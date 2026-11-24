@@ -1,0 +1,3 @@
+(library
+ (name syntax_catalog)
+ (libraries description diagnostic compiler_bug source token language))

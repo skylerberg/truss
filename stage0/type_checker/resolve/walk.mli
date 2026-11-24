@@ -38,7 +38,7 @@ type section_names = {
   names : target option array;
   brackets : bracket option array;
   mutable holes : (Syntax.id * (string * value) list) list;
-  mutable diagnostics : Diagnostic.in_definition list;
+  mutable diagnostics : Catalog.description list;
   mutable used_imports : string list;
 }
 
@@ -52,14 +52,7 @@ val create :
   state
 
 val lookup_section_names : state -> section -> section_names
-
-val report :
-  state ->
-  ?fixes:Source.Definition_span.t Diagnostic.fix list ->
-  Diagnostic.Code.resolve ->
-  Source.Definition_span.t ->
-  string ->
-  unit
+val report : state -> Catalog.Resolve.t -> unit
 
 val resolve_definition :
   state -> path:Path.t -> ?container:Path.t * Syntax.definition -> Syntax.definition -> unit

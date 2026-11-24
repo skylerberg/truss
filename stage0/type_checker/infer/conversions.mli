@@ -9,7 +9,7 @@ val convert :
   ?argument:Language.Mode.t ->
   ?takes_view_as_owner:bool ->
   ?expression:Syntax.expression ->
-  Source.Definition_span.t ->
+  Core.origin ->
   actual:Types.ty ->
   expected:Types.ty ->
   unit

@@ -37,6 +37,9 @@
   compiler_bug
   source
   diagnostic
+  description
+  catalog
+  project_catalog
   token
   lexer
   zarith

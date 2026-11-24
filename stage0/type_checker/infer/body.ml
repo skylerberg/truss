@@ -26,14 +26,12 @@ let check_body state (env : State.env) (written : Syntax.block) =
         match env.output with
         | Some (Returns output) ->
             if not (State.unify state output Types.unit) then
-              State.report state Mismatch
-                (Source.Definition_span.make (State.read_span state written.id).stop
-                   (State.read_span state written.id).stop)
-                (Printf.sprintf "This body must end with a value of type `%s`."
-                   (State.show state output))
+              State.report state
+                (Body_ends_without_value
+                   { body = Written written.id; output = State.zonk state output })
         | _ -> ())
     | [ (last : Syntax.statement) ] ->
-        Solver.run_in_statement state env (State.read_span state last.id) (fun () ->
+        Solver.run_in_statement state env (Written last.id) (fun () ->
             match (last.kind, env.output) with
             | Expression _, Some (Returns output) when State.resolve state output = Types.unit ->
                 Statements.check_statement state env last ~last:false
@@ -47,16 +45,16 @@ let check_body state (env : State.env) (written : Syntax.block) =
                   not
                     (Statements.statement_diverges state last || State.unify state output Types.unit)
                 then
-                  State.report state Mismatch (State.read_span state last.id)
-                    (Printf.sprintf "This body must end with a value of type `%s`."
-                       (State.show state output))
+                  State.report state
+                    (Last_statement_without_value
+                       { statement = Written last.id; output = State.zonk state output })
             | _ -> Statements.check_statement state env last ~last:false)
     | (first : Syntax.statement) :: rest ->
-        Solver.run_in_statement state env (State.read_span state first.id) (fun () ->
+        Solver.run_in_statement state env (Written first.id) (fun () ->
             Statements.check_statement state env first ~last:false);
         check_statements rest
   in
-  Solver.run_in_statement state env (State.read_span state written.id) (fun () ->
+  Solver.run_in_statement state env (Written written.id) (fun () ->
       check_statements written.statements)
 
 let declare_parameters state (written : Syntax.parameter list) (signature : Types.signature) =
@@ -120,7 +118,7 @@ let check_callback_contracts state env (written : Syntax.parameter list)
                     input.name)
                 inputs elaborated.inputs;
               let check_clause env (value : Syntax.expression) =
-                Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
+                Solver.run_in_statement state env (Written value.id) (fun () ->
                     Expressions.check state env value Types.bool)
               in
               List.iter
@@ -147,7 +145,7 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
               default )
           with
           | Some info, Some value ->
-              Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
+              Solver.run_in_statement state env (Written value.id) (fun () ->
                   let actual = Expressions.check_expression state env ~expected:info.type_ value in
                   Conversions.coerce state env ~argument:info.mode value ~actual
                     ~expected:info.type_);
@@ -189,12 +187,7 @@ let check_bit_vector_names state (form : Core.t) =
              (function
              | Local { type_; origin; _ }
                when not (Types.is_builtin Bool type_ || Types.find_integer_range type_ <> None) ->
-                 State.report state Not_bit_vector
-                   (State.read_span state (Core_walk.locate_origin origin))
-                   (Printf.sprintf
-                      "An assertion `by bit_vector` can name only integers and booleans, and this \
-                       is a `%s`."
-                      (Types.show type_))
+                 State.report state (Not_bit_vector { at = origin; type_ })
              | _ -> ());
          })
       value
@@ -218,11 +211,7 @@ let check_deserialized_invariants state (elaborated : Interface.Environment.elab
       List.iter
         (fun (invariant : Core.condition) ->
           if not invariant.executable then
-            State.report state Cannot_derive
-              (State.read_span state (Core_walk.locate_origin invariant.value.origin))
-              "This invariant cannot be checked at run time, so `serialization.Deserialize` cannot \
-               be derived: a value read from data might break it. Write the `impl`, which checks \
-               the value another way.")
+            State.report state (Unchecked_invariant { at = invariant.value.origin }))
         invariants
   | _ -> ()
 
@@ -257,9 +246,9 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
           (fun (clause : Syntax.type_clause) ->
             match clause.kind with
             | Type_invariant value ->
-                Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
+                Solver.run_in_statement state env (Written value.id) (fun () ->
                     Expressions.check state env value Types.bool)
-            | Potential value -> Clauses.check_integer state env value ~described:"A `potential`"
+            | Potential value -> Clauses.check_integer state env value ~subject:Potential
             | Derives _ -> ())
           clauses;
         let check_defaults (fields : Syntax.field list) (lowered_fields : Types.field list) =
@@ -273,8 +262,8 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       lowered_fields
                   with
                   | Some elaborated ->
-                      Solver.run_in_statement state constant_expression
-                        (State.read_span state value.id) (fun () ->
+                      Solver.run_in_statement state constant_expression (Written value.id)
+                        (fun () ->
                           Expressions.check state constant_expression value elaborated.field_type);
                       Constant.check state Default value
                   | None -> ())
@@ -316,8 +305,8 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                   law.parameters;
                 List.iter
                   (fun (requirement : Syntax.expression) ->
-                    Solver.run_in_statement state env (State.read_span state requirement.id)
-                      (fun () -> Expressions.check state env requirement Types.bool))
+                    Solver.run_in_statement state env (Written requirement.id) (fun () ->
+                        Expressions.check state env requirement Types.bool))
                   law.requires;
                 if not (is_broken (Member_body index)) then
                   check_body state { env with output = Some (Returns Types.bool) } law.body
@@ -333,7 +322,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                 Option.is_some (Types.find_specification_only_type constant.constant_type);
             }
           in
-          Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
+          Solver.run_in_statement state env (Written value.id) (fun () ->
               Expressions.check state env value constant.constant_type);
           Constant.check state Value value
         end
@@ -455,14 +444,15 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       goals = [];
     }
   in
-  Solver.run_in_statement state no_output (State.read_span state definition.id) (fun () ->
+  Solver.run_in_statement state no_output (Written definition.id) (fun () ->
       check_definition state elaborated ~checks_body ~has_syntax_error);
   List.iter (fun check -> check ()) (List.rev state.final_type_checks);
-  state.diagnostics <- Interface.Elaborator.list_diagnostics context @ state.diagnostics;
+  state.diagnostics <- List.rev (Interface.Elaborator.list_diagnostics context) @ state.diagnostics;
   state.diagnostics <-
-    Interface.Check.list_bound_diagnostics lookups.interface ~package:state.package
-      ~list_bounds:(State.lookup_bounds state) ~spans
-      (Interface.Elaborator.list_named_types context)
+    List.rev
+      (Interface.Check.list_bound_diagnostics lookups.interface ~package:state.package
+         ~list_bounds:(State.lookup_bounds state)
+         (Interface.Elaborator.list_named_types context))
     @ state.diagnostics;
   let finalize () =
     Tables.map ~map_type:(State.finalize_type state) ~map_argument:(State.finalize_argument state)
@@ -510,8 +500,13 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
           uses_run_forever;
         }
   | _ ->
+      let reported = Hashtbl.create 16 in
       Error
-        (List.sort_uniq
-           (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-             compare (left.span, left.code, left.message) (right.span, right.code, right.message))
-           state.diagnostics)
+        (List.filter
+           (fun description ->
+             (not (Hashtbl.mem reported description))
+             && begin
+               Hashtbl.add reported description ();
+               true
+             end)
+           (List.rev state.diagnostics))

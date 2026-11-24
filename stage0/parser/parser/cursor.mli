@@ -34,13 +34,12 @@ val has_reported : t -> bool
 
 val report :
   t ->
-  ?fixes:Source.span Diagnostic.fix list ->
-  Diagnostic.Code.parser ->
+  ?fixes:Syntax_catalog.Parsing.fix list ->
   Source.span ->
-  string ->
+  Syntax_catalog.Parsing.problem ->
   unit
 
-val fail : t -> string -> 'a
+val fail : t -> Syntax_catalog.Parsing.expected -> 'a
 val expect_punctuation : t -> Token.punctuation -> unit
 val expect_keyword : t -> Token.keyword -> unit
 val run_nested : t -> (t -> 'a) -> 'a

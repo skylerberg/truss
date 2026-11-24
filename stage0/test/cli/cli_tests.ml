@@ -436,7 +436,8 @@ let () =
         not
           (List.exists
              (fun (problem : Project.problem) ->
-               String.includes ~affix:"`two` is not a package of this project" problem.message)
+               String.includes ~affix:"`two` is not a package of this project"
+                 (Project.show_problem problem))
              problems)
       then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems));
       match Cli.Command_packages.load root with
@@ -547,7 +548,7 @@ let report_problems report =
 let expect_problem ?file files message =
   let problems_reported = list_problems files in
   let is_expected (problem : Project.problem) =
-    String.includes ~affix:message problem.message
+    String.includes ~affix:message (Project.show_problem problem)
     && match file with Some file -> problem.file = file | None -> true
   in
   if not (List.exists is_expected problems_reported) then
@@ -702,7 +703,8 @@ let () =
           (List.exists
              (fun (problem : Project.problem) ->
                problem.file = "one/truss.toml"
-               && String.includes ~affix:"A test's time limit is its project's" problem.message)
+               && String.includes ~affix:"A test's time limit is its project's"
+                    (Project.show_problem problem))
              problems)
       then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems)));
   test "a time limit of 0 is malformed, at its line" (fun () ->
@@ -1886,11 +1888,11 @@ let () =
       match
         List.filter
           (fun (problem : Project.problem) ->
-            String.includes ~affix:"not a package of this project" problem.message)
+            String.includes ~affix:"not a package of this project" (Project.show_problem problem))
           problems
       with
-      | [ { file = "truss.lock"; message; _ } ]
-        when String.includes ~affix:"Run `truss add acme.units`" message ->
+      | [ ({ file = "truss.lock"; _ } as problem) ]
+        when String.includes ~affix:"Run `truss add acme.units`" (Project.show_problem problem) ->
           ()
       | _ -> fail "problems: [%s]" (String.concat "; " (List.map Project.show_problem problems)));
   test "registry packages that depend on each other in a cycle are a problem, and none is built"

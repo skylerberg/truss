@@ -73,7 +73,7 @@ val list_callback_promises :
   entries:Logic.term list ->
   exits:Logic.term list ->
   result:Logic.term ->
-  (Obligation.piece * Logic.term) list
+  (Catalog.Prover.quoted * Logic.term) list
 
 val assume_own_callback_ensures :
   State.context ->
@@ -97,7 +97,7 @@ val check_callback_promises :
   location:Obligation.location ->
   Invocation.t ->
   State.passed ->
-  described:string ->
+  unpromised:Catalog.Prover.unpromised ->
   assume:
     (State.frame ->
     Types.function_type ->

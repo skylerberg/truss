@@ -13,6 +13,9 @@
   syntax
   types
   diagnostic
+  catalog
+  description
+  renderer
   strongly_connected
   core
   manifest

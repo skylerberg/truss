@@ -283,6 +283,7 @@ module Code : sig
     | Too_many_diagnostics
 
   val name : t -> string
+  val all : t list
 end
 
 type 'span edit = { span : 'span; replacement : string }
@@ -315,7 +316,7 @@ val fix : string -> 'span edit list -> 'span fix
 val replace : 'span -> string -> 'span edit
 val insert : 'span -> string -> 'span edit
 val delete : 'span -> 'span edit
-val list_spelling_fixes : 'span -> written:string -> string list -> 'span fix list
+val find_closest : string -> string list -> string option
 val show_count : int -> string -> string -> string
 
 type reported
@@ -335,13 +336,8 @@ module Collector : sig
   val to_list : t -> diagnostic list
 end
 
-val select_shown : t list -> t list
 val paint_severity : is_colored:bool -> severity -> string -> string
 val render : is_colored:bool -> Source.t -> t -> string
 val to_json_object : Source.t -> t -> string
 val encode_json_string : string -> string
 val quote : string -> string
-
-module For_testing : sig
-  val limit : int
-end

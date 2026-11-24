@@ -57,7 +57,7 @@ let print_tokens source tokens =
   print "" tokens
 
 let show_diagnostics ~json source diagnostics =
-  let shown = Diagnostic.select_shown diagnostics in
+  let shown = Description.select_shown diagnostics in
   if json then
     print_string
       ("[" ^ String.concat ",\n" (List.map (Diagnostic.to_json_object source) shown) ^ "]\n")

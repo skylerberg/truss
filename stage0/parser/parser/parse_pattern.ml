@@ -1,13 +1,12 @@
 let make_pattern_node cursor start kind : Syntax.pattern =
   { kind; id = Cursor.allocate_id_from cursor start }
 
-let range_bound = "a literal or a constant with its module or type, such as `http.last`"
+let range_bound = Syntax_catalog.Parsing.Range_bound
 
 let parse_string_literal cursor ~start ~modules literal =
   let string = Cursor.peek cursor in
   let reject_interpolation (_ : Token.interpolation) =
-    Cursor.report cursor Interpolation_not_allowed string.span
-      "A string in a pattern cannot have interpolations.";
+    Cursor.report cursor string.span Interpolated_pattern;
     raise Cursor.Failed
   in
   Atoms.make_string_literal cursor ~start ~modules literal ~parse_interpolation:reject_interpolation
@@ -24,11 +23,9 @@ let parse_literal cursor : Syntax.literal option =
       Cursor.advance cursor;
       match Cursor.peek_kind cursor with
       | Integer value -> take (Syntax.Literal_integer (Z.neg value))
-      | _ -> Cursor.fail cursor "a number after `-` in a pattern")
+      | _ -> Cursor.fail cursor Number_after_minus)
   | Float _ ->
-      Cursor.report cursor Float_pattern (Cursor.peek cursor).span
-        "A float literal cannot be a pattern, since `==` on floats treats `-0.0` and `0.0` as \
-         equal; match with a guard instead, as in `value if value == 0.0`.";
+      Cursor.report cursor (Cursor.peek cursor).span Float_pattern;
       raise Cursor.Failed
   | Keyword True -> take Syntax.Literal_true
   | Keyword False -> take Syntax.Literal_false
@@ -38,9 +35,7 @@ let parse_literal cursor : Syntax.literal option =
 let rec parse_variant_or_constant cursor start (path : Syntax.path) =
   if Cursor.is_punctuation cursor Dot then begin
     Cursor.advance cursor;
-    let constant =
-      Syntax.Type_constant (path, Atoms.lower_name cursor "the name of a constant after `.`")
-    in
+    let constant = Syntax.Type_constant (path, Atoms.lower_name cursor Constant_name_after_dot) in
     parse_range_or_single cursor start (Syntax.End_constant constant)
       (Syntax.Qualified_constant constant)
   end
@@ -64,7 +59,7 @@ and parse_range_or_single cursor start end_kind kind =
         | None -> (
             match Cursor.peek_kind cursor with
             | Lower _ | Upper _ -> parse_constant_end cursor stop_start
-            | _ -> Cursor.fail cursor "the end of the range; a range pattern needs both ends")
+            | _ -> Cursor.fail cursor Range_end)
       in
       make_pattern_node cursor start
         (Pattern_range { start = first; stop; inclusive = operator = Dot_dot_equal })
@@ -81,8 +76,8 @@ and parse_constant_end cursor start : Syntax.range_end =
     | Upper _ ->
         let path = { Syntax.modules; last = Atoms.make_name cursor (Cursor.take cursor) } in
         Cursor.expect_punctuation cursor Dot;
-        End_constant (Type_constant (path, Atoms.lower_name cursor "the name of a constant"))
-    | _ -> Cursor.fail cursor "a constant"
+        End_constant (Type_constant (path, Atoms.lower_name cursor Constant_name))
+    | _ -> Cursor.fail cursor Constant
   in
   { kind; id = Cursor.allocate_id_from cursor start }
 
@@ -98,7 +93,7 @@ and parse_primary cursor : Syntax.pattern =
       | Punctuation (Open Paren) ->
           make_pattern_node cursor start (Record (parse_pattern_fields cursor))
       | Lower _ | Upper _ -> parse_name_pattern cursor start
-      | _ -> Cursor.fail cursor "a pattern")
+      | _ -> Cursor.fail cursor Pattern)
 
 and parse_name_pattern cursor start =
   let modules = Atoms.parse_module_prefix cursor in
@@ -118,7 +113,7 @@ and parse_name_pattern cursor start =
   | String ({ tag = Some _; _ } as literal), _ ->
       let literal = Syntax.Literal_string (parse_string_literal cursor ~start ~modules literal) in
       parse_range_or_single cursor start (End_literal literal) (Literal literal)
-  | _ -> Cursor.fail cursor "a name after `.`"
+  | _ -> Cursor.fail cursor Name_after_dot
 
 and parse_unqualified_variant cursor start (path : Syntax.path) =
   let rec find_last_name (qualified : Token.t option) =
@@ -167,9 +162,7 @@ and parse_pattern_fields cursor =
   List.iteri
     (fun index (field : Syntax.pattern_field) ->
       if field.kind = Rest && index < last_index then
-        Cursor.report cursor Unexpected_token
-          (Cursor.read_file_span cursor field.id)
-          "`..` must be the last field of a pattern.")
+        Cursor.report cursor (Cursor.read_file_span cursor field.id) Rest_not_last)
     fields;
   fields
 

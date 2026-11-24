@@ -140,37 +140,28 @@ let resolve (lookups : Names.lookups) (key : Names.key) =
       in
       match find_declared_name definition with
       | Some declared when not defines_it ->
-          Walk.report state Shadowed_name spans.(declared.id)
-            (Printf.sprintf
-               "`%s` is a name in the prelude, and a name cannot shadow another. Choose another \
-                name."
-               name)
+          Walk.report state (Prelude_definition { name = Written declared.id; written = name })
       | _ -> ())
   | _ -> ());
   if key.ordinal > 0 && Path.is_resolved key.path then begin
-    let span =
-      match find_declared_name definition with
-      | Some name -> spans.(name.id)
-      | None -> Source.Definition_span.make_zero_width spans.(definition.id).start
-    in
     let first = lookups.read_place { key with ordinal = 0 } in
-    let first =
-      if first.file <> (lookups.read_place key).file then Path.show_file first.file else "this file"
-    in
-    Walk.report state Duplicate_definition span
-      (Printf.sprintf "%s is already defined in %s, so this definition is never used."
-         (Path.show key.path) first)
+    Walk.report state
+      (Redefined
+         {
+           name =
+             Option.map
+               (fun (name : Syntax.name) -> Core.Written name.id)
+               (find_declared_name definition);
+           path = key.path;
+           first = (if first.file <> (lookups.read_place key).file then Some first.file else None);
+         })
   end;
   (match find_value_name definition with
   | Some name when key.ordinal = 0 ->
       let submodule : Path.module_ = { module_ with modules = module_.modules @ [ name.text ] } in
       if lookups.module_exists submodule then
-        Walk.report state Duplicate_definition spans.(name.id)
-          (Printf.sprintf
-             "`%s` is a module, so no definition of `%s` can be named `%s`: `%s.x` would name \
-              either."
-             (Path.show_module submodule) (Path.show_module module_) name.text
-             (Path.show_module submodule))
+        Walk.report state
+          (Module_name_clash { name = Written name.id; written = name.text; submodule; module_ })
   | Some _ | None -> ());
   let compute_outcome section =
     let walked = Walk.lookup_section_names state section in
@@ -179,12 +170,7 @@ let resolve (lookups : Names.lookups) (key : Names.key) =
     in
     match walked.diagnostics with
     | [] -> Ok { resolved; used_imports = List.sort compare walked.used_imports }
-    | diagnostics ->
-        Error
-          (List.sort
-             (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-               compare left.span right.span)
-             diagnostics)
+    | diagnostics -> Error (List.rev diagnostics)
   in
   List.map
     (fun section ->
@@ -199,7 +185,7 @@ let resolve (lookups : Names.lookups) (key : Names.key) =
         else None ))
     sections
 
-let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax.file) ~text
+let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax.file)
     ~(used : string list option) =
   let module_ = path.module_ in
   let has_syntax_error (item : Syntax.definition Syntax.item) =
@@ -217,9 +203,7 @@ let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : S
     else used
   in
   let diagnostics = ref [] in
-  let report ?fixes code span message =
-    diagnostics := Diagnostic.make ?fixes ~code:(Resolve code) span message :: !diagnostics
-  in
+  let report import = diagnostics := Catalog.Resolve.describe_import import :: !diagnostics in
   ignore
     (List.fold_left
        (fun seen (item : Syntax.path Syntax.item) ->
@@ -227,42 +211,27 @@ let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : S
          let used_module = Names.resolve_used_module lookups ~from:module_ item.value in
          let last = Names.Scope.extract_last_name used_module in
          if Names.Scope.is_restricted_module ~from:module_ used_module then
-           report Intrinsic_import span Names.Scope.restricted_module_message
+           report (Intrinsic_module { item = span })
          else if not (Names.is_visible_module lookups ~from:module_ used_module) then
-           let missing = Printf.sprintf "No module `%s` exists." (Path.show_module used_module) in
-           report Unknown_module span
-             (if Names.is_visible_package lookups ~from:module_ used_module.package then missing
-              else missing ^ " " ^ Names.Scope.describe_path_start module_)
-         else if List.mem last seen then
-           report Duplicate_import span
-             (Printf.sprintf
-                "Another `use` already imports a module named `%s`. Write one of them by its full \
-                 path instead."
-                last)
+           report
+             (Missing_module
+                {
+                  item = span;
+                  module_ = used_module;
+                  path_start =
+                    (if Names.is_visible_package lookups ~from:module_ used_module.package then None
+                     else Some module_);
+                })
+         else if List.mem last seen then report (Imported_twice { item = span; last })
          else if
            match lookups.find module_ last with
            | Some entry -> Names.Scope.is_value_kind entry.kind
            | None -> false
-         then
-           report Duplicate_import span
-             (Printf.sprintf
-                "`%s` is a definition of `%s`, so this file cannot import a module named `%s`: \
-                 `%s.x` would name either. Rename the definition, or write the module's full path."
-                last (Path.show_module module_) last last)
+         then report (Definition_named_like { item = span; last; module_ })
          else
            begin match used with
            | Some used when not (List.mem last used) ->
-               let stop = span.stop in
-               let stop =
-                 if stop < String.length text && text.[stop] = '\n' then stop + 1 else stop
-               in
-               report Unused_import span
-                 ~fixes:
-                   [
-                     Diagnostic.fix "Delete the `use`."
-                       [ Diagnostic.delete (Source.make_span item.base stop) ];
-                   ]
-                 (Printf.sprintf "Nothing in this file uses `%s`." (Path.show_module used_module))
+               report (Unused_import { item = span; module_ = used_module })
            | Some _ | None -> ()
            end;
          last :: seen)

@@ -10,5 +10,6 @@
   core_walk
   intrinsic
   resolve
+  catalog
   interface
   zarith))

@@ -727,8 +727,8 @@ let () =
       let make_diagnostic offset =
         Diagnostic.make ~code:(Lexer Semicolon) (Source.make_span offset (offset + 1)) "x"
       in
-      let shown = Diagnostic.select_shown (List.init 250 make_diagnostic) in
-      if List.length shown <> Diagnostic.For_testing.limit + 1 then
+      let shown = Description.select_shown (List.init 250 make_diagnostic) in
+      if List.length shown <> Description.For_testing.limit + 1 then
         Harness.fail "%d shown" (List.length shown);
       match List.rev shown with
       | last :: _ when last.code = Too_many_diagnostics -> ()
@@ -737,7 +737,7 @@ let () =
       let text = String.concat "" (List.init 250 (Printf.sprintf "a%d;\n")) in
       List.iteri
         (fun index (diagnostic : Diagnostic.t) ->
-          if index < Diagnostic.For_testing.limit && diagnostic.fixes = [] then
+          if index < Description.For_testing.limit && diagnostic.fixes = [] then
             Harness.fail "diagnostic %d has no fix" index)
         (snd (lex text)));
   Harness.test "overlapping edits are refused" (fun () ->

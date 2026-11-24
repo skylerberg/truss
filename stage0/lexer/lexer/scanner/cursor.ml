@@ -51,9 +51,9 @@ let lookup_char cursor index = cursor.text.[index]
 let is_at cursor index character = index < cursor.length && cursor.text.[index] = character
 let satisfies cursor index is_wanted = index < cursor.length && is_wanted cursor.text.[index]
 
-let report cursor ?notes ?fixes ~code span message =
+let report cursor ?(notes = []) ?(fixes = []) at problem =
   Diagnostic.Collector.add cursor.diagnostics
-    (Diagnostic.make ?notes ?fixes ~code:(Lexer code) span message)
+    (Syntax_catalog.Lexing.render ~text:cursor.text { at; problem; notes; fixes })
 
 let is_line_break character = character = '\n' || character = '\r'
 let is_end_of_line cursor index = is_at_end cursor index || is_line_break cursor.text.[index]
@@ -82,7 +82,10 @@ let list_code_fixes cursor span codes =
   List.filter_map
     (fun code ->
       if joins_neighbor cursor span code then None
-      else Some (Diagnostic.fix ("Write `" ^ code ^ "`") [ Diagnostic.replace span code ]))
+      else
+        Some
+          ({ action = Write code; edits = [ Diagnostic.replace span code ] }
+            : Syntax_catalog.Lexing.fix))
     codes
 
 let decode cursor index = String.get_utf_8_uchar cursor.text index
@@ -123,20 +126,11 @@ let count_spaces_before cursor offset =
 let has_only_spaces_before cursor offset =
   count_spaces_before cursor offset = Source.compute_line_start cursor.source offset
 
-let describe_code_point scalar_value =
-  let code_point = Uchar.to_int scalar_value in
-  match Unicode.find_forbidden_name scalar_value with
-  | Some name -> Printf.sprintf "U+%04X %s" code_point name
-  | None -> Printf.sprintf "U+%04X" code_point
-
-let show_character cursor index =
+let decode_character cursor index : Syntax_catalog.Lexing.character =
   let decoded = decode cursor index in
-  if not (Uchar.utf_decode_is_valid decoded) then
-    Printf.sprintf "the byte 0x%02X" (Char.code cursor.text.[index])
+  if not (Uchar.utf_decode_is_valid decoded) then Invalid_byte (Char.code cursor.text.[index])
   else
     let code_point = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
-    if code_point < 0x80 then Printf.sprintf "`%c`" (Char.chr code_point)
+    if code_point < 0x80 then Ascii (Char.chr code_point)
     else
-      Printf.sprintf "`%s` (U+%04X)"
-        (String.sub cursor.text index (Uchar.utf_decode_length decoded))
-        code_point
+      Unicode { text = String.sub cursor.text index (Uchar.utf_decode_length decoded); code_point }

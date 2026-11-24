@@ -518,7 +518,7 @@ and holds_potential_type context ~seen (ty : Types.ty) =
             (function
               | Types.Type element -> has_potential context ~seen:(ty :: seen) element | _ -> false)
             arguments
-        then Facts.raise_unsupported Whole_definition "the potential of a collection's elements"
+        then Facts.raise_unsupported Whole_definition Potential_of_elements
         else false
     | _ -> false
 
@@ -832,6 +832,4 @@ let compute_method_cost context frame (metric : Language.Metric.t) (callee : Inv
         (Path.Method { owner = trait.trait; name; receiver })
         ~trait_arguments:(List.map substitute_argument trait.trait_arguments)
         (Facts.substitute_type context frame self_type)
-  | _ ->
-      Facts.raise_unsupported Whole_definition "the %s of a function that is not a trait's method"
-        (Language.Metric.show metric)
+  | _ -> Facts.raise_unsupported Whole_definition (Metric_of_non_trait_method metric)

@@ -1,7 +1,7 @@
 module Lookups = Lookups
 
 type result = {
-  diagnostics : Diagnostic.in_definition list;
+  diagnostics : Catalog.description list;
   must_be_disjoint : (Core.id list * Core.id list) list;
 }
 
@@ -15,6 +15,22 @@ let implements_capability (lookups : Lookups.t) key =
       | None -> false)
   | None -> false
 
+let collect_bare_names (definition : Syntax.definition) =
+  let names = Hashtbl.create 16 in
+  let rec visit_expression (value : Syntax.expression) =
+    (match value.kind with
+    | Name name -> Hashtbl.replace names value.id name.text
+    | Self_value -> Hashtbl.replace names value.id "self"
+    | _ -> ());
+    Syntax_walk.visit_expression_parts ~on_expression:visit_expression ~on_statement:visit_statement
+      value
+  and visit_statement statement =
+    Syntax_walk.visit_statement_parts ~on_expression:visit_expression ~on_statement:visit_statement
+      statement
+  in
+  Syntax_walk.visit_definition ~on_statement:visit_statement visit_expression definition;
+  names
+
 let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
   let elaborated = lookups.interface.read_elaborated_interface key in
   let scope = Interface.Impls.read_scope lookups.interface key in
@@ -22,9 +38,8 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
     {
       lookups;
       list_bounds = Interface.Properties.Bounds.of_known scope.bounds;
-      spans = lazy (lookups.interface.names.read_spans key);
-      text = lazy (lookups.interface.names.read_text key);
       mode_keywords = Hashtbl.create 8;
+      bare_names = lazy (collect_bare_names (lookups.interface.names.read_definition key));
       places_without_keyword = Hashtbl.create 8;
       names = Context.Local_table.create 32;
       origins = Context.Local_table.create 32;
@@ -70,24 +85,11 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
         (Mir.list_evaluated_asserts code.tree))
     (lookups.find_code key);
   {
-    diagnostics =
-      List.sort
-        (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-          compare (left.span, left.message) (right.span, right.message))
-        context.diagnostics;
+    diagnostics = List.rev context.diagnostics;
     must_be_disjoint = List.sort_uniq compare context.must_be_disjoint;
   }
 
 let check (lookups : Lookups.t) key =
   try check_definition lookups key
-  with Interface.Properties.Recursion_limit message ->
-    let names = lookups.interface.names in
-    {
-      diagnostics =
-        [
-          Diagnostic.make ~code:(Types Recursion_limit)
-            (names.read_spans key).((names.read_definition key).id)
-            message;
-        ];
-      must_be_disjoint = [];
-    }
+  with Interface.Properties.Recursion_limit diagnostic ->
+    { diagnostics = [ Catalog.Typing.describe diagnostic ]; must_be_disjoint = [] }

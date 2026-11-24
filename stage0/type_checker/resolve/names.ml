@@ -1,4 +1,4 @@
-type kind =
+type kind = Language.Definition_kind.t =
   | Function
   | Type
   | Trait
@@ -38,8 +38,8 @@ let is_constant : kind -> bool = function
   | Constant | Member_constant -> true
   | Function | Type | Trait | Capability | Theorem | Method | Impl | Test | Law_proof -> false
 
-type visibility = Private | Internal | Public | Public_opaque
-type key = { module_ : Path.module_; path : Path.t; ordinal : int }
+type visibility = Language.Visibility.t = Private | Internal | Public | Public_opaque
+type key = Path.key = { module_ : Path.module_; path : Path.t; ordinal : int }
 type declaration = { key : key; kind : kind; visibility : visibility; generic : bool }
 type place = { file : Path.file; base : int }
 
@@ -199,13 +199,6 @@ module Scope = struct
   let is_restricted_module ~(from : Path.module_) (module_ : Path.module_) =
     module_ = Well_known.intrinsic_module && from.package <> Path.standard_package
 
-  let restricted_module_message = "Only the `standard` package can use `standard.intrinsic`."
-
-  let describe_path_start (module_ : Path.module_) =
-    Printf.sprintf
-      "Every path starts with a package name, even inside the package. This file's module is `%s`."
-      (Path.show_module module_)
-
   type module_lookup =
     | Found_module of { module_ : Path.module_; imported : Path.module_ option }
     | Restricted_module
@@ -310,14 +303,6 @@ let collect_visible lookups =
   with
   | _ :: _ as visible -> Visible visible
   | [] -> ( match find_hidden lookups with Some hidden -> Hidden hidden | None -> Absent)
-
-let describe_hidden hidden (visibility : visibility) =
-  Printf.sprintf "`%s` is %s, so it cannot be used here." (Path.show hidden)
-    (match visibility with
-    | Private -> "private to its module"
-    | Internal -> "internal to its package"
-    | Public | Public_opaque ->
-        Compiler_bug.raise_bug ~stage:"Names" "%s is public, so it is not hidden" (Path.show hidden))
 
 let list_declaring_trait_lookups lookups ~visible_packages ~(from : Path.module_) name =
   List.concat_map

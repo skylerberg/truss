@@ -15,7 +15,7 @@ type t = {
   self_capabilities : (string * Types.capability_set) list;
   is_in_capability : bool;
   is_in_impl : bool;
-  diagnostics : Diagnostic.in_definition list ref;
+  diagnostics : Catalog.description list ref;
   named : (Syntax.id * Types.ty) list ref;
   spans : Source.Definition_span.t array;
 }
@@ -128,16 +128,16 @@ let list_trait_closure (lookups : Lookups.t) path =
   visit path;
   List.rev !closure
 
-let record_diagnostic diagnostics ?fixes code (span : Source.Definition_span.t) message =
-  let diagnostic = Diagnostic.make ?fixes ~code:(Types code) span message in
-  diagnostics := diagnostic :: !diagnostics;
-  Diagnostic.make_reported diagnostic
+let record_diagnostic diagnostics (diagnostic : Catalog.Typing.t) =
+  let description = Catalog.Typing.describe diagnostic in
+  diagnostics := description :: !diagnostics;
+  Catalog.make_reported description
 
-let report_error_type context code span message =
-  Types.Error (record_diagnostic context.diagnostics code span message)
+let report_error_type context diagnostic =
+  Types.Error (record_diagnostic context.diagnostics diagnostic)
 
-let report_error_capability context code span message =
-  [ Types.Capability_error (record_diagnostic context.diagnostics code span message) ]
+let report_error_capability context diagnostic =
+  [ Types.Capability_error (record_diagnostic context.diagnostics diagnostic) ]
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Interface" format
 let find_target context (name : Syntax.name) = context.resolved.names.(name.id)
@@ -166,10 +166,10 @@ let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
   match written.kind with
   | Path_type path -> elaborate_path_type context path
   | Self_type None -> (
-      match elaborate_self context context.spans.(written.id) with
+      match elaborate_self context (Written written.id) with
       | Ok self -> self
       | Error report -> Types.Error report)
-  | Self_type (Some key) -> elaborate_self_associated context context.spans.(written.id) key
+  | Self_type (Some key) -> elaborate_self_associated context (Written written.id) key
   | Associated (base, key) -> (
       match resolve_parameter context base with
       | Ok parameter -> elaborate_associated context (Types.Parameter parameter) parameter key
@@ -180,26 +180,21 @@ let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
       | Error report -> Types.Error report)
   | Type_error -> Types.Error Diagnostic.reported_elsewhere
 
-and elaborate_self context (span : Source.Definition_span.t) =
+and elaborate_self context (at : Core.origin) =
   match context.self_type with
   | Some self -> Ok self
-  | None ->
-      Error
-        (record_diagnostic context.diagnostics Misplaced_self_type span
-           "`Self` names a type only in a type's definition, a trait, an `impl`, or a method.")
+  | None -> Error (record_diagnostic context.diagnostics (Misplaced_self_type { at }))
 
-and elaborate_self_associated context (span : Source.Definition_span.t) (key : Syntax.name) =
+and elaborate_self_associated context (at : Core.origin) (key : Syntax.name) =
   match List.assoc_opt key.text context.self_associated with
   | Some fixed -> fixed
   | None -> (
-      match (elaborate_self context span, context.self_trait) with
+      match (elaborate_self context at, context.self_trait) with
       | Error report, _ -> Types.Error report
       | Ok _, None ->
-          report_error_type context Unknown_associated_type context.spans.(key.id)
-            (Printf.sprintf
-               "`Self.%s` names an associated type of a trait, and `Self` is not in a trait or in \
-                an `impl` of one here."
-               key.text)
+          report_error_type context
+            (Self_outside_trait
+               { at = Written key.id; name = key.text; associated = Associated_type })
       | Ok self, Some trait -> (
           match List.assoc_opt key.text trait.associated with
           | Some fixed -> fixed
@@ -207,9 +202,10 @@ and elaborate_self_associated context (span : Source.Definition_span.t) (key : S
               match find_declaring_trait context trait.trait key.text with
               | Some _ -> Types.Projection { base = self; trait; name = key.text }
               | None ->
-                  report_error_type context Unknown_associated_type context.spans.(key.id)
-                    (Printf.sprintf "`%s` declares no associated type `%s`."
-                       (Types.show_trait trait) key.text))))
+                  report_error_type context
+                    (Undeclared_associated
+                       { at = Written key.id; trait; name = key.text; associated = Associated_type })
+              )))
 
 and find_declaring_trait ?(capability = false) context trait name =
   List.find_opt
@@ -235,8 +231,14 @@ and elaborate_associated context base parameter (key : Syntax.name) =
   match associated_type with
   | Some associated_type -> associated_type
   | None ->
-      report_error_type context Unknown_associated_type context.spans.(key.id)
-        (Printf.sprintf "No bound of `%s` declares an associated type `%s`." parameter.name key.text)
+      report_error_type context
+        (Unbounded_associated
+           {
+             at = Written key.id;
+             parameter = parameter.name;
+             name = key.text;
+             associated = Associated_type;
+           })
 
 and elaborate_arguments context (path : Syntax.path_type) =
   List.filter_map
@@ -251,10 +253,12 @@ and elaborate_count_name context (name : Syntax.name) : Types.argument =
   match find_target context name with
   | Some (Value_parameter parameter) -> Types.Value (Types.Value_parameter parameter)
   | Some (Definition (Constant, path)) -> (
-      match Constants.evaluate_count context.lookups path ~written:name.text with
+      match Constants.evaluate_count context.lookups path with
       | Ok value -> Types.Value (Types.Known value)
-      | Error message ->
-          Types.Type (report_error_type context Arity context.spans.(name.id) message))
+      | Error error ->
+          Types.Type
+            (report_error_type context
+               (Count_error { at = Written name.id; written = name.text; error })))
   | Some (Unknown report) -> Types.Type (Types.Error report)
   | _ -> raise_bug "`%s` is not resolved as a type argument" name.text
 
@@ -269,10 +273,14 @@ and check_arity context (path : Syntax.path_type) shown expected :
       let argument_count = List.length written in
       if argument_count <> List.length expected then
         Error
-          (record_diagnostic context.diagnostics Arity context.spans.(path.id)
-             (Printf.sprintf "`%s` takes %s, and %s given." shown
-                (Diagnostic.show_count (List.length expected) "argument" "arguments")
-                (Diagnostic.show_count argument_count "is" "are")))
+          (record_diagnostic context.diagnostics
+             (Arity
+                {
+                  at = Written path.id;
+                  written = shown;
+                  expected = List.length expected;
+                  given = argument_count;
+                }))
       else
         let errors =
           List.concat
@@ -281,20 +289,16 @@ and check_arity context (path : Syntax.path_type) shown expected :
                  let is_value =
                    match argument with Syntax.Count _ | Count_name _ -> true | _ -> false
                  in
-                 let report_argument_kind message =
+                 let report_argument_kind mismatch =
                    [
-                     record_diagnostic context.diagnostics Argument_kind context.spans.(path.id)
-                       message;
+                     record_diagnostic context.diagnostics
+                       (Argument_kind
+                          { at = Written path.id; written = shown; parameter = name; mismatch });
                    ]
                  in
                  match (kind, is_value) with
-                 | Resolve.Names.Value_kind, false ->
-                     report_argument_kind
-                       (Printf.sprintf "`%s`'s parameter `%s` is a `UInt64` value, not a type."
-                          shown name)
-                 | Resolve.Names.Type_kind, true ->
-                     report_argument_kind
-                       (Printf.sprintf "`%s`'s parameter `%s` is a type, not a value." shown name)
+                 | Resolve.Names.Value_kind, false -> report_argument_kind Value_for_type
+                 | Resolve.Names.Type_kind, true -> report_argument_kind Type_for_value
                  | _ -> [])
                written expected)
         in
@@ -304,8 +308,7 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
   let shown = show_path path.path in
   match find_target context path.path.last with
   | Some (Type_parameter _) when path.arguments <> [] ->
-      report_error_type context Arity context.spans.(path.id)
-        (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." shown)
+      report_error_type context (Arguments_to_parameter { at = Written path.id; written = shown })
   | Some (Type_parameter parameter) -> (
       match Parameter_table.find_opt context.broken_parameters parameter with
       | Some report -> Types.Error report
@@ -326,14 +329,9 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
               context.named := (path.id, type_) :: !(context.named);
               type_))
   | Some (Definition (Trait, _)) ->
-      report_error_type context Not_a_type context.spans.(path.id)
-        (Printf.sprintf
-           "`%s` is a trait, not a type. A type parameter can have it as a bound, as in `[Item: \
-            %s]`."
-           shown shown)
+      report_error_type context (Trait_as_type { at = Written path.id; written = shown })
   | Some (Definition (Capability, _)) ->
-      report_error_type context Not_a_type context.spans.(path.id)
-        (Printf.sprintf "`%s` is a capability, not a type." shown)
+      report_error_type context (Capability_as_type { at = Written path.id; written = shown })
   | Some (Unknown report) -> Types.Error report
   | _ -> raise_bug "`%s` is not resolved as a type" shown
 
@@ -361,12 +359,12 @@ and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_
   | Some (Definition (Capability, trait)) when capability -> build_trait_reference trait
   | Some (Definition _) ->
       Error
-        (record_diagnostic context.diagnostics Not_a_trait context.spans.(path.id)
-           (Printf.sprintf "`%s` is not a trait." shown))
+        (record_diagnostic context.diagnostics
+           (Not_a_trait { at = Written path.id; written = shown; is_parameter = false }))
   | Some (Type_parameter _) ->
       Error
-        (record_diagnostic context.diagnostics Not_a_trait context.spans.(path.id)
-           (Printf.sprintf "`%s` is a generic parameter, not a trait." shown))
+        (record_diagnostic context.diagnostics
+           (Not_a_trait { at = Written path.id; written = shown; is_parameter = true }))
   | Some (Unknown report) -> Error report
   | _ -> raise_bug "`%s` is not resolved as a trait" shown
 
@@ -385,21 +383,12 @@ and elaborate_condition context (written : Syntax.condition) : Types.condition =
          in
          if is_decided then begin
            ignore
-             (record_diagnostic context.diagnostics Decided_condition
-                context.spans.(bound.subject.id)
+             (record_diagnostic context.diagnostics
                 (match subject with
                 | Types.Projection { base; trait; name } ->
-                    Printf.sprintf
-                      "A condition names a type parameter or `Self`, as a bound does, and `%s` is \
-                       an associated type. Give it a type parameter, as in `[%s, %s: %s[%s = \
-                       %s]]`, and name `%s` in the condition."
-                      (Types.show subject) name (Types.show base) (Types.show_trait trait) name name
-                      name
-                | _ ->
-                    Printf.sprintf
-                      "A condition names a type parameter or `Self`, and `%s` is neither: whether \
-                       it implements a trait is decided where it is written."
-                      (Types.show subject)));
+                    Decided_projection_condition
+                      { at = Written bound.subject.id; subject; base; trait; name }
+                | _ -> Decided_condition { at = Written bound.subject.id; subject }));
            []
          end
          else
@@ -422,15 +411,12 @@ and elaborate_capability_path context (path : Syntax.path_type) : Types.capabili
   let shown = show_path path.path in
   match find_target context path.path.last with
   | Some (Type_parameter _) ->
-      report_error_capability context Not_a_capability context.spans.(path.id)
-        (Printf.sprintf
-           "`%s` is a type parameter, not a capability. A capability parameter is written `generic \
-            %s` at each use."
-           shown shown)
+      report_error_capability context
+        (Not_a_capability { at = Written path.id; written = shown; is_type_parameter = true })
   | Some (Definition (Capability, path_)) -> [ Types.make_capability path_ ]
   | Some (Definition _) ->
-      report_error_capability context Not_a_capability context.spans.(path.id)
-        (Printf.sprintf "`%s` is not a capability." shown)
+      report_error_capability context
+        (Not_a_capability { at = Written path.id; written = shown; is_type_parameter = false })
   | Some (Unknown report) -> [ Types.Capability_error report ]
   | _ -> raise_bug "`%s` is not resolved as a capability" shown
 
@@ -456,22 +442,24 @@ and elaborate_capability context (written : Syntax.capability_reference) : Types
       match List.assoc_opt key.text context.self_capabilities with
       | Some set -> Types.list_capabilities set
       | None -> (
-          match (elaborate_self context context.spans.(written.id), context.self_trait) with
+          match (elaborate_self context (Written written.id), context.self_trait) with
           | Error report, _ -> [ Types.Capability_error report ]
           | Ok _, None ->
-              report_error_capability context Unknown_associated_capability context.spans.(key.id)
-                (Printf.sprintf
-                   "`Self.%s` names an associated capability set of a trait, and `Self` is not in \
-                    a trait or in an `impl` of one here."
-                   key.text)
+              report_error_capability context
+                (Self_outside_trait
+                   { at = Written key.id; name = key.text; associated = Associated_capability_set })
           | Ok self, Some trait -> (
               match find_capability_projection context self [ trait ] key with
               | Some projection -> [ projection ]
               | None ->
-                  report_error_capability context Unknown_associated_capability
-                    context.spans.(key.id)
-                    (Printf.sprintf "`%s` declares no associated capability set `%s`."
-                       (Types.show_trait trait) key.text))))
+                  report_error_capability context
+                    (Undeclared_associated
+                       {
+                         at = Written key.id;
+                         trait;
+                         name = key.text;
+                         associated = Associated_capability_set;
+                       }))))
   | Associated_capabilities (base, key) -> (
       match resolve_parameter context base with
       | Error report -> [ Types.Capability_error report ]
@@ -480,9 +468,14 @@ and elaborate_capability context (written : Syntax.capability_reference) : Types
           match find_capability_projection context (Types.Parameter parameter) bounds key with
           | Some projection -> [ projection ]
           | None ->
-              report_error_capability context Unknown_associated_capability context.spans.(key.id)
-                (Printf.sprintf "No bound of `%s` declares an associated capability set `%s`."
-                   parameter.name key.text)))
+              report_error_capability context
+                (Unbounded_associated
+                   {
+                     at = Written key.id;
+                     parameter = parameter.name;
+                     name = key.text;
+                     associated = Associated_capability_set;
+                   })))
 
 and elaborate_capabilities context written =
   Types.make_capability_set (List.concat_map (elaborate_capability context) written)
@@ -496,18 +489,16 @@ and elaborate_parameter_type context mode (written : Syntax.type_expression) =
   let type_ = elaborate_type context written in
   let report_owning_type ~written_path ~view ~copy ~takes =
     Types.Error
-      (record_diagnostic context.diagnostics Read_only_owning_parameter
-         ~fixes:
-           [
-             Diagnostic.fix
-               (Printf.sprintf "Write `%s`." view)
-               [ Diagnostic.replace context.spans.(written_path.Syntax.last.id) view ];
-           ]
-         context.spans.(written.id)
-         (Printf.sprintf
-            "A read-only `%s` parameter makes every caller that holds a `%s` copy it into a new \
-             %s. Declare it as `%s`, which takes %s."
-            (show_path written_path) view copy view takes))
+      (record_diagnostic context.diagnostics
+         (Read_only_owning_parameter
+            {
+              at = Written written.id;
+              name = Written written_path.Syntax.last.id;
+              written = show_path written_path;
+              view;
+              copy;
+              takes;
+            }))
   in
   match (mode, type_, written.kind) with
   | Language.Mode.Read, Types.Named { path; _ }, Path_type { path = written_path; _ }
@@ -546,10 +537,8 @@ and report_time_of_run_forever context ~uses (clauses : Syntax.clause list) =
         match clause.kind with
         | Cost { resource = Metric Time; _ } ->
             ignore
-              (record_diagnostic context.diagnostics Unbounded_time context.spans.(clause.id)
-                 "A function that uses `RunForever` may run forever, so no `time` clause bounds \
-                  it. Remove the `time` clause, or remove `RunForever` and give each loop a \
-                  measure.")
+              (record_diagnostic context.diagnostics
+                 (Time_of_run_forever { at = Written clause.id }))
         | _ -> ())
       clauses
 
@@ -570,31 +559,20 @@ and elaborate_capability_uses context uses =
           let unless = elaborate_condition context unless in
           List.filter_map (fun capability -> Types.make_unless capability unless) capabilities
       | unless, (first :: _ : Syntax.expression list) ->
-          let report message =
+          let report condition =
             ignore
-              (record_diagnostic context.diagnostics Misplaced_value_condition
-                 context.spans.(first.id) message);
+              (record_diagnostic context.diagnostics
+                 (Misplaced_value_condition { at = Written first.id; condition }));
             capabilities
           in
-          if context.is_in_capability then
-            report
-              "A capability's method takes no condition on its arguments: an implementation uses \
-               the capabilities of the code that provides it, so it could panic where the \
-               condition holds."
-          else if Option.is_some unless then
-            report "A condition on the arguments cannot be joined with a bound with `&&`."
-          else if capabilities <> [ Built_in Panic ] then
-            report
-              (Printf.sprintf
-                 "A condition on the arguments applies only to `Panic`, and `%s` is not `Panic`."
-                 (String.concat ", " (List.map Types.show_capability capabilities)))
+          if context.is_in_capability then report In_capability_method
+          else if Option.is_some unless then report Joined_with_bound
+          else if capabilities <> [ Built_in Panic ] then report (Not_panic capabilities)
           else [ Types.Capability_unless_values (Built_in Panic) ])
     uses
 
 and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Stdlib.result =
-  let report_error code span message =
-    Error (record_diagnostic context.diagnostics code span message)
-  in
+  let report_error diagnostic = Error (record_diagnostic context.diagnostics diagnostic) in
   let elaborate_counted (path : Syntax.path_type) (method_ : Syntax.name option) :
       (Types.resource, Diagnostic.reported) Stdlib.result =
     let shown = show_path path.path in
@@ -605,8 +583,9 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
           when Option.is_none
                  (context.lookups.names.find_key
                     (Path.make_capability_method capability method_.text)) ->
-            report_error Unknown_member context.spans.(method_.id)
-              (Printf.sprintf "`%s` has no method `%s`." shown method_.text)
+            report_error
+              (Unknown_capability_method
+                 { at = Written method_.id; written = shown; method_ = method_.text })
         | _ ->
             Ok
               (Calls
@@ -615,9 +594,7 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
                    method_ = Option.map (fun (method_ : Syntax.name) -> method_.text) method_;
                  }))
     | Some (Unknown report) -> Error report
-    | _ ->
-        report_error Not_a_capability context.spans.(path.id)
-          (Printf.sprintf "`calls` counts the calls of a capability, and `%s` is not one." shown)
+    | _ -> report_error (Calls_not_a_capability { at = Written path.id; written = shown })
   in
   let costs =
     List.filter_map
@@ -630,12 +607,7 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
               | Calls (Call_capability path) -> elaborate_counted path None
               | Calls (Call_method (path, method_)) -> elaborate_counted path (Some method_)
               | Calls (Call_parameter name) ->
-                  report_error Not_a_capability context.spans.(name.id)
-                    (Printf.sprintf
-                       "A function type's `calls` counts the calls of a capability, as in \
-                        `calls(FileRead)`: a type cannot name `%s`. Calls through a parameter are \
-                        counted in a function's own clauses."
-                       name.text)
+                  report_error (Calls_through_parameter { at = Written name.id; name = name.text })
             in
             let bound =
               match find_literal_bound cost.bound with
@@ -676,12 +648,10 @@ let elaborate_generics context owner (written : Syntax.generic_parameter list) :
       | `Value (written : Syntax.type_expression) ->
           let type_ = elaborate_type context written in
           if not (Types.is_builtin UInt64 type_ || Types.is_error type_) then begin
-            let span = context.spans.(written.id) in
             ignore
-              (record_diagnostic context.diagnostics Wrong_value_parameter_type span
-                 ~fixes:[ Diagnostic.fix "Write `UInt64`." [ Diagnostic.replace span "UInt64" ] ]
-                 (Printf.sprintf "`%s` is a value parameter, so its type is `UInt64`, not `%s`."
-                    parameter.name (Types.show type_)))
+              (record_diagnostic context.diagnostics
+                 (Wrong_value_parameter_type
+                    { at = Written written.id; parameter = parameter.name; type_ }))
           end;
           { Types.generic = parameter; kind = Value_generic })
     declared
@@ -890,12 +860,8 @@ let report_time_of_parameters_that_run_forever context ~(parameters : Types.para
         with
         | Some { type_ = Function { uses; _ }; _ } when not (Types.terminates uses) ->
             ignore
-              (record_diagnostic context.diagnostics Unbounded_time
-                 context.spans.(operand.written.id)
-                 (Printf.sprintf
-                    "`%s` may run forever, since its type uses `RunForever`, so `time(%s)` has no \
-                     value."
-                    name.text name.text))
+              (record_diagnostic context.diagnostics
+                 (Time_of_unbounded_parameter { at = Written operand.written.id; name = name.text }))
         | Some _ | None -> ())
     | Time, (Bound_method _ | Not_a_callee) | (Allocations | Allocated_bytes), _ -> ()
   in
@@ -973,11 +939,14 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
       let type_ =
         match Resolve.Names.find_generics context.lookups.names type_path with
         | Some expected when List.length expected <> List.length generics ->
-            report_error_type context Arity context.spans.(head.id)
-              (Printf.sprintf "`%s` takes %s, and this head names %d." (show_path head.path)
-                 (Diagnostic.show_count (List.length expected) "generic parameter"
-                    "generic parameters")
-                 (List.length generics))
+            report_error_type context
+              (Head_arity
+                 {
+                   at = Written head.id;
+                   written = show_path head.path;
+                   expected = List.length expected;
+                   given = List.length generics;
+                 })
         | _ -> (
             match Well_known.find_builtin_type type_path with
             | Some Never -> Types.Never
@@ -988,10 +957,13 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
       (generics, type_)
   | Some (Definition (((Trait | Capability) as kind), _)) ->
       ( generics,
-        report_error_type context Not_a_type context.spans.(head.id)
-          (Printf.sprintf "`%s` is %s, not a type, so it has no methods, constants, or `impl`s."
-             (show_path head.path)
-             (Resolve.Names.show_kind (Resolve.Names.convert_named kind))) )
+        report_error_type context
+          (Head_not_a_type
+             {
+               at = Written head.id;
+               written = show_path head.path;
+               kind = Resolve.Names.convert_named kind;
+             }) )
   | Some (Unknown report) -> (generics, Types.Error report)
   | _ -> raise_bug "the type head `%s` is not resolved" (show_path head.path)
 
@@ -1005,11 +977,8 @@ let elaborate_fields context (written : Syntax.field list) =
             match Types.find_specification_only_type field_type with
             | None -> field_type
             | Some specification_type ->
-                report_error_type context Specification_only context.spans.(type_.id)
-                  (Printf.sprintf
-                     "`%s` exists only in specifications and has no representation in code that \
-                      runs, so it is not the type of a field."
-                     (Types.show specification_type))
+                report_error_type context
+                  (Specification_only_field { at = Written type_.id; type_ = specification_type })
           in
           Some
             { Types.field_name = name.text; field_type; field_has_default = Option.is_some default }
@@ -1136,12 +1105,9 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
                     else if Types.exists_capability is_defined_by_this_impl set then
                       ( name.text,
                         Types.make_capability_set
-                          (report_error_capability context Unknown_associated_capability
-                             context.spans.(name.id)
-                             (Printf.sprintf
-                                "`%s` is defined from itself, or from a set that this `impl` \
-                                 defines after it."
-                                name.text)) )
+                          (report_error_capability context
+                             (Self_defined_capability_set { at = Written name.id; name = name.text }))
+                      )
                       :: sets
                     else (name.text, set) :: sets
                 | Associated_definition _ | Impl_member_error -> sets)

@@ -9,4 +9,4 @@ val copy_plain : Cursor.t -> Buffer.t -> is_special:(char -> bool) -> unit
 val read_character : Cursor.t -> Buffer.t -> context:context -> unit
 val consume_line_break : Cursor.t -> Source.span
 val note_line_break : Cursor.t -> Source.span -> unit
-val reject : ?code:Diagnostic.Code.lexer -> Cursor.t -> length:int -> string -> unit
+val reject : Cursor.t -> length:int -> Syntax_catalog.Lexing.problem -> unit

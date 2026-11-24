@@ -77,7 +77,8 @@ let () =
   let expect_malformed_at line text =
     match Registry.Lock.parse text with
     | exception Registry.Lock.Malformed { line = actual; _ } when actual = line -> ()
-    | exception Registry.Lock.Malformed { line = actual; message } ->
+    | exception Registry.Lock.Malformed { line = actual; problem } ->
+        let message = Project_catalog.describe_lock_problem problem in
         Harness.fail "at line %d: %s" actual message
     | _ -> Harness.fail "accepted"
   in
@@ -221,7 +222,7 @@ let load published name version ~hash =
                 holds = [];
               })
             record )
-  | _ -> Error "it is not there"
+  | _ -> Error (Project_catalog.Unavailable "it is not there")
 
 let make_entry name version =
   { Registry.Lock.name = parse_package name; version; hash = hash_of name version; holds = [] }
@@ -229,7 +230,7 @@ let make_entry name version =
 let list_chosen (packages, problems) =
   if problems <> [] then
     Harness.fail "problems: %s"
-      (String.concat " " (List.map Registry.Selection.describe_problem problems));
+      (String.concat " " (List.map Project_catalog.describe_selection_problem problems));
   List.map
     (fun (actual : Registry.Selection.package) -> (Path.show_package actual.name, actual.version))
     packages
@@ -459,7 +460,11 @@ let () =
           { (make_entry "truss.http" (1, 0, 0)) with holds = [ Prelude "Clock" ] };
         ]
       and current = [ make_entry "acme.geometry" (1, 0, 0); make_entry "truss.http" (1, 0, 0) ] in
-      let actual = String.concat " " (Registry.Selection.list_differences ~written ~current) in
+      let actual =
+        String.concat " "
+          (List.map Project_catalog.describe_difference
+             (Registry.Selection.list_differences ~written ~current))
+      in
       List.iter
         (fun part ->
           if not (String.includes ~affix:part actual) then

@@ -73,18 +73,16 @@ let lex_character_literal (cursor : Cursor.t) ~tag ~literal_start ~stop =
     | other -> other
   in
   let replacement = tag ^ "\"" ^ as_ordinary ^ "\"" in
-  Cursor.report cursor ~code:Character_literal
+  Cursor.report cursor
     ~fixes:
       [
-        Diagnostic.fix
-          ("Write `" ^ replacement ^ "`")
-          [ Diagnostic.replace (Source.make_span literal_start stop) replacement ];
+        {
+          action = Write replacement;
+          edits = [ Diagnostic.replace (Source.make_span literal_start stop) replacement ];
+        };
       ]
     (Source.make_span literal_start stop)
-    (Printf.sprintf "Truss has no %s literals. A single %s is a tagged string: `%s`."
-       (if tag = "UInt8" then "byte" else "character")
-       (if tag = "UInt8" then "byte" else "character")
-       replacement);
+    (Character_literal { is_byte = tag = "UInt8"; replacement });
   cursor.position <- stop;
   Token.String
     {
@@ -160,49 +158,48 @@ let lex_prefixed_string (cursor : Cursor.t) ~scan ~prefix ~start ~nesting =
     in
     search text_start
   in
-  let message, fixes =
+  let remove_prefix_fix : Syntax_catalog.Lexing.fix =
+    { action = Remove_prefix; edits = [ remove_prefix ] }
+  in
+  let (problem : Syntax_catalog.Lexing.string_prefix), (fixes : Syntax_catalog.Lexing.fix list) =
     match kind_of_prefix with
     | Format ->
-        ( Printf.sprintf
-            "Truss has no `%s` strings. Every string interpolates with `${...}`, as in `\"Hello \
-             ${name}\"`."
-            prefix,
+        ( Format_prefix prefix,
           if (not closed) || has_interpolations then []
-          else if empty then [ Diagnostic.fix "Remove the prefix" [ remove_prefix ] ]
+          else if empty then [ remove_prefix_fix ]
           else if quotes >= 3 && contains '\\' then []
           else
             match format_field_edits cursor ~start:text_start ~stop:text_stop with
             | Some edits ->
                 [
-                  Diagnostic.fix
-                    (if quotes = 1 then "Write an ordinary string" else "Write a raw string")
-                    (remove_prefix :: edits);
+                  {
+                    action = (if quotes = 1 then Write_ordinary_string else Write_raw_string);
+                    edits = remove_prefix :: edits;
+                  };
                 ]
             | None -> [] )
     | Raw_text ->
-        ( Printf.sprintf
-            "Truss has no `%s` strings. A raw string, which has no escapes, is written between \
-             `\"\"\"`s, as in `\"\"\"\\d+\"\"\"`."
-            prefix,
+        ( Raw_prefix prefix,
           if (not closed) || has_interpolations then []
-          else if empty || quotes >= 3 then [ Diagnostic.fix "Remove the prefix" [ remove_prefix ] ]
+          else if empty || quotes >= 3 then [ remove_prefix_fix ]
           else if Cursor.is_at cursor (text_stop - 1) '\\' || closes_on_doubled_quote then []
           else
             [
-              Diagnostic.fix "Write a raw string"
-                [
-                  Diagnostic.replace (Source.make_span start text_start) "\"\"\"";
-                  Diagnostic.replace (Source.make_span text_stop (text_stop + 1)) "\"\"\"";
-                ];
+              {
+                action = Write_raw_string;
+                edits =
+                  [
+                    Diagnostic.replace (Source.make_span start text_start) "\"\"\"";
+                    Diagnostic.replace (Source.make_span text_stop (text_stop + 1)) "\"\"\"";
+                  ];
+              };
             ] )
-    | Bytes ->
-        ( "Truss has no byte strings. A string is UTF-8 text, and `text.bytes()` gives its bytes.",
-          [] )
+    | Bytes -> (Byte_prefix, [])
   in
-  Cursor.report cursor ~code:String_prefix
+  Cursor.report cursor
     ~fixes:(if quote_joins_before cursor start then [] else fixes)
     (Source.make_span start quote_start)
-    message;
+    (String_prefix problem);
   (kind, ending)
 
 let read_hash_raw_text (cursor : Cursor.t) ~text_start ~text_stop =
@@ -241,7 +238,7 @@ let hash_raw_string cursor ~start =
         let delimiter = String.make quotes '"' in
         let interpolates = String.includes ~affix:"${" written in
         let stop = text_stop + 1 + hashes in
-        Cursor.report cursor ~code:String_prefix
+        Cursor.report cursor
           ~fixes:
             (if
                interpolates || quote_joins_before cursor start
@@ -250,15 +247,17 @@ let hash_raw_string cursor ~start =
              then []
              else
                [
-                 Diagnostic.fix "Write a raw string"
-                   [
-                     Diagnostic.replace (Source.make_span start text_start) delimiter;
-                     Diagnostic.replace (Source.make_span text_stop stop) delimiter;
-                   ];
+                 {
+                   action = Write_raw_string;
+                   edits =
+                     [
+                       Diagnostic.replace (Source.make_span start text_start) delimiter;
+                       Diagnostic.replace (Source.make_span text_stop stop) delimiter;
+                     ];
+                 };
                ])
           (Source.make_span start text_start)
-          "Truss has no `r#` strings. A raw string is written between `\"\"\"`s, or between more \
-           quotes when its text has `\"\"\"` in it.";
+          Raw_hash_string;
         let value = read_hash_raw_text cursor ~text_start ~text_stop in
         cursor.position <- stop;
         Some
@@ -301,21 +300,21 @@ let lex_quoted_string (cursor : Cursor.t) ~scan ~nesting ~delimiter =
     else quote_edits (position + 1) reversed_edits
   in
   let template = delimiter = '`' in
-  Cursor.report cursor ~code:String_delimiter
+  Cursor.report cursor
     ~fixes:
       (if ending = Closed && not (quote_joins_before cursor start) then
          [
-           Diagnostic.fix "Write the string between `\"`s"
-             (Diagnostic.replace (Source.make_span start (start + 1)) "\""
-              :: quote_edits (start + 1) []
-             @ [ Diagnostic.replace (Source.make_span (stop - 1) stop) "\"" ]);
+           {
+             action = Write_between_quotes;
+             edits =
+               Diagnostic.replace (Source.make_span start (start + 1)) "\""
+               :: quote_edits (start + 1) []
+               @ [ Diagnostic.replace (Source.make_span (stop - 1) stop) "\"" ];
+           };
          ]
        else [])
     (Source.make_span start (start + 1))
-    (if template then
-       "Truss has no template literals. Every string is written between `\"`s and interpolates \
-        with `${...}`."
-     else "A string is written between `\"`s.");
+    (if template then Template_literal else Quoted_string);
   (kind, ending)
 
 let lex_curly_quoted_string (cursor : Cursor.t) ~opening_length ~closing =
@@ -336,19 +335,22 @@ let lex_curly_quoted_string (cursor : Cursor.t) ~opening_length ~closing =
           value
         || quote_joins_before cursor start
       in
-      Cursor.report cursor ~code:Confusable_character
+      Cursor.report cursor
         ~fixes:
           (if reads_differently then []
            else
              [
-               Diagnostic.fix "Write the string between `\"`s"
-                 [
-                   Diagnostic.replace (Source.make_span start text_start) "\"";
-                   Diagnostic.replace (Source.make_span text_stop stop) "\"";
-                 ];
+               {
+                 action = Write_between_quotes;
+                 edits =
+                   [
+                     Diagnostic.replace (Source.make_span start text_start) "\"";
+                     Diagnostic.replace (Source.make_span text_stop stop) "\"";
+                   ];
+               };
              ])
         (Source.make_span start text_start)
-        "A string is written between straight quotes, `\"`. This is a curly quote.";
+        Curly_quote;
       cursor.position <- stop;
       Some
         (Token.String
@@ -365,8 +367,8 @@ let scan (cursor : Cursor.t) ~scan ~nesting =
   let start = cursor.position in
   let is offset character = Cursor.is_at cursor (start + offset) character in
   let make_token (kind, ending) = Some (Lexed (kind, ending)) in
-  let make_rejected ?code length message =
-    Source_text.reject ?code cursor ~length message;
+  let make_rejected length problem =
+    Source_text.reject cursor ~length problem;
     Some Skipped
   in
   let make_prefixed prefix =
@@ -391,14 +393,12 @@ let scan (cursor : Cursor.t) ~scan ~nesting =
                 locate_name_end (position + 1)
               else position
             in
-            make_rejected ~code:Lifetime
-              (locate_name_end (start + 1) - start)
-              "Truss has no lifetimes. How long a view lasts is checked without annotations."
-        | _ -> make_rejected 1 "`'` is not used in Truss. Strings are written with `\"`.")
+            make_rejected (locate_name_end (start + 1) - start) Lifetime
+        | _ -> make_rejected 1 Apostrophe)
   else if is 0 '`' then
     match find_closing_delimiter cursor ~start ~delimiter:'`' with
     | Some _ -> make_token (lex_quoted_string cursor ~scan ~nesting ~delimiter:'`')
-    | None -> make_rejected 1 "The backtick is not used in Truss."
+    | None -> make_rejected 1 Backtick
   else if is 0 '@' && is 1 '"' then make_prefixed "@"
   else if is 0 '$' && is 1 '"' then make_prefixed "$"
   else None

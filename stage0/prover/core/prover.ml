@@ -7,7 +7,11 @@ end))
 
 type proof =
   | Obligations of Obligation.outcome
-  | Unsupported of Obligation.location * string
+  | Unsupported of {
+      location : Obligation.location;
+      construct : Catalog.Prover.construct;
+      foreign : string option;
+    }
   | Not_proven_here
 
 let find_inherited_clauses (lookups : Lookups.t) (path : Path.t) =
@@ -68,11 +72,7 @@ let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
             (fun (shown, substitution) ->
               List.map
                 (fun builtin ->
-                  ( shown
-                    @ [
-                        Printf.sprintf "`%s` is `%s`" parameter.name
-                          (Language.Builtin_type.show builtin);
-                      ],
+                  ( shown @ [ (parameter.name, builtin) ],
                     Types.bind_argument parameter
                       (Types.Type (Types.make_builtin builtin))
                       substitution ))
@@ -98,17 +98,9 @@ let translate_derived_default (lookups : Lookups.t) (key : Resolve.Names.key)
     let outcome = Translate.translate_function lookups source ~path in
     List.map
       (fun (obligation : Obligation.t) ->
-        let message =
-          match obligation.code with
-          | Invariant ->
-              [
-                Obligation.Text
-                  "The value that the derived `Default` builds from the fields' defaults may not \
-                   meet this type's invariant.";
-              ]
-          | _ -> obligation.message
-        in
-        { obligation with message })
+        match Catalog.Prover.find_code obligation.obligation with
+        | Invariant -> { obligation with obligation = Derived_default_invariant }
+        | _ -> obligation)
       outcome.obligations
   else []
 
@@ -131,15 +123,13 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
         | instances ->
             let outcomes =
               List.map
-                (fun (shown, substitution) ->
+                (fun (instance, substitution) ->
                   let outcome = prove_with substitution in
-                  let prefix = "Where " ^ String.concat " and " shown ^ ": " in
                   {
                     outcome with
                     Obligation.obligations =
                       List.map
-                        (fun (obligation : Obligation.t) ->
-                          { obligation with message = Text prefix :: obligation.message })
+                        (fun (obligation : Obligation.t) -> { obligation with instance })
                         outcome.obligations;
                   })
                 instances
@@ -185,11 +175,7 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
         | Some _ | None -> Not_proven_here)
     | Trait | Capability | Law_proof -> Not_proven_here
   with Facts.Unsupported { location; construct; foreign_definition } ->
-    Unsupported
-      ( location,
-        match foreign_definition with
-        | Some name -> Printf.sprintf "%s, in `%s`" construct name
-        | None -> construct )
+    Unsupported { location; construct; foreign = foreign_definition }
 
 let show_float bits =
   let spell_shortest ~most ~is_same value =
@@ -280,31 +266,24 @@ let show_truss_value members value =
   in
   show value
 
-let show_counterexample members (obligation : Obligation.t) answer_values =
-  let shown =
-    List.filter_map
-      (fun (symbol, name) ->
-        match List.assoc_opt symbol answer_values with
-        | Some (Solver.Atom atom) when is_opaque atom -> None
-        | Some value -> Some (Printf.sprintf "`%s` is %s" name (show_truss_value members value))
-        | None -> None)
-      (List.rev obligation.values
-      @ List.rev_map (fun (term, name) -> (Logic.Symbol.Named_term term, name)) obligation.locals)
-  in
-  let path =
-    List.filter_map Fun.id
-      (List.mapi
-         (fun index (note, _) ->
-           match List.assoc_opt (Logic.Symbol.Reached index) answer_values with
-           | Some (Solver.Atom "true") -> Some note
-           | _ -> None)
-         obligation.path_notes)
-  in
-  (match shown with [] -> "" | shown -> " For example, when " ^ String.concat ", " shown ^ ".")
-  ^ match path with [] -> "" | path -> " On that path, " ^ String.concat ", " path ^ "."
+let list_counterexample_values members (obligation : Obligation.t) answer_values =
+  List.filter_map
+    (fun (symbol, name) ->
+      match List.assoc_opt symbol answer_values with
+      | Some (Solver.Atom atom) when is_opaque atom -> None
+      | Some value -> Some (name, show_truss_value members value)
+      | None -> None)
+    (List.rev obligation.values
+    @ List.rev_map (fun (term, name) -> (Logic.Symbol.Named_term term, name)) obligation.locals)
 
-let make_diagnostic code span message =
-  Diagnostic.make ~code:(Diagnostic.Code.Prover code) span message
+let list_path_notes (obligation : Obligation.t) answer_values =
+  List.filter_map Fun.id
+    (List.mapi
+       (fun index (note, _) ->
+         match List.assoc_opt (Logic.Symbol.Reached index) answer_values with
+         | Some (Solver.Atom "true") -> Some note
+         | _ -> None)
+       obligation.path_notes)
 
 let resolve_location (names : Resolve.Names.lookups) (key : Resolve.Names.key)
     (location : Obligation.location) =
@@ -313,84 +292,8 @@ let resolve_location (names : Resolve.Names.lookups) (key : Resolve.Names.key)
     | Node origin -> Core_walk.locate_origin origin
     | Whole_definition -> (names.read_definition key).id)
 
-let is_word_character character =
-  character = '_'
-  || (character >= 'a' && character <= 'z')
-  || (character >= 'A' && character <= 'Z')
-  || (character >= '0' && character <= '9')
-
-let replace_type_names type_names text =
-  if type_names = [] then text
-  else begin
-    let buffer = Buffer.create (String.length text) in
-    let length = String.length text in
-    let rec scan index =
-      if index < length then
-        if is_word_character text.[index] then begin
-          let stop = ref index in
-          while !stop < length && is_word_character text.[!stop] do
-            incr stop
-          done;
-          let word = String.sub text index (!stop - index) in
-          Buffer.add_string buffer (Option.value (List.assoc_opt word type_names) ~default:word);
-          scan !stop
-        end
-        else begin
-          Buffer.add_char buffer text.[index];
-          scan (index + 1)
-        end
-    in
-    scan 0;
-    Buffer.contents buffer
-  end
-
-let substitute_clause text spans clause replacements type_names =
-  let locate origin = Source.Definition_span.locate spans (Core_walk.locate_origin origin) in
-  let clause_span = locate clause in
-  let clause_text = Facts.quote_span text clause_span in
-  let buffer = Buffer.create (String.length clause_text) in
-  let next =
-    List.fold_left
-      (fun next ((span : Source.Definition_span.t), replacement) ->
-        let start = span.start - clause_span.start and stop = span.stop - clause_span.start in
-        if start < next || stop > String.length clause_text then next
-        else begin
-          Buffer.add_string buffer
-            (replace_type_names type_names (String.sub clause_text next (start - next)));
-          Buffer.add_string buffer replacement;
-          stop
-        end)
-      0
-      (List.sort_uniq compare
-         (List.map (fun (origin, replacement) -> (locate origin, replacement)) replacements))
-  in
-  Buffer.add_string buffer (replace_type_names type_names (String.drop_first next clause_text));
-  Buffer.contents buffer
-
-let render (lookups : Lookups.t) (message : Obligation.message) =
-  String.concat ""
-    (List.map
-       (function
-         | Obligation.Text text -> text
-         | Quote (key, origin) ->
-             Facts.quote_span
-               (lookups.interface.names.read_text key)
-               (Source.Definition_span.locate
-                  (lookups.interface.names.read_spans key)
-                  (Core_walk.locate_origin origin))
-         | Substituted { key; clause; replacements; type_names } ->
-             substitute_clause
-               (lookups.interface.names.read_text key)
-               (lookups.interface.names.read_spans key)
-               clause replacements type_names)
-       message)
-
-let render_fix lookups ({ title; edits } : Obligation.fix) =
-  Diagnostic.fix (render lookups title)
-    (List.map
-       (fun ({ at; replacement } : Obligation.edit) ->
-         Diagnostic.replace at (render lookups replacement))
-       edits)
+let render (lookups : Lookups.t) key description =
+  Renderer.render lookups.interface.names key (Catalog.Prover.describe description)
 
 type site = { code : Diagnostic.Code.prover; span : Source.Definition_span.t; shows : string }
 type citation = { cited : Resolve.Names.key; clause : Source.Definition_span.t }
@@ -402,15 +305,6 @@ type state = {
   failure : Source.Definition_span.t Diagnostic.diagnostic option;
   citation : citation option;
 }
-
-let explain_unknown = function
-  | Solver.Out_of_steps ->
-      " The solver reached its step limit before it found a proof or a counterexample."
-  | Incomplete reason ->
-      Printf.sprintf
-        " The solver's decision procedures are incomplete for this query, so it stopped without a \
-         proof or a counterexample. Z3 gives the reason `%s`."
-        reason
 
 let find_declared_evaluation : Logic.declaration -> Obligation.evaluation option = function
   | Constant (Evaluated evaluation, _) -> Some evaluation
@@ -431,7 +325,7 @@ type posed_obligation = {
   obligation : Obligation.t;
   query : Logic.query;
   has_run_result : bool;
-  failed_runs : (Obligation.evaluation * string) list;
+  failed_runs : Catalog.Prover.failed_run list;
 }
 
 let rec state_value (declarations : Logic.declaration list) (term : Logic.term) (sort : Logic.sort)
@@ -497,7 +391,12 @@ let pose_obligation runs site (obligation : Obligation.t) =
                     has_run_result = true;
                   })
           | Some (Unfinished report | Failed report) ->
-              { posed with failed_runs = posed.failed_runs @ [ (evaluation, report) ] }
+              let failed : Catalog.Prover.failed_run =
+                match evaluation with
+                | Constant_value path -> Constant_run { path; report }
+                | Assertion _ -> Assertion_run report
+              in
+              { posed with failed_runs = posed.failed_runs @ [ failed ] }
           | None -> posed)
       | _ -> posed)
     { site; obligation; query = obligation.query; has_run_result = false; failed_runs = [] }
@@ -518,49 +417,47 @@ let make_refutation_request ({ query; _ } : posed_obligation) =
   (Solver.make_request refutation, refutation)
 
 type posed =
-  | Unreadable of site
-  | Posed of { obligations : posed_obligation list; failed_evaluation : site option }
+  | Unreadable of Source.Definition_span.t Diagnostic.diagnostic
+  | Posed of {
+      key : Resolve.Names.key;
+      obligations : posed_obligation list;
+      failed_evaluation : Source.Definition_span.t Diagnostic.diagnostic option;
+    }
+
+let make_site (failure : Source.Definition_span.t Diagnostic.diagnostic) =
+  match failure.code with
+  | Prover code -> { code; span = failure.span; shows = failure.message }
+  | _ -> Compiler_bug.raise_bug ~stage:"Prover" "a proof site has a code of another family"
 
 let pose (lookups : Lookups.t) ~runs key proof =
   let runs = Evaluation_table.of_seq (List.to_seq runs) in
-  let resolve location = resolve_location lookups.interface.names key location in
   match proof with
-  | Not_proven_here -> Posed { obligations = []; failed_evaluation = None }
-  | Unsupported (location, construct) ->
-      Unreadable
-        {
-          code = Unsupported;
-          span = resolve location;
-          shows =
-            Printf.sprintf "The prover cannot read %s yet, so nothing in this definition is proven."
-              construct;
-        }
+  | Not_proven_here -> Posed { key; obligations = []; failed_evaluation = None }
+  | Unsupported { location; construct; foreign } ->
+      Unreadable (render lookups key (Unreadable { location; construct; foreign }))
   | Obligations outcome ->
       Posed
         {
+          key;
           obligations =
             List.map
               (fun (obligation : Obligation.t) ->
                 pose_obligation runs
-                  {
-                    code = obligation.code;
-                    span = resolve obligation.location;
-                    shows = render lookups obligation.message;
-                  }
+                  (make_site
+                     (render lookups key
+                        (Proves
+                           {
+                             location = obligation.location;
+                             instance = obligation.instance;
+                             obligation = obligation.obligation;
+                           })))
                   obligation)
               outcome.obligations;
           failed_evaluation =
             Option.bind outcome.evaluation (fun (evaluation : Obligation.evaluation) ->
                 match (evaluation, Evaluation_table.find_opt runs evaluation) with
                 | Constant_value path, Some (Failed report) ->
-                    Some
-                      {
-                        code = Evaluation;
-                        span = resolve Whole_definition;
-                        shows =
-                          Printf.sprintf "The value of `%s` cannot be computed: %s" (Path.show path)
-                            report;
-                      }
+                    Some (render lookups key (Unevaluated { path; report }))
                 | Constant_value _, (Some (Evaluated _ | Unfinished _) | None) -> None
                 | Assertion _, _ ->
                     Compiler_bug.raise_bug ~stage:"Prover"
@@ -580,65 +477,53 @@ let list_refutation_requests posed answers =
       if is_refutable obligation answer then Some (make_refutation_request obligation) else None)
     (List.combine (list_posed posed) answers)
 
-let explain_failed_runs failed_runs =
-  String.concat ""
-    (List.map
-       (fun ((evaluation : Obligation.evaluation), report) ->
-         match evaluation with
-         | Constant_value path ->
-             Printf.sprintf " The evaluation of `%s` stopped, so its value is not known: %s"
-               (Path.show path) report
-         | Assertion _ ->
-             Printf.sprintf " Its evaluation stopped, so its result is not known: %s" report)
-       failed_runs)
-
 let note_cited_clause (failure : Source.span Diagnostic.diagnostic) clause =
-  { failure with notes = failure.notes @ [ (clause, "This is the clause that must hold.") ] }
+  { failure with notes = failure.notes @ [ (clause, Catalog.Prover.describe_citation Cited_here) ] }
 
 let name_cited_clause (failure : Source.span Diagnostic.diagnostic) ~path ~line =
   {
     failure with
-    message = failure.message ^ Printf.sprintf " The clause that must hold is at `%s:%d`." path line;
+    message = failure.message ^ Catalog.Prover.describe_citation (Cited_at { path; line });
   }
 
-let explain_failure (posed : posed_obligation) answer ~is_refuted =
+let explain_failure (posed : posed_obligation) answer ~is_refuted : Catalog.Prover.failure option =
   match answer with
   | Solver.Proven -> None
-  | Counterexample _ when is_refuted -> Some " This fails every time the code reaches it."
+  | Counterexample _ when is_refuted -> Some Refuted
   | Counterexample values ->
       Some
-        (show_counterexample (Logic.list_members posed.query) posed.obligation values
-        ^ explain_failed_runs posed.failed_runs)
+        (Counterexample
+           {
+             values =
+               list_counterexample_values (Logic.list_members posed.query) posed.obligation values;
+             path = list_path_notes posed.obligation values;
+             failed_runs = posed.failed_runs;
+           })
   | Unknown unknown ->
       Some
-        (explain_unknown unknown
-       ^ " If the code is correct, a `proof` block or a theorem can lead the solver to the proof."
-        ^ (if posed.obligation.has_untriggered_written_fact then
-             " A quantified fact in the query has no trigger, so an `assert` of that fact at the \
-              term the proof needs may be enough."
-           else "")
-        ^ explain_failed_runs posed.failed_runs)
+        (Undecided
+           {
+             unknown =
+               (match unknown with
+               | Solver.Out_of_steps -> Out_of_steps
+               | Incomplete reason -> Incomplete reason);
+             has_untriggered_fact = posed.obligation.has_untriggered_written_fact;
+             failed_runs = posed.failed_runs;
+           })
 
-let advise_other_ways : Diagnostic.Code.prover -> string = function
-  | Overflow | Division | Shift ->
-      " It can also be checked first with an `if`, or done with the checked operation."
-  | Out_of_bounds ->
-      " It can also be checked first with an `if`, or, for one element, read with `get`."
-  | _ -> ""
-
-let fail_site (site : site) =
+let fail_site failure =
   {
-    site;
+    site = make_site failure;
     is_proven = false;
     trusts_compiled_code = false;
-    failure = Some (make_diagnostic site.code site.span site.shows);
+    failure = Some failure;
     citation = None;
   }
 
 let list_states (lookups : Lookups.t) posed ~answers ~refutations =
   match posed with
-  | Unreadable site -> [ fail_site site ]
-  | Posed { obligations; failed_evaluation } ->
+  | Unreadable failure -> [ fail_site failure ]
+  | Posed { key; obligations; failed_evaluation } ->
       let refutations = Queue.of_seq (List.to_seq refutations) in
       let _, states =
         List.fold_left2
@@ -649,14 +534,17 @@ let list_states (lookups : Lookups.t) posed ~answers ~refutations =
             let is_reported = List.mem (site.code, site.shows) reported in
             let failure =
               match explained with
-              | Some explained when not is_reported ->
+              | Some failure when not is_reported ->
                   Some
-                    {
-                      (make_diagnostic site.code site.span
-                         (site.shows ^ explained ^ advise_other_ways site.code))
-                      with
-                      fixes = List.map (render_fix lookups) obligation.fixes;
-                    }
+                    (render lookups key
+                       (Unproven
+                          {
+                            location = obligation.location;
+                            instance = obligation.instance;
+                            obligation = obligation.obligation;
+                            failure;
+                            fixes = obligation.fixes;
+                          }))
               | Some _ | None -> None
             in
             ( (if Option.is_some failure then (site.code, site.shows) :: reported else reported),

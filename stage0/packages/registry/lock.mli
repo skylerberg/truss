@@ -7,7 +7,7 @@ type entry = {
 
 type t = entry list
 
-exception Malformed of { line : int; message : string }
+exception Malformed of { line : int; problem : Project_catalog.lock_problem }
 
 val parse : string -> t
 val print : t -> string

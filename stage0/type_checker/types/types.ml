@@ -287,6 +287,8 @@ let list_fitting_integer_types number =
 let is_float_type type_ =
   match find_builtin type_ with Some builtin -> List.mem builtin float_types | None -> false
 
+type property = Copyable | Plain | View | Holds_function
+
 type substitution = {
   arguments : (parameter * argument) list;
   capability_arguments : (parameter * capability_set) list;

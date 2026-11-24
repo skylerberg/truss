@@ -16,5 +16,6 @@
   resolve
   interface
   diagnostic
+  catalog
   syntax_walk
   zarith))

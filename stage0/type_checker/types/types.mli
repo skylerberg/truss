@@ -110,6 +110,7 @@ val compute_missing_capabilities :
 
 val replace_capabilities : (capability -> capability_set option) -> capability_set -> capability_set
 
+type property = Copyable | Plain | View | Holds_function
 type substitution
 
 val no_substitution : substitution

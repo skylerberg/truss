@@ -94,9 +94,9 @@ let use_path cursor : Syntax.path option =
     let names =
       List.rev
         (Cursor.parse_separated cursor ~separator:Dot (fun cursor ->
-             Atoms.lower_name cursor "a module name"))
+             Atoms.lower_name cursor Module_name))
     in
-    if not (Cursor.is_at_end cursor) then Cursor.fail cursor "a line break after the module path";
+    if not (Cursor.is_at_end cursor) then Cursor.fail cursor Line_break_after_module_path;
     names
   with
   | last :: modules -> Some { modules = List.rev modules; last }
@@ -115,17 +115,19 @@ let use_after_definition (tokens : Token.t array) piece (line : _ Syntax.item) ~
     match Token.spell_tokens (Array.sub tokens piece.first (piece.stop - piece.first)) with
     | Some spelling ->
         [
-          Diagnostic.fix "Move it up to the other `use` lines"
-            [
-              Diagnostic.insert (Source.make_zero_width destination) (spelling ^ "\n");
-              Diagnostic.delete (Source.make_span line.base (compute_line_stop tokens piece));
-            ];
+          {
+            Syntax_catalog.Parsing.action = Move_use_up;
+            edits =
+              [
+                Diagnostic.insert (Source.make_zero_width destination) (spelling ^ "\n");
+                Diagnostic.delete (Source.make_span line.base (compute_line_stop tokens piece));
+              ];
+          };
         ]
     | None -> []
   in
-  Diagnostic.make ~code:(Parser Use_after_definition)
-    (Source.make_span line.base line.stop)
-    "`use` lines come before every definition in a file." ~fixes
+  Syntax_catalog.Parsing.render
+    { at = Source.make_span line.base line.stop; problem = Use_after_definition; fixes }
 
 let parse tokens ~lexer_diagnostics =
   let rec gather pieces ~uses ~definitions ~diagnostics ~destination =
@@ -206,8 +208,7 @@ module For_testing = struct
       parse_piece tokens piece (fun cursor ->
           match
             let statement = Parse_expression.parse_statement_line cursor ~previous:None in
-            if not (Cursor.is_at_end cursor) then
-              Cursor.fail cursor "a line break after the statement";
+            if not (Cursor.is_at_end cursor) then Cursor.fail cursor Line_break_after_statement;
             statement
           with
           | statement ->

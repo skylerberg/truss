@@ -21,9 +21,7 @@ let enter_specification context = { context with is_specification = true }
 let enter_proof context = { context with is_specification = true; allows_assert = true }
 let may_be_specification context = context.is_specification || context.is_function_body
 let show_quantifier = function Language.Quantifier.Forall -> "forall" | Exists -> "exists"
-
-let report cursor code id message =
-  Cursor.report cursor code (Cursor.read_file_span cursor id) message
+let report cursor id problem = Cursor.report cursor (Cursor.read_file_span cursor id) problem
 
 let try_operator_span cursor id =
   let span = Cursor.read_span cursor id in
@@ -33,28 +31,14 @@ let try_operator_span cursor id =
 let rec check_expression cursor context (value : Syntax.expression) =
   (match value.kind with
   | Quantified { quantifier; binder = Binder_type _; _ } when not (may_be_specification context) ->
-      report cursor Specification_only value.id
-        (Printf.sprintf
-           "`%s` over a whole type cannot run, so it is only for specifications and the bodies of \
-            functions for specifications only. Quantify over a range or a collection, as in `%s i \
-            in 0..count => ...`."
-           (show_quantifier quantifier) (show_quantifier quantifier))
+      report cursor value.id (Whole_type_quantifier { quantifier = show_quantifier quantifier })
   | Binary { operator = Connective Implies; operator_id; _ } when not (may_be_specification context)
     ->
-      report cursor Specification_only operator_id
-        "`==>` is only for specifications and the bodies of functions for specifications only; in \
-         code, write `!a || b`."
-  | Echo _ when context.is_specification ->
-      report cursor Echo_in_specification value.id
-        "`echo` is not allowed in specifications, which never run."
+      report cursor operator_id Implies_in_code
+  | Echo _ when context.is_specification -> report cursor value.id Echo_in_specification
   | Try _ when context.is_in_parallel ->
-      Cursor.report cursor Exits_parallel
-        (try_operator_span cursor value.id)
-        "`?` cannot exit a `parallel` block or a `parallel for`; return a `Result` from the branch \
-         and use `?` after it."
-  | Return _ when context.is_in_parallel ->
-      report cursor Exits_parallel value.id
-        "`return` cannot exit a `parallel` block or a `parallel for`."
+      Cursor.report cursor (try_operator_span cursor value.id) Try_in_parallel
+  | Return _ when context.is_in_parallel -> report cursor value.id Return_in_parallel
   | Break | Continue -> check_loop_exit cursor context value
   | _ -> ());
   match value.kind with
@@ -72,20 +56,15 @@ and check_parts cursor context value =
     ~on_statement:(check_statement cursor context) value
 
 and check_loop_exit cursor context (value : Syntax.expression) =
-  let word = match value.kind with Break -> "break" | _ -> "continue" in
+  let word : Syntax_catalog.Parsing.loop_exit =
+    match value.kind with Break -> Break_exit | _ -> Continue_exit
+  in
   match (context.enclosing_loop, value.kind) with
   | In_loop, _ | In_parallel_for, Continue -> ()
-  | No_loop, _ ->
-      report cursor Misplaced_loop_exit value.id
-        (Printf.sprintf "`%s` is only allowed in a loop." word)
-  | Across_lambda, _ ->
-      report cursor Misplaced_loop_exit value.id
-        (Printf.sprintf "`%s` cannot reach a loop outside the lambda it is in." word)
-  | In_parallel_for, _ ->
-      report cursor Exits_parallel value.id "`break` cannot exit a `parallel for`; `continue` can."
-  | Across_parallel_branch, _ ->
-      report cursor Exits_parallel value.id
-        (Printf.sprintf "`%s` cannot leave a branch of a `parallel` block." word)
+  | No_loop, _ -> report cursor value.id (Loop_exit_outside_loop word)
+  | Across_lambda, _ -> report cursor value.id (Loop_exit_across_lambda word)
+  | In_parallel_for, _ -> report cursor value.id Break_in_parallel_for
+  | Across_parallel_branch, _ -> report cursor value.id (Loop_exit_from_parallel_branch word)
 
 and check_block cursor context (body : Syntax.block) =
   List.iter (check_statement cursor context) body.statements
@@ -101,14 +80,8 @@ and check_placement cursor ~top (type_ : Syntax.type_expression) =
         List.iter
           (fun (clause : Syntax.clause) ->
             match clause.kind with
-            | Requires _ ->
-                report cursor Misplaced_callback_contract clause.id
-                  "A function type has a `requires` only as the type of a parameter, where it \
-                   constrains the arguments the callee passes its callback."
-            | Ensures _ ->
-                report cursor Misplaced_callback_contract clause.id
-                  "A function type has an `ensures` only as the type of a parameter, where it \
-                   constrains the results the callback returns to the callee."
+            | Requires _ -> report cursor clause.id Misplaced_callback_requires
+            | Ensures _ -> report cursor clause.id Misplaced_callback_ensures
             | _ -> ())
           clauses;
       List.iter
@@ -159,14 +132,10 @@ and check_statement cursor context (statement : Syntax.statement) =
       check_block cursor { context with is_in_parallel = true; enclosing_loop } body
   | Concurrent body -> check_block cursor context body
   | Proof body ->
-      if not context.is_function_body then
-        report cursor Misplaced_proof statement.id
-          "A `proof` block is only allowed in a function's body.";
+      if not context.is_function_body then report cursor statement.id Misplaced_proof;
       check_block cursor (enter_proof context) body
   | Assert _ ->
-      if not context.allows_assert then
-        report cursor Misplaced_assert statement.id
-          "`assert` is only allowed in tests, theorems, and proofs.";
+      if not context.allows_assert then report cursor statement.id Misplaced_assert;
       check_statement_parts cursor context statement
   | Expression _ | Assignment _ | Statement_error -> check_statement_parts cursor context statement
 
@@ -179,14 +148,8 @@ let check_parameters ?(lends = false) cursor (parameters : Syntax.parameter list
     (fun (parameter : Syntax.parameter) ->
       match parameter.kind with
       | Named_parameter { name; type_; default; _ } ->
-          if name.text = "result" then
-            report cursor Reserved_specification_name name.id
-              "A parameter cannot be named `result`, which names the return value in `ensures` and \
-               `cost`.";
-          if lends && name.text = "final" then
-            report cursor Reserved_specification_name name.id
-              "A parameter of a lending method cannot be named `final`: in the method's `ensures`, \
-               `final(result)` is the part as the caller left it.";
+          if name.text = "result" then report cursor name.id Parameter_named_result;
+          if lends && name.text = "final" then report cursor name.id Lending_parameter_named_final;
           check_types ~parameter:true cursor plain type_;
           Option.iter (check_expression cursor plain) default
       | Self_parameter _ | Parameter_error -> ())
@@ -202,26 +165,11 @@ let rec check_trait_arguments cursor ~is_law_proof (trait_ : Syntax.path_type) =
 
 and check_trait_argument cursor ~is_law_proof (type_ : Syntax.type_expression) =
   let report_associated_type written =
-    report cursor Misplaced_associated_type type_.id
-      (if is_law_proof then
-         Printf.sprintf
-           "`%s` cannot be a trait argument of a law proof, since no `impl` can have one." written
-       else
-         Printf.sprintf
-           "`%s` cannot be a trait argument of an `impl`: an associated type may stand for any \
-            type, so the `impl` could overlap every other `impl` of the trait for its type."
-           written)
+    report cursor type_.id (Associated_type_argument { written; is_law_proof })
   in
   match type_.kind with
   | Path_type path -> check_trait_arguments cursor ~is_law_proof path
-  | Function_type _ ->
-      report cursor Misplaced_function_type type_.id
-        (if is_law_proof then
-           "A function type cannot be a trait argument of a law proof, since no `impl` can have \
-            one."
-         else
-           "A function type cannot be a trait argument of an `impl`. Use a record that holds the \
-            function, such as `type Callback(run: fn(Int64) -> Int64)`, as the argument.")
+  | Function_type _ -> report cursor type_.id (Function_type_argument { is_law_proof })
   | Associated (parameter, name) -> report_associated_type (parameter.text ^ "." ^ name.text)
   | Self_type (Some name) -> report_associated_type ("Self." ^ name.text)
   | Self_type None | Type_error -> ()
@@ -236,19 +184,14 @@ let check_header_trait cursor ~is_law_proof (trait_ : Syntax.path_type) =
                  (Cursor.read_span cursor type_.id).stop)
           in
           let written = Option.value ~default:name.text (Cursor.spell cursor span) in
-          Cursor.report cursor Misplaced_constraint span
-            (if is_law_proof then
-               Printf.sprintf
-                 "A law proof's trait takes no constraint such as `%s`: the `impl` it proves \
-                  chooses `%s` in its body."
-                 written name.text
-             else
-               Printf.sprintf
-                 "An `impl` chooses its associated types in its body, so `%s` on its trait would \
-                  have no effect. Write `type %s = %s` in the `impl` instead."
-                 written name.text
-                 (Option.value ~default:"..."
-                    (Cursor.spell cursor (Cursor.read_file_span cursor type_.id))))
+          Cursor.report cursor span
+            (Constraint_on_trait
+               {
+                 written;
+                 name = name.text;
+                 chosen = Cursor.spell cursor (Cursor.read_file_span cursor type_.id);
+                 is_law_proof;
+               })
       | Type_argument _ | Count _ | Count_name _ -> ())
     trait_.arguments;
   check_trait_arguments cursor ~is_law_proof trait_
@@ -263,14 +206,8 @@ let check_generic_parameters cursor generics =
 
 let check_function_name cursor (name : Syntax.definition_name) =
   let name = match name with Plain_name name | Member_name (_, name) -> name in
-  if name.text = "old" then
-    report cursor Reserved_specification_name name.id
-      "A function cannot be named `old`, which names a value as it was when a function was called, \
-       in specifications."
-  else if name.text = "identical" then
-    report cursor Reserved_specification_name name.id
-      "A function cannot be named `identical`, which tests whether two values are the same value, \
-       in specifications."
+  if name.text = "old" then report cursor name.id Function_named_old
+  else if name.text = "identical" then report cursor name.id Function_named_identical
 
 let check_signature cursor (signature : Syntax.signature) =
   check_function_name cursor signature.name;

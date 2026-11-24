@@ -31,15 +31,9 @@ let check lookups (key : Resolve.Names.key) ~checks_body =
         Result.bind (Body.check lookups key ~checks_body) (fun (checked : checked) ->
             match Patterns.check lookups key checked.form with
             | [] -> Ok checked
-            | diagnostics -> Error diagnostics)
-      with Interface.Properties.Recursion_limit message ->
-        let names = lookups.interface.names in
-        Error
-          [
-            Diagnostic.make ~code:(Types Recursion_limit)
-              (names.read_spans key).((names.read_definition key).id)
-              message;
-          ])
+            | descriptions -> Error descriptions)
+      with Interface.Properties.Recursion_limit diagnostic ->
+        Error [ Catalog.Typing.describe diagnostic ])
 
 let check_contract (lookups : Lookups.t) key =
   check lookups key

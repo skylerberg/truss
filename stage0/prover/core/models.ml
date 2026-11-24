@@ -123,7 +123,7 @@ let substitute_value_term context (value : Types.value) =
           Facts.add_fact context
             (Facts.make_in_range (Types.make_builtin UInt64) (Logic.Symbol symbol)));
       Logic.Symbol symbol
-  | Value_variable _ -> Facts.raise_unsupported Whole_definition "an unsolved size"
+  | Value_variable _ -> Facts.raise_unsupported Whole_definition Unsolved_size
 
 let is_model_built_from_contents : Path.t -> bool = function
   | Impl { module_; trait; for_type } ->
@@ -296,5 +296,5 @@ let make_array_model context frame (ty : Types.ty) term =
                (make_sequence_length context element sequence)
                (make_value_term context frame count));
           sequence
-      | None -> Facts.raise_unsupported Whole_definition "the elements of `%s`" (Types.show ty))
-  | _ -> Facts.raise_unsupported Whole_definition "the elements of `%s`" (Types.show ty)
+      | None -> Facts.raise_unsupported Whole_definition (Elements_of ty))
+  | _ -> Facts.raise_unsupported Whole_definition (Elements_of ty)

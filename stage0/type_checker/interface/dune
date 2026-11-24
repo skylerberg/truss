@@ -14,4 +14,6 @@
   syntax_walk
   resolve
   diagnostic
+  catalog
+  core
   zarith))

@@ -9,12 +9,12 @@ let classify_receiver_mode (arguments : Syntax.argument list) : Language.Mode.t 
   | { value = { kind = Mode (Own, _); _ }; _ } :: _ -> Own
   | _ -> Read
 
-let describe_missing_method state type_ name =
-  match Types.find_view (State.normalize state type_) with
-  | Some view ->
-      Printf.sprintf "`%s` has no method `%s`, and neither has its view `%s`."
-        (State.show state type_) name (State.show state view)
-  | None -> Printf.sprintf "`%s` has no method `%s`." (State.show state type_) name
+let make_method_owner state type_ : Catalog.Inference.method_owner =
+  Type_owner
+    {
+      type_ = State.zonk state type_;
+      view = Option.map (State.zonk state) (Types.find_view (State.normalize state type_));
+    }
 
 let rec check_name (state : State.state) (env : State.env) (value : Syntax.expression)
     ({ name; target; type_arguments } : Resolve.head) =
@@ -34,12 +34,9 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
       state.tables.resolutions.(value.id) <- Some (Value_parameter parameter);
       Types.make_builtin UInt64
   | Type_parameter _ | Capability_parameter _ ->
-      State.make_error_type state Not_a_value (State.read_span state value.id)
-        (Printf.sprintf "`%s` is a type, not a value." text)
+      State.make_error_type state (Type_parameter_as_value { at = Written value.id; name = text })
   | Definition (Theorem, _) ->
-      State.make_error_type state Not_a_value (State.read_span state value.id)
-        (Printf.sprintf
-           "`%s` is a theorem, so it is not a value. Call it in a proof to use its `ensures`." text)
+      State.make_error_type state (Theorem_as_value { at = Written value.id; name = text })
   | Definition (Function, path) -> (
       match Instantiation.find_function_signature state.signatures state.lookups path with
       | Some signature -> (
@@ -67,12 +64,9 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
           Some (Variant_value { type_ = Types.unit; variant = Language.Builtin_type.show Unit });
         Types.unit
       end
-      else
-        State.make_error_type state Not_a_value (State.read_span state value.id)
-          (Printf.sprintf "`%s` is a type. Build a value with `%s(...)`." text text)
+      else State.make_error_type state (Type_as_value { at = Written value.id; name = text })
   | Definition ((Trait | Capability), _) ->
-      State.make_error_type state Not_a_value (State.read_span state value.id)
-        (Printf.sprintf "`%s` is not a value." text)
+      State.make_error_type state (Trait_as_value { at = Written value.id; name = text })
   | Variant (type_path, variant) ->
       check_variant_value state value type_path variant
         ~arguments:(Instantiation.instantiate_type state ~written:value.id type_path)
@@ -95,8 +89,8 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
       | None -> State.raise_bug "`result` is named where nothing is returned")
   | Old | Identical | Final | Specification_function _ ->
       state.tables.resolutions.(value.id) <- Some Specification_value;
-      State.make_error_type state Not_a_value (State.read_span state value.id)
-        (Printf.sprintf "`%s` is applied to its subject, as in `%s(...)`." text text)
+      State.make_error_type state
+        (Specification_function_as_value { at = Written value.id; name = text })
   | Visited -> (
       state.tables.resolutions.(value.id) <- Some Specification_value;
       match env.loop_element with
@@ -117,7 +111,7 @@ and check_variant_value state (value : Syntax.expression) type_path variant ~arg
       | Some { fields = None; _ } -> type_
       | Some { fields = Some [ field ]; _ } ->
           Solver.flatten state
-            (Bound { at = State.read_span state value.id; of_type = None })
+            (Bound { at = Written value.id; of_type = None })
             (Types.Function
                {
                  inputs = [ (Language.Mode.Own, field.field_type) ];
@@ -126,29 +120,28 @@ and check_variant_value state (value : Syntax.expression) type_path variant ~arg
                  costs = [ { amortized = false; resource = Metric Time; bound = Order_of } ];
                })
       | Some { fields = Some fields; _ } ->
-          State.make_error_type state Not_a_value (State.read_span state value.id)
-            (Printf.sprintf
-               "`%s` has %d fields, so it is not a function: a function takes its arguments by \
-                position, and fields have no order. Build it with named fields, as in `%s(%s)`."
-               variant (List.length fields) variant
-               (String.concat ", "
-                  (List.map (fun (field : Types.field) -> field.field_name ^ ": ...") fields)))
+          State.make_error_type state
+            (Variant_with_fields_as_function
+               {
+                 at = Written value.id;
+                 variant;
+                 fields = List.map (fun (field : Types.field) -> field.field_name) fields;
+               })
       | None ->
-          State.make_error_type state Unknown_variant (State.read_span state value.id)
-            (Printf.sprintf "`%s` has no variant `%s`." (Types.show type_) variant))
-  | None ->
-      State.make_error_type state Unknown_variant (State.read_span state value.id)
-        (Printf.sprintf "`%s` has no variants." (Types.show type_))
+          State.make_error_type state
+            (Unknown_variant { at = Written value.id; type_; variant; candidates = [] }))
+  | None -> State.make_error_type state (No_variants { at = Written value.id; type_ })
 
 and check_field state (value : Syntax.expression) base_type (member : Syntax.name) =
   let report_unknown candidates =
-    State.make_error_type state Unknown_member (State.read_span state member.id)
-      ~fixes:
-        (Diagnostic.list_spelling_fixes (State.read_span state member.id) ~written:member.text
-           candidates)
-      (Printf.sprintf "%s has no field `%s`."
-         (String.capitalize_ascii (State.describe state base_type))
-         member.text)
+    State.make_error_type state
+      (Unknown_field
+         {
+           at = Written member.id;
+           base = State.make_shown state base_type;
+           name = member.text;
+           candidates;
+         })
   in
   match base_type with
   | Types.Named { path; arguments } -> (
@@ -159,43 +152,35 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
           with
           | Some written ->
               if not (Members.are_fields_visible state.lookups ~package:state.package path) then begin
-                State.make_error_type state Private_field (State.read_span state member.id)
-                  (Printf.sprintf
-                     "`%s` is opaque, so its fields can be read only in its own package."
-                     (State.show state base_type))
+                State.make_error_type state
+                  (Opaque_field_read { at = Written member.id; type_ = State.zonk state base_type })
               end
               else begin
                 state.tables.resolutions.(value.id) <-
                   Some (Field_access { type_ = base_type; field = member.text });
                 Solver.flatten state
-                  (Bound { at = State.read_span state member.id; of_type = None })
+                  (Bound { at = Written member.id; of_type = None })
                   written.field_type
               end
           | None ->
               if Members.has_visible_method state path member.text then begin
-                State.make_error_type state Not_a_value (State.read_span state member.id)
-                  (Printf.sprintf "`%s` is a method, so it is called: `%s()`." member.text
-                     member.text)
+                State.make_error_type state
+                  (Method_as_field { at = Written member.id; name = member.text })
               end
               else
                 report_unknown (List.map (fun (written : Types.field) -> written.field_name) fields)
           )
       | None ->
           if Members.has_visible_method state path member.text then
-            State.make_error_type state Not_a_value (State.read_span state member.id)
-              (Printf.sprintf "`%s` is a method, so it is called: `%s()`." member.text member.text)
+            State.make_error_type state
+              (Method_as_field { at = Written member.id; name = member.text })
           else report_unknown [])
   | _ -> report_unknown []
 
 and check_function_value state (value : Syntax.expression) (instance : Instantiation.instance) =
   match Types.make_function_type instance.signature with
   | Some function_type -> instance.flatten (Types.Function function_type)
-  | None ->
-      State.make_error_type state Not_a_value (State.read_span state value.id)
-        (Printf.sprintf
-           "`%s` lends a part, and a function value cannot lend. Call it where the part is used, \
-            or write a lambda that returns a copy of the part."
-           (State.quote_span state (State.read_span state value.id)))
+  | None -> State.make_error_type state (Lending_function_value { at = Written value.id })
 
 and check_static_member state (value : Syntax.expression) type_ (member : Syntax.name) =
   match type_ with
@@ -229,21 +214,31 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
                   Some (Global { path = method_path; instantiation = instance.instantiation });
                 check_function_value state value instance
             | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path))
-        | Hidden hidden -> Members.make_hidden_error state (State.read_span state member.id) hidden
+        | Hidden hidden -> Members.make_hidden_error state (Written member.id) hidden
         | Absent ->
-            State.make_error_type state Unknown_member (State.read_span state member.id)
-              (match Types.find_view type_ with
-              | Some (Types.Named { path = Top { name; _ } as view; _ })
-                when Members.has_visible_method state view member.text ->
-                  Printf.sprintf
-                    "`%s` has no member `%s` of its own. The method is its view's: `%s.%s`."
-                    (State.show state type_) member.text name member.text
-              | _ -> Printf.sprintf "`%s` has no member `%s`." (State.show state type_) member.text)
-      )
+            State.make_error_type state
+              (No_member
+                 {
+                   at = Written member.id;
+                   type_ = State.zonk state type_;
+                   name = member.text;
+                   view =
+                     (match Types.find_view type_ with
+                     | Some (Types.Named { path = Top { name; _ } as view; _ })
+                       when Members.has_visible_method state view member.text ->
+                         Some name
+                     | _ -> None);
+                 }))
   | Types.Error _ | Types.Hole -> type_
   | _ ->
-      State.make_error_type state Unknown_member (State.read_span state member.id)
-        (Printf.sprintf "`%s` has no member `%s`." (State.show state type_) member.text)
+      State.make_error_type state
+        (No_member
+           {
+             at = Written member.id;
+             type_ = State.zonk state type_;
+             name = member.text;
+             view = None;
+           })
 
 and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) instance items :
     (unit, Types.ty) result =
@@ -255,10 +250,9 @@ and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) 
         let own = List.drop head instance.instantiation.type_arguments in
         if List.length written <> List.length own then
           Error
-            (State.make_error_type state Arity (State.read_span state value.id)
-               (Printf.sprintf "This takes %s, and %s given."
-                  (Diagnostic.show_count (List.length own) "type argument" "type arguments")
-                  (Diagnostic.show_count (List.length written) "is" "are")))
+            (State.make_error_type state
+               (Type_argument_count
+                  { at = Written value.id; expected = List.length own; given = List.length written }))
         else
           let errors =
             List.concat
@@ -274,13 +268,13 @@ and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) 
                    | Types.Type (Types.Error _ as reported), Types.Value _ -> [ reported ]
                    | Types.Type _, Types.Value _ ->
                        [
-                         State.make_error_type state Argument_kind (State.read_span state value.id)
-                           "A type argument is given where a `UInt64` value is expected.";
+                         State.make_error_type state
+                           (Type_for_value_argument { at = Written value.id });
                        ]
                    | Types.Value _, Types.Type _ ->
                        [
-                         State.make_error_type state Argument_kind (State.read_span state value.id)
-                           "A `UInt64` value is given where a type argument is expected.";
+                         State.make_error_type state
+                           (Value_for_type_argument { at = Written value.id });
                        ])
                  written own)
           in
@@ -315,23 +309,20 @@ and reject_specification_call state (env : State.env) (value : Syntax.expression
     in
     Some
       (Types.Error
-         (State.report_specification_only state (State.read_span state value.id)
-            (match
-               (Interface.Definition.find_interface state.lookups.interface path, specification_type)
-             with
-            | Some (Theorem_interface _), _ ->
-                Printf.sprintf
-                  "`%s` is a theorem, so it is called only in specifications and proofs, which are \
-                   not compiled."
-                  name
-            | _, Some specification_type ->
-                Printf.sprintf
-                  "`%s` mentions `%s`, which exists only in specifications, so it is called only \
-                   in specifications."
-                  name (Types.show specification_type)
-            | _, None ->
-                Printf.sprintf
-                  "`%s` is for specifications only, so it is called only in specifications." name)))
+         (State.report_specification_only state
+            (Specification_call_in_code
+               {
+                 at = Written value.id;
+                 name;
+                 call =
+                   (match
+                      ( Interface.Definition.find_interface state.lookups.interface path,
+                        specification_type )
+                    with
+                   | Some (Theorem_interface _), _ -> Theorem_call
+                   | _, Some specification_type -> Mentions specification_type
+                   | _, None -> Specification_function_call);
+               })))
 
 and lookup_trait_static_methods (state : State.state) path name =
   Resolve.Names.collect_visible

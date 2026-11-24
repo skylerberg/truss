@@ -1,7 +1,7 @@
 val record_integer_range :
   State.state ->
   loop:Syntax.id ->
-  described:string ->
+  owner:Catalog.Inference.range_owner ->
   admits_integer:bool ->
   Syntax.expression ->
   Types.ty ->
@@ -15,7 +15,7 @@ val check_statement : State.state -> State.env -> Syntax.statement -> last:bool 
 val find_elements_loop :
   State.state ->
   cause:State.cause ->
-  at:Source.Definition_span.t ->
+  at:Core.origin ->
   Types.ty ->
   Language.Mode.t ->
   (Tables.loop * Types.ty * Language.Mode.t) option

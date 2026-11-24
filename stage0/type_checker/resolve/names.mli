@@ -1,4 +1,4 @@
-type kind =
+type kind = Language.Definition_kind.t =
   | Function
   | Type
   | Trait
@@ -17,8 +17,8 @@ val convert_named : named -> kind
 val show_kind : kind -> string
 val is_constant : kind -> bool
 
-type visibility = Private | Internal | Public | Public_opaque
-type key = { module_ : Path.module_; path : Path.t; ordinal : int }
+type visibility = Language.Visibility.t = Private | Internal | Public | Public_opaque
+type key = Path.key = { module_ : Path.module_; path : Path.t; ordinal : int }
 type declaration = { key : key; kind : kind; visibility : visibility; generic : bool }
 type place = { file : Path.file; base : int }
 
@@ -85,8 +85,6 @@ module Scope : sig
   val is_value_kind : named -> bool
   val is_visible : from:Path.module_ -> Path.module_ -> visibility -> bool
   val is_restricted_module : from:Path.module_ -> Path.module_ -> bool
-  val restricted_module_message : string
-  val describe_path_start : Path.module_ -> string
 
   type module_lookup =
     | Found_module of { module_ : Path.module_; imported : Path.module_ option }
@@ -123,7 +121,6 @@ val choose_member : Path.t lookup list -> Path.t -> Path.t lookup
 val map_visible : ('visible -> 'converted) -> 'visible lookup -> 'converted lookup
 val choose_visible : 'visible lookup list -> 'visible lookup
 val collect_visible : 'visible lookup list -> 'visible list lookup
-val describe_hidden : Path.t -> visibility -> string
 
 val list_declaring_trait_lookups :
   lookups -> visible_packages:Path.package list -> from:Path.module_ -> string -> Path.t lookup list

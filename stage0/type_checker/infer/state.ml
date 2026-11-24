@@ -24,14 +24,11 @@ type subset_constraint = {
 type requirement = Implements of Types.trait_reference | Within of Language.Builtin_type.t list
 
 type cause =
-  | Bound of { at : Source.Definition_span.t; of_type : Types.ty option }
-  | Operator of {
-      at : Source.Definition_span.t;
-      operands : (Source.Definition_span.t * Source.Definition_span.t) option;
-    }
-  | Method_call of Source.Definition_span.t
-  | Loop of Source.Definition_span.t
-  | Quantifier of Source.Definition_span.t
+  | Bound of { at : Core.origin; of_type : Types.ty option }
+  | Operator of { at : Core.origin; operands : (Core.origin * Core.origin) option }
+  | Method_call of Core.origin
+  | Loop of Core.origin
+  | Quantifier of Core.origin
   | Excluded of (Types.ty -> Diagnostic.reported)
 
 type origin =
@@ -57,10 +54,14 @@ type frame = {
   mutable compiled_expressions : int list;
   mutable compiled_bindings : int list;
   mutable specification_only_report : Diagnostic.reported option;
-  span : Source.Definition_span.t;
+  origin : Core.origin;
 }
 
-type decision_site = Use | Statement_end | Actual_head | Method_call
+type decision_site = Catalog.Inference.decision_site =
+  | Use
+  | Statement_end
+  | Actual_head
+  | Method_call
 
 type entry =
   | Literal of {
@@ -74,11 +75,7 @@ type entry =
     }
   | Local of Syntax.id
   | Origin of origin
-  | Decided of {
-      site : decision_site;
-      decided_type : Types.ty;
-      decided_at : Source.Definition_span.t;
-    }
+  | Decided of { site : decision_site; decided_type : Types.ty; decided_at : Core.origin }
 
 type logged = { member : int; entry : entry }
 
@@ -92,7 +89,7 @@ type state = {
   signatures : Signatures.t;
   visible_packages : Path.package list Lazy.t;
   tables : Tables.t;
-  mutable diagnostics : Diagnostic.in_definition list;
+  mutable diagnostics : Catalog.description list;
   unifier : Unify.t;
   locals : (Syntax.id, local) Hashtbl.t;
   law_parameters : (string * Types.ty) list;
@@ -114,30 +111,23 @@ type state = {
   annotatable : (Syntax.id, unit) Hashtbl.t;
 }
 
-let add_diagnostic state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =
-  let diagnostic = Diagnostic.make ?notes ~fixes ~code:(Types code) span message in
-  state.diagnostics <- diagnostic :: state.diagnostics;
-  Diagnostic.make_reported diagnostic
+let report_description state (description : Catalog.description) =
+  state.diagnostics <- description :: state.diagnostics;
+  Catalog.make_reported description
 
-let report state ?fixes code span message = ignore (add_diagnostic state ?fixes code span message)
+let add_diagnostic state diagnostic =
+  report_description state (Catalog.Inference.describe diagnostic)
+
+let report state diagnostic = ignore (add_diagnostic state diagnostic)
 let is_formula env = env.specification || env.in_quantifier
 
-let reject_in_formula state env span what =
-  if is_formula env then
-    report state Not_in_specification span
-      (Printf.sprintf
-         "%s runs, so it cannot be part of a specification, a proof, or a quantifier's body, which \
-          the prover reads as formulas: they are built from `let`, `if`, `match`, and calls."
-         what)
+let reject_in_formula state env at construct =
+  if is_formula env then report state (Runs_in_formula { at; construct })
 
 let read_context state = state.unifier.mode.context
 let read_span state id = Interface.Elaborator.read_span (read_context state) id
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Infer" format
-
-let make_error_type state ?fixes code span message =
-  Types.Error (add_diagnostic state ?fixes code span message)
-
-let quote_span state span = Source.Definition_span.quote (Lazy.force state.text) span
+let make_error_type state diagnostic = Types.Error (add_diagnostic state diagnostic)
 
 let rec mark_lent_tails state (value : Syntax.expression) =
   match value.kind with
@@ -161,10 +151,6 @@ and mark_lent_block state (body : Syntax.block) =
   | { kind = Expression value; _ } :: _ -> mark_lent_tails state value
   | _ -> ()
 
-let fix title edits = Diagnostic.fix title edits
-let replace = Diagnostic.replace
-let insert position text = Diagnostic.insert (Source.Definition_span.make_zero_width position) text
-
 let read_current_frame state =
   match state.frames with frame :: _ -> frame | [] -> raise_bug "a check runs outside every frame"
 
@@ -178,30 +164,20 @@ let note_compiled_expression state env (value : Syntax.expression) =
     let frame = read_current_frame state in
     frame.compiled_expressions <- value.id :: frame.compiled_expressions
 
-let report_specification_only state span message =
+let report_specification_only state diagnostic =
   let frame = read_current_frame state in
   match frame.specification_only_report with
   | Some report -> report
   | None ->
-      let report = add_diagnostic state Specification_only span message in
+      let report = add_diagnostic state diagnostic in
       frame.specification_only_report <- Some report;
       report
 
-let reject_specification_only_type state ~subject span type_ =
+let reject_specification_only_type state ~subject at type_ =
   Option.map
     (fun specification_type ->
-      report_specification_only state span
-        (if Types.equal type_ specification_type then
-           Printf.sprintf
-             "%s has the type `%s`, which exists only in specifications and has no representation \
-              in code that runs."
-             subject (Types.show type_)
-         else
-           Printf.sprintf
-             "%s has the type `%s`, which holds `%s`. `%s` exists only in specifications and has \
-              no representation in code that runs."
-             subject (Types.show type_) (Types.show specification_type)
-             (Types.show specification_type)))
+      report_specification_only state
+        (Specification_only_type { at; subject; type_; specification_type }))
     (Types.find_specification_only_type type_)
 
 let with_mode (state : state) mode run =
@@ -286,11 +262,9 @@ let normalize state type_ =
 let check_compiled_binding state (id : Syntax.id) =
   match state.tables.local_types.(id) with
   | Some type_ -> (
-      let span = read_span state id in
       match
-        reject_specification_only_type state
-          ~subject:(Printf.sprintf "`%s`" (quote_span state span))
-          span (normalize state type_)
+        reject_specification_only_type state ~subject:(Binding_subject (Written id)) (Written id)
+          (normalize state type_)
       with
       | Some report ->
           let poisoned = Types.Error report in
@@ -305,7 +279,7 @@ let check_compiled_expression state (id : Syntax.id) =
   Option.iter
     (fun type_ ->
       ignore
-        (reject_specification_only_type state ~subject:"This value" (read_span state id)
+        (reject_specification_only_type state ~subject:Value_subject (Written id)
            (normalize state type_)))
     state.tables.types.(id)
 
@@ -447,12 +421,11 @@ let declare_compiled state env (name : Syntax.name) type_ ~binding ~mode =
 
 let find_target state (name : Syntax.name) = state.resolved.names.(name.id)
 let find_head state (value : Syntax.expression) = Resolve.find_head state.resolved value
-let show state type_ = Types.show (zonk state type_)
 
-let describe state type_ =
+let make_shown state type_ : Catalog.Inference.shown =
   match find_domain state type_ with
-  | Some domain -> if is_float_domain domain then "a float" else "an integer"
-  | None -> "`" ^ show state type_ ^ "`"
+  | Some domain -> if is_float_domain domain then Some_float else Some_integer
+  | None -> Exactly (zonk state type_)
 
 let note_mode_keyword state (written : Syntax.expression) (mode : Syntax.mode)
     (operand : Syntax.expression) =

@@ -10,17 +10,9 @@ val create :
 val read_span : t -> Syntax.id -> Source.Definition_span.t
 val list_known_bounds : t -> Properties.Bounds.t
 val find_self_type : t -> Types.ty option
-val list_diagnostics : t -> Diagnostic.in_definition list
+val list_diagnostics : t -> Catalog.description list
 val list_named_types : t -> (Syntax.id * Types.ty) list
-
-val record_diagnostic :
-  Diagnostic.in_definition list ref ->
-  ?fixes:Source.Definition_span.t Diagnostic.fix list ->
-  Diagnostic.Code.types ->
-  Source.Definition_span.t ->
-  string ->
-  Diagnostic.reported
-
+val record_diagnostic : Catalog.description list ref -> Catalog.Typing.t -> Diagnostic.reported
 val list_trait_closure : Lookups.t -> Path.t -> Path.t list
 val find_bounded_type : t -> Syntax.expression -> Types.ty option
 
@@ -53,6 +45,6 @@ val elaborate_condition : t -> Syntax.condition -> Types.condition
 val add_condition : t -> Types.condition -> t
 
 val elaborate_header :
-  Lookups.t -> Resolve.Names.key -> (Environment.header, Diagnostic.in_definition list) result
+  Lookups.t -> Resolve.Names.key -> (Environment.header, Catalog.description list) result
 
 val elaborate_definition : Lookups.t -> Resolve.Names.key -> Environment.elaborated_interface

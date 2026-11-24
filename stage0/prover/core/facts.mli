@@ -2,13 +2,13 @@ val make_variable : ?numbers:int list -> string -> 'a Logic.Symbol.t
 
 type unsupported = {
   location : Obligation.location;
-  construct : string;
+  construct : Catalog.Prover.construct;
   foreign_definition : string option;
 }
 
 exception Unsupported of unsupported
 
-val raise_unsupported : Obligation.location -> ('a, unit, string, 'b) format4 -> 'a
+val raise_unsupported : Obligation.location -> Catalog.Prover.construct -> 'a
 val run_in_source : State.context -> State.source -> (unit -> 'a) -> 'a
 val raise_bug : ('a, unit, string, 'b) format4 -> 'a
 val list_method_type_arguments : self_type:Types.ty -> Types.argument list -> Types.argument list
@@ -24,24 +24,24 @@ val mentions_fresh_after : State.context -> int -> Logic.term -> bool
 val close_over_binders : State.frame -> Logic.term -> Logic.term option
 val add_frame_fact : State.context -> State.frame -> Logic.term -> unit
 val assume : State.context -> State.frame -> Logic.term -> unit
-val add_requires : State.context -> State.frame -> Obligation.message -> Obligation.fix list
+
+val add_requires :
+  State.context -> State.frame -> Catalog.Prover.required list -> Catalog.Prover.fix list
+
 val show_truss_value : State.context -> Logic.term -> string option
 val remove_panic_condition : Types.capability_set -> Types.capability_set
 val find_counter_condition : State.context -> Costs.counter -> Types.condition
 
 val oblige :
   ?cited:Resolve.Names.key * Core.origin ->
-  ?fixes:Obligation.fix list ->
+  ?fixes:Catalog.Prover.fix list ->
   ?holds_when:Types.condition ->
   State.context ->
   State.frame ->
-  Diagnostic.Code.prover ->
   Obligation.location ->
-  Obligation.message ->
+  Catalog.Prover.obligation ->
   Logic.term ->
   unit
-
-val show_callee : Path.t -> string
 
 val reject_recursion_through_supplied_code :
   State.context -> State.frame -> Obligation.location -> Mir.statement -> unit
@@ -53,39 +53,29 @@ val is_evaluated_constant : State.context -> Path.t -> Mir.t -> bool
 val reject_constant_cycle : State.context -> State.frame -> Mir.t -> unit
 
 val reject_uncompared_recursion :
-  State.context ->
-  State.frame ->
-  Obligation.location ->
-  Path.t option ->
-  describe:(string -> string) ->
-  unit
+  State.context -> State.frame -> Obligation.location -> Path.t option -> unit
 
 val make_closed_obligation :
   State.context ->
   State.frame ->
-  Diagnostic.Code.prover ->
   Obligation.location ->
-  Obligation.message ->
+  Catalog.Prover.obligation ->
   Logic.term ->
   Obligation.t option
 
 val make_obligation :
   State.context ->
   State.frame ->
-  Diagnostic.Code.prover ->
   Obligation.location ->
-  Obligation.message ->
+  Catalog.Prover.obligation ->
   Logic.term ->
   Obligation.t
 
 val locate : State.context -> State.source -> Core.origin -> Obligation.location
 val add_hole : State.context -> Resolve.Names.key * Obligation.location -> unit
-val quote : State.source -> Core.origin -> Obligation.piece
+val quote : State.source -> Core.origin -> Catalog.Prover.quoted
 val is_home : State.context -> State.source -> bool
 val is_in_home_package : State.context -> State.source -> bool
-val describe_call : State.context -> Obligation.location -> ?callee:string -> unit -> string
-val quote_span : string -> Source.Definition_span.t -> string
-val quote_origin : State.context -> State.frame -> Core.origin -> string
 val find_bounds : Types.ty -> (Z.t * Z.t) option
 val find_float_format : Types.ty -> (int * int) option
 val make_constructor_symbol : Types.ty -> string option -> 'a Logic.Symbol.t

@@ -36,11 +36,10 @@ val satisfies : t -> int -> (char -> bool) -> bool
 
 val report :
   t ->
-  ?notes:(Source.span * string) list ->
-  ?fixes:Source.span Diagnostic.fix list ->
-  code:Diagnostic.Code.lexer ->
+  ?notes:(Source.span * Syntax_catalog.Lexing.note) list ->
+  ?fixes:Syntax_catalog.Lexing.fix list ->
   Source.span ->
-  string ->
+  Syntax_catalog.Lexing.problem ->
   unit
 
 val is_line_break : char -> bool
@@ -51,7 +50,7 @@ val is_hexadecimal_digit : char -> bool
 val is_ascii_letter : char -> bool
 val is_ascii_name_byte : char -> bool
 val is_ascii : char -> bool
-val list_code_fixes : t -> Source.span -> string list -> Source.span Diagnostic.fix list
+val list_code_fixes : t -> Source.span -> string list -> Syntax_catalog.Lexing.fix list
 val decode : t -> int -> Uchar.utf_decode
 val run_length : t -> int -> char -> int
 val skip_spaces : t -> int -> int
@@ -60,5 +59,4 @@ val measure_line_break : t -> int -> int
 val extract_indentation : t -> int -> string
 val count_spaces_before : t -> int -> int
 val has_only_spaces_before : t -> int -> bool
-val describe_code_point : Uchar.t -> string
-val show_character : t -> int -> string
+val decode_character : t -> int -> Syntax_catalog.Lexing.character

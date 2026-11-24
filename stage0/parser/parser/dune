@@ -3,6 +3,7 @@
  (libraries
   source
   diagnostic
+  syntax_catalog
   compiler_bug
   token
   lexer

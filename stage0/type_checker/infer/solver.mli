@@ -22,7 +22,7 @@ val resolve_associated_type :
   Types.ty ->
   Types.trait_reference ->
   Well_known.associated ->
-  at:Source.Definition_span.t ->
+  at:Core.origin ->
   Types.ty
 
 val list_sealed_closures :
@@ -32,7 +32,7 @@ val list_sealed_closures :
   (Types.trait_reference * Types.trait_reference list) list
 
 val decide_default :
-  State.state -> site:State.decision_site -> at:Source.Definition_span.t -> Types.ty -> Types.ty
+  State.state -> site:State.decision_site -> at:Core.origin -> Types.ty -> Types.ty
 
-val solve_head : State.state -> ?default_at:Source.Definition_span.t -> int -> unit
-val run_in_statement : State.state -> State.env -> Source.Definition_span.t -> (unit -> 'a) -> 'a
+val solve_head : State.state -> ?default_at:Core.origin -> int -> unit
+val run_in_statement : State.state -> State.env -> Core.origin -> (unit -> 'a) -> 'a

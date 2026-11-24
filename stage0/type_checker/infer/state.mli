@@ -23,14 +23,11 @@ type subset_constraint = {
 type requirement = Implements of Types.trait_reference | Within of Language.Builtin_type.t list
 
 type cause =
-  | Bound of { at : Source.Definition_span.t; of_type : Types.ty option }
-  | Operator of {
-      at : Source.Definition_span.t;
-      operands : (Source.Definition_span.t * Source.Definition_span.t) option;
-    }
-  | Method_call of Source.Definition_span.t
-  | Loop of Source.Definition_span.t
-  | Quantifier of Source.Definition_span.t
+  | Bound of { at : Core.origin; of_type : Types.ty option }
+  | Operator of { at : Core.origin; operands : (Core.origin * Core.origin) option }
+  | Method_call of Core.origin
+  | Loop of Core.origin
+  | Quantifier of Core.origin
   | Excluded of (Types.ty -> Diagnostic.reported)
 
 type origin =
@@ -56,10 +53,14 @@ type frame = {
   mutable compiled_expressions : int list;
   mutable compiled_bindings : int list;
   mutable specification_only_report : Diagnostic.reported option;
-  span : Source.Definition_span.t;
+  origin : Core.origin;
 }
 
-type decision_site = Use | Statement_end | Actual_head | Method_call
+type decision_site = Catalog.Inference.decision_site =
+  | Use
+  | Statement_end
+  | Actual_head
+  | Method_call
 
 type entry =
   | Literal of {
@@ -73,11 +74,7 @@ type entry =
     }
   | Local of Syntax.id
   | Origin of origin
-  | Decided of {
-      site : decision_site;
-      decided_type : Types.ty;
-      decided_at : Source.Definition_span.t;
-    }
+  | Decided of { site : decision_site; decided_type : Types.ty; decided_at : Core.origin }
 
 type logged = { member : int; entry : entry }
 
@@ -91,7 +88,7 @@ type state = {
   signatures : Signatures.t;
   visible_packages : Path.package list Lazy.t;
   tables : Tables.t;
-  mutable diagnostics : Diagnostic.in_definition list;
+  mutable diagnostics : Catalog.description list;
   unifier : Unify.t;
   locals : (Syntax.id, local) Hashtbl.t;
   law_parameters : (string * Types.ty) list;
@@ -113,48 +110,19 @@ type state = {
   annotatable : (Syntax.id, unit) Hashtbl.t;
 }
 
-val add_diagnostic :
-  state ->
-  ?notes:(Source.Definition_span.t * string) list ->
-  ?fixes:Source.Definition_span.t Diagnostic.fix list ->
-  Diagnostic.Code.types ->
-  Source.Definition_span.t ->
-  string ->
-  Diagnostic.reported
-
-val report :
-  state ->
-  ?fixes:Source.Definition_span.t Diagnostic.fix list ->
-  Diagnostic.Code.types ->
-  Source.Definition_span.t ->
-  string ->
-  unit
-
+val add_diagnostic : state -> Catalog.Inference.t -> Diagnostic.reported
+val report : state -> Catalog.Inference.t -> unit
+val report_description : state -> Catalog.description -> Diagnostic.reported
 val is_formula : env -> bool
-val reject_in_formula : state -> env -> Source.Definition_span.t -> string -> unit
+val reject_in_formula : state -> env -> Core.origin -> Catalog.Inference.formula_construct -> unit
 val read_span : state -> Syntax.id -> Source.Definition_span.t
 val raise_bug : ('a, unit, string, 'b) format4 -> 'a
-
-val make_error_type :
-  state ->
-  ?fixes:Source.Definition_span.t Diagnostic.fix list ->
-  Diagnostic.Code.types ->
-  Source.Definition_span.t ->
-  string ->
-  Types.ty
-
-val quote_span : state -> Source.Definition_span.t -> string
+val make_error_type : state -> Catalog.Inference.t -> Types.ty
 val mark_lent_tails : state -> Syntax.expression -> unit
-
-val fix :
-  string -> Source.Definition_span.t Diagnostic.edit list -> Source.Definition_span.t Diagnostic.fix
-
-val replace : Source.Definition_span.t -> string -> Source.Definition_span.t Diagnostic.edit
-val insert : int -> string -> Source.Definition_span.t Diagnostic.edit
 val read_current_frame : state -> frame
 val record : state -> Syntax.expression -> Types.ty -> unit
 val note_compiled_expression : state -> env -> Syntax.expression -> unit
-val report_specification_only : state -> Source.Definition_span.t -> string -> Diagnostic.reported
+val report_specification_only : state -> Catalog.Inference.t -> Diagnostic.reported
 val check_compiled_binding : state -> Syntax.id -> unit
 val check_compiled_expression : state -> Syntax.id -> unit
 val reduce_condition : state -> Types.condition -> Types.condition option
@@ -195,7 +163,7 @@ val record_narrowing :
   unit
 
 val record_decided :
-  state -> int -> site:decision_site -> decided_type:Types.ty -> at:Source.Definition_span.t -> unit
+  state -> int -> site:decision_site -> decided_type:Types.ty -> at:Core.origin -> unit
 
 val resolve_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_type : state -> Types.ty -> Types.ty
@@ -218,8 +186,7 @@ val declare_compiled :
 
 val find_target : state -> Syntax.name -> Resolve.target option
 val find_head : state -> Syntax.expression -> Resolve.head option
-val show : state -> Types.ty -> string
-val describe : state -> Types.ty -> string
+val make_shown : state -> Types.ty -> Catalog.Inference.shown
 val note_mode_keyword : state -> Syntax.expression -> Syntax.mode -> Syntax.expression -> unit
 val find_local_type : state -> Syntax.name -> Types.ty option
 val find_local : state -> Syntax.name -> local option

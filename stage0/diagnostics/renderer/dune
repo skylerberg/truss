@@ -1,0 +1,12 @@
+(library
+ (name renderer)
+ (libraries
+  catalog
+  description
+  diagnostic
+  compiler_bug
+  source
+  core
+  core_walk
+  resolve
+  syntax))

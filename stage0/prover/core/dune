@@ -17,6 +17,8 @@
   resolve
   interface
   diagnostic
+  catalog
+  renderer
   mir
   intrinsic
   intrinsic_signatures

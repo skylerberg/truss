@@ -34,33 +34,16 @@ let report_forbidden_run (cursor : Cursor.t) ~context =
   in
   let characters = collect [] in
   let stop = cursor.position in
-  let names = String.concat ", " (List.map Cursor.describe_code_point characters) in
-  let reasons =
-    List.sort_uniq compare
-      (List.map
-         (fun value ->
-           if Unicode.is_bidi_control value then
-             "Bidirectional controls can make code display differently from how it compiles."
-           else if Unicode.is_control value then
-             "Control characters can make a terminal hide or rewrite text."
-           else "Invisible characters can hide text from a reader.")
-         characters)
-  in
-  let plural = List.length characters > 1 in
-  let base =
-    Printf.sprintf "%s %s not allowed in source files. %s" names
-      (if plural then "are" else "is")
-      (String.concat " " reasons)
-  in
-  let message, fixes =
+  let is_plural = List.length characters > 1 in
+  let fixes : Syntax_catalog.Lexing.fix list =
     match context with
     | Code ->
-        ( base,
-          [
-            Diagnostic.fix
-              (if plural then "Delete the characters" else "Delete the character")
-              [ remove_trivia cursor ~start ~stop ~line_break:false ];
-          ] )
+        [
+          {
+            action = Delete_characters { is_plural };
+            edits = [ remove_trivia cursor ~start ~stop ~line_break:false ];
+          };
+        ]
     | Ordinary_string ->
         let escapes =
           String.concat ""
@@ -68,19 +51,35 @@ let report_forbidden_run (cursor : Cursor.t) ~context =
                (fun character -> Printf.sprintf "\\u{%X}" (Uchar.to_int character))
                characters)
         in
-        ( base ^ " Write it as an escape, so that it can be seen.",
-          [
-            Diagnostic.fix
-              ("Replace with `" ^ escapes ^ "`")
-              [ Diagnostic.replace (Source.make_span start stop) escapes ];
-          ] )
-    | Raw_string ->
-        ( base
-          ^ " A raw string has no escapes, so write the text as an ordinary string, with the \
-             character as an escape such as `\\u{200B}`.",
-          [] )
+        [
+          {
+            action = Replace_with escapes;
+            edits = [ Diagnostic.replace (Source.make_span start stop) escapes ];
+          };
+        ]
+    | Raw_string -> []
   in
-  Cursor.report cursor ~fixes ~code:Forbidden_character (Source.make_span start stop) message
+  Cursor.report cursor ~fixes (Source.make_span start stop)
+    (Forbidden_characters
+       {
+         characters =
+           List.map
+             (fun value : Syntax_catalog.Lexing.forbidden ->
+               {
+                 code_point = Uchar.to_int value;
+                 name = Unicode.find_forbidden_name value;
+                 kind =
+                   (if Unicode.is_bidi_control value then Bidirectional_control
+                    else if Unicode.is_control value then Control_character
+                    else Invisible_character);
+               })
+             characters;
+         context =
+           (match context with
+           | Code -> In_code
+           | Ordinary_string -> In_ordinary_string
+           | Raw_string -> In_raw_string);
+       })
 
 let report_invalid_run (cursor : Cursor.t) =
   let start = cursor.position in
@@ -90,9 +89,7 @@ let report_invalid_run (cursor : Cursor.t) =
   do
     cursor.position <- cursor.position + 1
   done;
-  Cursor.report cursor ~code:Invalid_utf8
-    (Source.make_span start cursor.position)
-    "Source files must be UTF-8, and these bytes are not valid UTF-8."
+  Cursor.report cursor (Source.make_span start cursor.position) Invalid_utf8
 
 let copy_plain (cursor : Cursor.t) buffer ~is_special =
   let start = cursor.position in
@@ -125,14 +122,16 @@ let consume_line_break (cursor : Cursor.t) =
   let start = cursor.position in
   let length = Cursor.measure_line_break cursor start in
   if length = 1 && Cursor.is_at cursor start '\r' then
-    Cursor.report cursor ~code:Carriage_return
+    Cursor.report cursor
       ~fixes:
         [
-          Diagnostic.fix "Replace with a line feed"
-            [ Diagnostic.replace (Source.make_span start (start + 1)) "\n" ];
+          {
+            action = Replace_with_line_feed;
+            edits = [ Diagnostic.replace (Source.make_span start (start + 1)) "\n" ];
+          };
         ]
       (Source.make_span start (start + 1))
-      "A carriage return is a line break only before a line feed.";
+      Carriage_return;
   cursor.position <- start + length;
   Source.make_span start cursor.position
 
@@ -141,8 +140,8 @@ let note_line_break (cursor : Cursor.t) line_break =
   if cursor.first_line_break = None then cursor.first_line_break <- Some line_break;
   cursor.line_is_blank <- true
 
-let reject ?(code = Diagnostic.Code.Unexpected_character) (cursor : Cursor.t) ~length message =
+let reject (cursor : Cursor.t) ~length problem =
   let start = cursor.position in
   cursor.position <- start + length;
   cursor.line_is_blank <- false;
-  Cursor.report cursor ~code (Source.make_span start (start + length)) message
+  Cursor.report cursor (Source.make_span start (start + length)) problem

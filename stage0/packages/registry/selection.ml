@@ -10,40 +10,26 @@ type package = {
   record : Lock.t;
 }
 
-type problem =
+type problem = Project_catalog.selection_problem =
   | No_version of { name : Path.package; wanted_by : Path.package }
-  | Cannot_load of { name : Path.package; version : Version.t; reason : string }
+  | Cannot_load of {
+      name : Path.package;
+      version : Version.t;
+      failure : Project_catalog.load_failure;
+    }
   | Two_contents of { name : Path.package; version : Version.t; recorded_by : Path.package }
-
-let describe_problem problem =
-  let show = Path.show_package in
-  match problem with
-  | No_version { name; wanted_by } ->
-      Printf.sprintf
-        "`%s` depends on `%s`, which is not a package of this project and has no line in \
-         `truss.lock`. Run `truss add %s`."
-        (show wanted_by) (show name) (show name)
-  | Cannot_load { name; version; reason } ->
-      Printf.sprintf "`truss.lock` names `%s` %s, whose files are not in the store, and %s."
-        (show name) (Version.show version) reason
-  | Two_contents { name; version; recorded_by } ->
-      Printf.sprintf
-        "`%s` was published with `%s` %s under another hash than the build has for it. One version \
-         has one content, so one of the two is wrong."
-        (show recorded_by) (show name) (Version.show version)
 
 let read_manifest_and_record ~read name =
   match
     ( Option.map Manifest.parse (read "truss.toml"),
       Lock.parse (Option.value ~default:"" (read "truss.lock")) )
   with
-  | exception Manifest.Malformed { line; message } ->
-      Error (Printf.sprintf "its manifest cannot be read: line %d: %s" line message)
-  | exception Lock.Malformed { line; message } ->
-      Error (Printf.sprintf "its lock file cannot be read: line %d: %s" line message)
+  | exception Manifest.Malformed { line; problem } ->
+      Error (Project_catalog.Unreadable_manifest { line; problem })
+  | exception Lock.Malformed { line; problem } ->
+      Error (Project_catalog.Unreadable_lock { line; problem })
   | Some { package = Some manifest; _ }, record when manifest.name = name -> Ok (manifest, record)
-  | _ ->
-      Error (Printf.sprintf "its manifest does not name the package `%s`" (Path.show_package name))
+  | _ -> Error (Project_catalog.Misnamed_manifest name)
 
 let choose ~lock ~roots ~is_local ~load =
   let chosen = Package_table.create 16 in
@@ -74,7 +60,7 @@ let choose ~lock ~roots ~is_local ~load =
         | None -> report_problem (No_version { name; wanted_by })
         | Some (version, hash) -> (
             match load name version ~hash with
-            | Error reason -> report_problem (Cannot_load { name; version; reason })
+            | Error failure -> report_problem (Cannot_load { name; version; failure })
             | Ok ((manifest : Manifest.package), record) ->
                 selected := { name; version; hash; manifest; record } :: !selected;
                 List.iter (record_of ~recorded_by:name) record;
@@ -144,39 +130,23 @@ let lock ~project packages : Lock.t =
       })
     packages
 
-let list_differences ~(written : Lock.t) ~(current : Lock.t) =
-  let show_capabilities = function
-    | [] -> "nothing"
-    | held -> String.concat ", " (List.map Grant.show_capability held)
-  in
+let list_differences ~(written : Lock.t) ~(current : Lock.t) : Project_catalog.difference list =
   List.filter_map
-    (fun (entry : Lock.entry) ->
+    (fun (entry : Lock.entry) : Project_catalog.difference option ->
       match Lock.find written entry.name with
-      | None ->
-          Some
-            (Printf.sprintf "`%s` %s is in the build and has no line."
-               (Path.show_package entry.name) (Version.show entry.version))
+      | None -> Some (Unlisted { name = entry.name; version = entry.version })
       | Some line when Version.compare line.version entry.version <> 0 ->
           Some
-            (Printf.sprintf "`%s` is %s, and a package of the build was published with %s."
-               (Path.show_package entry.name) (Version.show line.version)
-               (Version.show entry.version))
+            (Other_version { name = entry.name; written = line.version; current = entry.version })
       | Some line when line.hash <> entry.hash ->
-          Some
-            (Printf.sprintf "`%s` %s has another hash." (Path.show_package entry.name)
-               (Version.show entry.version))
+          Some (Other_hash { name = entry.name; version = entry.version })
       | Some line when line.holds <> entry.holds ->
-          Some
-            (Printf.sprintf "`%s` is said to hold %s, and the manifests grant it %s."
-               (Path.show_package entry.name) (show_capabilities line.holds)
-               (show_capabilities entry.holds))
+          Some (Other_holds { name = entry.name; written = line.holds; current = entry.holds })
       | Some _ -> None)
     current
   @ List.filter_map
-      (fun (line : Lock.entry) ->
-        if Lock.find current line.name = None then
-          Some (Printf.sprintf "Nothing in the build uses `%s`." (Path.show_package line.name))
-        else None)
+      (fun (line : Lock.entry) : Project_catalog.difference option ->
+        if Lock.find current line.name = None then Some (Unused line.name) else None)
       written
 
 module For_testing = struct

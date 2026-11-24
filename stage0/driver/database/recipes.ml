@@ -116,7 +116,8 @@ let run_resolve (database : Tracker.t) (row : Store.definition) =
                     List.iter (recorder.note References (Entity Import) file) used_imports)
                   row.file;
                 (section, Tracker.Value resolved, [])
-            | Some (Error diagnostics) -> (section, Failed, diagnostics)
+            | Some (Error descriptions) ->
+                (section, Failed, List.map (Renderer.render names key) descriptions)
             | None -> (section, Blocked, []))
           (Resolve.resolve names key))
   in
@@ -147,18 +148,18 @@ let run_check_imports (database : Tracker.t) id =
         recorder.note Reads (Lookup Source) id "";
         recorder.note Reads (Selection Unresolved) id "";
         recorder.note Reads (Selection Import_references) id "";
-        Resolve.list_file_diagnostics
-          (Lookups.make_names database recorder)
-          file
-          (fst (parse file text))
-          ~text
-          ~used:
-            (if Store.has_unresolved database.store ~file:id then None
-             else
-               Some
-                 (Store.list_names_of_edges_into database.store
-                    ~kind:(Kind.rank_target (Entity Import))
-                    ~id ~markers:references)))
+        List.map (Description.render_file ~text)
+        @@ Resolve.list_file_diagnostics
+             (Lookups.make_names database recorder)
+             file
+             (fst (parse file text))
+             ~used:
+               (if Store.has_unresolved database.store ~file:id then None
+                else
+                  Some
+                    (Store.list_names_of_edges_into database.store
+                       ~kind:(Kind.rank_target (Entity Import))
+                       ~id ~markers:references)))
   in
   Tracker.report Check_imports id
     ~is_changed:
@@ -207,7 +208,9 @@ let run_header database (row : Store.definition) =
       with
       | Ok header -> (Value header, [])
       | Error [] -> (Blocked, [])
-      | Error diagnostics -> (Failed, diagnostics))
+      | Error descriptions ->
+          ( Failed,
+            List.map (Renderer.render (Lookups.make_names database recorder) key) descriptions ))
 
 let run_elaborate database (row : Store.definition) =
   let key = Declarations.decode_key row.key in
@@ -220,7 +223,9 @@ let run_elaborate database (row : Store.definition) =
       match (elaborated.diagnostics, elaborated.interface) with
       | [], Error_interface _ -> (Blocked, [])
       | [], _ -> (Value elaborated, [])
-      | diagnostics, _ -> (Failed, diagnostics))
+      | descriptions, _ ->
+          ( Failed,
+            List.map (Renderer.render (Lookups.make_names database recorder) key) descriptions ))
 
 let run_derive_interface database (row : Store.definition) =
   let key = Declarations.decode_key row.key in
@@ -284,14 +289,18 @@ let run_check_signature database (row : Store.definition) =
               key
           with
           | [] -> (Value (), [])
-          | diagnostics -> (Failed, diagnostics))
+          | descriptions ->
+              ( Failed,
+                List.map (Renderer.render (Lookups.make_names database recorder) key) descriptions
+              ))
       | Failed | Blocked -> (Blocked, []))
 
 let check_types check database recorder key : Infer.checked Tracker.outcome * _ =
   match check (Lookups.make_infer database recorder) key with
   | Ok checked -> (Value checked, [])
   | Error [] -> (Blocked, [])
-  | Error diagnostics -> (Failed, diagnostics)
+  | Error descriptions ->
+      (Failed, List.map (Renderer.render (Lookups.make_names database recorder) key) descriptions)
 
 let run_check_contract database (row : Store.definition) =
   let key = Declarations.decode_key row.key in
@@ -370,7 +379,9 @@ let run_check_usage database (row : Store.definition) =
   run_fact database Check_usage Facts.usage_check row ~id:row.id (fun recorder ->
       match Usage.check (Lookups.make_usage database recorder) key with
       | [] -> (Value (), [])
-      | diagnostics -> (Failed, diagnostics))
+      | descriptions ->
+          ( Failed,
+            List.map (Renderer.render (Lookups.make_names database recorder) key) descriptions ))
 
 let run_check_ownership database (row : Store.definition) =
   let key = Declarations.decode_key row.key in
@@ -378,7 +389,9 @@ let run_check_ownership database (row : Store.definition) =
       let result = Ownership.check (Lookups.make_ownership database recorder) key in
       match result.diagnostics with
       | [] -> (Value result.must_be_disjoint, [])
-      | diagnostics -> (Failed, diagnostics))
+      | descriptions ->
+          ( Failed,
+            List.map (Renderer.render (Lookups.make_names database recorder) key) descriptions ))
 
 let run_generate_mir (database : Tracker.t) (row : Store.definition) =
   let path = (Declarations.decode_key row.key).path in
@@ -473,16 +486,17 @@ let group_recursion (database : Tracker.t) ~is_node (rows : Store.definition lis
 
 let replace_placed (database : Tracker.t) stage ~package ~unit placed =
   Tracker.report stage unit
-    ~is_changed:
-      (Tracker.replace_placed_diagnostics database stage ~package ~unit
-         (List.map
-            (fun ({ key; diagnostic } : Package_checks.placed) -> (Ids.of_key key, diagnostic))
-            placed))
+    ~is_changed:(Tracker.replace_placed_diagnostics database stage ~package ~unit placed)
 
 let check_package_unit database stage ~package ~unit check =
   Tracker.record database stage unit (fun recorder ->
       match Package_checks.run (Lookups.make_package_checks database recorder) package check with
-      | Placed placed -> placed
+      | Placed placed ->
+          let names = Lookups.make_names database recorder in
+          List.map
+            (fun ({ key; description } : Package_checks.placed) ->
+              (Ids.of_key key, Renderer.render names key description))
+            placed
       | Dependency_used _ ->
           Compiler_bug.raise_bug ~stage:"Database"
             "the check of a definition answered for a dependency"
@@ -1406,11 +1420,11 @@ let guard_units (database : Tracker.t) ?on_bug (stage : Kind.stage) ids run =
   with
   | () -> ()
   | exception Compiler_bug.Bug bug -> fail bug
-  | exception Interface.Properties.Recursion_limit message ->
+  | exception Interface.Properties.Recursion_limit _ ->
       fail
         {
           stage = "Database";
-          message = "a stage after the checks reached a recursion limit: " ^ message;
+          message = "a stage after the checks reached a recursion limit";
           doing = [];
         }
   | exception raised ->

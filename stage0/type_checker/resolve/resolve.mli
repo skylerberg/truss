@@ -83,15 +83,10 @@ val find_head : resolved -> Syntax.expression -> head option
 val resolve :
   Names.lookups ->
   Names.key ->
-  (section * (resolution, Diagnostic.in_definition list) result option) list
+  (section * (resolution, Catalog.description list) result option) list
 
 val list_file_diagnostics :
-  Names.lookups ->
-  Path.file ->
-  Syntax.file ->
-  text:string ->
-  used:string list option ->
-  Diagnostic.t list
+  Names.lookups -> Path.file -> Syntax.file -> used:string list option -> Source.span Catalog.t list
 
 type trait_header = {
   associated : string list;

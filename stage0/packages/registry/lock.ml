@@ -7,11 +7,9 @@ type entry = {
 
 type t = entry list
 
-exception Malformed of { line : int; message : string }
+exception Malformed of { line : int; problem : Project_catalog.lock_problem }
 
-let raise_malformed line format =
-  Printf.ksprintf (fun message -> raise (Malformed { line; message })) format
-
+let raise_malformed line problem = raise (Malformed { line; problem })
 let header = "format 1"
 
 let sort_entries entries =
@@ -26,25 +24,17 @@ let parse_entry line text =
       let name =
         match Manifest.parse_name written with
         | Some ({ owner = Some _; _ } as name) -> name
-        | _ ->
-            raise_malformed line
-              "`%s` is not a registry package's name, which is an owner and a name joined by `.`."
-              written
+        | _ -> raise_malformed line (Not_a_registry_name written)
       in
       let version =
         match Version.parse version with
         | Some ((major, _, _) as version) when major = Version.parse_major name -> version
         | Some _ ->
             raise_malformed line
-              "A version of `%s` starts with %d, the number at the end of its name, or 1 for a \
-               name without one."
-              written (Version.parse_major name)
-        | None ->
-            raise_malformed line "`%s` is not a version, which is three numbers, such as 1.4.2."
-              version
+              (Version_major_mismatch { written; major = Version.parse_major name })
+        | None -> raise_malformed line (Not_a_version version)
       in
-      if not (Content.is_hash hash) then
-        raise_malformed line "`%s` is not a hash, which is 64 hexadecimal digits." hash;
+      if not (Content.is_hash hash) then raise_malformed line (Not_a_hash hash);
       let holds =
         match rest with
         | [] -> []
@@ -55,18 +45,12 @@ let parse_entry line text =
                    let written = String.trim item in
                    match Grant.parse_capability written with
                    | Some capability -> capability
-                   | None ->
-                       raise_malformed line
-                         "`%s` is not a capability's name or full path. The capabilities after \
-                          `holds` have `, ` between them."
-                         written)
+                   | None -> raise_malformed line (Not_a_capability written))
                  (String.split_on_char ',' (String.concat " " words)))
-        | _ ->
-            raise_malformed line
-              "After a package's hash comes nothing, or `holds` and the capabilities it holds."
+        | _ -> raise_malformed line Unexpected_after_hash
       in
       { name; version; hash; holds }
-  | _ -> raise_malformed line "A line is a package's name, its version, and its hash."
+  | _ -> raise_malformed line Malformed_line
 
 let parse text =
   let lines =
@@ -83,12 +67,11 @@ let parse text =
       ignore
         (List.fold_left
            (fun seen (line, entry) ->
-             if List.mem entry.name seen then
-               raise_malformed line "`%s` already has a line above." (Path.show_package entry.name);
+             if List.mem entry.name seen then raise_malformed line (Repeated_line entry.name);
              entry.name :: seen)
            [] entries);
       sort_entries (List.map snd entries)
-  | (line, _) :: _ -> raise_malformed line "A lock file starts with the line `%s`." header
+  | (line, _) :: _ -> raise_malformed line (Missing_header header)
 
 let print entries =
   String.concat ""

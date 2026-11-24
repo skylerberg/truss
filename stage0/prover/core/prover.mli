@@ -3,7 +3,11 @@ module Lookups = Lookups
 
 type proof =
   | Obligations of Obligation.outcome
-  | Unsupported of Obligation.location * string
+  | Unsupported of {
+      location : Obligation.location;
+      construct : Catalog.Prover.construct;
+      foreign : string option;
+    }
   | Not_proven_here
 
 val prove : Lookups.t -> Resolve.Names.key -> proof

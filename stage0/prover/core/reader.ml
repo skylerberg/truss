@@ -64,7 +64,7 @@ let rec compute_place_type context frame run (place : Mir.place) =
           Option.bind (find_declared_fields context base_type variant) (List.assoc_opt field)
         with
         | Some field_type -> Facts.substitute_type context frame field_type
-        | None -> Facts.raise_unsupported Whole_definition "the field `%s`" field
+        | None -> Facts.raise_unsupported Whole_definition (Field field)
       in
       match List.nth place.Mir.projections (List.length place.Mir.projections - 1) with
       | Field field -> find_field_type None field
@@ -100,9 +100,7 @@ let rec resolve_aliases (frame : State.frame) run (place : Mir.place) :
 let expand_place frame run (place : Mir.place) =
   match resolve_aliases frame run place with
   | [ (_, place) ] -> place
-  | _ ->
-      Facts.raise_unsupported Whole_definition
-        "a name that the alternatives of a pattern bind `mut`, here"
+  | _ -> Facts.raise_unsupported Whole_definition Alternatives_binding_mut
 
 let describe_local : Mir.local_kind -> string = function
   | Source { local; _ } -> (
@@ -146,8 +144,7 @@ let rec read_resolved context frame run (place : Mir.place) =
         let projected = { place with Mir.projections = prefix @ [ projection ] } in
         let project_field variant field =
           if Facts.find_constructors context base_type = None then
-            Facts.raise_unsupported Whole_definition
-              "a field of `%s`, whose fields the prover does not see" (Types.show base_type);
+            Facts.raise_unsupported Whole_definition (Hidden_field_of base_type);
           ignore (Facts.declare_sort context base_type);
           Values.project_field context frame base_type variant field
             (compute_place_type context frame run projected)
@@ -211,7 +208,7 @@ let replace_field context ty variant field whole new_value =
               if name = field then new_value
               else Validity.select_field context ty variant name whole)
             fields )
-  | None -> Facts.raise_unsupported Whole_definition "the fields of `%s`" (Types.show ty)
+  | None -> Facts.raise_unsupported Whole_definition (Fields_of ty)
 
 let write_resolved context frame run (place : Mir.place) new_value =
   let rec rebuild prefix whole = function
@@ -241,7 +238,7 @@ let write_resolved context frame run (place : Mir.place) new_value =
             | _ :: _ ->
                 Lambdas.check_valid context frame
                   (Facts.locate context frame.source origin)
-                  part_type element ~deep:true ~when_:"for the element changed here");
+                  part_type element ~deep:true ~moment:Element_changed);
             let after =
               Intrinsics.write_sequence_element context frame base_type whole index element
             in
@@ -259,7 +256,7 @@ let write_resolved context frame run (place : Mir.place) new_value =
               (rebuilt viewed))
   in
   match place.Mir.root with
-  | Constant _ | Literal _ -> Facts.raise_unsupported Whole_definition "assigning to a constant"
+  | Constant _ | Literal _ -> Facts.raise_unsupported Whole_definition Constant_assignment
   | Local local -> (
       let whole =
         if place.Mir.projections = [] then new_value
@@ -397,7 +394,7 @@ let read_operand context frame run (operand : Mir.operand) =
       | Float number -> (
           match Facts.find_float_format ty with
           | Some format -> Operations.make_float_literal format number
-          | None -> Facts.raise_unsupported Whole_definition "a float literal without a float type")
+          | None -> Facts.raise_unsupported Whole_definition Float_literal_without_type)
       | Boolean truth -> Logic.Boolean truth)
 
 let compute_operand_type context frame operand =
@@ -608,7 +605,7 @@ let rec write_back_part context run ty (part : Mir.yielded) frame after =
                   write_back_part context run field_type field frame value
               | _ -> frame)
             frame fields
-      | None -> Facts.raise_unsupported Whole_definition "the fields of `%s`" (Types.show ty))
+      | None -> Facts.raise_unsupported Whole_definition (Fields_of ty))
   | Part (Use _ | Take _ | Immediate _) -> frame
 
 let bind_parts context (frame : State.frame) run =
@@ -628,19 +625,8 @@ let bind_parts context (frame : State.frame) run =
     frame.aliases frame
 
 let note_path (context : State.context) (frame : State.frame) (note : Mir.path_note) =
-  if frame.makes_obligations && Facts.is_home context frame.source then begin
-    let quote = Facts.quote_origin context frame in
-    let text =
-      match note with
-      | Arm_taken patterns ->
-          Printf.sprintf "the arm `%s` is taken" (String.concat ", " (List.map quote patterns))
-      | Condition_holds { condition; holds } -> Printf.sprintf "`%s` is %b" (quote condition) holds
-      | Else_runs pattern ->
-          Printf.sprintf "`%s` does not match, so the `else` runs" (quote pattern)
-      | Returns_early tried -> Printf.sprintf "`%s` returns early" (quote tried)
-    in
-    context.path_notes <- (text, frame.condition) :: context.path_notes
-  end
+  if frame.makes_obligations && Facts.is_home context frame.source then
+    context.path_notes <- (note, frame.condition) :: context.path_notes
 
 let refresh_place context frame ty (place : State.passed_place) =
   let fresh_value = Facts.arrive context frame "changed" ty in
@@ -653,9 +639,7 @@ let record_todo (context : State.context) (frame : State.frame) origin =
   if frame.is_ghost then context.unfinished <- frame.condition :: context.unfinished
 
 let oblige_unreachable context frame location =
-  Facts.oblige context frame Unreachable location
-    [ Text "This `unreachable` may be reached." ]
-    (Logic.Boolean false)
+  Facts.oblige context frame location Unreachable_reached (Logic.Boolean false)
 
 let lend_part context (frame : State.frame) origin (mode : Language.Mode.t) ~handed ~lends
     ~write_back =
@@ -669,17 +653,12 @@ let lend_part context (frame : State.frame) origin (mode : Language.Mode.t) ~han
               { frame with result = Some handed; yielded = Some before }
               clause
           in
-          Facts.oblige context frame Ensures
+          Facts.oblige context frame
             (Facts.locate context frame.source clause.origin)
-            [
-              Text "`";
-              Facts.quote frame.source clause.origin;
-              Text "` may not hold for the part lent here.";
-            ]
+            (Lent_part_ensures { clause = Facts.quote frame.source clause.origin })
             term)
         part_postconditions;
-      Lambdas.check_valid context frame location part_type handed ~deep:true
-        ~when_:"for the part lent here";
+      Lambdas.check_valid context frame location part_type handed ~deep:true ~moment:Part_lent;
       let frame, part_after =
         if mode = Language.Mode.Mut && lends then (
           let part_after = Facts.arrive context frame "lent" part_type in
@@ -692,7 +671,7 @@ let lend_part context (frame : State.frame) origin (mode : Language.Mode.t) ~han
           frame with
           yielded_so_far = Some (Intrinsics.append_part context frame part_type before part_after);
         }
-  | _ -> Facts.raise_unsupported location "a lent part outside a lending method's body"
+  | _ -> Facts.raise_unsupported location Lent_part_outside_lending_method
 
 let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(site : Invocation.site)
     =
@@ -711,8 +690,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       let ty = compute_place_type context frame run place in
       ignore (Facts.declare_sort context ty);
       if Facts.find_constructors context ty = None then
-        Facts.raise_unsupported location "a variant of `%s`, which the prover does not see"
-          (Types.show ty);
+        Facts.raise_unsupported location (Hidden_variant_of ty);
       ( frame,
         Logic.Is
           (Facts.make_constructor_symbol ty (Some variant), read_place context frame run place) )
@@ -871,7 +849,7 @@ and read_block context frame run (block : Mir.block) =
 and read_value context frame run (block : Mir.block) =
   match read_block context frame run block with
   | Some read -> read
-  | None -> Facts.raise_unsupported Whole_definition "a call in a specification that never returns"
+  | None -> Facts.raise_unsupported Whole_definition Nonreturning_specification_call
 
 and join_after_either context ~(outer : State.frame) ~condition
     ((entered : State.frame), (after : State.frame))
@@ -1400,10 +1378,15 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
                   (Facts.locate context frame.source origin)
                   (Facts.substitute_type context frame type_)
                   term ~deep:true
-                  ~when_:
+                  ~moment:
                     (match kind with
-                    | Temporary -> "for the value built here"
-                    | _ -> Printf.sprintf "for %s when its scope ends" (describe_local kind))
+                    | Temporary -> Built_here
+                    | Source { local; _ } ->
+                        At_scope_end
+                          (match Mir.find_local_name local with
+                          | Some name -> Named name
+                          | None -> Compiler_local)
+                    | Lent _ -> At_scope_end Lent_part)
             | _ -> ())
           locals;
       let frame =
@@ -1489,30 +1472,27 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
       in
       Facts.assume context frame (Logic.equal (Logic.Symbol symbol) holds);
       let location = Facts.locate context frame.source statement.origin in
-      Facts.oblige context frame Assertion location
+      Facts.oblige context frame location
         (match statement.origin with
-        | Written _ ->
-            [ Text "`"; Facts.quote frame.source statement.origin; Text "` may not hold." ]
+        | Written _ -> Assertion_may_fail { clause = Facts.quote frame.source statement.origin }
         | Desugared _ ->
-            let callee =
-              List.find_map
-                (fun (asserted : Mir.statement) ->
-                  match asserted.kind with
-                  | Basic (Call { call; _ }) ->
-                      (Mir.Call_edges.resolve_callee context.lookups.interface frame.substitution
-                         call.callee.target)
-                        .target
-                  | _ -> None)
-                (List.rev code.body.code.statements)
-            in
-            [
-              Text
-                (String.capitalize_ascii
-                   (Facts.describe_call context location
-                      ?callee:(Option.map Facts.show_callee callee)
-                      ()));
-              Text " may not give `true`.";
-            ])
+            Desugared_assertion_may_fail
+              {
+                call =
+                  {
+                    at = location;
+                    callee =
+                      List.find_map
+                        (fun (asserted : Mir.statement) ->
+                          match asserted.kind with
+                          | Basic (Call { call; _ }) ->
+                              (Mir.Call_edges.resolve_callee context.lookups.interface
+                                 frame.substitution call.callee.target)
+                                .target
+                          | _ -> None)
+                        (List.rev code.body.code.statements);
+                  };
+              })
         holds;
       Some frame
   | Path_note note ->

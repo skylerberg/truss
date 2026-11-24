@@ -1,0 +1,10 @@
+(executable
+ (name diagnostic_catalog)
+ (libraries
+  diagnostic
+  description
+  catalog
+  syntax_catalog
+  project_catalog
+  core
+  source))

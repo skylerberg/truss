@@ -267,25 +267,11 @@ let joins_neighbors cursor (span : Source.span) code =
 
 let has_reported cursor = Diagnostic.Collector.to_list cursor.diagnostics <> []
 
-let report cursor ?fixes code span message =
-  (match code with
-  | Diagnostic.Code.Missing_body -> cursor.syntax_errors := span :: !(cursor.syntax_errors)
-  | _ -> record_syntax_error cursor ~index:cursor.index span);
-  Diagnostic.Collector.add cursor.diagnostics
-    (Diagnostic.make ?fixes ~code:(Diagnostic.Code.Parser code) span message)
-
-let describe (token : Token.t) =
-  match token.kind with
-  | Newline -> "a line break"
-  | End_of_file -> "the end of the definition"
-  | Upper name | Lower name -> Printf.sprintf "the name `%s`" name
-  | Underscore -> "`_`"
-  | Keyword keyword -> Printf.sprintf "`%s`" (Token.spell_keyword keyword)
-  | Reserved reserved -> Printf.sprintf "`%s`" (Token.spell_reserved reserved)
-  | Integer _ | Float _ -> "a number"
-  | String _ -> "a string"
-  | Punctuation punctuation -> Printf.sprintf "`%s`" (Token.spell_punctuation punctuation)
-  | Foreign foreign -> Printf.sprintf "`%s`" (Token.spell_foreign foreign)
+let report cursor ?(fixes = []) at (problem : Syntax_catalog.Parsing.problem) =
+  (match problem with
+  | Missing_body -> cursor.syntax_errors := at :: !(cursor.syntax_errors)
+  | _ -> record_syntax_error cursor ~index:cursor.index at);
+  Diagnostic.Collector.add cursor.diagnostics (Syntax_catalog.Parsing.render { at; problem; fixes })
 
 let fail cursor expected =
   let token = peek cursor in
@@ -296,26 +282,19 @@ let fail cursor expected =
   (match token.kind with
   | _ when is_reported_by_lexer -> record_syntax_error cursor ~index:cursor.index token.span
   | Reserved reserved ->
-      report cursor Reserved_word token.span
-        (Printf.sprintf "`%s` is reserved for possible later use, and means nothing in Truss yet."
-           (Token.spell_reserved reserved))
-  | _ ->
-      report cursor Unexpected_token token.span
-        (Printf.sprintf "Expected %s, found %s." expected (describe token)));
+      report cursor token.span (Reserved_word { word = Token.spell_reserved reserved })
+  | _ -> report cursor token.span (Unexpected { expected; found = token.kind }));
   raise Failed
 
 let expect_punctuation cursor punctuation =
-  if not (accept_punctuation cursor punctuation) then
-    fail cursor (Printf.sprintf "`%s`" (Token.spell_punctuation punctuation))
+  if not (accept_punctuation cursor punctuation) then fail cursor (Token_punctuation punctuation)
 
 let expect_keyword cursor keyword =
-  if not (accept_keyword cursor keyword) then
-    fail cursor (Printf.sprintf "`%s`" (Token.spell_keyword keyword))
+  if not (accept_keyword cursor keyword) then fail cursor (Token_keyword keyword)
 
 let run_nested cursor parse =
   if cursor.nesting_depth >= nesting_limit then begin
-    report cursor Nesting_too_deep (peek cursor).span
-      (Printf.sprintf "This is nested more than %d levels deep." nesting_limit);
+    report cursor (peek cursor).span (Nesting_too_deep { limit = nesting_limit });
     raise Failed
   end;
   cursor.nesting_depth <- cursor.nesting_depth + 1;
@@ -331,11 +310,7 @@ let chain_limit = 10_000
 
 let check_chain_length cursor ~chain_length =
   if chain_length >= chain_limit then begin
-    report cursor Nesting_too_deep (peek cursor).span
-      (Printf.sprintf
-         "This chains more than %d operations, each of which nests one level deeper. Give parts of \
-          it names with `let`."
-         chain_limit);
+    report cursor (peek cursor).span (Chain_too_long { limit = chain_limit });
     raise Failed
   end
 
@@ -424,7 +399,7 @@ let parse_lines cursor ~parse_item ~recover =
           let separated =
             peek_kind cursor = Newline || (ends_with_comma && (peek cursor).line_break_before)
           in
-          if cursor.index < closer_index && not separated then fail cursor "a line break or `}`";
+          if cursor.index < closer_index && not separated then fail cursor Line_break_or_brace;
           value
         with
         | value -> value

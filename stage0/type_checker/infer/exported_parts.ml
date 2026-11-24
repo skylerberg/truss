@@ -39,13 +39,8 @@ let check_clauses (state : State.state) (name : Syntax.name) clauses =
           requires_and_costs
         && not (is_visible_to_other_packages state.lookups path)
       then
-        let hidden = Path.show path in
-        State.report state Private_in_public span
-          (Printf.sprintf
-             "Other packages can call `%s`, so the proofs of its callers there read this clause, \
-              and those packages cannot see `%s`. Make `%s` public, or state the clause with \
-              functions and constants that are public."
-             name.text hidden hidden)
+        State.report state
+          (Hidden_in_public_clause { at = Written id; name = name.text; hidden = path })
     in
     Array.iteri
       (fun id (elaboration : Tables.elaboration option) ->

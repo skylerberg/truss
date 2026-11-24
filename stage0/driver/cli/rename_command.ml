@@ -271,7 +271,7 @@ let run ~from_ ~to_ =
   let caused =
     List.filter_map
       (fun (_, file, text) ->
-        match Diagnostic.select_shown (Database.list_file_diagnostics database file) with
+        match Description.select_shown (Database.list_file_diagnostics database file) with
         | [] -> None
         | diagnostics ->
             Some

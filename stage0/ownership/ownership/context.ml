@@ -18,9 +18,8 @@ type decided_type = {
 type context = {
   lookups : Lookups.t;
   list_bounds : Interface.Impls.bounds;
-  spans : Source.Definition_span.t array Lazy.t;
-  text : string Lazy.t;
   mode_keywords : (Syntax.id, Core.mode_keyword) Hashtbl.t;
+  bare_names : (Syntax.id, string) Hashtbl.t Lazy.t;
   places_without_keyword : (Syntax.id, Language.Mode.t) Hashtbl.t;
   names : string Local_table.t;
   origins : Core.origin Local_table.t;
@@ -33,7 +32,7 @@ type context = {
   implements_capability : bool;
   is_constant : bool;
   mutable mutable_locals : Core.local list;
-  mutable diagnostics : Diagnostic.in_definition list;
+  mutable diagnostics : Catalog.description list;
   mutable must_be_disjoint : (Core.id list * Core.id list) list;
 }
 
@@ -111,33 +110,21 @@ let stores_function context (callee : Mir.callee) position =
   | Indirect _ -> true
   | _ -> List.exists is_declared (list_callee_signatures context callee)
 
-let locate_node context (node : Syntax.id) : Source.Definition_span.t =
-  Source.Definition_span.locate (Lazy.force context.spans) node
-
-let locate_origin context (origin : Core.origin) : Source.Definition_span.t =
-  locate_node context (Core_walk.locate_origin origin)
-
-let quote_origin context (origin : Core.origin) =
-  Source.Definition_span.quote (Lazy.force context.text) (locate_origin context origin)
-
-let describe_call context (origin : Core.origin) =
-  Core_walk.describe_call origin ~quote:(fun () -> quote_origin context origin) ()
-
 let find_mode_keyword context (place : Core.origin) =
   Hashtbl.find_opt context.mode_keywords (Core_walk.locate_origin place)
 
 let find_place_without_keyword context (place : Core.origin) =
   Hashtbl.find_opt context.places_without_keyword (Core_walk.locate_origin place)
 
-let report context ?(fixes = []) ?(notes = []) code (at : Source.Definition_span.t) message =
+let report context diagnostic =
+  let (description : Catalog.description) = Catalog.Ownership.describe diagnostic in
   let is_reported =
     List.exists
-      (fun (reported : _ Diagnostic.diagnostic) -> reported.span = at && reported.message = message)
+      (fun (reported : Catalog.description) ->
+        reported.location = description.location && reported.message = description.message)
       context.diagnostics
   in
-  if not is_reported then
-    context.diagnostics <-
-      Diagnostic.make ~fixes ~notes ~code:(Ownership code) at message :: context.diagnostics
+  if not is_reported then context.diagnostics <- description :: context.diagnostics
 
 let classify_binding_mode context (root : Place.root) : Language.Mode.t =
   match root with
@@ -151,27 +138,29 @@ let views_literal context (root : Place.root) =
   | Local local -> Local_table.mem context.literal_views local
   | Temporary _ | Constant _ | Environment -> false
 
-let show_root context (root : Place.root) =
+let find_root context (root : Place.root) : Catalog.Ownership.root =
   match root with
-  | Local Self -> "self"
+  | Local Self -> Self
   | Local local -> (
       match
         (Local_table.find_opt context.names local, Local_table.find_opt context.origins local)
       with
-      | Some name, _ -> name
-      | None, Some origin -> quote_origin context origin
+      | Some name, _ -> Named name
+      | None, Some origin -> Unnamed origin
       | None, None -> Compiler_bug.raise_bug ~stage:"Ownership" "a local that no body holds")
-  | Temporary _ -> "temporary"
-  | Constant (Top { name; _ } | Member_constant { name; _ }) -> name
-  | Constant path -> Path.show path
-  | Environment -> "the lambda's captured variables"
+  | Temporary _ -> Temporary
+  | Constant path -> Constant path
+  | Environment -> Environment
 
-let show context (place : Place.t) =
-  show_root context place.root
-  ^ String.concat ""
-      (List.map
-         (function Place.Field name -> "." ^ name | Element _ | Range _ -> "[...]")
-         place.steps)
+let find_place context (place : Place.t) : Catalog.Ownership.place =
+  {
+    root = find_root context place.root;
+    steps =
+      List.map
+        (function
+          | Place.Field name -> Catalog.Ownership.Field name | Element _ | Range _ -> Indexed)
+        place.steps;
+  }
 
 let note_owned_scrutinee context (body : Mir.Graph.body) ~bound ~(viewed : Mir.place) ~written =
   match (body.locals.(bound).kind, viewed.root) with
@@ -188,16 +177,24 @@ let note_owned_scrutinee context (body : Mir.Graph.body) ~bound ~(viewed : Mir.p
       | Source _ | Temporary | Lent _ -> ())
   | _ -> ()
 
-let find_owned_scrutinee context (root : Place.root) =
+let is_written_as context (written : Core.origin) (root : Catalog.Ownership.root) =
+  let written = Core_walk.locate_origin written in
+  match root with
+  | Self -> Hashtbl.find_opt (Lazy.force context.bare_names) written = Some "self"
+  | Named name -> Hashtbl.find_opt (Lazy.force context.bare_names) written = Some name
+  | Unnamed origin -> Core_walk.locate_origin origin = written
+  | Temporary | Constant _ | Environment -> false
+
+let find_owned_scrutinee context (root : Place.root) : Catalog.Ownership.scrutinee option =
   match root with
   | Local local -> (
       match Local_table.find_opt context.owned_scrutinees local with
-      | Some owned
-        when Source.Definition_span.quote (Lazy.force context.text)
-               (locate_origin context owned.written)
-             = show_root context (Local owned.scrutinee) ->
-          Some owned
-      | Some _ | None -> None)
+      | Some owned ->
+          let scrutinee = find_root context (Local owned.scrutinee) in
+          if is_written_as context owned.written scrutinee then
+            Some { scrutinee; written = owned.written; is_part = owned.is_part }
+          else None
+      | None -> None)
   | Temporary _ | Constant _ | Environment -> None
 
 let collect context (mir : Mir.Graph.t) ~mode_keywords =
@@ -259,27 +256,19 @@ let collect context (mir : Mir.Graph.t) ~mode_keywords =
            | Temporary | Lent _ -> None)
          mir.body.parameters)
 
-let copy_edits context (moved : Core.origin) =
-  (match find_mode_keyword context moved with
-    | Some { mode = Own; written; operand; _ } ->
-        [
-          Diagnostic.delete
-            (Source.Definition_span.make (locate_node context written).start
-               (locate_node context operand).start);
-        ]
-    | Some { mode = Read | Mut; _ } | None -> [])
-  @ [
-      Diagnostic.insert
-        (Source.Definition_span.make_zero_width (locate_origin context moved).stop)
-        ".copy()";
-    ]
+let find_copy context type_ (moved : Core.origin) : Catalog.Ownership.copy option =
+  if is_copyable context type_ then
+    Some
+      {
+        moved;
+        own_keyword =
+          (match find_mode_keyword context moved with
+          | Some { mode = Own; written; operand; _ } -> Some (Written written, Written operand)
+          | Some { mode = Read | Mut; _ } | None -> None);
+      }
+  else None
 
-let copy_fix context title type_ (moved : Core.origin) =
-  if is_copyable context type_ then [ Diagnostic.fix title (copy_edits context moved) ] else []
-
-let locate_with_mode_keyword context (place : Core.origin) : Source.Definition_span.t =
+let cover_with_mode_keyword context (place : Core.origin) : Core.origin Catalog.range =
   match find_mode_keyword context place with
-  | Some { written; _ } ->
-      Source.Definition_span.make (locate_node context written).start
-        (locate_origin context place).stop
-  | None -> locate_origin context place
+  | Some { written; _ } -> { covering = [ Written written; place ] }
+  | None -> { covering = [ place ] }

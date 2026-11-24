@@ -282,6 +282,296 @@ module Code = struct
     | Prover of prover
     | Too_many_diagnostics
 
+  let all =
+    List.map
+      (fun code -> Lexer code)
+      [
+        Invalid_utf8;
+        Carriage_return;
+        Forbidden_character;
+        Comment;
+        Semicolon;
+        Unexpected_character;
+        Strict_equality;
+        Character_literal;
+        String_prefix;
+        String_delimiter;
+        Attribute;
+        Foreign_operator;
+        Path_separator;
+        Confusable_character;
+        Lifetime;
+        Number_hexadecimal_float;
+        Name_case;
+        Name_not_ascii;
+        Number_suffix;
+        Number_uppercase_prefix;
+        Number_uppercase_exponent;
+        Number_missing_digits;
+        Number_invalid_digit;
+        Number_followed_by_name;
+        Number_underscore;
+        Number_digit_separator;
+        Number_leading_zero;
+        Unterminated_string;
+        Invalid_escape;
+        Line_break_in_interpolation;
+        Empty_interpolation;
+        Interpolation_too_deep;
+        Raw_string_quotes;
+        Raw_string_closing_not_alone;
+        Raw_string_indentation;
+        Unclosed_bracket;
+        Unmatched_closing_bracket;
+      ]
+    @ List.map
+        (fun code -> Parser code)
+        [
+          Unexpected_token;
+          Needs_parentheses;
+          Reserved_word;
+          Use_after_definition;
+          Statement_at_top_level;
+          Missing_body;
+          Open_range;
+          Interpolation_not_allowed;
+          Float_pattern;
+          Let_else_brace;
+          Nesting_too_deep;
+          Misplaced_opaque;
+          Misplaced_tuple;
+          Misplaced_visibility;
+          Misplaced_self;
+          Lends_own;
+          Repeated_clause;
+          Cost_word;
+          Loop_cost_bound;
+          Function_type_cost_bound;
+          Function_type_names;
+          Misplaced_callback_contract;
+          Misplaced_condition;
+          Misplaced_function_type;
+          Misplaced_associated_type;
+          Misplaced_constraint;
+          Misplaced_potential;
+          Increment;
+          Double_negation;
+          Match_arm_comma;
+          Conditional_operator;
+          Let_mut;
+          Address_of;
+          Closure_bars;
+          Brace_record;
+          Turbofish;
+          Trailing_lambda;
+          As_conversion;
+          Elif;
+          Angle_brackets;
+          Qualified_variant;
+          Macro_call;
+          Tuple;
+          Power_operator;
+          Short_declaration;
+          Pipe_operator;
+          Lambda_annotation;
+          Impl_parameters;
+          Null_coalescing;
+          Specification_only;
+          Misplaced_assert;
+          Misplaced_proof;
+          Misplaced_loop_exit;
+          Exits_parallel;
+          Echo_in_specification;
+          Reserved_specification_name;
+        ]
+    @ List.map
+        (fun code -> Resolve code)
+        [
+          Unknown_name;
+          Unknown_module;
+          Not_visible;
+          Ambiguous_module;
+          Duplicate_import;
+          Unused_import;
+          Intrinsic_import;
+          Shadowed_name;
+          Duplicate_definition;
+          Not_a_place;
+          Not_generic;
+          Not_a_constant;
+          Alternative_bindings;
+          Not_a_generic_parameter;
+          Unconstrained_capability_parameter;
+          Null;
+        ]
+    @ List.map
+        (fun code -> Types code)
+        [
+          Character_scalar_count;
+          Misplaced_self_type;
+          Mismatch;
+          Not_bit_vector;
+          Cannot_infer;
+          Missing_label;
+          Unknown_label;
+          Out_of_order;
+          Positional_after_labeled;
+          Missing_argument;
+          Too_many_arguments;
+          Repeated_argument;
+          Missing_mode;
+          Redundant_mode;
+          Wrong_mode;
+          Unknown_member;
+          Ambiguous_method;
+          Private_field;
+          Member_not_visible;
+          Not_callable;
+          Not_a_value;
+          No_impl;
+          Mismatched_integers;
+          String_addition;
+          Literal_out_of_range;
+          Integer_for_float;
+          Negated_unsigned;
+          Unused_value;
+          Unbounded_time;
+          Upper_bound_in_exact_bound;
+          Cost_of_other_resource;
+          Not_assignable;
+          Wrong_try;
+          Lambda_needs_type;
+          Not_a_record;
+          Not_a_tuple_type;
+          Unknown_variant;
+          Specification_only;
+          Not_in_specification;
+          Decided_in_specification;
+          Not_structural;
+          Wrong_receiver;
+          Not_indexable;
+          Not_iterable;
+          Implements_built_in;
+          Not_derivable;
+          Not_a_type;
+          Not_a_trait;
+          Not_a_capability;
+          Arity;
+          Argument_kind;
+          Wrong_value_parameter_type;
+          Unsatisfied_bound;
+          Private_in_public;
+          Method_outside_package;
+          Default_not_constant;
+          Not_constant;
+          Constant_overflow;
+          Constant_not_data;
+          Condition_not_constant;
+          Main_signature;
+          No_real_implementation;
+          Duplicate_field;
+          Cannot_derive;
+          Derives_inferred;
+          Redeclared_method;
+          Restated_method_body;
+          Restated_method_clause;
+          Restated_method_default;
+          Overridden_method_default;
+          Default_without_body;
+          Decided_condition;
+          Misplaced_value_condition;
+          Trait_cycle;
+          Recursion_limit;
+          Missing_member;
+          Extra_member;
+          Signature_mismatch;
+          Missing_required_impl;
+          Implements_built_in_capability;
+          Impl_uses;
+          Mut_self_for_slice;
+          Read_only_owning_parameter;
+          Unknown_associated_type;
+          Unknown_associated_capability;
+        ]
+    @ List.map (fun code -> Patterns code) [ Unreachable_arm; Unreachable_alternative; Refutable ]
+    @ List.map
+        (fun code -> Usage code)
+        [
+          Unused_variable;
+          Unused_function;
+          Unused_constant;
+          Unused_run_forever;
+          Unreachable_code;
+          Self_comparison;
+        ]
+    @ List.map
+        (fun code -> Ownership code)
+        [
+          Views_temporary;
+          Use_after_move;
+          Not_owned;
+          Not_reinitialized;
+          Conflicting_loan;
+          Mutated_while_viewed;
+          View_escapes;
+          Self_referential;
+          View_crosses_capability;
+          Needs_owned;
+          Data_race;
+          Lent_part_escapes;
+          Lends_other_parameter;
+          Lent_mut_in_variant;
+          Needs_lent_mut;
+          Task_outlives_view;
+        ]
+    @ List.map
+        (fun code -> Capabilities code)
+        [
+          Not_available;
+          Lambda_uses;
+          Not_granted;
+          Provide_mode;
+          Not_an_implementation;
+          Callback_may_deadlock;
+          Monitor_needs_tasks;
+        ]
+    @ List.map
+        (fun code -> Package code)
+        [
+          Impl_location;
+          Sealed_trait_impl;
+          Overlapping_impls;
+          Method_name_clash;
+          Needs_indirect;
+          Not_strictly_positive;
+          Growing_type;
+          Instantiation_cycle;
+          Duplicate_test;
+        ]
+    @ List.map
+        (fun code -> Prover code)
+        [
+          Overflow;
+          Division;
+          Shift;
+          Out_of_range;
+          Out_of_bounds;
+          Requires;
+          Ensures;
+          Invariant;
+          Termination;
+          Constant_cycle;
+          Evaluation;
+          Panic;
+          Assertion;
+          Law;
+          Cost;
+          Disjoint;
+          Unreachable;
+          Unsupported;
+        ]
+    @ [ Too_many_diagnostics ]
+
   let name_lexer_code code =
     match code with
     | Invalid_utf8 -> "invalid_utf8"
@@ -622,11 +912,6 @@ let find_closest text candidates =
   | closest :: _ -> Some closest
   | [] -> None
 
-let list_spelling_fixes span ~written candidates =
-  match find_closest written candidates with
-  | Some candidate -> [ fix (Printf.sprintf "Write `%s`." candidate) [ replace span candidate ] ]
-  | None -> []
-
 let show_count count singular plural =
   Printf.sprintf "%d %s" count (if count = 1 then singular else plural)
 
@@ -710,8 +995,6 @@ let list_machine_applicable (diagnostics : t list) =
       | _ -> false)
     diagnostics
 
-let limit = 200
-
 module Collector = struct
   type diagnostic = t
   type nonrec t = diagnostic Dynarray.t
@@ -724,20 +1007,6 @@ module Collector = struct
       (fun (left : diagnostic) (right : diagnostic) -> compare left.span.start right.span.start)
       (Dynarray.to_list collector)
 end
-
-let select_shown diagnostics =
-  let rec take count last = function
-    | [] -> []
-    | rest when count = limit ->
-        [
-          make
-            ~severity:(if List.exists is_error rest then (Error : severity) else Warning)
-            ~code:Too_many_diagnostics (Source.make_zero_width last)
-            (Printf.sprintf "%d more diagnostics are not shown." (List.length rest));
-        ]
-    | (first : t) :: rest -> first :: take (count + 1) first.span.stop rest
-  in
-  take 0 0 diagnostics
 
 let show_location source offset =
   let line, column = Source.compute_position source offset in
@@ -908,7 +1177,3 @@ let to_json_object source diagnostic =
     (encode_json_string diagnostic.message)
     (encode_json_span source diagnostic.span)
     (String.concat "," notes) (String.concat "," fixes)
-
-module For_testing = struct
-  let limit = limit
-end

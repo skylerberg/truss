@@ -4,10 +4,9 @@ type t = { package : package option; time_limit_seconds : int option }
 
 let default_time_limit_seconds = 10
 
-exception Malformed of { line : int; message : string }
+exception Malformed of { line : int; problem : Project_catalog.manifest_problem }
 
-let raise_malformed line format =
-  Printf.ksprintf (fun message -> raise (Malformed { line; message })) format
+let raise_malformed line problem = raise (Malformed { line; problem })
 
 let is_lower_snake_case name =
   name <> ""
@@ -59,12 +58,12 @@ let tokenize_line line text =
           done;
           add (Bare (String.sub text index (!stop - index)));
           scan !stop
-      | character -> raise_malformed line "`%c` cannot be written here." character
+      | character -> raise_malformed line (Unexpected_character character)
   and add_punctuation token index =
     add token;
     scan (index + 1)
   and scan_quoted buffer index =
-    if index >= length then raise_malformed line "This string is not closed on its line."
+    if index >= length then raise_malformed line Unclosed_string
     else
       match text.[index] with
       | '"' ->
@@ -85,8 +84,6 @@ type entry = { key : string; quoted : bool; value : value; line : int; last_line
 type table = { name : string; line : int; entries : entry list }
 type statement = Header of table | Entry of entry
 
-let value_expected = "a string in quotes, a whole number, or a list in brackets"
-
 let rec skip_line_breaks = function
   | (Line_break, _) :: rest -> skip_line_breaks rest
   | rest -> rest
@@ -98,14 +95,14 @@ let rec list_items line items rest =
       match skip_line_breaks rest with
       | (Comma, _) :: rest -> list_items line (item :: items) rest
       | (Close, _) :: rest -> (List.rev (item :: items), rest)
-      | (_, line) :: _ -> raise_malformed line "Expected `,` or `]` after a list's item."
-      | [] -> raise_malformed line "This list is not closed with `]`.")
-  | (_, line) :: _ -> raise_malformed line "A list holds strings in quotes, with `,` between them."
-  | [] -> raise_malformed line "This list is not closed with `]`."
+      | (_, line) :: _ -> raise_malformed line List_separator_expected
+      | [] -> raise_malformed line Unclosed_list)
+  | (_, line) :: _ -> raise_malformed line List_item_not_string
+  | [] -> raise_malformed line Unclosed_list
 
 let rec skip_past_brace line = function
   | (Close_brace, _) :: rest -> rest
-  | (Line_break, _) :: _ | [] -> raise_malformed line "This table is not closed with `}`."
+  | (Line_break, _) :: _ | [] -> raise_malformed line Unclosed_inline_table
   | _ :: rest -> skip_past_brace line rest
 
 let parse_value line = function
@@ -115,11 +112,11 @@ let parse_value line = function
       let items, rest = list_items line [] rest in
       (List items, rest)
   | (Open_brace, _) :: rest -> (Inline_table, skip_past_brace line rest)
-  | _ -> raise_malformed line "Expected a value after `=`: %s." value_expected
+  | _ -> raise_malformed line Value_expected
 
 let expect_end_of_line line = function
   | (Line_break, last_line) :: rest -> (last_line, rest)
-  | _ -> raise_malformed line "Expected the line to end here."
+  | _ -> raise_malformed line Line_end_expected
 
 let parse_statement line = function
   | (Open, _) :: ((Bare name | Quoted name), _) :: (Close, _) :: rest ->
@@ -129,21 +126,19 @@ let parse_statement line = function
       let last_line, rest = expect_end_of_line line rest in
       let quoted = match token with Quoted _ -> true | _ -> false in
       (Entry { key; quoted; value; line; last_line }, rest)
-  | _ ->
-      raise_malformed line
-        "Expected a table, such as `[package]`, or a line of the form `key = value`."
+  | _ -> raise_malformed line Statement_expected
 
 let read_tables text =
   let problems = ref [] in
-  let report line message = problems := (line, message) :: !problems in
+  let report line problem = problems := (line, problem) :: !problems in
   let tokens =
     List.concat
       (List.mapi
          (fun index line_text ->
            match tokenize_line (index + 1) line_text with
            | tokens -> tokens
-           | exception Malformed { line; message } ->
-               report line message;
+           | exception Malformed { line; problem } ->
+               report line problem;
                [ (Line_break, line) ])
          (String.split_on_char '\n' text))
   in
@@ -164,13 +159,10 @@ let read_tables text =
         | (Entry entry, rest), Some table ->
             parse_statements tables (Some { table with entries = entry :: table.entries }) rest
         | (Entry entry, rest), None ->
-            report entry.line
-              (Printf.sprintf
-                 "`%s` is in no table. A manifest starts with a table, such as `[package]`."
-                 entry.key);
+            report entry.line (Entry_outside_table entry.key);
             parse_statements tables current rest
-        | exception Malformed { line; message } ->
-            report line message;
+        | exception Malformed { line; problem } ->
+            report line problem;
             parse_statements tables current (skip_through line tokens))
   in
   let tables = parse_statements [] None tokens in
@@ -179,21 +171,17 @@ let read_tables text =
 let parse_tables text =
   match read_tables text with
   | tables, [] -> tables
-  | _, (line, message) :: _ -> raise (Malformed { line; message })
-
-let name_expected =
-  "a `lower_snake_case` name, or an owner and a name joined by `.`, such as `weather` or \
-   `acme.geometry`"
+  | _, (line, problem) :: _ -> raise (Malformed { line; problem })
 
 let read_text (entry : entry) =
   match entry.value with
   | Text text -> text
-  | _ -> raise_malformed entry.line "`%s` is a string in quotes." entry.key
+  | _ -> raise_malformed entry.line (Not_a_string entry.key)
 
 let read_number (entry : entry) =
   match entry.value with
   | Number number -> number
-  | _ -> raise_malformed entry.line "`%s` is a whole number." entry.key
+  | _ -> raise_malformed entry.line (Not_a_number entry.key)
 
 let parse_version text =
   match List.map int_of_string_opt (String.split_on_char '.' text) with
@@ -212,51 +200,38 @@ let toolchain_builds version =
 let parse_granted_capability (entry : entry) written =
   match Grant.parse_capability written with
   | Some capability -> capability
-  | None ->
-      raise_malformed entry.line
-        "`%s` names no capability. A grant names a capability of the prelude by its name, such as \
-         `Clock`, and any other by its full path."
-        written
+  | None -> raise_malformed entry.line (Unknown_capability written)
 
 let parse_dependency (entry : entry) : dependency =
   let package =
     match parse_name entry.key with
     | Some package -> package
-    | None ->
-        raise_malformed entry.line "`%s` is not a package's name, which is %s." entry.key
-          name_expected
+    | None -> raise_malformed entry.line (Not_a_package_name entry.key)
   in
   if (not entry.quoted) && package.owner <> None then
-    raise_malformed entry.line "A name with `.` is written in quotes: `\"%s\" = []`." entry.key;
+    raise_malformed entry.line (Unquoted_owned_name entry.key);
   match entry.value with
   | List capabilities ->
       { package; capabilities = List.map (parse_granted_capability entry) capabilities }
   | Inline_table ->
       raise_malformed entry.line
-        "A dependency's entry is the list of capabilities it is granted, as in `%s = []`. A \
-         manifest holds no versions: `truss add` writes them in `truss.lock`."
-        (if entry.quoted then Printf.sprintf "%S" entry.key else entry.key)
+        (Inline_table_dependency (if entry.quoted then Printf.sprintf "%S" entry.key else entry.key))
   | Text _ ->
       raise_malformed entry.line
-        "A dependency's entry is the list of capabilities it is granted, as in `%s = []`, not a \
-         version. `truss add` writes versions in `truss.lock`."
-        (if entry.quoted then Printf.sprintf "%S" entry.key else entry.key)
-  | Number _ ->
-      raise_malformed entry.line "A dependency's entry is the list of capabilities it is granted."
+        (Text_dependency (if entry.quoted then Printf.sprintf "%S" entry.key else entry.key))
+  | Number _ -> raise_malformed entry.line Number_dependency
 
 let parse text =
   let tables = parse_tables text in
   let seen = Hashtbl.create 4 in
   List.iter
     (fun (table : table) ->
-      if Hashtbl.mem seen table.name then
-        raise_malformed table.line "The table `[%s]` is already written above." table.name;
+      if Hashtbl.mem seen table.name then raise_malformed table.line (Repeated_table table.name);
       Hashtbl.replace seen table.name ();
       let keys = Hashtbl.create 8 in
       List.iter
         (fun (entry : entry) ->
-          if Hashtbl.mem keys entry.key then
-            raise_malformed entry.line "`%s` is already written above." entry.key;
+          if Hashtbl.mem keys entry.key then raise_malformed entry.line (Repeated_key entry.key);
           Hashtbl.replace keys entry.key ())
         table.entries)
     tables;
@@ -265,10 +240,7 @@ let parse text =
   List.iter
     (fun (table : table) ->
       if not (List.mem table.name [ "package"; "dependencies"; "test"; "project" ]) then
-        raise_malformed table.line
-          "A manifest has no table `[%s]`. Its tables are `[package]`, `[dependencies]`, \
-           `[project]`, and `[test]`."
-          table.name)
+        raise_malformed table.line (Unknown_table table.name))
     tables;
   let name = ref None and truss = ref None in
   List.iter
@@ -280,22 +252,14 @@ let parse text =
             Some
               (match parse_name text with
               | Some package -> package
-              | None -> raise_malformed entry.line "A package's name is %s." name_expected)
+              | None -> raise_malformed entry.line Bad_package_name)
       | "truss" ->
           let text = read_text entry in
           if parse_version text = None then
-            raise_malformed entry.line
-              "`truss` is the version of Truss the package is written for, as two numbers, such as \
-               `\"%s\"`."
-              truss_version;
+            raise_malformed entry.line (Bad_truss_version { toolchain = truss_version });
           truss := Some text
-      | "version" ->
-          raise_malformed entry.line
-            "A manifest holds no version. The registry gives a package its version when it is \
-             published. Delete this line."
-      | key ->
-          raise_malformed entry.line "`[package]` has no key `%s`. Its keys are `name` and `truss`."
-            key)
+      | "version" -> raise_malformed entry.line Package_version
+      | key -> raise_malformed entry.line (Unknown_package_key key))
     (list_entries "package");
   let time_limit_seconds = ref None in
   List.iter
@@ -303,13 +267,12 @@ let parse text =
       match entry.key with
       | "time_limit" ->
           let seconds = read_number entry in
-          if seconds <= 0 then
-            raise_malformed entry.line "`time_limit` is a whole number of seconds, more than 0.";
+          if seconds <= 0 then raise_malformed entry.line Bad_time_limit;
           time_limit_seconds := Some seconds
-      | key -> raise_malformed entry.line "`[test]` has no key `%s`. Its key is `time_limit`." key)
+      | key -> raise_malformed entry.line (Unknown_test_key key))
     (list_entries "test");
   List.iter
-    (fun (entry : entry) -> raise_malformed entry.line "`[project]` has no key `%s`." entry.key)
+    (fun (entry : entry) -> raise_malformed entry.line (Unknown_project_key entry.key))
     (list_entries "project");
   let package =
     match (find_table "package", !name) with
@@ -320,17 +283,13 @@ let parse text =
             truss = !truss;
             dependencies = List.map parse_dependency (list_entries "dependencies");
           }
-    | Some table, None ->
-        raise_malformed table.line "`[package]` names its package, with `name = \"...\"` under it."
+    | Some table, None -> raise_malformed table.line Unnamed_package
     | None, _ -> (
         match find_table "dependencies" with
-        | Some table ->
-            raise_malformed table.line
-              "`[dependencies]` are a package's, and this manifest has no `[package]`."
+        | Some table -> raise_malformed table.line Dependencies_without_package
         | None -> None)
   in
-  if package = None && find_table "project" = None then
-    raise_malformed 1 "A manifest has a `[package]` table, a `[project]` table, or both.";
+  if package = None && find_table "project" = None then raise_malformed 1 Neither_table;
   { package; time_limit_seconds = !time_limit_seconds }
 
 let has_project_table text =

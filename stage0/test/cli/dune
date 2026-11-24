@@ -15,6 +15,7 @@
   manifest
   registry
   project
+  project_catalog
   backend
   watcher))
 
