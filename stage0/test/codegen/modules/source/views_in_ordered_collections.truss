@@ -1,0 +1,58 @@
+fn later(first: view String, second: view String) -> view String {
+  first.max(second)
+}
+
+fn greatest[Value: Ordered](first: own Value, second: own Value, third: own Value) -> Value {
+  let greater = own first.max(own second)
+  own greater.max(own third)
+}
+
+test "a list of views is sorted in place" {
+  let text = "pear,apple,fig"
+  var parts = text.split(",")
+  mut parts.sort()
+  assert parts == ["apple", "fig", "pear"]
+  assert text == "pear,apple,fig"
+}
+
+test "a map is keyed by views of one string" {
+  let text = "b,a,b,c,b"
+  var counts: Map[view String, UInt64] = [:]
+  for part in text.split(",") {
+    let seen = counts.get(part).unwrap_or(0)
+    mut counts.insert(part, value: seen.saturating_add(1))
+  }
+  assert counts.length() == 3
+  assert counts.get("b") == Some(3)
+  assert counts.contains("c") && !counts.contains("d")
+}
+
+test "a set holds views of one string" {
+  let text = "b,a,b"
+  var seen: Set[view String] = []
+  for part in text.split(",") {
+    mut seen.insert(part)
+  }
+  assert seen.length() == 2 && seen.contains("a")
+}
+
+test "the greater of two views is a view, and generic code orders views" {
+  let first = "apple".to_string()
+  let second = "pear".to_string()
+  assert later(first, second: second) == "pear"
+  let apple: view String = first
+  let pear: view String = second
+  let fig: view String = "fig"
+  assert greatest(apple, second: pear, third: fig) == "pear"
+  assert first == "apple" && second == "pear"
+}
+
+test "a view of a list of numbers is ordered by its elements" {
+  let low: List[Int64] = [1, 2, 3]
+  let high: List[Int64] = [1, 3]
+  let lower: view List[Int64] = low
+  let higher: view List[Int64] = high
+  assert lower.max(higher) == [1, 3]
+  assert lower.min(higher) == [1, 2, 3]
+  assert low.length() == 3
+}

@@ -46,12 +46,27 @@ let make_impl_method trait_interface impl_interface impl (declared : Types.trait
           ~default:declared.method_receiver;
     }
 
-let list_impl_methods (interface : Interface.Lookups.t) impl =
+let list_impl_methods (interface : Interface.Lookups.t) ?(serves_a_view = false) impl =
+  let impl_interface = Interface.Definition.read_impl_interface interface impl in
+  let trait = impl_interface.implements.trait in
+  let trait_interface = Interface.Definition.read_trait_interface interface trait in
+  List.map
+    (fun (declared : Types.trait_method) ->
+      if serves_a_view && Interface.Impls.inherits_method trait_interface impl_interface declared
+      then
+        Path.Method
+          { owner = trait; name = declared.method_name; receiver = declared.method_receiver }
+      else make_impl_method trait_interface impl_interface impl declared)
+    trait_interface.methods
+
+let inherits_method (interface : Interface.Lookups.t) impl ~name ~receiver =
   let impl_interface = Interface.Definition.read_impl_interface interface impl in
   let trait_interface =
     Interface.Definition.read_trait_interface interface impl_interface.implements.trait
   in
-  List.map (make_impl_method trait_interface impl_interface impl) trait_interface.methods
+  match Interface.Definition.find_method_of_trait trait_interface ~name ~receiver with
+  | Some declared -> Interface.Impls.inherits_method trait_interface impl_interface declared
+  | None -> false
 
 let is_self_of_enclosing_trait (type_ : Types.ty) =
   match type_ with
@@ -68,13 +83,28 @@ let rec list_code_of_impl_for interface ((type_ : Types.ty), (bound : Types.trai
             ~trait:required Bound
         with
         | Impl { impl; substitution } ->
-            list_impl_methods interface impl
+            list_impl_methods interface ~serves_a_view:(Types.is_view type_) impl
             @ List.concat_map (list_code_of_impl_for interface)
                 (Interface.Impls.list_required_bounds
                    (Interface.Definition.read_impl_interface interface impl).impl_generics
                    substitution)
         | Bound -> [])
     (Interface.Properties.list_bound_closure interface ~self:type_ bound)
+
+let list_code_supplied_to_self (interface : Interface.Lookups.t) ~trait substitution =
+  match Types.find_argument (Types.make_self_parameter trait) substitution with
+  | Some (Type self) ->
+      list_code_of_impl_for interface
+        ( self,
+          {
+            trait;
+            trait_arguments =
+              List.filter_map
+                (fun (generic : Types.generic) -> Types.find_argument generic.generic substitution)
+                (Interface.Definition.read_trait_interface interface trait).trait_generics;
+            associated = [];
+          } )
+  | Some (Value _) | None -> []
 
 let list_code_supplied_to_bound interface instance (type_, bound) =
   list_code_of_impl_for interface
@@ -141,6 +171,9 @@ let resolve_callee (interface : Interface.Lookups.t) instance (callee : _ Core.t
       in
       let target, supplied =
         match evidence with
+        | Impl { impl; _ }
+          when Types.is_view self_type && inherits_method interface impl ~name ~receiver ->
+            (Some declaration, lazy (list_code_supplied_to_declaration ()))
         | Impl { impl; substitution } ->
             let method_ = Path.Method { owner = impl; name; receiver } in
             (Some method_, lazy (list_code_supplied_to method_ ~bound_by_owner:substitution))
@@ -157,8 +190,8 @@ let resolve_node (lookups : lookups) (declaration : Path.t) instance =
     let* trait_interface = Interface.Definition.find_trait_interface lookups.interface owner in
     let* self =
       match Types.find_argument (Types.make_self_parameter owner) instance with
-      | Some (Type self) -> Some self
-      | Some (Value _) | None -> None
+      | Some (Type self) when not (Types.is_view self) -> Some self
+      | Some (Type _ | Value _) | None -> None
     in
     let trait : Types.trait_reference =
       {

@@ -126,7 +126,9 @@ let make_code context (path : Path.t) (instantiation : Ground.instantiation) : c
   match path with
   | Top _ | Method _ | Test _ -> (
       let interface = read_signature context path in
-      let substitution = Monomorphic.make_signature_substitution interface instantiation in
+      let substitution =
+        Instances.make_substitution context.lookups.interface path interface instantiation
+      in
       let enclosing_impl =
         match path with
         | Method { owner = (Impl _ | Derived _) as impl; _ } -> Some impl

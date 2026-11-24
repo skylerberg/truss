@@ -363,7 +363,9 @@ let build_test_main context (item : Lowered.Item.t) test_path : Emit_c.fragment 
 let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instantiation
     ~(ty : Ground.function_type) : Emit_c.fragment =
   let signature = Definitions.read_signature context function_ in
-  let substitution = Monomorphic.make_signature_substitution signature instantiation in
+  let substitution =
+    Instances.make_substitution context.lookups.interface function_ signature instantiation
+  in
   let state = make_generated_state context ~item ~definition:function_ ~substitution in
   let builder = state.builder in
   let environment = Emit_c.Ir_builder.allocate_local builder (Raw (Nullable_pointer Opaque)) in

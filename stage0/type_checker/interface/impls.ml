@@ -269,7 +269,7 @@ let check_recursion_depth ~depth type_ trait =
              stops there: bounds that ask for ever larger types never finish."
             (Types.show type_) (Types.show_trait trait) Properties.recursion_limit))
 
-let reads_self_only lookups (trait : Path.t) =
+let only_reads_self lookups ~(trait : Path.t) (method_ : Types.trait_method) =
   let self = Types.make_self_parameter trait in
   let rec holds_self (type_ : Types.ty) =
     match type_ with
@@ -280,19 +280,38 @@ let reads_self_only lookups (trait : Path.t) =
         List.exists (fun (_, input) -> holds_self input) inputs || holds_self output
     | Never | Integer | Variable _ | Hole | Error _ -> false
   and holds_self_argument = function Types.Type type_ -> holds_self type_ | Value _ -> false in
+  let signature = Definition.read_method_signature lookups ~owner:trait method_ in
+  method_.method_receiver = Instance Read
+  && (not (holds_self (Types.extract_result_type signature.output)))
+  && List.for_all
+       (fun (parameter : Types.parameter_info) ->
+         parameter.mode = Read || not (holds_self parameter.type_))
+       signature.parameters
+
+let has_only_methods_that_read_self lookups (trait : Path.t) =
   match Definition.find_trait_interface lookups trait with
   | Some interface ->
       (not interface.is_capability)
-      && List.for_all
-           (fun (method_ : Types.trait_method) ->
-             let signature = Definition.read_method_signature lookups ~owner:trait method_ in
-             method_.method_receiver = Instance Read
-             && (not (holds_self (Types.extract_result_type signature.output)))
-             && List.for_all
-                  (fun (parameter : Types.parameter_info) ->
-                    parameter.mode = Read || not (holds_self parameter.type_))
-                  signature.parameters)
-           interface.methods
+      && List.for_all (only_reads_self lookups ~trait) interface.methods
+  | None -> false
+
+let inherits_method (trait : Types.trait_interface) (impl : Types.impl_interface)
+    (declared : Types.trait_method) =
+  declared.provided && Option.is_none (Types.find_implementing_receiver trait impl declared)
+
+let serves_a_view lookups (impl : Path.t) =
+  match Definition.find_impl_interface lookups impl with
+  | Some impl_interface -> (
+      let trait = impl_interface.implements.trait in
+      match Definition.find_trait_interface lookups trait with
+      | Some interface ->
+          (not interface.is_capability)
+          && List.for_all
+               (fun declared ->
+                 inherits_method interface impl_interface declared
+                 || only_reads_self lookups ~trait declared)
+               interface.methods
+      | None -> false)
   | None -> false
 
 let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_conditions = true)
@@ -317,11 +336,15 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
             if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then
               Some (Evidence Bound)
             else None
-        | Types.Named _ when Types.is_view type_ ->
-            if reads_self_only lookups wanted.trait then
+        | Types.Named _ when Types.is_view type_ -> (
+            match
               find_evidence lookups ~list_bounds ~depth ~checks_conditions (Types.strip_view type_)
                 wanted
-            else None
+            with
+            | Some (Evidence (Impl { impl; _ })) as served when serves_a_view lookups impl -> served
+            | Some (Evidence (Impl _)) -> None
+            | served when has_only_methods_that_read_self lookups wanted.trait -> served
+            | _ -> None)
         | Types.Named _ ->
             List.find_map
               (fun { impl_path; impl; substitution } ->

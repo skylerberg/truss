@@ -3,9 +3,14 @@ let is_runtime_call (path : Path.t) = Well_known.is Write_fully path
 
 let list_code_supplied_to (interface : Interface.Lookups.t) path instantiation =
   match Interface.Impls.read_signature interface path with
-  | Some (signature : Types.signature) ->
-      Mir.Call_edges.list_code_supplied_to_generics interface signature.generics
-        (Monomorphic.make_signature_substitution signature instantiation)
+  | Some (signature : Types.signature) -> (
+      let substitution = Instances.make_substitution interface path signature instantiation in
+      Mir.Call_edges.list_code_supplied_to_generics interface signature.generics substitution
+      @
+      match path with
+      | Method { owner = Top _ as trait; _ } ->
+          Mir.Call_edges.list_code_supplied_to_self interface ~trait substitution
+      | _ -> [])
   | None -> []
 
 let check (interface : Interface.Lookups.t) ~find_call_edges (item : Lowered.Item.t) fragment =

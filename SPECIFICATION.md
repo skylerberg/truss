@@ -717,10 +717,13 @@ var longest: view String = words[0]
   in place, so a view of its elements views the argument. A value cannot
   hold a view of a part of itself.
 - **A view implements a trait that its viewed type implements** when every
-  method of the trait takes `self` read-only and takes `Self` only in
-  read-only parameters. So a `view String` is `Equal`, `Hash`, and
-  `Display`, and is a key that looks up a `Map[String, Int64]`. It
-  implements no trait with a `mut self` or `own self` method.
+  method that the viewed type's `impl` writes takes `self` read-only and
+  takes `Self` only in read-only parameters. A method that the `impl`
+  inherits from its trait is compiled for the view, so `Self` in it is the
+  view. So a `view String` is `Equal`, `Hash`, `Display`, and `Ordered`: a
+  `List[view String]` is sorted in place, and a `Map[view String, Int64]`
+  is keyed by views. A view implements no trait whose `impl` writes a
+  method that takes `self` by `mut` or `own`, or that returns `Self`.
 - **`mut` access is never stored.** It has a name only as a `mut` parameter,
   a `mut` loop's variable, or a lambda's `mut` parameter, and lasts for that
   call, iteration, or `provide mut` block. Disjoint ranges of one `List` or

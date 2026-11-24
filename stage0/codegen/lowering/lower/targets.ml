@@ -6,6 +6,19 @@ let resolve_trait_method (context : Definitions.context) substitution
     Interface.Impls.resolve_evidence context.lookups.interface substitution ~self_type ~trait
       evidence
   with
+  | Impl { impl; _ }
+    when Option.is_some
+           (Ground.find_viewed (Monomorphic.ground context.monomorphic substitution self_type))
+         && Mir.Call_edges.inherits_method context.lookups.interface impl ~name ~receiver ->
+      let own = Monomorphic.ground_instantiation context.monomorphic substitution instantiation in
+      let of_trait =
+        Ground.Type (Monomorphic.ground context.monomorphic substitution self_type)
+        :: List.map
+             (Monomorphic.ground_argument context.monomorphic substitution)
+             trait.trait_arguments
+      in
+      ( Path.Method { owner = trait.trait; name; receiver },
+        { own with type_arguments = of_trait @ own.type_arguments } )
   | Impl { impl; substitution = arguments } ->
       let impl_arguments =
         List.map

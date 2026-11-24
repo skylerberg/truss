@@ -45,7 +45,7 @@ val list_no_bounds : bounds
 val list_required_bounds :
   Types.generic list -> Types.substitution -> (Types.ty * Types.trait_reference) list
 
-val reads_self_only : Lookups.t -> Path.t -> bool
+val inherits_method : Types.trait_interface -> Types.impl_interface -> Types.trait_method -> bool
 
 val find_evidence :
   Lookups.t ->
