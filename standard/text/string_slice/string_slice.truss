@@ -501,7 +501,7 @@ internal fn StringSlice.count_byte(self, byte: UInt8) -> UInt64
       invariant block_count <= index - start
       cost allocations == 0
     {
-      block_count += if self.byte(index) == byte { 1 } else { 0 }
+      block_count += if intrinsic.view_at(self.bytes, index: index) == byte { 1 } else { 0 }
     }
     count += intrinsic.convert(block_count)
     start = stop
