@@ -1,4 +1,4 @@
-theorem sorted_between(items: Slice[Int64], first: UInt64, second: UInt64)
+theorem sorted_between(items: view List[Int64], first: UInt64, second: UInt64)
   requires items.is_sorted()
   requires first <= second
   requires second < items.length()
@@ -10,7 +10,7 @@ theorem sorted_between(items: Slice[Int64], first: UInt64, second: UInt64)
   }
 }
 
-theorem sorted_up_to(items: Slice[Int64], last: UInt64)
+theorem sorted_up_to(items: view List[Int64], last: UInt64)
   requires items.is_sorted()
   requires last < items.length()
   ensures forall i in 0..last + 1 => items[i] <= items[last]

@@ -37,7 +37,7 @@ let group_ends tokens ~first ~stop =
 let continues_type_arguments : Token.kind -> bool = function
   | Upper _ | Lower _ | Integer _
   | Punctuation (Comma | Colon | Dot | Equal | Plus | Arrow)
-  | Keyword (Self_type | Fn | Mut | Own | Capability) ->
+  | Keyword (Self_type | Fn | Mut | Own | View | Capability) ->
       true
   | _ -> false
 

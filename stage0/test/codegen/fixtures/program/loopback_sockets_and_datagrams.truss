@@ -1,10 +1,10 @@
 use standard.network
 
-fn say(text: StringSlice) uses Console {
+fn say(text: String) uses Console {
   Console.print_line(text)
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Console, NetworkServer, NetworkClient, Handles
 {
   let loopback = network.SocketAddress(address: network.IpAddress.loopback, port: 0)
@@ -21,12 +21,12 @@ fn main(arguments: Slice[String]) -> ExitCode
         var server = own moved
         say("accepted from the client ${server.peer_address().port == client.local_address().port}")
         let request: List[UInt8] = [112, 105, 110, 103]
-        let _ = mut client.write(request.slice())
+        let _ = mut client.write(request)
         var heard: List[UInt8] = []
         if mut server.read(mut heard, limit: 100) is Ok(count) {
           say("the server read ${count}, first ${heard[0]}")
         }
-        let _ = mut server.write(heard.slice())
+        let _ = mut server.write(heard)
         let _ = mut server.shut_down(network.Direction.Sending)
         var answer: List[UInt8] = []
         if mut client.read(mut answer, limit: 100) is Ok(count) {
@@ -50,7 +50,7 @@ fn main(arguments: Slice[String]) -> ExitCode
     var receiver = own bound
     var sender = own opened
     let message: List[UInt8] = [1, 2, 3]
-    if mut sender.send_to(message.slice(), address: receiver.local_address()) is Ok(sent) {
+    if mut sender.send_to(message, address: receiver.local_address()) is Ok(sent) {
       say("sent ${sent}")
     }
     var packet: List[UInt8] = []

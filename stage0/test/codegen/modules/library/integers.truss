@@ -64,6 +64,37 @@ test "saturating subtraction and multiplication stop at the ends of the type" {
   assert small.saturating_multiply(4) == 12
 }
 
+test "wrapping addition, subtraction, and multiplication wrap in every width" {
+  assert Int8.maximum.wrapping_add(1) == Int8.minimum
+  assert Int8.minimum.wrapping_subtract(1) == Int8.maximum
+  let hundred: Int8 = 100
+  assert hundred.wrapping_multiply(3) == 44
+  assert UInt8.maximum.wrapping_add(1) == 0
+  assert Int16.maximum.wrapping_add(1) == Int16.minimum
+  assert Int16.minimum.wrapping_multiply(-1) == Int16.minimum
+  assert UInt16.maximum.wrapping_multiply(UInt16.maximum) == 1
+  assert Int32.maximum.wrapping_add(1) == Int32.minimum
+  let half: Int32 = 65536
+  assert half.wrapping_multiply(half) == 0
+  assert UInt32.maximum.wrapping_multiply(UInt32.maximum) == 1
+  assert Int64.maximum.wrapping_add(1) == Int64.minimum
+  assert Int64.minimum.wrapping_subtract(1) == Int64.maximum
+  assert Int64.maximum.wrapping_multiply(2) == -2
+  let none: UInt64 = 0
+  assert none.wrapping_subtract(1) == UInt64.maximum
+}
+
+test "a range over every value of a signed type ends at its highest value" {
+  var count: UInt64 = 0
+  var last: Int8 = 0
+  for value in Int8.minimum..=Int8.maximum {
+    count = count.wrapping_add(1)
+    last = value
+  }
+  assert count == 256
+  assert last == Int8.maximum
+}
+
 test "absolute values, negation, and sign handle the lowest value" {
   let minus_five: Int16 = -5
   assert minus_five.absolute() == 5

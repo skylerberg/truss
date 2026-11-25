@@ -1,6 +1,6 @@
 type Player(name: String, score: Int64)
 
-fn best_is_highest(players: Slice[Player]) -> Bool
+fn best_is_highest(players: List[Player]) -> Bool
   requires players.length() > 0
   ensures result
 {

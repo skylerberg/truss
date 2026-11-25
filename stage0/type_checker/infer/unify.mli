@@ -40,6 +40,6 @@ type unknown = Unknown_type of int | Unknown_value of int
 
 val list_unknowns : t -> Types.ty -> unknown list
 val list_argument_unknowns : t -> Types.argument -> unknown list
-val unify : t -> Types.ty -> Types.ty -> bool
-val unify_arguments : t -> Types.argument list -> Types.argument list -> bool
+val unify : ?modulo_views:bool -> t -> Types.ty -> Types.ty -> bool
+val unify_arguments : ?modulo_views:bool -> t -> Types.argument list -> Types.argument list -> bool
 val unify_value : t -> Types.value -> Types.value -> bool

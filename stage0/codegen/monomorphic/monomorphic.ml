@@ -134,7 +134,6 @@ let compute_named_builtin_shape ty (builtin : Language.Builtin_type.t)
   | Never, [] -> Sum []
   | Array, [ Type element; Value count ] -> Array (element, Z.to_int count)
   | Storage, [ Type element ] -> Storage.make_storage_shape element
-  | View, [ Type element ] -> Storage.make_view_shape element
   | Handle, [] -> Builtin_records.Handle.shape
   | Shared, [ Type _ ] -> Builtin_records.Shared.shape
   | Integer, _ -> raise_bug "Integer exists only in specifications"
@@ -170,9 +169,12 @@ let compute_defined_shape context path arguments : Memory_layout.shape =
       | Builtin_type _ -> raise_bug "a built-in type under a path that is not built in"
       | Types.Todo_type -> raise (Todo_type path))
 
-let compute_shape context (ty : Ground.ty) =
-  match (find_builtin_shape ty, ty) with
-  | Some shape, _ -> shape
-  | None, Named { path; arguments } -> compute_defined_shape context path arguments
-  | None, (Never | Function _) ->
-      raise_bug "the unnamed type %s has no built-in shape" (Ground.to_string ty)
+let rec compute_shape context (ty : Ground.ty) =
+  match Ground.find_viewed ty with
+  | Some viewed -> compute_shape context viewed
+  | None -> (
+      match (find_builtin_shape ty, ty) with
+      | Some shape, _ -> shape
+      | None, Named { path; arguments } -> compute_defined_shape context path arguments
+      | None, (Never | Function _) ->
+          raise_bug "the unnamed type %s has no built-in shape" (Ground.to_string ty))

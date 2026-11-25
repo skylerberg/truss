@@ -14,7 +14,6 @@ type t = {
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability_set) list;
   is_in_capability : bool;
-  is_in_impl : bool;
   diagnostics : Catalog.diagnostic list ref;
   named : (Syntax.id * Types.ty) list ref;
 }
@@ -40,7 +39,6 @@ let create_with lookups resolved (scope : _ Environment.scope) ~known_bounds =
     self_associated = scope.self_associated;
     self_capabilities = scope.self_capabilities;
     is_in_capability = false;
-    is_in_impl = false;
     diagnostics = ref [];
     named = ref [];
   }
@@ -173,6 +171,11 @@ let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
       match elaborate_function_type context function_type with
       | Ok function_type -> Types.Function function_type
       | Error report -> Types.Error report)
+  | View_type viewed -> (
+      match elaborate_type context viewed with
+      | (Types.Error _ | Types.Hole) as unknown -> unknown
+      | type_ when Types.is_viewable type_ -> Types.make_view type_
+      | type_ -> report_error_type context (Not_viewable_type { at = Written written.id; type_ }))
   | Type_error -> Types.Error Catalog.reported_elsewhere
 
 and elaborate_self context (at : Core.origin) =
@@ -480,40 +483,13 @@ and elaborate_mode = function
   | Some Syntax.Mut -> Language.Mode.Mut
   | Some Own -> Language.Mode.Own
 
-and elaborate_parameter_type context mode (written : Syntax.type_expression) =
-  let type_ = elaborate_type context written in
-  let report_owning_type ~written_path ~view ~copy ~takes =
-    Types.Error
-      (record_diagnostic context.diagnostics
-         (Read_only_owning_parameter
-            {
-              at = Written written.id;
-              name = Written written_path.Syntax.last.id;
-              written = show_path written_path;
-              view;
-              copy;
-              takes;
-            }))
-  in
-  match (mode, type_, written.kind) with
-  | Language.Mode.Read, Types.Named { path; _ }, Path_type { path = written_path; _ }
-    when not context.is_in_impl ->
-      if Well_known.is List path then
-        report_owning_type ~written_path ~view:"Slice" ~copy:"list"
-          ~takes:"a `List`, an `Array`, and a range of either"
-      else if Well_known.is String path then
-        report_owning_type ~written_path ~view:"StringSlice" ~copy:"string"
-          ~takes:"a `String`, a string literal, and a part of a string"
-      else type_
-  | _ -> type_
-
 and elaborate_function_type context (written : Syntax.function_type) :
     (Types.function_type, Catalog.reported) Stdlib.result =
   let inputs =
     List.map
       (fun (input : Syntax.function_input) ->
         let mode = elaborate_mode input.mode in
-        (mode, elaborate_parameter_type context mode input.type_))
+        (mode, elaborate_type context input.type_))
       written.inputs
   in
   let output =
@@ -876,6 +852,12 @@ let rec split_field_path (value : Syntax.expression) =
       Option.map (fun (root, fields) -> (root, fields @ [ field ])) (split_field_path base)
   | _ -> None
 
+let split_part (value : Syntax.expression) =
+  match value.kind with
+  | Bracket (base, [ Item { kind = Range { start = None; stop = None; _ }; _ } ]) ->
+      Option.map (fun (root, fields) -> (root, fields, true)) (split_field_path base)
+  | _ -> Option.map (fun (root, fields) -> (root, fields, false)) (split_field_path value)
+
 let elaborate_modifies context (signature : Types.signature) (clauses : Syntax.clause list) =
   let report diagnostic = ignore (record_diagnostic context.diagnostics diagnostic) in
   let rec has_index (value : Syntax.expression) =
@@ -892,29 +874,30 @@ let elaborate_modifies context (signature : Types.signature) (clauses : Syntax.c
   in
   let elaborate_entry (value : Syntax.expression) =
     let at : Core.origin = Written value.id in
-    match split_field_path value with
+    match split_part value with
     | None ->
         report
           (if has_index value then Indexed_modified_part { at } else Not_a_modified_part { at });
         None
-    | Some (parameter, names) -> (
+    | Some (parameter, names, is_elements) -> (
         let fields = List.map (fun (name : Syntax.name) -> name.text) names in
+        let part position : Types.modified = { position; field_path = fields; is_elements } in
         match Types.find_parameter_position signature parameter with
         | None ->
             if is_resolved value then report (Modified_non_parameter { at; name = parameter });
             None
         | Some position when (Types.read_parameter_at signature position).mode <> Mut ->
-            report (Read_only_part { at; parameter; fields });
+            report (Read_only_part { at; parameter; part = part position });
             None
-        | Some _ when fields = [] ->
+        | Some _ when fields = [] && not is_elements ->
             report (Modified_whole_parameter { at; parameter });
             None
-        | Some position -> Some (value, parameter, { Types.position; field_path = fields }))
+        | Some position -> Some (value, parameter, part position))
   in
   let is_contained ~index (part : Types.modified) ~other_index (other : Types.modified) =
-    other_index <> index && other.position = part.position
-    && Types.is_field_path_prefix other.field_path part.field_path
-    && (other.field_path <> part.field_path || other_index < index)
+    other_index <> index
+    && Types.is_part_within ~container:other part
+    && (other <> part || other_index < index)
   in
   List.concat_map
     (fun (clause : Syntax.clause) ->
@@ -939,8 +922,8 @@ let elaborate_modifies context (signature : Types.signature) (clauses : Syntax.c
                            {
                              at = Written value.id;
                              parameter;
-                             fields = part.field_path;
-                             container = container.field_path;
+                             part;
+                             container;
                              siblings =
                                Catalog.read_entry_siblings
                                  (List.map
@@ -975,7 +958,7 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
               {
                 Types.name = name.text;
                 mode;
-                type_ = elaborate_parameter_type context mode type_;
+                type_ = elaborate_type context type_;
                 has_default = Option.is_some default;
               }
         | Self_parameter _ | Parameter_error -> None)
@@ -1401,16 +1384,15 @@ let elaborate_member (lookups : Lookups.t) ~path resolved (definition : Syntax.d
   let context = create_declared lookups resolved header.container_scope in
   match definition.kind with
   | Function { signature; _ } | Method_declaration signature ->
-      let is_in_capability, is_in_impl =
+      let is_in_capability =
         match header.container with
-        | Capability_parts -> (true, false)
-        | Trait_parts _ -> (false, false)
-        | Impl_parts _ -> (false, true)
+        | Capability_parts -> true
+        | Trait_parts _ | Impl_parts _ -> false
       in
       make_elaborated_interface context
         (Function_interface
            (elaborate_signature
-              { context with self_capabilities = []; is_in_capability; is_in_impl }
+              { context with self_capabilities = []; is_in_capability }
               ~owner:path ~head:[] ~self_type:header.container_scope.self_type signature))
   | _ -> make_elaborated_interface context (Error_interface Catalog.reported_elsewhere)
 

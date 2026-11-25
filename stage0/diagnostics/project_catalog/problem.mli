@@ -28,6 +28,8 @@ type manifest =
   | Unknown_package_key of string
   | Bad_time_limit
   | Unknown_test_key of string
+  | Unknown_build_key of string
+  | Not_an_x86_64_level
   | Unknown_project_key of string
   | Unnamed_package
   | Dependencies_without_package
@@ -67,6 +69,8 @@ type difference =
     }
   | Unused of Path.package
 
+type project_setting = Time_limit | X86_64_level
+
 type t =
   | Manifest of manifest
   | Lock of lock
@@ -80,7 +84,7 @@ type t =
     }
   | Project_toolchain of { name : Path.package; truss : string; toolchain : string }
   | Missing_truss_version of { toolchain : string }
-  | Nested_time_limit
+  | Nested_project_setting of project_setting
   | Standard_name
   | Name_in_use of { name : Path.package; manifest : string }
   | Owner_named_like of { name : string; other : Path.package }

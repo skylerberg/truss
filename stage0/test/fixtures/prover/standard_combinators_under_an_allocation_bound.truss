@@ -19,25 +19,26 @@ fn recovered(value: Result[Int64, Bool]) -> Int64
   value.map(fn(inner) { inner / 2 }).map_error(fn(error) { !error }).unwrap_or_else(fn(error) { if error { 1 } else { 0 } })
 }
 
-fn has_seven(items: Slice[Int64]) -> Bool
+fn has_seven(items: List[Int64]) -> Bool
   cost allocations <= 0
 {
   items.contains(7)
 }
 
-fn first_positive(items: Slice[Int64]) -> Option[UInt64]
+fn first_positive(items: List[Int64]) -> Option[UInt64]
   cost allocations <= 0
 {
   items.find_index(fn(item) { item > 0 })
 }
 
-fn total(items: Slice[Int64]) -> Int64
+fn total(items: List[Int64]) -> Int64
   cost allocations <= 0
 {
   items.fold(0, combine: fn(sum, item) { sum.wrapping_add(item) })
 }
 
-fn halve_all(items: mut Slice[Int64])
+fn halve_all(items: mut List[Int64])
+  modifies items[..]
   cost allocations <= 0
 {
   mut items.update_each(fn(item) { item = item / 2 })

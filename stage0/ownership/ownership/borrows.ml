@@ -326,14 +326,15 @@ let check_body context (actions : Actions.t) moves =
               | None, true, _ ->
                   Context.report context
                     (Self_referential_store { at; root = Context.find_root context place.root })
-              | None, false, Some parameter ->
+              | None, false, Some parameter_view ->
+                  let parameter = (Actions.extract_viewed_place parameter_view).root in
                   Context.report context
                     (Stored_view_of_borrowed
                        {
                          at;
-                         parameter =
-                           Context.find_root context (Actions.extract_viewed_place parameter).root;
+                         parameter = Context.find_root context parameter;
                          holder = Context.find_root context place.root;
+                         declaration = Context.find_view_declaration context parameter;
                        })
               | None, false, None -> ())
       | Yield_point { views; parts; forwarded } -> (

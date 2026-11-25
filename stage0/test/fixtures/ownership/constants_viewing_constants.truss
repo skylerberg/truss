@@ -1,9 +1,9 @@
 let numbers: List[Int64] = [1, 2, 3]
-let rest: Slice[Int64] = numbers[1..3]
-let name: StringSlice = "truss"
+let rest: view List[Int64] = numbers[1..3]
+let name: view String = "truss"
 
-fn pick(items: Slice[Int64]) -> Slice[Int64] {
+fn pick(items: List[Int64]) -> view List[Int64] {
   items[1..2]
 }
 
-let picked: Slice[Int64] = pick(numbers)
+let picked: view List[Int64] = pick(numbers)

@@ -1,4 +1,4 @@
-fn f(items: Slice[Int64], index: UInt64) -> Int64
+fn f(items: List[Int64], index: UInt64) -> Int64
   requires index < items.length()
 {
   items[index]

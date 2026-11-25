@@ -11,18 +11,13 @@ type decision = {
   declares : bool;
 }
 
-type copy_edit =
-  | Rename_copy of Core.origin
-  | Append_copy of Core.origin
-  | Wrap_copy of Core.origin
-
-type view_copy = { copy_method : string; edit : copy_edit }
+type view_copy = Append_copy of Core.origin | Wrap_copy of Core.origin
 type widening = { side : side; operand : Core.origin; target : Types.ty }
 type impl_need = { needing : Types.ty; condition : Types.trait_reference }
 
 type unmet_bound =
   | Does_not_hold
-  | Slice_lacks_mut_self
+  | Does_not_hold_for_view
   | Associated_differs of { name : string; found : Types.ty }
 
 type mismatch =
@@ -60,7 +55,7 @@ type bare_owner =
   | Construction_owner of owner
 
 type method_owner =
-  | Type_owner of { type_ : Types.ty; view : Types.ty option }
+  | Type_owner of { type_ : Types.ty; list : Types.ty option }
   | Named_owner of string
   | Path_owner of Path.t
 
@@ -78,7 +73,6 @@ type not_callee =
 
 type not_data = Function_type | Handle | Shared_state
 type empty_literal = Empty_list | Empty_map
-type stored_slice = Held_by of string | In_field | In_element | Lent_by_a_call
 type integer_operator = Bitwise | Shift | Complement
 type joined_piece = Fragment of Core.origin | Interpolated of Core.origin
 type specification_call = Theorem_call | Mentions of Types.ty | Specification_function_call
@@ -256,9 +250,7 @@ type t =
       traits : Types.trait_reference list;
     }
   | Index_not_mutable of { at : Core.origin; by : mutation; self_type : Types.ty; assigns : bool }
-  | Stored_slice_written of { at : Core.origin; by : mutation; stored : stored_slice }
-  | Slice_parameter_assigned of { at : Core.origin; parameter : string }
-  | Slice_passed_to_generic of { at : Core.origin }
+  | View_written of { at : Core.origin; by : mutation; view : Core.origin }
   | Mutation_in_formula of { at : Core.origin; by : mutation }
   | Captured_mutation of { at : Core.origin; by : mutation; name : string }
   | Read_only_mutation of { at : Core.origin; by : mutation; name : string }
@@ -286,7 +278,9 @@ type t =
   | Opaque_field_read of { at : Core.origin; type_ : Types.ty }
   | Method_as_field of { at : Core.origin; name : string }
   | Lending_function_value of { at : Core.origin }
-  | No_member of { at : Core.origin; type_ : Types.ty; name : string; view : string option }
+  | View_passed_mut of { at : Core.origin }
+  | View_receiver of { at : Core.origin; name : string; receivers : Path.receiver list }
+  | No_member of { at : Core.origin; type_ : Types.ty; name : string; list : string option }
   | Type_argument_count of { at : Core.origin; expected : int; given : int }
   | Type_for_value_argument of { at : Core.origin }
   | Value_for_type_argument of { at : Core.origin }
@@ -354,7 +348,7 @@ type t =
   | Range_not_integer of { at : Core.origin; owner : range_owner; element : Types.ty }
   | Unused_value of { at : Core.origin; type_ : Types.ty }
   | Let_else_falls_through of { at : Core.origin }
-  | Not_iterable_loop of { at : Core.origin; mode : Language.Mode.t; type_ : shown }
+  | Not_iterable_loop of { at : Core.origin; mode : Language.Mode.t; is_view : bool; type_ : shown }
   | Cursor_not_cursor of { at : Core.origin; type_ : Types.ty; cursor : Types.ty }
   | Not_displayable of { at : Core.origin; type_ : Types.ty }
   | Template_part_conversion of {

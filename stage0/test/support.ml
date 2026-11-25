@@ -250,7 +250,11 @@ let prove database file = Database.prove database (In_files [ file ])
 
 let c_compiler =
   lazy
-    (match C_compiler.find ~objects:(Cache.make_objects_directory (Workspace.open_cache ())) () with
+    (match
+       C_compiler.find ~x86_64_level:X86_64_level.default
+         ~objects:(Cache.make_objects_directory (Workspace.open_cache ()))
+         ()
+     with
     | Ok c_compiler -> c_compiler
     | Error message ->
         prerr_endline message;

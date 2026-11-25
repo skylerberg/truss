@@ -1,4 +1,4 @@
-type holder = Own | Of_view of Types.ty
+type holder = Own | Of_list of Types.ty
 
 type clash =
   | Same_receiver of { receiver : Path.receiver; trait : Types.trait_reference }

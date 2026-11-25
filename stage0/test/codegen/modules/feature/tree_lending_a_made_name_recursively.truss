@@ -15,7 +15,7 @@ fn Tree.leftmost_name(self) lends String {
   }
 }
 
-fn Tree.path_to_leftmost(self, prefix: StringSlice) lends String {
+fn Tree.path_to_leftmost(self, prefix: String) lends String {
   match self {
     Leaf => "${prefix}."
     Node(left, name, ..) => left.path_to_leftmost("${prefix}/${name}")

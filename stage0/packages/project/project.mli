@@ -21,6 +21,7 @@ type layout = {
   files : source_file list;
   problems : problem list;
   time_limit_ms : int;
+  x86_64_level : X86_64_level.t;
 }
 
 type selection = {

@@ -135,18 +135,17 @@ let check_real_implementations (state : Checking.state) (resolved : Resolve.reso
 
 let check_main state resolved (clauses : Syntax.clause list) (signature : Types.signature)
     (span : Core.origin) =
-  let slice_of_string =
+  let list_of_strings =
     match signature.parameters with
     | [
      {
        name = "arguments";
        mode = Read;
-       type_ =
-         Named { path = slice; arguments = [ Type (Named { path = string; arguments = [] }) ] };
+       type_ = Named { path = list; arguments = [ Type (Named { path = string; arguments = [] }) ] };
        has_default = false;
      };
     ] ->
-        Well_known.is Slice slice && Well_known.is String string
+        Well_known.is List list && Well_known.is String string
     | _ -> false
   in
   let exit_code =
@@ -154,7 +153,7 @@ let check_main state resolved (clauses : Syntax.clause list) (signature : Types.
     | Returns (Named { path; arguments = [] }) -> Well_known.is Exit_code path
     | _ -> false
   in
-  if not (slice_of_string && exit_code && signature.generics = [] && signature.receiver = None) then
+  if not (list_of_strings && exit_code && signature.generics = [] && signature.receiver = None) then
     Checking.report state (Main_signature { at = span });
   check_real_implementations state resolved ~recipient:Catalog.Typing.Main
     (List.concat_map
@@ -481,17 +480,25 @@ let check_modifies (state : Checking.state) (written : Syntax.signature)
     (signature : Types.signature) =
   let package = Path.locate_package state.key.path in
   let check_entry (value : Syntax.expression) =
-    match Elaborator.split_field_path value with
+    match Elaborator.split_part value with
     | None -> ()
-    | Some (parameter, names) -> (
+    | Some (parameter, names, is_elements) -> (
         let fields = List.map (fun (name : Syntax.name) -> name.text) names in
         match Types.find_parameter_position signature parameter with
-        | Some position when List.mem { Types.position; field_path = fields } signature.modifies
-          -> (
+        | Some position
+          when List.mem { Types.position; field_path = fields; is_elements } signature.modifies -> (
             match
               Definition.find_field_path_type state.lookups ~package
                 (Types.read_parameter_at signature position).type_ fields
             with
+            | Ok type_
+              when is_elements
+                   && not
+                        (Types.is_error type_
+                        || Option.is_some (Types.find_sequence_element type_)
+                        || Types.is_builtin Storage type_) ->
+                Checking.report state
+                  (Part_without_elements { at = Written value.id; parameter; fields; type_ })
             | Ok _ | Error Broken_type -> ()
             | Error (No_fields { type_; prefix }) ->
                 Checking.report state

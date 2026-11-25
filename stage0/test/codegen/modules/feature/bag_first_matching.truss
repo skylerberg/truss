@@ -1,9 +1,9 @@
 type Bag(items: List[String])
 
-fn Bag.first_matching(self, prefix: StringSlice) lends Option[String] {
-  let wanted = prefix.to_string()
+fn Bag.first_matching(self, prefix: String) lends Option[String] {
+  let wanted = prefix.copy()
   for item in self.items {
-    if item.slice().starts_with(wanted.slice()) {
+    if item.starts_with(wanted) {
       return Some(item)
     }
   }

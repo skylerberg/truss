@@ -1,0 +1,2051 @@
+use standard.intrinsic
+use standard.core
+use standard.specification
+
+public fn List[Element].is_empty(self) -> Bool
+  ensures result == (self.length() == 0)
+  cost time O(1)
+{
+  self.length() == 0
+}
+
+public fn List[Element].get(self, index: UInt64) lends Option[Element]
+
+  ensures (result is Some(_)) == (index < self.length())
+  ensures !(result is Some(element) && !identical(element, self.model()[index]))
+  cost time O(1)
+{
+  if index < self.length() {
+    Some(self[index])
+  } else {
+    None
+  }
+}
+
+public fn List[Element].first(self) lends Option[Element]
+
+  ensures (result is Some(_)) == (self.length() > 0)
+  ensures !(result is Some(element) && !identical(element, self.model()[0]))
+  cost time O(1)
+{
+  if self.length() > 0 {
+    Some(self[0])
+  } else {
+    None
+  }
+}
+
+public fn List[Element].last(self) lends Option[Element]
+
+  ensures (result is Some(_)) == (self.length() > 0)
+  ensures !(result is Some(element) && !identical(element, self.model()[self.length() - 1]))
+  cost time O(1)
+{
+  if self.length() > 0 {
+    Some(self[self.length() - 1])
+  } else {
+    None
+  }
+}
+
+public fn List[Element].split_first(self) lends Option[SplitFirst[Element]]
+
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(1)
+{
+  if self.length() > 0 {
+    Some(SplitFirst(first: self[0], rest: self[1..]))
+  } else {
+    None
+  }
+}
+
+public fn List[Element].split_last(self) lends Option[SplitLast[Element]]
+
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(1)
+{
+  if self.length() > 0 {
+    Some(SplitLast(last: self[self.length() - 1], rest: self[..self.length() - 1]))
+  } else {
+    None
+  }
+}
+
+public fn List[Element].split_at(self, index: UInt64) -> core.Pair[view List[Element], view List[Element]]
+  uses Panic unless index <= self.length()
+  ensures result.first.length() == index
+  ensures result.second.length() == self.length() - index
+  cost time O(1)
+{
+  if index > self.length() {
+    Panic.crash("range out of bounds")
+  }
+  core.Pair(
+    first: self[..index],
+    second: self[index..],
+  )
+}
+
+public fn List[Element: Equal].contains(self, item: Element) -> Bool
+
+  ensures result == (exists i in 0..self.length() => self.model()[i] == item)
+  cost time O(self.length() * time(Element.equal))
+  cost allocations <= self.length() * allocations(Element.equal)
+{
+  var index: UInt64 = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant forall i in 0..index => !(self.model()[i] == item)
+    decreases self.length() - index
+    cost time O(index * time(Element.equal))
+  {
+    if self[index] == item {
+      return true
+    }
+    index += 1
+  }
+  false
+}
+
+public fn List[Element: Equal].index_of(self, item: Element) -> Option[UInt64]
+
+  ensures match result {
+    Some(index) => index < self.length() && self.model()[index] == item
+      && (forall i in 0..index => !(self.model()[i] == item))
+    None => !self.contains(item)
+  }
+  cost time O(self.length() * time(Element.equal))
+  cost allocations <= self.length() * allocations(Element.equal)
+{
+  var index: UInt64 = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant forall i in 0..index => !(self.model()[i] == item)
+    decreases self.length() - index
+    cost time O(index * time(Element.equal))
+  {
+    if self[index] == item {
+      return Some(index)
+    }
+    index += 1
+  }
+  None
+}
+
+public fn List[Element: Equal].last_index_of(self, item: Element) -> Option[UInt64]
+
+  ensures match result {
+    Some(index) => index < self.length() && self.model()[index] == item
+      && (forall i: UInt64 => index < i && i < self.length() ==> !(self.model()[i] == item))
+    None => !self.contains(item)
+  }
+  cost time O(self.length() * time(Element.equal))
+  cost allocations <= self.length() * allocations(Element.equal)
+{
+  var index = self.length()
+  while index > 0
+    invariant index <= self.length()
+    invariant forall i in index..self.length() => !(self.model()[i] == item)
+    decreases index
+    cost time O((self.length() - index) * time(Element.equal))
+  {
+    index -= 1
+    if self[index] == item {
+      return Some(index)
+    }
+  }
+  None
+}
+
+public fn List[Element].find_index(
+  self,
+  predicate: (fn(element: Element) -> Bool uses generic Granted requires self.model().contains(element)),
+) -> Option[UInt64]
+  uses generic Granted
+  ensures match result {
+    Some(index) => index < self.length() && predicate.ensures(self.model()[index], true)
+      && (forall i in 0..index => predicate.ensures(self.model()[i], false))
+    None => forall i in 0..self.length() => predicate.ensures(self.model()[i], false)
+  }
+  cost time O(self.length() * time(predicate))
+  cost allocations <= self.length() * allocations(predicate)
+{
+  var index: UInt64 = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant forall i in 0..index => predicate.ensures(self.model()[i], false)
+    decreases self.length() - index
+    cost time O(index * time(predicate))
+  {
+    if predicate(self[index]) {
+      return Some(index)
+    }
+    index += 1
+  }
+  None
+}
+
+public fn List[Element: Equal].starts_with(self, prefix: List[Element]) -> Bool
+
+  ensures result == (prefix.length() <= self.length()
+    && forall i in 0..prefix.length() => self.model()[i] == prefix.model()[i])
+  cost time O(prefix.length() * time(Element.equal))
+  cost allocations <= prefix.length() * allocations(Element.equal)
+{
+  if prefix.length() > self.length() {
+    return false
+  }
+  var index: UInt64 = 0
+  while index < prefix.length()
+    invariant index <= prefix.length()
+    invariant forall i in 0..index => self.model()[i] == prefix.model()[i]
+    decreases prefix.length() - index
+    cost time O(index * time(Element.equal))
+  {
+    if self[index] != prefix[index] {
+      return false
+    }
+    index += 1
+  }
+  true
+}
+
+public fn List[Element: Equal].ends_with(self, suffix: List[Element]) -> Bool
+
+  ensures result == (suffix.length() <= self.length()
+    && forall i in 0..suffix.length() => self.model()[self.length() - suffix.length() + i] == suffix.model()[i])
+  cost time O(suffix.length() * time(Element.equal))
+  cost allocations <= suffix.length() * allocations(Element.equal)
+{
+  if suffix.length() > self.length() {
+    return false
+  }
+  let start = self.length() - suffix.length()
+  var index: UInt64 = 0
+  while index < suffix.length()
+    invariant index <= suffix.length()
+    invariant forall i in 0..index => self.model()[start + i] == suffix.model()[i]
+    decreases suffix.length() - index
+    cost time O(index * time(Element.equal))
+  {
+    if self[start + index] != suffix[index] {
+      return false
+    }
+    index += 1
+  }
+  true
+}
+
+fn failure_table[Element: Equal](needle: List[Element]) -> List[UInt64]
+  ensures result.length() == needle.length()
+  ensures forall i in 0..result.length() => result.model()[i] <= i
+  cost time O(needle.length() * time(Element.equal))
+{
+  var table: intrinsic.Storage[UInt64] = intrinsic.storage_with_capacity(needle.length())
+  if needle.length() == 0 {
+    return List(storage: own table)
+  }
+  intrinsic.storage_push(mut table, value: 0)
+  var matched: UInt64 = 0
+  var index: UInt64 = 1
+  while index < needle.length()
+    invariant 1 <= index
+    invariant index <= needle.length()
+    invariant matched < index
+    invariant intrinsic.storage_length(table) == index
+    invariant intrinsic.storage_capacity(table) == needle.length()
+    invariant forall i in 0..index => intrinsic.storage_model(table)[i] <= i
+    decreases needle.length() - index
+    cost time O((4 * index - matched) * time(Element.equal))
+  {
+    let before = matched
+    while matched > 0 && needle[index] != needle[matched]
+      invariant matched <= before
+      decreases matched
+      cost time O((before - matched + 1) * time(Element.equal))
+    {
+      matched = intrinsic.storage_at(table, index: matched - 1)
+    }
+    if needle[index] == needle[matched] {
+      matched += 1
+    }
+    intrinsic.storage_push(mut table, value: matched)
+    index += 1
+  }
+  List(storage: own table)
+}
+
+fn matched_after[Element: Equal](
+  haystack: List[Element],
+  needle: List[Element],
+  table: List[UInt64],
+  matched: UInt64,
+  index: UInt64,
+) -> UInt64
+  requires index < haystack.length()
+  requires matched < needle.length()
+  requires table.length() == needle.length()
+  requires forall i in 0..table.length() => table.model()[i] <= i
+  ensures result <= matched + 1
+  ensures result <= needle.length()
+  cost time O((matched + 3 - result) * time(Element.equal))
+{
+  var current = matched
+  while current > 0 && haystack[index] != needle[current]
+    invariant current <= matched
+    decreases current
+    cost time O((matched - current + 1) * time(Element.equal))
+  {
+    current = table[current - 1]
+  }
+  if haystack[index] == needle[current] { current + 1 } else { current }
+}
+
+fn find_with_table[Element: Equal](haystack: List[Element], needle: List[Element], table: List[UInt64]) -> Option[UInt64]
+  requires needle.length() > 0
+  requires table.length() == needle.length()
+  requires forall i in 0..table.length() => table.model()[i] <= i
+  ensures match result {
+    Some(index) => index + needle.length() <= haystack.length()
+    None => true
+  }
+  cost time O(haystack.length() * time(Element.equal))
+{
+  var has_match = false
+  var first: UInt64 = 0
+  var matched: UInt64 = 0
+  var index: UInt64 = 0
+  while index < haystack.length() && !has_match
+    invariant index <= haystack.length()
+    invariant matched < needle.length()
+    invariant matched <= index
+    invariant has_match ==> first + needle.length() <= haystack.length()
+    decreases haystack.length() - index
+    cost time O((4 * index - matched) * time(Element.equal))
+  {
+    matched = matched_after(haystack, needle: needle, table: table, matched: matched, index: index)
+    index += 1
+    if matched == needle.length() {
+      has_match = true
+      first = index - matched
+      matched = table[matched - 1]
+    }
+  }
+  if has_match { Some(first) } else { None }
+}
+
+public fn List[Element: Equal].find_slice(self, needle: List[Element]) -> Option[UInt64]
+  ensures match result {
+    Some(index) => index + needle.length() <= self.length()
+    None => true
+  }
+  cost time O(self.length() * time(Element.equal) + needle.length() * time(Element.equal))
+{
+  if needle.length() == 0 {
+    return Some(0)
+  }
+  let table = failure_table(needle)
+  find_with_table(self, needle: needle, table: table)
+}
+
+public fn List[Element: Ordered].is_sorted(self) -> Bool
+  ensures result == (forall index in 1..self.length() => self[index - 1] <= self[index])
+  cost time O(1 + self.length() * time(Element.compare))
+{
+  var index: UInt64 = 1
+  while index < self.length()
+    invariant 1 <= index
+    invariant index - 1 <= self.length()
+    invariant forall i in 1..index => i < self.length() ==> self[i - 1] <= self[i]
+    decreases self.length() - index
+    cost time O((index - 1) * time(Element.compare))
+  {
+    if !(self[index - 1] <= self[index]) {
+      return false
+    }
+    index += 1
+  }
+  true
+}
+
+theorem sorted_between[Element: Ordered](items: view List[Element], first: UInt64, second: UInt64)
+  requires items.is_sorted()
+  requires first <= second
+  requires second < items.length()
+  ensures items[first] <= items[second]
+  decreases second - first
+{
+  if first < second {
+    sorted_between(items, first: first, second: second - 1)
+  }
+}
+
+theorem sorted_below[Element: Ordered](items: view List[Element], target: Element, last: UInt64)
+  requires items.is_sorted()
+  requires last < items.length()
+  requires items[last] < target
+  ensures forall i in 0..last + 1 => items[i] < target
+{
+  assert forall i in 0..last + 1 => {
+    sorted_between(items, first: i, second: last)
+    items[i] < target
+  }
+}
+
+theorem sorted_above[Element: Ordered](items: view List[Element], target: Element, first: UInt64)
+  requires items.is_sorted()
+  requires first < items.length()
+  requires target < items[first]
+  ensures forall i in first..items.length() => target < items[i]
+{
+  assert forall i in first..items.length() => {
+    sorted_between(items, first: first, second: i)
+    target < items[i]
+  }
+}
+
+public fn List[Element: Ordered].binary_search(self, target: Element) -> Option[UInt64]
+  requires self.is_sorted()
+  ensures match result {
+    Some(index) => index < self.length() && self[index] == target
+    None => !self.contains(target)
+  }
+  cost time O(log(self.length()) * time(Element.compare))
+{
+  var low: UInt64 = 0
+  var high = self.length()
+  while low < high
+    invariant low <= high
+    invariant high <= self.length()
+    invariant forall i in 0..low => !(self.model()[i] == target)
+    invariant forall i in high..self.length() => !(self.model()[i] == target)
+    decreases high - low
+    cost time O((log(self.length()) - log(high - low)) * time(Element.compare))
+  {
+    let middle = low + (high - low) / 2
+    match self[middle].compare(target) {
+      Less => {
+        proof {
+          sorted_below(self, target: target, last: middle)
+        }
+        low = middle + 1
+      }
+      Greater => {
+        proof {
+          sorted_above(self, target: target, first: middle)
+        }
+        high = middle
+      }
+      Equal => {
+        return Some(middle)
+      }
+    }
+  }
+  None
+}
+
+public fn List[Element].partition_point(self, before: fn(Element) -> Bool) -> UInt64
+  requires forall i in 0..self.length() => forall j in i..self.length() =>
+    before(self.model()[j]) ==> before(self.model()[i])
+  ensures result <= self.length()
+  ensures forall i in 0..result => before(self.model()[i])
+  ensures forall i in result..self.length() => !before(self.model()[i])
+  cost time O(log(self.length()) * time(before))
+{
+  var low: UInt64 = 0
+  var high = self.length()
+  while low < high
+    invariant low <= high
+    invariant high <= self.length()
+    invariant forall i in 0..low => before(self.model()[i])
+    invariant forall i in high..self.length() => !before(self.model()[i])
+    decreases high - low
+    cost time O((log(self.length()) - log(high - low)) * time(before))
+  {
+    let middle = low + (high - low) / 2
+    if before(self[middle]) {
+      low = middle + 1
+    } else {
+      high = middle
+    }
+  }
+  low
+}
+
+public fn List[Element: Ordered].minimum(self) lends Option[Element]
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(self.length() * time(Element.compare))
+{
+  if self.length() == 0 {
+    None
+  } else {
+    var best: UInt64 = 0
+    for index in 1..self.length()
+      invariant best < self.length()
+    {
+      if self[index] < self[best] {
+        best = index
+      }
+    }
+    Some(self[best])
+  }
+}
+
+public fn List[Element: Ordered].maximum(self) lends Option[Element]
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(self.length() * time(Element.compare))
+{
+  if self.length() == 0 {
+    None
+  } else {
+    var best: UInt64 = 0
+    for index in 1..self.length()
+      invariant best < self.length()
+    {
+      if self[index] > self[best] {
+        best = index
+      }
+    }
+    Some(self[best])
+  }
+}
+
+public fn List[Element: Copyable].to_list(self) -> List[Element]
+  ensures identical(result.model(), self.model())
+  cost time O(self.length() * time(Element.copy))
+  cost allocations <= 1 + self.length() * allocations(Element.copy)
+{
+  var copy: intrinsic.Storage[Element] = intrinsic.storage_with_capacity(self.length())
+  for index in 0..self.length()
+    invariant intrinsic.storage_length(copy) == index
+    invariant intrinsic.storage_capacity(copy) == self.length()
+    invariant forall i in 0..index =>
+      identical(intrinsic.storage_model(copy)[i], self.model()[i])
+    cost allocations <= index * allocations(Element.copy)
+  {
+    intrinsic.storage_push(mut copy, value: self[index].copy())
+  }
+  List(storage: own copy)
+}
+
+public fn List[Element: Copyable].filter(
+  self,
+  keep: (fn(element: Element) -> Bool uses generic Granted requires self.model().contains(element)),
+) -> List[Element]
+  uses generic Granted
+  ensures result.length() <= self.length()
+  ensures forall i in 0..result.length() => keep.ensures(result.model()[i], true)
+  cost time O(self.length() * (time(keep) + time(Element.copy)))
+{
+  var retained: intrinsic.Storage[Element] = intrinsic.storage_with_capacity(self.length())
+  for index in 0..self.length()
+    invariant intrinsic.storage_length(retained) <= index
+    invariant intrinsic.storage_capacity(retained) == self.length()
+    invariant forall i in 0..intrinsic.storage_length(retained) =>
+      keep.ensures(intrinsic.storage_model(retained)[i], true)
+  {
+    if keep(self[index]) {
+      intrinsic.storage_push(mut retained, value: self[index].copy())
+    }
+  }
+  List(storage: own retained)
+}
+
+public fn List[Element: Ordered + Copyable].sorted(self) -> List[Element]
+  ensures result.length() == self.length()
+  ensures result.is_sorted()
+  cost time O(self.length() * time(Element.copy) + self.length() * log(self.length()) * time(Element.compare))
+{
+  var copy = self.to_list()
+  mut copy.sort()
+  copy
+}
+
+public fn List[Element: Copyable].repeated(self, times: UInt64) -> List[Element]
+  ensures result.length() == self.length() * times
+  cost time O(self.length() * times * time(Element.copy))
+{
+  if self.length() == 0 || times == 0 {
+    return []
+  }
+  match self.length().checked_multiply(times) {
+    Some(total) => {
+      var elements: intrinsic.Storage[Element] = intrinsic.storage_with_capacity(total)
+      for position in 0..total
+        invariant intrinsic.storage_length(elements) == position
+        invariant intrinsic.storage_capacity(elements) == total
+      {
+        intrinsic.storage_push(mut elements, value: self[position % self.length()].copy())
+      }
+      List(storage: own elements)
+    }
+    None => intrinsic.crash("a list cannot hold that many elements")
+  }
+}
+
+public fn List[Element: Display].join(self, separator: String) -> String
+{
+  var output = ""
+  var index: UInt64 = 0
+  while index < self.length()
+    invariant index <= self.length()
+    decreases self.length() - index
+  {
+    if index > 0 {
+      mut output.push(separator)
+    }
+    self[index].display(mut output)
+    index += 1
+  }
+  output
+}
+
+public fn List[Element].enumerate(self) -> Enumerated[Element]
+  ensures result.count() == self.length()
+  cost time O(1)
+  cost allocations == 0
+{
+  Enumerated(elements: self)
+}
+
+public fn List[Element].reversed(self) -> Reversed[Element]
+  ensures result.count() == self.length()
+  cost time O(1)
+  cost allocations == 0
+{
+  Reversed(elements: self)
+}
+
+public fn List[Element].windows(self, size: UInt64) -> Windows[Element]
+  uses Panic unless size > 0
+  ensures result.count() <= self.length()
+  cost time O(1)
+  cost allocations == 0
+{
+  if size == 0 {
+    Panic.crash("the size is zero")
+  }
+  Windows(elements: self, size: size)
+}
+
+public fn List[Element].chunks(self, size: UInt64) -> Chunks[Element]
+  uses Panic unless size > 0
+  ensures result.count() <= self.length()
+  cost time O(1)
+  cost allocations == 0
+{
+  if size == 0 {
+    Panic.crash("the size is zero")
+  }
+  Chunks(elements: self, size: size)
+}
+
+public fn List[Element: Equal].split(self, separator: Element) -> List[view List[Element]]
+  ensures result.length() <= self.length() + 1
+{
+  var parts: List[view List[Element]] = []
+  var start: UInt64 = 0
+  var index: UInt64 = 0
+  while index < self.length()
+    invariant start <= index
+    invariant index <= self.length()
+    invariant parts.length() <= index
+    decreases self.length() - index
+  {
+    if self[index] == separator {
+      mut parts.push(self[start..index])
+      start = index + 1
+    }
+    index += 1
+  }
+  mut parts.push(self[start..])
+  parts
+}
+
+public fn List[Element].zip[Other](self, other: List[Other]) -> Zipped[Element, Other]
+  ensures result.count() <= self.length()
+  ensures result.count() <= other.length()
+  cost time O(1)
+  cost allocations == 0
+{
+  Zipped(first: self, second: other)
+}
+
+public fn List[Element].swap(mut self, first: UInt64, second: UInt64)
+  modifies self[..]
+  uses Panic unless first < self.length() && second < self.length()
+  ensures identical(self.model()[first], old(self.model())[second])
+  ensures identical(self.model()[second], old(self.model())[first])
+  ensures forall i in 0..self.length() =>
+    i == first || i == second || identical(self.model()[i], old(self.model())[i])
+  ensures self.model().is_permutation_of(old(self.model()))
+  cost time O(1)
+  cost amortized time O(1)
+  cost allocations == 0
+{
+  if first >= self.length() || second >= self.length() {
+    Panic.crash("index out of bounds")
+  }
+  intrinsic.storage_swap(mut self.storage, first: first, second: second)
+}
+
+internal fn List[Element].reverse_between(mut self, start: UInt64, stop: UInt64)
+  modifies self[..]
+  requires start <= stop
+  requires stop <= self.length()
+  ensures forall i in start..stop => identical(self.model()[i], old(self.model())[start + stop - 1 - i])
+  ensures forall i in 0..start => identical(self.model()[i], old(self.model())[i])
+  ensures forall i in stop..self.length() => identical(self.model()[i], old(self.model())[i])
+  ensures self.model().is_permutation_of(old(self.model()))
+  cost time O(stop - start)
+{
+  var low = start
+  var high = stop
+  while low + 1 < high
+    invariant self.length() == old(self.length())
+    invariant start <= low
+    invariant high <= stop
+    invariant low <= high
+    invariant low + high == start + stop
+    invariant forall i in start..low => identical(self.model()[i], old(self.model())[start + stop - 1 - i])
+    invariant forall i in high..stop => identical(self.model()[i], old(self.model())[start + stop - 1 - i])
+    invariant forall i in low..high => identical(self.model()[i], old(self.model())[i])
+    invariant forall i in 0..start => identical(self.model()[i], old(self.model())[i])
+    invariant forall i in stop..self.length() => identical(self.model()[i], old(self.model())[i])
+    invariant self.model().is_permutation_of(old(self.model()))
+    decreases high - low
+    cost time O(low - start)
+  {
+    high -= 1
+    mut self.swap(low, second: high)
+    low += 1
+  }
+}
+
+public fn List[Element].reverse(mut self)
+  modifies self[..]
+  ensures forall i in 0..self.length() =>
+    identical(self.model()[i], old(self.model())[self.length() - 1 - i])
+  ensures self.model().is_permutation_of(old(self.model()))
+  cost time O(self.length())
+  cost amortized time O(self.length())
+{
+  mut self.reverse_between(0, stop: self.length())
+}
+
+public fn List[Element].rotate_left(mut self, by: UInt64)
+  modifies self[..]
+  uses Panic unless by <= self.length()
+  ensures forall i: Integer =>
+    0 <= i && i < self.length() - by ==> identical(self.model()[i], old(self.model())[i + by])
+  ensures forall i: Integer =>
+    self.length() - by <= i && i < self.length() ==>
+      identical(self.model()[i], old(self.model())[i + by - self.length()])
+  ensures self.model().is_permutation_of(old(self.model()))
+  cost time O(self.length())
+{
+  if by > self.length() {
+    Panic.crash("range out of bounds")
+  }
+  mut self.reverse_between(0, stop: by)
+  mut self.reverse_between(by, stop: self.length())
+  mut self.reverse_between(0, stop: self.length())
+}
+
+public fn List[Element].rotate_right(mut self, by: UInt64)
+  modifies self[..]
+  uses Panic unless by <= self.length()
+  ensures forall i in by..self.length() => identical(self.model()[i], old(self.model())[i - by])
+  ensures forall i in 0..by => identical(self.model()[i], old(self.model())[i + self.length() - by])
+  ensures self.model().is_permutation_of(old(self.model()))
+  cost time O(self.length())
+{
+  if by > self.length() {
+    Panic.crash("range out of bounds")
+  }
+  mut self.rotate_left(self.length() - by)
+}
+
+public fn List[Element: Copyable].fill(mut self, value: Element)
+  modifies self[..]
+  ensures forall i in 0..self.length() => identical(self.model()[i], value)
+  cost time O(self.length() * time(Element.copy))
+{
+  for index in 0..self.length()
+    invariant self.length() == old(self.length())
+    invariant forall i in 0..index => identical(self.model()[i], value)
+  {
+    self[index] = value.copy()
+  }
+}
+
+public fn List[Element: Copyable].copy_from(mut self, source: List[Element])
+  modifies self[..]
+  uses Panic unless source.length() == self.length()
+  ensures forall i in 0..self.length() => identical(self.model()[i], source.model()[i])
+  cost time O(self.length() * time(Element.copy))
+{
+  if source.length() != self.length() {
+    Panic.crash("lists of different lengths")
+  }
+  for index in 0..self.length()
+    invariant self.length() == old(self.length())
+    invariant forall i in 0..index => identical(self.model()[i], source.model()[i])
+  {
+    self[index] = source[index].copy()
+  }
+}
+
+public fn List[Element].update_each(
+  mut self,
+  change: (fn(mut Element) uses generic Granted),
+)
+  modifies self[..]
+  uses generic Granted
+  ensures forall i in 0..self.length() => change.ensures(old(self.model())[i], self.model()[i])
+  cost calls(change) == self.length()
+  cost time O(self.length() * time(change))
+  cost allocations <= self.length() * allocations(change)
+{
+  for index in 0..self.length()
+    invariant self.length() == old(self.length())
+    invariant forall i in 0..index => change.ensures(old(self.model())[i], self.model()[i])
+    invariant forall i in index..self.length() => identical(self.model()[i], old(self.model())[i])
+  {
+    change(mut self[index])
+  }
+}
+
+fn parent_holds[Element: Ordered](items: Sequence[Element], limit: Integer, parent: Integer) -> Bool
+  requires limit <= items.length()
+  requires 0 <= parent
+  requires parent < limit / 2
+  ensures result == (items[2 * parent + 1] <= items[parent] && (2 * parent + 2 >= limit || items[2 * parent + 2] <= items[parent]))
+{
+  items[2 * parent + 1] <= items[parent] && (2 * parent + 2 >= limit || items[2 * parent + 2] <= items[parent])
+}
+
+fn is_heap_from[Element: Ordered](items: Sequence[Element], limit: Integer, floor: Integer) -> Bool
+  requires limit <= items.length()
+  requires 0 <= floor
+  ensures result == (forall parent in floor..limit / 2 => parent_holds(items, limit: limit, parent: parent))
+{
+  forall parent in floor..limit / 2 => parent_holds(items, limit: limit, parent: parent)
+}
+
+fn is_heap_except[Element: Ordered](items: Sequence[Element], limit: Integer, floor: Integer, hole: Integer) -> Bool
+  requires limit <= items.length()
+  requires 0 <= floor
+  ensures result == (forall parent in floor..limit / 2 => parent == hole || parent_holds(items, limit: limit, parent: parent))
+{
+  forall parent in floor..limit / 2 => parent == hole || parent_holds(items, limit: limit, parent: parent)
+}
+
+fn children_are_at_most[Element: Ordered](items: Sequence[Element], limit: Integer, hole: Integer, above: Integer) -> Bool
+  requires limit <= items.length()
+  requires 0 <= hole
+  requires 0 <= above
+  requires above < items.length()
+  ensures result == (hole >= limit / 2
+      || (items[2 * hole + 1] <= items[above] && (2 * hole + 2 >= limit || items[2 * hole + 2] <= items[above])))
+{
+  hole >= limit / 2
+    || (items[2 * hole + 1] <= items[above] && (2 * hole + 2 >= limit || items[2 * hole + 2] <= items[above]))
+}
+
+theorem swap_keeps_heap_except[Element: Ordered](
+  before: view List[Element],
+  after: view List[Element],
+  limit: UInt64,
+  floor: UInt64,
+  hole: UInt64,
+  child: UInt64,
+)
+  requires before.length() == after.length()
+  requires limit <= before.length()
+  requires floor <= hole
+  requires hole < limit / 2
+  requires child == 2 * hole + 1 || child == 2 * hole + 2
+  requires child < limit
+  requires is_heap_except(before.model(), limit: limit, floor: floor, hole: hole)
+  requires hole > floor ==> children_are_at_most(before.model(), limit: limit, hole: hole, above: (hole - 1) / 2)
+  requires identical(after.model()[hole], before.model()[child])
+  requires identical(after.model()[child], before.model()[hole])
+  requires forall i in 0..before.length() => i == hole || i == child || identical(after.model()[i], before.model()[i])
+  requires parent_holds(after.model(), limit: limit, parent: hole)
+  ensures is_heap_except(after.model(), limit: limit, floor: floor, hole: child)
+{
+}
+
+fn sink_once[Element: Ordered](
+  items: mut List[Element],
+  hole: UInt64,
+  limit: UInt64,
+  floor: UInt64,
+  top: UInt64,
+) -> UInt64
+  modifies items[..]
+  requires limit <= items.length()
+  requires floor <= hole
+  requires hole < limit / 2
+  requires is_heap_except(items.model(), limit: limit, floor: floor, hole: hole)
+  requires hole <= floor || children_are_at_most(items.model(), limit: limit, hole: hole, above: (hole - 1) / 2)
+  requires top >= items.length() || limit <= top
+  requires top >= items.length() || (forall i in 0..limit => items[i] <= items[top])
+  ensures items.length() == old(items.length())
+  ensures result == hole || result == 2 * hole + 1 || result == 2 * hole + 2
+  ensures result < limit
+  ensures result == hole ==> is_heap_from(items.model(), limit: limit, floor: floor)
+  ensures result != hole ==> is_heap_except(items.model(), limit: limit, floor: floor, hole: result)
+  ensures result != hole ==> children_are_at_most(items.model(), limit: limit, hole: result, above: hole)
+  ensures forall i in limit..items.length() => identical(items.model()[i], old(items.model())[i])
+  ensures top < items.length() ==> forall i in 0..limit => items[i] <= items[top]
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(time(Element.compare))
+{
+  let left = 2 * hole + 1
+  var child = left
+  if left + 1 < limit && items[left] < items[left + 1] {
+    child = left + 1
+  }
+  if items[hole] < items[child] {
+    mut items.swap(hole, second: child)
+    proof {
+      swap_keeps_heap_except(
+        old(items),
+        after: items,
+        limit: limit,
+        floor: floor,
+        hole: hole,
+        child: child,
+      )
+    }
+    child
+  } else {
+    hole
+  }
+}
+
+fn settle[Element: Ordered](items: mut List[Element], start: UInt64, limit: UInt64, top: UInt64)
+  modifies items[..]
+  requires limit <= items.length()
+  requires is_heap_except(items.model(), limit: limit, floor: start, hole: start)
+  requires top >= items.length() || limit <= top
+  requires top >= items.length() || (forall i in 0..limit => items[i] <= items[top])
+  ensures is_heap_from(items.model(), limit: limit, floor: start)
+  ensures forall i in limit..items.length() => identical(items.model()[i], old(items.model())[i])
+  ensures top < items.length() ==> forall i in 0..limit => items[i] <= items[top]
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(log(items.length()) * time(Element.compare))
+{
+  if start >= limit / 2 {
+    return
+  }
+  var hole = start
+  var width: UInt64 = 1
+  var settled = false
+  while !settled && hole < limit / 2
+    invariant items.length() == old(items.length())
+    invariant items.model().is_permutation_of(old(items.model()))
+    invariant start <= hole
+    invariant hole < limit
+    invariant 1 <= width
+    invariant width <= limit
+    invariant width <= items.length()
+    invariant settled || width - 1 <= hole
+    invariant !settled ==> is_heap_except(items.model(), limit: limit, floor: start, hole: hole)
+    invariant !settled && hole > start ==> children_are_at_most(items.model(), limit: limit, hole: hole, above: (hole - 1) / 2)
+    invariant settled ==> is_heap_from(items.model(), limit: limit, floor: start)
+    invariant forall i in limit..items.length() => identical(items.model()[i], old(items.model())[i])
+    invariant top < items.length() ==> forall i in 0..limit => items[i] <= items[top]
+    decreases limit - hole + (if settled { 0 } else { 1 })
+    cost time O(log(width) * time(Element.compare))
+  {
+    let next = sink_once(mut items, hole: hole, limit: limit, floor: start, top: top)
+    width = 2 * width
+    if next == hole {
+      settled = true
+    } else {
+      hole = next
+    }
+  }
+}
+
+theorem heap_item_is_at_most_root[Element: Ordered](items: view List[Element], limit: UInt64, index: UInt64)
+  requires limit <= items.length()
+  requires is_heap_from(items.model(), limit: limit, floor: 0)
+  requires index < limit
+  ensures items[index] <= items[0]
+  decreases index
+{
+  if index > 0 {
+    let parent = (index - 1) / 2
+    heap_item_is_at_most_root(items, limit: limit, index: parent)
+  }
+}
+
+theorem heap_root_is_largest[Element: Ordered](items: view List[Element], limit: UInt64)
+  requires limit <= items.length()
+  requires is_heap_from(items.model(), limit: limit, floor: 0)
+  ensures forall i in 0..limit => items[i] <= items[0]
+{
+  assert forall i in 0..limit => {
+    heap_item_is_at_most_root(items, limit: limit, index: i)
+    items[i] <= items[0]
+  }
+}
+
+fn build_heap[Element: Ordered](items: mut List[Element])
+  modifies items[..]
+  ensures is_heap_from(items.model(), limit: items.length(), floor: 0)
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(items.length() * log(items.length()) * time(Element.compare))
+{
+  let count = items.length()
+  var start = count / 2
+  while start > 0
+    invariant items.length() == count
+    invariant items.model().is_permutation_of(old(items.model()))
+    invariant start <= count / 2
+    invariant is_heap_from(items.model(), limit: count, floor: start)
+    decreases start
+    cost time O((count / 2 - start) * log(count) * time(Element.compare))
+  {
+    start -= 1
+    settle(mut items, start: start, limit: count, top: count)
+  }
+}
+
+fn put_largest_last[Element: Ordered](items: mut List[Element], unsorted: UInt64)
+  modifies items[..]
+  requires 2 <= unsorted
+  requires unsorted <= items.length()
+  requires is_heap_from(items.model(), limit: unsorted, floor: 0)
+  requires unsorted >= items.length() || (forall i in 0..unsorted => items[i] <= items[unsorted])
+  ensures is_heap_except(items.model(), limit: unsorted - 1, floor: 0, hole: 0)
+  ensures forall i in 0..unsorted - 1 => items[i] <= items[unsorted - 1]
+  ensures identical(items.model()[unsorted - 1], old(items.model())[0])
+  ensures forall i in unsorted..items.length() => identical(items.model()[i], old(items.model())[i])
+  ensures unsorted >= items.length() || items[unsorted - 1] <= items[unsorted]
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(1)
+{
+  proof {
+    heap_root_is_largest(items, limit: unsorted)
+  }
+  mut items.swap(0, second: unsorted - 1)
+}
+
+fn move_largest_to_end[Element: Ordered](items: mut List[Element], unsorted: UInt64)
+  modifies items[..]
+  requires 2 <= unsorted
+  requires unsorted <= items.length()
+  requires is_heap_from(items.model(), limit: unsorted, floor: 0)
+  requires forall i in 1..items.length() => i <= unsorted || items[i - 1] <= items[i]
+  requires unsorted >= items.length() || (forall i in 0..unsorted => items[i] <= items[unsorted])
+  ensures is_heap_from(items.model(), limit: unsorted - 1, floor: 0)
+  ensures forall i in 1..items.length() => i > unsorted - 1 ==> items[i - 1] <= items[i]
+  ensures forall i in 0..unsorted - 1 => items[i] <= items[unsorted - 1]
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(log(items.length()) * time(Element.compare))
+{
+  put_largest_last(mut items, unsorted: unsorted)
+  settle(mut items, start: 0, limit: unsorted - 1, top: unsorted - 1)
+}
+
+fn drain_heap[Element: Ordered](items: mut List[Element])
+  modifies items[..]
+  requires is_heap_from(items.model(), limit: items.length(), floor: 0)
+  ensures items.is_sorted()
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(items.length() * log(items.length()) * time(Element.compare))
+{
+  let count = items.length()
+  var unsorted = count
+  while unsorted >= 2
+    invariant items.length() == count
+    invariant items.model().is_permutation_of(old(items.model()))
+    invariant unsorted <= count
+    invariant is_heap_from(items.model(), limit: unsorted, floor: 0)
+    invariant forall i in 1..count => i > unsorted ==> items[i - 1] <= items[i]
+    invariant unsorted < count ==> forall i in 0..unsorted => items[i] <= items[unsorted]
+    decreases unsorted
+    cost time O((count - unsorted) * log(count) * time(Element.compare))
+  {
+    move_largest_to_end(mut items, unsorted: unsorted)
+    unsorted -= 1
+  }
+}
+
+fn heap_sort[Element: Ordered](items: mut List[Element])
+  modifies items[..]
+  ensures items.is_sorted()
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(items.length() * log(items.length()) * time(Element.compare))
+{
+  build_heap(mut items)
+  drain_heap(mut items)
+}
+
+let insertion_sort_threshold: UInt64 = 12
+
+let partial_sort_steps: UInt64 = 5
+
+let shortest_to_shift: UInt64 = 50
+
+let shortest_for_median: UInt64 = 8
+
+let shortest_for_ninther: UInt64 = 50
+
+let descending_sample_swaps: UInt64 = 12
+
+let shortest_to_break_patterns: UInt64 = 8
+
+let balance_divisor: UInt64 = 8
+
+fn insert_last[Element: Ordered](items: mut List[Element], last: UInt64)
+  modifies items[..]
+  requires last < items.length()
+  requires forall i in 1..last => items[i - 1] <= items[i]
+  ensures items.length() == old(items.length())
+  ensures forall i in 1..last + 1 => items[i - 1] <= items[i]
+  ensures forall i in last + 1..items.length() => identical(items.model()[i], old(items.model())[i])
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(last * time(Element.compare))
+{
+  var index = last
+  while index > 0 && items[index] < items[index - 1]
+    invariant items.length() == old(items.length())
+    invariant index <= last
+    invariant forall i in 1..index => items[i - 1] <= items[i]
+    invariant forall i in index + 2..last + 1 => items[i - 1] <= items[i]
+    invariant index < last ==> items[index] < items[index + 1]
+    invariant 0 < index && index < last ==> items[index - 1] <= items[index + 1]
+    invariant forall i in last + 1..items.length() => identical(items.model()[i], old(items.model())[i])
+    invariant items.model().is_permutation_of(old(items.model()))
+    decreases index
+    cost time O((last - index) * time(Element.compare))
+  {
+    mut items.swap(index - 1, second: index)
+    index -= 1
+  }
+}
+
+fn insertion_sort[Element: Ordered](items: mut List[Element])
+  modifies items[..]
+  ensures items.is_sorted()
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(items.length() * items.length() * time(Element.compare))
+{
+  for last in 1..items.length()
+    invariant items.length() == old(items.length())
+    invariant forall i in 1..last => items[i - 1] <= items[i]
+    invariant items.model().is_permutation_of(old(items.model()))
+    cost time O(last * items.length() * time(Element.compare))
+  {
+    insert_last(mut items, last: last)
+  }
+}
+
+fn shift_right[Element: Ordered](items: mut List[Element], start: UInt64)
+  modifies items[..]
+  requires start < items.length()
+  ensures items.length() == old(items.length())
+  ensures forall i in 0..start => identical(items.model()[i], old(items.model())[i])
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O((items.length() - start) * time(Element.compare))
+{
+  var index = start + 1
+  while index < items.length() && items[index] < items[index - 1]
+    invariant items.length() == old(items.length())
+    invariant start < index
+    invariant index <= items.length()
+    invariant forall i in 0..start => identical(items.model()[i], old(items.model())[i])
+    invariant items.model().is_permutation_of(old(items.model()))
+    decreases items.length() - index
+    cost time O((index - start) * time(Element.compare))
+  {
+    mut items.swap(index - 1, second: index)
+    index += 1
+  }
+}
+
+fn try_insertion_sort[Element: Ordered](items: mut List[Element]) -> Bool
+  modifies items[..]
+  requires 1 <= items.length()
+  ensures result ==> items.is_sorted()
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(items.length() * time(Element.compare))
+{
+  var sorted_length: UInt64 = 1
+  var is_settled = false
+  for step in 0..partial_sort_steps
+    invariant items.length() == old(items.length())
+    invariant 1 <= sorted_length && sorted_length <= items.length()
+    invariant forall i in 1..sorted_length => items[i - 1] <= items[i]
+    invariant items.model().is_permutation_of(old(items.model()))
+    cost time O(step * items.length() * time(Element.compare))
+  {
+    if !is_settled {
+      while sorted_length < items.length() && !(items[sorted_length] < items[sorted_length - 1])
+        invariant items.length() == old(items.length())
+        invariant 1 <= sorted_length && sorted_length <= items.length()
+        invariant forall i in 1..sorted_length => items[i - 1] <= items[i]
+        decreases items.length() - sorted_length
+        cost time O(sorted_length * time(Element.compare))
+      {
+        sorted_length += 1
+      }
+      if sorted_length == items.length() || items.length() < shortest_to_shift {
+        is_settled = true
+      } else {
+        mut items.swap(sorted_length - 1, second: sorted_length)
+        insert_last(mut items, last: sorted_length - 1)
+        shift_right(mut items, start: sorted_length)
+      }
+    }
+  }
+  sorted_length == items.length()
+}
+
+type Partition(pivot: UInt64, was_partitioned: Bool)
+
+fn partition[Element: Ordered](items: mut List[Element], pivot: UInt64) -> Partition
+  modifies items[..]
+  requires pivot < items.length()
+  requires 2 <= items.length()
+  ensures items.length() == old(items.length())
+  ensures result.pivot < items.length()
+  ensures identical(items.model()[result.pivot], old(items.model())[pivot])
+  ensures forall i in 0..result.pivot => items[i] < items[result.pivot]
+  ensures forall i in result.pivot..items.length() => items[result.pivot] <= items[i]
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(items.length() * time(Element.compare))
+{
+  mut items.swap(0, second: pivot)
+  var low: UInt64 = 1
+  var high = items.length() - 1
+  var has_swapped = false
+  while low <= high
+    invariant items.length() == old(items.length())
+    invariant 1 <= low && low <= high + 1 && high < items.length()
+    invariant identical(items.model()[0], old(items.model())[pivot])
+    invariant forall i in 1..low => items[i] < items[0]
+    invariant forall i in high + 1..items.length() => items[0] <= items[i]
+    invariant items.model().is_permutation_of(old(items.model()))
+    decreases high + 1 - low
+    cost time O((low + items.length() - high) * time(Element.compare))
+  {
+    let scan_start = low
+    while low <= high && items[low] < items[0]
+      invariant items.length() == old(items.length())
+      invariant 1 <= low && low <= high + 1 && high < items.length()
+      invariant identical(items.model()[0], old(items.model())[pivot])
+      invariant forall i in 1..low => items[i] < items[0]
+      invariant forall i in high + 1..items.length() => items[0] <= items[i]
+      invariant items.model().is_permutation_of(old(items.model()))
+      invariant scan_start <= low
+      decreases high + 1 - low
+      cost time O((low - scan_start) * time(Element.compare))
+    {
+      low += 1
+    }
+    let scan_end = high
+    while low <= high && !(items[high] < items[0])
+      invariant items.length() == old(items.length())
+      invariant 1 <= low && low <= high + 1 && high < items.length()
+      invariant identical(items.model()[0], old(items.model())[pivot])
+      invariant forall i in 1..low => items[i] < items[0]
+      invariant forall i in high + 1..items.length() => items[0] <= items[i]
+      invariant items.model().is_permutation_of(old(items.model()))
+      invariant high <= scan_end
+      decreases high + 1 - low
+      cost time O((scan_end - high) * time(Element.compare))
+    {
+      high -= 1
+    }
+    if low <= high {
+      mut items.swap(low, second: high)
+      has_swapped = true
+      low += 1
+      high -= 1
+    }
+  }
+  mut items.swap(0, second: high)
+  Partition(pivot: high, was_partitioned: !has_swapped)
+}
+
+fn partition_equal[Element: Ordered](items: mut List[Element]) -> UInt64
+  modifies items[..]
+  requires 1 <= items.length()
+  requires forall i in 0..items.length() => items[0] <= items[i]
+  ensures items.length() == old(items.length())
+  ensures 1 <= result && result <= items.length()
+  ensures identical(items.model()[0], old(items.model())[0])
+  ensures forall i in 0..result => items[i] <= items[0]
+  ensures forall i in result..items.length() => items[0] < items[i]
+  ensures forall i in 0..items.length() => items[0] <= items[i]
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(items.length() * time(Element.compare))
+{
+  var low: UInt64 = 1
+  var high = items.length() - 1
+  while low <= high
+    invariant items.length() == old(items.length())
+    invariant 1 <= low && low <= high + 1 && high < items.length()
+    invariant identical(items.model()[0], old(items.model())[0])
+    invariant forall i in 0..low => items[i] <= items[0]
+    invariant forall i in high + 1..items.length() => items[0] < items[i]
+    invariant forall i in 0..items.length() => items[0] <= items[i]
+    invariant items.model().is_permutation_of(old(items.model()))
+    decreases high + 1 - low
+    cost time O((low + items.length() - high) * time(Element.compare))
+  {
+    let scan_start = low
+    while low <= high && !(items[0] < items[low])
+      invariant items.length() == old(items.length())
+      invariant 1 <= low && low <= high + 1 && high < items.length()
+      invariant identical(items.model()[0], old(items.model())[0])
+      invariant forall i in 0..low => items[i] <= items[0]
+      invariant forall i in high + 1..items.length() => items[0] < items[i]
+      invariant forall i in 0..items.length() => items[0] <= items[i]
+      invariant items.model().is_permutation_of(old(items.model()))
+      invariant scan_start <= low
+      decreases high + 1 - low
+      cost time O((low - scan_start) * time(Element.compare))
+    {
+      low += 1
+    }
+    let scan_end = high
+    while low <= high && items[0] < items[high]
+      invariant items.length() == old(items.length())
+      invariant 1 <= low && low <= high + 1 && high < items.length()
+      invariant identical(items.model()[0], old(items.model())[0])
+      invariant forall i in 0..low => items[i] <= items[0]
+      invariant forall i in high + 1..items.length() => items[0] < items[i]
+      invariant forall i in 0..items.length() => items[0] <= items[i]
+      invariant items.model().is_permutation_of(old(items.model()))
+      invariant high <= scan_end
+      decreases high + 1 - low
+      cost time O((scan_end - high) * time(Element.compare))
+    {
+      high -= 1
+    }
+    if low <= high {
+      mut items.swap(low, second: high)
+      low += 1
+      high -= 1
+    }
+  }
+  low
+}
+
+type SampleOrder = Ascending | Descending | Mixed
+
+type PivotChoice(index: UInt64, order: SampleOrder)
+
+type Median(index: UInt64, swaps: UInt64)
+
+fn select_median[Element: Ordered](items: List[Element], first: UInt64, second: UInt64, third: UInt64) -> Median
+  requires first < items.length()
+  requires second < items.length()
+  requires third < items.length()
+  ensures result.index == first || result.index == second || result.index == third
+  ensures result.swaps <= 3
+  cost time O(time(Element.compare))
+{
+  var low = first
+  var middle = second
+  var high = third
+  var swaps: UInt64 = 0
+  if items[middle] < items[low] {
+    let former_low = low
+    low = middle
+    middle = former_low
+    swaps += 1
+  }
+  if items[high] < items[middle] {
+    let former_middle = middle
+    middle = high
+    high = former_middle
+    swaps += 1
+  }
+  if items[middle] < items[low] {
+    middle = low
+    swaps += 1
+  }
+  Median(index: middle, swaps: swaps)
+}
+
+fn choose_pivot[Element: Ordered](items: List[Element]) -> PivotChoice
+  requires 1 <= items.length()
+  ensures result.index < items.length()
+  cost time O(time(Element.compare))
+{
+  let length = items.length()
+  let quarter = length / 4
+  var first = quarter
+  var second = quarter * 2
+  var third = quarter * 3
+  var swaps: UInt64 = 0
+  if length >= shortest_for_median {
+    if length >= shortest_for_ninther {
+      let near_first = select_median(items, first: first - 1, second: first, third: first + 1)
+      let near_second = select_median(items, first: second - 1, second: second, third: second + 1)
+      let near_third = select_median(items, first: third - 1, second: third, third: third + 1)
+      first = near_first.index
+      second = near_second.index
+      third = near_third.index
+      swaps = near_first.swaps + near_second.swaps + near_third.swaps
+    }
+    let median = select_median(items, first: first, second: second, third: third)
+    second = median.index
+    swaps += median.swaps
+  }
+  if swaps == 0 {
+    PivotChoice(index: second, order: SampleOrder.Ascending)
+  } else if swaps == descending_sample_swaps {
+    PivotChoice(index: second, order: SampleOrder.Descending)
+  } else {
+    PivotChoice(index: second, order: SampleOrder.Mixed)
+  }
+}
+
+fn break_patterns[Element](items: mut List[Element])
+  modifies items[..]
+  ensures items.length() == old(items.length())
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(1)
+{
+  let length = items.length()
+  if length >= shortest_to_break_patterns {
+    var state = length
+    let middle = length / 4 * 2
+    for index in middle - 1..middle + 2
+      invariant items.length() == length
+      invariant items.model().is_permutation_of(old(items.model()))
+      cost time O(index + 1 - middle)
+    {
+      state = state ^ (state << 13)
+      state = state ^ (state >> 7)
+      state = state ^ (state << 17)
+      mut items.swap(index, second: state % length)
+    }
+  }
+}
+
+fn compute_depth_limit(count: UInt64) -> UInt64
+  ensures result == 2 * log(count)
+  cost time O(log(count))
+{
+  var width = count
+  var limit: UInt64 = 0
+  while width > 0
+    invariant width <= count
+    invariant limit + 2 * log(width) == 2 * log(count)
+    decreases width
+    cost time O(log(count) - log(width))
+  {
+    width = width / 2
+    limit += 2
+  }
+  limit
+}
+
+fn quicksort[Element: Ordered](
+  items: mut List[Element],
+  limit: UInt64,
+  was_balanced: Bool,
+  was_partitioned: Bool,
+)
+  modifies items[..]
+  ensures items.is_sorted()
+  ensures items.model().is_permutation_of(old(items.model()))
+  ensures forall i in 0..items.length() => old(items.model()).contains(items[i])
+  decreases items.length(), 2
+  cost time O(items.length() * (limit + log(items.length())) * time(Element.compare))
+{
+  let length = items.length()
+  if length <= insertion_sort_threshold {
+    insertion_sort(mut items)
+    proof {
+      specification.elements_of_a_permutation(items.model(), original: old(items.model()))
+    }
+    return
+  }
+  if limit == 0 {
+    heap_sort(mut items)
+    proof {
+      specification.elements_of_a_permutation(items.model(), original: old(items.model()))
+    }
+    return
+  }
+  if !was_balanced {
+    break_patterns(mut items)
+  }
+  let choice = choose_pivot(items)
+  var pivot = choice.index
+  var is_ascending = choice.order is Ascending
+  if choice.order is Descending {
+    mut items.reverse()
+    pivot = length - 1 - pivot
+    is_ascending = true
+  }
+  if was_balanced && was_partitioned && is_ascending {
+    if try_insertion_sort(mut items) {
+      proof {
+        specification.elements_of_a_permutation(items.model(), original: old(items.model()))
+      }
+      return
+    }
+  }
+  let parts = partition(mut items, pivot: pivot)
+  if parts.pivot == 0 {
+    let equal_count = partition_equal(mut items)
+    sort_after_equal_run(
+      mut items,
+      equal_count: equal_count,
+      limit: limit - 1,
+      was_balanced: was_balanced,
+      was_partitioned: was_partitioned,
+    )
+  } else {
+    let smallest_balanced_side = length / balance_divisor
+    sort_sides(
+      mut items,
+      pivot: parts.pivot,
+      limit: limit - 1,
+      was_balanced: parts.pivot >= smallest_balanced_side && length - 1 - parts.pivot >= smallest_balanced_side,
+      was_partitioned: parts.was_partitioned,
+    )
+  }
+  proof {
+    specification.elements_of_a_permutation(items.model(), original: old(items.model()))
+  }
+}
+
+fn sort_after_equal_run[Element: Ordered](
+  items: mut List[Element],
+  equal_count: UInt64,
+  limit: UInt64,
+  was_balanced: Bool,
+  was_partitioned: Bool,
+)
+  modifies items[..]
+  requires 1 <= equal_count && equal_count <= items.length()
+  requires forall i in 0..equal_count => items[i] <= items[0]
+  requires forall i in equal_count..items.length() => items[0] < items[i]
+  requires forall i in 0..items.length() => items[0] <= items[i]
+  ensures items.is_sorted()
+  ensures items.model().is_permutation_of(old(items.model()))
+  decreases items.length(), 0
+  cost time O(((items.length() - 1) * (limit + log(items.length())) + 1) * time(Element.compare))
+{
+  quicksort(mut items[equal_count..], limit: limit, was_balanced: was_balanced, was_partitioned: was_partitioned)
+}
+
+fn sort_sides[Element: Ordered](
+  items: mut List[Element],
+  pivot: UInt64,
+  limit: UInt64,
+  was_balanced: Bool,
+  was_partitioned: Bool,
+)
+  modifies items[..]
+  requires pivot < items.length()
+  requires forall i in 0..pivot => items[i] < items[pivot]
+  requires forall i in pivot..items.length() => items[pivot] <= items[i]
+  ensures items.is_sorted()
+  ensures items.model().is_permutation_of(old(items.model()))
+  decreases items.length(), 1
+  cost time O(((items.length() - 1) * (limit + log(items.length())) + 3) * time(Element.compare))
+{
+  let is_left_smaller = pivot < items.length() - 1 - pivot
+  sort_prefix(
+    mut items,
+    stop: pivot,
+    limit: limit,
+    was_balanced: is_left_smaller || was_balanced,
+    was_partitioned: is_left_smaller || was_partitioned,
+  )
+  sort_suffix(
+    mut items,
+    start: pivot + 1,
+    limit: limit,
+    was_balanced: !is_left_smaller || was_balanced,
+    was_partitioned: !is_left_smaller || was_partitioned,
+  )
+}
+
+fn sort_prefix[Element: Ordered](
+  items: mut List[Element],
+  stop: UInt64,
+  limit: UInt64,
+  was_balanced: Bool,
+  was_partitioned: Bool,
+)
+  modifies items[..]
+  requires stop < items.length()
+  ensures items.length() == old(items.length())
+  ensures forall i in 1..stop => items[i - 1] <= items[i]
+  ensures forall i in stop..items.length() => identical(items.model()[i], old(items.model())[i])
+  ensures forall i in 0..stop => exists j in 0..stop => identical(items.model()[i], old(items.model())[j])
+  ensures items.model().is_permutation_of(old(items.model()))
+  decreases items.length(), 0
+  cost time O((stop * (limit + log(items.length())) + 1) * time(Element.compare))
+{
+  quicksort(mut items[..stop], limit: limit, was_balanced: was_balanced, was_partitioned: was_partitioned)
+}
+
+fn sort_suffix[Element: Ordered](
+  items: mut List[Element],
+  start: UInt64,
+  limit: UInt64,
+  was_balanced: Bool,
+  was_partitioned: Bool,
+)
+  modifies items[..]
+  requires 1 <= start && start <= items.length()
+  ensures items.length() == old(items.length())
+  ensures forall i in start + 1..items.length() => items[i - 1] <= items[i]
+  ensures forall i in 0..start => identical(items.model()[i], old(items.model())[i])
+  ensures forall i in start..items.length() =>
+    exists j in start..items.length() => identical(items.model()[i], old(items.model())[j])
+  ensures items.model().is_permutation_of(old(items.model()))
+  decreases items.length(), 0
+  cost time O(((items.length() - start) * (limit + log(items.length())) + 1) * time(Element.compare))
+{
+  quicksort(mut items[start..], limit: limit, was_balanced: was_balanced, was_partitioned: was_partitioned)
+}
+
+public fn List[Element: Ordered].sort(mut self)
+  modifies self[..]
+  ensures self.is_sorted()
+  ensures self.model().is_permutation_of(old(self.model()))
+  ensures forall i in 0..self.length() => old(self.model()).contains(self[i])
+  cost time O(self.length() * log(self.length()) * time(Element.compare))
+{
+  quicksort(mut self, limit: compute_depth_limit(self.length()), was_balanced: true, was_partitioned: true)
+}
+
+fn sift_down_by[Element](
+  items: mut List[Element],
+  position: UInt64,
+  limit: UInt64,
+  room: UInt64,
+  compare: (fn(Element, Element) -> Ordering uses generic Granted),
+)
+  modifies items[..]
+  uses generic Granted
+  requires 1 <= position
+  requires limit <= items.length()
+  ensures items.length() == old(items.length())
+  decreases room
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(log(room) * time(compare))
+{
+  if room >= 2 && position <= limit / 2 {
+    var largest = 2 * position
+    if largest < limit && compare(items[largest - 1], items[largest]) == Ordering.Less {
+      largest = largest + 1
+    }
+    if compare(items[position - 1], items[largest - 1]) == Ordering.Less {
+      mut items.swap(position - 1, second: largest - 1)
+      sift_down_by(mut items, position: largest, limit: limit, room: room / 2, compare: compare)
+    }
+  }
+}
+
+fn build_heap_by[Element](items: mut List[Element], compare: (fn(Element, Element) -> Ordering uses generic Granted))
+  modifies items[..]
+  uses generic Granted
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(items.length() * log(items.length()) * time(compare))
+{
+  let count = items.length()
+  var position = count / 2
+  while position >= 1
+    invariant items.length() == count
+    invariant items.model().is_permutation_of(old(items.model()))
+    invariant position <= count / 2
+    decreases position
+    cost time O((count / 2 - position) * log(count) * time(compare))
+  {
+    sift_down_by(mut items, position: position, limit: count, room: count, compare: compare)
+    position -= 1
+  }
+}
+
+fn drain_heap_by[Element](items: mut List[Element], compare: (fn(Element, Element) -> Ordering uses generic Granted))
+  modifies items[..]
+  uses generic Granted
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(items.length() * log(items.length()) * time(compare))
+{
+  let count = items.length()
+  var unsorted = count
+  while unsorted >= 2
+    invariant items.length() == count
+    invariant items.model().is_permutation_of(old(items.model()))
+    invariant unsorted <= count
+    decreases unsorted
+    cost time O((count - unsorted) * log(count) * time(compare))
+  {
+    unsorted -= 1
+    mut items.swap(0, second: unsorted)
+    sift_down_by(mut items, position: 1, limit: unsorted, room: count, compare: compare)
+  }
+}
+
+public fn List[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ordering uses generic Granted))
+  modifies self[..]
+  uses generic Granted
+  ensures self.model().is_permutation_of(old(self.model()))
+  ensures forall i in 0..self.length() => old(self.model()).contains(self[i])
+  cost time O(self.length() * log(self.length()) * time(compare))
+{
+  build_heap_by(mut self, compare: compare)
+  drain_heap_by(mut self, compare: compare)
+  proof {
+    specification.elements_of_a_permutation(self.model(), original: old(self.model()))
+  }
+}
+
+public fn List[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key uses generic Granted))
+  modifies self[..]
+  uses generic Granted
+  ensures self.model().is_permutation_of(old(self.model()))
+  ensures forall i in 0..self.length() => old(self.model()).contains(self[i])
+  cost time O(self.length() * log(self.length()) * (time(key) + time(Key.compare)))
+{
+  mut self.sort_by(fn(first, second) { key(first).compare(key(second)) })
+}
+
+public fn Sequence[Element].is_totally_ordered_by(
+  self,
+  compare: (fn(Element, Element) -> Ordering uses generic Granted),
+) -> Bool
+  ensures result == (forall a in 0..self.length() => forall b in 0..self.length() =>
+    forall c in 0..self.length() =>
+      !(compare.ensures(self[a], self[b], Ordering.Less) && compare.ensures(self[a], self[b], Ordering.Equal))
+      && !(compare.ensures(self[a], self[b], Ordering.Less) && compare.ensures(self[a], self[b], Ordering.Greater))
+      && !(compare.ensures(self[a], self[b], Ordering.Equal) && compare.ensures(self[a], self[b], Ordering.Greater))
+      && compare.ensures(self[a], self[b], Ordering.Less) == compare.ensures(self[b], self[a], Ordering.Greater)
+      && (!compare.ensures(self[a], self[b], Ordering.Greater) && !compare.ensures(self[b], self[c], Ordering.Greater)
+        ==> !compare.ensures(self[a], self[c], Ordering.Greater)))
+{
+  forall a in 0..self.length() => forall b in 0..self.length() => forall c in 0..self.length() =>
+    !(compare.ensures(self[a], self[b], Ordering.Less) && compare.ensures(self[a], self[b], Ordering.Equal))
+    && !(compare.ensures(self[a], self[b], Ordering.Less) && compare.ensures(self[a], self[b], Ordering.Greater))
+    && !(compare.ensures(self[a], self[b], Ordering.Equal) && compare.ensures(self[a], self[b], Ordering.Greater))
+    && compare.ensures(self[a], self[b], Ordering.Less) == compare.ensures(self[b], self[a], Ordering.Greater)
+    && (!compare.ensures(self[a], self[b], Ordering.Greater) && !compare.ensures(self[b], self[c], Ordering.Greater)
+      ==> !compare.ensures(self[a], self[c], Ordering.Greater))
+}
+
+internal fn List[Element].extreme_position(
+  self,
+  compare: (fn(Element, Element) -> Ordering uses generic Granted),
+  greatest: Bool,
+) -> UInt64
+  uses generic Granted
+  requires self.length() > 0
+  ensures result < self.length()
+  ensures self.model().is_totally_ordered_by(compare) ==> forall i in 0..self.length() =>
+    !compare.ensures(self[i], self[result], if greatest { Ordering.Greater } else { Ordering.Less })
+  cost time O(self.length() * time(compare))
+  cost allocations <= self.length() * allocations(compare)
+{
+  var best: UInt64 = 0
+  var index: UInt64 = 1
+  while index < self.length()
+    invariant best < index
+    invariant 1 <= index
+    invariant index <= self.length()
+    invariant self.model().is_totally_ordered_by(compare) ==> forall i in 0..index =>
+      !compare.ensures(self[i], self[best], if greatest { Ordering.Greater } else { Ordering.Less })
+    decreases self.length() - index
+    cost time O(index * time(compare))
+  {
+    let order = compare(self[index], self[best])
+    if (greatest && order != Ordering.Less) || (!greatest && order == Ordering.Less) {
+      best = index
+    }
+    index += 1
+  }
+  best
+}
+
+public fn List[Element].min_by(
+  self,
+  compare: (fn(Element, Element) -> Ordering uses generic Granted),
+) lends Option[Element]
+  uses generic Granted
+  ensures (result is Some(_)) == (self.length() > 0)
+  ensures self.model().is_totally_ordered_by(compare) ==> match result {
+    Some(least) => forall i in 0..self.length() => !compare.ensures(self[i], least, Ordering.Less)
+    None => true
+  }
+  cost time O(self.length() * time(compare))
+  cost allocations <= self.length() * allocations(compare)
+{
+  if self.length() > 0 {
+    let position = self.extreme_position(compare, greatest: false)
+    Some(self[position])
+  } else {
+    None
+  }
+}
+
+public fn List[Element].max_by(
+  self,
+  compare: (fn(Element, Element) -> Ordering uses generic Granted),
+) lends Option[Element]
+  uses generic Granted
+  ensures (result is Some(_)) == (self.length() > 0)
+  ensures self.model().is_totally_ordered_by(compare) ==> match result {
+    Some(largest) => forall i in 0..self.length() => !compare.ensures(self[i], largest, Ordering.Greater)
+    None => true
+  }
+  cost time O(self.length() * time(compare))
+  cost allocations <= self.length() * allocations(compare)
+{
+  if self.length() > 0 {
+    let position = self.extreme_position(compare, greatest: true)
+    Some(self[position])
+  } else {
+    None
+  }
+}
+
+impl Equal for List[Element: Equal] {
+  fn equal(self, other: List[Element]) -> Bool
+    ensures result == (self.length() == other.length()
+      && forall i in 0..self.length() => self.model()[i] == other.model()[i])
+    cost time O(self.length() * time(Element.equal))
+    cost allocations <= self.length() * allocations(Element.equal)
+  {
+    if !(self.length() == other.length()) {
+      return false
+    }
+    var index: UInt64 = 0
+    while index < self.length()
+      invariant index <= self.length()
+      invariant forall i in 0..index => self.model()[i] == other.model()[i]
+      decreases self.length() - index
+      cost time O(index * time(Element.equal))
+    {
+      if !(self[index] == other[index]) {
+        return false
+      }
+      index += 1
+    }
+    true
+  }
+}
+
+public fn lexicographic[Element: Ordered](
+  first: Sequence[Element],
+  second: Sequence[Element],
+  from: Integer,
+) -> Ordering
+  requires 0 <= from
+  ensures result == (if from < first.length() && from < second.length() {
+      if first[from].compare(second[from]) == Ordering.Equal {
+        lexicographic(first, second: second, from: from + 1)
+      } else {
+        first[from].compare(second[from])
+      }
+    } else if first.length() < second.length() {
+      Ordering.Less
+    } else if first.length() > second.length() {
+      Ordering.Greater
+    } else {
+      Ordering.Equal
+    })
+  decreases first.length() - from
+{
+  if from < first.length() && from < second.length() {
+    if first[from].compare(second[from]) == Ordering.Equal {
+      lexicographic(first, second: second, from: from + 1)
+    } else {
+      first[from].compare(second[from])
+    }
+  } else if first.length() < second.length() {
+    Ordering.Less
+  } else if first.length() > second.length() {
+    Ordering.Greater
+  } else {
+    Ordering.Equal
+  }
+}
+
+internal theorem lexicographic_agrees_with_equal[Element: Ordered](
+  first: Sequence[Element],
+  second: Sequence[Element],
+  from: Integer,
+)
+  requires 0 <= from
+  ensures (lexicographic(first, second: second, from: from) == Ordering.Equal)
+    == (first.length() == second.length() && forall i in from..first.length() => first[i] == second[i])
+  decreases first.length() - from
+{
+  if from < first.length() && from < second.length() {
+    lexicographic_agrees_with_equal(first, second: second, from: from + 1)
+    assert (first[from].compare(second[from]) == Ordering.Equal) == (first[from] == second[from])
+  }
+}
+
+internal theorem lexicographic_is_antisymmetric[Element: Ordered](
+  first: Sequence[Element],
+  second: Sequence[Element],
+  from: Integer,
+)
+  requires 0 <= from
+  ensures (lexicographic(first, second: second, from: from) == Ordering.Less)
+    == (lexicographic(first: second, second: first, from: from) == Ordering.Greater)
+  decreases first.length() - from
+{
+  if from < first.length() && from < second.length() {
+    assert (first[from].compare(second[from]) == Ordering.Less)
+      == (second[from].compare(first[from]) == Ordering.Greater)
+    assert (second[from].compare(first[from]) == Ordering.Less)
+      == (first[from].compare(second[from]) == Ordering.Greater)
+    lexicographic_is_antisymmetric(first, second: second, from: from + 1)
+  }
+}
+
+internal theorem lexicographic_is_transitive[Element: Ordered](
+  first: Sequence[Element],
+  second: Sequence[Element],
+  third: Sequence[Element],
+  from: Integer,
+)
+  requires 0 <= from
+  requires lexicographic(first, second: second, from: from) != Ordering.Greater
+  requires lexicographic(first: second, second: third, from: from) != Ordering.Greater
+  ensures lexicographic(first, second: third, from: from) != Ordering.Greater
+  decreases first.length() - from
+{
+  if from < first.length() && from < second.length() && from < third.length() {
+    assert first[from] <= second[from]
+    assert second[from] <= third[from]
+    assert first[from] <= third[from]
+    if first[from].compare(third[from]) == Ordering.Equal {
+      assert third[from] <= first[from]
+      assert second[from] <= first[from]
+      assert third[from] <= second[from]
+      lexicographic_is_transitive(first, second: second, third: third, from: from + 1)
+    }
+  }
+}
+
+impl Ordered for List[Element: Ordered] {
+  fn compare(self, other: List[Element]) -> Ordering
+    ensures result == lexicographic(self.model(), second: other.model(), from: 0)
+    cost time O(self.length() * time(Element.compare))
+    cost allocations <= self.length() * allocations(Element.compare)
+  {
+    var index: UInt64 = 0
+    while index < self.length() && index < other.length()
+      invariant index <= self.length()
+      invariant index <= other.length()
+      invariant lexicographic(self.model(), second: other.model(), from: 0)
+        == lexicographic(self.model(), second: other.model(), from: index)
+      decreases self.length() - index
+      cost time O(index * time(Element.compare))
+      cost allocations <= index * allocations(Element.compare)
+    {
+      let order = self[index].compare(other[index])
+      if !(order == Ordering.Equal) {
+        return order
+      }
+      index += 1
+    }
+    self.length().compare(other.length())
+  }
+}
+
+proof Ordered.agrees_with_equal for List[Element: Ordered] {
+  lexicographic_agrees_with_equal(first.model(), second: second.model(), from: 0)
+}
+
+proof Ordered.antisymmetric for List[Element: Ordered] {
+  lexicographic_is_antisymmetric(first.model(), second: second.model(), from: 0)
+}
+
+proof Ordered.transitive for List[Element: Ordered] {
+  lexicographic_is_transitive(first.model(), second: second.model(), third: third.model(), from: 0)
+}
+
+internal fn hash_elements[Element: Hash](hasher: Hasher, items: Sequence[Element], count: Integer) -> Hasher
+  requires 0 <= count
+  requires count <= items.length()
+  ensures identical(result, if count == 0 {
+      hasher
+    } else {
+      items[count - 1].hash(hash_elements(hasher, items: items, count: count - 1))
+    })
+  decreases count
+{
+  if count == 0 {
+    hasher
+  } else {
+    items[count - 1].hash(hash_elements(hasher, items: items, count: count - 1))
+  }
+}
+
+internal theorem elements_hash_alike[Element: Hash](
+  hasher: Hasher,
+  first: Sequence[Element],
+  second: Sequence[Element],
+  count: Integer,
+)
+  requires 0 <= count
+  requires count <= first.length()
+  requires count <= second.length()
+  requires forall i in 0..count => first[i] == second[i]
+  ensures identical(hash_elements(hasher, items: first, count: count), hash_elements(hasher, items: second, count: count))
+  decreases count
+{
+  if count > 0 {
+    elements_hash_alike(hasher, first: first, second: second, count: count - 1)
+  }
+}
+
+impl Hash for List[Element: Hash] {
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, hash_elements(hasher.write(self.length()), items: self.model(), count: self.length()))
+    cost time O(self.length() * time(Element.hash))
+    cost allocations <= self.length() * allocations(Element.hash)
+  {
+    let start = hasher.write(self.length())
+    var state = start
+    for index in 0..self.length()
+      invariant identical(state, hash_elements(start, items: self.model(), count: index))
+      cost time O(index * time(Element.hash))
+    {
+      state = self[index].hash(state)
+    }
+    state
+  }
+}
+
+proof Hash.agrees_with_equal for List[Element: Hash] {
+  elements_hash_alike(hasher.write(first.length()), first: first.model(), second: second.model(), count: first.length())
+}
+
+impl Display for List[Element: Display] {
+  fn display(self, output: mut String)
+  {
+    mut output.push("[")
+    for index in 0..self.length() {
+      if index > 0 {
+        mut output.push(", ")
+      }
+      self[index].display(mut output)
+    }
+    mut output.push("]")
+  }
+}

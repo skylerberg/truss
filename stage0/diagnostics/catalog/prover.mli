@@ -37,7 +37,7 @@ type requirement =
   | Element_to_pop
   | Element_at_index
   | Index_within_length
-  | Range_within_view
+  | Range_within_storage
   | Count_of_array
 
 type recursion_impl = Derives | Inherits
@@ -157,7 +157,7 @@ type construct =
   | Intrinsic_at_parameter of { operation : string; parameter : Types.ty }
   | Negation_of of Types.ty
   | Shift_of of Types.ty
-  | Slice_of of Types.ty
+  | Range_of of Types.ty
   | Unreadable_parameter_type
   | Unreadable_cursor of Types.ty
   | Field of string

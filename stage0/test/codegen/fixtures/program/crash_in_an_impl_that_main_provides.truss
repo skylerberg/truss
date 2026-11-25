@@ -16,7 +16,7 @@ fn count_once() -> Int64
   Counter.next()
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Panic
 {
   let counted = provide CrashingCounter(limit: 0) {

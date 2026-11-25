@@ -62,6 +62,7 @@ type layout = {
   files : source_file list;
   problems : problem list;
   time_limit_ms : int;
+  x86_64_level : X86_64_level.t;
 }
 
 let list_files (files : files) root = Option.value (files.find_tree root) ~default:[]
@@ -113,16 +114,24 @@ let lay_out (files_in : files) root =
               None)
       manifests
   in
-  let time_limit_seconds =
+  let read_project_setting ~default ~setting:nested read =
     List.fold_left
-      (fun limit (directory, (manifest : Manifest.t)) ->
-        match manifest.time_limit_seconds with
-        | Some seconds when directory = "" -> seconds
+      (fun setting (directory, (manifest : Manifest.t)) ->
+        match read manifest with
+        | Some written when directory = "" -> written
         | Some _ ->
-            report_problem directory Nested_time_limit;
-            limit
-        | None -> limit)
-      Manifest.default_time_limit_seconds parsed
+            report_problem directory (Nested_project_setting nested);
+            setting
+        | None -> setting)
+      default parsed
+  in
+  let time_limit_seconds =
+    read_project_setting ~default:Manifest.default_time_limit_seconds ~setting:Time_limit
+      (fun manifest -> manifest.time_limit_seconds)
+  in
+  let x86_64_level =
+    read_project_setting ~default:X86_64_level.default ~setting:X86_64_level (fun manifest ->
+        manifest.x86_64_level)
   in
   let seen = Package_table.create 8 in
   let packages =
@@ -158,7 +167,13 @@ let lay_out (files_in : files) root =
                 (List.assoc_opt directory packages)))
       files
   in
-  { packages; files; problems = List.rev !problems; time_limit_ms = time_limit_seconds * 1000 }
+  {
+    packages;
+    files;
+    problems = List.rev !problems;
+    time_limit_ms = time_limit_seconds * 1000;
+    x86_64_level;
+  }
 
 type selection = {
   selected : Registry.Selection.package list;

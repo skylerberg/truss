@@ -50,7 +50,7 @@ let describe_manifest_problem : Problem.manifest -> string = function
   | Unknown_table name ->
       Printf.sprintf
         "A manifest has no table `[%s]`. Its tables are `[package]`, `[dependencies]`, \
-         `[project]`, and `[test]`."
+         `[project]`, `[test]`, and `[build]`."
         name
   | Bad_package_name -> Printf.sprintf "A package's name is %s." name_expected
   | Bad_truss_version { toolchain } ->
@@ -65,6 +65,14 @@ let describe_manifest_problem : Problem.manifest -> string = function
       Printf.sprintf "`[package]` has no key `%s`. Its keys are `name` and `truss`." key
   | Bad_time_limit -> "`time_limit` is a whole number of seconds, more than 0."
   | Unknown_test_key key -> Printf.sprintf "`[test]` has no key `%s`. Its key is `time_limit`." key
+  | Unknown_build_key key ->
+      Printf.sprintf "`[build]` has no key `%s`. Its key is `x86_64_level`." key
+  | Not_an_x86_64_level ->
+      Printf.sprintf "`x86_64_level` is the level of x86-64 CPU that programs are built for: %s."
+        (String.concat ", "
+           (List.map
+              (fun level -> Printf.sprintf "`%S`" (X86_64_level.show level))
+              X86_64_level.all))
   | Unknown_project_key key -> Printf.sprintf "`[project]` has no key `%s`." key
   | Unnamed_package -> "`[package]` names its package, with `name = \"...\"` under it."
   | Dependencies_without_package ->
@@ -156,9 +164,15 @@ let describe : Problem.t -> string = function
       Printf.sprintf
         "`[package]` needs `truss = \"%s\"`, the version of Truss the package is written for."
         toolchain
-  | Nested_time_limit ->
-      "A test's time limit is its project's. Write `[test]` in the project's manifest, \
-       `truss.toml` at its root."
+  | Nested_project_setting setting ->
+      let owner, table =
+        match setting with
+        | Time_limit -> ("A test's time limit", "test")
+        | X86_64_level -> ("A build's x86-64 level", "build")
+      in
+      Printf.sprintf
+        "%s is its project's. Write `[%s]` in the project's manifest, `truss.toml` at its root."
+        owner table
   | Standard_name -> "The package name `standard` is the standard library's."
   | Name_in_use { name; manifest } ->
       Printf.sprintf "The package name `%s` is already used by %s." (show name) manifest

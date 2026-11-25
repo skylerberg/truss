@@ -633,6 +633,7 @@ let locate_file snapshot (file : Path.file) =
   | _ -> Path.show_file file
 
 let time_limit_ms snapshot = snapshot.project.project_layout.time_limit_ms
+let x86_64_level snapshot = snapshot.project.project_layout.x86_64_level
 let lock_fix snapshot = snapshot.project.selection.lock_fix
 
 type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }

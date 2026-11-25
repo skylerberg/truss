@@ -4,7 +4,7 @@ fn Shelf.title(self) lends Option[String] {
   self.title
 }
 
-fn show(text: StringSlice) {}
+fn show(text: String) {}
 
 fn f(shelf: Shelf) {
   let Some(title) = shelf.title().copy() else {

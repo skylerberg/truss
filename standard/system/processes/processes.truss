@@ -63,17 +63,17 @@ fn begin(command: processes.Command) -> Result[Started, SystemError]
 {
   var texts: intrinsic.Storage[UInt8] = intrinsic.storage_empty()
   var starts: intrinsic.Storage[UInt64] = intrinsic.storage_empty()
-  handles.with_file_error(add_ended_with_zero_byte(command.program.slice().bytes, texts: mut texts, starts: mut starts))?
+  handles.with_file_error(add_ended_with_zero_byte(command.program.storage, texts: mut texts, starts: mut starts))?
   for argument in command.arguments
-    invariant calls.ends_with_zero_byte(intrinsic.storage_view(texts))
+    invariant calls.ends_with_zero_byte(texts)
   {
-    handles.with_file_error(add_ended_with_zero_byte(argument.slice().bytes, texts: mut texts, starts: mut starts))?
+    handles.with_file_error(add_ended_with_zero_byte(argument.storage, texts: mut texts, starts: mut starts))?
   }
-  let arguments = addresses(intrinsic.storage_view(texts), starts: intrinsic.storage_view(starts))
+  let arguments = addresses(texts, starts: starts)
   var variables: intrinsic.Storage[UInt8] = intrinsic.storage_empty()
   var variable_starts: intrinsic.Storage[UInt64] = intrinsic.storage_empty()
   handles.with_file_error(add_variables(command, texts: mut variables, starts: mut variable_starts))?
-  let environment = addresses(intrinsic.storage_view(variables), starts: intrinsic.storage_view(variable_starts))
+  let environment = addresses(variables, starts: variable_starts)
 
   let size = intrinsic.libc_spawn_file_actions_size()
   var actions: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(size)
@@ -98,8 +98,8 @@ fn begin(command: processes.Command) -> Result[Started, SystemError]
     failed = arrange(command.error_output, descriptor: 2, child_reads: false, actions: mut actions, ends: mut error_output)
   }
   if failed == 0 && command.directory is Some(directory) {
-    failed = match calls.ended_with_zero_byte(directory.text.slice().bytes) {
-      Ok(path) => intrinsic.libc_posix_spawn_file_actions_addchdir(mut actions, path: intrinsic.storage_view(path))
+    failed = match calls.ended_with_zero_byte(directory.text.storage) {
+      Ok(path) => intrinsic.libc_posix_spawn_file_actions_addchdir(mut actions, path: path)
       Err(error) => error
     }
   }
@@ -107,10 +107,10 @@ fn begin(command: processes.Command) -> Result[Started, SystemError]
   if failed == 0 {
     failed = intrinsic.libc_posix_spawnp(
       mut process,
-      program: intrinsic.storage_view(texts),
-      file_actions: intrinsic.storage_view(actions),
-      arguments: intrinsic.storage_view(arguments),
-      environment: intrinsic.storage_view(environment),
+      program: texts,
+      file_actions: actions,
+      arguments: arguments,
+      environment: environment,
     )
   }
   let _ = intrinsic.libc_posix_spawn_file_actions_destroy(mut actions)
@@ -144,7 +144,7 @@ fn arrange(
     Discard => intrinsic.libc_posix_spawn_file_actions_addopen(
       mut actions,
       descriptor: descriptor,
-      path: "/dev/null\0".slice().bytes,
+      path: "/dev/null\0".storage,
       flags: if child_reads { intrinsic.libc_o_rdonly() } else { intrinsic.libc_o_wronly() },
       mode: 0,
     )
@@ -169,21 +169,21 @@ fn arrange(
   }
 }
 
-fn addresses(texts: intrinsic.View[UInt8], starts: intrinsic.View[UInt64]) -> intrinsic.Storage[UInt64]
+fn addresses(texts: intrinsic.Storage[UInt8], starts: intrinsic.Storage[UInt64]) -> intrinsic.Storage[UInt64]
   ensures intrinsic.storage_length(result) > 0
   ensures intrinsic.storage_model(result)[intrinsic.storage_length(result) - 1] == 0
 {
-  let first = intrinsic.view_address(texts)
+  let first = intrinsic.storage_address(texts)
   proof {
-    assert intrinsic.view_length(texts) == 0 || first >= 1
+    assert intrinsic.storage_length(texts) == 0 || first >= 1
   }
-  let count = intrinsic.view_length(starts)
+  let count = intrinsic.storage_length(starts)
   var all: intrinsic.Storage[UInt64] = intrinsic.storage_with_capacity(count + 1)
   for index in 0..count
     invariant intrinsic.storage_length(all) == index
     invariant intrinsic.storage_capacity(all) == count + 1
   {
-    let start = intrinsic.view_at(starts, index: index)
+    let start = intrinsic.storage_at(starts, index: index)
     intrinsic.storage_push(mut all, value: first.wrapping_add(start))
   }
   intrinsic.storage_push(mut all, value: 0)
@@ -203,7 +203,7 @@ fn add_variables(
     while is_present {
       let entry = intrinsic.environment_entry(index, is_present: mut is_present)
       if is_present {
-        if !set_again(entry, by: command.variables.slice()) {
+        if !set_again(entry, by: command.variables) {
           add_ended_with_zero_byte(entry, texts: mut texts, starts: mut starts)?
         }
         index = index.wrapping_add(1)
@@ -211,39 +211,39 @@ fn add_variables(
     }
   }
   for position in 0..command.variables.length() {
-    let name = command.variables[position].name.slice().bytes
-    if intrinsic.view_length(name) == 0 || holds(name, byte: 61) {
+    let name = command.variables[position].name.storage
+    if intrinsic.storage_length(name) == 0 || holds(name, byte: 61) {
       return Err(intrinsic.libc_einval())
     }
-    if !named_later(command.variables.slice(), position: position) {
+    if !named_later(command.variables, position: position) {
       growth.push(mut starts, value: intrinsic.storage_length(texts))
       add_without_zero_byte(name, texts: mut texts)?
       growth.push(mut texts, value: 61)
-      add_without_zero_byte(command.variables[position].value.slice().bytes, texts: mut texts)?
+      add_without_zero_byte(command.variables[position].value.storage, texts: mut texts)?
       growth.push(mut texts, value: 0)
     }
   }
   Ok(Unit)
 }
 
-fn names(entry: intrinsic.View[UInt8], name: intrinsic.View[UInt8]) -> Bool {
-  let length = intrinsic.view_length(name)
-  if intrinsic.view_length(entry) <= length || intrinsic.view_at(entry, index: length) != 61 {
+fn names(entry: intrinsic.Storage[UInt8], name: intrinsic.Storage[UInt8]) -> Bool {
+  let length = intrinsic.storage_length(name)
+  if intrinsic.storage_length(entry) <= length || intrinsic.storage_at(entry, index: length) != 61 {
     return false
   }
-  intrinsic.compare_bytes(intrinsic.view_slice(entry, start: 0, stop: length), right: name) == 0
+  intrinsic.compare_bytes(intrinsic.storage_range(entry, start: 0, stop: length), right: name) == 0
 }
 
-fn set_again(entry: intrinsic.View[UInt8], by: Slice[processes.Variable]) -> Bool {
+fn set_again(entry: intrinsic.Storage[UInt8], by: List[processes.Variable]) -> Bool {
   for variable in by {
-    if names(entry, name: variable.name.slice().bytes) {
+    if names(entry, name: variable.name.storage) {
       return true
     }
   }
   false
 }
 
-fn named_later(variables: Slice[processes.Variable], position: UInt64) -> Bool
+fn named_later(variables: List[processes.Variable], position: UInt64) -> Bool
   requires position < variables.length()
 {
   for later in position + 1..variables.length() {
@@ -254,9 +254,9 @@ fn named_later(variables: Slice[processes.Variable], position: UInt64) -> Bool
   false
 }
 
-fn holds(bytes: intrinsic.View[UInt8], byte: UInt8) -> Bool {
-  for index in 0..intrinsic.view_length(bytes) {
-    if intrinsic.view_at(bytes, index: index) == byte {
+fn holds(bytes: intrinsic.Storage[UInt8], byte: UInt8) -> Bool {
+  for index in 0..intrinsic.storage_length(bytes) {
+    if intrinsic.storage_at(bytes, index: index) == byte {
       return true
     }
   }
@@ -285,7 +285,7 @@ fn collect(
       var waited_for: intrinsic.Storage[Int32] = intrinsic.storage_with_capacity(2)
       intrinsic.storage_push(mut waited_for, value: if output_open { output } else { -1 })
       intrinsic.storage_push(mut waited_for, value: if error_open { error_output } else { -1 })
-      if intrinsic.runtime_descriptors_wait(intrinsic.storage_view(waited_for), count: 2, ticket: ticket) == 0 {
+      if intrinsic.runtime_descriptors_wait(waited_for, count: 2, ticket: ticket) == 0 {
         return Err(intrinsic.libc_errno())
       }
     }
@@ -315,12 +315,12 @@ fn drain(pipe: Int32, into: mut intrinsic.Storage[UInt8]) -> Result[Bool, Int32]
 }
 
 fn add_ended_with_zero_byte(
-  bytes: intrinsic.View[UInt8],
+  bytes: intrinsic.Storage[UInt8],
   texts: mut intrinsic.Storage[UInt8],
   starts: mut intrinsic.Storage[UInt64],
 ) -> Result[Unit, Int32]
   ensures match result {
-    Ok(_) => calls.ends_with_zero_byte(intrinsic.storage_view(texts))
+    Ok(_) => calls.ends_with_zero_byte(texts)
     Err(_) => true
   }
 {
@@ -330,15 +330,15 @@ fn add_ended_with_zero_byte(
   Ok(Unit)
 }
 
-fn add_without_zero_byte(bytes: intrinsic.View[UInt8], texts: mut intrinsic.Storage[UInt8]) -> Result[Unit, Int32] {
+fn add_without_zero_byte(bytes: intrinsic.Storage[UInt8], texts: mut intrinsic.Storage[UInt8]) -> Result[Unit, Int32] {
   let start = intrinsic.storage_length(texts)
-  let length = intrinsic.view_length(bytes)
+  let length = intrinsic.storage_length(bytes)
   growth.reserve(mut texts, additional: length + 1)
   for index in 0..length
     invariant intrinsic.storage_length(texts) == start + index
     invariant intrinsic.storage_capacity(texts) >= start + length + 1
   {
-    let byte = intrinsic.view_at(bytes, index: index)
+    let byte = intrinsic.storage_at(bytes, index: index)
     if byte == 0 {
       return Err(intrinsic.libc_einval())
     }

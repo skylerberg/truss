@@ -163,7 +163,7 @@ public fn Hasher.after_bytes(self, bytes: Sequence[UInt8], count: Integer) -> Ha
   }
 }
 
-public fn Hasher.write_bytes(self, bytes: Slice[UInt8]) -> Hasher
+public fn Hasher.write_bytes(self, bytes: List[UInt8]) -> Hasher
   ensures identical(result, self.after_bytes(bytes.model(), count: bytes.length()).write(bytes.length()))
   cost time O(bytes.length())
   cost allocations == 0

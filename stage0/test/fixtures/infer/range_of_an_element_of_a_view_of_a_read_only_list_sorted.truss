@@ -1,4 +1,4 @@
-fn f(items: Slice[List[Int64]]) {
-  var view = items[..]
-  mut view[0][..].sort()
+fn f(items: List[List[Int64]]) {
+  var viewed: view List[List[Int64]] = items[..]
+  mut viewed[0][..].sort()
 }

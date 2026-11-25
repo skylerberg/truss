@@ -49,6 +49,7 @@ type keyword =
   | Use
   | Uses
   | Var
+  | View
   | When
   | While
   | With
@@ -223,6 +224,7 @@ let keywords =
     ("use", Use);
     ("uses", Uses);
     ("var", Var);
+    ("view", View);
     ("when", When);
     ("while", While);
     ("with", With);
@@ -364,7 +366,7 @@ let can_begin = function
       true
   | Keyword
       ( Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends
-      | Modifies | Opaque | Requires | Unless | Uses | When | With ) ->
+      | Modifies | Opaque | Requires | Unless | Uses | View | When | With ) ->
       false
   | Punctuation _ | Newline | End_of_file -> false
 

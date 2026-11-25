@@ -5,23 +5,23 @@ use standard.streams
 use standard.url
 use standard.uuid
 
-fn kind_of(text: StringSlice) -> Option[json.ParseErrorKind] {
+fn kind_of(text: String) -> Option[json.ParseErrorKind] {
   match json.parse(text) {
     Ok(_) => None
     Err(error) => Some(error.kind)
   }
 }
 
-fn round_trip(text: StringSlice) -> Bool {
+fn round_trip(text: String) -> Bool {
   match json.parse(text) {
     Ok(value) => value.to_text() == text
     Err(_) => false
   }
 }
 
-fn written_text_parses_to_the_same_value(text: StringSlice) -> Bool {
+fn written_text_parses_to_the_same_value(text: String) -> Bool {
   match json.parse(text) {
-    Ok(value) => match json.parse(value.to_text().slice()) {
+    Ok(value) => match json.parse(value.to_text()) {
       Ok(again) => again == value
       Err(_) => false
     }
@@ -250,7 +250,7 @@ test "a value is read from a reader and written to a writer" uses RunForever {
   }
 }
 
-fn pointed(text: StringSlice, path: StringSlice) -> Option[String] {
+fn pointed(text: String, path: String) -> Option[String] {
   match json.parse(text) {
     Ok(document) => {
       match document.pointer(path) {
@@ -287,7 +287,7 @@ test "a template builds a value around the values written in it" {
   let name = "Ada \"the first\""
   let count: Int64 = 3
   let tags: List[json.Value] = [json.Value.from("a"), json.Value.from(true)]
-  let built = json.Value"""{"name": ${name.slice()}, "count": ${count}, "tags": ${own tags}, "nested": [ ${false} , null, 1.5]}"""
+  let built = json.Value"""{"name": ${name.copy()}, "count": ${count}, "tags": ${own tags}, "nested": [ ${false} , null, 1.5]}"""
   assert built.to_text() == "{\"name\":\"Ada \\\"the first\\\"\",\"count\":3,\"tags\":[\"a\",true],\"nested\":[false,null,1.5]}"
   let whole = json.Value"${count}"
   let inner = json.Value"""{"id": ${count}}"""

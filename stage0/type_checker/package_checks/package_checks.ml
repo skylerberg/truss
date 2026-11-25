@@ -129,7 +129,7 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
       Interface.Definition.find_trait_interface lookups.interface impl.implements.trait )
   with
   | Types.Named { path; _ }, Some trait when not trait.is_capability ->
-      let view = Types.find_view impl.for_type in
+      let list_of_array = Types.find_list_of_array impl.for_type in
       let list_counted_members owner =
         Resolve.Names.list_members_visible_to_package lookups.interface.names
           ~package:declaration.key.module_.package owner
@@ -137,17 +137,17 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
       List.filter_map
         (fun (method_ : Types.trait_method) ->
           let own = list_counted_members path method_.method_name
-          and of_view =
-            match view with
-            | Some (Types.Named view) ->
+          and of_list =
+            match list_of_array with
+            | Some (Types.Named list) ->
                 List.filter
                   (fun (key : Resolve.Names.key) ->
                     match key.path with Method { receiver; _ } -> receiver <> Static | _ -> false)
-                  (list_counted_members view.path method_.method_name)
+                  (list_counted_members list.path method_.method_name)
             | _ -> []
           in
           let find_holder ~is_own : Catalog.Package.holder =
-            match view with Some view when not is_own -> Of_view view | _ -> Own
+            match list_of_array with Some list when not is_own -> Of_list list | _ -> Own
           in
           let is_same_version (key : Resolve.Names.key) =
             match key.path with
@@ -173,10 +173,10 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
                     }))
           in
           let is_own_version = List.exists is_same_version own in
-          if is_own_version || List.exists is_same_version of_view then
+          if is_own_version || List.exists is_same_version of_list then
             make_clash ~is_own:is_own_version
               (Same_receiver { receiver = method_.method_receiver; trait = impl.implements })
-          else if own = [] && of_view = [] then None
+          else if own = [] && of_list = [] then None
           else if declaration.key.module_.package <> Path.locate_package path then
             make_clash ~is_own:(own <> []) Other_package
           else if not written then

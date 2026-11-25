@@ -1,5 +1,5 @@
-fn Window.widen(mut self, data: Slice[Int64]) {
-  self.view = data[0..2]
+fn Window.widen(mut self, data: view List[Int64]) {
+  self.viewed = data[0..2]
 }
 
 fn f() -> UInt64 {
@@ -8,5 +8,5 @@ fn f() -> UInt64 {
   var window = Window(other[0..1])
   mut window.widen(data)
   mut data.push(4)
-  window.view.length()
+  window.viewed.length()
 }

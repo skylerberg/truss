@@ -58,14 +58,6 @@ type t =
   | Calls_not_a_capability of { at : Core.origin; written : string }
   | Calls_through_parameter of { at : Core.origin; name : string }
   | Unknown_capability_method of { at : Core.origin; written : string; method_ : string }
-  | Read_only_owning_parameter of {
-      at : Core.origin;
-      name : Core.origin;
-      written : string;
-      view : string;
-      copy : string;
-      takes : string;
-    }
   | Time_of_run_forever of { at : Core.origin }
   | Time_of_unbounded_parameter of { at : Core.origin; name : string }
   | Misplaced_value_condition of { at : Core.origin; condition : value_condition }
@@ -94,7 +86,6 @@ type t =
       for_type : Types.ty;
     }
   | Uses_on_trait_impl of { at : Core.origin }
-  | Mut_self_for_slice of { at : Core.origin; trait : string; for_type : Types.ty }
   | Callback_contract_mismatch of {
       at : Core.origin;
       name : string;
@@ -150,16 +141,17 @@ type t =
   | Restated_requires of { at : Core.origin; name : string; declared_by : string }
   | Restated_decreases of { at : Core.origin; name : string; declared_by : string }
   | Restated_modifies of { at : Core.origin; name : string; declared_by : string }
+  | Not_viewable_type of { at : Core.origin; type_ : Types.ty }
   | Indexed_modified_part of { at : Core.origin }
   | Not_a_modified_part of { at : Core.origin }
   | Modified_non_parameter of { at : Core.origin; name : string }
   | Modified_whole_parameter of { at : Core.origin; parameter : string }
-  | Read_only_part of { at : Core.origin; parameter : string; fields : string list }
+  | Read_only_part of { at : Core.origin; parameter : string; part : Types.modified }
   | Repeated_part of {
       at : Core.origin;
       parameter : string;
-      fields : string list;
-      container : string list;
+      part : Types.modified;
+      container : Types.modified;
       siblings : Core.origin Description.siblings;
     }
   | Fieldless_part of {
@@ -177,11 +169,17 @@ type t =
       field : string;
       candidates : string list;
     }
+  | Part_without_elements of {
+      at : Core.origin;
+      parameter : string;
+      fields : string list;
+      type_ : Types.ty;
+    }
   | Impl_modifies of {
       at : Core.origin;
       name : string;
       parameter : string;
-      fields : string list;
+      part : Types.modified;
       trait : string;
     }
   | Restated_default of { at : Core.origin; name : string; declared_by : string }

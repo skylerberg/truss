@@ -229,19 +229,43 @@ let describe : Ownership.t -> Nodes.description = function
               " itself, which makes it self-referential. The caller does not know about the view, \
                so it could mutate that part and invalidate the view.";
           ])
-  | Stored_view_of_borrowed { at = origin; parameter; holder } ->
-      let parameter = code_of (show_root parameter) in
-      make View_escapes (Build.at origin)
-        ((Description.Text "This stores a view of " :: parameter)
+  | Stored_view_of_borrowed { at = origin; parameter; holder; declaration } ->
+      let shown_parameter = code_of (show_root parameter) in
+      let fixes, advice =
+        match declaration with
+        | Some { type_node; view_type } ->
+            ( [
+                {
+                  Description.title = [ Text "Declare it `view`." ];
+                  edits = [ Build.insert_before type_node [ Text "view " ] ];
+                };
+              ],
+              (Description.Text "Declare " :: shown_parameter)
+              @ (Description.Text " as a view, as in `" :: show_root parameter)
+              @ [
+                  Text
+                    (Printf.sprintf ": %s`, so that each caller keeps its argument borrowed."
+                       (Types.show view_type));
+                ] )
+        | None ->
+            ( [],
+              (Description.Text "Take the stored part of " :: shown_parameter)
+              @ [
+                  Text
+                    " as a view, such as a `view List` or a `view String`, so that each caller \
+                     keeps its argument borrowed.";
+                ] )
+      in
+      make View_escapes (Build.at origin) ~fixes
+        ((Description.Text "This stores a view of " :: shown_parameter)
         @ (Description.Text " in " :: code_of (show_root holder))
-        @ (Description.Text ", which outlives this function, but " :: parameter)
+        @ (Description.Text ", which outlives this function, but " :: shown_parameter)
         @ [
             Description.Text
               " is only borrowed for the call, and the caller does not expect it to stay borrowed \
-               afterwards. Take ";
+               afterwards. ";
           ]
-        @ parameter
-        @ [ Text " as a view type, such as a `Slice`, to store a view of it." ])
+        @ advice)
   | Lent_owned_part { at = origin; part } ->
       make View_escapes (Build.at origin)
         (Description.Text "This lends a part of "
@@ -291,10 +315,10 @@ let describe : Ownership.t -> Nodes.description = function
           Text
             (Printf.sprintf
                "Data race: the iterations of a `%s for` run at the same time, and each is lent an \
-                element of %s to mutate. Only a `List`, a `Slice`, or an `Array` lends its \
-                elements to iterations that run at the same time: its elements at different \
-                positions are different places. Loop over a `mut Slice` of the collection's \
-                storage, or use a `for` loop."
+                element of %s to mutate. Only a `List` or an `Array` lends its elements to \
+                iterations that run at the same time: its elements at different positions are \
+                different places. Loop over a `mut` range of the collection's list, or use a `for` \
+                loop."
                (show_schedule schedule)
                (match collection with
                | Some collection -> Printf.sprintf "`%s`" (Types.show collection)
@@ -362,6 +386,16 @@ let describe : Ownership.t -> Nodes.description = function
                  (match List.rev place.steps with
                  | Indexed :: _ -> "an element"
                  | Field _ :: _ | [] -> "part of an element"));
+          ])
+  | Moved_range { at = origin; place; copy; view_type } ->
+      make Not_owned (Build.at origin) ~fixes:(copy_fix "Copy it." copy)
+        (code_of (show_place place)
+        @ [
+            Text
+              (Printf.sprintf
+                 " is a range of a collection, and elements cannot be moved out of their \
+                  collection. Copy it, or keep a view of it in a place of type `%s`."
+                 (Types.show view_type));
           ])
   | Moved_constant { at = origin; place; copy } ->
       make Not_owned (Build.at origin) ~fixes:(copy_fix "Copy it." copy)
@@ -440,28 +474,36 @@ let describe : Ownership.t -> Nodes.description = function
                the `concurrent` block early, the code after the block does not run, so each branch \
                must reinitialize each place lent `mut` that it moves out of.";
           ])
-  | Undeclared_change { at = origin; function_; parameter; fields; last_entry } ->
-      let shown = Build.show_field_path parameter fields in
+  | Resized_range { at = origin; call } ->
+      make Resized_range (Build.at origin)
+        ((Description.Text "This range is passed `mut` to " :: Build.describe_call call)
+        @ [
+            Text
+              ", which may change the length of its argument, and a range has a fixed length. Pass \
+               the whole list, or declare that the function changes only elements, with `modifies` \
+               and `[..]`.";
+          ])
+  | Undeclared_change { at = origin; function_; parameter; part; last_entry } ->
+      let shown = Types.show_modified_part ~root:parameter part in
+      let is_whole = part.field_path = [] && not part.is_elements in
       make Undeclared_change (Build.at origin)
         ~fixes:
-          (match (fields, last_entry) with
-          | _ :: _, Some last ->
+          (match last_entry with
+          | Some last when not is_whole ->
               [
                 {
                   title = [ Text (Printf.sprintf "Add `%s` to the `modifies` clause." shown) ];
                   edits = [ Build.insert_after last [ Text (", " ^ shown) ] ];
                 };
               ]
-          | [], _ | _, None -> [])
+          | Some _ | None -> [])
         [
           Text
             (Printf.sprintf
                "%s changes here, and the `modifies` clause of `%s` does not name it. The proofs of \
                 its callers take every part of `%s` that the clause does not name to keep its \
                 value."
-               (match fields with
-               | [] -> Printf.sprintf "All of `%s`" shown
-               | _ :: _ -> Printf.sprintf "`%s`" shown)
+               (if is_whole then Printf.sprintf "All of `%s`" shown else Printf.sprintf "`%s`" shown)
                (Build.show_function_name function_)
                parameter);
         ]

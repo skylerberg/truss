@@ -20,6 +20,7 @@ type context = {
   list_bounds : Interface.Impls.bounds;
   mode_keywords : (Syntax.id, Core.mode_keyword) Hashtbl.t;
   bare_names : (Syntax.id, string) Hashtbl.t Lazy.t;
+  parameter_types : (Syntax.id, Syntax.id) Hashtbl.t Lazy.t;
   places_without_keyword : (Syntax.id, Language.Mode.t) Hashtbl.t;
   names : string Local_table.t;
   origins : Core.origin Local_table.t;
@@ -207,10 +208,9 @@ let collect context (mir : Mir.Graph.t) ~mode_keywords =
     Array.iteri
       (fun local (info : Mir.local_info) ->
         (match info.kind with
-        | Source { local = core; _ } -> (
-            match Mir.find_local_name core with
-            | Some name -> Local_table.replace context.names core name
-            | None -> Local_table.replace context.origins core info.origin)
+        | Source { local = core; _ } ->
+            Local_table.replace context.origins core info.origin;
+            Option.iter (Local_table.replace context.names core) (Mir.find_local_name core)
         | Temporary | Lent _ -> ());
         match info.kind with
         | Source { local = core; mode; is_var; is_binding = true }
@@ -273,3 +273,17 @@ let cover_with_mode_keyword context (place : Core.origin) : Core.origin Catalog.
   match find_mode_keyword context place with
   | Some { written; _ } -> { covering = [ Written written; place ] }
   | None -> { covering = [ place ] }
+
+let find_view_declaration context (root : Place.root) : Catalog.Ownership.view_declaration option =
+  match root with
+  | Local local -> (
+      match
+        (Local_table.find_opt context.origins local, Local_table.find_opt context.types local)
+      with
+      | Some (Written name), Some type_ when Types.is_viewable type_ ->
+          Option.map
+            (fun type_node : Catalog.Ownership.view_declaration ->
+              { type_node = Written type_node; view_type = Types.make_view type_ })
+            (Hashtbl.find_opt (Lazy.force context.parameter_types) name)
+      | _ -> None)
+  | Temporary _ | Constant _ | Environment -> None

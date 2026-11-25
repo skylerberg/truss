@@ -31,6 +31,19 @@ let collect_bare_names (definition : Syntax.definition) =
   Syntax_walk.visit_definition ~on_statement:visit_statement visit_expression definition;
   names
 
+let collect_parameter_types (definition : Syntax.definition) =
+  let types = Hashtbl.create 4 in
+  (match definition.kind with
+  | Function { signature; _ } ->
+      List.iter
+        (fun (parameter : Syntax.parameter) ->
+          match parameter.kind with
+          | Named_parameter { name; type_; _ } -> Hashtbl.replace types name.id type_.id
+          | Self_parameter _ | Parameter_error -> ())
+        signature.parameters
+  | _ -> ());
+  types
+
 let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
   let elaborated = lookups.interface.read_elaborated_interface key in
   let scope = Interface.Impls.read_scope lookups.interface key in
@@ -40,6 +53,7 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
       list_bounds = Interface.Properties.Bounds.of_known scope.bounds;
       mode_keywords = Hashtbl.create 8;
       bare_names = lazy (collect_bare_names (lookups.interface.names.read_definition key));
+      parameter_types = lazy (collect_parameter_types (lookups.interface.names.read_definition key));
       places_without_keyword = Hashtbl.create 8;
       names = Context.Local_table.create 32;
       origins = Context.Local_table.create 32;
@@ -80,7 +94,8 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
             (match elaborated.interface with
             | Function_interface _ | Constant_interface _ -> true
             | _ -> false);
-        Modified_parts.check context key code.tree
+        Modified_parts.check context key code.tree;
+        Modified_parts.check_ranges context code.tree
       end;
       List.iter
         (fun (_, asserted) -> check_graph (Mir.expand asserted) ~returns_to_caller:false)

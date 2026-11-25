@@ -31,7 +31,7 @@ let rec check_block_value state env ?expected (written : Syntax.block) =
     | (first : Syntax.statement) :: rest ->
         ignore
           (Solver.run_in_statement state env (Written first.id) (fun () ->
-               check_statement state env first ~last:false));
+               check_statement state { env with binds_view = false } first ~last:false));
         infer_statements_value rest
   in
   infer_statements_value written.statements
@@ -59,7 +59,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
             Hooks.check state env value annotated;
             annotated
         | None -> (
-            let type_ = Hooks.check_expression state env value in
+            let type_ = Hooks.check_expression state { env with binds_view = not is_var } value in
             match written_pattern.kind with
             | Variant _ | Record _ | Tuple _ | Literal (Literal_string _) ->
                 Conversions.read_actual_head state value type_
@@ -221,14 +221,12 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
             (Calls.check_argument state env key
                (make_parameter "key"
                   (Solver.resolve_associated_type state base_type index Index_key
-                     ~at:(Written key.id)))
-               ~has_generic_type:false);
+                     ~at:(Written key.id))));
           ignore
             (Calls.check_argument state env value
                (make_parameter "value"
                   (Solver.resolve_associated_type state base_type index Index_output
-                     ~at:(Written value.id)))
-               ~has_generic_type:false);
+                     ~at:(Written value.id))));
           State.elaborate state written.id
             (Call
                (Tables.make_method_call trait Index_assign_assign ~self_type:base_type
@@ -312,15 +310,22 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
               (Solver.resolve_associated_type state type_ cursor Cursor_element ~at, Own)
           | None ->
               ( State.make_error_type state
-                  (Not_iterable_loop { at; mode; type_ = State.make_shown state type_ }),
+                  (Not_iterable_loop
+                     {
+                       at;
+                       mode;
+                       is_view = Types.is_view type_;
+                       type_ = State.make_shown state type_;
+                     }),
                 mode )))
 
 and find_elements_loop state ~cause ~at type_ (lends : Language.Mode.t) =
   let iterable = make_trait Iterable in
   let lending_method =
     match (Types.find_sequence_element type_, lends) with
-    | Some _, _ -> None
-    | None, Mut -> Some (make_trait Iterable_mut, Well_known.Iterable_mut_element)
+    | Some _, (Read | Own) -> None
+    | Some _, Mut when not (Types.is_view type_) -> None
+    | _, Mut -> Some (make_trait Iterable_mut, Well_known.Iterable_mut_element)
     | None, (Read | Own) -> Some (iterable, Iterable_element)
   in
   let required = match lending_method with Some (trait, _) -> trait | None -> iterable in

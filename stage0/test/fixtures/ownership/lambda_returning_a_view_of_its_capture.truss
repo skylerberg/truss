@@ -1,6 +1,12 @@
-fn fill(items: mut Slice[Slice[Int64]], from: fn() -> Slice[Int64]) {}
+fn fill(items: mut List[view List[Int64]], from: fn() -> view List[Int64])
+  modifies items[..]
+{
+  todo
+}
 
-fn keep(items: mut Slice[Slice[Int64]]) {
+fn keep(items: mut List[view List[Int64]])
+  modifies items[..]
+{
   let numbers = [1, 2, 3]
   fill(mut items, from: fn() { numbers[..] })
 }

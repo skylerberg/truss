@@ -100,26 +100,25 @@ let is_member_of type_ (declaration : Resolve.Names.declaration) =
   | Some (Impl { for_type = owner; _ }, _) | Some (owner, _) -> Path.equal owner type_
   | None -> false
 
-let list_view_methods declarations type_ =
-  match Well_known.find_view type_ with
-  | None -> []
-  | Some view ->
-      let own_overloads =
-        List.filter_map
-          (fun (declaration : Resolve.Names.declaration) ->
-            match declaration.key.path with
-            | Method { name; receiver; _ } when is_member_of type_ declaration ->
-                Some (name, receiver)
-            | _ -> None)
-          declarations
-      in
-      List.filter
+let list_array_methods_of_list declarations type_ =
+  if Well_known.find_builtin_type type_ <> Some Array then []
+  else
+    let list = Well_known.make_path List in
+    let own_overloads =
+      List.filter_map
         (fun (declaration : Resolve.Names.declaration) ->
           match declaration.key.path with
-          | Method { owner; name; receiver = Instance _ as receiver } ->
-              Path.equal owner view && not (List.mem (name, receiver) own_overloads)
-          | _ -> false)
+          | Method { name; receiver; _ } when is_member_of type_ declaration -> Some (name, receiver)
+          | _ -> None)
         declarations
+    in
+    List.filter
+      (fun (declaration : Resolve.Names.declaration) ->
+        match declaration.key.path with
+        | Method { owner; name; receiver = Instance (Read | Mut) as receiver } ->
+            Path.equal owner list && not (List.mem (name, receiver) own_overloads)
+        | _ -> false)
+      declarations
 
 let list_named_members declarations member =
   List.filter
@@ -137,8 +136,7 @@ let list_implemented_traits (names : Resolve.Names.lookups) packages type_ =
     (fun traits (trait, impl) ->
       if List.exists (fun (kept, _) -> Path.equal kept trait) traits then traits
       else traits @ [ (trait, impl) ])
-    []
-    (list_impls type_ @ Option.fold ~none:[] ~some:list_impls (Well_known.find_view type_))
+    [] (list_impls type_)
 
 let list_type_members names packages candidates type_ =
   let is_written_in impl (declaration : Resolve.Names.declaration) =
@@ -159,7 +157,7 @@ let list_type_members names packages candidates type_ =
   in
   List.map
     (fun (declaration : Resolve.Names.declaration) -> Definition declaration.key.path)
-    (List.filter (is_member_of type_) candidates @ list_view_methods candidates type_)
+    (List.filter (is_member_of type_) candidates @ list_array_methods_of_list candidates type_)
   @ List.concat_map list_trait_members (list_implemented_traits names packages type_)
 
 let list_owners (names : Resolve.Names.lookups) packages argument declarations =
@@ -193,10 +191,7 @@ let resolve names packages argument =
 let is_related ~type_ other =
   let name = Path.show_name type_ and other_name = Path.show_name other in
   (not (Path.equal type_ other))
-  && (String.includes ~affix:name other_name
-     || String.includes ~affix:other_name name
-     || Option.exists (Path.equal other) (Well_known.find_view type_)
-     || Option.exists (Path.equal type_) (Well_known.find_view other))
+  && (String.includes ~affix:name other_name || String.includes ~affix:other_name name)
 
 let explain_missing names packages text =
   let argument = parse text in

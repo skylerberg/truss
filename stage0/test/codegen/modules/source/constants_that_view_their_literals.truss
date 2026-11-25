@@ -1,13 +1,13 @@
-type Label(name: StringSlice, rank: UInt64)
+type Label(name: view String, rank: UInt64)
 
-let greeting: StringSlice = "hello"
-let nothing: StringSlice = ""
-let words: List[StringSlice] = ["one", "two"]
-let alias: StringSlice = greeting
+let greeting: view String = "hello"
+let nothing: view String = ""
+let words: List[view String] = ["one", "two"]
+let alias: view String = greeting
 let label: Label = Label(name: "first", rank: 1)
-let ranks: Map[StringSlice, UInt64] = ["one": 1, "two": 2]
+let ranks: Map[String, UInt64] = ["one": 1, "two": 2]
 
-test "a StringSlice constant reads its literal's bytes" {
+test "a view String constant reads its literal's bytes" {
   assert greeting == "hello"
   assert greeting.length() == 5
   assert nothing.is_empty()

@@ -242,27 +242,6 @@ let rec make_literal_value context frame (ty : Types.ty) (value : Language.Liter
       | _ -> ());
   literal
 
-let make_owner_of_view context frame ~(view : Types.ty) ~(owner : Types.ty) viewed =
-  let symbol = Logic.Symbol.Owner_of_view owner in
-  Facts.declare context
-    (Logic.Function (symbol, [ Facts.declare_sort context view ], Facts.declare_sort context owner));
-  let converted = Logic.Apply (symbol, [ viewed ]) in
-  Validity.assume_valid context frame owner converted;
-  let element =
-    match owner with
-    | Types.Named { arguments = [ Types.Type element ]; _ } -> element
-    | _ -> Types.make_builtin UInt8
-  in
-  (match
-     ( Models.find_model context owner converted ~element,
-       Models.find_model context view viewed ~element )
-   with
-  | Some owned, Some elements -> Facts.assume context frame (Logic.equal owned elements)
-  | _ ->
-      Facts.raise_bug "`%s` and its view `%s` have no model of one type" (Types.show owner)
-        (Types.show view));
-  converted
-
 let rec find_abstracted_selection context term =
   match term with
   | Logic.Apply ((Logic.Symbol.Field _ as selector), [ whole ]) ->
@@ -383,7 +362,9 @@ let translate_named_function (context : State.context) (frame : State.frame)
           (Facts.list_clauses callee_clauses.requires)
       end
   | _ -> ());
-  let type_arguments = List.map (Types.substitute_argument frame.substitution) type_arguments in
+  let type_arguments =
+    List.map (Types.substitute_argument_erased frame.substitution) type_arguments
+  in
   let symbol = Logic.Symbol.Function_value { callee = path; type_arguments } in
   Facts.declare context (Logic.Constant (symbol, Facts.declare_sort context ty));
   let term = Logic.Symbol symbol in

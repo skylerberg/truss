@@ -5,7 +5,7 @@ fn used_bits(length: UInt64) -> UInt64
   if length % 64 == 0 { UInt64.maximum } else { 5 }
 }
 
-theorem the_unused_words_hold_five(words: Slice[UInt64], length: UInt64)
+theorem the_unused_words_hold_five(words: view List[UInt64], length: UInt64)
   requires length % 64 == 1
   requires forall i in 0..words.length() =>
     words[i] == (if i < length { 1 } else { used_bits(length) })

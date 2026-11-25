@@ -144,6 +144,11 @@ let check_call_types context (node : Core.expression) (call : Core.call) =
         List.iteri
           (fun position (expected, (argument : Core.argument)) ->
             let found = read_operand_type argument.value in
+            let expected, found =
+              match argument.mode with
+              | Read -> (Types.erase_views expected, Types.erase_views found)
+              | Mut | Own -> (expected, found)
+            in
             if not (fits context ~expected ~found) then
               context.report
                 "argument %d of a call of `%s` has the type `%s`, and its parameter `%s`" position
@@ -695,7 +700,7 @@ let check_form (interface : Interface.Lookups.t) (source_lookups : Resolve.Names
                          Core.argument) ->
                          check_mutable_place "a range passed `mut`" base
                      | { mode = Mut; value = Value _; _ } ->
-                         report "a `mut` parameter receives a value that is not a slice"
+                         report "a `mut` parameter receives a value that is not a range"
                      | { mode = Mut; value = Place core_place; _ } ->
                          check_mutable_place "a `mut` argument" core_place
                      | { mode = Own; value = Place _; _ } ->

@@ -1,5 +1,5 @@
 fn f(
-  source: Slice[Int64],
+  source: List[Int64],
   produce: (fn(Int64) -> List[Int64] uses generic Granted),
 ) -> List[List[Int64]]
   uses generic Granted

@@ -39,13 +39,10 @@ let list_types (signature : Types.signature) =
 let find_unallowed_part ~(expected : Types.signature) ~(written : Types.signature) =
   List.find_map
     (fun (part : Types.modified) ->
-      match Types.list_modified_fields expected part.position with
+      match Types.list_modified_parts expected part.position with
       | Some allowed
-        when not
-               (List.exists
-                  (fun prefix -> Types.is_field_path_prefix prefix part.field_path)
-                  allowed) ->
-          Some (part.position, part.field_path)
+        when not (List.exists (fun container -> Types.is_part_within ~container part) allowed) ->
+          Some part
       | Some _ | None -> None)
     written.modifies
 
@@ -264,17 +261,7 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
               | Some evidence -> check_evidence_grants evidence)
             trait.requires;
           if (not trait.is_capability) && impl.impl_uses <> Types.no_capabilities then
-            Checking.report state (Uses_on_trait_impl { at = Written trait_path.id });
-          if
-            (Types.is_well_known Slice impl.for_type
-            || Types.is_well_known String_slice impl.for_type)
-            && List.exists
-                 (fun (method_ : Types.trait_method) -> method_.method_receiver = Instance Mut)
-                 trait.methods
-          then
-            Checking.report state
-              (Mut_self_for_slice
-                 { at = Written trait_path.id; trait = shown_trait; for_type = impl.for_type }))
+            Checking.report state (Uses_on_trait_impl { at = Written trait_path.id }))
 
 let list_callback_contracts (definition : Syntax.definition) =
   let parameters =
@@ -411,14 +398,14 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                      { at = Written name.id; name = name.text; trait = shown_trait })
               else
                 match find_unallowed_part ~expected ~written with
-                | Some (position, fields) ->
+                | Some part ->
                     Checking.report state
                       (Impl_modifies
                          {
                            at = Written name.id;
                            name = name.text;
-                           parameter = (Types.read_parameter_at written position).name;
-                           fields;
+                           parameter = (Types.read_parameter_at written part.position).name;
+                           part;
                            trait = shown_trait;
                          })
                 | None -> check_callback_contracts state name ~shown_trait implemented.declaration))

@@ -13,7 +13,7 @@ let solver =
 let c_compiler =
   lazy
     (match
-       C_compiler.find
+       C_compiler.find ~x86_64_level:X86_64_level.default
          ~objects:(Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz")
          ()
      with

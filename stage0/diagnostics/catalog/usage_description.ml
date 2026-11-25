@@ -146,8 +146,8 @@ let describe : Usage.t -> Nodes.description = function
                "Nothing in `%s` may run forever, so its `RunForever` is unused. Remove it."
                (Path.show function_));
         ]
-  | Unmodified_part { entry; function_; parameter; fields; change } ->
-      let shown = Build.show_field_path parameter fields in
+  | Unmodified_part { entry; function_; parameter; part; change } ->
+      let shown = Types.show_modified_part ~root:parameter part in
       let function_name = Build.show_function_name function_ in
       make Unmodified_part (Build.at entry) ~severity:Warning
         ~fixes:

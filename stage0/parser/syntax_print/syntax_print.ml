@@ -62,6 +62,7 @@ let rec show_type_expression (type_ : Syntax.type_expression) =
   | Self_type (Some name) -> "Self." ^ name.text
   | Associated (parameter, name) -> parameter.text ^ "." ^ name.text
   | Function_type function_type_ -> show_function_type function_type_
+  | View_type viewed -> "view " ^ show_type_expression viewed
   | Type_error -> "error"
 
 and show_path_type (path_type : Syntax.path_type) =

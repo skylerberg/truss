@@ -315,7 +315,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                   match (arguments, List.assoc_opt wanted overloads) with
                   | ([] | { Syntax.label = Some _; _ } :: _), _ ->
                       report_missing_receiver state env value arguments
-                  | receiver :: rest, Some (Type_overload method_path | View_overload method_path)
+                  | receiver :: rest, Some (Type_overload method_path | List_overload method_path)
                     ->
                       let inner =
                         match receiver.value.kind with
@@ -329,18 +329,17 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                       if inner != receiver.value then begin
                         State.record state receiver.value receiver_type
                       end;
-                      if
-                        not
-                          (State.unify state
-                             (Option.value ~default:receiver_type
-                                (Conversions.find_view_as ~owned:receiver_head ~view:type_))
-                             type_)
-                      then
+                      let receiver_as_self =
+                        match Types.find_list_of_array receiver_head with
+                        | Some list when Types.is_well_known List type_ -> list
+                        | _ -> receiver_type
+                      in
+                      if not (State.unify ~modulo_views:true state receiver_as_self type_) then
                         Failures.report_mismatch state (Written inner.id) ~expected:type_
                           ~actual:receiver_type;
                       Modes.check_mode state env receiver.value
                         { name = "self"; mode = wanted_mode; type_; has_default = false }
-                        receiver_type ~has_generic_type:false;
+                        receiver_type;
                       check_method_with_receiver state env ?expected value ~receiver:receiver.value
                         ~receiver_type method_path rest
                   | _ :: _, Some (Trait_overload (trait, method_)) ->
@@ -377,7 +376,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
           | Some (Trait_overload (trait, method_)) ->
               check_trait_method_through_type state env ?expected value type_ trait method_
                 arguments
-          | Some (Type_overload _ | View_overload _) ->
+          | Some (Type_overload _ | List_overload _) ->
               State.raise_bug "a generic parameter has a method of its own"
           | None -> report_unmatched_receiver_mode state env arguments member)
       | [], Ok (Hidden _) -> State.raise_bug "a generic parameter has a method of its own"
@@ -397,7 +396,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
            (No_method
               {
                 at = Written member.id;
-                owner = Type_owner { type_ = State.zonk state type_; view = None };
+                owner = Type_owner { type_ = State.zonk state type_; list = None };
                 name = member.text;
                 candidates = [];
               }))
@@ -436,9 +435,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
         let parameter : Types.parameter_info =
           { name = "self"; mode; type_ = receiver_type; has_default = false }
         in
-        let mode =
-          Calls.check_argument state env receiver.value parameter ~has_generic_type:false
-        in
+        let mode = Calls.check_argument state env receiver.value parameter in
         Ok ([ { Tables.expression = receiver.value; core_argument_index = 0; mode } ], rest)
     | Some _, ([] | { label = Some _; _ } :: _) ->
         Error (report_missing_receiver state env value arguments)
@@ -563,12 +560,16 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
 
 and check_method_call state env ?expected (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) ~type_arguments arguments =
-  let receiver_type =
+  let written_receiver_type =
     let head = Conversions.read_expected_head state (Hooks.check_expression state env base) in
     if Name_lookup.has_sealed_method state head member.text then head
     else
       Solver.decide_default state ~site:Method_call ~at:(Written value.id)
         (Conversions.read_actual_head state base head)
+  in
+  let is_view_receiver = Types.is_view written_receiver_type in
+  let receiver_type =
+    Conversions.read_expected_head state (Types.strip_view written_receiver_type)
   in
   let has_mode_keyword = List.mem_assoc value.id state.keyword_modes in
   let lent_mode =
@@ -660,11 +661,25 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
                     candidates;
                   }))
       | Ok (Visible overloads) -> (
-          match choose_temporary overloads with
+          match
+            if is_view_receiver then
+              Option.map
+                (fun overload -> (Path.Instance Read, overload))
+                (List.assoc_opt (Path.Instance Read) overloads)
+            else choose_temporary overloads
+          with
+          | None when is_view_receiver ->
+              State.make_error_type state
+                (View_receiver
+                   {
+                     at = Written member.id;
+                     name = member.text;
+                     receivers = List.map fst overloads;
+                   })
           | None -> report_missing_receiver_mode overloads
-          | Some (_, (Type_overload method_path | View_overload method_path)) ->
+          | Some (_, (Type_overload method_path | List_overload method_path)) ->
               check_method_with_receiver state env ?expected ~type_arguments value ~receiver:base
-                ~receiver_type method_path arguments
+                ~receiver_type:written_receiver_type method_path arguments
           | Some (_, Trait_overload (trait, method_)) ->
               check_trait_method_with_receiver state env value ~receiver:base ~receiver_type trait
                 method_ ~type_arguments arguments)
@@ -710,16 +725,9 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
       | Error error -> Calls.check_arguments_alone state env arguments error
       | Ok () -> (
           (match instance.signature.receiver with
-          | Some (mode, self_type) -> (
-              let receiver_head = Conversions.read_actual_head state receiver receiver_type in
-              match Conversions.find_view_as ~owned:receiver_head ~view:self_type with
-              | Some _ ->
-                  Conversions.coerce state env ~argument:mode receiver ~actual:receiver_type
-                    ~expected:self_type
-              | None ->
-                  if not (State.unify state self_type receiver_type) then
-                    Failures.report_mismatch state (Written receiver.id) ~expected:self_type
-                      ~actual:receiver_type)
+          | Some (mode, self_type) ->
+              Conversions.coerce state env ~argument:mode receiver ~actual:receiver_type
+                ~expected:self_type
           | None -> ());
           (match (expected, instance.signature.output) with
           | Some expected, Returns output -> State.unify_as_hint state output expected

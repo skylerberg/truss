@@ -47,27 +47,25 @@ let rec find_lent_mode resolved (tables : Tables.t) (value : Syntax.expression) 
       find_lent_mode resolved tables inner
   | _ -> None
 
-let rec is_slice (value : Syntax.expression) =
-  match value.kind with
-  | Bracket (_, [ Item { kind = Range _; _ } ]) -> true
-  | Parenthesized inner | Mode (_, inner) -> is_slice inner
-  | _ -> false
-
 let rec is_plain_string_literal (value : Syntax.expression) =
   match value.kind with
   | String { tag = None; rest = []; _ } -> true
   | Parenthesized inner -> is_plain_string_literal inner
   | _ -> false
 
+let rec is_in_sequence (resolved : Resolve.resolved) (value : Syntax.expression) =
+  match value.kind with
+  | Bracket _ when resolved.brackets.(value.id) = Some Index -> true
+  | Member (base, _) | Parenthesized base -> is_in_sequence resolved base
+  | _ -> false
+
 let is_borrowed resolved tables (value : Syntax.expression) =
-  (is_place resolved tables value || is_plain_string_literal value
-  || Option.is_some (find_lent_mode resolved tables value))
-  && not (is_slice value)
+  is_place resolved tables value || is_plain_string_literal value
+  || Option.is_some (find_lent_mode resolved tables value)
+  || is_in_sequence resolved value
 
 let classify_scrutinee_mode resolved tables (scrutinee : Syntax.expression) : Language.Mode.t =
   match scrutinee.kind with
   | Mode (Own, inner) when Option.is_none (find_keyword_operation resolved tables inner) -> Own
-  | Mode (Mut, inner)
-    when Option.is_none (find_keyword_operation resolved tables inner) && not (is_slice inner) ->
-      Mut
+  | Mode (Mut, inner) when Option.is_none (find_keyword_operation resolved tables inner) -> Mut
   | _ -> if is_borrowed resolved tables scrutinee then Read else Own

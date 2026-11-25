@@ -574,7 +574,7 @@ let find_constructors context ty =
         List.sort compare
           (List.map
              (fun (field : Types.field) ->
-               (field.field_name, Types.substitute substitution field.field_type))
+               (field.field_name, Types.substitute_erased substitution field.field_type))
              list)
       in
       match interface.shape with
@@ -591,6 +591,7 @@ let find_constructors context ty =
   | None -> None
 
 let rec declare_sort (context : State.context) (ty : Types.ty) : Logic.sort =
+  let ty = Types.erase_views ty in
   if is_numeric ty then Int
   else if is_bool ty then Bool
   else
@@ -713,9 +714,11 @@ let list_definition_bounds (lookups : Lookups.t) ~(current : Path.t) ~(condition
          list_self_bounds parameter @ Types.list_bounds generics parameter))
     condition
 
-let substitute_type (context : State.context) (frame : State.frame) ty =
+let substitute_declared_type (context : State.context) (frame : State.frame) ty =
   (Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
     (Types.substitute frame.substitution ty)
+
+let substitute_type context frame ty = Types.erase_views (substitute_declared_type context frame ty)
 
 let find_local_type context frame local =
   Option.map (substitute_type context frame) (Locals.find_opt local frame.types)

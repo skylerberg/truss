@@ -212,12 +212,20 @@ let find_builtin = function
 let is_builtin wanted type_ = find_builtin type_ = Some wanted
 let is_well_known wanted = function Named { path; _ } -> Well_known.is wanted path | _ -> false
 
-let find_view = function
-  | Named { path; arguments } ->
-      Option.map
-        (fun view -> Named { path = view; arguments = List.take 1 arguments })
-        (Well_known.find_view path)
+let find_viewed = function
+  | Named { path; arguments = [ Type viewed ] } when Well_known.find_builtin_type path = Some View
+    ->
+      Some viewed
   | _ -> None
+
+let strip_view type_ = Option.value ~default:type_ (find_viewed type_)
+let is_view type_ = Option.is_some (find_viewed type_)
+
+let make_view viewed =
+  if is_view viewed then viewed else make_builtin View ~arguments:[ Type viewed ]
+
+let is_viewable type_ =
+  is_well_known List type_ || is_well_known String type_ || is_builtin Storage type_
 
 let signed_integer_types : Language.Builtin_type.t list = [ Int8; Int16; Int32; Int64 ]
 let unsigned_integer_types : Language.Builtin_type.t list = [ UInt8; UInt16; UInt32; UInt64 ]
@@ -444,6 +452,17 @@ let rec map ?(map_capabilities = Fun.id) transform type_ =
             }
       | Parameter _ | Never | Integer | Variable _ | Hole | Error _ -> type_)
 
+let rec erase_views type_ = map (fun type_ -> Option.map erase_views (find_viewed type_)) type_
+let erase_argument_views argument = map_argument erase_views argument
+let erase_trait_views (trait : trait_reference) = map_trait erase_views trait
+let substitute_erased substitution type_ = erase_views (substitute substitution type_)
+
+let substitute_argument_erased substitution argument =
+  erase_argument_views (substitute_argument substitution argument)
+
+let substitute_trait_erased substitution trait =
+  erase_trait_views (substitute_trait substitution trait)
+
 let rec exists ?(resolve = Fun.id) transform type_ =
   let type_ = resolve type_ in
   let exists = exists ~resolve transform in
@@ -562,6 +581,9 @@ and show_condition condition =
        condition)
 
 and show = function
+  | Named { path; arguments = [ Type viewed ] } when Well_known.find_builtin_type path = Some View
+    ->
+      "view " ^ show viewed
   | Named { path; arguments = [] } -> Path.show_name path
   | Named { path; arguments } ->
       Printf.sprintf "%s[%s]" (Path.show_name path)
@@ -691,7 +713,7 @@ let mentions_specification_only_type parameters output =
     (fun type_ -> Option.is_some (find_specification_only_type type_))
     (extract_result_type output :: List.map (fun parameter -> parameter.type_) parameters)
 
-type modified = { position : int; field_path : string list }
+type modified = { position : int; field_path : string list; is_elements : bool }
 
 type signature = {
   generics : generic list;
@@ -736,10 +758,18 @@ let read_parameter_at (signature : signature) position =
             position
             (List.length signature.parameters))
 
-let list_modified_fields (signature : signature) position =
+let list_modified_parts (signature : signature) position =
   match List.filter (fun modified -> modified.position = position) signature.modifies with
   | [] -> None
-  | entries -> Some (List.map (fun modified -> modified.field_path) entries)
+  | entries -> Some entries
+
+let is_part_within ~(container : modified) (part : modified) =
+  container.position = part.position
+  && is_field_path_prefix container.field_path part.field_path
+  && ((not container.is_elements) || (part.is_elements && container.field_path = part.field_path))
+
+let show_modified_part ~root (part : modified) =
+  String.concat "." (root :: part.field_path) ^ if part.is_elements then "[..]" else ""
 
 type instantiation = {
   type_arguments : argument list;
@@ -932,10 +962,16 @@ let make_trait_reference ~arguments trait : trait_reference =
 let string_type = Named { path = Well_known.make_path String; arguments = [] }
 
 let find_sequence_element (sequence : ty) =
-  match sequence with
+  match strip_view sequence with
   | Named { path; arguments = Type element :: _ }
-    when Well_known.is_buffer_sequence path || Well_known.find_builtin_type path = Some Array ->
+    when Well_known.is List path || Well_known.find_builtin_type path = Some Array ->
       Some element
+  | _ -> None
+
+let find_list_of_array = function
+  | Named { path; arguments = Type element :: _ }
+    when Well_known.find_builtin_type path = Some Array ->
+      Some (make_named (Well_known.make_path List) [ element ])
   | _ -> None
 
 let find_specification_sequence_element (sequence : ty) =

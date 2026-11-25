@@ -11,6 +11,7 @@ type context = {
   list_bounds : Interface.Impls.bounds;
   mode_keywords : (Syntax.id, Core.mode_keyword) Hashtbl.t;
   bare_names : (Syntax.id, string) Hashtbl.t Lazy.t;
+  parameter_types : (Syntax.id, Syntax.id) Hashtbl.t Lazy.t;
   places_without_keyword : (Syntax.id, Language.Mode.t) Hashtbl.t;
   names : string Local_table.t;
   origins : Core.origin Local_table.t;
@@ -41,4 +42,5 @@ val find_owned_scrutinee : context -> Place.root -> Catalog.Ownership.scrutinee 
 val find_place : context -> Place.t -> Catalog.Ownership.place
 val collect : context -> Mir.Graph.t -> mode_keywords:Core.mode_keyword list -> unit
 val find_copy : context -> Types.ty -> Core.origin -> Catalog.Ownership.copy option
+val find_view_declaration : context -> Place.root -> Catalog.Ownership.view_declaration option
 val cover_with_mode_keyword : context -> Core.origin -> Core.origin Catalog.range

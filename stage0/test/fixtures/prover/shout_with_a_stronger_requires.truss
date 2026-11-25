@@ -5,7 +5,7 @@ type Shout(text: String)
 impl FromTemplate for Shout {
   type Part = String
 
-  fn is_valid_template(literals: Slice[text.Literal]) -> Bool
+  fn is_valid_template(literals: List[text.Literal]) -> Bool
   {
     true
   }

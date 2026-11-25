@@ -8,7 +8,8 @@ let not_strictly_positive =
 
 let describe_holder method_name = function
   | Package.Own -> Printf.sprintf "a `%s` of its own" method_name
-  | Of_view view -> Printf.sprintf "the `%s` of its view `%s`" method_name (Types.show view)
+  | Of_list list ->
+      Printf.sprintf "the `%s` of `%s`, whose methods an `Array` has" method_name (Types.show list)
 
 let describe : Package.t -> Nodes.description = function
   | Impl_location { header; trait; for_type } ->

@@ -7,4 +7,5 @@
   path
   manifest
   registry
-  project_catalog))
+  project_catalog
+  x86_64_level))

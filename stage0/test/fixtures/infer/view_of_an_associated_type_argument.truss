@@ -16,7 +16,7 @@ fn joined[Value: Add[Value]](value: Value) -> Value.Output {
   todo
 }
 
-fn measure(text: StringSlice) -> UInt64 {
+fn measure(text: String) -> UInt64 {
   text.length()
 }
 

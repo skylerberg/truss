@@ -1,7 +1,0 @@
-fn f(name: own String) -> String {
-  StringSlice.to_string(name)
-}
-
-fn g(name: own String) -> String {
-  String.to_string(name)
-}

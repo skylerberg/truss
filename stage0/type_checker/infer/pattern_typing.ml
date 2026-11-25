@@ -553,9 +553,5 @@ and check_literal_pattern state id at literal type_ =
       | None -> check_string_pattern state at type_)
 
 and check_string_pattern state at type_ =
-  if
-    not
-      (Types.is_well_known String type_
-      || Types.is_well_known String_slice type_
-      || Types.is_error type_)
-  then State.report state (String_pattern_type { at; type_ })
+  if not (Types.is_well_known String (Types.strip_view type_) || Types.is_error type_) then
+    State.report state (String_pattern_type { at; type_ })

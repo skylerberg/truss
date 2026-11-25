@@ -352,16 +352,9 @@ let write_fully = Well_known.make_path Write_fully
 let write_output (state : Lowering.state) output =
   let builder = state.builder in
   let int32 = Ground.make_builtin Int32 in
-  let view_ty = Storage.make_view_type (Ground.make_builtin UInt8) in
-  let descriptor = Lowering.allocate_temporary state int32
-  and view = Lowering.allocate_temporary state view_ty in
+  let bytes_ty = Storage.make_storage_type (Ground.make_builtin UInt8) in
+  let descriptor = Lowering.allocate_temporary state int32 in
   Emit_c.Ir_builder.emit builder (Assign (descriptor, Use (Constant (Integer (Int32, Z.one)))));
-  Emit_c.Ir_builder.emit builder
-    (Assign
-       ( view,
-         Storage.build_view view_ty
-           ~buffer:(Copy (Storage.project_buffer output))
-           ~length:(Copy (Storage.project_length output)) ));
   let signature = Definitions.read_signature state.context write_fully in
   let result =
     match signature.output with
@@ -371,7 +364,7 @@ let write_output (state : Lowering.state) output =
   Targets.lower_item_call state
     (Lowered.Item.make_code write_fully Ground.no_instantiation)
     ~signature ~substitution:Types.no_substitution
-    ~arguments:[ (Read, int32, descriptor); (Read, view_ty, view) ]
+    ~arguments:[ (Read, int32, descriptor); (Read, bytes_ty, output) ]
     ~destination:(Lowering.allocate_temporary state result)
     ~site:None ()
 

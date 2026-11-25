@@ -274,7 +274,7 @@ let () =
         make_package
           [
             ( "main.truss",
-              "fn main(arguments: Slice[String]) -> ExitCode {\n\
+              "fn main(arguments: List[String]) -> ExitCode {\n\
               \  if arguments.length() == 2 { ExitCode.success } else { ExitCode.failure }\n\
                }\n" );
           ]
@@ -712,6 +712,60 @@ let () =
       | exception Manifest.Malformed { line = 4; _ } -> ()
       | _ -> fail "accepted")
 
+let () =
+  test "the project's [build] x86_64_level gives the level its programs are built for" (fun () ->
+      let root =
+        make_directory
+          [
+            ("truss.toml", "[project]\n[build]\nx86_64_level = \"v1\"\n");
+            ("one/truss.toml", make_manifest "one");
+          ]
+      in
+      let project = Cli.Command_packages.load (Filename.concat root "one") in
+      if Workspace.x86_64_level (fst project) <> V1 then fail "read another level");
+  test "a project without an x86-64 level builds its programs for v3" (fun () ->
+      if Workspace.x86_64_level (fst (Cli.Command_packages.load (make_package []))) <> V3 then
+        fail "read another level");
+  test "an x86-64 level in a package's manifest that is not its project's is a problem" (fun () ->
+      let root =
+        make_directory
+          [
+            ("truss.toml", "[project]\n");
+            ("one/truss.toml", make_manifest "one" ^ "[build]\nx86_64_level = \"v1\"\n");
+          ]
+      in
+      let project = Cli.Command_packages.load root in
+      let problems = Workspace.problems (fst project) in
+      if
+        not
+          (List.exists
+             (fun (problem : Project.problem) ->
+               problem.file = "one/truss.toml"
+               && String.includes ~affix:"A build's x86-64 level is its project's"
+                    (Project.show_problem problem))
+             problems)
+      then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems));
+      if Workspace.x86_64_level (fst project) <> V3 then fail "read the package's level");
+  List.iter
+    (fun (written, expected) ->
+      test (Printf.sprintf "an x86-64 level written as %s is malformed, at its line" written)
+        (fun () ->
+          match
+            Manifest.parse (Printf.sprintf "[project]\n[build]\nx86_64_level = %s\n" written)
+          with
+          | exception Manifest.Malformed { line = 3; problem }
+            when String.includes ~affix:expected (Project_catalog.describe_manifest_problem problem)
+            ->
+              ()
+          | exception Manifest.Malformed { line; problem } ->
+              fail "line %d: %s" line (Project_catalog.describe_manifest_problem problem)
+          | _ -> fail "accepted"))
+    [ ({|"v5"|}, {|`"v1"`, `"v2"`, `"v3"`, `"v4"`|}); ("3", "is a string in quotes") ];
+  test "a key of [build] other than x86_64_level is malformed, at its line" (fun () ->
+      match Manifest.parse "[project]\n[build]\nlevel = \"v1\"\n" with
+      | exception Manifest.Malformed { line = 3; _ } -> ()
+      | _ -> fail "accepted")
+
 let edit start stop replacement = Diagnostic.replace (Source.make_span start stop) replacement
 
 let make_diagnostic ~fixes start stop =
@@ -1118,18 +1172,18 @@ let () =
   test "a method written in an impl is shown through the implementing type" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.square_area) ] in
       expect_strings ~expected:[ "fn area(self) -> Int64" ] (run_show root "demo.Square.area"));
-  test "a view's method is shown through each type that has the view" (fun () ->
+  test "a method of `List` is shown through `List` and through `Array`" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
       expect_strings
-        ~expected:[ "public fn Slice[Element: Ordered].sort(mut self)" ]
+        ~expected:[ "public fn List[Element: Ordered].sort(mut self)" ]
         (list_headers (run_show root "List.sort"));
       expect_strings
-        ~expected:[ "public fn Slice[Element: Ordered].sort(mut self)" ]
+        ~expected:[ "public fn List[Element: Ordered].sort(mut self)" ]
         (list_headers (run_show root "Array.sort"));
       expect_strings
-        ~expected:[ "public fn StringSlice.trim(self) -> StringSlice" ]
+        ~expected:[ "public fn String.trim(self) -> view String" ]
         (list_headers (run_show root "String.trim")));
-  test "a type's own method hides its view's method of the same name and mode" (fun () ->
+  test "the overloads of a method by its receiver's mode are shown together" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
       expect_strings
         ~expected:[ "public fn List[Element].reverse(mut self)" ]
@@ -1137,19 +1191,17 @@ let () =
       expect_strings
         ~expected:
           [
+            "public fn String.to_bytes(self) -> List[UInt8]";
             "public fn String.to_bytes(own self) -> List[UInt8]";
-            "public fn StringSlice.to_bytes(self) -> List[UInt8]";
           ]
         (list_headers (run_show root "String.to_bytes")));
-  test "a type is shown with its view's methods and without its view's impls" (fun () ->
+  test "a type is shown with its methods and its impls" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
       let headers = list_headers (run_show root "List") in
-      if not (List.mem "public fn Slice[Element: Ordered].sort(mut self)" headers) then
-        fail "`Slice.sort` is missing from %s" (String.concat "; " headers);
-      if List.mem "public fn Slice[Element].reverse(mut self)" headers then
-        fail "the hidden `Slice.reverse` is shown in %s" (String.concat "; " headers);
-      if List.exists (String.starts_with ~prefix:"impl Equal for Slice") headers then
-        fail "an impl for `Slice` is shown in %s" (String.concat "; " headers));
+      if not (List.mem "public fn List[Element: Ordered].sort(mut self)" headers) then
+        fail "`List.sort` is missing from %s" (String.concat "; " headers);
+      if not (List.exists (String.starts_with ~prefix:"impl Equal for List") headers) then
+        fail "the impl of `Equal` for `List` is missing from %s" (String.concat "; " headers));
   test "a module is shown without repeating the methods written in its traits and impls" (fun () ->
       let root =
         make_package
@@ -1194,19 +1246,7 @@ let () =
       expect_strings
         ~expected:[ "fn compare(self, other: Self) -> Ordering" ]
         (list_headers (run_show root "demo.Interval.compare")));
-  test "a missing member is reported with the member of that name on a related type" (fun () ->
-      let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
-      let status, output = run_truss [ "show"; "-C"; root; "Slice.characters" ] in
-      if
-        status <> 2
-        || not
-             (String.includes
-                ~affix:
-                  "`Slice` has no member `characters`. `StringSlice.characters` exists. `truss \
-                   show Slice` lists its methods and its impls."
-                output)
-      then fail "status %d: %s" status output);
-  test "a missing member with no related one is reported with the type's listing" (fun () ->
+  test "a missing member is reported with the type's listing" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
       let status, output = run_truss [ "show"; "-C"; root; "demo.Point.scale" ] in
       if
@@ -1236,13 +1276,13 @@ let make_speaker_calling called =
       ( "main.truss",
         Printf.sprintf
           "capability Speaker {\n\
-          \  fn say(text: StringSlice)\n\
-          \  fn shout(text: StringSlice)\n\
+          \  fn say(text: String)\n\
+          \  fn shout(text: String)\n\
            }\n\n\
            type Quiet()\n\n\
            impl Speaker for Quiet {\n\
-          \  fn say(self, text: StringSlice) {}\n\n\
-          \  fn shout(self, text: StringSlice) {\n\
+          \  fn say(self, text: String) {}\n\n\
+          \  fn shout(self, text: String) {\n\
           \    todo\n\
           \  }\n\
            }\n\n\
@@ -1251,7 +1291,7 @@ let make_speaker_calling called =
            {\n\
           \  Speaker.%s(\"hello\")\n\
            }\n\n\
-           fn main(arguments: Slice[String]) -> ExitCode {\n\
+           fn main(arguments: List[String]) -> ExitCode {\n\
           \  provide Quiet() {\n\
           \    speak()\n\
           \  }\n\
@@ -1357,7 +1397,7 @@ let () =
             ("weather/daily/daily.truss", "public fn forecast() -> UInt64 {\n  1\n}\n");
             ( "main.truss",
               "use demo.weather\n\n\
-               fn main(arguments: Slice[String]) -> ExitCode {\n\
+               fn main(arguments: List[String]) -> ExitCode {\n\
               \  let _ = weather.daily.forecast()\n\
               \  ExitCode.success\n\
                }\n" );
@@ -1378,7 +1418,7 @@ let () =
             ("weather/daily/daily.truss", "public fn forecast() -> UInt64 {\n  1\n}\n");
             ( "main.truss",
               "use demo.weather\n\n\
-               fn main(arguments: Slice[String]) -> ExitCode {\n\
+               fn main(arguments: List[String]) -> ExitCode {\n\
               \  let _ = weather.total([1]) + weather.daily.forecast()\n\
               \  ExitCode.success\n\
                }\n" );
@@ -1626,7 +1666,7 @@ let () =
       | [ hole ] ->
           if read_string_field "type" hole <> "String" then fail "the type is not String";
           expect_strings
-            ~expected:[ "count: Int64"; "header: String"; "title: StringSlice" ]
+            ~expected:[ "count: Int64"; "header: String"; "title: String" ]
             (List.map
                (fun binding ->
                  read_string_field "name" binding ^ ": " ^ read_string_field "type" binding)
@@ -2508,7 +2548,7 @@ let () =
         make_package
           [
             ( "main.truss",
-              "fn main(arguments: Slice[String]) -> ExitCode {\n\
+              "fn main(arguments: List[String]) -> ExitCode {\n\
               \  ExitCode.success\n\
                }\n\n\
                fn helper() -> Int64 {\n\
@@ -2532,7 +2572,7 @@ let make_package_with_two_warnings () =
   make_package
     [
       ( "main.truss",
-        "fn main(arguments: Slice[String]) -> ExitCode {\n\
+        "fn main(arguments: List[String]) -> ExitCode {\n\
         \  ExitCode.success\n\
          }\n\n\
          fn helper() -> Int64 {\n\

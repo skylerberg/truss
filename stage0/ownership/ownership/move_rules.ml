@@ -25,7 +25,21 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
           | Some scrutinee -> Returned_view_of_scrutinee { at; place = shown; scrutinee; copy }
           | None -> Returned_unowned { at; place = shown; views_literal; copy })
   else if List.exists (function Place.Element _ | Range _ -> true | Field _ -> false) place.steps
-  then refuse (fun at copy -> Moved_element { at; place = shown; copy })
+  then
+    match List.rev place.steps with
+    | Range _ :: _ ->
+        Refused
+          (fun context at type_ ->
+            Context.report context
+              (Moved_range
+                 {
+                   at;
+                   place = shown;
+                   copy = Context.find_copy context type_ origin;
+                   view_type = Types.make_view type_;
+                 }))
+    | Element _ :: _ | Field _ :: _ | [] ->
+        refuse (fun at copy -> Moved_element { at; place = shown; copy })
   else
     match (root_mode, place.root) with
     | Read, Constant _ -> refuse (fun at copy -> Moved_constant { at; place = shown; copy })

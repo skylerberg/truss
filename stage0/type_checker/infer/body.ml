@@ -16,6 +16,7 @@ let no_output : State.env =
     loop_element = None;
     compile_time = false;
     in_quantifier = false;
+    binds_view = false;
   }
 
 let constant_expression : State.env = { no_output with compile_time = true }
@@ -167,6 +168,7 @@ let check_function state ~broken_body (written : Syntax.signature)
       loop_element = None;
       compile_time = false;
       in_quantifier = false;
+      binds_view = false;
     }
   in
   declare_parameters state written.parameters signature;

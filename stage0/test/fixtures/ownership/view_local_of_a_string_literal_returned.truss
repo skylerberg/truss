@@ -1,0 +1,4 @@
+fn f() -> view String {
+  let text: view String = "static"
+  text
+}

@@ -33,7 +33,7 @@ let list_laws (context : State.context) trait =
   | None -> []
 
 let list_law_parameter_types ~substitution (law : Mir.law) =
-  List.map (fun (_, type_) -> Types.substitute substitution type_) law.parameters
+  List.map (fun (_, type_) -> Types.substitute_erased substitution type_) law.parameters
 
 let bind_law_parameters frame source ~substitution (law : Mir.law) terms =
   let types = list_law_parameter_types ~substitution law in

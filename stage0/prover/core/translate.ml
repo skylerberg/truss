@@ -191,7 +191,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   let parameters = contract.parameters in
   let signature =
     Option.map
-      (Types.map_signature (Types.substitute substitution))
+      (Types.map_signature (Types.substitute_erased substitution))
       (Interface.Impls.read_signature lookups.interface path)
   in
   let is_update_step =
@@ -321,6 +321,11 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   let declared_requires = Facts.list_clauses contract.requires
   and declared_ensures = contract.ensures in
   let output = match signature with Some { output = Returns ty; _ } -> Some ty | _ -> None in
+  let declared_output =
+    match Interface.Impls.read_signature lookups.interface path with
+    | Some { output = Returns ty; _ } -> Some (Types.substitute substitution ty)
+    | _ -> None
+  in
   let start =
     List.fold_left
       (fun frame (parameter : Mir.parameter) ->
@@ -348,6 +353,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
+  let declared_output = Option.map (Facts.substitute_declared_type context start) declared_output in
   let output = Option.map (Facts.substitute_type context start) output in
   let start =
     match signature with
@@ -400,7 +406,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
               old_locals;
               self = Option.map fst self;
               old_self = start.self;
-              self_type = Option.map (fun (_, ty) -> Types.substitute substitution ty) self;
+              self_type = Option.map (fun (_, ty) -> Types.substitute_erased substitution ty) self;
               result;
               makes_obligations = false;
               substitution;
@@ -602,9 +608,10 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                    (Amounts.compute_potential context frame ty handed)))
             potential_change context.lent_back
         in
-        match (returned, output) with
-        | Some term, Some output ->
-            Costs.plus potential_change (Amounts.compute_potential context frame output term)
+        match (returned, declared_output) with
+        | Some term, Some declared_output ->
+            Costs.plus potential_change
+              (Amounts.compute_potential context frame declared_output term)
         | _ -> potential_change
       in
       let under_trait = Facts.restrict frame trait_requires in
@@ -727,7 +734,8 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
                 List.fold_left2
                   (fun (locals, types) (local, type_) term ->
                     ( Locals.add (Core_local local) term locals,
-                      Locals.add (Core_local local) (Types.substitute renaming type_) types ))
+                      Locals.add (Core_local local) (Types.substitute_erased renaming type_) types
+                    ))
                   (start.locals, start.types) parameters
                   (List.take (List.length parameters) terms)
               in
@@ -827,7 +835,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
           let entry =
             List.fold_left
               (fun (frame : State.frame) (parameter : Mir.parameter) ->
-                let ty = Types.substitute subtrait_substitution parameter.type_ in
+                let ty = Types.substitute_erased subtrait_substitution parameter.type_ in
                 let term =
                   Facts.arrive context frame ("parameter." ^ Facts.read_parameter_name parameter) ty
                 in
@@ -854,7 +862,8 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
             { entry with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
           in
           let result_type =
-            Types.substitute subtrait_substitution (Types.extract_result_type signature.output)
+            Types.substitute_erased subtrait_substitution
+              (Types.extract_result_type signature.output)
           in
           let invocation : Invocation.t =
             {
@@ -895,7 +904,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
                                note_changed_in_place = (fun () -> ());
                              }
                        | Read | Own -> None);
-                     type_ = Types.substitute subtrait_substitution parameter.type_;
+                     type_ = Types.substitute_erased subtrait_substitution parameter.type_;
                      term = read_place parameter entry;
                    })
                  clauses.parameters)
@@ -934,7 +943,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
                 ~compute_change:(fun () ->
                   List.fold_left
                     (fun total (parameter : Mir.parameter) ->
-                      let ty = Types.substitute subtrait_substitution parameter.type_ in
+                      let ty = Types.substitute_erased subtrait_substitution parameter.type_ in
                       let before =
                         Amounts.compute_potential context after ty (read_place parameter entry)
                       in

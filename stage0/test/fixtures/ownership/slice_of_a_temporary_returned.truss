@@ -1,3 +1,0 @@
-fn f() -> Slice[Int64] {
-  make().slice()
-}

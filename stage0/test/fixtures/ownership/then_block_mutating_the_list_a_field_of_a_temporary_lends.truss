@@ -1,6 +1,6 @@
-type Shelf(names: Slice[String])
+type Shelf(names: view List[String])
 
-fn show(text: StringSlice) {}
+fn show(text: String) {}
 
 fn f(names: mut List[String]) {
   if Shelf(names: names[..]).names.get(0) is Some(name) {

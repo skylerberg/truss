@@ -9,9 +9,11 @@ fn f(items: mut List[String]) {
   }
 }
 
-fn g(view: mut Slice[String]) {
-  mut view[..].reverse()
-  for item in mut view {
+fn g(viewed: mut List[String])
+  modifies viewed[..]
+{
+  mut viewed[..].reverse()
+  for item in mut viewed {
     mut item.push("x")
   }
 }

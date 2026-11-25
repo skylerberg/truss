@@ -34,16 +34,18 @@ let () =
                ];
            };
        time_limit_seconds = None;
+       x86_64_level = None;
       } ->
           ()
       | _ -> Harness.fail "read differently");
-  Harness.test "PACKAGES.md's project manifest is a project with a time limit, and no package"
-    (fun () ->
+  Harness.test
+    "PACKAGES.md's project manifest is a project with a time limit and an x86-64 level, and no \
+     package" (fun () ->
       let text = File_system.read (Harness.make_workspace_path "PACKAGES.md") in
       let manifest = String.concat "\n" (Documents.list_block_after text "## Projects") in
       if not (Manifest.has_project_table manifest) then Harness.fail "not a project";
       match Manifest.parse manifest with
-      | { package = None; time_limit_seconds = Some 10 } -> ()
+      | { package = None; time_limit_seconds = Some 10; x86_64_level = Some V2 } -> ()
       | _ -> Harness.fail "read differently");
   Harness.test "a manifest has a package, a project, or both" (fun () ->
       let both = "[project]\n[package]\nname = \"a\"\n" in

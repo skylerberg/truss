@@ -60,7 +60,7 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
             let parameter : Types.parameter_info =
               { name = "the function value"; mode; type_ = input; has_default = false }
             in
-            let mode = check_argument state env argument.value parameter ~has_generic_type:false in
+            let mode = check_argument state env argument.value parameter in
             { Tables.expression = argument.value; core_argument_index = index; mode })
           arguments
       in
@@ -84,8 +84,7 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
         (State.make_error_type state
            (Not_callable { at = Written callee.id; callee = State.make_shown state callee_type }))
 
-and check_argument state env (value : Syntax.expression) (parameter : Types.parameter_info)
-    ~has_generic_type =
+and check_argument state env (value : Syntax.expression) (parameter : Types.parameter_info) =
   let inner =
     match value.kind with
     | Mode (mode, inner)
@@ -95,7 +94,41 @@ and check_argument state env (value : Syntax.expression) (parameter : Types.para
         inner
     | _ -> value
   in
-  let actual = Hooks.check_expression state env ~expected:parameter.type_ inner in
+  let rec view_parts type_ =
+    match State.normalize state type_ with
+    | Types.Named { path; arguments } as known when not (Types.is_view known) ->
+        Types.Named
+          {
+            path;
+            arguments =
+              List.map
+                (function
+                  | Types.Type argument ->
+                      let argument = State.normalize state argument in
+                      Types.Type
+                        (if Types.is_viewable argument then Types.make_view argument
+                         else view_parts argument)
+                  | Types.Value _ as count -> count)
+                arguments;
+          }
+    | other -> other
+  in
+  let rec is_construction (written : Syntax.expression) =
+    match written.kind with
+    | List _ | Map _ -> true
+    | Call ({ kind = Name { case = Upper; _ } | Member (_, { case = Upper; _ }); _ }, _) -> true
+    | Parenthesized inner -> is_construction inner
+    | _ -> false
+  in
+  let expected =
+    match (parameter.mode, inner.kind) with
+    | Read, (If _ | Match _ | Block _)
+      when Types.is_viewable (Conversions.read_expected_head state parameter.type_) ->
+        Types.make_view parameter.type_
+    | Read, _ when is_construction inner -> view_parts parameter.type_
+    | _ -> parameter.type_
+  in
+  let actual = Hooks.check_expression state env ~expected inner in
   if inner != value then begin
     State.record state value actual
   end;
@@ -104,10 +137,8 @@ and check_argument state env (value : Syntax.expression) (parameter : Types.para
     | Some mode -> { parameter with mode }
     | None -> parameter
   in
-  Conversions.coerce state env ~argument:parameter.mode
-    ~takes_view_as_owner:(has_generic_type && parameter.mode = Read)
-    value ~actual ~expected:parameter.type_;
-  Modes.check_mode state env value parameter actual ~has_generic_type;
+  Conversions.coerce state env ~argument:parameter.mode value ~actual ~expected:parameter.type_;
+  Modes.check_mode state env value parameter actual;
   parameter.mode
 
 and match_arguments state site (value : Syntax.expression) (parameters : Types.parameter_info list)
@@ -184,11 +215,6 @@ and check_arguments state env site (value : Syntax.expression)
     let is_lambda ((argument : Syntax.argument), _) =
       match argument.value.kind with Lambda _ -> true | _ -> false
     in
-    let has_generic_type (_, index) =
-      match (List.nth declared index).type_ with
-      | Types.Parameter _ | Projection _ -> true
-      | _ -> false
-    in
     let is_checked_late (_, index) =
       match (List.nth declared index).type_ with
       | Types.Projection _ -> true
@@ -198,10 +224,7 @@ and check_arguments state env site (value : Syntax.expression)
     let check ((argument : Syntax.argument), index) =
       let parameter = List.nth parameters index in
       let parameter = { parameter with type_ = flatten parameter.type_ } in
-      let mode =
-        check_argument state env argument.value parameter
-          ~has_generic_type:(has_generic_type (argument, index))
-      in
+      let mode = check_argument state env argument.value parameter in
       {
         Tables.expression = argument.value;
         core_argument_index = (if has_receiver then index + 1 else index);
@@ -401,12 +424,7 @@ and check_updates state env (value : Syntax.expression) ~at record_type
           in
           match List.assq argument groups with
           | [] ->
-              ignore
-                (check_argument state env argument.value parameter
-                   ~has_generic_type:
-                     (match declared.type_ with
-                     | Types.Parameter _ | Projection _ -> true
-                     | _ -> false));
+              ignore (check_argument state env argument.value parameter);
               [ (argument.value.id, [ parameter.name ]) ]
           | nested ->
               let at =

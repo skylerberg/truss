@@ -1,4 +1,4 @@
-fn f(table: Map[String, Int64], key: StringSlice) -> Int64
+fn f(table: Map[String, Int64], key: String) -> Int64
   requires forall each: String => table.model().contains_key(each) ==>
     exists other: String => table.model().contains_key(other) && !(other == each)
 {

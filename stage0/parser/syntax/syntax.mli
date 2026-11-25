@@ -24,6 +24,7 @@ and type_kind =
   | Self_type of name option
   | Associated of name * name
   | Function_type of function_type
+  | View_type of type_expression
   | Type_error
 
 and path_type = { path : path; arguments : type_argument list; id : id }

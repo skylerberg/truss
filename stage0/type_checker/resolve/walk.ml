@@ -316,6 +316,7 @@ let rec resolve_type_expression state scope (type_ : Syntax.type_expression) =
           scope inputs
       in
       List.iter (resolve_clause state named) clauses
+  | View_type viewed -> resolve_type_expression state scope viewed
   | Type_error -> ()
 
 and resolve_associated_base state scope (base : Syntax.name) (member : Syntax.name) associated =
@@ -896,6 +897,7 @@ let rec list_generic_capabilities (type_ : Syntax.type_expression) : Syntax.name
         inputs
       @ Option.fold ~none:[] ~some:list_generic_capabilities output
       @ list_used_generic_capabilities clauses
+  | View_type viewed -> list_generic_capabilities viewed
   | Self_type _ | Associated _ | Type_error -> []
 
 and list_used_generic_capabilities (clauses : Syntax.clause list) =

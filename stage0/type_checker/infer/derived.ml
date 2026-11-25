@@ -172,35 +172,13 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                     ~arguments ~lends:None))
           in
           let text_argument text =
-            Operands.build_argument Read
-              (node (Types.make_named (Well_known.make_path String_slice) []) (Literal (Text text)))
+            Operands.build_argument Read (node Types.string_type (Literal (Text text)))
           in
           let count_argument count =
             Operands.build_argument Read
               (node (Types.make_builtin UInt64) (Integer (Z.of_int count)))
           in
           let read place : Core.argument = { mode = Read; value = Place place } in
-          let build_view_argument string_place =
-            Operands.build_argument Read
-              (node
-                 (Types.make_named (Well_known.make_path String_slice) [])
-                 (Call
-                    (Callee_uses.make_call signatures lookups.interface ~list_bounds
-                       ~callee:
-                         (Function
-                            {
-                              path =
-                                Method
-                                  {
-                                    owner = Well_known.make_path String;
-                                    name = "slice";
-                                    receiver = Instance Read;
-                                  };
-                              instantiation = Types.no_instantiation;
-                            })
-                       ~arguments:[ read string_place ]
-                       ~lends:None)))
-          in
           let variants =
             match shape with
             | Sum variants ->
@@ -924,7 +902,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                                           ~arguments:
                                                             [
                                                               make_source_argument Read;
-                                                              build_view_argument name_place;
+                                                              read name_place;
                                                             ]
                                                           ~lends:None)))) );
                                         ];

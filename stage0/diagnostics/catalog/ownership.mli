@@ -21,6 +21,7 @@ type loan = {
 }
 
 type copy = { moved : Core.origin; own_keyword : (Core.origin * Core.origin) option }
+type view_declaration = { type_node : Core.origin; view_type : Types.ty }
 type dangling_act = Is | Returns | Stores_in of root | Lends
 type dangling_view = Captured_variables | Temporary_view | View_of of root
 type scrutinee = { scrutinee : root; written : Core.origin; is_part : bool }
@@ -56,7 +57,12 @@ type t =
   | Returned_view_of_implementation of { at : Core.origin }
   | Stored_view_in_implementation of { at : Core.origin; viewed : root }
   | Self_referential_store of { at : Core.origin; root : root }
-  | Stored_view_of_borrowed of { at : Core.origin; parameter : root; holder : root }
+  | Stored_view_of_borrowed of {
+      at : Core.origin;
+      parameter : root;
+      holder : root;
+      declaration : view_declaration option;
+    }
   | Lent_owned_part of { at : Core.origin; part : root }
   | Lent_other_parameter of { at : Core.origin; root : root }
   | Branch_data_race of { at : Core.origin; schedule : Language.Loop_mode.t; place : place }
@@ -82,6 +88,7 @@ type t =
       copy : copy option;
     }
   | Moved_element of { at : Core.origin; place : place; copy : copy option }
+  | Moved_range of { at : Core.origin; place : place; copy : copy option; view_type : Types.ty }
   | Moved_constant of { at : Core.origin; place : place; copy : copy option }
   | Moved_literal_view of { at : Core.origin; place : place; copy : copy option }
   | Moved_view_of_scrutinee of {
@@ -96,10 +103,11 @@ type t =
   | Not_reinitialized_at_return of { at : Core.origin; moved : Core.origin; place : place }
   | Not_reinitialized_at_scope_end of { moved : Core.origin; place : place }
   | Not_reinitialized_in_branch of { moved : Core.origin; place : place }
+  | Resized_range of { at : Core.origin; call : Core.origin }
   | Undeclared_change of {
       at : Core.origin;
       function_ : Path.t;
       parameter : string;
-      fields : string list;
+      part : Types.modified;
       last_entry : Core.origin option;
     }

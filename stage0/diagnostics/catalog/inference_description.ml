@@ -96,20 +96,14 @@ let describe_mismatch :
   | Expected { expected; actual; copy } ->
       let fixes =
         match copy with
-        | Some { copy_method; edit } ->
-            let title = Printf.sprintf "Copy the view with `%s()`." copy_method in
+        | Some copy ->
             [
-              fix title
+              fix "Copy the view with `copy()`."
                 [
-                  (match edit with
-                  | Rename_copy name -> Build.replace name [ Text copy_method ]
-                  | Append_copy written ->
-                      Build.insert_after written [ Text ("." ^ copy_method ^ "()") ]
+                  (match copy with
+                  | Append_copy written -> Build.insert_after written [ Text ".copy()" ]
                   | Wrap_copy written ->
-                      Build.replace written
-                        [
-                          Text "("; Build.quote written; Text (Printf.sprintf ").%s()" copy_method);
-                        ]);
+                      Build.replace written [ Text "("; Build.quote written; Text ").copy()" ]);
                 ];
             ]
         | None -> []
@@ -150,11 +144,10 @@ let describe_mismatch :
       in
       ( Unsatisfied_bound,
         (match unmet with
-          | Slice_lacks_mut_self ->
+          | Does_not_hold_for_view ->
               needs
-              ^ ", which does not hold: a slice implements no trait with a `mut self` method. \
-                 Generic code could call the method on a copy of the slice, and a copy views the \
-                 same elements."
+              ^ ", which does not hold: a view implements a trait only where each method that an \
+                 `impl` writes takes `Self` through read-only parameters alone."
           | Does_not_hold -> needs ^ ", which does not hold."
           | Associated_differs { name; found } ->
               Printf.sprintf "%s, and its `%s` is `%s`." needs name (Types.show found))
@@ -426,9 +419,10 @@ let describe : Inference.t -> Nodes.description = function
         ~fixes:(Build.list_spelling_fixes origin ~written:name candidates)
         (say
            (match owner with
-           | Type_owner { type_; view = Some view } ->
-               Printf.sprintf "`%s` has no method `%s`, and neither has its view `%s`."
-                 (Types.show type_) name (Types.show view)
+           | Type_owner { type_; list = Some list } ->
+               Printf.sprintf
+                 "`%s` has no method `%s`, and neither has `%s`, whose methods an `Array` has."
+                 (Types.show type_) name (Types.show list)
            | owner -> Printf.sprintf "`%s` has no method `%s`." (show_method_owner owner) name))
   | Counted_not_a_capability { at = origin; written } ->
       make Not_a_capability (Build.at origin)
@@ -582,7 +576,9 @@ let describe : Inference.t -> Nodes.description = function
         (say "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`.")
   | Not_sliceable { at = origin; base } ->
       make Not_indexable (Build.at origin)
-        (say (Printf.sprintf "%s cannot be sliced." (show_shown_capitalized base)))
+        (say
+           (Printf.sprintf "%s has no ranges: only a `List` and an `Array` have."
+              (show_shown_capitalized base)))
   | Not_indexable { at = origin; base } ->
       make Not_indexable (Build.at origin)
         (say (Printf.sprintf "%s cannot be indexed." (show_shown_capitalized base)))
@@ -773,34 +769,12 @@ let describe : Inference.t -> Nodes.description = function
                an element read-only, and not `IndexMut`.%s"
               (Types.show self_type) (Types.show self_type)
               (if assigns then " Assign the whole element with `=`." else "")))
-  | Stored_slice_written { at = origin; by; stored } ->
+  | View_written { at = origin; by; view } ->
       make (code_of_mutation by) (Build.at origin)
-        (say
-           (Printf.sprintf
-              "%s, so its elements cannot be written through it: a slice held in a variable, a \
-               field, or an element may alias another view of the same elements. Write through a \
-               range of the collection, as in `mut items[1..]`, or through a `mut Slice` \
-               parameter."
-              (match stored with
-              | Held_by name -> Printf.sprintf "`%s` holds a slice" name
-              | In_field -> "This slice is held in a field"
-              | In_element -> "This slice is an element of a collection"
-              | Lent_by_a_call -> "This slice is lent by a call")))
-  | Slice_parameter_assigned { at = origin; parameter } ->
-      make Not_assignable (Build.at origin)
-        (say
-           (Printf.sprintf
-              "`%s` is a `mut` slice parameter, so it cannot be assigned: the caller lends it \
-               write access to a range of elements, and a different slice would carry that access \
-               to elements the caller did not lend. Write its elements instead."
-              parameter))
-  | Slice_passed_to_generic { at = origin } ->
-      make Wrong_mode (Build.at origin)
-        (say
-           "A slice is passed `mut` only to a `mut Slice` parameter, and this parameter's declared \
-            type is a type parameter or an associated type. The callee could assign it a different \
-            slice, which would leave the elements the caller lent unchanged while its contract \
-            describes them as written.")
+        (Description.Text "`" :: Build.quote view
+        :: say
+             "` is a view, and a view is read-only, so nothing is written through it. Write \
+              through the place that it views.")
   | Mutation_in_formula { at = origin; by } ->
       make Not_in_specification (Build.at origin)
         (say
@@ -919,14 +893,26 @@ let describe : Inference.t -> Nodes.description = function
             "` lends a part, and a function value cannot lend. Call it where the part is used, or \
              write a lambda that returns a copy of the part.";
         ]
-  | No_member { at = origin; type_; name; view } ->
+  | View_passed_mut { at = origin } ->
+      make Wrong_mode (Build.at origin)
+        (say
+           "This is a view, and a view is read-only, so it cannot be passed `mut`. Pass the place \
+            that it views.")
+  | View_receiver { at = origin; name; receivers } ->
+      make Wrong_receiver (Build.at origin)
+        (say
+           (Printf.sprintf
+              "`%s` takes %s, and its receiver here is a view, which is read-only. Copy the view \
+               with `copy()` to own a value."
+              name
+              (String.concat " or " (List.map Path.show_receiver receivers))))
+  | No_member { at = origin; type_; name; list } ->
       make Unknown_member (Build.at origin)
         (say
-           (match view with
-           | Some view ->
-               Printf.sprintf
-                 "`%s` has no member `%s` of its own. The method is its view's: `%s.%s`."
-                 (Types.show type_) name view name
+           (match list with
+           | Some list ->
+               Printf.sprintf "`%s` has no member `%s` of its own. The method is `%s.%s`."
+                 (Types.show type_) name list name
            | None -> Printf.sprintf "`%s` has no member `%s`." (Types.show type_) name))
   | Type_argument_count { at = origin; expected; given } ->
       make Arity (Build.at origin)
@@ -1194,10 +1180,13 @@ let describe : Inference.t -> Nodes.description = function
         (say
            "The `else` of a `let` must leave the block, with `return`, `break`, `continue`, or \
             `unreachable`.")
-  | Not_iterable_loop { at = origin; mode; type_ } ->
+  | Not_iterable_loop { at = origin; mode; is_view; type_ } ->
       make Not_iterable (Build.at origin)
         (say
            (match mode with
+           | Mut when is_view ->
+               "This is a view, and a view is read-only, so a `for` loop cannot mutate its \
+                elements. Loop over the place that it views."
            | Read ->
                Printf.sprintf
                  "A `for` loop cannot go over %s: it implements neither `Iterable` nor `Cursor`."

@@ -89,6 +89,7 @@ and check_placement cursor ~top (type_ : Syntax.type_expression) =
         inputs;
       Option.iter (check_placement cursor ~top:false) output
   | Path_type path -> check_path_placement cursor path
+  | View_type viewed -> check_placement cursor ~top:false viewed
   | Self_type _ | Associated _ | Type_error -> ()
 
 and check_path_placement cursor (path : Syntax.path_type) =
@@ -172,6 +173,7 @@ and check_trait_argument cursor ~is_law_proof (type_ : Syntax.type_expression) =
   | Path_type path -> check_trait_arguments cursor ~is_law_proof path
   | Function_type _ -> report cursor type_.id (Function_type_argument { is_law_proof })
   | Associated _ | Self_type (Some _) -> report_associated_type ()
+  | View_type viewed -> check_trait_argument cursor ~is_law_proof viewed
   | Self_type None | Type_error -> ()
 
 let check_header_trait cursor ~is_law_proof (trait_ : Syntax.path_type) =

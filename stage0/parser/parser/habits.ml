@@ -236,7 +236,8 @@ let report_as_conversion cursor ~(value : Syntax.expression) ~(as_token : Token.
   | Path_type { path = { modules = []; last = { text = "Float64"; _ } }; arguments = []; _ } ->
       report_float Float64
   | Type_error -> Cursor.report cursor as_token.span As_unknown_conversion
-  | Path_type _ | Self_type _ | Associated _ | Function_type _ -> report Library_conversion
+  | Path_type _ | Self_type _ | Associated _ | Function_type _ | View_type _ ->
+      report Library_conversion
 
 let report_elif cursor ~(previous_stop : int) ~(elif_token : Token.t) =
   Cursor.report cursor elif_token.span

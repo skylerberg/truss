@@ -41,14 +41,14 @@ internal fn set_raw_mode(descriptor: Int32, enabled: Bool) -> Result[Unit, Int32
     change(mut settings, at: output_at, size: flag_size, clear: 0, set: intrinsic.libc_opost())
     change(mut settings, at: local_at, size: flag_size, clear: 0, set: local)
   }
-  calls.done(intrinsic.libc_tcsetattr(descriptor, settings: settings.slice().elements))
+  calls.done(intrinsic.libc_tcsetattr(descriptor, settings: settings.storage))
 }
 
 fn change(settings: mut List[UInt8], at: UInt64, size: UInt64, clear: UInt64, set: UInt64)
   ensures settings.length() == old(settings.length())
   uses RunForever
 {
-  let before = calls.number_at(settings.slice().elements, offset: at, size: size)
+  let before = calls.number_at(settings.storage, offset: at, size: size)
   var left = (before & ~clear) | set
   var index: UInt64 = 0
   while index < size && index < 8

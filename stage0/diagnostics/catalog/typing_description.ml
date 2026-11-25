@@ -184,20 +184,6 @@ let describe : Typing.t -> Nodes.description = function
   | Unknown_capability_method { at = origin; written; method_ } ->
       make Unknown_member (Build.at origin)
         (say (Printf.sprintf "`%s` has no method `%s`." written method_))
-  | Read_only_owning_parameter { at = origin; name; written; view; copy; takes } ->
-      make Read_only_owning_parameter (Build.at origin)
-        ~fixes:
-          [
-            {
-              title = say (Printf.sprintf "Write `%s`." view);
-              edits = [ Build.replace name [ Text view ] ];
-            };
-          ]
-        (say
-           (Printf.sprintf
-              "A read-only `%s` parameter makes every caller that holds a `%s` copy it into a new \
-               %s. Declare it as `%s`, which takes %s."
-              written view copy view takes))
   | Time_of_run_forever { at = origin } ->
       make Unbounded_time (Build.at origin)
         (say
@@ -282,14 +268,6 @@ let describe : Typing.t -> Nodes.description = function
         (say
            "Only an `impl` of a capability can have `uses`. A trait's methods can use only the \
             capabilities the trait declares.")
-  | Mut_self_for_slice { at = origin; trait; for_type } ->
-      make Mut_self_for_slice (Build.at origin)
-        (say
-           (Printf.sprintf
-              "`%s` has a `mut self` method, so it cannot be implemented for `%s`. Generic code \
-               could call the method on a copy of a slice, and a copy views the same elements, so \
-               the write would reach elements that were lent read-only."
-              trait (Types.show for_type)))
   | Callback_contract_mismatch { at = origin; name; trait; parameter; declaration; clauses } ->
       make Signature_mismatch (Build.at origin)
         (Description.Text
@@ -401,7 +379,7 @@ let describe : Typing.t -> Nodes.description = function
   | Main_signature { at = origin } ->
       make Main_signature (Build.at origin)
         (say
-           "`main` must have exactly the signature `fn main(arguments: Slice[String]) -> ExitCode`.")
+           "`main` must have exactly the signature `fn main(arguments: List[String]) -> ExitCode`.")
   | Duplicate_member { at = origin; member_kind; name } ->
       make Duplicate_field (Build.at origin)
         (say (Printf.sprintf "Another %s of this type is already named `%s`." member_kind name))
@@ -467,11 +445,19 @@ let describe : Typing.t -> Nodes.description = function
               "`%s` restates `%s.%s`, so it adds only `ensures` and `cost` clauses. The parts that \
                its implementations change are those that `%s.%s` names."
               name declared_by name declared_by name))
+  | Not_viewable_type { at = origin; type_ } ->
+      make Not_viewable (Build.at origin)
+        (say
+           (Printf.sprintf
+              "`view` applies to a `String` and to a `List`, and this type is `%s`. A value of \
+               another type is viewed by a read-only parameter, a `let`, or a lending method."
+              (Types.show type_)))
   | Indexed_modified_part { at = origin } ->
       make Not_a_field_path (Build.at origin)
         (say
-           "An element of a collection is not a fixed part, so a `modifies` clause names the field \
-            that holds the collection.")
+           "One element or a narrower range is not a fixed part. A `modifies` clause names every \
+            element of a list with `[..]`, as in `items[..]`, or the field that holds the \
+            collection.")
   | Not_a_modified_part { at = origin } ->
       make Not_a_field_path (Build.at origin)
         (say "A `modifies` clause names fields of `mut` parameters, such as `scanner.position`.")
@@ -489,16 +475,16 @@ let describe : Typing.t -> Nodes.description = function
                change in every part already, so name the fields of `%s` that change, or remove \
                `%s`."
               parameter parameter parameter))
-  | Read_only_part { at = origin; parameter; fields } ->
+  | Read_only_part { at = origin; parameter; part } ->
       make Read_only_part (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` is not `mut`, so the function changes no part of it. Remove `%s` from the \
                clause, or take `%s` as `mut`."
               parameter
-              (Build.show_field_path parameter fields)
+              (Types.show_modified_part ~root:parameter part)
               parameter))
-  | Repeated_part { at = origin; parameter; fields; container; siblings } ->
+  | Repeated_part { at = origin; parameter; part; container; siblings } ->
       make Repeated_part (Build.at origin)
         ~fixes:
           [
@@ -508,12 +494,13 @@ let describe : Typing.t -> Nodes.description = function
             };
           ]
         (say
-           (if container = fields then
-              Printf.sprintf "The clause names `%s` twice." (Build.show_field_path parameter fields)
+           (if container = part then
+              Printf.sprintf "The clause names `%s` twice."
+                (Types.show_modified_part ~root:parameter part)
             else
               Printf.sprintf "`%s` is a part of `%s`, which the clause names already."
-                (Build.show_field_path parameter fields)
-                (Build.show_field_path parameter container)))
+                (Types.show_modified_part ~root:parameter part)
+                (Types.show_modified_part ~root:parameter container)))
   | Fieldless_part { at = origin; parameter; prefix; fields; type_; has_variants } ->
       let reason =
         if has_variants then "whose fields belong to its variants and so are not fixed parts"
@@ -542,7 +529,15 @@ let describe : Typing.t -> Nodes.description = function
       make Unknown_member (Build.at origin)
         ~fixes:(Build.list_spelling_fixes origin ~written:field candidates)
         (say (Printf.sprintf "`%s` has no field `%s`." (Types.show type_) field))
-  | Impl_modifies { at = origin; name; parameter; fields; trait } ->
+  | Part_without_elements { at = origin; parameter; fields; type_ } ->
+      make Not_a_field_path (Build.at origin)
+        (say
+           (Printf.sprintf
+              "`%s` is of type `%s`, which is no `List` and no `Array`, so it has no elements for \
+               `[..]` to name."
+              (Build.show_field_path parameter fields)
+              (Types.show type_)))
+  | Impl_modifies { at = origin; name; parameter; part; trait } ->
       make Impl_modifies (Build.at origin)
         (say
            (Printf.sprintf
@@ -550,7 +545,7 @@ let describe : Typing.t -> Nodes.description = function
                that holds it. An implementation changes only the parts that its trait's method \
                names."
               name
-              (Build.show_field_path parameter fields)
+              (Types.show_modified_part ~root:parameter part)
               trait name))
   | Restated_default { at = origin; name; declared_by } ->
       make Restated_method_default (Build.at origin)

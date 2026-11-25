@@ -96,78 +96,23 @@ let rec use_mutable_indexes (state : State.state) ~(report_with : mutation optio
       use_mutable_indexes state ~report_with base
   | _ -> ()
 
-let has_slice_type (state : State.state) (value : Syntax.expression) =
-  match state.tables.types.(value.id) with
-  | Some type_ ->
-      let type_ = State.normalize state type_ in
-      Types.is_well_known Slice type_ || Types.is_well_known String_slice type_
-  | None -> false
-
-type stored_slice = Catalog.Inference.stored_slice =
-  | Held_by of string
-  | In_field
-  | In_element
-  | Lent_by_a_call
-
-let find_named_slice state (name : Syntax.name) =
-  match State.find_target state name with
-  | Some (Local id) -> (
-      match Hashtbl.find_opt state.locals id with
-      | Some { binding = Parameter; mode = Mut; _ } | None -> None
-      | Some { name; _ } -> Some (Held_by name))
+let rec find_viewing_base (state : State.state) (place : Syntax.expression) =
+  match place.kind with
+  | Parenthesized inner | Mode (_, inner) -> find_viewing_base state inner
+  | Member (base, _) | Bracket (base, _) -> (
+      match Option.map (State.normalize state) state.tables.types.(base.id) with
+      | Some type_ when Types.is_view type_ -> Some base
+      | _ -> find_viewing_base state base)
   | _ -> None
 
-let rec find_stored_slice state (slice : Syntax.expression) =
-  match slice.kind with
-  | Parenthesized inner | Mode (_, inner) -> find_stored_slice state inner
-  | Name name -> find_named_slice state name
-  | Member (_, name) when Option.is_some (State.find_target state name) ->
-      find_named_slice state name
-  | Bracket (base, [ Item { kind = Range _; _ } ]) -> find_slice_written_through state base
-  | Member _ -> Some In_field
-  | Bracket _ -> Some In_element
-  | Call _ -> Some Lent_by_a_call
-  | _ -> None
-
-and find_slice_written_through state (place : Syntax.expression) =
-  if has_slice_type state place then find_stored_slice state place
-  else
-    match place.kind with
-    | Parenthesized inner | Mode (_, inner) -> find_slice_written_through state inner
-    | Member (base, _) | Bracket (base, _) -> find_slice_written_through state base
-    | _ -> None
-
-let rec find_assigned_slice_parameter state (target : Syntax.expression) =
-  let is_writable slice = has_slice_type state slice && find_stored_slice state slice = None in
-  match target.kind with
-  | Parenthesized inner -> find_assigned_slice_parameter state inner
-  | (Name _ | Self_value) when is_writable target -> Some target
-  | Member (base, _) when is_writable base -> Some base
-  | _ -> None
-
-let show_slice_parameter (parameter : Syntax.expression) =
-  match parameter.kind with Name name -> name.text | _ -> "self"
-
-let check_slice_writes state ~(by : mutation) ~is_to_generic (value : Syntax.expression) =
-  let at : Core.origin = Written value.id in
-  let report_stored stored = State.report state (Stored_slice_written { at; by; stored }) in
+let check_view_writes state ~(by : mutation) (value : Syntax.expression) =
   State.check_when_final state (fun () ->
-      match by with
-      | Assignment -> (
-          match find_assigned_slice_parameter state value with
-          | Some parameter ->
-              State.report state
-                (Slice_parameter_assigned { at; parameter = show_slice_parameter parameter })
-          | None -> (
-              match value.kind with
-              | Member (base, _) | Bracket (base, _) ->
-                  Option.iter report_stored (find_slice_written_through state base)
-              | _ -> ()))
-      | Passed_mut when is_to_generic && has_slice_type state value ->
-          State.report state (Slice_passed_to_generic { at })
-      | Passed_mut -> Option.iter report_stored (find_slice_written_through state value))
+      Option.iter
+        (fun (base : Syntax.expression) ->
+          State.report state (View_written { at = Written value.id; by; view = Written base.id }))
+        (find_viewing_base state value))
 
-let mutate_with state env ~(by : mutation) ~is_to_generic (value : Syntax.expression) =
+let mutate state env ~(by : mutation) (value : Syntax.expression) =
   let at : Core.origin = Written value.id in
   (match (find_immutable state env value, by) with
   | _ when State.is_formula env -> State.report state (Mutation_in_formula { at; by })
@@ -188,15 +133,13 @@ let mutate_with state env ~(by : mutation) ~is_to_generic (value : Syntax.expres
       | _ -> State.report state (Not_assignable_place { at }))
   | Some (Lent_read_only | Not_a_place), Passed_mut -> ());
   (match find_immutable state env value with
-  | None when not (State.is_formula env) -> check_slice_writes state ~by ~is_to_generic value
+  | None when not (State.is_formula env) -> check_view_writes state ~by value
   | Some _ | None -> ());
   use_mutable_indexes state value
     ~report_with:
       (match find_immutable state env value with
       | None when not (State.is_formula env) -> Some by
       | _ -> None)
-
-let mutate state env ~by value = mutate_with state env ~by ~is_to_generic:false value
 
 let rec note_place_without_keyword (state : State.state) env (place : Syntax.expression) ~needs =
   match place.kind with
@@ -230,25 +173,22 @@ let is_known_not_plain state type_ =
 let find_lent_field_mode (state : State.state) (value : Syntax.expression) type_ :
     Language.Mode.t option =
   match (Hashtbl.find_opt state.yielded value.id, classify_argument state value) with
-  | _ when Places.is_slice value -> None
   | Some Read, With_mode (Mut, _) -> Some Read
   | Some Read, (Place | Lent _) when is_known_not_plain state type_ -> Some Read
   | Some Mut, With_mode (Mut, _) -> Some Mut
   | _ -> None
 
-let check_mode state env (value : Syntax.expression) (parameter : Types.parameter_info) type_
-    ~has_generic_type =
+let check_mode state env (value : Syntax.expression) (parameter : Types.parameter_info) type_ =
   let name = parameter.name in
   match (parameter.mode, classify_argument state value) with
   | Read, (Place | Temporary | Lent _) -> ()
   | Read, With_mode (_, inner) ->
       State.report state
         (Mode_on_read_argument { at = Written value.id; inner = Written inner.id; parameter = name })
-  | Mut, With_mode (Mut, inner) ->
-      mutate_with state env ~by:Passed_mut ~is_to_generic:has_generic_type inner
+  | Mut, With_mode (Mut, inner) -> mutate state env ~by:Passed_mut inner
   | Mut, Place ->
       State.report state (Missing_mut_argument { at = Written value.id; parameter = name })
-  | Mut, Lent Mut -> mutate_with state env ~by:Passed_mut ~is_to_generic:has_generic_type value
+  | Mut, Lent Mut -> mutate state env ~by:Passed_mut value
   | Mut, Lent (Read | Own) ->
       State.report state (Lent_read_only_argument { at = Written value.id; parameter = name })
   | Mut, (Temporary | With_mode (Own, _)) ->

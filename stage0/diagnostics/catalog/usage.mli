@@ -29,7 +29,7 @@ type t =
       entry : Core.origin;
       function_ : Path.t;
       parameter : string;
-      fields : string list;
+      part : Types.modified;
       change : part_change;
     }
   | Unused_definition of {

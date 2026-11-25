@@ -38,7 +38,7 @@ fn parse_visibility(cursor: mut TokenCursor) -> WrittenVisibility
   WrittenVisibility(visibility: None, tokens: [], public_token: None, opaque_token: None)
 }
 
-fn report_misplaced_visibility(cursor: mut TokenCursor, code: StringSlice, tokens: Slice[token.Token], message: StringSlice)
+fn report_misplaced_visibility(cursor: mut TokenCursor, code: String, tokens: List[token.Token], message: String)
   uses Panic
 {
   let Some(first) = tokens.first() else {

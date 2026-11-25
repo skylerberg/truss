@@ -104,7 +104,7 @@ let show_requirement = function
   | Element_to_pop -> "have an element to pop"
   | Element_at_index -> "have an element at its index"
   | Index_within_length -> "be given an index at most the storage's length"
-  | Range_within_view -> "be given a range within the view"
+  | Range_within_storage -> "be given a range within the storage"
   | Count_of_array -> "have as many elements as the array's count"
 
 let describe_difference = function
@@ -683,7 +683,7 @@ let show_construct = function
       Printf.sprintf "`intrinsic.%s` at the type parameter `%s`" operation (Types.show parameter)
   | Negation_of type_ -> Printf.sprintf "negating a value of `%s`" (Types.show type_)
   | Shift_of type_ -> Printf.sprintf "a shift of `%s`" (Types.show type_)
-  | Slice_of type_ -> Printf.sprintf "a slice of `%s`" (Types.show type_)
+  | Range_of type_ -> Printf.sprintf "a range of `%s`" (Types.show type_)
   | Unreadable_parameter_type ->
       "a function passed for a parameter whose type the prover cannot read"
   | Unreadable_cursor type_ ->

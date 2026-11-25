@@ -7,10 +7,14 @@ val list_evaluated_asserts : Tree.t -> (int * Tree.t) list
 val list_leading_fields : Tree.projection list -> string list
 val list_mut_provided_places : Tree.provided list -> Tree.place list
 
+type changed = { origin : Core.origin; place : Tree.place; is_elements : bool }
+
+val classify_changed_part : changed -> string list * bool
+
 val list_changed_places :
-  list_modified:(Tree.callee -> int -> string list list option) ->
+  list_modified:(Tree.callee -> int -> Types.modified list option) ->
   Tree.block list ->
-  (Core.origin * Tree.place) list
+  changed list
 
 val find_callee : Tree.statement -> Tree.callee option
 val is_in_sequence : Tree.place -> bool

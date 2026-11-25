@@ -6,7 +6,7 @@ fn signal_or_time_out() -> String
   let wanted = [processes.Signal.User2]
   concurrent {
     {
-      if Signals.wait(wanted.slice()) is Some(_) {
+      if Signals.wait(wanted) is Some(_) {
         Console.print_line("a signal")
       } else {
         Console.print_line("no signal")
@@ -19,7 +19,7 @@ fn signal_or_time_out() -> String
   }
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Tasks, Clock, Console, Signals
 {
   Console.print_line(signal_or_time_out())

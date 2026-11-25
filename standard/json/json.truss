@@ -107,7 +107,7 @@ let part_marker: UInt8 = 1
 
 let no_parts: List[Value] = []
 
-fn with_position(text: StringSlice, failure: Failure) -> ParseError
+fn with_position(text: String, failure: Failure) -> ParseError
 {
   var line: UInt64 = 1
   var column: UInt64 = 1
@@ -134,7 +134,7 @@ fn is_whitespace(byte: UInt8) -> Bool
   byte == 32 || byte == 9 || byte == 10 || byte == 13
 }
 
-fn skip_whitespace(text: StringSlice, from: UInt64) -> UInt64
+fn skip_whitespace(text: String, from: UInt64) -> UInt64
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
@@ -150,7 +150,7 @@ fn skip_whitespace(text: StringSlice, from: UInt64) -> UInt64
   index
 }
 
-fn skip_digits(text: StringSlice, from: UInt64) -> UInt64
+fn skip_digits(text: String, from: UInt64) -> UInt64
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
@@ -166,7 +166,7 @@ fn skip_digits(text: StringSlice, from: UInt64) -> UInt64
   index
 }
 
-fn parse_hex4(text: StringSlice, from: UInt64) -> Option[UInt32]
+fn parse_hex4(text: String, from: UInt64) -> Option[UInt32]
   requires from <= text.length()
   ensures !(result is Some(code) && code > 65535)
   ensures (result is Some(_)) ==> text.length() - from >= 4
@@ -185,7 +185,7 @@ fn parse_hex4(text: StringSlice, from: UInt64) -> Option[UInt32]
   Some(first * 4096 + second * 256 + third * 16 + fourth)
 }
 
-fn parse_escape(text: StringSlice, from: UInt64, output: mut String) -> Result[UInt64, Failure]
+fn parse_escape(text: String, from: UInt64, output: mut String) -> Result[UInt64, Failure]
   requires from < text.length()
   ensures !(result is Ok(end) && (end <= from || end > text.length()))
 {
@@ -218,7 +218,7 @@ fn parse_escape(text: StringSlice, from: UInt64, output: mut String) -> Result[U
   Ok(from + 2)
 }
 
-fn parse_unicode_escape(text: StringSlice, from: UInt64, output: mut String) -> Result[UInt64, Failure]
+fn parse_unicode_escape(text: String, from: UInt64, output: mut String) -> Result[UInt64, Failure]
   requires from < text.length()
   requires text.length() - from >= 2
   ensures !(result is Ok(end) && (end <= from || end > text.length()))
@@ -251,7 +251,7 @@ fn parse_unicode_escape(text: StringSlice, from: UInt64, output: mut String) -> 
   }
 }
 
-fn parse_string(text: StringSlice, from: UInt64) -> Result[ParsedString, Failure]
+fn parse_string(text: String, from: UInt64) -> Result[ParsedString, Failure]
   requires from < text.length()
   ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
 {
@@ -283,7 +283,7 @@ fn parse_string(text: StringSlice, from: UInt64) -> Result[ParsedString, Failure
   Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: text.length()))
 }
 
-fn parse_number(text: StringSlice, from: UInt64) -> Result[ParsedValue, Failure]
+fn parse_number(text: String, from: UInt64) -> Result[ParsedValue, Failure]
   requires from < text.length()
   ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
 {
@@ -331,7 +331,7 @@ fn parse_number(text: StringSlice, from: UInt64) -> Result[ParsedValue, Failure]
   Err(Failure(kind: ParseErrorKind.InvalidNumber, offset: from))
 }
 
-fn parse_literal(text: StringSlice, from: UInt64, word: StringSlice, value: own Value) -> Result[ParsedValue, Failure]
+fn parse_literal(text: String, from: UInt64, word: String, value: own Value) -> Result[ParsedValue, Failure]
   requires from < text.length()
   requires word.length() > 0
   ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
@@ -354,10 +354,10 @@ fn parse_literal(text: StringSlice, from: UInt64, word: StringSlice, value: own 
 }
 
 fn parse_array(
-  text: StringSlice,
+  text: String,
   from: UInt64,
   depth: UInt64,
-  parts: Slice[Value],
+  parts: List[Value],
   next_part: mut UInt64,
   in_template: Bool,
 ) -> Result[ParsedValue, Failure]
@@ -401,10 +401,10 @@ fn parse_array(
 }
 
 fn parse_object(
-  text: StringSlice,
+  text: String,
   from: UInt64,
   depth: UInt64,
-  parts: Slice[Value],
+  parts: List[Value],
   next_part: mut UInt64,
   in_template: Bool,
 ) -> Result[ParsedValue, Failure]
@@ -459,10 +459,10 @@ fn parse_object(
 }
 
 fn parse_value(
-  text: StringSlice,
+  text: String,
   from: UInt64,
   depth: UInt64,
-  parts: Slice[Value],
+  parts: List[Value],
   next_part: mut UInt64,
   in_template: Bool,
 ) -> Result[ParsedValue, Failure]
@@ -509,9 +509,9 @@ fn parse_value(
 }
 
 fn parse_document(
-  text: StringSlice,
+  text: String,
   maximum_depth: UInt64,
-  parts: Slice[Value],
+  parts: List[Value],
   in_template: Bool,
 ) -> Result[Value, Failure]
 {
@@ -532,20 +532,20 @@ fn parse_document(
   Ok(own step.value)
 }
 
-public fn parse(text: StringSlice, maximum_depth: UInt64 = 128) -> Result[Value, ParseError]
+public fn parse(text: String, maximum_depth: UInt64 = 128) -> Result[Value, ParseError]
 {
-  match parse_document(text, maximum_depth: maximum_depth, parts: no_parts.slice(), in_template: false) {
+  match parse_document(text, maximum_depth: maximum_depth, parts: no_parts, in_template: false) {
     Ok(value) => Ok(own value)
     Err(failure) => Err(with_position(text, failure: failure))
   }
 }
 
-public fn parse_bytes(bytes: Slice[UInt8], maximum_depth: UInt64 = 128) -> Result[Value, ParseError]
+public fn parse_bytes(bytes: List[UInt8], maximum_depth: UInt64 = 128) -> Result[Value, ParseError]
 {
   match String.from_utf8(bytes.to_list()) {
     Ok(text) => parse(text, maximum_depth: maximum_depth)
     Err(error) => Err(with_position(
-      StringSlice(bytes: bytes.elements),
+      String.viewing(bytes),
       failure: Failure(kind: ParseErrorKind.InvalidUnicode, offset: error.valid_up_to),
     ))
   }
@@ -572,7 +572,7 @@ fn escape_overhead(byte: UInt8) -> UInt64
   }
 }
 
-public fn quote(text: StringSlice) -> String
+public fn quote(text: String) -> String
   cost time O(text.length())
 {
   if text.length() > UInt64.maximum / 8 {
@@ -683,28 +683,28 @@ public fn Value.as_float64(self) -> Option[Float64]
   }
 }
 
-public fn Value.as_text(self) -> Option[StringSlice]
+public fn Value.as_text(self) -> Option[view String]
   ensures identical(result, match self {
-      String(value) => Some(value.slice())
+      String(value) => Some(value)
       _ => None
     })
   cost time O(1)
 {
   match self {
-    String(value) => Some(value.slice())
+    String(value) => Some(value)
     _ => None
   }
 }
 
-public fn Value.as_items(self) -> Option[Slice[Value]]
+public fn Value.as_items(self) -> Option[view List[Value]]
   ensures identical(result, match self {
-      Array(items) => Some(items.slice())
+      Array(items) => Some(items)
       _ => None
     })
   cost time O(1)
 {
   match self {
-    Array(items) => Some(items.slice())
+    Array(items) => Some(items)
     _ => None
   }
 }
@@ -718,7 +718,7 @@ public fn Value.as_members(self) lends Option[Map[String, Value]]
   }
 }
 
-public fn Value.get(self, name: StringSlice) lends Option[Value]
+public fn Value.get(self, name: String) lends Option[Value]
 {
   match self {
     Object(members) => {
@@ -747,7 +747,7 @@ public fn Value.get_index(self, index: UInt64) lends Option[Value]
   }
 }
 
-fn pointer_token_end(path: StringSlice) -> UInt64
+fn pointer_token_end(path: String) -> UInt64
   requires path.length() > 0
   ensures 1 <= result
   ensures result <= path.length()
@@ -763,7 +763,7 @@ fn pointer_token_end(path: StringSlice) -> UInt64
   index
 }
 
-fn unescaped_pointer_token(token: StringSlice) -> Option[String]
+fn unescaped_pointer_token(token: String) -> Option[String]
 {
   var name = ""
   var run: UInt64 = 0
@@ -797,7 +797,7 @@ fn unescaped_pointer_token(token: StringSlice) -> Option[String]
   Some(own name)
 }
 
-fn pointer_array_index(token: StringSlice) -> Option[UInt64]
+fn pointer_array_index(token: String) -> Option[UInt64]
 {
   if token.length() == 0 || (token.length() > 1 && token.byte(0) == 48) {
     return None
@@ -818,7 +818,7 @@ fn pointer_array_index(token: StringSlice) -> Option[UInt64]
   }
 }
 
-public fn Value.pointer(self, path: StringSlice) lends Option[Value]
+public fn Value.pointer(self, path: String) lends Option[Value]
   decreases path.length()
 {
   if path.length() == 0 {
@@ -983,7 +983,7 @@ impl Display for Value {
 impl text.Parse for Value {
   type Error = ParseError
 
-  fn parse(text: StringSlice) -> Result[Value, ParseError]
+  fn parse(text: String) -> Result[Value, ParseError]
   {
     parse(text)
   }
@@ -992,11 +992,11 @@ impl text.Parse for Value {
 impl FromTemplate for Value {
   type Part = Value
 
-  fn is_valid_template(literals: Slice[text.Literal]) -> Bool
+  fn is_valid_template(literals: List[text.Literal]) -> Bool
   {
     match template_text(literals) {
       Some(text) => {
-        parse_document(text, maximum_depth: text.length(), parts: no_parts.slice(), in_template: true) is Ok(_)
+        parse_document(text, maximum_depth: text.length(), parts: no_parts, in_template: true) is Ok(_)
       }
       None => false
     }
@@ -1009,7 +1009,7 @@ impl FromTemplate for Value {
         match parse_document(
           text,
           maximum_depth: text.length(),
-          parts: template.parts.slice(),
+          parts: template.parts,
           in_template: true,
         ) {
           Ok(value) => value
@@ -1021,7 +1021,7 @@ impl FromTemplate for Value {
   }
 }
 
-fn template_text(literals: Slice[text.Literal]) -> Option[String]
+fn template_text(literals: List[text.Literal]) -> Option[String]
 {
   var joined = ""
   var index: UInt64 = 0
@@ -1060,8 +1060,8 @@ impl From[String] for Value {
   }
 }
 
-impl From[StringSlice] for Value {
-  fn from(value: own StringSlice) -> Value {
+impl From[view String] for Value {
+  fn from(value: own view String) -> Value {
     Value.String(value.to_string())
   }
 }
@@ -1113,7 +1113,7 @@ public fn read_from[Source: streams.Reader](source: mut Source, maximum_depth: U
 {
   var bytes: List[UInt8] = []
   match mut source.read_to_end(mut bytes) {
-    Ok(_) => match parse_bytes(bytes.slice(), maximum_depth: maximum_depth) {
+    Ok(_) => match parse_bytes(bytes, maximum_depth: maximum_depth) {
       Ok(value) => Ok(own value)
       Err(error) => Err(ReadError.Parse(error: error))
     }
@@ -1262,7 +1262,7 @@ public fn encode_pretty[Item: serialization.Serialize](
 }
 
 public fn decode[Item: serialization.Deserialize](
-  text: StringSlice,
+  text: String,
   names: serialization.Names = serialization.Names.AsWritten,
 ) -> Result[Item, Error]
   uses RunForever

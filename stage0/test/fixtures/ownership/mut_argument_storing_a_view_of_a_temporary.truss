@@ -3,7 +3,7 @@ fn make() -> List[Int64] {
 }
 
 fn f() -> UInt64 {
-  var views: List[Slice[Int64]] = []
+  var views: List[view List[Int64]] = []
   mut views.push(make()[0..2])
   views.length()
 }

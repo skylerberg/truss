@@ -1,8 +1,8 @@
-fn has_a_three(options: Slice[Option[Int64]]) -> Bool {
+fn has_a_three(options: List[Option[Int64]]) -> Bool {
   exists Some(value) in options => value == 3
 }
 
-fn has_only_positives(options: Slice[Option[Int64]]) -> Bool {
+fn has_only_positives(options: List[Option[Int64]]) -> Bool {
   forall Some(value) in options => value > 0
 }
 

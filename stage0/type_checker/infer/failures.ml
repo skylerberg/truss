@@ -161,15 +161,6 @@ let report_mismatch ?copy (state : State.state) at ~expected ~actual =
 let report_unmet_bound (state : State.state) ~at ~of_type ~sides ~impl_need subject
     (bound : Types.trait_reference) ~associated =
   let frame = State.read_current_frame state in
-  let is_slice = Types.is_well_known Slice subject || Types.is_well_known String_slice subject in
-  let has_mut_self_method =
-    match Interface.Definition.find_trait_interface state.lookups.interface bound.trait with
-    | Some trait ->
-        List.exists
-          (fun (method_ : Types.trait_method) -> method_.method_receiver = Instance Mut)
-          trait.methods
-    | None -> false
-  in
   match
     List.find_opt
       (fun (reported, reported_bound, _) -> Types.equal reported subject && reported_bound = bound)
@@ -179,7 +170,7 @@ let report_unmet_bound (state : State.state) ~at ~of_type ~sides ~impl_need subj
   | None ->
       let unmet : Catalog.Inference.unmet_bound =
         match associated with
-        | None when is_slice && has_mut_self_method -> Slice_lacks_mut_self
+        | None when Types.is_view subject -> Does_not_hold_for_view
         | None -> Does_not_hold
         | Some (name, found, _) -> Associated_differs { name; found = State.zonk state found }
       in

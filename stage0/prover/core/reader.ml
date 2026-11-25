@@ -32,7 +32,7 @@ let find_declared_fields context ty variant =
       let list_fields (list : Types.field list) =
         List.map
           (fun (field : Types.field) ->
-            (field.field_name, Types.substitute substitution field.field_type))
+            (field.field_name, Types.substitute_erased substitution field.field_type))
           list
       in
       match (interface.shape, variant) with
@@ -71,11 +71,10 @@ let rec compute_place_type context frame run (place : Mir.place) =
       | Variant_field { variant; field } -> find_field_type (Some variant) field
       | Element _ -> Intrinsics.find_sequence_element context frame base_type
       | Range _ ->
-          Types.Named
-            {
-              path = Well_known.make_path Slice;
-              arguments = [ Types.Type (Intrinsics.find_sequence_element context frame base_type) ];
-            })
+          if Types.is_well_known String base_type then base_type
+          else
+            Types.make_named (Well_known.make_path List)
+              [ Intrinsics.find_sequence_element context frame base_type ])
 
 let rec resolve_aliases (frame : State.frame) run (place : Mir.place) :
     (Logic.term * Mir.place) list =
@@ -160,7 +159,7 @@ let rec read_resolved context frame run (place : Mir.place) =
                 ~node ~origin
           | Range { node; start; stop; origin; _ } ->
               let _, viewed, _, _ =
-                Intrinsics.apply_slice context frame ~node
+                Intrinsics.apply_range context frame ~node
                   { origin; type_ = compute_place_type context frame run projected }
                   ~base_type ~collection:term
                   ~low:(read_index context frame run start)
@@ -235,13 +234,13 @@ let write_resolved context frame run (place : Mir.place) new_value =
             after
         | Range { node; start; stop; origin; _ } ->
             let _, viewed, start, stop =
-              Intrinsics.apply_slice context frame ~node { origin; type_ = part_type } ~base_type
+              Intrinsics.apply_range context frame ~node { origin; type_ = part_type } ~base_type
                 ~collection:whole
                 ~low:(read_index context frame run start)
                 ~high:(Option.map (read_index context frame run) stop)
             in
             Intrinsics.write_sequence_range context frame base_type whole ~start ~stop
-              (rebuilt viewed))
+              ~range_type:part_type (rebuilt viewed))
   in
   match place.Mir.root with
   | Constant _ | Literal _ -> Facts.raise_unsupported Whole_definition Constant_assignment
@@ -303,10 +302,10 @@ let compute_changes ?(also = []) context run (frame : State.frame) (blocks : Mir
   let parts =
     List.sort_uniq compare
       (List.concat_map
-         (fun (_, place) -> list_parts place)
+         (fun (changed : Mir.changed) -> list_parts changed.place)
          (Mir.list_changed_places
             ~list_modified:
-              (Mir.list_callee_modified_fields
+              (Mir.list_callee_modified_parts
                  ~read_signature:(Contracts.read_signature context)
                  context.lookups.interface frame.substitution)
             blocks)
@@ -666,12 +665,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
           default.form ~type_:ty
       in
       ({ frame with spent = declared.spent }, term)
-  | Convert { conversion = To_integer; value; _ } -> (frame, translate_operand value)
-  | Convert { conversion = View_to_owned; value; _ } ->
-      ( frame,
-        Values.make_owner_of_view context frame
-          ~view:(compute_operand_type context frame value)
-          ~owner:ty (translate_operand value) )
+  | Convert { conversion = To_integer | To_view; value; _ } -> (frame, translate_operand value)
   | Convert { conversion = From_integer; value; _ } ->
       (frame, Operations.convert_from_integer context frame site (translate_operand value))
   | Function_value { path; instantiation; is_argument } ->

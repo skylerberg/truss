@@ -16,7 +16,7 @@ fn read_current() -> Int64
   Store.current(1)
 }
 
-fn main(arguments: Slice[String]) -> ExitCode {
+fn main(arguments: List[String]) -> ExitCode {
   let value = provide Fixed(value: 3) {
     read_current()
   }

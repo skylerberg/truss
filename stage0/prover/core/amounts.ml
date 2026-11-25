@@ -306,9 +306,9 @@ let compute_step_amount ?result context frame (invocation : Invocation.t)
                   match passed.type_ with
                   | Types.Named { path; arguments = [ Types.Type element ] } -> (
                       match Well_known.find_builtin_type path with
-                      | Some ((Storage | View) as builtin) ->
+                      | Some Storage ->
                           Models.make_sequence_length context element
-                            (Intrinsics.make_buffer_model context builtin element passed.term)
+                            (Intrinsics.make_buffer_model context Storage element passed.term)
                       | _ -> Operations.declare_unknown_amount context frame counter)
                   | _ -> Operations.declare_unknown_amount context frame counter)
               | None -> Operations.declare_unknown_amount context frame counter)
@@ -396,25 +396,17 @@ let compute_buffer context (ty : Types.ty) : State.buffer option =
           element;
           model_of = (fun term -> Intrinsics.make_buffer_model context Storage element term);
         }
-  | Types.Named { path; arguments = [ Types.Type element ] }
-    when Well_known.find_builtin_type path = Some View ->
-      Some
-        {
-          kind = View;
-          element;
-          model_of = (fun term -> Intrinsics.make_buffer_model context View element term);
-        }
   | Types.Named { path; arguments } when Types.find_builtin ty = None -> (
       match Interface.Definition.find_interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface { shape = Record [ field ]; type_generics; _ })
         -> (
           let substitution = Types.make_substitution type_generics arguments in
-          match Types.substitute substitution field.field_type with
+          match Types.substitute_erased substitution field.field_type with
           | Types.Named { path = field_path; arguments = [ Types.Type element ] } -> (
               match Well_known.find_builtin_type field_path with
-              | Some ((Storage | View) as kind) ->
+              | Some Storage ->
                   Option.map
-                    (fun model_of -> { State.kind; element; model_of })
+                    (fun model_of -> { State.kind = Storage; element; model_of })
                     (Models.find_model_function context ty
                        ~model:(Models.make_sequence_type element))
               | _ -> None)
@@ -466,24 +458,53 @@ let choose_by_variant ty term shape compute_variant =
             (compute_variant last) earlier
       | [] -> Costs.zero)
 
+let find_declared_element (declared : Types.ty) ~(erased : Types.ty) =
+  match declared with
+  | Types.Named { arguments = Types.Type element :: _; _ }
+    when Types.equal (Types.erase_views element) erased ->
+      element
+  | _ -> erased
+
+let list_declared_fields (context : State.context) (declared : Types.ty) =
+  match declared with
+  | Types.Named { path; arguments } when Types.find_builtin declared = None -> (
+      match Interface.Definition.find_interface context.lookups.interface path with
+      | Some (Interface.Environment.Type_interface interface) ->
+          let substitution = Types.make_substitution interface.type_generics arguments in
+          let declare variant =
+            List.map (fun (field : Types.field) ->
+                ((variant, field.field_name), Types.substitute substitution field.field_type))
+          in
+          Some
+            (match interface.shape with
+            | Record fields -> declare None fields
+            | Sum variants ->
+                List.concat_map
+                  (fun (variant : Types.variant) ->
+                    declare (Some variant.variant_name) (Option.value variant.fields ~default:[]))
+                  variants
+            | Todo_type | Builtin_type _ -> [])
+      | _ -> None)
+  | _ -> None
+
 let rec find_potential_clause context (ty : Types.ty) =
   match Validity.find_type_clauses context ty with
   | Some (source, { potential = Some potential; _ }) -> Some (source, potential)
   | _ -> None
 
-and has_potential (context : State.context) ?(seen = []) (ty : Types.ty) =
-  if seen <> [] then holds_potential_type context ~seen ty
+and has_potential (context : State.context) ?(seen = []) (declared : Types.ty) =
+  if seen <> [] then holds_potential_type context ~seen declared
   else
-    let key = ty in
-    match Tables.Type_table.find_opt context.holds_potential key with
+    match Tables.Type_table.find_opt context.holds_potential declared with
     | Some holds -> holds
     | None ->
-        let holds = holds_potential_type context ~seen ty in
-        Tables.Type_table.replace context.holds_potential key holds;
+        let holds = holds_potential_type context ~seen declared in
+        Tables.Type_table.replace context.holds_potential declared holds;
         holds
 
-and holds_potential_type context ~seen (ty : Types.ty) =
-  if List.exists (Types.equal ty) seen then false
+and holds_potential_type context ~seen (declared : Types.ty) =
+  let ty = Types.erase_views declared in
+  if Types.is_view declared || List.exists (Types.equal declared) seen then false
   else
     match ty with
     | Parameter _ -> true
@@ -491,27 +512,17 @@ and holds_potential_type context ~seen (ty : Types.ty) =
     | Named _ when Option.is_some (find_buffer context ty) -> (
         match find_buffer context ty with
         | Some { kind = Storage; _ } -> true
-        | Some { element; _ } -> has_potential context ~seen:(ty :: seen) element
+        | Some { element; _ } ->
+            has_potential context ~seen:(declared :: seen)
+              (find_declared_element declared ~erased:element)
         | None -> false)
-    | Types.Named { path; arguments } when Types.find_builtin ty = None -> (
-        match Interface.Definition.find_interface context.lookups.interface path with
-        | Some (Interface.Environment.Type_interface interface) ->
-            let substitution = Types.make_substitution interface.type_generics arguments in
-            let fields =
-              match interface.shape with
-              | Record fields -> fields
-              | Sum variants ->
-                  List.concat_map
-                    (fun (variant : Types.variant) -> Option.value variant.fields ~default:[])
-                    variants
-              | Todo_type | Builtin_type _ -> []
-            in
+    | Types.Named _ when Types.find_builtin ty = None -> (
+        match list_declared_fields context declared with
+        | Some fields ->
             List.exists
-              (fun (field : Types.field) ->
-                has_potential context ~seen:(ty :: seen)
-                  (Types.substitute substitution field.field_type))
+              (fun (_, field_type) -> has_potential context ~seen:(declared :: seen) field_type)
               fields
-        | _ -> false)
+        | None -> false)
     | Types.Named { arguments; _ } ->
         if
           List.exists
@@ -522,10 +533,11 @@ and holds_potential_type context ~seen (ty : Types.ty) =
         else false
     | _ -> false
 
-and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty) term =
-  if not (has_potential context ty) then Costs.zero
+and compute_potential context (frame : State.frame) ?(seen = []) (declared : Types.ty) term =
+  if not (has_potential context declared) then Costs.zero
   else begin
-    let held = declare_held_symbol context ty term in
+    let ty = Types.erase_views declared in
+    let held = declare_held_symbol context declared term in
     if (not (List.mem held context.potentials)) && not (Logic.mentions frame.bound term) then begin
       context.potentials <- held :: context.potentials;
       Facts.add_frame_fact context frame
@@ -550,11 +562,10 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
                   Facts.add_frame_fact context frame
                     (Logic.equal slack
                        (Logic.ite (Logic.greater_equal saved (Logic.int 0)) saved (Logic.int 0)))
-              | _, (View | Array) ->
-                  Facts.add_frame_fact context frame (Logic.equal slack (Logic.int 0))
+              | _, Array -> Facts.add_frame_fact context frame (Logic.equal slack (Logic.int 0))
               | _ -> ());
               let elements =
-                if has_potential context element then
+                if has_potential context (find_declared_element declared ~erased:element) then
                   sum_element_potentials context element sequence
                 else Costs.zero
               in
@@ -572,7 +583,8 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
               | None -> Costs.zero
             in
             let parts =
-              choose_by_variant ty term shape (compute_parts_potential context frame ~seen ty term)
+              choose_by_variant ty term shape
+                (compute_parts_potential context frame ~seen declared term)
             in
             Facts.add_frame_fact context frame
               (Logic.equal held (Costs.plus declared_potential parts))
@@ -581,20 +593,25 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
     end;
     match (find_potential_clause context ty, Facts.find_constructors context ty) with
     | None, Some [ (None, fields) ] when Option.is_none (find_buffer context ty) -> (
-        try compute_parts_potential context frame ~seen ty term (None, fields)
+        try compute_parts_potential context frame ~seen declared term (None, fields)
         with Facts.Unsupported _ -> held)
     | _ -> held
   end
 
-and compute_parts_potential context frame ~seen ty term (variant, fields) =
+and compute_parts_potential context frame ~seen declared term (variant, fields) =
+  let ty = Types.erase_views declared in
+  let declared_fields = Option.value ~default:[] (list_declared_fields context declared) in
   List.fold_left
-    (fun total (field, field_type) ->
+    (fun total (field, erased_field_type) ->
+      let field_type =
+        Option.value ~default:erased_field_type (List.assoc_opt (variant, field) declared_fields)
+      in
       if has_potential context field_type then
         let part = Validity.select_field context ty variant field term in
         Costs.plus total
-          (if List.exists (Types.equal field_type) (ty :: seen) then
+          (if List.exists (Types.equal field_type) (declared :: seen) then
              declare_held_symbol context field_type part
-           else compute_potential context frame ~seen:(ty :: seen) field_type part)
+           else compute_potential context frame ~seen:(declared :: seen) field_type part)
       else total)
     Costs.zero fields
 
@@ -826,7 +843,7 @@ let compute_method_cost context frame (metric : Language.Metric.t) (callee : Inv
   | Trait_method { trait; name; receiver; self_type; _ } ->
       let substitute_argument : Types.argument -> Types.argument = function
         | Type type_ -> Type (Facts.substitute_type context frame type_)
-        | argument -> Types.substitute_argument frame.substitution argument
+        | argument -> Types.substitute_argument_erased frame.substitution argument
       in
       declare_method_cost context frame metric
         (Path.Method { owner = trait.trait; name; receiver })

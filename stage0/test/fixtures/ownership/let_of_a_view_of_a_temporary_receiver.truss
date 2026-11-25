@@ -1,0 +1,4 @@
+fn f() -> UInt64 {
+  let part = make().split_at(1).first
+  part.length()
+}

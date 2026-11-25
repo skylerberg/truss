@@ -2,11 +2,11 @@ use standard.cryptography
 use standard.hex
 use standard.random
 
-fn hex_of(bytes: Slice[UInt8]) -> String {
+fn hex_of(bytes: List[UInt8]) -> String {
   hex.encode(bytes)
 }
 
-fn digest_of(bytes: Slice[UInt8]) -> String {
+fn digest_of(bytes: List[UInt8]) -> String {
   let digest = cryptography.sha256(bytes)
   hex.encode(digest[..])
 }

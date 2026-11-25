@@ -9,6 +9,7 @@ type env = {
   loop_element : Types.ty option;
   compile_time : bool;
   in_quantifier : bool;
+  binds_view : bool;
 }
 
 val runs : env -> bool
@@ -170,7 +171,7 @@ val resolve_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_type : state -> Types.ty -> Types.ty
 val finalize_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_argument : state -> Types.argument -> Types.argument
-val unify : state -> Types.ty -> Types.ty -> bool
+val unify : ?modulo_views:bool -> state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
 val normalize_trait : state -> Types.trait_reference -> Types.trait_reference
 val find_evidence : state -> Types.ty -> Types.trait_reference -> Interface.Impls.solution option

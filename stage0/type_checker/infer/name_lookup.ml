@@ -1,6 +1,6 @@
 type overload =
   | Type_overload of Path.t
-  | View_overload of Path.t
+  | List_overload of Path.t
   | Trait_overload of Types.trait_reference * Types.trait_method
 
 let classify_receiver_mode (arguments : Syntax.argument list) : Language.Mode.t =
@@ -13,7 +13,7 @@ let make_method_owner state type_ : Catalog.Inference.method_owner =
   Type_owner
     {
       type_ = State.zonk state type_;
-      view = Option.map (State.zonk state) (Types.find_view (State.normalize state type_));
+      list = Option.map (State.zonk state) (Types.find_list_of_array (State.normalize state type_));
     }
 
 let rec check_name (state : State.state) (env : State.env) (value : Syntax.expression)
@@ -143,6 +143,7 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
            candidates;
          })
   in
+  let base_type = Types.strip_view base_type in
   match base_type with
   | Types.Named { path; arguments } -> (
       match Members.find_fields state.lookups path arguments with
@@ -222,10 +223,10 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
                    at = Written member.id;
                    type_ = State.zonk state type_;
                    name = member.text;
-                   view =
-                     (match Types.find_view type_ with
-                     | Some (Types.Named { path = Top { name; _ } as view; _ })
-                       when Members.has_visible_method state view member.text ->
+                   list =
+                     (match Types.find_list_of_array type_ with
+                     | Some (Types.Named { path = Top { name; _ } as list; _ })
+                       when Members.has_visible_method state list member.text ->
                          Some name
                      | _ -> None);
                  }))
@@ -237,7 +238,7 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
              at = Written member.id;
              type_ = State.zonk state type_;
              name = member.text;
-             view = None;
+             list = None;
            })
 
 and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) instance items :
@@ -476,8 +477,10 @@ and resolve_overloads state receiver_type name :
     in
     let lookup_type_method =
       list_methods_of (fun method_path -> Type_overload method_path) (Some receiver_type)
-    and lookup_view_method =
-      list_methods_of (fun method_path -> View_overload method_path) (Types.find_view receiver_type)
+    and lookup_list_method =
+      list_methods_of
+        (fun method_path -> List_overload method_path)
+        (Types.find_list_of_array receiver_type)
     in
     Ok
       (Resolve.Names.collect_visible
@@ -493,7 +496,11 @@ and resolve_overloads state receiver_type name :
                              (fun (trait, method_) -> Trait_overload (trait, method_))
                              (choose_trait_method name receiver candidate methods))
                          candidates
-                   @ [ lookup_view_method receiver ])))
+                   @ [
+                       (match receiver with
+                       | Path.Instance Own | Static -> Resolve.Names.Absent
+                       | Instance (Read | Mut) -> lookup_list_method receiver);
+                     ])))
             [ Path.Instance Read; Instance Mut; Instance Own ]))
 
 and instantiate_trait_method state ~written ~self_type (trait : Types.trait_reference)

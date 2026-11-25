@@ -133,16 +133,17 @@ let rec copy_plain_bindings form (pattern : Core.pattern) : Core.pattern =
 
 let make_range form ~origin (base : Core.place) ~start ~stop ~inclusive : Core.kind =
   let make = make_synthetic_expression form ~origin in
-  let base_type = Core_walk.compute_place_type base in
-  let element =
-    match base_type with
-    | Types.Named { arguments = Types.Type element :: _; _ } -> element
-    | type_ -> raise_bug "a range of `%s`" (Types.show type_)
-  in
-  let bound_type, path =
-    match Types.find_specification_sequence_element base_type with
-    | Some _ -> (Types.Integer, Well_known.make_path Sequence)
-    | None -> (Types.make_builtin UInt64, Well_known.make_path Slice)
+  let base_type = Types.strip_view (Core_walk.compute_place_type base) in
+  let bound_type, type_ =
+    match
+      (Types.find_specification_sequence_element base_type, Types.find_sequence_element base_type)
+    with
+    | Some _, _ -> (Types.Integer, base_type)
+    | None, Some element ->
+        (Types.make_builtin UInt64, Types.make_named (Well_known.make_path List) [ element ])
+    | None, None when Types.is_well_known String base_type ->
+        (Types.make_builtin UInt64, Types.string_type)
+    | None, None -> raise_bug "a range of `%s`" (Types.show base_type)
   in
   let stop =
     Option.map
@@ -160,7 +161,7 @@ let make_range form ~origin (base : Core.place) ~start ~stop ~inclusive : Core.k
          base;
          start = (match start with Some start -> start | None -> make bound_type (Integer Z.zero));
          stop;
-         type_ = Types.Named { path; arguments = [ Types.Type element ] };
+         type_;
          origin;
        })
 
@@ -536,25 +537,14 @@ let apply_conversion form (id : Syntax.id) (inner : Core.expression) (conversion
   | Function_widening -> if Types.equal inner.type_ expected then inner else convert Widen
   | To_integer -> convert To_integer
   | From_integer -> convert From_integer
-  | View_to_owned -> convert View_to_owned
-  | Owned_to_view when Types.is_well_known List inner.type_ || Types.is_builtin Array inner.type_ ->
+  | To_view -> convert To_view
+  | Array_as_list -> (
       let base : Core.place = match inner.kind with Use place -> place | _ -> Temporary inner in
-      make (make_range form ~origin base ~start:None ~stop:None ~inclusive:false)
-  | Owned_to_view -> (
-      match inner.type_ with
-      | Types.Named { path; arguments } ->
-          make
-            (Call
-               (make_call form
-                  ~callee:
-                    (Function
-                       {
-                         path = Method { owner = path; name = "slice"; receiver = Instance Read };
-                         instantiation = { Types.no_instantiation with type_arguments = arguments };
-                       })
-                  ~arguments:[ Operands.build_argument Read inner ]
-                  ~lends:None))
-      | other -> raise_bug "`%s` is viewed and has no view" (Types.show other))
+      match Types.find_list_of_array inner.type_ with
+      | Some list ->
+          make_synthetic_expression form ~origin list
+            (make_range form ~origin base ~start:None ~stop:None ~inclusive:false)
+      | None -> raise_bug "`%s` is passed as a list and is no array" (Types.show inner.type_))
 
 let has_node form (value : Syntax.expression) = Option.is_some form.tables.types.(value.id)
 
@@ -1152,7 +1142,7 @@ and build_range_record form env (value : Syntax.expression) start stop ~inclusiv
           (Core.Boolean inclusive)
       in
       build_record [ (Range_start, start); (Range_stop, stop); (Range_inclusive, inclusive) ]
-  | _ -> raise_bug "a range without both bounds is valid only inside a slice"
+  | _ -> raise_bug "a range without both bounds is valid only as an index"
 
 and build_provide form env (implementations : Syntax.expression list) (body : Syntax.block) :
     Core.kind =
@@ -1206,11 +1196,7 @@ and build_interpolated_string form env ~origin (literal : Syntax.string_literal)
                           { mode = Mut; value = Place text_place };
                           {
                             mode = Read;
-                            value =
-                              Value
-                                (make
-                                   (Types.make_named (Well_known.make_path String_slice) [])
-                                   (Literal (Text pushed.value)));
+                            value = Value (make Types.string_type (Literal (Text pushed.value)));
                           };
                         ]
                       ~lends:None))));
@@ -1301,13 +1287,7 @@ and build_tagged_string form env (value : Syntax.expression) (literal : Syntax.s
         Well_known.locate_method From_template_is_valid_template
       in
       let is_valid =
-        call_tag
-          (Trait_method { tag with name; receiver })
-          Types.bool
-          (apply_conversion form value.id (make_literals ())
-             ( Tables.Owned_to_view,
-               Types.make_named (Well_known.make_path Slice)
-                 [ Types.make_named (Well_known.make_path Literal) [] ] ))
+        call_tag (Trait_method { tag with name; receiver }) Types.bool (make_literals ())
       in
       Block
         {

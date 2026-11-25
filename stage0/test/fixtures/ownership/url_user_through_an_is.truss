@@ -1,6 +1,6 @@
-fn Url.user(self) -> Option[StringSlice] {
+fn Url.user(self) -> Option[view String] {
   if self.user is Some(present) {
-    Some(present.slice())
+    Some(present)
   } else {
     None
   }

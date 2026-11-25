@@ -21,8 +21,8 @@ test "Base32 round-trips every length, and rejects bad lengths, padding, and sym
   let source: List[UInt8] = [0, 255, 37, 74, 111, 148, 185, 222, 3, 40, 77, 114, 151, 188, 225, 6, 43, 80, 117, 154, 191, 228, 9, 46]
   for length in 0..source.length() {
     let bytes = source[..length]
-    assert base32.decode(base32.encode(bytes).slice()) == Ok(bytes.to_list())
-    assert base32.decode(base32.encode(bytes, padding: false).slice()) == Ok(bytes.to_list())
+    assert base32.decode(base32.encode(bytes)) == Ok(bytes.to_list())
+    assert base32.decode(base32.encode(bytes, padding: false)) == Ok(bytes.to_list())
   }
   assert base32.decode("MZXW6YTBO") == Err(base32.DecodeError.InvalidLength)
   assert base32.decode("MZX") == Err(base32.DecodeError.InvalidLength)
@@ -63,13 +63,13 @@ test "TOTP verification accepts a code within the window once, and refuses a rep
   let now: Int64 = 1111111111
   let step = now / 30
   let code = totp.code_at(now)
-  assert totp.verify_at(code.slice(), unix_seconds: now) == Some(step)
-  assert totp.verify_at(code.slice(), unix_seconds: now + 30) == Some(step)
-  assert totp.verify_at(code.slice(), unix_seconds: now - 30) == Some(step)
-  assert totp.verify_at(code.slice(), unix_seconds: now + 30, window: 0) == None
-  assert totp.verify_at(code.slice(), unix_seconds: now + 90) == None
-  assert totp.verify_at(code.slice(), unix_seconds: now, last_step: Some(step)) == None
-  assert totp.verify_at(code.slice(), unix_seconds: now, last_step: Some(step - 1)) == Some(step)
+  assert totp.verify_at(code, unix_seconds: now) == Some(step)
+  assert totp.verify_at(code, unix_seconds: now + 30) == Some(step)
+  assert totp.verify_at(code, unix_seconds: now - 30) == Some(step)
+  assert totp.verify_at(code, unix_seconds: now + 30, window: 0) == None
+  assert totp.verify_at(code, unix_seconds: now + 90) == None
+  assert totp.verify_at(code, unix_seconds: now, last_step: Some(step)) == None
+  assert totp.verify_at(code, unix_seconds: now, last_step: Some(step - 1)) == Some(step)
   assert totp.verify_at("abcdef", unix_seconds: now) == None
   assert totp.verify_at("", unix_seconds: now) == None
 }
