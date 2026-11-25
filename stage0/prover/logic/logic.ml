@@ -1087,7 +1087,3 @@ let list_members query =
       | None -> entries)
     numbering.datatypes []
   |> List.sort compare
-
-module For_testing = struct
-  let hash_term = hash_term
-end

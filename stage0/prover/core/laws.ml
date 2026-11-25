@@ -190,16 +190,17 @@ let add_named_relation context frame (expected : Types.function_type) callee_ter
            Logic.equal holds
              (Logic.equal result (Lambdas.apply_function context expected callee_term entries)) ));
   let mark = context.State.fresh in
-  let facts_mark = List.length context.facts in
+  let facts_before = context.facts in
   let read = read_named_ensures context frame clauses expected ~entries ~exits ~result in
   let bound = List.map fst parameters in
   let is_inside_the_relation fact =
     Logic.mentions bound fact || Facts.mentions_fresh_after context mark fact
   in
-  let added = Lambdas.list_facts_since context facts_mark in
   context.facts <-
-    List.filter (fun fact -> not (is_inside_the_relation fact)) added
-    @ List.drop (List.length added) context.facts;
+    List.fold_left
+      (fun facts fact -> if is_inside_the_relation fact then facts else Fact_list.add fact facts)
+      facts_before
+      (List.rev (Fact_list.list_newest_since context.facts ~count:(Fact_list.count facts_before)));
   match read with
   | [] -> ()
   | ensures when List.exists (Facts.mentions_fresh_after context mark) ensures -> ()

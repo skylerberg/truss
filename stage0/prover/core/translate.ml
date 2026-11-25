@@ -31,7 +31,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       type_clauses = Tables.Path_table.create 16;
       callees = Tables.Path_table.create 16;
       stated = Tables.Stated_table.create 64;
-      facts = [];
+      facts = Fact_list.empty;
       scopes = [];
       quantifier_facts = Tables.Term_table.create 16;
       written_quantifiers = Tables.Term_table.create 4;

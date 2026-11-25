@@ -36,6 +36,7 @@ val oblige :
   ?cited:Resolve.Names.key * Core.origin ->
   ?fixes:Catalog.Prover.fix list ->
   ?can_be_required:bool ->
+  ?is_proven_by_evaluation:bool ->
   ?holds_when:Types.condition ->
   State.context ->
   State.frame ->

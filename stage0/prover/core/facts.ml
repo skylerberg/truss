@@ -74,7 +74,7 @@ let declare (context : State.context) (declaration : Logic.declaration) =
 let find_argument_sorts (context : State.context) symbol =
   Tables.Symbol_table.find_opt context.declared symbol
 
-let add_fact (context : State.context) fact = context.facts <- fact :: context.facts
+let add_fact (context : State.context) fact = context.facts <- Fact_list.add fact context.facts
 
 let declare_value_symbol context (frame : State.frame) name sort =
   match List.rev frame.binders with
@@ -324,7 +324,7 @@ and make_obligation (context : State.context) (frame : State.frame) location obl
     Logic.prune
       {
         declarations = List.rev context.declarations;
-        facts = List.rev context.facts;
+        facts = Fact_list.list_oldest_first context.facts;
         goal = Logic.( ==> ) frame.condition goal;
       }
   in
@@ -370,8 +370,8 @@ let is_panic_obligation : Diagnostic.Code.prover -> bool = function
 let find_counter_condition (context : State.context) counter =
   if List.mem counter context.conditional_counters then context.condition else []
 
-let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?holds_when (context : State.context)
-    (frame : State.frame) location obligation goal =
+let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?(is_proven_by_evaluation = false)
+    ?holds_when (context : State.context) (frame : State.frame) location obligation goal =
   let code = Catalog.Prover_description.find_code obligation in
   let holds_when = Option.value holds_when ~default:context.obligation_condition in
   if
@@ -383,11 +383,21 @@ let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?holds_when (context :
          || (is_panic_obligation code && context.keeps_failures))
   then assume context frame goal
   else
+    let unproven =
+      match goal with
+      | Logic.Boolean _ -> Some goal
+      | _ when is_proven_by_evaluation -> Some goal
+      | _ -> (
+          match Fact_list.remove_held context.facts ~under:frame.condition goal with
+          | Logic.Boolean true -> None
+          | unproven -> Some unproven)
+    in
     match
-      make_closed_obligation context frame location obligation
-        (add_quantifier_facts
-           ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
-           context goal)
+      Option.bind unproven (fun unproven ->
+          make_closed_obligation context frame location obligation
+            (add_quantifier_facts
+               ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
+               context unproven))
     with
     | Some obligation ->
         let is_home_body = is_home context frame.source && frame.makes_obligations in

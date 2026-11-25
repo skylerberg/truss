@@ -3287,6 +3287,19 @@ let () =
       goal = Logic.Operation (operator, [ Logic.Symbol symbol; Logic.Symbol symbol ]);
     }
   in
+  Harness.test "a value passed as it was received asks the solver nothing about its invariant"
+    (fun () ->
+      let database =
+        Support.make_database
+          (Support.setup [ ("app.main", Fixtures.Prover.value_with_an_invariant_passed_unchanged) ])
+      in
+      match
+        List.filter
+          (fun (state : Database.proof_state) -> state.site.code = "prover.invariant")
+          (Support.list_proof_states database (Support.parse_file "app.main"))
+      with
+      | [] -> ()
+      | states -> Harness.fail "%d obligations about the invariant" (List.length states));
   Harness.test "two facts that differ only deep inside hash differently" (fun () ->
       let make_symbol label = Logic.Symbol (Logic.Symbol.Variable { label; numbers = [] }) in
       let nest last =
@@ -3294,8 +3307,8 @@ let () =
           (fun index inner -> Logic.Operation (And, [ make_symbol (string_of_int index); inner ]))
           (List.init 300 Fun.id) (make_symbol last)
       in
-      if Logic.For_testing.hash_term (nest "first") = Logic.For_testing.hash_term (nest "second")
-      then Harness.fail "the hash reads only the start of a term");
+      if Logic.hash_term (nest "first") = Logic.hash_term (nest "second") then
+        Harness.fail "the hash reads only the start of a term");
   Harness.test "a conjunction under a premise splits into one pruned query per conjunct" (fun () ->
       let make_symbol label = Logic.Symbol.Variable { label; numbers = [] } in
       let premise = make_symbol "premise"

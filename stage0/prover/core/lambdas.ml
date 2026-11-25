@@ -492,13 +492,6 @@ let assign_counters (context : State.context) (sources : (Costs.counter * Types.
   context.conditional_counters <-
     List.filter (fun counter -> not (List.mem (counter, []) sources)) counters
 
-let list_facts_since (context : State.context) count =
-  let rec take count list =
-    if count <= 0 then []
-    else match list with [] -> [] | item :: rest -> item :: take (count - 1) rest
-  in
-  take (List.length context.facts - count) context.facts
-
 let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : Invocation.site)
     (written : State.lambda_code) ~list_facts ~list_promises =
   let location = Facts.locate context frame.source site.origin in
@@ -513,7 +506,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   let called = Facts.declare_fresh context frame "called" Logic.Bool in
   let inside = { (Facts.restrict frame called) with result = None } in
   let start_fresh = context.fresh
-  and start_facts = List.length context.facts
+  and start_facts = Fact_list.count context.facts
   and start_declarations = List.length context.declarations in
   let arguments =
     List.map
@@ -587,10 +580,12 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
          (fun index pair -> (index, pair))
          (List.combine written.code.parameters function_type.inputs))
   in
-  let mark = context.fresh and facts_mark = List.length context.facts in
+  let mark = context.fresh and facts_mark = Fact_list.count context.facts in
   let recursive_costs_mark = context.recursive_costs_assumed in
   let premises =
-    List.drop (List.length context.facts - facts_mark) (list_facts_since context start_facts)
+    List.drop
+      (Fact_list.count context.facts - facts_mark)
+      (Fact_list.list_newest_since context.facts ~count:start_facts)
   in
   let ended = ref [] in
   let saved_returns = context.returns
@@ -708,7 +703,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
               promised)
           exits;
         let facts =
-          list_facts_since context facts_mark
+          Fact_list.list_newest_since context.facts ~count:facts_mark
           @ List.map (fun (exit_ : State.frame) -> exit_.condition) exits
         in
         List.filter_map
@@ -733,7 +728,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
           operand_counters)
   in
   let end_fresh = context.fresh in
-  let shown = list_facts_since context facts_mark in
+  let shown = Fact_list.list_newest_since context.facts ~count:facts_mark in
   let term =
     match find_lambda_definition context frame function_type written with
     | Some term -> term

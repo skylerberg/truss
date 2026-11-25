@@ -630,7 +630,7 @@ let enter_loop ?holds context frame ~entry clauses ~changed =
     list_loop_costs context frame clauses ~held_gains:(measure_held_gains context frame holds)
   in
   check_loop_entry context entry costs;
-  let fresh_mark = context.fresh and facts_mark = List.length context.facts in
+  let fresh_mark = context.fresh and facts_mark = Fact_list.count context.facts in
   let preserved = list_validity_obligations context frame changed in
   let head = havoc context frame changed in
   assume_preserved_validity context head preserved;
@@ -653,7 +653,7 @@ let leave_loop context frame frames =
 let end_iterations context (frame : State.frame) loop_at clauses (start : loop_start) ~head
     ~(inside : State.frame) ~iterations ~iteration_bounds ~ends ~breaks ~with_through =
   check_loop_iterations context loop_at head start ~iterations ~iteration_bounds
-    ~facts:(Lambdas.list_facts_since context start.facts_mark @ [ inside.condition ])
+    ~facts:(Fact_list.list_newest_since context.facts ~count:start.facts_mark @ [ inside.condition ])
     ~ends:(List.map with_through ends) ~breaks:(List.map with_through breaks);
   List.iter
     (fun (end_ : State.frame) ->
@@ -725,7 +725,7 @@ let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context f
     enter_loop_head context { head with yielded = Some before } costs ~iterations:(Some iterations)
   in
   assume_invariants context head clauses;
-  let ended_mark = List.length context.facts in
+  let ended_mark = Fact_list.count context.facts in
   let received = receive head before in
   let through = received.through in
   let inside = received.advance (Facts.restrict head received.has_another) in
@@ -738,7 +738,8 @@ let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context f
   let ended = received.advance (Facts.restrict head (Logic.not_ received.has_another)) in
   let varies = Facts.mentions_fresh_after context loop.fresh_mark in
   let ended_facts =
-    Lambdas.list_facts_since context ended_mark @ Lambdas.list_facts_since context loop.facts_mark
+    Fact_list.list_newest_since context.facts ~count:ended_mark
+    @ Fact_list.list_newest_since context.facts ~count:loop.facts_mark
   in
   let exit_ =
     exit_loop context ~clause_at:head
@@ -1163,7 +1164,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
   in
   let most = List.map Costs.at_least_zero iteration_bounds in
   check_loop_iterations context loop.while_at head start ~iterations ~iteration_bounds
-    ~facts:(Lambdas.list_facts_since context start.facts_mark @ [ inside.condition ])
+    ~facts:(Fact_list.list_newest_since context.facts ~count:start.facts_mark @ [ inside.condition ])
     ~ends ~breaks;
   List.iter
     (fun (end_ : State.frame) ->

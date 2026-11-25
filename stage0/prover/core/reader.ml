@@ -1533,7 +1533,7 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
       in
       Facts.assume context frame (Logic.equal (Logic.Symbol symbol) holds);
       let location = Facts.locate context frame.source statement.origin in
-      Facts.oblige context frame location
+      Facts.oblige ~is_proven_by_evaluation:true context frame location
         (match statement.origin with
         | Written _ -> Assertion_may_fail { clause = Facts.quote frame.source statement.origin }
         | Desugared _ ->

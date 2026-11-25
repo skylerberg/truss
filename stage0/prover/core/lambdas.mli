@@ -45,7 +45,6 @@ val list_loop_counters :
   State.context -> Logic.term Locals.t -> Mir.body -> (Costs.counter * Types.condition) list
 
 val assign_counters : State.context -> (Costs.counter * Types.condition) list -> unit
-val list_facts_since : State.context -> int -> Logic.term list
 
 val translate_lambda :
   State.context ->
