@@ -119,8 +119,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                                   (fun (noted, _) -> noted <> place.id)
                                   state.places_without_keyword;
                               Conversions.convert state env ~expression:part_expression
-                                (State.read_span state part_expression.id)
-                                ~actual:part_type ~expected:view;
+                                (Written part_expression.id) ~actual:part_type ~expected:view;
                               convert_from (make_from view)
                             end
                             else if Types.equal part_type part then Some None
