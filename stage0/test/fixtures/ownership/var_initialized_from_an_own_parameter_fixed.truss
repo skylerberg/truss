@@ -1,4 +1,0 @@
-fn f(items: own List[Int64]) {
-  var copy = own items
-  mut copy.push(1)
-}

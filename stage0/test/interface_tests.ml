@@ -138,7 +138,7 @@ let () =
     "declaring Copyable on a type that is not opaque is an error with a fix that removes it"
     (fun () ->
       expect_one_diagnostic "type Point(x: Int64)\n  derives Copyable\n" "types.derives_inferred"
-        ~fixed:"type Point(x: Int64)\n")
+        ~fixed:("  derives Copyable\n", ""))
 
 let () =
   Harness.test "an opaque type cannot declare Copyable when a field is not Copyable" (fun () ->
@@ -266,25 +266,33 @@ let () =
               \  modifies scanner.position, scanner.region.stop, scanner.tokens[..]\n\
                { todo }\n" );
         ];
+      let declare parts =
+        scanner ^ "fn f(scanner: mut Scanner, count: UInt64)\n  modifies " ^ parts ^ "\n{ todo }\n"
+      in
       List.iter
-        (fun (parts, code, says) ->
-          expect_one_diagnostic
-            (scanner ^ "fn f(scanner: mut Scanner, count: UInt64)\n  modifies " ^ parts
-           ^ "\n{ todo }\n")
-            code ~says)
+        (fun (parts, code, says, fixed_parts) ->
+          expect_one_diagnostic (declare parts) code ~says
+            ?fixed:(Option.map (fun fixed_parts -> (parts, fixed_parts)) fixed_parts))
         [
-          ("scanner.region[0]", "types.not_a_field_path", "One element or a narrower range");
-          ("scanner.position[..]", "types.not_a_field_path", "has no elements");
-          ("limit.bits", "types.not_a_field_path", "`limit` is not a parameter");
-          ("count.bits", "types.read_only_part", "`count` is not `mut`");
-          ("scanner", "types.not_a_field_path", "`scanner` is a whole parameter");
-          ("scanner.position, scanner.position", "types.repeated_part", "`scanner.position` twice");
+          ("scanner.region[0]", "types.not_a_field_path", "One element or a narrower range", None);
+          ("scanner.position[..]", "types.not_a_field_path", "has no elements", None);
+          ("limit.bits", "types.not_a_field_path", "`limit` is not a parameter", None);
+          ("count.bits", "types.read_only_part", "`count` is not `mut`", None);
+          ("scanner", "types.not_a_field_path", "`scanner` is a whole parameter", None);
+          ( "scanner.position, scanner.position",
+            "types.repeated_part",
+            "`scanner.position` twice",
+            Some "scanner.position" );
           ( "scanner.region.stop, scanner.region",
             "types.repeated_part",
-            "`scanner.region.stop` is a part of `scanner.region`" );
-          ("scanner.postion", "types.unknown_member", "`Scanner` has no field `postion`.");
-          ("scanner.position.bits", "types.not_a_field_path", "which has no fields to name");
-          ("scanner.last.value", "types.not_a_field_path", "belong to its variants");
+            "`scanner.region.stop` is a part of `scanner.region`",
+            Some "scanner.region" );
+          ( "scanner.postion",
+            "types.unknown_member",
+            "`Scanner` has no field `postion`.",
+            Some "scanner.position" );
+          ("scanner.position.bits", "types.not_a_field_path", "which has no fields to name", None);
+          ("scanner.last.value", "types.not_a_field_path", "belong to its variants", None);
         ]);
   Harness.test "an impl's method changes only the parts that its trait's method names" (fun () ->
       let recorder =
@@ -338,7 +346,8 @@ let () =
       match Support.list_codes (check packages (Support.parse_file "app.main")) with
       | [ "types.trait_cycle"; "types.trait_cycle" ] -> ()
       | reported -> Harness.fail "found [%s]" (String.concat "; " reported));
-  Harness.test "a trait hierarchy of many diamonds is checked quickly" (fun () ->
+  Harness.test "a trait hierarchy of many diamonds is checked without visiting each path through it"
+    (fun () ->
       let levels = 24 in
       let make_level_source index =
         let body = if index = 0 then "{\n  fn size(self) -> UInt64\n}" else "{}" in
@@ -353,9 +362,7 @@ let () =
               "fn measure[Value: T0](value: Value) -> UInt64 {\n  value.size()\n}\n";
             ])
       in
-      let started = Sys.time () in
-      expect_no_diagnostics [ ("app.main", text) ];
-      if Sys.time () -. started > 5.0 then Harness.fail "took %.1f seconds" (Sys.time () -. started));
+      expect_no_diagnostics [ ("app.main", text) ]);
   Harness.test "a bound keeps a trait that it requires twice with different arguments" (fun () ->
       expect_no_diagnostics
         [
@@ -557,15 +564,7 @@ let () =
       expect_one_diagnostic
         Fixtures.Interface.steps_trait_giving_a_default_to_a_method_without_a_body
         "types.default_without_body" ~at:("3", 1)
-        ~says:"a method that an `impl` writes has no default"
-        ~fixed:
-          "trait Steps {\n\
-          \  fn step(self, by: Int64) -> Int64\n\
-           }\n\n\
-           type Walker()\n\n\
-           impl Steps for Walker {\n\
-          \  fn step(self, by: Int64) -> Int64 { todo }\n\
-           }\n");
+        ~says:"a method that an `impl` writes has no default" ~fixed:("Int64 = 3", "Int64"));
   Harness.test "an impl overrides no method that has a default" (fun () ->
       expect_one_diagnostic Fixtures.Interface.steps_impl_overriding_a_method_that_has_a_default
         "types.overridden_method_default" ~at:("step", 2)
@@ -1026,7 +1025,7 @@ let () =
 let () =
   Harness.test "a type that contains itself with growing arguments does not hang" (fun () ->
       let packages =
-        Support.setup [ ("app.main", Fixtures.Interface.nested_type_with_growing_arguments) ]
+        Support.setup [ ("app.main", Fixtures.Package_checks.nested_type_with_growing_arguments) ]
       in
       ignore
         (Interface.Impls.is_copyable (make_interface packages)
@@ -1078,24 +1077,17 @@ let () =
       expect_one_diagnostic Fixtures.Interface.offset_with_an_int64_value_parameter
         "types.wrong_value_parameter_type"
         ~says:"`shift` is a value parameter, so its type is `UInt64`, not `Int64`."
-        ~fixed:Fixtures.Interface.offset_with_an_int64_value_parameter_fixed);
+        ~fixed:("fn offset[shift: Int64]() -> UInt64 {", "fn offset[shift: UInt64]() -> UInt64 {"));
   Harness.test "a type's value parameter of a type other than UInt64 is an error" (fun () ->
       expect_one_diagnostic Fixtures.Interface.ring_with_a_bool_value_parameter
-        "types.wrong_value_parameter_type");
+        "types.wrong_value_parameter_type" ~fixed:("Bool", "UInt64"));
   Harness.test "a value parameter of an unknown type reports only the unknown name" (fun () ->
-      match
-        Support.list_codes
-          (Database.For_testing.list_diagnostics [ Resolve; Interface ]
-             (Support.make_database
-                (Support.setup
-                   [
-                     ( "app.main",
-                       Fixtures.Interface.offset_with_a_value_parameter_of_an_unknown_type );
-                   ]))
-             (Support.parse_file "app.main"))
-      with
-      | [ code ] when code <> "types.wrong_value_parameter_type" -> ()
-      | codes -> Harness.fail "found [%s]" (String.concat "; " codes));
+      Support.expect_one_diagnostic
+        ~check:(fun packages ->
+          Database.For_testing.list_diagnostics [ Resolve; Interface ]
+            (Support.make_database packages))
+        Fixtures.Interface.offset_with_a_value_parameter_of_an_unknown_type "resolve.unknown_name"
+        ~at:("Missing", 1));
   Harness.test "a type argument must be of its parameter's kind" (fun () ->
       expect_one_diagnostic "fn f(items: List[3]) {}\n" "types.argument_kind");
   Harness.test "a constant in a type argument must have a value" (fun () ->

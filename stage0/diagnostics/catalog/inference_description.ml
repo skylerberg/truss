@@ -743,13 +743,14 @@ let describe : Inference.t -> Nodes.description = function
       make Ambiguous_method (Build.at origin)
         ~fixes:
           (List.map
-             (fun (trait : Types.trait_reference) ->
+             (fun ((trait : Types.trait_reference), mode) ->
                let trait_name = show_trait_name trait.trait in
                fix
                  (Printf.sprintf "Call `%s`'s `%s`." trait_name name)
                  [
                    Build.replace call
-                     (Description.Text (Printf.sprintf "%s.%s(" trait_name name)
+                     (Description.Text
+                        (Printf.sprintf "%s.%s(%s" trait_name name (Language.Mode.show_prefix mode))
                       :: Build.quote receiver
                       :: List.concat_map
                            (fun argument -> [ Description.Text ", "; Build.quote_over argument ])

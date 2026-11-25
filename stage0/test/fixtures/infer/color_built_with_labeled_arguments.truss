@@ -1,5 +1,0 @@
-type Color(red: UInt8, green: UInt8, blue: UInt8)
-
-fn f() -> Color {
-  Color(red: 1, green: 2, blue: 3)
-}

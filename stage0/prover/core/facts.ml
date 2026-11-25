@@ -403,6 +403,7 @@ let oblige ?cited ?(fixes = []) ?holds_when (context : State.context) (frame : S
           match fixes with
           | [] when is_home_body -> (
               match show_truss_goal context goal with
+              | Some _ when Logic.is_refuted goal -> []
               | Some required -> add_requires context frame [ Code required ]
               | None -> [])
           | fixes -> fixes

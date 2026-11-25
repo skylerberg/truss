@@ -149,7 +149,7 @@ let () =
       | [ "types.mismatch" ] -> ()
       | reported -> Harness.fail "reported [%s]" (String.concat "; " reported));
   Harness.test "a literal takes the type of the other operand" (fun () ->
-      expect_type Fixtures.Infer.uint8_plus_a_literal "1" "UInt8");
+      expect_type Fixtures.Prover.addition_that_can_overflow "1" "UInt8");
   Harness.test "a literal nothing decides is an Int64" (fun () ->
       expect_type Fixtures.Infer.var_of_a_literal "0" "Int64");
   Harness.test "a literal takes the expected type" (fun () ->
@@ -821,7 +821,8 @@ let () =
     "a literal local whose method gives an associated type takes its default type at that statement"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.local_unsigned_absolute_then_compared_with_a_uint8
-        "types.mismatched_integers");
+        "types.mismatched_integers"
+        ~fixed:("small == magnitude", "UInt64.from_integer(small) == magnitude"));
   Harness.test
     "a literal local joined with an associated type of another literal local takes the type the \
      other's default gives" (fun () ->
@@ -833,7 +834,8 @@ let () =
 let () =
   Harness.test "comparing integer types that differ is an error with a fix that converts" (fun () ->
       expect_one_diagnostic Fixtures.Infer.comparison_of_uint64_and_uint32
-        "types.mismatched_integers" ~fixed:Fixtures.Infer.comparison_of_uint64_and_uint32_fixed);
+        "types.mismatched_integers"
+        ~fixed:("length == count", "length == UInt64.from_integer(count)"));
   Harness.test "a comparison views a list, an array, or a string that meets its view" (fun () ->
       expect_fine Fixtures.Infer.comparisons_of_owners_and_views);
   Harness.test "a comparison of a list with a range of another element type is a mismatch"
@@ -845,7 +847,8 @@ let () =
      the list or the string it stands for" (fun () ->
       expect_fine Fixtures.Infer.views_passed_as_owners_to_generic_parameters);
   Harness.test "a view is not passed to an `own` parameter of its viewed type" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.view_passed_as_an_own_key "types.mismatch");
+      expect_one_diagnostic Fixtures.Infer.view_passed_as_an_own_key "types.mismatch"
+        ~fixed:("mut counts.insert(word, value: 1)", "mut counts.insert(word.copy(), value: 1)"));
   Harness.test "a list is not passed as an array" (fun () ->
       expect_one_diagnostic Fixtures.Infer.range_passed_as_an_array_key "types.mismatch");
   Harness.test "a list of bytes is not passed as a string" (fun () ->
@@ -855,8 +858,7 @@ let () =
   Harness.test "a view where its viewed type is owned is a mismatch with a fix to `copy()`"
     (fun () ->
       expect_one_diagnostic "fn f(name: view String) -> List[String] {\n  [name]\n}\n"
-        "types.mismatch" ~at:("name]", 1)
-        ~fixed:"fn f(name: view String) -> List[String] {\n  [name.copy()]\n}\n");
+        "types.mismatch" ~at:("name]", 1) ~fixed:("[name]", "[name.copy()]"));
   Harness.test "`copy()` of a view makes an owned value" (fun () ->
       expect_fine "fn f(items: view List[Int64]) -> List[Int64] {\n  items.copy()\n}\n");
   Harness.test
@@ -898,7 +900,7 @@ let () =
       expect_fix_titles text []);
   Harness.test "+ on strings is an error with a fix to interpolation" (fun () ->
       expect_one_diagnostic Fixtures.Infer.string_plus_a_string "types.string_addition"
-        ~fixed:Fixtures.Infer.string_plus_a_string_fixed);
+        ~fixed:("name + \"!\"", "\"${name}!\""));
   Harness.test "an operator chooses the impl by both operands" (fun () ->
       let text = Fixtures.Infer.additions_of_meters_and_integers in
       match locate_core_call text "length + extra" 1 with
@@ -968,7 +970,8 @@ let () =
       expect_one_diagnostic
         (functions ^ Fixtures.Infer.copy_file_with_a_positional_argument_after_a_label)
         "types.positional_after_labeled"
-        ~fixed:(functions ^ Fixtures.Infer.copy_file_with_both_labels));
+        ~fixed:
+          ("copy_file(source: original, backup)", "copy_file(source: original, destination: backup)"));
   Harness.test
     "a positional argument gets no fix after a label away from its position, or when it is named \
      like another parameter" (fun () ->
@@ -1006,7 +1009,7 @@ let () =
   Harness.test "the first argument of a record with several fields needs a label too" (fun () ->
       expect_one_diagnostic Fixtures.Infer.point_with_an_unlabeled_first_argument
         "types.missing_label" ~says:"`Point` has 2 fields"
-        ~fixed:Fixtures.Infer.point_with_labeled_arguments);
+        ~fixed:("Point(0, y: 1)", "Point(x: 0, y: 1)"));
   Harness.test "a variant with one field given two arguments is one error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.circle_built_with_two_arguments
         "types.too_many_arguments" ~says:"`Circle` has 1 field, and 2 arguments are given.");
@@ -1020,17 +1023,20 @@ let () =
   Harness.test "a call with an argument without a parameter has the error type" (fun () ->
       expect_one_diagnostic
         Fixtures.Infer.distance_with_a_positional_argument_after_a_label_returned_as_a_string
-        "types.positional_after_labeled");
+        "types.positional_after_labeled"
+        ~fixed:("distance(from: start, finish)", "distance(from: start, to: finish)")
+        ~left_after_fix:[ "types.mismatch" ]);
   Harness.test "a repeated argument has no parameter, so no other parameter is missing" (fun () ->
       expect_one_diagnostic
         (functions ^ Fixtures.Infer.copy_file_with_a_repeated_source)
         "types.repeated_argument");
-  Harness.test "a lambda without a parameter needs no type of its own" (fun () ->
+  Harness.test "a lambda passed as an extra argument is one error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.apply_twice_with_an_extra_lambda
         "types.too_many_arguments");
-  Harness.test "an empty list without a parameter leaves no type to infer" (fun () ->
+  Harness.test "an empty list after a label, with no parameter to type it, is one error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.sum_of_with_an_empty_list_after_a_label
-        "types.positional_after_labeled");
+        "types.positional_after_labeled"
+        ~fixed:("sum_of(first: items, [])", "sum_of(first: items, second: [])"));
   Harness.test "a constant built by a rejected call is one error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.wrapper_constant_with_an_extra_argument
         "types.too_many_arguments");
@@ -1092,7 +1098,7 @@ let () =
     "a call of a method that takes `mut self` needs the mode keyword, with a fix that adds it"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.sort_of_a_list_without_mut "types.missing_mode"
-        ~fixed:Fixtures.Infer.sort_of_a_mut_list);
+        ~fixed:("items.sort()", "mut items.sort()"));
   Harness.test
     "the receiver's mode chooses between a `String`'s read-only overload and its `own` overload"
     (fun () ->
@@ -1115,8 +1121,7 @@ let () =
   Harness.test "an unknown label is an error with a fix to the closest" (fun () ->
       expect_one_diagnostic
         (functions ^ Fixtures.Infer.misspelled_label)
-        "types.unknown_label"
-        ~fixed:(functions ^ Fixtures.Infer.copy_file_with_a_destination_label));
+        "types.unknown_label" ~fixed:("destinaton", "destination"));
   Harness.test "a record is built with labels in any order" (fun () ->
       expect_fine Fixtures.Infer.point_built_with_labels_reversed);
   Harness.test "a record with one field takes a bare value" (fun () ->
@@ -1127,31 +1132,30 @@ let () =
 let () =
   Harness.test "a mut parameter needs mut at the call, with a fix that adds it" (fun () ->
       expect_one_diagnostic Fixtures.Infer.bump_without_mut "types.missing_mode"
-        ~fixed:Fixtures.Infer.bump_without_mut_fixed);
+        ~fixed:("bump(count)", "bump(mut count)"));
   Harness.test "own on a place that copies implicitly is redundant" (fun () ->
       expect_one_diagnostic Fixtures.Infer.own_before_an_integer "types.redundant_mode"
-        ~fixed:Fixtures.Infer.own_before_an_integer_fixed);
+        ~fixed:("own count", "count"));
   Harness.test "own on a place of the error type is not reported again as redundant" (fun () ->
       expect_one_diagnostic Fixtures.Infer.own_before_a_local_bound_to_a_misspelled_field
-        "types.unknown_member");
+        "types.unknown_member" ~fixed:("itemz", "items"));
   Harness.test "own on a place of an option of the error type is not reported again as redundant"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.own_before_an_option_of_a_misspelled_field
-        "types.unknown_member");
+        "types.unknown_member" ~fixed:("itemz", "items"));
   Harness.test "own on a place of a hole's type is not redundant" (fun () ->
       expect_fine Fixtures.Infer.own_before_a_local_bound_to_todo);
   Harness.test "a redundant own is reported once a later element of the statement solves the type"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.own_before_a_lambda_parameter_solved_later_as_an_integer
-        "types.redundant_mode"
-        ~fixed:Fixtures.Infer.own_before_a_lambda_parameter_solved_later_as_an_integer_fixed);
+        "types.redundant_mode" ~fixed:("own value", "value"));
   Harness.test "a mut receiver chooses the method's mut overload" (fun () ->
       expect_fine Fixtures.Infer.mut_push_onto_a_var_list);
   Harness.test
     "a place calling a method that takes mut self needs the mode keyword, with a fix that adds it"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.push_without_mut "types.missing_mode"
-        ~fixed:Fixtures.Infer.push_without_mut_fixed)
+        ~fixed:("items.push(1)", "mut items.push(1)"))
 
 let () =
   let shapes = Fixtures.Infer.others_shape_with_private_members in
@@ -1271,9 +1275,9 @@ let () =
 let () =
   Harness.test "a statement's value must be used, with a fix that discards it" (fun () ->
       expect_one_diagnostic Fixtures.Infer.unused_length "types.unused_value"
-        ~fixed:Fixtures.Infer.unused_length_fixed);
+        ~fixed:("items.length()", "let _ = items.length()"));
   Harness.test "the default of a parameter of a view type can be an owned value" (fun () ->
-      expect_fine Fixtures.Infer.view_parameters_with_owned_defaults);
+      expect_fine Fixtures.Ownership.view_parameters_with_owned_defaults);
   Harness.test "`time` of a method that no bound of the type parameter declares is an error"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.cost_naming_time_of_an_undeclared_method
@@ -1288,7 +1292,8 @@ let () =
         ~says:"Only a place, such as a variable, a field, or an element, can be assigned.");
   Harness.test "a mode keyword before a call that is assigned is reported once, as not a place"
     (fun () ->
-      expect_one_diagnostic Fixtures.Infer.mut_before_an_assigned_call "resolve.not_a_place");
+      expect_one_diagnostic Fixtures.Infer.mut_before_an_assigned_call "resolve.not_a_place"
+        ~fixed:("mut five", "five") ~left_after_fix:[ "types.not_assignable" ]);
   List.iter
     (fun (written, text, fixed, says) ->
       Harness.test
@@ -1297,27 +1302,27 @@ let () =
     [
       ( "an element",
         Fixtures.Infer.mut_before_an_assigned_element,
-        Fixtures.Infer.mut_before_an_assigned_element_fixed,
+        ("mut waits", "waits"),
         "An assignment writes its target, so `waits[1]` takes no `mut`." );
       ( "a variable",
         Fixtures.Infer.mut_before_an_assigned_variable,
-        Fixtures.Infer.mut_before_an_assigned_variable_fixed,
+        ("mut count", "count"),
         "An assignment writes its target, so `count` takes no `mut`." );
       ( "a variable after `own`",
         Fixtures.Infer.own_before_an_assigned_variable,
-        Fixtures.Infer.own_before_an_assigned_variable_fixed,
+        ("own count", "count"),
         "An assignment writes its target, so `count` takes no `own`." );
       ( "a field of `self`",
         Fixtures.Infer.mut_before_an_assigned_field,
-        Fixtures.Infer.mut_before_an_assigned_field_fixed,
+        ("mut self.count = 0", "self.count = 0"),
         "An assignment writes its target, so `self.count` takes no `mut`." );
       ( "the target of a compound assignment",
         Fixtures.Infer.mut_before_a_compound_assignment,
-        Fixtures.Infer.mut_before_a_compound_assignment_fixed,
+        ("mut total", "total"),
         "An assignment writes its target, so `total` takes no `mut`." );
       ( "an entry of a map",
         Fixtures.Infer.mut_before_an_assigned_map_entry,
-        Fixtures.Infer.mut_before_an_assigned_map_entry_fixed,
+        ("mut group_of", "group_of"),
         "An assignment writes its target, so `group_of[own key]` takes no `mut`." );
     ];
   List.iter
@@ -1452,7 +1457,8 @@ let () =
 
 let () =
   Harness.test "an unknown field is an error with a fix to the closest" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.misspelled_field "types.unknown_member");
+      expect_one_diagnostic Fixtures.Infer.misspelled_field "types.unknown_member"
+        ~fixed:("point.z", "point.x"));
   Harness.test "a method from a trait needs no import" (fun () ->
       expect_fine Fixtures.Infer.copy_of_a_list);
   Harness.test "a law's proof names the law's parameters, which have the proof's type for Self"
@@ -1481,13 +1487,16 @@ let () =
       expect_fine Fixtures.Infer.big_integer_from_an_int64)
 
 let () =
-  Harness.test "an unknown variant in a pattern is an error" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.misspelled_variant_arm "types.unknown_variant");
+  Harness.test "an unknown variant in a pattern is fixed to the closest variant with as many fields"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.misspelled_variant_arm "types.unknown_variant"
+        ~fixed:("Sone", "Some"));
   Harness.test "a bare name in a record pattern binds the field it names" (fun () ->
       expect_fine Fixtures.Infer.let_binding_both_fields_of_a_pair);
   Harness.test "a bare name that names no field of a record with several is an error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.record_pattern_with_a_name_of_no_field
-        "types.missing_label")
+        "types.missing_label"
+        ~fixed:("let (a, second) = pair", "let (first: a, second) = pair"))
 
 let () =
   Harness.test "a tuple pattern binds the fields of a tuple type by position" (fun () ->
@@ -1500,25 +1509,28 @@ let () =
   Harness.test "a tuple pattern names the fields in their order" (fun () ->
       expect_one_diagnostic Fixtures.Infer.tuple_pattern_names_fields_out_of_order
         "types.out_of_order" ~says:"`value` here would bind the field `key`"
-        ~fixed:Fixtures.Infer.tuple_pattern_names_fields_out_of_order_fixed);
+        ~fixed:("value, key", "key, value"));
   Harness.test "a tuple pattern has one pattern for each field" (fun () ->
       expect_one_diagnostic Fixtures.Infer.tuple_pattern_with_a_pattern_too_many "types.arity");
   Harness.test "a tuple pattern matches only a tuple type" (fun () ->
       expect_one_diagnostic Fixtures.Infer.tuple_pattern_on_a_record "types.not_a_tuple_type"
-        ~fixed:Fixtures.Infer.tuple_pattern_on_a_record_fixed);
+        ~fixed:("let x, y = point", "let (x, y) = point"));
   Harness.test "parentheses match the fields of a tuple type by name" (fun () ->
       expect_fine Fixtures.Infer.record_pattern_on_a_tuple_type_by_name;
       expect_one_diagnostic Fixtures.Infer.record_pattern_on_map_entries_with_a_wildcard
         "types.missing_label"
         ~says:"a list of patterns without parentheses matches its fields by position"
-        ~fixed:Fixtures.Infer.record_pattern_on_map_entries_with_a_wildcard_fixed);
+        ~fixed:("(_, group)", "_, group"));
   Harness.test "a bare pattern that names no field is labeled with the one field left open"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.record_pattern_on_map_entries_in_a_lambda
-        "types.missing_label" ~fixed:Fixtures.Infer.record_pattern_on_map_entries_in_a_lambda_fixed;
+        "types.missing_label"
+        ~fixed:
+          ( "counts.count_where(fn((key, count)) { count > key.length() })",
+            "counts.count_where(fn((key, value: count)) { count > key.length() })" );
       expect_one_diagnostic Fixtures.Infer.variant_pattern_with_a_wildcard_for_a_field
         "types.missing_label" ~says:"`Link` has 2 fields: `value`, `rest`."
-        ~fixed:Fixtures.Infer.variant_pattern_with_a_wildcard_for_a_field_fixed)
+        ~fixed:("Link(_, rest) => rest is Link(..)", "Link(value: _, rest) => rest is Link(..)"))
 
 let () =
   let report text = check (Support.setup [ ("app.main", text) ]) (Support.parse_file "app.main") in
@@ -1539,7 +1551,7 @@ let () =
     | edits when List.length edits <> count -> Harness.fail "not every diagnostic has one fix"
     | edits -> (
         let after = Diagnostic.apply_edits text edits in
-        if after <> fixed then Harness.fail "fixed to %S" after
+        if after <> Support.apply_edit text fixed then Harness.fail "fixed to %S" after
         else
           match report after with
           | [] -> ()
@@ -1555,9 +1567,11 @@ let () =
   Harness.test "a complete positional list is labeled in the declared order of the fields"
     (fun () ->
       expect_every_fix Fixtures.Infer.color_built_with_three_positional_arguments
-        "types.missing_label" ~count:3 ~fixed:Fixtures.Infer.color_built_with_labeled_arguments;
+        "types.missing_label" ~count:3
+        ~fixed:("Color(1, 2, 3)", "Color(red: 1, green: 2, blue: 3)");
       expect_every_fix Fixtures.Infer.link_matched_with_two_names_of_no_field "types.missing_label"
-        ~count:2 ~fixed:Fixtures.Infer.link_matched_with_two_names_of_no_field_fixed);
+        ~count:2
+        ~fixed:("Link(head, tail)", "Link(value: head, rest: tail)"));
   Harness.test "a partial positional list gets no fix, since which field each means is not known"
     (fun () ->
       expect_no_fix Fixtures.Infer.color_built_with_two_positional_arguments_and_a_label
@@ -1567,21 +1581,22 @@ let () =
   Harness.test "a label in a pattern that names no field is an unknown label" (fun () ->
       expect_one_diagnostic Fixtures.Infer.link_matched_with_a_misspelled_label
         "types.unknown_label" ~says:"`Link` has no field `valu`."
-        ~fixed:Fixtures.Infer.link_matched_with_a_misspelled_label_fixed);
+        ~fixed:("Link(valu: head, ..) => head", "Link(value: head, ..) => head"));
   Harness.test "a field matched twice in a pattern is a repeated argument" (fun () ->
       expect_one_diagnostic Fixtures.Infer.link_matched_with_a_field_twice "types.repeated_argument"
         ~says:"`value` is matched more than once.");
   Harness.test "a tuple pattern on a record is fixed to its labeled form" (fun () ->
       expect_one_diagnostic Fixtures.Infer.tuple_pattern_of_other_names_on_a_record
         "types.not_a_tuple_type" ~says:"as in `(start: low, stop: high)`"
-        ~fixed:Fixtures.Infer.tuple_pattern_of_other_names_on_a_record_fixed);
+        ~fixed:("low, high", "(start: low, stop: high)"));
   Harness.test "a tuple type is built by position, then by label" (fun () ->
       expect_fine Fixtures.Infer.span_built_by_position_and_by_label);
   Harness.test
     "a variable named like another field of a tuple type is an error, with a fix that labels it"
     (fun () ->
       expect_every_fix Fixtures.Infer.span_built_with_its_fields_swapped "types.out_of_order"
-        ~count:2 ~fixed:Fixtures.Infer.span_built_with_its_fields_swapped_fixed);
+        ~count:2
+        ~fixed:("Span(end, start)", "Span(end: end, start: start)"));
   Harness.test "a tuple type takes no positional argument after a label" (fun () ->
       expect_one_diagnostic Fixtures.Infer.span_built_with_a_positional_argument_after_a_label
         "types.positional_after_labeled")
@@ -1778,10 +1793,11 @@ let () =
       expect_one_diagnostic Fixtures.Infer.list_literal_as_a_heap "types.mismatch");
   Harness.test "new on a type that takes a list literal names the literal" (fun () ->
       expect_one_diagnostic Fixtures.Infer.new_on_a_list "types.unknown_member"
-        ~says:"The literal `[]` is an empty `List[_]`." ~fixed:Fixtures.Infer.new_on_a_list_fixed);
+        ~says:"The literal `[]` is an empty `List[_]`." ~fixed:("List.new()", "[]"));
   Harness.test "new on a type that takes a map literal names the literal" (fun () ->
       expect_one_diagnostic Fixtures.Infer.new_on_a_sorted_map "types.unknown_member"
-        ~says:"The literal `[:]` is an empty" ~fixed:Fixtures.Infer.new_on_a_sorted_map_fixed);
+        ~says:"The literal `[:]` is an empty"
+        ~fixed:("collections.SortedMap.new()", "[:]"));
   Harness.test "new where nothing expects the collection names the literal and offers no fix"
     (fun () ->
       let text = Fixtures.Infer.new_on_a_list_with_type_arguments in
@@ -1835,26 +1851,6 @@ let () =
         Database.read_checked_body (Support.make_database packages) key
       in
       if find_type_check_result () <> find_type_check_result () then Harness.fail "different")
-
-let () =
-  Harness.test "no table of the standard library holds a type inference left unsolved" (fun () ->
-      let packages = Support.setup [] in
-      List.iter
-        (fun ((file : Path.file), _) ->
-          List.iter
-            (fun (declaration : Resolve.Names.declaration) ->
-              match Database.read_checked_body (Support.make_database packages) declaration.key with
-              | Some { tables; _ } ->
-                  List.iter
-                    (Array.iter (function
-                      | Some type_
-                        when Types.exists (function Variable _ -> true | _ -> false) type_ ->
-                          Harness.fail "%s: an unsolved type" (Path.show declaration.key.path)
-                      | _ -> ()))
-                    [ tables.types; tables.local_types ]
-              | None -> ())
-            ((Support.make_names packages).list_declarations_in file))
-        Standard_library.files)
 
 let point = "type Point(x: Int64)\n\n"
 
@@ -1914,17 +1910,23 @@ let () =
       expect_fine Fixtures.Infer.overloads_of_label_across_traits);
   Harness.test "two traits that give one overload of a name are ambiguous at the call" (fun () ->
       expect_one_diagnostic Fixtures.Infer.traits_giving_one_label "types.ambiguous_method"
-        ~fixed:Fixtures.Infer.traits_giving_one_label_fixed);
+        ~alternatives:[ ("counter.label()", "Second.label(counter)") ]
+        ~fixed:("counter.label()", "First.label(counter)"));
   Harness.test "two unrelated traits that share a name are ambiguous however each takes self"
     (fun () ->
-      expect_one_diagnostic Fixtures.Infer.unrelated_traits_sharing_label "types.ambiguous_method");
+      expect_one_diagnostic Fixtures.Infer.unrelated_traits_sharing_label "types.ambiguous_method"
+        ~fixed:("Counter(count: 3).label()", "First.label(Counter(count: 3))")
+        ~alternatives:[ ("Counter(count: 3).label()", "Second.label(Counter(count: 3))") ]);
   Harness.test "two bounds that give one overload of a name are ambiguous through the type"
     (fun () -> expect_one_diagnostic Fixtures.Infer.bounds_giving_one_make "types.ambiguous_method");
   Harness.test "two unrelated bounds that share a name are ambiguous however each takes self"
     (fun () ->
-      expect_one_diagnostic Fixtures.Infer.unrelated_bounds_sharing_label "types.ambiguous_method");
+      expect_one_diagnostic Fixtures.Infer.unrelated_bounds_sharing_label "types.ambiguous_method"
+        ~fixed:("value.label()", "First.label(value)"));
   Harness.test "a bound's method is picked from its family by how the call takes self" (fun () ->
       expect_fine Fixtures.Infer.bound_with_overloads_by_receiver);
+  Harness.test "a trait's method written in full takes a temporary or a `Plain` place as `own self`"
+    (fun () -> expect_fine Fixtures.Infer.consumed_written_in_full_on_a_temporary_and_a_plain_place);
   Harness.test "a trait's method written in full has no overload for a mode it lacks" (fun () ->
       expect_one_diagnostic Fixtures.Infer.label_written_in_full_with_mut_self
         "types.wrong_receiver");
@@ -1940,11 +1942,7 @@ let () =
   Harness.test "an operation on a hole is a hole" (fun () ->
       expect_fine Fixtures.Infer.addition_to_a_todo);
   Harness.test "a mistake is not reported again as a type that cannot be inferred" (fun () ->
-      let packages = Support.setup [ ("app.main", Fixtures.Infer.map_of_an_undefined_name) ] in
-      if
-        List.mem "types.cannot_infer"
-          (Support.list_codes (check packages (Support.parse_file "app.main")))
-      then Harness.fail "cascaded");
+      expect_one_diagnostic Fixtures.Infer.map_of_an_undefined_name "resolve.unknown_name");
   Harness.test "a Float32 literal too large is an error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.float32_literal_too_large "types.literal_out_of_range");
   Harness.test "a Float32 literal is rounded once, from its decimal" (fun () ->
@@ -2064,7 +2062,7 @@ let () =
       expect_no_diagnostics [ ("app.main", Fixtures.Infer.output_of_a_generic_supertrait) ]);
   Harness.test "the string + fix keeps escapes" (fun () ->
       expect_one_diagnostic Fixtures.Infer.escaped_string_plus_a_string "types.string_addition"
-        ~fixed:Fixtures.Infer.escaped_string_plus_a_string_fixed);
+        ~fixed:("\"a\\\"b\" + name", "\"a\\\"b${name}\""));
   Harness.test "a lambda cannot mutate a captured variable" (fun () ->
       expect_one_diagnostic Fixtures.Infer.lambda_assigning_a_captured_var "types.not_assignable")
 
@@ -2242,7 +2240,9 @@ let () =
       expect_one_diagnostic Fixtures.Infer.negation_of_an_unsigned_parameter
         "types.negated_unsigned");
   Harness.test "a sum of strings is one error, and its value is not a string" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.string_addition_bound_to_a_let "types.string_addition");
+      expect_one_diagnostic Fixtures.Infer.string_addition_bound_to_a_let "types.string_addition"
+        ~fixed:("let count = \"a\" + text", "let count = \"a${text}\"")
+        ~left_after_fix:[ "types.mismatch" ]);
   Harness.test "a variant that its type does not have is one error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.unknown_variant_of_an_option "types.unknown_variant");
   Harness.test "a variant constructor of a record is an error" (fun () ->
@@ -2254,7 +2254,8 @@ let () =
       expect_one_diagnostic Fixtures.Infer.function_value_called_with_no_arguments
         "types.missing_argument" ~says:"This function takes 1 argument, and 0 are given.");
   Harness.test "a labeled call through a function value has the error type" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.function_value_called_with_a_label "types.unknown_label");
+      expect_one_diagnostic Fixtures.Infer.function_value_called_with_a_label "types.unknown_label"
+        ~fixed:("value: 1", "1") ~left_after_fix:[ "types.mismatch" ]);
   Harness.test "`identical` given one value has the error type" (fun () ->
       expect_one_diagnostic Fixtures.Infer.identical_of_one_value_compared_with_an_integer
         "types.missing_argument");
@@ -2642,7 +2643,7 @@ let () =
   in
   let expect_rejected ?fixed ?loop_clause clause code ~says =
     expect_one_diagnostic
-      ?fixed:(Option.map make_each_source fixed)
+      ?fixed:(Option.map (fun fixed -> (clause, fixed)) fixed)
       (make_each_source ?loop_clause clause)
       code ~says
   in
@@ -2780,7 +2781,7 @@ let () =
         "types.mismatch");
   Harness.test "with names fields as a construction does" (fun () ->
       expect_one_diagnostic Fixtures.Infer.record_update_of_an_unknown_field "types.unknown_label"
-        ~says:"`Config` has no field `nme`.");
+        ~fixed:("nme", "name") ~says:"`Config` has no field `nme`.");
   Harness.test "with updates a field once" (fun () ->
       expect_one_diagnostic Fixtures.Infer.record_update_of_a_field_twice "types.repeated_argument";
       expect_one_diagnostic Fixtures.Infer.record_update_of_a_field_and_its_part

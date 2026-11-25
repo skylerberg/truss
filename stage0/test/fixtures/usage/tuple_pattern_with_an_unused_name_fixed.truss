@@ -1,7 +1,0 @@
-fn total(counts: Map[String, UInt64]) -> UInt64 {
-  var sum: UInt64 = 0
-  for _, count in counts {
-    sum = sum.saturating_add(count)
-  }
-  sum
-}

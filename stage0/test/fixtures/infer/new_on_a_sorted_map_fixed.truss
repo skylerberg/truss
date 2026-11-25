@@ -1,5 +1,0 @@
-use standard.collections
-
-fn f() {
-  let ports: collections.SortedMap[String, Int64] = [:]
-}

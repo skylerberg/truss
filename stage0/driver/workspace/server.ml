@@ -139,7 +139,11 @@ let stop_servers ?key ~wait () =
       let running = list_other_servers directory ~suffix in
       List.iter
         (fun server_path ->
-          try Unix.unlink (locate_socket server_path) with Unix.Unix_error (ENOENT, _, _) -> ())
+          let path = locate_socket server_path in
+          let wakeup = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
+          (try Unix.connect wakeup (ADDR_UNIX path) with Unix.Unix_error _ -> ());
+          (try Unix.unlink path with Unix.Unix_error (ENOENT, _, _) -> ());
+          Unix.close wakeup)
         running;
       if wait then List.iter wait_for_server_to_end running;
       running <> []

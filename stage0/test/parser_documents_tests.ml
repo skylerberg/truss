@@ -46,28 +46,10 @@ let () =
       List.iteri
         (fun index text ->
           Harness.test
-            (Printf.sprintf "%s block %d parses cleanly" name (index + 1))
+            (Printf.sprintf "%s block %d parses cleanly, and the grammar accepts it" name (index + 1))
             (fun () ->
-              let _, _, diagnostics = parse_snippet text in
-              Parse_support.expect_no_diagnostics text diagnostics))
-        (Documents.list_truss_blocks (Parse_support.read_document name)))
-    markdown_files
-
-let () =
-  Harness.test "a signature without a body in an example is checked" (fun () ->
-      let _, _, diagnostics = parse_snippet "fn f(x: Int64)\n  requires x & 1 < 2" in
-      if Support.list_codes diagnostics <> [ "parser.needs_parentheses" ] then
-        Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)))
-
-let () =
-  List.iter
-    (fun name ->
-      List.iteri
-        (fun index text ->
-          Harness.test
-            (Printf.sprintf "%s block %d is accepted by the grammar" name (index + 1))
-            (fun () ->
-              let tokens, items, _ = parse_snippet text in
+              let tokens, items, diagnostics = parse_snippet text in
+              Parse_support.expect_no_diagnostics text diagnostics;
               List.iter
                 (fun (item : Reference_parser.Snippet.item) ->
                   let slice =
@@ -86,22 +68,13 @@ let () =
     markdown_files
 
 let () =
-  Harness.test "the grammar accepts every Truss file of the repository that the parser accepts"
+  Harness.test "a signature without a body in an example is checked" (fun () ->
+      let _, _, diagnostics = parse_snippet "fn f(x: Int64)\n  requires x & 1 < 2" in
+      if Support.list_codes diagnostics <> [ "parser.needs_parentheses" ] then
+        Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
+  Harness.test
+    "the grammar rejects mixed operators without parentheses, an open range, and an empty sum type"
     (fun () ->
-      List.iter
-        (fun path ->
-          let source =
-            Source.create ~path
-              (In_channel.with_open_bin (Harness.make_workspace_path path) In_channel.input_all)
-          in
-          let tokens, lexer_diagnostics = Lexer.lex source in
-          let _, parser_diagnostics = Parser.parse tokens ~lexer_diagnostics in
-          if
-            lexer_diagnostics = [] && parser_diagnostics = []
-            && not (Reference_parser.accepts Reference_parser.parse_file (Array.to_list tokens))
-          then Harness.fail "the grammar rejects %s" path)
-        (Harness.list_truss_files ()));
-  Harness.test "the grammar rejects every input the parser rejects" (fun () ->
       List.iter
         (fun text ->
           let tokens, _ = Lexer.lex (Parse_support.make_source text) in

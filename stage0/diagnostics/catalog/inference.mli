@@ -247,7 +247,7 @@ type t =
       name : string;
       receiver : Core.origin;
       arguments : Core.origin Description.range list;
-      traits : Types.trait_reference list;
+      traits : (Types.trait_reference * Language.Mode.t) list;
     }
   | Index_not_mutable of { at : Core.origin; by : mutation; self_type : Types.ty; assigns : bool }
   | View_written of { at : Core.origin; by : mutation; view : Core.origin }

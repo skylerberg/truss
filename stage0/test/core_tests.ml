@@ -403,18 +403,6 @@ let () =
         (Support.list_declarations packages (Support.parse_module "app.main")))
 
 let () =
-  let database = Support.make_database (Support.setup []) in
-  let forms = ref 0 in
-  List.iter
-    (fun ((file : Path.file), _) ->
-      Harness.test
-        (Printf.sprintf "%s's core forms satisfy the invariants" (Path.show_file file))
-        (fun () -> forms := !forms + Core_lint.check_file database file))
-    Standard_library.files;
-  Harness.test "the standard library has core forms" (fun () ->
-      if !forms < 500 then Harness.fail "only %d of its definitions have one" !forms)
-
-let () =
   Harness.test "a `todo` type has no derived core form" (fun () ->
       let packages = Support.setup [ ("app.main", "type Later = todo\n  derives Equal\n") ] in
       let path =

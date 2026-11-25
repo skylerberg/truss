@@ -1,0 +1,15 @@
+fn apply(action: (fn(Int64) -> Int64 uses Panic), value: Int64) -> Int64
+  uses Panic
+{
+  action(value)
+}
+
+fn doubled(value: Int64) -> Int64 {
+  value.saturating_multiply(2)
+}
+
+test "a pure function value can be passed where its function type allows Panic" uses Panic {
+  let pure: fn(Int64) -> Int64 = fn(value) { value.saturating_add(1) }
+  assert apply(doubled, value: 5) == 10
+  assert apply(pure, value: 5) == 6
+}
