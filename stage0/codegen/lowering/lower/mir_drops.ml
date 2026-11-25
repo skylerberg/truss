@@ -253,8 +253,6 @@ let end_default_temporaries (state : Lowering.state) local =
 let end_local state local =
   let frame = Mir_places.require_mir_frame state in
   if List.mem local frame.called_parts && not (Hashtbl.mem frame.placed_parts local) then
-    Mir_lends.emit_mark state
-      (if frame.after_lend.(frame.block) then Lend_transfer else Lend_release)
-      (Mir_lends.obtain_lent_call state local)
+    Mir_lends.end_lend state local
   else drop_local state local;
   end_default_temporaries state local

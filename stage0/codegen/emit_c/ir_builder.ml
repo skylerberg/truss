@@ -381,8 +381,8 @@ let list_statement_written_or_addressed : Lowered.statement -> Lowered.local lis
       list_operands_addressed (list_target_operands target @ arguments)
       @ list_destination_written_or_addressed result
   | Drop place | Free_block { place; _ } -> list_place_written_or_addressed place
-  | Defer_free_block { lend; place; _ } ->
-      list_operand_addressed lend @ list_place_written_or_addressed place
+  | Defer_free_block { lend; arena; place; _ } ->
+      list_operands_addressed [ lend; arena ] @ list_place_written_or_addressed place
   | Echo { text; length; _ } -> list_operands_addressed [ text; length ]
   | Fail_obligation_when { test = _, left, right; message; length; reported; trace; _ } ->
       list_operands_addressed
@@ -499,7 +499,7 @@ let list_captures functions ~home ~mentioned ~written_or_addressed ~is_scalar ~i
 let is_scalar_type (emission : Emission.t) : Lowered.ty -> bool = function
   | Pointer _ | Raw _ -> true
   | Value ty -> not (C_types.is_struct emission.types ty)
-  | Environment _ | Evidence _ | Capabilities _ | Trace | Lend | Lend_mark -> false
+  | Environment _ | Evidence _ | Capabilities _ | Trace | Lend | Lend_arena -> false
 
 let make_address_type builder local : Lowered.ty =
   Pointer { target = lookup_local_type builder local; writable = true }
@@ -559,22 +559,19 @@ let render_local_declarations builder (emission : Emission.t) ~locals ~parameter
              ++ Text " " ++ Name (Local local)
              ++ Text (initializer_ ^ ";\n")
            in
-           let declare_and_initialize suffix =
-             declare "" ++ Text "  " ++ Emission.use_helper emission Lend
-             ++ Text (suffix ^ "(&")
-             ++ Name (Local local) ++ Text ");\n"
-           in
            Some
              (match (ty, (Dynarray.get builder.locals local).is_zeroed) with
-             | Lend, false -> declare_and_initialize "_init"
-             | Lend_mark, false -> declare_and_initialize "_init_mark"
+             | Lend, false -> declare " = {0}"
+             | Lend_arena, false ->
+                 declare "" ++ Text "  " ++ Emission.use_helper emission Lend
+                 ++ Text "_arena_init(&" ++ Name (Local local) ++ Text ");\n"
              | _, false -> declare ""
              | Value ty, true when C_types.is_struct emission.types ty -> declare " = {0}"
              | (Value _ | Pointer _ | Raw _), true -> declare " = 0"
-             | (Environment _ | Evidence _ | Capabilities _ | Trace | Lend | Lend_mark), true ->
+             | (Environment _ | Evidence _ | Capabilities _ | Trace | Lend | Lend_arena), true ->
                  raise_bug
                    "a zeroed environment, evidence slot, table, link of the call chain, lend \
-                    record, or lend mark"))
+                    record, or lend arena"))
        locals)
 
 let render_blocks builder number (function_ : function_) ~reached ~jump_targets ~texts =

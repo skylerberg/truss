@@ -46,4 +46,5 @@ val render_sites_file : resolve_position:(Lowered.site -> position) -> Lowered.s
 
 module For_testing : sig
   val render_c : fragment -> string
+  val lend_runtime : string
 end

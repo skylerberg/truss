@@ -107,6 +107,33 @@ let () =
             ~expected:(name ^ ": " ^ String.concat ", " expected_types)
             (name ^ ": " ^ String.concat ", " dropped_types))
         deferred_drops);
+  Codegen_support.test
+    "the caller of a lending method keeps one record for the lend, initializes only the header of \
+     its arena, and only releases the lend" (fun () ->
+      let caller : Lowered.Item.t =
+        Code
+          {
+            path = Top { module_ = Codegen_support.example; name = "first_title_length" };
+            instantiation = Ground.no_instantiation;
+            assumes_condition = false;
+          }
+      in
+      let _, backend =
+        Codegen_support.load ~roots:[ caller ] Fixtures.Lowering.shelf_lending_values_it_makes
+      in
+      let c = Emit_c.For_testing.render_c (Backend.For_testing.compile_fragment backend caller) in
+      let lend_names =
+        String.map
+          (function ('A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_') as letter -> letter | _ -> ' ')
+          c
+        |> String.split_on_char ' '
+        |> List.filter (String.starts_with ~prefix:"truss_lend")
+      in
+      Codegen_support.expect_string
+        ~expected:"truss_lend, truss_lend_arena, truss_lend_arena_init, truss_lend_release"
+        (String.concat ", " (List.sort_uniq String.compare lend_names));
+      Codegen_support.expect_int ~expected:1
+        (List.length (List.filter (String.equal "truss_lend") lend_names)));
   Codegen_support.test "a value that a lending method made is dropped once, as its caller left it"
     (fun () ->
       Codegen_support.expect_output Fixtures.Lowering.shelf_lending_values_it_makes
@@ -172,27 +199,3 @@ let () =
           Codegen_support.expect_string
             ~expected:"Evaluating example.spun stopped: it used more than 5 ms of CPU time" message
       | Ok _ -> Codegen_support.fail "the tests ran")
-
-let () =
-  Codegen_support.test
-    "a caller of a lending method initializes only the live fields of its lend record and mark"
-    (fun () ->
-      let read : Lowered.Item.t =
-        Code
-          {
-            path = Top { module_ = Codegen_support.example; name = "read" };
-            instantiation = Ground.no_instantiation;
-            assumes_condition = false;
-          }
-      in
-      let _, backend =
-        Codegen_support.load ~roots:[ read ]
-          Fixtures.Lowering.call_of_a_lending_method_that_never_lends
-      in
-      let c = Emit_c.For_testing.render_c (Backend.For_testing.compile_fragment backend read) in
-      List.iter
-        (fun call ->
-          if not (String.includes ~affix:call c) then Codegen_support.fail "no %s in:\n%s" call c)
-        [ "truss_lend_init(&"; "truss_lend_init_mark(&" ];
-      if String.includes ~affix:"= {0};" c then
-        Codegen_support.fail "a zeroed declaration in:\n%s" c)

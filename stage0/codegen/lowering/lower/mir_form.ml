@@ -585,7 +585,6 @@ and lend ?(forwards = 0) state part (call : Mir.call) ~origin =
               Mir_places.bind_local state part (Mir_places.lower_place state place)))
   | callee, None ->
       let frame = Mir_places.require_mir_frame state in
-      let lent = Mir_lends.obtain_lent_call state part in
       let list_lent_operands part_ty : Lowered.operand list =
         (if Lowering.is_zero_size state part_ty then []
          else
@@ -599,7 +598,8 @@ and lend ?(forwards = 0) state part (call : Mir.call) ~origin =
                  Address { place = Lowering.allocate_local state (Value part_ty); writable = true });
            ])
         @ [
-            lent.record;
+            Mir_lends.obtain_lend_record state part;
+            Mir_lends.obtain_lend_arena state;
             Option.value
               (Mir_places.find_reported_site state)
               ~default:(Constant (Site (Mir_places.locate_site state origin)));
@@ -611,7 +611,6 @@ and lend ?(forwards = 0) state part (call : Mir.call) ~origin =
           | Lends (mode, ty) -> (mode, Monomorphic.ground state.context.monomorphic substitution ty)
           | Returns _ -> Definitions.raise_bug "a lending call of a method that does not lend"
         in
-        Mir_lends.emit_mark state Lend_begin lent;
         if Lowering.is_zero_size state part_ty then begin
           emit_call ~lending:(list_lent_operands part_ty) (Mir_places.make_discard_place state);
           Lowering.allocate_local state (Value part_ty)
@@ -647,7 +646,6 @@ and lend ?(forwards = 0) state part (call : Mir.call) ~origin =
             Definitions.raise_bug "a lending call of a function value, whose type cannot lend"
         | Intrinsic _ -> Definitions.raise_bug "a lending call of an intrinsic that lends no part"
       in
-      Mir_lends.emit_mark state Lend_called lent;
       Mir_places.bind_local state part place
 
 and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
@@ -752,7 +750,7 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
       (Call
          {
            target = Intrinsic intrinsic;
-           arguments = lending.record :: arguments;
+           arguments = lending.record :: lending.arena :: arguments;
            result = Discarded;
          })
   in
@@ -768,8 +766,10 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
           [ take_address source; take_address target; Constant (Size_of ty) ]
     | Deferred_free variant ->
         Emit_c.Ir_builder.emit state.builder
-          (Defer_free_block { lend = lending.record; place = target; variant })
+          (Defer_free_block
+             { lend = lending.record; arena = lending.arena; place = target; variant })
   in
+  Mir_lends.transfer_lends state lending;
   match lending.slot with
   | None -> ()
   | Some slot_pointer -> (
@@ -788,6 +788,7 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
                        arguments =
                          [
                            lending.record;
+                           lending.arena;
                            Constant (Size_of lending.part);
                            Constant (Alignment_of lending.part);
                          ];
@@ -954,7 +955,7 @@ let lower_code (state : Lowering.state) path ~parameters ?lending () =
       ?lending ~lambdas:code_mir.lambdas code_mir.body
   in
   state.frame <- { state.frame with mir = Some frame };
-  Option.iter (fun (lending : Lowering.lending) -> state.lend_record <- Some lending.record) lending;
+  Option.iter (fun (lending : Lowering.lending) -> state.lend_arena <- Some lending.arena) lending;
   List.iter2 (Mir_places.bind_local state) code_mir.body.parameters parameters;
   Mir_lends.make_owned_locals state;
   lower_body state frame

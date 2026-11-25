@@ -179,7 +179,11 @@ let list_lending_parameters context substitution (result : Types.result) : Lower
       let part = Monomorphic.ground context.monomorphic substitution ty in
       (if Memory_layout.has_zero_size context.env part then []
        else [ Lowered.Pointer { target = Value part; writable = true } ])
-      @ [ Pointer { target = Lend; writable = true }; Raw (Pointer Opaque) ]
+      @ [
+          Pointer { target = Lend; writable = true };
+          Pointer { target = Lend_arena; writable = true };
+          Raw (Pointer Opaque);
+        ]
   | Returns _ -> []
 
 let make_c_signature context substitution ~(parameters : (Language.Mode.t * Types.ty) list)

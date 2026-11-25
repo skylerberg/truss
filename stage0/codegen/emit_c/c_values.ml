@@ -158,7 +158,7 @@ let classify_scalar (emission : Emission.t) : Lowered.ty -> Memory_layout.scalar
       | _ -> C_runtime.raise_bug "an operator on %s, which is not a scalar" (Ground.to_string ty))
   | Raw scalar -> scalar
   | Pointer _ | Environment _ | Evidence _ -> Pointer Opaque
-  | Lend | Lend_mark -> C_runtime.raise_bug "an operator on a lend's record"
+  | Lend | Lend_arena -> C_runtime.raise_bug "an operator on a lend's record"
   | Trace -> C_runtime.raise_bug "an operator on a link of the call chain"
   | Capabilities _ -> C_runtime.raise_bug "an operator on a table of capabilities"
 

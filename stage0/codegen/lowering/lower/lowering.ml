@@ -17,10 +17,9 @@ type lending = {
   slot : Lowered.place option;
   part : Ground.ty;
   record : Lowered.operand;
+  arena : Lowered.operand;
   site : Lowered.operand;
 }
-
-type lent_call = { mark : Lowered.place; record : Lowered.operand }
 
 type frame = {
   code : Definitions.code;
@@ -45,7 +44,7 @@ and mir_frame = {
   applied_defaults : (Mir.local, applied_default) Hashtbl.t;
   lending : lending option;
   called_parts : Mir.local list;
-  lent_calls : (Mir.local, lent_call) Hashtbl.t;
+  lend_records : (Mir.local, Lowered.place) Hashtbl.t;
   placed_parts : (Mir.local, unit) Hashtbl.t;
   mutable forwarded_locals : int;
   ended_after_lend : Mir.local list;
@@ -78,7 +77,7 @@ type state = {
   mutable evidence : (Path.t * Lowered.operand) list;
   mutable tasks : task list;
   mutable moved : Lowered.place list;
-  mutable lend_record : Lowered.operand option;
+  mutable lend_arena : Lowered.operand option;
 }
 
 let make_frame code = { code; self_place = None; exit = None; mir = None }
@@ -95,7 +94,7 @@ let enter context ?(nested = ref 0) ~builder frame =
     evidence = [];
     tasks = [];
     moved = [];
-    lend_record = None;
+    lend_arena = None;
   }
 
 let enter_item context ~item (code : Definitions.code) =
@@ -112,10 +111,10 @@ let allocate_local state ?name ty : Lowered.place =
 let outline state ~parts body =
   let nested = !(state.nested) in
   incr state.nested;
-  let enclosing = state.lend_record in
-  state.lend_record <- None;
+  let enclosing = state.lend_arena in
+  state.lend_arena <- None;
   let holder = Emit_c.Ir_builder.outline state.builder ~index:nested ~parts body in
-  state.lend_record <- enclosing;
+  state.lend_arena <- enclosing;
   (nested, Lowered.Address { place = Lowered.make_local_place holder; writable = false })
 
 let ground state ty = Monomorphic.ground state.context.monomorphic state.frame.code.substitution ty

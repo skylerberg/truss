@@ -565,6 +565,51 @@ let () =
   ()
 
 let () =
+  Codegen_support.test
+    "two actions, two write-backs, and a slot of one lend take no block from the allocator"
+    (fun () ->
+      let program =
+        Emit_c.For_testing.lend_runtime
+        ^ {|static uint64_t blocks;
+static uint64_t released;
+void *truss_runtime_allocate(uint64_t size, uint64_t alignment) {
+  (void)size;
+  (void)alignment;
+  blocks += 1;
+  return 0;
+}
+void truss_runtime_free(void *pointer) { (void)pointer; }
+static void note_release(void *context) { released = released * 2 + (uint64_t)context; }
+int main(void) {
+  struct truss_lend lend = {0};
+  struct truss_lend_arena arena;
+  truss_lend_arena_init(&arena);
+  int64_t first_place = 0, first_copy = 10, second_place = 0, second_copy = 20;
+  truss_lend_defer(&lend, &arena, (void *)note_release, (void *)1);
+  truss_lend_defer(&lend, &arena, (void *)note_release, (void *)3);
+  truss_lend_defer_write_back(&lend, &arena, &first_place, &first_copy, sizeof first_place);
+  truss_lend_defer_write_back(&lend, &arena, &second_place, &second_copy, sizeof second_place);
+  uint8_t *slot = truss_lend_allocate(&lend, &arena, 16, 8);
+  slot[15] = 1;
+  truss_lend_release(&lend);
+  return (int)(first_place + second_place + released + 100 * blocks + arena.used);
+}
+|}
+      in
+      let output = Codegen_support.make_scratch_path "lend_runtime" in
+      match
+        C_compiler.build_executable
+          (Lazy.force Codegen_support.c_compiler)
+          Development
+          ~sources:[ C_compiler.make_source ~name:"the lend runtime" program ]
+          ~output
+      with
+      | Error message -> failwith message
+      | Ok () ->
+          let status, _, _ = Process.run output [] in
+          Codegen_support.expect_int ~expected:37 status)
+
+let () =
   Codegen_support.test "a symbol names the path and the type arguments" (fun () ->
       let item =
         Lowered.Item.Code

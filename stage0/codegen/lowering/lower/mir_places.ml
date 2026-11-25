@@ -294,7 +294,7 @@ let make_body_frame (state : Lowering.state) ?owner ?returns_into ?lending
           | Basic (Lend { call = { callee = { target = Intrinsic _; _ }; _ }; _ }) -> []
           | Basic (Lend { part; _ }) -> [ part ]
           | Basic _ | Provide_start _ | Provide_end -> []);
-    lent_calls = Hashtbl.create 4;
+    lend_records = Hashtbl.create 4;
     placed_parts = Hashtbl.create 4;
     forwarded_locals = 0;
     ended_after_lend = list_statements_where (fun block -> after_lend.(block)) Moves.list_ended;

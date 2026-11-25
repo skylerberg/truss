@@ -115,7 +115,7 @@ let rec render_type types : Lowered.ty -> C_text.t = function
   | Capabilities count -> render_key types (Capabilities count)
   | Trace -> Text "struct truss_trace"
   | Lend -> Text "struct truss_lend"
-  | Lend_mark -> Text "struct truss_lend_mark"
+  | Lend_arena -> Text "struct truss_lend_arena"
 
 let render_member_type types : Memory_layout.member -> C_text.t = function
   | Typed ty -> render_value_type types ty

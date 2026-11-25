@@ -10,7 +10,7 @@ type ty =
   | Capabilities of int
   | Trace
   | Lend
-  | Lend_mark
+  | Lend_arena
 
 type site = { definition : Path.t; offset : int }
 type root = Local of local | Static of { item : Item.t; ty : Ground.ty }
@@ -127,8 +127,6 @@ type intrinsic =
   | Shared_unlock
   | Blocking_begin
   | Blocking_end
-  | Lend_begin
-  | Lend_called
   | Lend_release
   | Lend_transfer
   | Lend_allocate
@@ -177,7 +175,7 @@ type statement =
       trace : operand option;
     }
   | Free_block of { place : place; variant : string }
-  | Defer_free_block of { lend : operand; place : place; variant : string }
+  | Defer_free_block of { lend : operand; arena : operand; place : place; variant : string }
   | Fork of { branches : (int * operand) list }
   | Fork_range of { body : int; environment : operand; first : operand; last : operand }
 
