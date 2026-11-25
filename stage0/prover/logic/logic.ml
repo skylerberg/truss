@@ -133,9 +133,29 @@ module Symbol_table = Hashtbl.Make (Structural_key.Make (struct
   type t = symbol
 end))
 
-module Term_table = Hashtbl.Make (Structural_key.Make (struct
+let rec hash_term term =
+  let combine hash part = (hash * 31) + part in
+  let hash_terms seed terms =
+    List.fold_left (fun hash term -> combine hash (hash_term term)) seed terms
+  in
+  match term with
+  | Symbol symbol -> combine 1 (Hashtbl.hash symbol)
+  | Integer value -> combine 2 (Z.hash value)
+  | Boolean value -> combine 3 (Hashtbl.hash value)
+  | Bits (width, value) -> combine (combine 4 width) (Z.hash value)
+  | Apply (symbol, arguments) -> hash_terms (combine 5 (Hashtbl.hash symbol)) arguments
+  | Is (symbol, argument) -> combine (combine 6 (Hashtbl.hash symbol)) (hash_term argument)
+  | Operation (operator, arguments) -> hash_terms (combine 7 (Hashtbl.hash operator)) arguments
+  | Forall (variables, triggers, body) ->
+      hash_terms (combine 8 (Hashtbl.hash variables)) (body :: triggers)
+  | Exists (variables, body) -> combine (combine 9 (Hashtbl.hash variables)) (hash_term body)
+
+module Term_table = Hashtbl.Make (struct
   type t = term
-end))
+
+  let equal : t -> t -> bool = ( = )
+  let hash term = hash_term term land max_int
+end)
 
 let show_bits width value =
   "#b" ^ String.init width (fun index -> if Z.testbit value (width - 1 - index) then '1' else '0')
@@ -1066,3 +1086,7 @@ let list_members query =
       | None -> entries)
     numbering.datatypes []
   |> List.sort compare
+
+module For_testing = struct
+  let hash_term = hash_term
+end

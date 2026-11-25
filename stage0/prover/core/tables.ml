@@ -16,9 +16,7 @@ module Symbol_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Logic.symbol
 end))
 
-module Term_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Logic.term
-end))
+module Term_table = Logic.Term_table
 
 module Type_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Types.ty

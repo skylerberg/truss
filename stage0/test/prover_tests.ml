@@ -3287,6 +3287,15 @@ let () =
       goal = Logic.Operation (operator, [ Logic.Symbol symbol; Logic.Symbol symbol ]);
     }
   in
+  Harness.test "two facts that differ only deep inside hash differently" (fun () ->
+      let make_symbol label = Logic.Symbol (Logic.Symbol.Variable { label; numbers = [] }) in
+      let nest last =
+        List.fold_right
+          (fun index inner -> Logic.Operation (And, [ make_symbol (string_of_int index); inner ]))
+          (List.init 300 Fun.id) (make_symbol last)
+      in
+      if Logic.For_testing.hash_term (nest "first") = Logic.For_testing.hash_term (nest "second")
+      then Harness.fail "the hash reads only the start of a term");
   Harness.test "a conjunction under a premise splits into one pruned query per conjunct" (fun () ->
       let make_symbol label = Logic.Symbol.Variable { label; numbers = [] } in
       let premise = make_symbol "premise"
