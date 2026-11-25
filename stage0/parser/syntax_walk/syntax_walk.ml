@@ -76,7 +76,8 @@ let visit_expression_parts ~on_expression ~on_statement (value : Syntax.expressi
       List.iter
         (function
           | Syntax.Item item -> on_expression item
-          | Item_constraint (_, type_) -> visit_type_expression on_expression type_)
+          | Item_constraint (_, type_) | Item_type type_ ->
+              visit_type_expression on_expression type_)
         items
   | Call (callee, arguments) ->
       on_expression callee;
@@ -415,7 +416,8 @@ let walk_names ~on_name (definition : Syntax.definition) =
             | Syntax.Item item -> walk_expression item
             | Item_constraint (name, type_) ->
                 on_name name;
-                walk_type type_)
+                walk_type type_
+            | Item_type type_ -> walk_type type_)
           items
     | _ -> visit_expression_parts ~on_expression:walk_expression ~on_statement:walk_statement value
   and walk_statement (statement : Syntax.statement) =

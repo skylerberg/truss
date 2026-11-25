@@ -161,7 +161,7 @@ fn walk_expression_parts(cursor: mut TokenCursor, visitor: Visitor, value: synta
       for item in items {
         match item {
           Item(element) => on_expression(mut cursor, visitor, value: element)
-          ItemConstraint(value: written, ..) => walk_type_expression(mut cursor, visitor, written)
+          ItemConstraint(value: written, ..) | ItemType(value: written) => walk_type_expression(mut cursor, visitor, written)
         }
       }
     }

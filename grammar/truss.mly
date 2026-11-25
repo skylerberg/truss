@@ -509,6 +509,7 @@ brackets:
 bracket_item:
   | expression { () }
   | UPPER EQ type_expression { () }
+  | VIEW type_expression { () }
 
 argument:
   | expression { () }

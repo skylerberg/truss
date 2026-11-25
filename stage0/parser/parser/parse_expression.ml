@@ -782,6 +782,7 @@ and parse_bracket_item cursor =
       let name = Atoms.make_name cursor (Cursor.take cursor) in
       Cursor.advance cursor;
       Item_constraint (name, parse_type_expression cursor)
+  | Keyword View, _ -> Item_type (parse_type_expression cursor)
   | _ -> Item (parse_expression cursor ~open_range:true)
 
 and parse_arguments cursor =

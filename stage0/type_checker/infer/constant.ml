@@ -56,7 +56,7 @@ let rec find_offending_expression (state : State.state) ~may_call ~bound (value 
                | Syntax.Item { kind = Range { start; stop; _ }; _ } ->
                    Option.to_list start @ Option.to_list stop
                | Item index -> [ index ]
-               | Item_constraint _ -> [])
+               | Item_constraint _ | Item_type _ -> [])
              items)
   | Range { start; stop; _ } when may_call -> find_first (Option.to_list start @ Option.to_list stop)
   | Quantified { binder = Binder_in (pattern, collection); body; _ } when may_call -> (

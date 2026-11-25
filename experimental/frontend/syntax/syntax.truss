@@ -188,7 +188,10 @@ internal type Text(value: String, id: UInt64)
 internal type Argument(label: Option[Name], value: Expression)
   derives Equal
 
-internal type BracketItem = Item(value: Expression) | ItemConstraint(name: Name, value: TypeExpression)
+internal type BracketItem =
+  | Item(value: Expression)
+  | ItemConstraint(name: Name, value: TypeExpression)
+  | ItemType(value: TypeExpression)
   derives Equal
 
 internal type Update(kind: UpdateKind, id: UInt64)
