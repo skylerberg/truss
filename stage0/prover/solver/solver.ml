@@ -142,6 +142,14 @@ let stop_idle pool =
   in
   List.iter Process.stop idle
 
+let read_version output =
+  match parse_sexps output with
+  | [ List [ Atom ":version"; Atom literal ] ] when String.starts_with ~prefix:"\"" literal -> (
+      match String.split_on_char ' ' (read_string_literal literal) with
+      | number :: _ -> Some number
+      | [] -> None)
+  | _ -> None
+
 let find () =
   let program =
     match Sys.getenv_opt "TRUSS_Z3" with Some program when program <> "" -> program | _ -> "z3"
@@ -159,7 +167,7 @@ let find () =
       match
         Process.converse z3 ("(get-info :version)\n" ^ echo_end_of_answer) ~until:end_of_answer
       with
-      | Ok output when String.trim output = Printf.sprintf "(:version \"%s\")" version ->
+      | Ok output when read_version output = Some version ->
           let pool = { program; lock = Mutex.create (); idle = [ z3 ] } in
           Ok
             {

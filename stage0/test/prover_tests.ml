@@ -3400,6 +3400,26 @@ let () =
       match String.split_on_char '\n' (String.trim (File_system.read launches)) with
       | [ _ ] -> ()
       | launched -> Harness.fail "launched Z3 %d times" (List.length launched));
+  test "a Z3 that names its build after its version has the version before the build" (fun () ->
+      let directory = Harness.make_scratch_directory "z3" in
+      Harness.write_files directory
+        [
+          ( "z3",
+            String.concat "\n"
+              [
+                "#!/bin/sh";
+                "while read -r line; do";
+                "  case \"$line\" in";
+                "    '(get-info :version)') echo '(:version \"5.3.3 - build hashcode 0\")' ;;";
+                "    '(echo \"truss.end-of-answer\")') echo truss.end-of-answer ;;";
+                "  esac";
+                "done";
+                "";
+              ] );
+        ];
+      Unix.chmod (Filename.concat directory "z3") 0o755;
+      Unix.putenv "TRUSS_Z3" (Filename.concat directory "z3");
+      ignore (find_solver ()));
   test "a query's declarations are forgotten before the next query" (fun () ->
       let flag = Logic.Symbol.Variable { label = "flag"; numbers = [] } in
       let excluded_middle =
