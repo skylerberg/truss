@@ -496,6 +496,19 @@ let is_evaluated_constant (context : State.context) path code =
        (Types.find_specification_only_type
           (Interface.Definition.read_constant_type context.lookups.interface path))
 
+let make_catalog_dependency (dependency : Mir.Call_edges.dependency) : Catalog.Prover.dependency =
+  {
+    kind = (match dependency.kind with Read -> Reads | Direct_call -> Calls | Supplied _ -> Uses);
+    path = dependency.path;
+    omitted =
+      Option.map
+        (fun (omitted : Mir.Call_edges.omitted) : Catalog.Prover.omitted ->
+          match omitted with
+          | Field field -> Omitted_field field
+          | Argument parameter -> Omitted_argument parameter)
+        dependency.omitted;
+  }
+
 let reject_constant_cycle (context : State.context) (frame : State.frame) (code : Mir.t) =
   if context.lookups.list_recursion_group context.node <> [] then
     List.iter
@@ -503,29 +516,108 @@ let reject_constant_cycle (context : State.context) (frame : State.frame) (code 
         if is_in_recursion_group context dependency.path then
           oblige context frame (Node dependency.origin)
             (Constant_cycle
-               {
-                 cyclic = context.node;
-                 dependency =
-                   {
-                     kind =
-                       (match dependency.kind with
-                       | Read -> Reads
-                       | Direct_call -> Calls
-                       | Supplied _ -> Uses);
-                     path = dependency.path;
-                     omitted =
-                       Option.map
-                         (fun (omitted : Mir.Call_edges.omitted) : Catalog.Prover.omitted ->
-                           match omitted with
-                           | Field field -> Omitted_field field
-                           | Argument parameter -> Omitted_argument parameter)
-                         dependency.omitted;
-                   };
-               })
+               { cyclic = context.node; dependency = make_catalog_dependency dependency })
             (Logic.Boolean false))
       (Mir.Call_edges.list_dependencies
          { interface = context.lookups.interface; mir = context.lookups.mir }
          Types.no_substitution code)
+
+type circular_proof = { location : Obligation.location; proof : Catalog.Prover.circular_proof }
+
+let is_in_proof_cycle (context : State.context) path =
+  List.exists (Path.equal path) (context.lookups.list_proof_group context.node)
+  && not (is_in_recursion_group context path)
+
+let has_proof_cycle (context : State.context) =
+  List.exists
+    (fun member -> not (is_in_recursion_group context member))
+    (context.lookups.list_proof_group context.node)
+
+let list_circular_dependencies context ~make_proof dependencies =
+  List.filter_map
+    (fun (dependency : Mir.Call_edges.dependency) ->
+      if is_in_proof_cycle context dependency.path then
+        Some
+          {
+            location = Obligation.Node dependency.origin;
+            proof = make_proof (make_catalog_dependency dependency);
+          }
+      else None)
+    dependencies
+
+let list_circular_instance_uses (context : State.context) (frame : State.frame) lookups =
+  let reported = ref [] in
+  List.filter_map
+    (fun (instance : Mir.Call_edges.instance_use) ->
+      match List.find_opt (is_in_proof_cycle context) instance.dependencies with
+      | Some dependency when not (List.exists (Path.equal dependency) !reported) ->
+          reported := dependency :: !reported;
+          Some
+            {
+              location =
+                (match instance.used.origin with
+                | Some origin -> locate context frame.source origin
+                | None -> Whole_definition);
+              proof =
+                Circular_instance { type_ = instance.used.type_; dependency; cyclic = context.node };
+            }
+      | Some _ | None -> None)
+    (Mir.Call_edges.list_instance_uses lookups context.node)
+
+let list_circular_clauses (context : State.context) frame ~type_ =
+  let lookups : Mir.Call_edges.lookups =
+    { interface = context.lookups.interface; mir = context.lookups.mir }
+  in
+  let make_proof clause dependency : Catalog.Prover.circular_proof =
+    Circular_clause { clause; type_; dependency }
+  in
+  if has_proof_cycle context then
+    list_circular_dependencies context ~make_proof:(make_proof Invariant_clause)
+      (Mir.Call_edges.list_invariant_dependencies lookups context.node)
+    @ list_circular_dependencies context ~make_proof:(make_proof Potential_clause)
+        (Mir.Call_edges.list_potential_dependencies lookups context.node)
+    @ list_circular_instance_uses context frame lookups
+  else []
+
+let has_circular_clause lookups group member =
+  List.exists
+    (fun (dependency : Mir.Call_edges.dependency) -> List.exists (Path.equal dependency.path) group)
+    (Mir.Call_edges.list_invariant_dependencies lookups member
+    @ Mir.Call_edges.list_potential_dependencies lookups member)
+
+let list_circular_contracts (context : State.context) frame =
+  if not (has_proof_cycle context) then []
+  else
+    let lookups : Mir.Call_edges.lookups =
+      { interface = context.lookups.interface; mir = context.lookups.mir }
+    in
+    let written = Mir.Call_edges.list_contract_dependencies lookups context.node in
+    let is_written (inherited : Mir.Call_edges.dependency) =
+      List.exists
+        (fun (dependency : Mir.Call_edges.dependency) -> Path.equal dependency.path inherited.path)
+        written
+    in
+    match
+      list_circular_dependencies context
+        ~make_proof:(fun dependency -> Circular_contract { cyclic = context.node; dependency })
+        written
+      @ List.map
+          (fun (circular : circular_proof) -> { circular with location = Whole_definition })
+          (list_circular_dependencies context
+             ~make_proof:(fun dependency ->
+               Circular_inherited_contract { cyclic = context.node; dependency })
+             (List.filter
+                (fun inherited -> not (is_written inherited))
+                (Mir.Call_edges.list_inherited_contract_dependencies lookups context.node)))
+      @ list_circular_instance_uses context frame lookups
+    with
+    | [] -> []
+    | circular ->
+        let group = context.lookups.list_proof_group context.node in
+        if List.exists (has_circular_clause lookups group) group then [] else circular
+
+let reject_circular_proof context frame (circular : circular_proof) =
+  oblige context frame circular.location (Circular_proof circular.proof) (Logic.Boolean false)
 
 let quote (source : State.source) origin : Catalog.Prover.quoted = { key = source.key; origin }
 

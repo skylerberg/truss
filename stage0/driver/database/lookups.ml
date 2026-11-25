@@ -108,10 +108,12 @@ let make_infer database recorder : Infer.Lookups.t =
           (Source.Definition_span.locate (source.read_spans key) (Core_walk.locate_origin origin)));
   }
 
-let list_recursion_group (database : Tracker.t) recorder path =
+let list_group (database : Tracker.t) recorder (group : Path.t list Tracker.fact) path =
   Option.value ~default:[]
-    (Tracker.find_value database recorder Facts.recursion_group.whole (Path.locate_package path)
+    (Tracker.find_value database recorder group.whole (Path.locate_package path)
        ~id:(Ids.of_path path))
+
+let list_recursion_group database recorder = list_group database recorder Facts.recursion_group
 
 let make_usage database recorder : Usage.Lookups.t =
   {
@@ -178,6 +180,7 @@ let make_proof (database : Tracker.t) (recorder : Tracker.recorder) : Prover.Loo
     mir = make_mir database recorder;
     list_must_be_disjoint = read_of_key database recorder Facts.ownership.whole;
     list_recursion_group = list_recursion_group database recorder;
+    list_proof_group = list_group database recorder Facts.proof_group;
   }
 
 let make_package_checks (database : Tracker.t) (recorder : Tracker.recorder) :

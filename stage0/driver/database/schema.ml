@@ -106,6 +106,9 @@ let tables =
     keyed_by_id "recursion_group"
       ("path INTEGER PRIMARY KEY, " ^ state ^ ", representative INTEGER, members BLOB")
       [ ("recursion_group_representative", "representative") ];
+    keyed_by_id "proof_group"
+      ("path INTEGER PRIMARY KEY, " ^ state ^ ", representative INTEGER, members BLOB")
+      [ ("proof_group_representative", "representative") ];
     fact_of_definition "usage_check" state;
     fact_of_definition "ownership" (state ^ ", must_be_disjoint BLOB");
     fact_of_definition ~has_index_without_value:true "proof" (state ^ ", value BLOB");

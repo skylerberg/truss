@@ -51,6 +51,13 @@ type supplied_recursion =
 type dependency_kind = Reads | Calls | Uses
 type omitted = Omitted_field of string | Omitted_argument of string
 type dependency = { kind : dependency_kind; path : Path.t; omitted : omitted option }
+type type_clause = Invariant_clause | Potential_clause
+
+type circular_proof =
+  | Circular_clause of { clause : type_clause; type_ : Types.ty; dependency : dependency }
+  | Circular_contract of { cyclic : Path.t; dependency : dependency }
+  | Circular_inherited_contract of { cyclic : Path.t; dependency : dependency }
+  | Circular_instance of { type_ : Types.ty; dependency : Path.t; cyclic : Path.t }
 
 type unbounded =
   | Unstated_costs of {
@@ -95,6 +102,7 @@ type obligation =
   | Recursion_through_impl of { call : call; impl : recursion_impl }
   | Recursion_through_supply of supplied_recursion
   | Constant_cycle of { cyclic : Path.t; dependency : dependency }
+  | Circular_proof of circular_proof
   | Precondition_may_fail of { clause : quoted; call : call }
   | Precondition_may_panic of { clause : quoted; call : call }
   | Panics_where_ruled_out of { call : call; condition : quoted list }
