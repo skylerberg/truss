@@ -569,12 +569,9 @@ let () =
         ~at:"|>"
         ~fixed:("let total = items\n  |> list.sum", "let total = list.sum(items)");
       Parse_support.expect_body_error "let total = items |> take(3)" ~code:Pipe_operator ~at:"|>");
-  Harness.test "a lambda with annotations" (fun () ->
-      Parse_support.expect_body_error "let double = fn(x: Int64) { x * 2 }" ~code:Lambda_annotation
-        ~at:": Int64" ~fixed:("x: Int64", "x");
-      Parse_support.expect_body_error "let double = fn(x) -> Int64 { x * 2 }"
-        ~code:Lambda_annotation ~at:" -> Int64"
-        ~fixed:("let double = fn(x) -> Int64 { x * 2 }", "let double = fn(x) { x * 2 }"));
+  Harness.test "a lambda with a result type" (fun () ->
+      Parse_support.expect_body_error "let double = fn(x: Int64) -> Int64 { x * 2 }"
+        ~code:Lambda_result_type ~at:" -> Int64" ~fixed:(" -> Int64", ""));
   Harness.test "List<String>.new() in an expression" (fun () ->
       Parse_support.expect_body_error "let names = List<String>.new()" ~code:Angle_brackets ~at:"<"
         ~fixed:("List<String>", "List[String]"));

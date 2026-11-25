@@ -383,11 +383,12 @@ let () =
         "types.decided_in_specification");
   Harness.test "arithmetic in a specification may mix integer types" (fun () ->
       expect_fine Fixtures.Infer.requires_adds_a_uint8_and_an_int64);
-  Harness.test "a proof in a lambda's body does not decide the type of the lambda's parameter"
-    (fun () ->
-      expect_one_diagnostic Fixtures.Infer.proof_in_a_lambda_compares_its_parameter
-        "types.decided_in_specification"
-        ~says:"A specification cannot decide the type of `scaled`. Declare `scaled` with a type.");
+  Harness.test "a lambda's body does not decide the type of the lambda's parameter" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.lambda_body_compares_its_parameter "types.cannot_infer"
+        ~at:("scaled", 1)
+        ~says:
+          "The type of `scaled` cannot be inferred from where this lambda is used. Declare \
+           `scaled` with a type.");
   Harness.test "a method call in an invariant cannot give a float local in code its default type"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.invariant_calls_an_inherent_method_of_a_float_local
@@ -1617,13 +1618,33 @@ let () =
         "types.positional_after_labeled")
 
 let () =
-  Harness.test "a lambda with nothing to give its parameter types is an error" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.lambda_bound_without_a_type "types.lambda_needs_type"
-        ~says:
-          "Bind it with a typed `let`, such as `let double: fn(Int64) -> Int64 = fn(x) { x * 2 }`.");
-  Harness.test "a lambda passed as a type argument asks for the callee's type arguments" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.lambda_passed_as_a_type_argument
-        "types.lambda_needs_type" ~says:"Give `hold` its type arguments in brackets.");
+  Harness.test "a lambda parameter that nothing gives a type asks for an annotation" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.lambda_bound_without_a_type "types.cannot_infer"
+        ~at:("text", 1) ~says:"Declare `text` with a type.";
+      expect_one_diagnostic Fixtures.Infer.lambda_passed_as_a_type_argument "types.cannot_infer"
+        ~at:("x", 1) ~says:"Declare `x` with a type.");
+  Harness.test "an annotation decides a lambda parameter's type that the callee leaves open"
+    (fun () ->
+      expect_fine Fixtures.Infer.annotated_lambda_parameter_of_a_generic_callee;
+      expect_fine Fixtures.Infer.annotated_lambda_passed_as_a_type_argument);
+  Harness.test "a lambda that nothing passes as a function type is typed by its annotations"
+    (fun () ->
+      expect_type Fixtures.Infer.annotated_lambda_bound_without_a_type
+        "fn(value: Int64) { value.saturating_add(amount) }" "fn(Int64) -> Int64";
+      expect_type Fixtures.Infer.annotated_mut_lambda_bound_without_a_type
+        "fn(count: mut Int64) { count = count.saturating_add(1) }" "fn(mut Int64)");
+  Harness.test "an annotation of another type than the function type's is a mismatch" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.lambda_parameter_annotated_with_another_type
+        "types.mismatch" ~at:("UInt8", 1)
+        ~says:"This lambda's function type gives this parameter `Int64`, not `UInt8`.");
+  Harness.test "an annotation of another mode than the function type's is a wrong mode" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.lambda_parameter_annotated_without_mut "types.wrong_mode"
+        ~says:"This lambda's function type passes this parameter `mut`, not read-only."
+        ~fixed:("score: Int64", "score: mut Int64");
+      expect_one_diagnostic Fixtures.Infer.lambda_parameter_annotated_mut_where_passed_read_only
+        "types.wrong_mode"
+        ~says:"This lambda's function type passes this parameter read-only, not `mut`."
+        ~fixed:("item: mut Int64", "item: Int64"));
   Harness.test "a lambda takes its parameter types from the function type it is passed as"
     (fun () -> expect_type Fixtures.Infer.lambda_incrementing_items "item + 1" "Int64");
   Harness.test "concurrent code needs `Tasks`, in a block and in a loop" (fun () ->
@@ -2032,8 +2053,8 @@ let () =
   Harness.test "an integer range on a type that is not ordered is one error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.integer_range_arm_on_a_bool "types.mismatch");
   Harness.test "a range pattern whose bounds infer its type as Bool is an error" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.bool_range_lambda_parameter "types.mismatch"
-        ~says:"not `Bool`");
+      expect_one_diagnostic Fixtures.Infer.bool_range_let_else_of_an_undecided_value
+        "types.mismatch" ~says:"not `Bool`");
   Harness.test "a range pattern on Character is fine" (fun () ->
       expect_fine Fixtures.Infer.character_range_arm);
   Harness.test "a Character literal is a tagged string holding its scalar value" (fun () ->

@@ -482,7 +482,7 @@ State that is updated from one call to the next goes in a `for` loop or a
 method such as `fold`, and behavior with state is a record that implements
 a trait.
 
-A lambda has no annotations, so what it knows of its arguments comes from
+A lambda states no contract, so what it knows of its arguments comes from
 the callee. A parameter's function type states that fact in a `requires`,
 as in `make: (fn(index: UInt64) -> Element requires index < count)`, and a
 lambda passed for `make` may rely on `index < count`. The callee's contract
@@ -493,8 +493,10 @@ caller reads from the lambda's body
 | Rule | Reason |
 |---|---|
 | Only a lambda that captures nothing can be stored. A function-typed parameter is non-escaping unless it is `own`. | A lambda that captures is a view, and a view cannot escape. |
-| A lambda's parameter types and result type come from its expected function type, never from its body. | *Local reasoning.* Rust checks a closure's body before it knows the parameter types, and "type annotations needed" is one of its commonest errors. |
-| A lambda's parameter modes come from the expected type too. | A mode keyword at a call site shows the mutation of an existing place. A lambda's parameter is a new binding, so a keyword there would show nothing. |
+| A lambda's parameter types are decided before its body is checked: by its expected function type, or by an annotation. | *Local reasoning.* Rust checks a closure's body before it knows the parameter types, and "type annotations needed" is one of its commonest errors. |
+| A lambda's parameter may have an annotation, which states the mode and the type that the expected function type gives. | Type inference stops at the statement ([Functions](#functions)), and every other binding can state a type that its statement does not decide. Without the annotation, a stored lambda needs a typed `let` that restates its parameters by position, and a generic callee needs every type argument in brackets. An annotation that converted the argument would be the only annotation that converts. |
+| An annotation writes the mode as a function's parameter does. A parameter without an annotation writes none. | `score: Score` is read-only in a signature and in a lambda alike. A bare mode keyword would show nothing: at a call site it shows the mutation of an existing place, and a lambda's parameter is a new binding. |
+| A lambda declares no result type. | The body's value has a type, and the expected function type's result is checked against it. A written result type would restate one of the two. |
 | `return` exits the lambda. | Kotlin's non-local `return` from an inline lambda is a known source of confusion. |
 | A lambda has one form, `fn(x) { ... }`, passed inside the call's parentheses. | *One spelling.* A block's value is its last expression, so `x => x * 2` would be a second form, and a trailing lambda a second way to pass an argument. |
 | A lambda names its parameters. | An implicit parameter such as `it` or `$0` is not a descriptive name ([Names](#names)). |

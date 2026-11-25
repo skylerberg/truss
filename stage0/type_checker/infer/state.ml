@@ -214,11 +214,6 @@ let find_class_origin state index =
     (function { member; entry = Origin origin } -> Some (member, origin) | _ -> None)
     (list_class_log state index)
 
-let find_variable_origin state (type_ : Types.ty) =
-  match resolve state type_ with
-  | Types.Variable index -> Option.map snd (find_class_origin state index)
-  | _ -> None
-
 let make_fresh_type state origin =
   let fresh = Unify.make_fresh_type state.unifier in
   record_in_log state state.unifier.next (Origin origin);

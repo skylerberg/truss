@@ -809,7 +809,10 @@ let index_written_nodes (definition : Syntax.definition) =
     (match value.kind with
     | Match { arms; _ } ->
         List.iter (fun (arm : Syntax.arm) -> List.iter visit_pattern arm.patterns) arms
-    | Lambda { parameters; _ } -> List.iter visit_pattern parameters
+    | Lambda { parameters; _ } ->
+        List.iter
+          (fun (parameter : Syntax.lambda_parameter) -> visit_pattern parameter.pattern)
+          parameters
     | Is { pattern; _ } | Quantified { binder = Binder_in (pattern, _); _ } -> visit_pattern pattern
     | _ -> ());
     Syntax_walk.visit_expression_parts ~on_expression:visit_expression ~on_statement:visit_statement

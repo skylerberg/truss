@@ -85,7 +85,7 @@ module Code = struct
     | Power_operator
     | Short_declaration
     | Pipe_operator
-    | Lambda_annotation
+    | Lambda_result_type
     | Impl_parameters
     | Null_coalescing
     | Specification_only
@@ -148,7 +148,6 @@ module Code = struct
     | Cost_of_other_resource
     | Not_assignable
     | Wrong_try
-    | Lambda_needs_type
     | Not_a_record
     | Not_a_tuple_type
     | Unknown_variant
@@ -377,7 +376,7 @@ module Code = struct
     | Power_operator -> "power_operator"
     | Short_declaration -> "short_declaration"
     | Pipe_operator -> "pipe_operator"
-    | Lambda_annotation -> "lambda_annotation"
+    | Lambda_result_type -> "lambda_result_type"
     | Impl_parameters -> "impl_parameters"
     | Null_coalescing -> "null_coalescing"
     | Specification_only -> "specification_only"
@@ -442,7 +441,6 @@ module Code = struct
     | Cost_of_other_resource -> "cost_of_other_resource"
     | Not_assignable -> "not_assignable"
     | Wrong_try -> "wrong_try"
-    | Lambda_needs_type -> "lambda_needs_type"
     | Not_a_record -> "not_a_record"
     | Not_a_tuple_type -> "not_a_tuple_type"
     | Unknown_variant -> "unknown_variant"

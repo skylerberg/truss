@@ -24,6 +24,43 @@ let find_all options =
     (fun option all -> Option.bind option (fun each -> Option.map (List.cons each) all))
     options (Some [])
 
+let check_parameter_annotation (state : State.state) ~mode ~input
+    ((annotation : Syntax.parameter_annotation), annotated_mode, annotated) =
+  if annotated_mode <> mode then
+    State.report state
+      (Lambda_parameter_mode
+         {
+           at = Written annotation.id;
+           type_expression = Written annotation.type_.id;
+           passed = mode;
+           annotated = annotated_mode;
+         });
+  if not (State.unify state input annotated) then
+    ignore
+      (Failures.add_mismatch_diagnostic state (Written annotation.type_.id)
+         ~sides:[ (input, annotated) ]
+         (Lambda_parameter_type
+            { passed = State.make_shown state input; annotated = State.make_shown state annotated }))
+
+let require_decided_parameter (state : State.state) (parameter : Syntax.lambda_parameter) input =
+  let list_undecided () =
+    List.filter_map
+      (function
+        | Unify.Unknown_type index when Option.is_none (Unify.find_domain state.unifier index) ->
+            Some index
+        | Unknown_type _ | Unknown_value _ -> None)
+      (Unify.list_unknowns state.unifier input)
+  in
+  List.iter (fun index -> Solver.solve_head state index) (list_undecided ());
+  match (list_undecided (), parameter.pattern.kind) with
+  | [], _ | _, Pattern_error -> ()
+  | undecided, _ ->
+      let reported =
+        State.add_diagnostic state
+          (Undetermined { at = Written parameter.pattern.id; undetermined = Lambda_parameter })
+      in
+      List.iter (fun index -> Unify.poison state.unifier index reported) undecided
+
 let rec check_string_literal state env ?expected (value : Syntax.expression)
     (literal : Syntax.string_literal) =
   let interpolations =
@@ -228,32 +265,57 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
         map from_entries From_entries_from_entries;
       map
 
-and check_lambda (state : State.state) env ?expected (value : Syntax.expression) parameters body =
+and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
+    (parameters : Syntax.lambda_parameter list) body =
   let locals_read_before = state.locals_read in
   state.lambdas <- value.id :: state.lambdas;
-  let expected = Option.map (Conversions.read_expected_head state) expected in
+  let annotations =
+    List.map
+      (fun (parameter : Syntax.lambda_parameter) ->
+        Option.map
+          (fun (annotation : Syntax.parameter_annotation) ->
+            ( annotation,
+              Interface.Elaborator.elaborate_mode annotation.mode,
+              Interface.Elaborator.elaborate_type (State.read_context state) annotation.type_ ))
+          parameter.annotation)
+      parameters
+  in
+  let list_annotated_inputs ~make_unannotated =
+    List.map
+      (function
+        | Some (_, mode, annotated) -> (mode, annotated)
+        | None -> (Language.Mode.Read, make_unannotated ()))
+      annotations
+  in
   let make_untyped unknown =
-    List.iter
-      (fun written ->
-        Pattern_typing.check_pattern state env written unknown ~mode:Language.Mode.Read)
-      parameters;
+    List.iter2
+      (fun (parameter : Syntax.lambda_parameter) (mode, type_) ->
+        Pattern_typing.check_pattern state env parameter.pattern type_ ~mode)
+      parameters
+      (list_annotated_inputs ~make_unannotated:(fun () -> unknown));
     ignore (Statements.check_block_value state env body);
     unknown
   in
+  let check_as (function_type : Types.function_type) =
+    List.iter2
+      (fun ((parameter : Syntax.lambda_parameter), annotation) (mode, input) ->
+        Option.iter (check_parameter_annotation state ~mode ~input) annotation;
+        require_decided_parameter state parameter input;
+        Pattern_typing.check_parameter_pattern state env parameter.pattern input ~mode)
+      (List.combine parameters annotations)
+      function_type.inputs;
+    let output = function_type.output in
+    let lambda_env = { env with output = Some (Returns output) } in
+    let body_type = Statements.check_block_value state lambda_env ~expected:output body in
+    Conversions.convert state lambda_env ?expression:(find_block_value body) (Written body.id)
+      ~actual:body_type ~expected:output;
+    Types.Function function_type
+  in
   let result =
-    match expected with
+    match Option.map (Conversions.read_expected_head state) expected with
     | Some (Types.Function function_type)
       when List.length function_type.inputs = List.length parameters ->
-        List.iter2
-          (fun written (mode, input) ->
-            Pattern_typing.check_parameter_pattern state env written input ~mode)
-          parameters function_type.inputs;
-        let output = function_type.output in
-        let lambda_env = { env with output = Some (Returns output) } in
-        let body_type = Statements.check_block_value state lambda_env ~expected:output body in
-        Conversions.convert state lambda_env ?expression:(find_block_value body) (Written body.id)
-          ~actual:body_type ~expected:output;
-        Types.Function function_type
+        check_as function_type
     | Some (Types.Function function_type) ->
         make_untyped
           (State.make_error_type state
@@ -266,19 +328,15 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
                 }))
     | Some ((Types.Error _ | Types.Hole) as unknown) -> make_untyped unknown
     | _ ->
-        let remedy : Catalog.Inference.lambda_remedy =
-          match Option.bind expected (State.find_variable_origin state) with
-          | Some (Generic_argument { declared_on; parameter; _ }) ->
-              Bracket_arguments
-                {
-                  declared_on;
-                  is_type =
-                    (match parameter.kind with Type_generic _ -> true | Value_generic -> false);
-                }
-          | Some (List_literal _ | Map_literal _) | None -> Typed_let
-        in
-        make_untyped
-          (State.make_error_type state (Lambda_needs_type { at = Written value.id; remedy }))
+        check_as
+          {
+            inputs =
+              list_annotated_inputs ~make_unannotated:(fun () ->
+                  Unify.make_fresh_type state.unifier);
+            output = Unify.make_fresh_type state.unifier;
+            uses = Unify.make_fresh_capability_variable state.unifier;
+            costs = [];
+          }
   in
   state.lambdas <- List.tl state.lambdas;
   let rec list_newer acc list =

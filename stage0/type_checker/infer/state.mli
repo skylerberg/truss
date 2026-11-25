@@ -142,7 +142,6 @@ val make_fresh_generic_arguments :
 
 val list_class_log : state -> int -> logged list
 val find_class_origin : state -> int -> (int * origin) option
-val find_variable_origin : state -> Types.ty -> origin option
 val lookup_bounds : state -> Interface.Properties.Bounds.t
 val normalize : state -> Types.ty -> Types.ty
 val find_domain : state -> Types.ty -> Language.Builtin_type.t list option

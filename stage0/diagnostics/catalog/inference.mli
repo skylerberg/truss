@@ -23,6 +23,7 @@ type unmet_bound =
 type mismatch =
   | Expected of { expected : shown; actual : shown; copy : view_copy option }
   | Loop_element of { element : shown; annotated : shown }
+  | Lambda_parameter_type of { passed : shown; annotated : shown }
   | Mismatched_integers of { left : Types.ty; right : Types.ty; widening : widening option }
   | Unsatisfied_bound of {
       of_type : Types.ty option;
@@ -76,7 +77,6 @@ type empty_literal = Empty_list | Empty_map
 type integer_operator = Bitwise | Shift | Complement
 type joined_piece = Fragment of Core.origin | Interpolated of Core.origin
 type specification_call = Theorem_call | Mentions of Types.ty | Specification_function_call
-type lambda_remedy = Bracket_arguments of { declared_on : Path.t; is_type : bool } | Typed_let
 type specification_subject = Binding_subject of Core.origin | Value_subject
 
 type undetermined =
@@ -84,6 +84,7 @@ type undetermined =
   | Generic_argument of { parameter : string; is_type : bool; declared_on : Path.t }
   | List_element
   | Map_entries
+  | Lambda_parameter
 
 type t =
   | Mismatch of { at : Core.origin; mismatch : mismatch; decision : decision option }
@@ -267,6 +268,12 @@ type t =
   | Temporary_passed_mut of { at : Core.origin; parameter : string }
   | Redundant_own of { at : Core.origin; inner : Core.origin; type_ : Types.ty }
   | Mut_for_own of { at : Core.origin; parameter : string }
+  | Lambda_parameter_mode of {
+      at : Core.origin;
+      type_expression : Core.origin;
+      passed : Language.Mode.t;
+      annotated : Language.Mode.t;
+    }
   | Type_parameter_as_value of { at : Core.origin; name : string }
   | Theorem_as_value of { at : Core.origin; name : string }
   | Type_as_value of { at : Core.origin; name : string }
@@ -344,7 +351,6 @@ type t =
   | Undetermined of { at : Core.origin; undetermined : undetermined }
   | Types_undetermined of { at : Core.origin }
   | Trait_arguments_undetermined of { at : Core.origin; trait : Path.t }
-  | Lambda_needs_type of { at : Core.origin; remedy : lambda_remedy }
   | Range_not_integer of { at : Core.origin; owner : range_owner; element : Types.ty }
   | Unused_value of { at : Core.origin; type_ : Types.ty }
   | Let_else_falls_through of { at : Core.origin }
