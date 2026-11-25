@@ -1,0 +1,35 @@
+use standard.json
+use standard.serialization
+
+type Shape =
+  | Dot
+  | Line(from: Int64 = 0, to: Int64)
+  derives Equal, serialization.Serialize, serialization.Deserialize
+
+type Config(name: String = "default", limit: Int64 = 3)
+  derives Equal, serialization.Deserialize
+
+test "a missing variant field takes its default" uses RunForever {
+  let decoded: Result[Shape, json.Error] = json.decode("{\"Line\":{\"to\":4}}")
+  assert own decoded.ok() == Some(Shape.Line(from: 0, to: 4))
+}
+
+test "a variant field given in the data overrides its default" uses RunForever {
+  let decoded: Result[Shape, json.Error] = json.decode("{\"Line\":{\"from\":2,\"to\":4}}")
+  assert own decoded.ok() == Some(Shape.Line(from: 2, to: 4))
+}
+
+test "a missing required variant field is an error" uses RunForever {
+  let decoded: Result[Shape, json.Error] = json.decode("{\"Line\":{\"from\":2}}")
+  assert decoded.is_err()
+}
+
+test "a record takes each missing field's default" uses RunForever {
+  let decoded: Result[Config, json.Error] = json.decode("{\"limit\":7}")
+  assert own decoded.ok() == Some(Config(name: "default", limit: 7))
+}
+
+test "a record with every field missing takes every default" uses RunForever {
+  let decoded: Result[Config, json.Error] = json.decode("{}")
+  assert own decoded.ok() == Some(Config(name: "default", limit: 3))
+}
