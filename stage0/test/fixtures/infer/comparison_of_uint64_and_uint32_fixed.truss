@@ -1,3 +1,0 @@
-fn f(count: UInt32, length: UInt64) -> Bool {
-  length == UInt64.from_integer(count)
-}

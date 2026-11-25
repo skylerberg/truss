@@ -175,7 +175,8 @@ let () =
       expect_fine Fixtures.Capabilities.test_declaring_run_forever);
   Harness.test "a place whose implementation mutates state is provided mut" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.counter_provided_as_tally
-        "capabilities.provide_mode")
+        "capabilities.provide_mode"
+        ~fixed:("provide counter {", "provide mut counter {"))
 
 let first_or_crash = Fixtures.Capabilities.first_or_crash
 let run = first_or_crash ^ Fixtures.Capabilities.run
@@ -399,13 +400,14 @@ let () =
       | [ Unused_dependency { Path.owner = None; name = "clock_library" } ] -> ()
       | _ -> Harness.fail "not reported");
   Harness.test "a dependency named in a path is used" (fun () ->
-      let packages, _ =
+      let ((packages, _) as checked) =
         list_codes_with_grants [ pays; ledger ]
           [
             ( { Path.owner = None; name = "store" },
               [ Grant.Full_path { module_names = [ "store"; "ledger" ]; name = "Ledger" } ] );
           ]
       in
+      expect_codes ~expected:[] checked;
       if list_problems packages <> [] then Harness.fail "reported");
   Harness.test "a dependency whose trait's method is called with a dot is used" (fun () ->
       let packages, actual =
@@ -432,7 +434,7 @@ let () =
   Harness.test "an unused dependency is not reported for a package with an error" (fun () ->
       let packages, _ =
         list_codes_with_grants
-          [ ("app.main", Fixtures.Capabilities.function_returning_true_as_int64); time ]
+          [ ("app.main", Fixtures.Infer.body_returning_bool_as_int64); time ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
       if list_problems packages <> [] then Harness.fail "reported");
@@ -822,7 +824,7 @@ let () =
   Harness.test "a function that uses RunForever unless C states its time clause when C" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.time_of_a_function_that_runs_forever_unless_finite
         "types.unbounded_time" ~says:"`when` a condition that implies `Source: FiniteCursor`"
-        ~fixed:Fixtures.Capabilities.time_when_a_function_terminates;
+        ~fixed:("cost time O(1)", "cost time O(1) when Source: FiniteCursor");
       expect_fine Fixtures.Capabilities.time_when_a_function_terminates);
   Harness.test "a loop over a cursor that may not end uses RunForever unless it is finite"
     (fun () ->
@@ -871,7 +873,7 @@ let () =
       expect_fine Fixtures.Capabilities.time_when_a_subtrait;
       expect_one_diagnostic Fixtures.Capabilities.time_when_an_unrelated_condition
         "types.unbounded_time" ~says:"`when` a condition that implies `Source: FiniteCursor`"
-        ~fixed:Fixtures.Capabilities.time_when_an_unrelated_condition_fixed;
+        ~fixed:("Display", "Display && Source: FiniteCursor");
       expect_fine Fixtures.Capabilities.time_when_an_unrelated_condition_fixed);
   Harness.test "a call of a function that panics unless a condition on values needs no `Panic`"
     (fun () ->

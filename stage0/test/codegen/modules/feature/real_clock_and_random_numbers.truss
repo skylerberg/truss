@@ -1,0 +1,4 @@
+test "a test that uses the clock and random numbers gets the real ones" uses Clock, Random {
+  assert Clock.now().unix_nanoseconds() > 1600000000000000000
+  assert Random.next() != Random.next()
+}

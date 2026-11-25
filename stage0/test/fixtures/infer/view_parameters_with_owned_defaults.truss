@@ -1,7 +1,0 @@
-fn greet(name: String = "world", tags: List[Int64] = [1, 2]) -> UInt64 {
-  name.length() + tags.length()
-}
-
-fn f() -> UInt64 {
-  greet() + greet("you")
-}

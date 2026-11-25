@@ -469,9 +469,17 @@ and report_missing_receiver state env (value : Syntax.expression) arguments =
 
 and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_arguments
     (member : Syntax.name) arguments =
-  let wanted = Path.Instance (Name_lookup.classify_receiver_mode arguments) in
   let find_overload receiver =
     Interface.Definition.find_trait_method state.lookups.interface trait ~name:member.text ~receiver
+  in
+  let wanted : Path.receiver =
+    match (Name_lookup.classify_receiver_mode arguments, arguments) with
+    | Read, { value = receiver; label = None } :: _
+      when Option.is_some (find_overload (Instance Own))
+           && ((not (Places.is_place state.resolved state.tables receiver))
+              || Option.is_none (find_overload (Instance Read))) ->
+        Instance Own
+    | mode, _ -> Instance mode
   in
   match
     match find_overload Static with None -> find_overload wanted | trait_method -> trait_method
@@ -697,6 +705,25 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
                   (if is_implemented_by_the_view trait then written_receiver_type else receiver_type)
                 trait method_ ~type_arguments arguments)
       | Error traits ->
+          let find_receiver_mode (trait : Types.trait_reference) : Language.Mode.t option =
+            let modes =
+              List.filter_map
+                (fun (method_ : Types.trait_method) ->
+                  match method_.method_receiver with Instance mode -> Some mode | Static -> None)
+                (Members.list_trait_methods state.lookups trait.trait member.text)
+            in
+            if List.mem Language.Mode.Read modes then Some Read
+            else if List.mem Language.Mode.Own modes then
+              if
+                (not place)
+                || State.decide_property state Interface.Properties.Plain receiver_type
+                   <> Interface.Properties.Fails
+              then Some Read
+              else Some Own
+            else if List.mem Language.Mode.Mut modes && place && Modes.is_mutable state env base
+            then Some Mut
+            else None
+          in
           State.make_error_type state
             (Ambiguous_method_call
                {
@@ -715,7 +742,11 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
                            | None -> [ Written argument.value.id ]);
                        })
                      arguments;
-                 traits;
+                 traits =
+                   List.filter_map
+                     (fun trait ->
+                       Option.map (fun mode -> (trait, mode)) (find_receiver_mode trait))
+                     traits;
                }))
 
 and check_method_with_receiver state env ?expected ?(type_arguments = [])

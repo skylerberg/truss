@@ -1,5 +1,0 @@
-fn f() -> String {
-  let text = "abc"
-  var held = text.copy()
-  held
-}

@@ -7,6 +7,12 @@ let expect_one_diagnostic = Support.expect_one_diagnostic ~check
 let expect_fine text = Support.expect_no_diagnostics ~check [ ("app.main", text) ]
 let keep = Fixtures.Ownership.keep
 
+let expect_rejected_after prefix ?says name body code =
+  Harness.test name (fun () -> expect_one_diagnostic ?says (prefix ^ body) code)
+
+let expect_accepted_after prefix name body =
+  Harness.test name (fun () -> expect_fine (prefix ^ body))
+
 let () =
   Harness.test "a body changes only the parts that its modifies clause names" (fun () ->
       let scanner =
@@ -40,19 +46,14 @@ let () =
       in
       expect_one_diagnostic (step "  scanner.count = 1") "ownership.undeclared_change"
         ~says:"`scanner.count` changes here, and the `modifies` clause of `step` does not name it."
-        ~fixed:
-          (scanner
-         ^ "public fn step(scanner: mut Scanner)\n\
-           \  modifies scanner.region.stop, scanner.count\n\
-            {\n\
-           \  scanner.region.stop = 1\n\
-           \  scanner.count = 1\n\
-            }\n");
+        ~fixed:("modifies scanner.region.stop", "modifies scanner.region.stop, scanner.count");
       expect_one_diagnostic (step "  advance(mut scanner)") "ownership.undeclared_change"
-        ~says:"`scanner.position` changes here";
+        ~says:"`scanner.position` changes here"
+        ~fixed:("modifies scanner.region.stop", "modifies scanner.region.stop, scanner.position");
       expect_one_diagnostic
         (step "  scanner.region = Region(first: 0, stop: 0)")
-        "ownership.undeclared_change" ~says:"`scanner.region` changes here";
+        "ownership.undeclared_change" ~says:"`scanner.region` changes here"
+        ~fixed:("modifies scanner.region.stop", "modifies scanner.region");
       expect_one_diagnostic
         (scanner
        ^ "public fn replace(scanner: mut Scanner, other: own Scanner)\n\
@@ -71,7 +72,7 @@ let () =
         (changing ~parts:"scanner.position, scanner.count" ~body:"  scanner.position = 0")
         "usage.unmodified_part"
         ~says:"`f` never changes `scanner.count`, so the proofs of its callers do not learn"
-        ~fixed:(changing ~parts:"scanner.position" ~body:"  scanner.position = 0");
+        ~fixed:("modifies scanner.position, scanner.count", "modifies scanner.position");
       expect_one_diagnostic
         (changing ~parts:"scanner.count" ~body:"  let _ = scanner.position")
         "usage.unmodified_part" ~says:"`scanner` need not be `mut`";
@@ -228,14 +229,14 @@ let () =
         (make_lending_source "numbered" "(mut self) lends mut Numbered"
            "  Numbered(index: 0, title: self.books[0])\n")
         "ownership.needs_lent_mut"
-        ~fixed:
-          (make_lending_source "numbered" "(mut self) lends mut Numbered"
-             "  Numbered(index: 0, title: mut self.books[0])\n"));
+        ~fixed:("title: self.books[0]", "title: mut self.books[0]")
+        ~alternatives:[ ("title: self.books[0]", "title: self.books[0].copy()") ]);
   Harness.test "a place in a constructor lent read-only takes no `mut` keyword" (fun () ->
       expect_one_diagnostic
         (make_lending_source "numbered" "(self) lends Numbered"
            "  Numbered(index: 0, title: mut self.books[0])\n")
-        "types.redundant_mode");
+        "types.redundant_mode"
+        ~fixed:("mut self.books[0]", "self.books[0]"));
   Harness.test "a lending method cannot lend a part of a local it owns" (fun () ->
       expect_one_diagnostic ~says:"a part of `sorted`"
         (make_lending_source "first_sorted" "(self) lends String"
@@ -263,7 +264,7 @@ let () =
         ~says:
           "Declare `items` as a view, as in `items: view List[Int64]`, so that each caller keeps \
            its argument borrowed."
-        ~fixed:(keep "items: view List[Int64]"));
+        ~fixed:("items: List[Int64]", "items: view List[Int64]"));
   List.iter
     (fun (subject, parameter, stored) ->
       Harness.test
@@ -280,11 +281,7 @@ let () =
               (Printf.sprintf
                  "Take the stored part of `%s` as a view, such as a `view List` or a `view \
                   String`, so that each caller keeps its argument borrowed."
-                 root);
-          List.iter
-            (fun (diagnostic : Diagnostic.t) ->
-              if diagnostic.fixes <> [] then Harness.fail "offered a fix")
-            (check (Support.setup [ ("app.main", text) ]) (Support.parse_file "app.main"))))
+                 root)))
     [
       ("a part of a borrowed parameter", "bag: Bag", "bag.items");
       ("a `mut` parameter", "items: mut List[Int64]", "items");
@@ -363,7 +360,8 @@ let () =
        expect_one_diagnostic
          (make_lending_source "first_length" "(self, shelf: String) -> UInt64"
             "  let first = self.titles[shelf][0]\n  first.length()\n")
-         "ownership.lent_part_escapes"));
+         "ownership.lent_part_escapes"
+         ~fixed:("self.titles[shelf][0]", "self.titles[shelf][0].copy()")));
   Harness.test "a lent constructor is not lent one place `mut` twice" (fun () ->
       expect_one_diagnostic
         (make_lending_source "both" "(mut self) lends mut Both"
@@ -372,10 +370,8 @@ let () =
 
 let () =
   let helpers = Fixtures.Ownership.handlers_and_lambda_callees in
-  let expect_rejected name body code =
-    Harness.test name (fun () -> expect_one_diagnostic (helpers ^ body) code)
-  in
-  let expect_accepted name body = Harness.test name (fun () -> expect_fine (helpers ^ body)) in
+  let expect_rejected = expect_rejected_after helpers in
+  let expect_accepted = expect_accepted_after helpers in
   expect_rejected "a lambda that captures a parameter cannot be returned"
     Fixtures.Ownership.lambda_capturing_a_parameter_returned "ownership.view_escapes";
   expect_rejected "a lambda that captures a local cannot be returned"
@@ -429,10 +425,8 @@ let () =
 
 let () =
   let types = Fixtures.Ownership.types in
-  let expect_rejected name body code =
-    Harness.test name (fun () -> expect_one_diagnostic (types ^ body) code)
-  in
-  let expect_accepted name body = Harness.test name (fun () -> expect_fine (types ^ body)) in
+  let expect_rejected = expect_rejected_after types in
+  let expect_accepted = expect_accepted_after types in
   expect_rejected "a `let` of a value that owns data and stores a view views the value"
     Fixtures.Ownership.labeled_reassigned_while_viewed "ownership.mutated_while_viewed";
   expect_rejected "a range of a part of a value that owns data and stores a view views the value"
@@ -468,10 +462,8 @@ let () =
 
 let () =
   let reader = "type Reader(buffer: List[Int64])\n\n" in
-  let expect_rejected name body code =
-    Harness.test name (fun () -> expect_one_diagnostic (reader ^ body) code)
-  in
-  let expect_accepted name body = Harness.test name (fun () -> expect_fine (reader ^ body)) in
+  let expect_rejected = expect_rejected_after reader in
+  let expect_accepted = expect_accepted_after reader in
   expect_rejected "a lending method cannot lend a view of its local"
     Fixtures.Ownership.reader_lending_a_view_of_a_local "ownership.view_escapes";
   expect_accepted "a method can lend a view of `self`, and lend a local itself"
@@ -540,9 +532,7 @@ let () =
 
 let () =
   let journal = Fixtures.Ownership.journal in
-  let expect_rejected name body code =
-    Harness.test name (fun () -> expect_one_diagnostic (journal ^ body) code)
-  in
+  let expect_rejected = expect_rejected_after journal in
   expect_rejected "a capability's implementation cannot store a view argument"
     Fixtures.Ownership.journal_keeping_a_view "ownership.view_crosses_capability";
   expect_rejected "a capability's method cannot return a view of the implementation's state"
@@ -556,7 +546,7 @@ let () =
 
 let () =
   let url = "type Url(scheme: String, user: Option[String])\n\n" in
-  let expect_accepted name body = Harness.test name (fun () -> expect_fine (url ^ body)) in
+  let expect_accepted = expect_accepted_after url in
   expect_accepted "a view of a `match` binding of a parameter can be returned"
     Fixtures.Ownership.url_user_through_a_match;
   expect_accepted "a view of an `is` binding of a parameter can be returned"
@@ -574,10 +564,8 @@ let () =
 
 let () =
   let helpers = Fixtures.Ownership.holder_and_wait in
-  let expect_rejected ?says name body code =
-    Harness.test name (fun () -> expect_one_diagnostic ?says (helpers ^ body) code)
-  in
-  let expect_accepted name body = Harness.test name (fun () -> expect_fine (helpers ^ body)) in
+  let expect_rejected = expect_rejected_after helpers in
+  let expect_accepted = expect_accepted_after helpers in
   expect_rejected
     "one branch of a `concurrent` block cannot mutate a place that another branch uses"
     ~says:"`concurrent` block" Fixtures.Ownership.concurrent_branch_mutating_a_viewed_list
@@ -631,36 +619,34 @@ let () =
   let names = "let names: List[Int64] = [1, 2]\n\n" in
   let config = Fixtures.Ownership.config in
   List.iter
-    (fun (construct, text, code) ->
-      Harness.test (construct ^ " is an error") (fun () -> expect_one_diagnostic text code))
+    (fun (construct, text, fixed) ->
+      Harness.test (construct ^ " is an error, with a fix that copies it") (fun () ->
+          expect_one_diagnostic text "ownership.not_owned" ~fixed))
     [
       ( "moving a constant with `own`",
         keep ^ names ^ Fixtures.Ownership.moving_a_constant_with_own,
-        "ownership.not_owned" );
+        ("own names", "names.copy()") );
       ( "moving a field of a constant with `own`",
         keep ^ config ^ Fixtures.Ownership.moving_a_field_of_a_constant_with_own,
-        "ownership.not_owned" );
+        ("own config.items", "config.items.copy()") );
       ( "passing a constant to an `own` parameter",
         keep ^ names ^ Fixtures.Ownership.passing_a_constant_to_an_own_parameter,
-        "ownership.not_owned" );
+        ("keep(names)", "keep(names.copy())") );
       ( "passing a type's constant to an `own` parameter",
         keep ^ config ^ Fixtures.Ownership.passing_a_types_constant_to_an_own_parameter,
-        "ownership.not_owned" );
+        ("keep(Config.ports)", "keep(Config.ports.copy())") );
       ( "binding a constant with `var`",
         names ^ Fixtures.Ownership.binding_a_constant_with_var,
-        "ownership.not_owned" );
+        ("var mine = names", "var mine = names.copy()") );
       ( "binding a type's constant with `var`",
         config ^ Fixtures.Ownership.binding_a_types_constant_with_var,
-        "ownership.not_owned" );
-      ( "returning a constant",
-        names ^ Fixtures.Ownership.constant_list_returned,
-        "ownership.needs_owned" );
+        ("var mine = Config.ports", "var mine = Config.ports.copy()") );
     ];
   Harness.test "an owned value from a constant is a copy, with a fix" (fun () ->
       expect_one_diagnostic
         (names ^ Fixtures.Ownership.constant_list_returned)
         "ownership.needs_owned"
-        ~fixed:(names ^ Fixtures.Ownership.copy_of_a_constant_list_returned));
+        ~fixed:("{\n  names", "{\n  names.copy()"));
   Harness.test "a constant can be read, viewed, copied, and returned as a view" (fun () ->
       expect_fine (keep ^ names ^ Fixtures.Ownership.constant_read_viewed_copied_and_returned));
   let bag = Fixtures.Ownership.bag in
@@ -683,8 +669,7 @@ let () =
   Harness.test "a moved place cannot be used, with a fix that copies at the move" (fun () ->
       expect_one_diagnostic
         (keep ^ Fixtures.Ownership.list_moved_then_read)
-        "ownership.use_after_move"
-        ~fixed:(keep ^ Fixtures.Ownership.list_copied_then_read));
+        "ownership.use_after_move" ~fixed:("own items", "items.copy()"));
   Harness.test "a moved place whose type is not `Copyable` gets no fix that copies it" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.token_moved_then_read "ownership.use_after_move";
       let packages = Support.setup [ ("app.main", Fixtures.Ownership.token_moved_then_read) ] in
@@ -695,10 +680,13 @@ let () =
   Harness.test "a `let` that reads a moved place is reported at the place" (fun () ->
       expect_one_diagnostic
         (keep ^ Fixtures.Ownership.list_moved_then_bound)
-        "ownership.use_after_move" ~at:("items\n  look", 1));
+        "ownership.use_after_move" ~fixed:("own items", "items.copy()") ~at:("items\n  look", 1));
   Harness.test "a tagged string moves its interpolations, and a plain string reads them" (fun () ->
       let shout = Fixtures.Ownership.shout in
-      expect_one_diagnostic (shout ^ Fixtures.Ownership.shout_of_a_name) "ownership.not_owned";
+      expect_one_diagnostic
+        (shout ^ Fixtures.Ownership.shout_of_a_name)
+        "ownership.not_owned"
+        ~fixed:("Shout\"hey ${names[0]}\"", "Shout\"hey ${names[0].copy()}\"");
       expect_fine (shout ^ Fixtures.Ownership.shout_of_a_copied_name);
       expect_fine (shout ^ Fixtures.Ownership.shout_of_an_own_name);
       expect_fine Fixtures.Ownership.plain_string_of_a_name);
@@ -707,40 +695,40 @@ let () =
   Harness.test "a place moved by an argument cannot be read by a later argument of the same call"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.call_moving_then_reading_a_list
-        "ownership.use_after_move");
+        "ownership.use_after_move" ~fixed:("own items", "items.copy()"));
   Harness.test "labeled arguments move and read places in the order written" (fun () ->
       expect_fine Fixtures.Ownership.list_read_by_a_label_before_another_moves_it;
       expect_one_diagnostic Fixtures.Ownership.list_moved_by_a_label_before_another_reads_it
-        "ownership.use_after_move");
+        "ownership.use_after_move" ~fixed:("own items", "items.copy()"));
   Harness.test "a place moved on one path cannot be used after the paths join" (fun () ->
       expect_one_diagnostic
         (keep ^ Fixtures.Ownership.list_moved_on_one_path)
-        "ownership.use_after_move");
+        "ownership.use_after_move" ~fixed:("own items", "items.copy()"));
   Harness.test "a place moved in a loop is moved in the loop's next iteration" (fun () ->
       expect_one_diagnostic
         (keep ^ Fixtures.Ownership.list_moved_in_a_loop)
-        "ownership.use_after_move");
+        "ownership.use_after_move" ~fixed:("own items", "items.copy()"));
   Harness.test "a place is usable again once it is assigned" (fun () ->
       expect_fine (keep ^ Fixtures.Ownership.moved_var_reassigned));
   Harness.test
     "a field of a place moved out whole cannot be assigned, which prevents a double free of its \
      other fields" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.field_assigned_after_its_pair_moved
-        "ownership.use_after_move");
+        "ownership.use_after_move" ~fixed:("own pair", "pair.copy()"));
   Harness.test "a field can be moved out by itself" (fun () ->
       expect_fine Fixtures.Ownership.field_of_a_config_moved_out);
   Harness.test "a read-only parameter cannot be moved" (fun () ->
-      expect_one_diagnostic (keep ^ Fixtures.Ownership.read_only_pile_moved) "ownership.not_owned");
+      expect_one_diagnostic
+        (keep ^ Fixtures.Ownership.read_only_pile_moved)
+        "ownership.not_owned" ~fixed:("own pile", "pile.copy()"));
   Harness.test "a field moved out of a `mut` parameter must be reinitialized" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.field_moved_out_of_a_mut_config
         "ownership.not_reinitialized");
   Harness.test "a local that a value is moved into has no view of the moved place" (fun () ->
       expect_fine Fixtures.Ownership.local_moved_into_then_reassigned);
   (let holder = "type Holder(items: List[Int64], count: UInt64)\n\n" in
-   let expect_accepted name body = Harness.test name (fun () -> expect_fine (holder ^ body)) in
-   let expect_rejected name body code =
-     Harness.test name (fun () -> expect_one_diagnostic (holder ^ body) code)
-   in
+   let expect_accepted = expect_accepted_after holder in
+   let expect_rejected = expect_rejected_after holder in
    expect_accepted "a field of a place lent `mut` can be moved out and reinitialized"
      Fixtures.Ownership.field_of_mut_self_moved_out_and_reinitialized;
    expect_rejected "a field moved out of `mut self` must be reinitialized"
@@ -755,8 +743,10 @@ let () =
          "ownership.not_reinitialized" ~at:("moved", 2));
    expect_rejected "a place lent `mut` must be reinitialized on every path"
      Fixtures.Ownership.mut_holder_reinitialized_on_one_path "ownership.not_reinitialized";
-   expect_rejected "a place lent `mut` cannot be used while it is moved out"
-     Fixtures.Ownership.mut_holder_read_while_moved_out "ownership.use_after_move";
+   Harness.test "a place lent `mut` cannot be used while it is moved out" (fun () ->
+       expect_one_diagnostic
+         (holder ^ Fixtures.Ownership.mut_holder_read_while_moved_out)
+         "ownership.use_after_move" ~fixed:("own holder", "holder.copy()"));
    expect_accepted "a `mut` loop variable can be moved out and reinitialized in the iteration"
      Fixtures.Ownership.mut_loop_variable_moved_out_and_reinitialized;
    expect_rejected "a `mut` loop variable that is moved out must be reinitialized in the iteration"
@@ -787,30 +777,46 @@ let () =
   Harness.test "a view-typed local that views nothing can be returned" (fun () ->
       expect_fine Fixtures.Ownership.view_local_of_a_string_literal_returned);
   List.iter
-    (fun (position, text, fixed) ->
-      Harness.test (position ^ " that is a place needs `own`, with a fix that adds it") (fun () ->
-          expect_one_diagnostic text "ownership.needs_owned" ~fixed))
+    (fun (position, text, fixed, copied) ->
+      Harness.test
+        (position ^ " that is a place needs `own`, with fixes that add it or copy the place")
+        (fun () ->
+          expect_one_diagnostic text "ownership.needs_owned" ~fixed ~alternatives:[ copied ]))
     [
       ( "a `var`'s value",
         Fixtures.Ownership.var_initialized_from_an_own_parameter,
-        Fixtures.Ownership.var_initialized_from_an_own_parameter_fixed );
+        ("var copy = items", "var copy = own items"),
+        ("var copy = items", "var copy = items.copy()") );
       ( "an assigned value",
         Fixtures.Ownership.assignment_of_an_own_parameter_to_a_var,
-        Fixtures.Ownership.assignment_of_an_own_parameter_to_a_var_fixed );
+        ("held = items", "held = own items"),
+        ("held = items", "held = items.copy()") );
       ( "an argument to an `own` parameter",
         Fixtures.Ownership.own_list_passed_without_own,
-        Fixtures.Ownership.own_list_passed_without_own_fixed );
+        ("keep(items)", "keep(own items)"),
+        ("keep(items)", "keep(items.copy())") );
       ( "the base of a record update",
         Fixtures.Ownership.record_update_of_an_own_parameter,
-        Fixtures.Ownership.record_update_of_an_own_parameter_fixed );
+        ("settings with (name: \"renamed\")", "own settings with (name: \"renamed\")"),
+        ("settings with (name: \"renamed\")", "settings.copy() with (name: \"renamed\")") );
       ( "the receiver of a method that takes `own self`",
         Fixtures.Ownership.own_receiver_moved_without_own,
-        Fixtures.Ownership.own_receiver_moved_without_own_fixed );
+        ("bag.into_items()", "own bag.into_items()"),
+        ("bag.into_items()", "bag.copy().into_items()") );
     ];
+  Harness.test
+    "a receiver that owns data, passed to a trait's `own self` method written in full, needs `own`"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.consumed_written_in_full_on_a_place_that_owns_data
+        "ownership.needs_owned"
+        ~fixed:("Consumed.take(names)", "Consumed.take(own names)")
+        ~alternatives:[ ("Consumed.take(names)", "Consumed.take(names.copy())") ]);
   Harness.test "the base of a record update that copies implicitly takes no `own`" (fun () ->
       expect_fine Fixtures.Ownership.record_update_of_a_copied_point);
   Harness.test "a map literal's keys and values must be owned" (fun () ->
-      expect_one_diagnostic Fixtures.Ownership.map_literal_of_an_own_name "ownership.needs_owned");
+      expect_one_diagnostic Fixtures.Ownership.map_literal_of_an_own_name "ownership.needs_owned"
+        ~fixed:("[name: 1]", "[own name: 1]")
+        ~alternatives:[ ("[name: 1]", "[name.copy(): 1]") ]);
   Harness.test "a constant's value and a default may hold a constant without a copy" (fun () ->
       expect_fine Fixtures.Ownership.constants_and_defaults_holding_a_constant);
   Harness.test "a constant's value cannot be a view of a temporary" (fun () ->
@@ -820,10 +826,14 @@ let () =
     (fun () -> expect_fine Fixtures.Ownership.constants_viewing_constants);
   Harness.test "a constant's value cannot pass a constant to an `own` parameter" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.constant_passing_a_constant_to_an_own_parameter
-        "ownership.not_owned");
+        "ownership.not_owned"
+        ~fixed:("let kept: Wrapper = keep(first)", "let kept: Wrapper = keep(first.copy())"));
   Harness.test "the condition of an assertion by evaluation cannot move a constant" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.assertion_by_evaluation_moving_a_constant
-        "ownership.not_owned");
+        "ownership.not_owned"
+        ~fixed:
+          ( "assert keep(first).items.length() == 2 by evaluation",
+            "assert keep(first.copy()).items.length() == 2 by evaluation" ));
   List.iter
     (fun (place, text, fixed) ->
       Harness.test
@@ -832,25 +842,25 @@ let () =
     [
       ( "a read-only parameter in a list literal",
         Fixtures.Ownership.list_of_a_name_parameter,
-        Fixtures.Ownership.list_of_a_copied_name_parameter );
+        ("[name]", "[name.copy()]") );
       ( "a read-only parameter passed to an `own` parameter",
         keep ^ Fixtures.Ownership.read_only_pile_passed_without_own,
-        keep ^ Fixtures.Ownership.read_only_pile_passed_without_own_fixed );
+        ("keep_pile(pile)", "keep_pile(pile.copy())") );
       ( "a read-only parameter used as a map key",
         Fixtures.Ownership.map_assignment_with_a_viewed_host,
-        Fixtures.Ownership.map_assignment_with_a_copied_host );
+        ("ports[host] = 8080", "ports[host.copy()] = 8080") );
       ( "a read-only receiver of a method that takes `own self`",
         Fixtures.Ownership.read_only_receiver_moved,
-        Fixtures.Ownership.read_only_receiver_copied );
+        ("bag.into_items()", "bag.copy().into_items()") );
       ( "a `let` bound to a string literal",
         Fixtures.Ownership.var_initialized_from_a_string_literal_let,
-        Fixtures.Ownership.var_initialized_from_a_string_literal_let_fixed );
+        ("var held = text", "var held = text.copy()") );
       ( "an element of an `own` list",
         Fixtures.Ownership.var_initialized_from_an_element,
-        Fixtures.Ownership.var_initialized_from_an_element_fixed );
+        ("var first = names[0]", "var first = names[0].copy()") );
       ( "a lambda's capture",
         Fixtures.Ownership.list_of_a_capture,
-        Fixtures.Ownership.list_of_a_copied_capture );
+        ("apply(fn() { [name] })", "apply(fn() { [name.copy()] })") );
     ];
   List.iter
     (fun (place, text, code, fixed) ->
@@ -861,33 +871,33 @@ let () =
       ( "a read-only parameter passed `own`",
         keep ^ Fixtures.Ownership.read_only_pile_moved,
         "ownership.not_owned",
-        keep ^ Fixtures.Ownership.read_only_pile_passed_without_own_fixed );
+        ("own pile", "pile.copy()") );
       ( "a `let` bound to a string literal and moved into a `var`",
         Fixtures.Ownership.string_literal_let_moved_into_a_var,
         "ownership.not_owned",
-        Fixtures.Ownership.var_initialized_from_a_string_literal_let_fixed );
+        ("own text", "text.copy()") );
       ( "an element moved into a `var`",
         Fixtures.Ownership.element_moved_into_a_var,
         "ownership.not_owned",
-        Fixtures.Ownership.var_initialized_from_an_element_fixed );
+        ("own names[0]", "names[0].copy()") );
       ( "a read-only parameter moved into a list literal",
         Fixtures.Ownership.list_of_a_moved_name_parameter,
         "ownership.not_owned",
-        Fixtures.Ownership.list_of_a_copied_name_parameter );
+        ("own name", "name.copy()") );
       ( "a place moved into a `var` and used afterward",
         Fixtures.Ownership.list_moved_into_a_var_then_read,
         "ownership.use_after_move",
-        Fixtures.Ownership.list_copied_into_a_var_then_read );
+        ("own items", "items.copy()") );
       ( "a receiver moved with `own` and used afterward",
         Fixtures.Ownership.bag_moved_by_its_receiver_then_read,
         "ownership.use_after_move",
-        Fixtures.Ownership.bag_copied_for_its_receiver_then_read );
+        ("own bag", "bag.copy()") );
     ];
   Harness.test "a field of an element is part of an element, which cannot be moved, with a fix"
     (fun () ->
       expect_one_diagnostic ~says:"`rows[...].label` is part of an element"
         Fixtures.Ownership.field_of_an_element_moved_into_a_var "ownership.not_owned"
-        ~fixed:Fixtures.Ownership.field_of_an_element_copied_into_a_var);
+        ~fixed:("own rows[0].label", "rows[0].label.copy()"));
   Harness.test "an associated type that grows a type reaches the recursion limit" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.associated_type_that_grows_its_type
         "types.recursion_limit" ~says:"needs more than 64 nested types");
@@ -904,13 +914,15 @@ let () =
   Harness.test "an impl method cannot move a read-only parameter" (fun () ->
       expect_one_diagnostic
         (keep ^ bag ^ Fixtures.Ownership.impl_method_moving_a_read_only_parameter)
-        "ownership.not_owned");
+        "ownership.not_owned"
+        ~fixed:("own other.items", "other.items.copy()"));
   Harness.test "an impl method may move a field of an owned self" (fun () ->
       expect_fine (bag ^ Fixtures.Ownership.impl_method_moving_a_field_of_own_self));
   Harness.test "a trait's method with a body is checked too" (fun () ->
       expect_one_diagnostic
         (keep ^ Fixtures.Ownership.trait_method_body_moving_a_read_only_parameter)
-        "ownership.not_owned")
+        "ownership.not_owned"
+        ~fixed:("own pile.items", "pile.items.copy()"))
 
 let () =
   Harness.test
@@ -972,13 +984,15 @@ let () =
     "a borrowed string in a tagged template is moved where the interpolation type converts only \
      from an owned string" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.template_interpolation_that_needs_an_owned_string
-        "ownership.not_owned");
+        "ownership.not_owned"
+        ~fixed:("Sentence\"hello ${name}\"", "Sentence\"hello ${name.copy()}\""));
   Harness.test "a `let` can bind a range of a temporary list" (fun () ->
       expect_fine Fixtures.Ownership.let_of_a_range_of_a_temporary);
   Harness.test "a `let` can bind an element of a temporary list" (fun () ->
       expect_fine Fixtures.Ownership.let_of_an_element_of_a_temporary);
   Harness.test "a `var` cannot bind a range of a list, which stays in the list" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.var_of_a_range "ownership.not_owned"
+        ~fixed:("var part = items[1..]", "var part = items[1..].copy()")
         ~says:"keep a view of it in a place of type `view List[Int64]`");
   Harness.test "a range of a name bound to a parameter views the parameter" (fun () ->
       expect_fine Fixtures.Ownership.range_of_a_name_bound_to_a_parameter_returned);
@@ -1000,14 +1014,17 @@ let () =
   Harness.test "a returned `let` bound to a string literal is reported as a view of the literal"
     (fun () ->
       expect_one_diagnostic ~says:"`text` views a string literal. Return a copy."
-        Fixtures.Ownership.string_literal_let_returned "ownership.needs_owned");
+        Fixtures.Ownership.string_literal_let_returned "ownership.needs_owned"
+        ~fixed:("  text", "  text.copy()"));
   Harness.test "a moved `let` bound to a string literal is reported as a view of the literal"
     (fun () ->
       expect_one_diagnostic ~says:"`text` views a string literal, so it cannot be moved"
-        Fixtures.Ownership.string_literal_let_moved_into_a_var "ownership.not_owned");
+        Fixtures.Ownership.string_literal_let_moved_into_a_var "ownership.not_owned"
+        ~fixed:("own text", "text.copy()"));
   Harness.test "a moved `let` bound to a place is reported as a view" (fun () ->
       expect_one_diagnostic ~says:"`other` is a view, so it cannot be moved"
-        Fixtures.Ownership.let_of_a_place_moved_into_a_var "ownership.not_owned")
+        Fixtures.Ownership.let_of_a_place_moved_into_a_var "ownership.not_owned"
+        ~fixed:("own other", "other.copy()"))
 
 let () =
   Harness.test "a view of a local cannot outlive the local's block" (fun () ->
@@ -1039,34 +1056,39 @@ let () =
   Harness.test "a let of the result of a call with a mode keyword binds it owned" (fun () ->
       expect_fine Fixtures.Ownership.let_of_a_mut_pop_kept);
   Harness.test "is on a place binds views of its parts" (fun () ->
-      expect_one_diagnostic Fixtures.Ownership.is_on_a_parameter_kept "ownership.not_owned")
+      expect_one_diagnostic Fixtures.Ownership.is_on_a_parameter_kept "ownership.not_owned"
+        ~fixed:("own text", "text.copy()"))
 
 let () =
   Harness.test "a part moved out of a match on an owned parameter is fixed with `match own`"
     (fun () ->
       expect_one_diagnostic ~says:"`name` views part of `entry`, so it cannot be moved"
         Fixtures.Ownership.match_on_an_own_parameter_moved_out "ownership.not_owned"
-        ~fixed:Fixtures.Ownership.match_on_an_own_parameter_moved_out_fixed);
+        ~alternatives:[ ("own name", "name.copy()") ]
+        ~fixed:("match entry {", "match own entry {"));
   Harness.test "a part moved out of an is on an owned parameter is fixed with `own`" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.is_on_an_own_parameter_moved_out
-        "ownership.not_owned" ~fixed:Fixtures.Ownership.is_on_an_own_parameter_moved_out_fixed);
+        "ownership.not_owned"
+        ~alternatives:[ ("own text", "text.copy()") ]
+        ~fixed:("if present is Some(text) {", "if own present is Some(text) {"));
   Harness.test "a part returned from a match on an owned parameter is fixed with `match own`"
     (fun () ->
       expect_one_diagnostic ~says:"`text` views part of `present`"
         Fixtures.Ownership.match_binding_of_an_own_parameter_returned "ownership.needs_owned"
-        ~fixed:Fixtures.Ownership.match_binding_of_an_own_parameter_returned_fixed);
+        ~alternatives:[ ("own text", "text.copy()") ]
+        ~fixed:("match present {", "match own present {"));
   Harness.test "a `let` of an owned parameter that is moved on is fixed with `own`" (fun () ->
       expect_one_diagnostic ~says:"`other` views `name`, so it cannot be moved"
         Fixtures.Ownership.let_of_an_own_parameter_moved_out "ownership.not_owned"
-        ~fixed:Fixtures.Ownership.let_of_an_own_parameter_moved_out_fixed);
+        ~alternatives:[ ("own other", "other.copy()") ]
+        ~fixed:("let other = name", "let other = own name"));
   Harness.test "a part moved out of a match on a read-only parameter is fixed with a copy"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.is_on_a_parameter_kept "ownership.not_owned"
-        ~fixed:Fixtures.Ownership.is_on_a_parameter_kept_fixed);
+        ~fixed:("own text", "text.copy()"));
   Harness.test "a part of a scrutinee that a lambda captures is fixed with a copy" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.match_on_a_captured_own_parameter_returned
-        "ownership.needs_owned"
-        ~fixed:Fixtures.Ownership.match_on_a_captured_own_parameter_returned_fixed)
+        "ownership.needs_owned" ~fixed:("own name", "name.copy()"))
 
 let () =
   Harness.test "a `String` cannot be mutated while a view that its view's method returned is live"
@@ -1302,40 +1324,50 @@ let () =
   Harness.test "a part lent read-only is not assigned to" (fun () ->
       expect_one_diagnostic
         (grid ^ Fixtures.Ownership.grid_cell_name_assigned)
-        "types.not_assignable");
+        "types.not_assignable"
+        ~fixed:("grid.cell(0).name = \"new\"", "mut grid.cell(0).name = \"new\""));
   Harness.test "a part lent read-only is not passed `mut`" (fun () ->
       expect_one_diagnostic (grid ^ Fixtures.Ownership.grid_cell_passed_as_mut) "types.wrong_mode");
   Harness.test "a lent part cannot be moved" (fun () ->
-      expect_one_diagnostic (grid ^ Fixtures.Ownership.grid_cell_moved) "ownership.not_owned");
+      expect_one_diagnostic
+        (grid ^ Fixtures.Ownership.grid_cell_moved)
+        "ownership.not_owned"
+        ~fixed:("take(grid.cell(0))", "take(grid.cell(0).copy())"));
   Harness.test "a lent part cannot be the receiver of a method that takes `own self`, with a fix"
     (fun () ->
       expect_one_diagnostic
         (grid ^ Fixtures.Ownership.lent_receiver_moved)
         "ownership.not_owned"
-        ~fixed:(grid ^ Fixtures.Ownership.lent_receiver_copied));
+        ~fixed:("grid.cell(0).into_name()", "grid.cell(0).copy().into_name()"));
   Harness.test "a lent part cannot be returned" (fun () ->
-      expect_one_diagnostic (grid ^ Fixtures.Ownership.grid_cell_returned) "ownership.not_owned");
+      expect_one_diagnostic
+        (grid ^ Fixtures.Ownership.grid_cell_returned)
+        "ownership.not_owned"
+        ~fixed:("grid.cell(0)", "grid.cell(0).copy()"));
   Harness.test "a `let` cannot bind a lent part, with a fix that copies the scrutinee" (fun () ->
       expect_one_diagnostic
         (grid ^ Fixtures.Ownership.let_of_a_grid_cell)
         "ownership.lent_part_escapes" ~at:("held", 1)
-        ~fixed:(grid ^ Fixtures.Ownership.let_of_a_grid_cell_fixed));
+        ~fixed:("let held = grid.cell(0)", "let held = grid.cell(0).copy()"));
   Harness.test "a `let` cannot bind a field of a lent part, with a fix that copies the scrutinee"
     (fun () ->
       expect_one_diagnostic
         (grid ^ Fixtures.Ownership.let_of_a_grid_cell_name)
         "ownership.lent_part_escapes" ~at:("name = grid", 1)
-        ~fixed:(grid ^ Fixtures.Ownership.let_of_a_grid_cell_name_fixed));
+        ~fixed:("let name = grid.cell(0).name", "let name = grid.cell(0).name.copy()"));
   Harness.test
     "a `let` pattern cannot bind a part of a lent part, with a fix that copies the scrutinee"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.let_else_of_a_lent_option
         "ownership.lent_part_escapes" ~at:("title) =", 1)
-        ~fixed:Fixtures.Ownership.let_else_of_a_lent_option_fixed);
+        ~fixed:
+          ("let Some(title) = shelf.title() else {", "let Some(title) = shelf.title().copy() else {"));
   Harness.test "a `let` copies a `Plain` lent part" (fun () ->
       expect_fine (counter ^ Fixtures.Ownership.let_of_a_lent_count));
   Harness.test "a `match` on a lent part binds views of it, which cannot be moved" (fun () ->
-      expect_one_diagnostic (grid ^ Fixtures.Ownership.match_on_a_grid_cell) "ownership.not_owned");
+      expect_one_diagnostic
+        (grid ^ Fixtures.Ownership.match_on_a_grid_cell)
+        "ownership.not_owned" ~fixed:("own name", "name.copy()"));
   Harness.test
     "a lending call keeps its whole receiver lent, so two parts cannot be lent `mut` in one \
      statement" (fun () ->
@@ -1403,7 +1435,9 @@ let () =
      declares the parameter a view" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.list_parameter_pushed_onto_a_mut_list
         "ownership.view_escapes" ~says:"as in `source: view List[Int64]`"
-        ~fixed:Fixtures.Ownership.view_parameter_pushed_onto_a_mut_list);
+        ~fixed:
+          ( "fn f(held: mut List[view List[Int64]], source: List[Int64]) {",
+            "fn f(held: mut List[view List[Int64]], source: view List[Int64]) {" ));
   Harness.test
     "a view of a read-only parameter that is not a view cannot be stored in a `mut` parameter"
     (fun () ->
@@ -1447,28 +1481,35 @@ let () =
 let () =
   let take = Fixtures.Ownership.take in
   let expect_moved_twice operator condition =
+    let program condition =
+      take
+      ^ Printf.sprintf
+          "fn f(flag: Bool, box: own Box) -> Bool {\n\
+          \  let first = %s\n\
+          \  first && take(own box)\n\
+           }\n"
+          condition
+    in
     Harness.test (operator ^ " may have evaluated its right operand") (fun () ->
-        expect_one_diagnostic
-          (take
-          ^ Printf.sprintf
-              "fn f(flag: Bool, box: own Box) -> Bool {\n\
-              \  let first = %s\n\
-              \  first && take(own box)\n\
-               }\n"
-              condition)
-          "ownership.use_after_move")
+        let moving = Printf.sprintf condition "own box" in
+        expect_one_diagnostic (program moving) "ownership.use_after_move"
+          ~fixed:("let first = " ^ moving, "let first = " ^ Printf.sprintf condition "box.copy()"))
   in
-  expect_moved_twice "`&&`" "flag && take(own box)";
-  expect_moved_twice "`||`" "flag || take(own box)";
-  expect_moved_twice "a negated `&&`" "!(flag && take(own box))";
+  expect_moved_twice "`&&`" "flag && take(%s)";
+  expect_moved_twice "`||`" "flag || take(%s)";
+  expect_moved_twice "a negated `&&`" "!(flag && take(%s))";
   Harness.test "an operand that is evaluated last sees the moves of the operands before it"
     (fun () ->
       expect_one_diagnostic
         (take ^ Fixtures.Ownership.two_moves_in_an_and)
-        "ownership.use_after_move";
+        "ownership.use_after_move"
+        ~fixed:
+          ("flag && take(own box) && take(own box)", "flag && take(box.copy()) && take(own box)");
       expect_one_diagnostic
         (take ^ Fixtures.Ownership.moves_in_an_or_and_an_and)
-        "ownership.use_after_move");
+        "ownership.use_after_move"
+        ~fixed:
+          ("(flag || take(own box)) && take(own box)", "(flag || take(box.copy())) && take(own box)"));
   Harness.test "a move in the right operand is the only move of the place" (fun () ->
       expect_fine (take ^ Fixtures.Ownership.move_in_the_right_operand_of_and);
       expect_fine (take ^ Fixtures.Ownership.move_in_the_right_operand_of_or))
@@ -1478,5 +1519,7 @@ let () =
       expect_fine Fixtures.Ownership.record_update_shorthand_captured_by_a_lambda);
   Harness.test "a value of with that is not Plain is passed own, as to a construction" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.record_update_moving_a_value_without_own
-        "ownership.needs_owned";
+        "ownership.needs_owned"
+        ~fixed:("own config with (name: name)", "own config with (name: own name)")
+        ~alternatives:[ ("own config with (name: name)", "own config with (name: name.copy())") ];
       expect_fine Fixtures.Ownership.record_update_shorthand_passed_own)

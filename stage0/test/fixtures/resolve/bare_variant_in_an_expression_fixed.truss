@@ -1,7 +1,0 @@
-type Chain =
-  | End
-  | indirect Link(value: Int64, rest: Chain)
-
-fn start() -> Chain {
-  Chain.End
-}

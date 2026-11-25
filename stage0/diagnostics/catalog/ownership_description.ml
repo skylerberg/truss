@@ -483,20 +483,39 @@ let describe : Ownership.t -> Nodes.description = function
                the whole list, or declare that the function changes only elements, with `modifies` \
                and `[..]`.";
           ])
-  | Undeclared_change { at = origin; function_; parameter; part; last_entry } ->
+  | Undeclared_change
+      { at = origin; function_; parameter; part; last_entry; replaced_entry; removed_entries } ->
       let shown = Types.show_modified_part ~root:parameter part in
       let is_whole = part.field_path = [] && not part.is_elements in
       make Undeclared_change (Build.at origin)
         ~fixes:
-          (match last_entry with
-          | Some last when not is_whole ->
+          (match (replaced_entry, last_entry) with
+          | _ when is_whole -> []
+          | Some replaced, _ ->
+              [
+                {
+                  title =
+                    [
+                      Text
+                        (Printf.sprintf "Name `%s` in the `modifies` clause, in place of its parts."
+                           shown);
+                    ];
+                  edits =
+                    Build.replace replaced [ Text shown ]
+                    :: List.map
+                         (fun (entry, siblings) ->
+                           Build.remove_entry { covering = [ entry ] } siblings)
+                         removed_entries;
+                };
+              ]
+          | None, Some last ->
               [
                 {
                   title = [ Text (Printf.sprintf "Add `%s` to the `modifies` clause." shown) ];
                   edits = [ Build.insert_after last [ Text (", " ^ shown) ] ];
                 };
               ]
-          | Some _ | None -> [])
+          | None, None -> [])
         [
           Text
             (Printf.sprintf

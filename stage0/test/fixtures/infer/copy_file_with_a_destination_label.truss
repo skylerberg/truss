@@ -1,3 +1,0 @@
-fn f() {
-  copy_file(1, destination: 2)
-}

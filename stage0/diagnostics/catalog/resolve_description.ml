@@ -203,7 +203,7 @@ let describe : Resolve.t -> Nodes.description = function
       make Duplicate_definition
         (match name with Some name -> Build.at name | None -> Before Definition)
         (say
-           (Printf.sprintf "%s is already defined in %s, so this definition is never used."
+           (Printf.sprintf "`%s` is already defined in %s, so this definition is never used."
               (Path.show path)
               (match first with Some file -> Path.show_file file | None -> "this file")))
   | Module_name_clash { name; written; submodule; module_ } ->

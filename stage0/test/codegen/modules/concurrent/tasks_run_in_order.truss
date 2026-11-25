@@ -1,0 +1,268 @@
+
+type InOrder(opened: UInt64, cancelled: List[UInt64])
+
+fn InOrder.is_cancelled(self, task_group: UInt64) -> Bool {
+  for other in self.cancelled {
+    if other == task_group {
+      return true
+    }
+  }
+  false
+}
+
+impl Tasks for InOrder {
+  fn open(mut self) -> UInt64 {
+    self.opened += 1
+    self.opened
+  }
+
+  fn spawn(self, task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool {
+    if self.is_cancelled(task_group) {
+      return false
+    }
+    work(item)
+    true
+  }
+
+  fn join(self, task_group: UInt64) {}
+
+  fn cancel(mut self, task_group: UInt64) -> Bool {
+    if self.is_cancelled(task_group) {
+      return false
+    }
+    mut self.cancelled.push(task_group)
+    true
+  }
+
+  fn cancelled(self) -> Bool {
+    false
+  }
+
+  fn watch(self, key: UInt64) -> UInt64 {
+    0
+  }
+
+  fn wait(self, key: UInt64, ticket: UInt64, reason: String) {}
+
+  fn wake(self, key: UInt64) {}
+
+  fn lock(self, mutex: UInt64) {}
+
+  fn unlock(self, mutex: UInt64) {}
+
+  fn yield_now(self) {}
+}
+
+type Bag(items: List[String])
+
+impl Iterable for Bag {
+  type Element = String
+
+  fn count(self) -> UInt64 {
+    self.items.count()
+  }
+
+  fn element(self, position: UInt64) lends String {
+    self.items[position]
+  }
+}
+
+fn total_length(words: List[String]) -> UInt64
+  uses Tasks
+{
+  concurrent for word in words {
+    if word.length() > 100 {
+      return word.length()
+    }
+  }
+  var total: UInt64 = 0
+  for word in words {
+    total += word.length()
+  }
+  total
+}
+
+fn first_longer(bag: Bag, limit: UInt64) -> String
+  uses Tasks
+{
+  concurrent for word in bag {
+    if word.length() > limit {
+      return word.copy()
+    }
+  }
+  "none"
+}
+
+test "every element is still owned by the list after the loop" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  let length = provide mut tasks {
+    total_length(["a${1}", "bc${2}", "def${3}"])
+  }
+  assert length == 9
+}
+
+test "a task that returns ends the loop, and later elements are not spawned" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  let bag = Bag(items: ["a${1}", "abcdef${2}", "abc${3}", "abcdefgh${4}"])
+  let present = provide mut tasks {
+    first_longer(bag, limit: 4)
+  }
+  assert present == "abcdef2"
+  assert bag.items.length() == 4
+  assert bag.items[3] == "abcdefgh4"
+}
+
+test "no task returns" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  let bag = Bag(items: ["a${1}", "ab${2}"])
+  let present = provide mut tasks {
+    first_longer(bag, limit: 9)
+  }
+  assert present == "none"
+}
+
+type Counter(count: Int64)
+
+type Labels(index: Int64, count: Int64)
+
+impl Cursor for Labels {
+  type Element = String
+
+  fn next(mut self) -> Option[String] {
+    if self.index >= self.count {
+      return None
+    }
+    self.index += 1
+    Some("label ${self.index - 1}")
+  }
+}
+
+fn Counter.labels(self) -> Labels {
+  Labels(index: 0, count: self.count)
+}
+
+impl Cursor for Counter {
+  type Element = Int64
+
+  fn next(mut self) -> Option[Int64] {
+    if self.count <= 0 {
+      return None
+    }
+    self.count -= 1
+    Some(self.count + 1)
+  }
+}
+
+fn label_lengths(counter: Counter, stop: Int64) -> UInt64
+  uses Tasks, RunForever
+{
+  concurrent for label in counter.labels() {
+    if label == "label ${stop}" {
+      return label.length()
+    }
+  }
+  0
+}
+
+fn sum_steps(counter: mut Counter) -> Int64
+  uses Tasks, Tally, RunForever
+{
+  concurrent for step in mut counter {
+    Tally.add(step)
+  }
+  Tally.total()
+}
+
+capability Tally {
+  fn add(amount: Int64)
+  fn total() -> Int64
+}
+
+type Sum(total: Int64)
+
+impl Tally for Sum {
+  fn add(mut self, amount: Int64) {
+    self.total += amount
+  }
+
+  fn total(self) -> Int64 {
+    self.total
+  }
+}
+
+test "a computed value is dropped by its task or by the loop" uses RunForever {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  provide mut tasks {
+    assert label_lengths(Counter(count: 4), stop: 2) == 7
+    assert label_lengths(Counter(count: 3), stop: 9) == 0
+  }
+}
+
+test "a plain value pulled from a cursor in a mut parameter is copied" uses RunForever {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  var sum = Sum(total: 0)
+  var counter = Counter(count: 4)
+  let total = provide mut tasks, mut sum {
+    sum_steps(mut counter)
+  }
+  assert total == 10
+  assert counter.count == 0
+}
+
+fn longest(words: own List[String], limit: UInt64) -> String
+  uses Tasks
+{
+  concurrent for word in own words {
+    if word.length() > limit {
+      return own word
+    }
+  }
+  "none"
+}
+
+test "a task returns the item it was given" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  let present = provide mut tasks {
+    longest(["a", "abcdef", "abc", "abcdefgh"], limit: 4)
+  }
+  assert present == "abcdef"
+}
+
+test "every item is taken when no task leaves" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  let present = provide mut tasks {
+    longest(["a", "ab", "abc"], limit: 4)
+  }
+  assert present == "none"
+}
+
+fn nested(count: Int64, wanted: Int64) -> List[String]
+  uses Tasks
+{
+  concurrent for index in 0..count {
+    concurrent {
+      let beside = "beside ${index}"
+      if index == wanted {
+        return ["item ${index}", "found"]
+      }
+    }
+    if beside.length() == 0 {
+      return []
+    }
+  }
+  []
+}
+
+test "the list is the function's result" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  let present = provide mut tasks {
+    nested(4, wanted: 2)
+  }
+  assert present.length() == 2
+  assert present[0] == "item 2"
+  var again = InOrder(opened: 0, cancelled: [])
+  let none = provide mut again {
+    nested(2, wanted: 7)
+  }
+  assert none.length() == 0
+}

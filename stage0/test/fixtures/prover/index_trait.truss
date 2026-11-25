@@ -1,9 +1,0 @@
-public trait Index {
-  type Key
-  type Output
-
-  fn contains_key(self, key: Self.Key) -> Bool
-
-  fn at(self, key: Self.Key) lends Self.Output
-    requires self.contains_key(key)
-}

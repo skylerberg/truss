@@ -1,5 +1,0 @@
-type Name(text: String)
-
-fn f(name: Name) -> List[Name] {
-  [name.copy()]
-}

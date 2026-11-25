@@ -1,6 +1,7 @@
 type mutation = Catalog.Inference.mutation = Assignment | Passed_mut
 
 val mutate : State.state -> State.env -> by:mutation -> Syntax.expression -> unit
+val is_mutable : State.state -> State.env -> Syntax.expression -> bool
 val find_lent_field_mode : State.state -> Syntax.expression -> Types.ty -> Language.Mode.t option
 
 val check_mode :

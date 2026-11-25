@@ -12,8 +12,8 @@ val expect_recovered_definitions : ?codes:string list -> string -> string list -
 val expect_recovered_statements : ?codes:string list -> string -> string list -> unit
 
 val expect_error :
-  ?fixed:string ->
-  ?alternatives:string list ->
+  ?fixed:string * string ->
+  ?alternatives:(string * string) list ->
   ?occurrence:int ->
   string ->
   code:Diagnostic.Code.parser ->
@@ -21,8 +21,8 @@ val expect_error :
   unit
 
 val expect_body_error :
-  ?fixed:string ->
-  ?alternatives:string list ->
+  ?fixed:string * string ->
+  ?alternatives:(string * string) list ->
   ?occurrence:int ->
   string ->
   code:Diagnostic.Code.parser ->

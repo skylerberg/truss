@@ -63,14 +63,15 @@ let list_interpolation_tokens text index =
   | Some literal -> show_tokens (Token.list_interpolations literal).(index).tokens
   | None -> []
 
-let expect_error ?fixed ?(alternatives = []) ?occurrence text ~code ~at =
-  Support.expect_error
+let expect_error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
+  Support.expect_diagnostic
     ~list_diagnostics:(fun text -> snd (lex text))
-    ?fixed ~alternatives ?occurrence text ~code:(Lexer code) ~at;
+    ?fixed ~alternatives ~at:(at, occurrence) text
+    (Diagnostic.Code.name (Lexer code));
   match (fixed, alternatives) with
   | Some fixed, [] ->
       let recovered = list_recovered_tokens text in
-      if list_recovered_tokens fixed <> recovered then
+      if list_recovered_tokens (Support.apply_edit text fixed) <> recovered then
         Harness.fail "%S recovers as [%s], which no fix writes" text (String.concat "; " recovered)
   | _ -> ()
 
@@ -98,7 +99,8 @@ let () =
   Harness.test "a byte order mark at the start is skipped" (fun () ->
       expect_tokens "\xEF\xBB\xBFx" [ "x"; "NL" ]);
   Harness.test "a byte order mark elsewhere is forbidden" (fun () ->
-      expect_error "a \xEF\xBB\xBF b" ~code:Forbidden_character ~at:"\xEF" ~fixed:"a b");
+      expect_error "a \xEF\xBB\xBF b" ~code:Forbidden_character ~at:"\xEF"
+        ~fixed:("a \xEF\xBB\xBF b", "a b"));
   Harness.test "the first line starts after a byte order mark" (fun () ->
       let source = Source.create ~path:"test.truss" "\xEF\xBB\xBFab\ncd" in
       let show_offset offset =
@@ -126,16 +128,19 @@ let () =
   Harness.test "a carriage return and line feed is one line break" (fun () ->
       expect_tokens "a\r\nb\r\n" [ "a"; "NL"; "b"; "NL" ]);
   Harness.test "a carriage return on its own is an error and a line break" (fun () ->
-      expect_error "a\rb" ~code:Carriage_return ~at:"\r" ~fixed:"a\nb";
+      expect_error "a\rb" ~code:Carriage_return ~at:"\r" ~fixed:("a\x0db", "a\nb");
       expect_equal_lists Fun.id "tokens" [ "a"; "NL"; "b"; "NL" ] (list_tokens "a\rb"));
   Harness.test "a forbidden character in code is deleted" (fun () ->
-      expect_error "let b\xE2\x80\x8B = 1" ~code:Forbidden_character ~at:"\xE2" ~fixed:"let b = 1");
+      expect_error "let b\xE2\x80\x8B = 1" ~code:Forbidden_character ~at:"\xE2"
+        ~fixed:("b\xE2\x80\x8B", "b"));
   Harness.test "a forbidden character at the end of the text is deleted" (fun () ->
-      expect_error "let b = 1\xE2\x80\x8B" ~code:Forbidden_character ~at:"\xE2" ~fixed:"let b = 1");
+      expect_error "let b = 1\xE2\x80\x8B" ~code:Forbidden_character ~at:"\xE2"
+        ~fixed:("1\xE2\x80\x8B", "1"));
   Harness.test "a forbidden character between names becomes a space" (fun () ->
-      expect_error "a\x01b" ~code:Forbidden_character ~at:"\x01" ~fixed:"a b");
+      expect_error "a\x01b" ~code:Forbidden_character ~at:"\x01" ~fixed:("a\x01b", "a b"));
   Harness.test "a forbidden character in a string becomes an escape" (fun () ->
-      expect_error "\"\xE2\x80\xAE\"" ~code:Forbidden_character ~at:"\xE2" ~fixed:"\"\\u{202E}\"";
+      expect_error "\"\xE2\x80\xAE\"" ~code:Forbidden_character ~at:"\xE2"
+        ~fixed:("\xE2\x80\xAE", "\\u{202E}");
       expect_equal_lists Fun.id "tokens" (list_tokens "\"\\u{202E}\"")
         (list_tokens "\"\xE2\x80\xAE\""));
   Harness.test "a forbidden character in a raw string has no fix" (fun () ->
@@ -161,17 +166,18 @@ let () =
       expect_tokens "fn Self self loop result time O _"
         [ "fn"; "Self"; "self"; "reserved loop"; "result"; "time"; "O"; "_"; "NL" ]);
   Harness.test "userName is lower_snake_case" (fun () ->
-      expect_error "userName" ~code:Name_case ~at:"userName" ~fixed:"user_name");
+      expect_error "userName" ~code:Name_case ~at:"userName" ~fixed:("userName", "user_name"));
   Harness.test "an acronym in a name" (fun () ->
-      expect_error "parseHTTPResponse" ~code:Name_case ~at:"parse" ~fixed:"parse_http_response");
+      expect_error "parseHTTPResponse" ~code:Name_case ~at:"parse"
+        ~fixed:("parseHTTPResponse", "parse_http_response"));
   Harness.test "MAX_SIZE is a constant from another language" (fun () ->
-      expect_error "MAX_SIZE" ~code:Name_case ~at:"MAX" ~fixed:"max_size");
+      expect_error "MAX_SIZE" ~code:Name_case ~at:"MAX" ~fixed:("MAX_SIZE", "max_size"));
   Harness.test "Http_Client is UpperCamelCase" (fun () ->
-      expect_error "Http_Client" ~code:Name_case ~at:"Http" ~fixed:"HttpClient");
+      expect_error "Http_Client" ~code:Name_case ~at:"Http" ~fixed:("Http_Client", "HttpClient"));
   Harness.test "underscores at the ends and doubled" (fun () ->
-      expect_error "count_" ~code:Name_case ~at:"count" ~fixed:"count";
-      expect_error "user__name" ~code:Name_case ~at:"user" ~fixed:"user_name";
-      expect_error "_unused" ~code:Name_case ~at:"_" ~fixed:"unused");
+      expect_error "count_" ~code:Name_case ~at:"count" ~fixed:("count_", "count");
+      expect_error "user__name" ~code:Name_case ~at:"user" ~fixed:("user__name", "user_name");
+      expect_error "_unused" ~code:Name_case ~at:"_" ~fixed:("_unused", "unused"));
   Harness.test "no fix that would make a keyword" (fun () ->
       expect_error "_type" ~code:Name_case ~at:"_");
   Harness.test "no fix that would make a name a string's prefix or tag" (fun () ->
@@ -221,20 +227,20 @@ let () =
       expect_equal_lists Fun.id "tokens" [ "3e0"; "NL" ] (list_tokens "3f");
       expect_equal_lists Fun.id "tokens" [ "5e0"; "NL" ] (list_tokens "5d"));
   Harness.test "prefixes and exponents are lowercase" (fun () ->
-      expect_error "0X1F" ~code:Number_uppercase_prefix ~at:"0X" ~fixed:"0x1F";
-      expect_error "1E9" ~code:Number_uppercase_exponent ~at:"E" ~fixed:"1e9");
+      expect_error "0X1F" ~code:Number_uppercase_prefix ~at:"0X" ~fixed:("0X1F", "0x1F");
+      expect_error "1E9" ~code:Number_uppercase_exponent ~at:"E" ~fixed:("1E9", "1e9"));
   Harness.test "underscores go between digits" (fun () ->
-      expect_error "1__000" ~code:Number_underscore ~at:"_" ~fixed:"1_000";
-      expect_error "0x_FF" ~code:Number_underscore ~at:"_" ~fixed:"0xFF");
+      expect_error "1__000" ~code:Number_underscore ~at:"_" ~fixed:("1__000", "1_000");
+      expect_error "0x_FF" ~code:Number_underscore ~at:"_" ~fixed:("0x_FF", "0xFF"));
   Harness.test "one fix corrects every problem in a literal" (fun () ->
-      expect_error "1__0__0" ~code:Number_underscore ~at:"_" ~fixed:"1_0_0");
+      expect_error "1__0__0" ~code:Number_underscore ~at:"_" ~fixed:("1__0__0", "1_0_0"));
   Harness.test "a form of another language with another problem has no fix" (fun () ->
       expect_error "0X_FF" ~code:Number_uppercase_prefix ~at:"0X");
   Harness.test "a leading zero" (fun () ->
-      expect_error "0755" ~code:Number_leading_zero ~at:"0755" ~fixed:"0o755"
-        ~alternatives:[ "755" ];
-      expect_error "09" ~code:Number_leading_zero ~at:"09" ~fixed:"9";
-      expect_error "00.5" ~code:Number_leading_zero ~at:"00" ~fixed:"0.5");
+      expect_error "0755" ~code:Number_leading_zero ~at:"0755" ~fixed:("0755", "0o755")
+        ~alternatives:[ ("0755", "755") ];
+      expect_error "09" ~code:Number_leading_zero ~at:"09" ~fixed:("09", "9");
+      expect_error "00.5" ~code:Number_leading_zero ~at:"00" ~fixed:("00.5", "0.5"));
   Harness.test "errors without a fix" (fun () ->
       expect_error "0b102" ~code:Number_invalid_digit ~at:"2";
       expect_error "0o8" ~code:Number_invalid_digit ~at:"8";
@@ -263,12 +269,12 @@ let () =
       expect_tokens {|return"x"|} [ "return"; {|"x"|}; "NL" ]);
   Harness.test "an unterminated string closes at the end of its line" (fun () ->
       expect_error "\"never closed\nx" ~code:Unterminated_string ~at:"\""
-        ~fixed:"\"never closed\"\nx");
+        ~fixed:("\"never closed", "\"never closed\""));
   Harness.test "escapes that do not exist" (fun () ->
       expect_error {|"\q"|} ~code:Invalid_escape ~at:"\\";
       expect_error {|"\u{D800}"|} ~code:Invalid_escape ~at:"\\");
   Harness.test "an empty interpolation" (fun () ->
-      expect_error {|"a${}b"|} ~code:Empty_interpolation ~at:"$" ~fixed:{|"ab"|});
+      expect_error {|"a${}b"|} ~code:Empty_interpolation ~at:"$" ~fixed:("\"a${}b\"", "\"ab\""));
   Harness.test "a line break ends an interpolation and its string" (fun () ->
       expect_error "\"${a\nlet b = 1" ~code:Line_break_in_interpolation ~at:"$";
       expect_equal_lists Fun.id "tokens"
@@ -283,24 +289,26 @@ let () =
         [ "lexer.interpolation_too_deep" ]
         (list_codes (make_nested 33)));
   Harness.test "a character literal becomes a tagged string" (fun () ->
-      expect_error "'a'" ~code:Character_literal ~at:"'" ~fixed:{|Character"a"|};
-      expect_error {|'\n'|} ~code:Character_literal ~at:"'" ~fixed:{|Character"\n"|};
-      expect_error {|'"'|} ~code:Character_literal ~at:"'" ~fixed:{|Character"\""|});
+      expect_error "'a'" ~code:Character_literal ~at:"'" ~fixed:("'a'", "Character\"a\"");
+      expect_error {|'\n'|} ~code:Character_literal ~at:"'" ~fixed:("'\\n'", "Character\"\\n\"");
+      expect_error {|'"'|} ~code:Character_literal ~at:"'" ~fixed:("'\"'", "Character\"\\\"\""));
   Harness.test "an escape of another language becomes a code point" (fun () ->
-      expect_error {|"\x41"|} ~code:Invalid_escape ~at:"\\" ~fixed:{|"\u{41}"|};
-      expect_error {|"\u00E9"|} ~code:Invalid_escape ~at:"\\" ~fixed:{|"\u{E9}"|};
-      expect_error {|"\U0001F600"|} ~code:Invalid_escape ~at:"\\" ~fixed:{|"\u{1F600}"|};
-      expect_error {|"\a"|} ~code:Invalid_escape ~at:"\\" ~fixed:{|"\u{7}"|});
+      expect_error {|"\x41"|} ~code:Invalid_escape ~at:"\\" ~fixed:("x41", "u{41}");
+      expect_error {|"\u00E9"|} ~code:Invalid_escape ~at:"\\" ~fixed:("u00E9", "u{E9}");
+      expect_error {|"\U0001F600"|} ~code:Invalid_escape ~at:"\\" ~fixed:("U0001F600", "u{1F600}");
+      expect_error {|"\a"|} ~code:Invalid_escape ~at:"\\" ~fixed:("\"\\a\"", "\"\\u{7}\""));
   Harness.test "an escape of another language gives the string its character" (fun () ->
       expect_equal_lists Fun.id "tokens" [ {|"A\x1Bé"|}; "NL" ] (list_tokens {|"\x41\e\u00E9"|}));
   Harness.test "an escaped single quote needs no escape" (fun () ->
-      expect_error {|"it\'s"|} ~code:Invalid_escape ~at:"\\" ~fixed:{|"it's"|});
+      expect_error {|"it\'s"|} ~code:Invalid_escape ~at:"\\" ~fixed:("\"it\\'s\"", "\"it's\""));
   Harness.test "a surrogate written with four digits has no fix" (fun () ->
       expect_error {|"\uD800"|} ~code:Invalid_escape ~at:"\\");
   Harness.test "an f-string becomes an ordinary string" (fun () ->
-      expect_error {|f"Hello {name}"|} ~code:String_prefix ~at:"f" ~fixed:{|"Hello ${name}"|};
-      expect_error {|f"{{{user.name}}}"|} ~code:String_prefix ~at:"f" ~fixed:{|"{${user.name}}"|};
-      expect_error {|f""|} ~code:String_prefix ~at:"f" ~fixed:{|""|});
+      expect_error {|f"Hello {name}"|} ~code:String_prefix ~at:"f"
+        ~fixed:("f\"Hello {name}\"", "\"Hello ${name}\"");
+      expect_error {|f"{{{user.name}}}"|} ~code:String_prefix ~at:"f"
+        ~fixed:("f\"{{{user.name}}}\"", "\"{${user.name}}\"");
+      expect_error {|f""|} ~code:String_prefix ~at:"f" ~fixed:("f\"\"", "\"\""));
   Harness.test "an f-string with a format specification has no fix" (fun () ->
       expect_error {|f"{value:.2f}"|} ~code:String_prefix ~at:"f";
       expect_error {|f"{}"|} ~code:String_prefix ~at:"f");
@@ -308,19 +316,22 @@ let () =
       expect_equal_lists Fun.id "tokens" [ "x"; "="; {|"a ${}"|}; "NL" ]
         (list_tokens {|x = f"a {b}"|}));
   Harness.test "an r-string becomes a raw string" (fun () ->
-      expect_error {|r"\d+"|} ~code:String_prefix ~at:"r" ~fixed:{|"""\d+"""|};
+      expect_error {|r"\d+"|} ~code:String_prefix ~at:"r" ~fixed:("r\"\\d+\"", "\"\"\"\\d+\"\"\"");
       expect_equal_lists Fun.id "tokens" [ {|"\\d+"|}; "NL" ] (list_tokens {|r"\d+"|}));
   Harness.test "a byte string has no fix" (fun () ->
       expect_error {|b"abc"|} ~code:String_prefix ~at:"b";
       expect_equal_lists Fun.id "tokens" [ {|"abc"|}; "NL" ] (list_tokens {|b"abc"|}));
   Harness.test "a byte literal becomes a tagged string" (fun () ->
-      expect_error "b'a'" ~code:Character_literal ~at:"b" ~fixed:{|UInt8"a"|});
+      expect_error "b'a'" ~code:Character_literal ~at:"b" ~fixed:("b'a'", "UInt8\"a\""));
   Harness.test "a name before a string that is not a prefix is a name" (fun () ->
       expect_equal_lists Fun.id "tokens" [ "g"; {|"a"|}; "NL" ] (list_tokens {|g"a"|}));
   Harness.test "a Rust raw string with hashes becomes a raw string" (fun () ->
-      expect_error {|r#"\d+"#|} ~code:String_prefix ~at:"r" ~fixed:{|"""\d+"""|};
-      expect_error {|r##"say "hi" now"##|} ~code:String_prefix ~at:"r" ~fixed:{|"""say "hi" now"""|};
-      expect_error {|r#"a"""b"#|} ~code:String_prefix ~at:"r" ~fixed:{|""""a"""b""""|};
+      expect_error {|r#"\d+"#|} ~code:String_prefix ~at:"r"
+        ~fixed:("r#\"\\d+\"#", "\"\"\"\\d+\"\"\"");
+      expect_error {|r##"say "hi" now"##|} ~code:String_prefix ~at:"r"
+        ~fixed:("r##\"say \"hi\" now\"##", "\"\"\"say \"hi\" now\"\"\"");
+      expect_error {|r#"a"""b"#|} ~code:String_prefix ~at:"r"
+        ~fixed:("r#\"a\"\"\"b\"#", "\"\"\"\"a\"\"\"b\"\"\"\"");
       expect_equal_lists Fun.id "tokens" [ {|"say \"hi\" now"|}; "NL" ]
         (list_tokens {|r#"say "hi" now"#|}));
   Harness.test "a Rust raw string whose fix would interpolate has no fix" (fun () ->
@@ -328,7 +339,8 @@ let () =
   Harness.test "a Rust raw string that starts with a quote has no fix" (fun () ->
       expect_error {|r#""a"#|} ~code:String_prefix ~at:"r");
   Harness.test "a Rust raw string outside ASCII becomes a raw string" (fun () ->
-      expect_error "r#\"caf\u{E9}\"#" ~code:String_prefix ~at:"r" ~fixed:"\"\"\"caf\u{E9}\"\"\"");
+      expect_error "r#\"caf\u{E9}\"#" ~code:String_prefix ~at:"r"
+        ~fixed:("r#\"caf\u{E9}\"#", "\"\"\"caf\u{E9}\"\"\""));
   Harness.test "a Rust raw string that ends with a quote has no fix" (fun () ->
       expect_error {|r#"say "hi""#|} ~code:String_prefix ~at:"r");
   Harness.test "a Rust raw string reports invalid UTF-8 in its text, as its fix would" (fun () ->
@@ -344,23 +356,28 @@ let () =
         (list_codes "r#\"a\xE2\x80\xAEb\"#"));
   Harness.test "a Python string with three quotes loses its prefix" (fun () ->
       expect_error "f\"\"\"\n  Hello {name}\n  \"\"\"" ~code:String_prefix ~at:"f"
-        ~fixed:"\"\"\"\n  Hello ${name}\n  \"\"\"";
-      expect_error {|r"""\d+"""|} ~code:String_prefix ~at:"r" ~fixed:{|"""\d+"""|});
+        ~fixed:("f\"\"\"\n  Hello {name}", "\"\"\"\n  Hello ${name}");
+      expect_error {|r"""\d+"""|} ~code:String_prefix ~at:"r"
+        ~fixed:("r\"\"\"\\d+\"\"\"", "\"\"\"\\d+\"\"\""));
   Harness.test "a Python string with three quotes and a backslash has no fix" (fun () ->
       expect_error "f\"\"\"\n  a\\nb\n  \"\"\"" ~code:String_prefix ~at:"f");
   Harness.test "a C# verbatim string with a doubled quote has no fix" (fun () ->
       expect_equal_lists Fun.id "fixed" [] (list_fixed_texts {|@"a""b"|} ~code:String_prefix));
   Harness.test "a C# string becomes a Truss string" (fun () ->
-      expect_error {|$"Hello {name}"|} ~code:String_prefix ~at:"$" ~fixed:{|"Hello ${name}"|};
-      expect_error {|@"C:\logs"|} ~code:String_prefix ~at:"@" ~fixed:{|"""C:\logs"""|};
+      expect_error {|$"Hello {name}"|} ~code:String_prefix ~at:"$"
+        ~fixed:("$\"Hello {name}\"", "\"Hello ${name}\"");
+      expect_error {|@"C:\logs"|} ~code:String_prefix ~at:"@"
+        ~fixed:("@\"C:\\logs\"", "\"\"\"C:\\logs\"\"\"");
       expect_error {|Path$"{name}"|} ~code:String_prefix ~at:"$");
   Harness.test "a template literal becomes an ordinary string" (fun () ->
-      expect_error "`Hello ${name}`" ~code:String_delimiter ~at:"`" ~fixed:{|"Hello ${name}"|};
-      expect_error "`say \"hi\"`" ~code:String_delimiter ~at:"`" ~fixed:{|"say \"hi\""|};
+      expect_error "`Hello ${name}`" ~code:String_delimiter ~at:"`"
+        ~fixed:("`Hello ${name}`", "\"Hello ${name}\"");
+      expect_error "`say \"hi\"`" ~code:String_delimiter ~at:"`"
+        ~fixed:("`say \"hi\"`", "\"say \\\"hi\\\"\"");
       expect_equal_lists Fun.id "tokens" [ {|"Hello ${}"|}; "NL" ] (list_tokens "`Hello ${name}`"));
   Harness.test "a string between single quotes becomes an ordinary string" (fun () ->
-      expect_error "'abc'" ~code:String_delimiter ~at:"'" ~fixed:{|"abc"|};
-      expect_error "''" ~code:String_delimiter ~at:"'" ~fixed:{|""|};
+      expect_error "'abc'" ~code:String_delimiter ~at:"'" ~fixed:("'abc'", "\"abc\"");
+      expect_error "''" ~code:String_delimiter ~at:"'" ~fixed:("''", "\"\"");
       expect_equal_lists Fun.id "fixed"
         [ {|print("say \"hi\"", 'x y')|}; {|print('say "hi"', "x y")|} ]
         (list_fixed_texts {|print('say "hi"', 'x y')|} ~code:String_delimiter));
@@ -371,16 +388,16 @@ let () =
         (list_codes "f<'a>(x: &'a str)"));
   Harness.test "Swift's interpolation becomes ${...}" (fun () ->
       expect_error {|"Hello \(user.name)"|} ~code:Invalid_escape ~at:"\\"
-        ~fixed:{|"Hello ${user.name}"|});
+        ~fixed:("\\(user.name)", "${user.name}"));
   Harness.test "curly quotes around text that a string reads differently have no fix" (fun () ->
       expect_error "\u{201C}a\\nb\u{201D}" ~code:Confusable_character ~at:"\u{201C}";
       expect_error "\u{201C}a${b}\u{201D}" ~code:Confusable_character ~at:"\u{201C}";
       expect_error "\u{201C}say \"hi\"\u{201D}" ~code:Confusable_character ~at:"\u{201C}");
   Harness.test "curly quotes become straight quotes" (fun () ->
       expect_error "\u{201C}text\u{201D}" ~code:Confusable_character ~at:"\u{201C}"
-        ~fixed:{|"text"|};
+        ~fixed:("“text”", "\"text\"");
       expect_error "\u{2018}text\u{2019}" ~code:Confusable_character ~at:"\u{2018}"
-        ~fixed:{|"text"|};
+        ~fixed:("‘text’", "\"text\"");
       expect_equal_lists Fun.id "tokens" [ {|"text"|}; "NL" ] (list_tokens "\u{201C}text\u{201D}"));
   Harness.test "quotes touching a name are not a character literal" (fun () ->
       expect_equal_lists Fun.id "codes"
@@ -411,18 +428,18 @@ let () =
       expect_error
         (join_lines [ {|"""|}; {|  text"""|} ])
         ~code:Raw_string_closing_not_alone ~at:{|"""|} ~occurrence:2
-        ~fixed:(join_lines [ {|"""|}; "  text"; {|  """|} ]));
+        ~fixed:({|text"""|}, "text\n  \"\"\""));
   Harness.test "a line that does not start with the indentation" (fun () ->
       expect_error
         (join_lines [ {|"""|}; "  spaces"; "\ttab"; {|  """|} ])
-        ~code:Raw_string_indentation ~at:"\ttab"
-        ~fixed:(join_lines [ {|"""|}; "  spaces"; "  tab"; {|  """|} ]));
+        ~code:Raw_string_indentation ~at:"\ttab" ~fixed:("\ttab", "  tab"));
   Harness.test "Python's empty triple-quoted string gets a note" (fun () ->
       match snd (lex {|x = """"""|}) with
       | [ { notes = [ (_, note) ]; _ } ] when String.ends_with ~suffix:{|`""`.|} note -> ()
       | _ -> Harness.fail "expected one diagnostic, with a note suggesting an empty string");
   Harness.test "an unterminated one-line raw string closes at the end of its line" (fun () ->
-      expect_error "\"\"\"abc\nx" ~code:Unterminated_string ~at:"\"" ~fixed:"\"\"\"abc\"\"\"\nx");
+      expect_error "\"\"\"abc\nx" ~code:Unterminated_string ~at:"\""
+        ~fixed:("\"\"\"abc", "\"\"\"abc\"\"\""));
   Harness.test "an unterminated multi-line raw string runs to the end of the file" (fun () ->
       let text = join_lines [ "fn f() {"; {|  let s = """|}; "    text"; "}"; "fn g() {}" ] in
       expect_error text ~code:Unterminated_string ~at:{|"""|};
@@ -444,9 +461,9 @@ let () =
   Harness.test "a block comment across lines separates statements" (fun () ->
       expect_equal_lists Fun.id "tokens" [ "a"; "NL"; "b"; "NL" ] (list_tokens "a /* x\n */ b"));
   Harness.test "a semicolon" (fun () ->
-      expect_error "let a = 1;" ~code:Semicolon ~at:";" ~fixed:"let a = 1";
-      expect_error "  a; b" ~code:Semicolon ~at:";" ~fixed:"  a\n  b";
-      expect_error "{ a; }" ~code:Semicolon ~at:";" ~fixed:"{ a }");
+      expect_error "let a = 1;" ~code:Semicolon ~at:";" ~fixed:("let a = 1;", "let a = 1");
+      expect_error "  a; b" ~code:Semicolon ~at:";" ~fixed:("a; b", "a\n  b");
+      expect_error "{ a; }" ~code:Semicolon ~at:";" ~fixed:("{ a; }", "{ a }"));
   Harness.test "a semicolon mid-line separates statements" (fun () ->
       expect_equal_lists Fun.id "tokens" [ "a"; "NL"; "b"; "NL" ] (list_tokens "a; b"));
   Harness.test "a semicolon before a comment ends no statement" (fun () ->
@@ -458,10 +475,10 @@ let () =
       expect_equal_lists Fun.id "codes"
         [ "lexer.unexpected_character"; "lexer.unexpected_character" ]
         (list_codes "don't it's");
-      expect_error "f('ab')" ~code:String_delimiter ~at:"'" ~fixed:{|f("ab")|});
+      expect_error "f('ab')" ~code:String_delimiter ~at:"'" ~fixed:("f('ab')", "f(\"ab\")"));
   Harness.test "strict equality" (fun () ->
-      expect_error "a === b" ~code:Strict_equality ~at:"===" ~fixed:"a == b";
-      expect_error "a !== b" ~code:Strict_equality ~at:"!==" ~fixed:"a != b");
+      expect_error "a === b" ~code:Strict_equality ~at:"===" ~fixed:("a === b", "a == b");
+      expect_error "a !== b" ~code:Strict_equality ~at:"!==" ~fixed:("a !== b", "a != b"));
   Harness.test "a longer run of = is not strict equality" (fun () ->
       expect_tokens "a ==== b" [ "a"; "=="; "=="; "b"; "NL" ]);
   Harness.test "characters Truss does not use" (fun () ->
@@ -486,10 +503,12 @@ let () =
 
 let () =
   Harness.test "a float with no digit on one side of its point" (fun () ->
-      expect_error "x = 1." ~code:Number_missing_digits ~at:"." ~fixed:"x = 1.0";
-      expect_error "x = .5" ~code:Number_missing_digits ~at:"." ~fixed:"x = 0.5";
-      expect_error "f(.5e3, y)" ~code:Number_missing_digits ~at:"." ~fixed:"f(0.5e3, y)";
-      expect_error "return .25" ~code:Number_missing_digits ~at:"." ~fixed:"return 0.25";
+      expect_error "x = 1." ~code:Number_missing_digits ~at:"." ~fixed:("x = 1.", "x = 1.0");
+      expect_error "x = .5" ~code:Number_missing_digits ~at:"." ~fixed:("x = .5", "x = 0.5");
+      expect_error "f(.5e3, y)" ~code:Number_missing_digits ~at:"."
+        ~fixed:("f(.5e3, y)", "f(0.5e3, y)");
+      expect_error "return .25" ~code:Number_missing_digits ~at:"."
+        ~fixed:("return .25", "return 0.25");
       expect_equal_lists Fun.id "tokens" [ "x"; "="; "1e0"; "NL" ] (list_tokens "x = 1."));
   Harness.test "a point after an operand is a member access" (fun () ->
       expect_tokens "1.max(2)" [ "1"; "."; "max"; "("; "2"; ")"; "NL" ];
@@ -498,7 +517,7 @@ let () =
       expect_tokens "pair.5" [ "pair"; "."; "5"; "NL" ];
       expect_tokens "items[0].5" [ "items"; "["; "0"; "]"; "."; "5"; "NL" ]);
   Harness.test "C++'s digit separator becomes an underscore" (fun () ->
-      expect_error "1'000'000" ~code:Number_digit_separator ~at:"'" ~fixed:"1_000_000";
+      expect_error "1'000'000" ~code:Number_digit_separator ~at:"'" ~fixed:("1'000'000", "1_000_000");
       expect_equal_lists Fun.id "tokens" [ "1000000"; "NL" ] (list_tokens "1'000'000"));
   Harness.test "a hexadecimal float has no fix" (fun () ->
       expect_error "0x1p3" ~code:Number_hexadecimal_float ~at:"0";
@@ -511,21 +530,25 @@ let () =
       expect_error "#[derive(Debug)]\ntype Point(x: Int64)" ~code:Attribute ~at:"#";
       expect_error "#![allow(unused)]\nx" ~code:Attribute ~at:"#");
   Harness.test "an operator of another language becomes Truss's" (fun () ->
-      expect_error "a <> b" ~code:Foreign_operator ~at:"<>" ~fixed:"a != b";
-      expect_error "0..<count" ~code:Foreign_operator ~at:"..<" ~fixed:"0..count";
+      expect_error "a <> b" ~code:Foreign_operator ~at:"<>" ~fixed:("a <> b", "a != b");
+      expect_error "0..<count" ~code:Foreign_operator ~at:"..<" ~fixed:("<count", "count");
       expect_equal_lists Fun.id "tokens" [ "a"; "!="; "b"; "NL" ] (list_tokens "a <> b"));
   Harness.test "a path written with `::` becomes a path written with `.`" (fun () ->
-      expect_error "json::parse(text)" ~code:Path_separator ~at:"::" ~fixed:"json.parse(text)";
-      expect_error "Shape::Circle" ~code:Path_separator ~at:"::" ~fixed:"Shape.Circle";
+      expect_error "json::parse(text)" ~code:Path_separator ~at:"::"
+        ~fixed:("json::parse", "json.parse");
+      expect_error "Shape::Circle" ~code:Path_separator ~at:"::"
+        ~fixed:("Shape::Circle", "Shape.Circle");
       expect_equal_lists Fun.id "tokens" [ "json"; "."; "parse"; "NL" ] (list_tokens "json::parse");
       expect_equal_lists Fun.id "tokens"
         [ "parse"; "::"; "<"; "Int64"; ">" ]
         (list_tokens "parse::<Int64>"));
   Harness.test "three dots between operands are either range" (fun () ->
-      expect_error "1...5" ~code:Foreign_operator ~at:"..." ~fixed:"1..5" ~alternatives:[ "1..=5" ];
+      expect_error "1...5" ~code:Foreign_operator ~at:"..." ~fixed:("1...5", "1..5")
+        ~alternatives:[ ("1...5", "1..=5") ];
       expect_equal_lists Fun.id "tokens" [ "a"; "..="; "b"; "NL" ] (list_tokens "a...b"));
   Harness.test "three dots alone are todo" (fun () ->
-      expect_error "fn f() { ... }" ~code:Foreign_operator ~at:"..." ~fixed:"fn f() { todo }";
+      expect_error "fn f() { ... }" ~code:Foreign_operator ~at:"..."
+        ~fixed:("fn f() { ... }", "fn f() { todo }");
       expect_equal_lists Fun.id "tokens" [ "{"; "todo"; "}"; "NL" ] (list_tokens "{ ... }"));
   Harness.test "three dots before an operand have no fix" (fun () ->
       expect_error "f(...items)" ~code:Foreign_operator ~at:"...";
@@ -542,10 +565,12 @@ let () =
       expect_tokens "a |> b" [ "a"; "|>"; "b"; "NL" ];
       expect_tokens "a\n  |> b" [ "a"; "|>"; "b"; "NL" ]);
   Harness.test "a character that looks like punctuation becomes it" (fun () ->
-      expect_error "f\u{FF08}x)" ~code:Confusable_character ~at:"\u{FF08}" ~fixed:"f(x)";
-      expect_error "a \u{2264} b" ~code:Confusable_character ~at:"\u{2264}" ~fixed:"a <= b";
-      expect_error "a\u{00A0}b" ~code:Confusable_character ~at:"\u{00A0}" ~fixed:"a b";
-      expect_error "\u{2200} x" ~code:Confusable_character ~at:"\u{2200}" ~fixed:"forall x";
+      expect_error "f\u{FF08}x)" ~code:Confusable_character ~at:"\u{FF08}" ~fixed:("f（x)", "f(x)");
+      expect_error "a \u{2264} b" ~code:Confusable_character ~at:"\u{2264}"
+        ~fixed:("a ≤ b", "a <= b");
+      expect_error "a\u{00A0}b" ~code:Confusable_character ~at:"\u{00A0}"
+        ~fixed:("a\u{00A0}b", "a b");
+      expect_error "\u{2200} x" ~code:Confusable_character ~at:"\u{2200}" ~fixed:("∀ x", "forall x");
       expect_equal_lists Fun.id "tokens" [ "a"; "<="; "b"; "NL" ] (list_tokens "a \u{2264} b"));
   Harness.test "a string fix right after a string is withheld" (fun () ->
       List.iter
@@ -562,7 +587,7 @@ let () =
   Harness.test "a fix whose code would join a neighbor is withheld" (fun () ->
       expect_error "p\u{2200}x" ~code:Confusable_character ~at:"\u{2200}";
       expect_error "a\u{2013}>b" ~code:Confusable_character ~at:"\u{2013}";
-      expect_error "a\u{2013}b" ~code:Confusable_character ~at:"\u{2013}" ~fixed:"a-b";
+      expect_error "a\u{2013}b" ~code:Confusable_character ~at:"\u{2013}" ~fixed:("a–b", "a-b");
       expect_error "fn.5" ~code:Number_missing_digits ~at:".";
       expect_error "a<>=b" ~code:Foreign_operator ~at:"<>";
       expect_error "a..<.b" ~code:Foreign_operator ~at:"..<";
@@ -594,7 +619,7 @@ let () =
         || lex_kind "100.0" <> lex_kind "1e2"
       then Harness.fail "equal floats lex as different tokens");
   Harness.test "`1.` at the end of a line is a float" (fun () ->
-      expect_error "x = 1.\nmax" ~code:Number_missing_digits ~at:"." ~fixed:"x = 1.0\nmax");
+      expect_error "x = 1.\nmax" ~code:Number_missing_digits ~at:"." ~fixed:("x = 1.", "x = 1.0"));
   Harness.test "`1.` in an interpolation is a float" (fun () ->
       expect_equal_lists Fun.id "tokens"
         (list_interpolation_tokens "\"${1.0}\"" 0)
@@ -657,14 +682,14 @@ let () =
         [ "f"; "("; "1"; ","; "2"; ")"; "NL" ]
         (list_tokens "f(1 ] , 2)"));
   Harness.test "an unclosed bracket inside another" (fun () ->
-      expect_error "f(1, [2)" ~code:Unclosed_bracket ~at:"[" ~fixed:"f(1, [2])";
+      expect_error "f(1, [2)" ~code:Unclosed_bracket ~at:"[" ~fixed:("f(1, [2)", "f(1, [2])");
       expect_equal_lists Fun.id "tokens"
         [ "f"; "("; "1"; ","; "["; "2"; "+]"; ")"; "NL" ]
         (list_tokens "f(1, [2)"));
   Harness.test "the indentation says where a bracket was meant to close" (fun () ->
       expect_error "fn f() {\n  let x = [1, 2\n  g(x)\n}\n" ~code:Unclosed_bracket ~at:"["
-        ~fixed:"fn f() {\n  let x = [1, 2]\n  g(x)\n}\n";
-      expect_error "f(\n  a,\n  b\n" ~code:Unclosed_bracket ~at:"(" ~fixed:"f(\n  a,\n  b)\n");
+        ~fixed:("let x = [1, 2", "let x = [1, 2]");
+      expect_error "f(\n  a,\n  b\n" ~code:Unclosed_bracket ~at:"(" ~fixed:("b", "b)"));
   Harness.test "a closer goes after the last token, not inside a comment that ends the line"
     (fun () ->
       expect_equal_lists Fun.id "fixed" [ "f(a, b) // note\n" ]
@@ -679,17 +704,15 @@ let () =
       expect_equal_lists Fun.id "fixed" [ "f(a, \"b\"\n" ]
         (list_fixed_texts "f(a, \"b\n" ~code:Unterminated_string));
   Harness.test "a missing } goes on a line of its own" (fun () ->
-      expect_error "fn f() {\n  body\n" ~code:Unclosed_bracket ~at:"{"
-        ~fixed:"fn f() {\n  body\n}\n");
+      expect_error "fn f() {\n  body\n" ~code:Unclosed_bracket ~at:"{" ~fixed:("body\n", "body\n}\n"));
   Harness.test "a closer that matches nothing is dropped" (fun () ->
       expect_error "a }" ~code:Unmatched_closing_bracket ~at:"}";
       expect_equal_lists Fun.id "tokens" [ "a"; "NL" ] (list_tokens "a }"));
   Harness.test "a bracket still open at the end of the file" (fun () ->
-      expect_error "let x = (1\n" ~code:Unclosed_bracket ~at:"(" ~fixed:"let x = (1)\n");
+      expect_error "let x = (1\n" ~code:Unclosed_bracket ~at:"(" ~fixed:("let x = (1", "let x = (1)"));
   Harness.test "a definition in column 0 closes open brackets" (fun () ->
       let text = "fn a() {\n  f(1,\nfn b() {}\n" in
-      expect_error text ~code:Unclosed_bracket ~at:"(" ~occurrence:2
-        ~fixed:"fn a() {\n  f(1,)\n}\nfn b() {}\n";
+      expect_error text ~code:Unclosed_bracket ~at:"(" ~occurrence:2 ~fixed:("f(1,", "f(1,)\n}");
       expect_equal_lists Fun.id "tokens"
         [
           "fn";
@@ -855,7 +878,6 @@ let () =
         (snd (lex text)))
 
 let read_document = Parse_support.read_document
-let list_truss_blocks name = Documents.list_truss_blocks (read_document name)
 let list_block_after = Documents.list_block_after
 let list_words = Documents.list_words
 
@@ -913,13 +935,4 @@ let () =
             Harness.fail "can_begin %s" (spell kind))
         (List.map (fun (_, keyword) -> Token.Keyword keyword) Token.For_testing.keywords
         @ List.map (fun (_, punctuation) -> Token.Punctuation punctuation) Token.punctuation
-        @ [ Underscore ]));
-  List.iter
-    (fun name ->
-      List.iteri
-        (fun index text ->
-          Harness.test
-            (Printf.sprintf "%s block %d lexes cleanly" name (index + 1))
-            (fun () -> expect_equal_lists Fun.id "codes" [] (list_codes text)))
-        (list_truss_blocks name))
-    (Harness.list_markdown_documents ())
+        @ [ Underscore ]))

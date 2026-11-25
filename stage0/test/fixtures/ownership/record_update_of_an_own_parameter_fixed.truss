@@ -1,5 +1,0 @@
-type Settings(name: String, retries: Int64)
-
-fn renamed(settings: own Settings) -> Settings {
-  own settings with (name: "renamed")
-}
