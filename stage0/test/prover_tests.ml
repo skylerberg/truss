@@ -2647,6 +2647,8 @@ let () =
 let () =
   Harness.test "a string's characters collect into a list in time linear in its length" (fun () ->
       expect_proven Fixtures.Prover.characters_collected_in_linear_time);
+  Harness.test "a list of views passed `own` or `mut` holds no potential for its elements"
+    (fun () -> expect_proven Fixtures.Prover.list_of_views_passed_on_in_constant_amortized_time);
   Harness.test "a view holds no potential, so returning one costs constant amortized time"
     (fun () -> expect_proven Fixtures.Prover.view_returned_in_constant_amortized_time);
   Harness.test "a finite cursor collects through a bound in its remaining count of nexts" (fun () ->
