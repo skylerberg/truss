@@ -63,6 +63,7 @@ val copy_value :
   ?literal:Language.Literal.t ->
   State.context ->
   State.frame ->
+  declared:Types.ty ->
   Types.ty ->
   Logic.term ->
   State.frame

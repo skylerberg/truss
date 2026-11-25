@@ -597,7 +597,7 @@ let apply_specification_function context frame ~location (measure : Core.specifi
       (frame, Lambdas.apply_callback_ensures context function_type values)
   | _ -> Facts.raise_unsupported location Specification_function
 
-let copy_value ?literal (context : State.context) frame ty term =
+let copy_value ?literal (context : State.context) frame ~declared ty term =
   let literal =
     match (literal, ty) with
     | Some (Language.Literal.Elements _), Types.Named { arguments = [ Types.Type element ]; _ }
@@ -624,7 +624,8 @@ let copy_value ?literal (context : State.context) frame ty term =
         (fun ({ element; model_of; _ } : State.buffer) ->
           let per_element =
             if
-              Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.bounds element
+              Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.bounds
+                (Amounts.find_declared_element declared ~erased:element)
             then Costs.least_amount (Metric metric)
             else declare_copy_cost_of metric element
           in
@@ -638,7 +639,7 @@ let copy_value ?literal (context : State.context) frame ty term =
         | _, Metric Time, Units ->
             let time = match literal with Some _ -> Costs.zero | None -> declare_copy_cost Time in
             let copy_potential =
-              try Amounts.compute_potential context frame ty term
+              try Amounts.compute_potential context frame declared term
               with Facts.Unsupported _ -> Costs.zero
             in
             Costs.minus (Costs.plus time (Logic.int 1)) copy_potential

@@ -48,7 +48,7 @@ type frame = {
   lends : (Logic.term * (frame -> Logic.term -> frame)) list Locals.t;
 }
 
-type changed_part = { root : Locals.local; fields : string list }
+type changed_part = { root : Locals.local; declared_root_type : Types.ty; fields : string list }
 type place_value = One of Logic.term | Run of Logic.term * Logic.term
 type noted_place = { origin : Core.origin; value : place_value }
 

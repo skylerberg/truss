@@ -294,7 +294,13 @@ let compute_changes ?(also = []) context run (frame : State.frame) (blocks : Mir
         | Local local ->
             let root = Locals.make_key run.infos local in
             if is_bound root then
-              Some { State.root; fields = Mir.list_leading_fields place.Mir.projections }
+              Some
+                {
+                  State.root;
+                  declared_root_type =
+                    Facts.substitute_declared_type context frame run.infos.(local).type_;
+                  fields = Mir.list_leading_fields place.Mir.projections;
+                }
             else None
         | Constant _ | Literal _ -> None)
       (resolve_aliases frame run place)
@@ -644,7 +650,10 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
         | Borrow { place = { root = Literal { value; _ }; projections = [] }; _ } -> Some value
         | _ -> None
       in
-      (Values.copy_value ?literal context frame ty term, term)
+      ( Values.copy_value ?literal context frame
+          ~declared:(Facts.substitute_declared_type context frame site.type_)
+          ty term,
+        term )
   | Convert { conversion = Widen; value; converts_function_expression } ->
       Operations.check_widened location ~is_written:converts_function_expression
         (compute_operand_type context frame value)

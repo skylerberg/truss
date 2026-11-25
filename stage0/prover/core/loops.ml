@@ -462,13 +462,26 @@ let exit_loop context ~(clause_at : State.frame) (exit_ : State.frame) costs ~it
   in
   { exit_ with spent }
 
+let read_declared_part_type context (part : State.changed_part) =
+  List.fold_left
+    (fun declared field ->
+      match
+        Option.bind (Amounts.list_declared_fields context declared) (List.assoc_opt (None, field))
+      with
+      | Some field_type -> field_type
+      | None ->
+          Facts.raise_bug "a loop changes the field `%s`, which `%s` does not declare" field
+            (Types.show declared))
+    part.declared_root_type part.fields
+
 let measure_held_gains context (entry : State.frame) (changed : State.changed_part list) =
   let held =
     List.filter_map
       (fun part ->
         Option.map
-          (fun (ty, _) ->
-            (ty, fun (at : State.frame) -> Option.map snd (find_changed_part context at part)))
+          (fun _ ->
+            ( read_declared_part_type context part,
+              fun (at : State.frame) -> Option.map snd (find_changed_part context at part) ))
           (find_changed_part context entry part))
       changed
   in
