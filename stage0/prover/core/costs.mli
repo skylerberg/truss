@@ -17,6 +17,8 @@ val at_least_zero : Logic.term -> Logic.term
 val larger : Logic.term -> Logic.term -> Logic.term
 val reduce_constants : Logic.term -> Logic.term
 val units : Logic.term -> Logic.term
+val linearize : Logic.term -> (Logic.term * Z.t) list * Z.t
+val combine : (Logic.term * Z.t) list * Z.t -> Logic.term
 val normalize : Logic.term -> Logic.term
 val since : start:Logic.term -> Logic.term -> Logic.term
 val grows_with : varies:(Logic.term -> bool) -> Logic.term -> bool

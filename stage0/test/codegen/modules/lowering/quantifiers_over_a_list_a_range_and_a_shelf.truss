@@ -37,7 +37,7 @@ fn first_with_a_long(shelves: List[Shelf]) -> Int64 {
   0
 }
 
-test "quantifiers over a list, a slice, and a type with a `count` and an `element` of its own" {
+test "quantifiers over a list, a range, and a type with a `count` and an `element` of its own" {
   assert any_negative([1, -1, 2])
   assert !any_negative([1, 2])
   assert !any_negative([])

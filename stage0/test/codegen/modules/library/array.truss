@@ -104,8 +104,8 @@ test "an array's elements are each given to a function, which makes a new array"
 
 test "an array is searched, joined, and sorted by a comparison" {
   var numbers: Array[Int64, 6] = [4, 1, 5, 2, 6, 3]
-  assert numbers.find_slice([5, 2][..]) == Some(2)
-  assert numbers.find_slice([2, 5][..]) is None
+  assert numbers.find_sublist([5, 2][..]) == Some(2)
+  assert numbers.find_sublist([2, 5][..]) is None
   assert numbers.join("+") == "4+1+5+2+6+3"
   mut numbers.sort_by(fn(first, second) { first.compare(second) })
   assert numbers == [1, 2, 3, 4, 5, 6]

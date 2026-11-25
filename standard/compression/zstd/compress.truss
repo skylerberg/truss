@@ -283,7 +283,7 @@ fn parse_block(input: List[UInt8], start: UInt64, end: UInt64, finder: mut Match
         continue
       }
     }
-    mut literals.append_slice(input[anchor..position])
+    mut literals.append_items(input[anchor..position])
     let literal_length = position - anchor
     let offset_value = if literal_length > 0 && candidate.offset == repeated { 1 } else { candidate.offset.saturating_add(3) }
     repeated = candidate.offset
@@ -300,7 +300,7 @@ fn parse_block(input: List[UInt8], start: UInt64, end: UInt64, finder: mut Match
     anchor = position
   }
   if anchor < end && end <= input.length() {
-    mut literals.append_slice(input[anchor..end])
+    mut literals.append_items(input[anchor..end])
   }
   Parse(sequences: own sequences, literals: own literals, last_offset: repeated)
 }
@@ -335,7 +335,7 @@ fn write_sequence_count(output: mut List[UInt8], count: UInt64) {
 fn compressed_block(parse: Parse, encoders: Encoders) -> Option[List[UInt8]] {
   var block: List[UInt8] = []
   write_literals_header(mut block, size: parse.literals.length())
-  mut block.append_slice(parse.literals)
+  mut block.append_items(parse.literals)
   if parse.literals.length() >= 64 {
     if huffman_literals(parse.literals) is Some(coded) && coded.length() < block.length() {
       block = coded.copy()
@@ -344,7 +344,7 @@ fn compressed_block(parse: Parse, encoders: Encoders) -> Option[List[UInt8]] {
   write_sequence_count(mut block, count: parse.sequences.length())
   if !parse.sequences.is_empty() {
     mut block.push(0)
-    mut block.append_slice(encode_sequences(parse.sequences, encoders: encoders)?)
+    mut block.append_items(encode_sequences(parse.sequences, encoders: encoders)?)
   }
   Some(own block)
 }
@@ -411,12 +411,12 @@ public fn compress(input: List[UInt8]) -> List[UInt8] {
       match block {
         Some(compressed) if compressed.length() < content.length() => {
           write_block_header(mut output, size: compressed.length(), kind: 2, is_last: is_last)
-          mut output.append_slice(compressed)
+          mut output.append_items(compressed)
           last_offset = parse.last_offset
         }
         _ => {
           write_block_header(mut output, size: content.length(), kind: 0, is_last: is_last)
-          mut output.append_slice(content)
+          mut output.append_items(content)
         }
       }
     }
@@ -626,7 +626,7 @@ fn huffman_literals(literals: List[UInt8]) -> Option[List[UInt8]] {
   var section = encoding.description.copy()
   let regenerated = literals.length()
   if regenerated <= 1023 {
-    mut section.append_slice(huffman_stream(literals, codes: encoding.codes)?)
+    mut section.append_items(huffman_stream(literals, codes: encoding.codes)?)
   } else {
     let each = (regenerated + 3) / 4
     let first = huffman_stream(literals[..each], codes: encoding.codes)?
@@ -639,10 +639,10 @@ fn huffman_literals(literals: List[UInt8]) -> Option[List[UInt8]] {
     write_little_endian(mut section, value: first.length(), count: 2)
     write_little_endian(mut section, value: second.length(), count: 2)
     write_little_endian(mut section, value: third.length(), count: 2)
-    mut section.append_slice(first)
-    mut section.append_slice(second)
-    mut section.append_slice(third)
-    mut section.append_slice(fourth)
+    mut section.append_items(first)
+    mut section.append_items(second)
+    mut section.append_items(third)
+    mut section.append_items(fourth)
   }
   let compressed = section.length()
   let format: UInt64 = if regenerated <= 1023 { 0 } else if regenerated <= 16383 && compressed <= 16383 { 2 } else { 3 }
@@ -653,6 +653,6 @@ fn huffman_literals(literals: List[UInt8]) -> Option[List[UInt8]] {
   let header: UInt64 = 2 | (format << 2) | (regenerated << 4) | (compressed << (4 + size_bits))
   var output: List[UInt8] = []
   write_little_endian(mut output, value: header, count: if format == 0 { 3 } else if format == 2 { 4 } else { 5 })
-  mut output.append_slice(section)
+  mut output.append_items(section)
   Some(own output)
 }

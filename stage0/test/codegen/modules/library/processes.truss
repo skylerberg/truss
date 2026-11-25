@@ -44,10 +44,10 @@ fn words_of(command: processes.Command) -> String {
 }
 
 test "a command written as a template splits its text into words and keeps each value whole" {
-  let message: view String = "fix the build"
+  let message = "fix the build"
   let command = processes.Command"git commit  -m ${message} --author=${"me"}"
   assert words_of(command) == "git|commit|-m|fix the build|--author=me"
-  let empty: view String = ""
+  let empty = ""
   let listing = processes.Command" ls ${empty} "
   assert words_of(listing) == "ls|"
   let plain = processes.Command"true"
