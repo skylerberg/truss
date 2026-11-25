@@ -387,7 +387,8 @@ let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?(is_proven_by_evaluat
       match goal with
       | Logic.Boolean _ -> false
       | _ ->
-          (not is_proven_by_evaluation) && frame.binders = []
+          (not is_proven_by_evaluation) && frame.makes_obligations
+          && (not (Logic.mentions frame.bound goal || Logic.mentions frame.bound frame.condition))
           && Fact_list.holds context.facts ~under:frame.condition goal
     in
     if is_held then assume context frame goal
