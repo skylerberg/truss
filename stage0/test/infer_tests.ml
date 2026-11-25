@@ -1381,6 +1381,11 @@ let () =
     (fun () -> expect_fine Fixtures.Infer.lists_written_through_parameters_and_ranges);
   Harness.test "a view implements a trait whose inherited methods take `Self` by `own`" (fun () ->
       expect_fine Fixtures.Infer.views_in_ordered_positions);
+  Harness.test "a place given where a type parameter is undecided makes the type argument a view"
+    (fun () -> expect_fine Fixtures.Infer.views_inferred_for_borrowed_arguments);
+  Harness.test "a value built from a place is no owner where one is returned" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.borrowed_argument_returned_as_an_owner "types.mismatch"
+        ~says:"holds a view where an owned value is expected");
   Harness.test "a view satisfies no bound whose impl writes a method that takes `self` by `own`"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.view_given_to_a_bound_whose_impl_owns_self

@@ -23,7 +23,11 @@ let find_view_copy (state : State.state) (written : Syntax.expression) ~view ~ow
     | Some viewed -> State.unify ~modulo_views:true state viewed owner
     | None -> false
   in
-  if not (is_copyable && is_view_of_owner) then None
+  if not (is_copyable && is_view_of_owner) then
+    let found = State.zonk state view and wanted = State.zonk state owner in
+    if (not (Types.equal found wanted)) && Types.equal (Types.erase_views found) wanted then
+      Some Copy_where_given
+    else None
   else
     let is_postfix (value : Syntax.expression) =
       match value.kind with

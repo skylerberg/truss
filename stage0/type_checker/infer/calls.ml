@@ -137,6 +137,8 @@ and check_argument state env (value : Syntax.expression) (parameter : Types.para
     | Some mode -> { parameter with mode }
     | None -> parameter
   in
+  if parameter.mode = Own then
+    Modes.infer_view_of_borrowed_place state env value ~actual ~expected:parameter.type_;
   Conversions.coerce state env ~argument:parameter.mode value ~actual ~expected:parameter.type_;
   Modes.check_mode state env value parameter actual;
   parameter.mode
