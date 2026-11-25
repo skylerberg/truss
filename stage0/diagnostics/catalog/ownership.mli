@@ -110,4 +110,6 @@ type t =
       parameter : string;
       part : Types.modified;
       last_entry : Core.origin option;
+      replaced_entry : Core.origin option;
+      removed_entries : (Core.origin * Core.origin Description.siblings) list;
     }

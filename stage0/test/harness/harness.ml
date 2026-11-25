@@ -64,18 +64,23 @@ let restore_environment saved =
     (fun (name, value) -> if List.assoc_opt name current <> Some value then Unix.putenv name value)
     saved
 
+let slow_test_seconds = 0.5
+
 let test_always name body =
   incr count;
   let enclosing_test = !current_test in
   current_test := name;
   incr running_depth;
   let environment = read_environment () in
+  let started = Unix.gettimeofday () in
   (match body () with
   | () -> ()
   | exception Test_failed message -> report_failure name message
   | exception exception_ ->
       report_failure name
         (Printf.sprintf "raised %s%s" (Printexc.to_string exception_) (Printexc.get_backtrace ())));
+  let elapsed = Unix.gettimeofday () -. started in
+  if elapsed > slow_test_seconds then Printf.printf "slow: %.2f s: %s\n%!" elapsed name;
   decr running_depth;
   current_test := enclosing_test;
   restore_environment environment
@@ -141,25 +146,11 @@ let write_files root files =
       File_system.write path text)
     files
 
-let rec list_files_under ~suffix directory =
-  Sys.readdir (make_workspace_path directory)
-  |> Array.to_list
-  |> List.concat_map (fun name ->
-      let path = Filename.concat directory name in
-      if Sys.is_directory (make_workspace_path path) then list_files_under ~suffix path
-      else if Filename.check_suffix name suffix then [ path ]
-      else [])
-
 let list_markdown_documents () =
   Sys.readdir (make_workspace_path ".")
   |> Array.to_list
   |> List.filter (fun name -> Filename.check_suffix name ".md")
   |> List.sort compare
-
-let list_truss_files () =
-  List.sort compare
-    (list_files_under ~suffix:".truss" "standard"
-    @ list_files_under ~suffix:".truss" "stage0/test/fixtures")
 
 let expect_string ~expected actual =
   if not (String.equal expected actual) then fail "expected %S, got %S" expected actual

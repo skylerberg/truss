@@ -1,4 +1,0 @@
-let area = match shape {
-  Circle(radius) => radius
-  _ => 0.0
-}

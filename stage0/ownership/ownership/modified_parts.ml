@@ -91,6 +91,18 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
                       interface Types.no_substitution)
                  [ tree.body.code ])
           in
+          let read_written_part (entry : Syntax.expression) =
+            Option.bind (Interface.Elaborator.split_part entry) (fun (root, names, is_elements) ->
+                Option.map
+                  (fun position ->
+                    ( {
+                        Types.position;
+                        field_path = List.map (fun (name : Syntax.name) -> name.text) names;
+                        is_elements;
+                      },
+                      root ))
+                  (Types.find_parameter_position signature root))
+          in
           let reported = ref [] in
           List.iter
             (fun (origin, (part : Types.modified)) ->
@@ -104,6 +116,21 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
                      || List.mem part !reported)
               then begin
                 reported := part :: !reported;
+                let entries = Option.value written_entries ~default:[] in
+                let ranges =
+                  List.map
+                    (fun (entry : Syntax.expression) ->
+                      { Catalog.covering = [ Core.Written entry.id ] })
+                    entries
+                in
+                let contained =
+                  List.filter
+                    (fun (_, entry) ->
+                      match read_written_part entry with
+                      | Some (written, _) -> Types.is_part_within ~container:part written
+                      | None -> false)
+                    (List.mapi (fun index entry -> (index, entry)) entries)
+                in
                 Context.report context
                   (Undeclared_change
                      {
@@ -116,6 +143,18 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
                              Option.map
                                (fun (last : Syntax.expression) -> Core.Written last.id)
                                (List.nth_opt entries (List.length entries - 1)));
+                       replaced_entry =
+                         (match contained with
+                         | (index, _) :: _ -> Some (Core.Written (List.nth entries index).id)
+                         | [] -> None);
+                       removed_entries =
+                         (match contained with
+                         | _ :: rest ->
+                             List.map
+                               (fun (index, (entry : Syntax.expression)) ->
+                                 (Core.Written entry.id, Catalog.read_entry_siblings ranges index))
+                               rest
+                         | [] -> []);
                      })
               end)
             changes;
@@ -129,22 +168,7 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
                        || Types.is_field_path_prefix changed.field_path written.field_path))
                   changes
               in
-              let written_parts =
-                List.map
-                  (fun (entry : Syntax.expression) ->
-                    Option.bind (Interface.Elaborator.split_part entry)
-                      (fun (root, names, is_elements) ->
-                        Option.map
-                          (fun position ->
-                            ( {
-                                Types.position;
-                                field_path = List.map (fun (name : Syntax.name) -> name.text) names;
-                                is_elements;
-                              },
-                              root ))
-                          (Types.find_parameter_position signature root)))
-                  entries
-              in
+              let written_parts = List.map read_written_part entries in
               List.iteri
                 (fun index written_part ->
                   match written_part with

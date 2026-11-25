@@ -18,10 +18,11 @@ let () =
       then Harness.fail "wrong use lines");
   Harness.test "a use line after a definition moves up" (fun () ->
       Parse_support.expect_error "use a.b\n\nfn f() {}\nuse c.d\n" ~code:Use_after_definition
-        ~at:"use c.d" ~fixed:"use a.b\nuse c.d\n\nfn f() {}\n");
+        ~at:"use c.d"
+        ~fixed:("\nfn f() {}\nuse c.d", "use c.d\n\nfn f() {}"));
   Harness.test "a use line after the first definition moves above it" (fun () ->
       Parse_support.expect_error "fn f() {}\nuse c.d\n" ~code:Use_after_definition ~at:"use c.d"
-        ~fixed:"use c.d\nfn f() {}\n");
+        ~fixed:("fn f() {}\nuse c.d", "use c.d\nfn f() {}"));
   Harness.test "a statement at the top level is one error" (fun () ->
       Parse_support.expect_error "fn f() {}\nx = 1\nfn g() {}" ~code:Statement_at_top_level ~at:"x");
   Harness.test "a definition records where its syntax errors are" (fun () ->
@@ -669,7 +670,7 @@ let () =
       Parse_support.expect_body_error "let x = items[1..=]" ~code:Open_range ~at:"..=");
   Harness.test "an open range has no comma after it" (fun () ->
       Parse_support.expect_body_error "let x = items[1..,]" ~code:Open_range ~at:","
-        ~fixed:"let x = items[1..]");
+        ~fixed:("let x = items[1..,]", "let x = items[1..]"));
   Harness.test "a bare name does not end a range pattern" (fun () ->
       Parse_support.expect_body_error "match x {\n  lo..hi => 1\n  _ => 0\n}" ~code:Unexpected_token
         ~at:"lo");
@@ -757,7 +758,7 @@ let () =
   Harness.test "the expression before let ... else cannot end with }" (fun () ->
       Parse_support.expect_body_error "let Some(x) = if ready { a } else { b } else { return }"
         ~code:Let_else_brace ~at:"else { return"
-        ~fixed:"let Some(x) = (if ready { a } else { b }) else { return }");
+        ~fixed:("if ready { a } else { b }", "(if ready { a } else { b })"));
   Harness.test "assignments" (fun () ->
       Parse_support.expect_statements "a = 1\nitems[i] += 2\nflags |= mask"
         [ "(= a 1)"; "(+= ([] items i) 2)"; "(|= flags mask)" ]);

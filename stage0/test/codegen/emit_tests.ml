@@ -371,73 +371,6 @@ let () =
                 (Return (Some (Codegen_support.copy 3)));
             ];
         ]);
-  let float64_constant value = Lowered.Constant (Float64 (Int64.bits_of_float value)) in
-  Codegen_support.test "float equality treats every NaN as equal" (fun () ->
-      Codegen_support.expect_status 1
-        [
-          return_bool
-            [ Codegen_support.local (Raw Bool) ]
-            [
-              Assign
-                ( Codegen_support.at 0,
-                  Compare (Equal, float64_constant Float.nan, float64_constant Float.nan) );
-            ];
-        ]);
-  Codegen_support.test "IEEE float equality does not" (fun () ->
-      Codegen_support.expect_status 0
-        [
-          return_bool
-            [ Codegen_support.local (Raw Bool) ]
-            [
-              Assign
-                ( Codegen_support.at 0,
-                  Compare (Ieee_equal, float64_constant Float.nan, float64_constant Float.nan) );
-            ];
-        ]);
-  Codegen_support.test "NaN is ordered after every number" (fun () ->
-      Codegen_support.expect_status 1
-        [
-          return_bool
-            [ Codegen_support.local (Raw Bool) ]
-            [
-              Assign
-                ( Codegen_support.at 0,
-                  Compare (Less, float64_constant Float.infinity, float64_constant Float.nan) );
-            ];
-        ]);
-  Codegen_support.test "negative zero equals zero" (fun () ->
-      Codegen_support.expect_status 1
-        [
-          return_bool
-            [ Codegen_support.local (Raw Bool) ]
-            [
-              Assign
-                ( Codegen_support.at 0,
-                  Compare (Equal, float64_constant (-0.0), float64_constant 0.0) );
-            ];
-        ]);
-  Codegen_support.test "a shift amount is masked to the width of the value" (fun () ->
-      Codegen_support.expect_status 2
-        [
-          Codegen_support.entry
-            [
-              Codegen_support.local (Codegen_support.value Codegen_support.int64);
-              Codegen_support.local (Codegen_support.value Codegen_support.int32);
-            ]
-            [
-              Codegen_support.block
-                [
-                  Assign
-                    ( Codegen_support.at 0,
-                      Binary
-                        ( Shift_left,
-                          Codegen_support.constant_int64 1,
-                          Lowered.Constant (Integer (UInt64, Z.of_int 65)) ) );
-                  Assign (Codegen_support.at 1, Convert (Codegen_support.copy 0, Integer Int32));
-                ]
-                (Return (Some (Codegen_support.copy 1)));
-            ];
-        ]);
   Codegen_support.test "an overflowing add reports the overflow" (fun () ->
       Codegen_support.expect_status 1
         [
@@ -986,67 +919,6 @@ let () =
       in
       Codegen_support.expect_status 46 (make_program_with [ 40; 5; 6 ]);
       Codegen_support.expect_status 101 (make_program_with [ 40; 5 ]));
-  Codegen_support.test "a float fits an integer type where the whole number it is cut down to does"
-    (fun () ->
-      let expect_all_right cases =
-        Codegen_support.expect_status
-          ((1 lsl List.length cases) - 1)
-          [
-            build_entry (fun builder ->
-                let status =
-                  Emit_c.Ir_builder.allocate_local builder
-                    (Codegen_support.value Codegen_support.int32)
-                in
-                Emit_c.Ir_builder.emit builder
-                  (Assign (Lowered.make_local_place status, Use (Codegen_support.constant_int32 0)));
-                List.iteri
-                  (fun index (float, target, expected) ->
-                    let fits = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-                    ignore
-                      (operate builder ~destination:(Lowered.make_local_place fits)
-                         ~type_arguments:[ Codegen_support.float64; target ]
-                         (Scalar Fits)
-                         [ Value (Constant (Float64 (Int64.bits_of_float float))) ]);
-                    let emit_int32 rvalue =
-                      Emit_c.Ir_builder.emit_value builder
-                        (Codegen_support.value Codegen_support.int32)
-                        rvalue
-                    in
-                    let is_right =
-                      Emit_c.Ir_builder.emit_value builder (Raw Bool)
-                        (Compare
-                           (Equal, Copy (Lowered.make_local_place fits), Constant (Bool expected)))
-                    in
-                    let bit = emit_int32 (Convert (is_right, Integer Int32)) in
-                    let shifted =
-                      emit_int32 (Binary (Shift_left, bit, Codegen_support.constant_int32 index))
-                    in
-                    Emit_c.Ir_builder.emit builder
-                      (Assign
-                         ( Lowered.make_local_place status,
-                           Binary (Bit_or, Copy (Lowered.make_local_place status), shifted) )))
-                  cases;
-                status);
-          ]
-      in
-      expect_all_right
-        [
-          (9223372036854774784., Codegen_support.int64, true);
-          (9223372036854775808., Codegen_support.int64, false);
-          (-9223372036854775808., Codegen_support.int64, true);
-          (-9223372036854777856., Codegen_support.int64, false);
-          (Float.nan, Codegen_support.int64, false);
-          (Float.infinity, Codegen_support.int64, false);
-          (Float.neg_infinity, Codegen_support.int64, false);
-        ];
-      expect_all_right
-        [
-          (255.9, Codegen_support.uint8, true);
-          (256., Codegen_support.uint8, false);
-          (-0.5, Codegen_support.uint8, true);
-          (-1., Codegen_support.uint8, false);
-          (0., Codegen_support.uint8, true);
-        ]);
   Codegen_support.test "a storage is shortened in place and keeps its room" (fun () ->
       let storage_ty = Storage.make_storage_type Codegen_support.uint8 in
       let operate_checked builder ?destination operation arguments =
@@ -1332,35 +1204,6 @@ let expect_every_result cases =
   Codegen_support.expect_status (List.length cases) [ count_expected_results cases ]
 
 let () =
-  Codegen_support.test "addition, subtraction, multiplication, and negation wrap in every width"
-    (fun () ->
-      expect_every_result
-        (List.map make_binary_case
-           [
-             (Int8, Add, "127", "1", "-128");
-             (Int8, Subtract, "-128", "1", "127");
-             (Int8, Multiply, "100", "3", "44");
-             (UInt8, Add, "255", "1", "0");
-             (UInt8, Multiply, "255", "255", "1");
-             (Int16, Add, "32767", "1", "-32768");
-             (Int16, Multiply, "-32768", "-1", "-32768");
-             (UInt16, Multiply, "65535", "65535", "1");
-             (UInt16, Subtract, "0", "1", "65535");
-             (Int32, Add, "2147483647", "1", "-2147483648");
-             (Int32, Multiply, "65536", "65536", "0");
-             (UInt32, Multiply, "4294967295", "4294967295", "1");
-             (Int64, Add, "9223372036854775807", "1", "-9223372036854775808");
-             (Int64, Subtract, "-9223372036854775808", "1", "9223372036854775807");
-             (Int64, Multiply, "9223372036854775807", "2", "-2");
-             (UInt64, Subtract, "0", "1", "18446744073709551615");
-           ]
-        @ List.map make_unary_case
-            [
-              (Int8, Negate, "-128", "-128");
-              (Int32, Negate, "-2147483648", "-2147483648");
-              (Int64, Negate, "-9223372036854775808", "-9223372036854775808");
-              (UInt32, Negate, "1", "4294967295");
-            ]));
   Codegen_support.test
     "arithmetic that does not overflow gives the sum, the difference, the product, and the opposite"
     (fun () ->

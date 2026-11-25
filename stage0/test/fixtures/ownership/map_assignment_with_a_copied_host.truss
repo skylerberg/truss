@@ -1,7 +1,0 @@
-type Host(name: String)
-  derives Equal, Hash, Ordered
-
-fn f(host: Host) {
-  var ports: Map[Host, Int64] = [Host(name: "http"): 80]
-  ports[host.copy()] = 8080
-}

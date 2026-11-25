@@ -1,0 +1,3 @@
+(library
+ (name mir_lint)
+ (libraries harness compiler_bug path resolve mir database))

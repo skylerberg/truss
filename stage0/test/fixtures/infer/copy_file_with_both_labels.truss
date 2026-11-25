@@ -1,3 +1,0 @@
-fn f(original: Int64, backup: Int64) {
-  copy_file(source: original, destination: backup)
-}

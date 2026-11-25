@@ -1,6 +1,0 @@
-fn bump(count: mut Int64) {}
-
-fn f() {
-  var count = 0
-  bump(mut count)
-}

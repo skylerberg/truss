@@ -1,3 +1,0 @@
-internal fn double(value: Int64) -> Int64 {
-  value * 2
-}

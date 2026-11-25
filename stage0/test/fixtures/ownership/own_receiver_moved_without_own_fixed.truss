@@ -1,9 +1,0 @@
-type Bag(items: List[Int64])
-
-fn Bag.into_items(own self) -> List[Int64] {
-  self.items
-}
-
-fn f(bag: own Bag) -> List[Int64] {
-  own bag.into_items()
-}

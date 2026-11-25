@@ -38,6 +38,8 @@ let rec find_immutable state (env : State.env) (value : Syntax.expression) : imm
       | None -> Some Not_a_place)
   | _ -> Some Not_a_place
 
+let is_mutable state env value = Option.is_none (find_immutable state env value)
+
 let use_mutable_index (state : State.state) ~(report_with : mutation option)
     (value : Syntax.expression) =
   match Tables.find_call state.tables value.id with

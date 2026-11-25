@@ -49,7 +49,11 @@ let list_required_fixes (context : State.context) (frame : State.frame) (clauses
               (Facts.show_truss_value context passed.term)))
       (List.mapi (fun index parameter -> (index, parameter)) clauses.parameters)
   in
-  if Facts.is_home context frame.source && List.for_all is_fixed (Logic.list_free_constants term)
+  if
+    Facts.is_home context frame.source
+    && List.for_all is_fixed (Logic.list_free_constants term)
+    && List.exists (fun name -> List.mem name context.entry) (Logic.list_free_constants term)
+    && not (Logic.is_refuted term)
   then begin
     let written = list_written () in
     let replacements =
