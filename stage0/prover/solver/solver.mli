@@ -1,6 +1,7 @@
 type t
 
 val find : unit -> (t, string) result
+val stop : t -> unit
 
 type sexp = Atom of string | List of sexp list
 type unknown = Out_of_steps | Incomplete of string

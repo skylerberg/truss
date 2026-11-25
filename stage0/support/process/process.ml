@@ -14,6 +14,7 @@ type writer = {
   text : string;
   mutable written : int;
   mutable is_open : bool;
+  closes_after_text : bool;
 }
 
 let piece_length = 65536
@@ -40,17 +41,18 @@ let write_piece writer =
       writer.written <- writer.written + count;
       if writer.written < String.length writer.text then true
       else begin
-        close_stdin writer;
+        if writer.closes_after_text then close_stdin writer;
         false
       end
   | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK | EINTR), _, _) -> true
   | exception Unix.Unix_error (EPIPE, _, _) ->
-      close_stdin writer;
+      if writer.closes_after_text then close_stdin writer;
       false
 
-let rec exchange piece ~readers ~writer =
+let rec exchange ?(is_answered = fun () -> false) piece ~readers ~writer =
   match (readers, writer) with
   | [], None -> ()
+  | _, None when is_answered () -> ()
   | _ ->
       let readable, writable =
         match
@@ -72,7 +74,7 @@ let rec exchange piece ~readers ~writer =
             if (not (List.mem writer.stdin writable)) || write_piece writer then Some writer
             else None)
       in
-      exchange piece ~readers ~writer
+      exchange ~is_answered piece ~readers ~writer
 
 let rec await pid =
   match Unix.waitpid [] pid with
@@ -108,7 +110,7 @@ let run ?input ?on_output program arguments =
     | Some text, Some (_, stdin) ->
         Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
         Unix.set_nonblock stdin;
-        Some { stdin; text; written = 0; is_open = true }
+        Some { stdin; text; written = 0; is_open = true; closes_after_text = true }
     | _ -> None
   in
   Fun.protect
@@ -127,3 +129,54 @@ let run_attached program arguments =
   in
   let _, status = Unix.waitpid [] pid in
   exit_code status
+
+type coprocess = { pid : int; standard_input : Unix.file_descr; standard_output : Unix.file_descr }
+
+let start program arguments =
+  let stdin_read, standard_input = Unix.pipe ~cloexec:true () in
+  let standard_output, stdout_write = Unix.pipe ~cloexec:true () in
+  let close_all descriptors = List.iter Unix.close descriptors in
+  match
+    Unix.create_process program
+      (Array.of_list (program :: arguments))
+      stdin_read stdout_write Unix.stderr
+  with
+  | pid ->
+      close_all [ stdin_read; stdout_write ];
+      Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+      Unix.set_nonblock standard_input;
+      { pid; standard_input; standard_output }
+  | exception error ->
+      close_all [ stdin_read; standard_input; standard_output; stdout_write ];
+      raise error
+
+let converse coprocess text ~until =
+  let output =
+    { descriptor = coprocess.standard_output; contents = Buffer.create 4096; on_read = None }
+  in
+  let last_line = until ^ "\n" in
+  let is_answered () =
+    let length = Buffer.length output.contents and line_length = String.length last_line in
+    length >= line_length
+    && Buffer.sub output.contents (length - line_length) line_length = last_line
+    && (length = line_length || Buffer.nth output.contents (length - line_length - 1) = '\n')
+  in
+  exchange ~is_answered (Bytes.create piece_length) ~readers:[ output ]
+    ~writer:
+      (Some
+         {
+           stdin = coprocess.standard_input;
+           text;
+           written = 0;
+           is_open = true;
+           closes_after_text = false;
+         });
+  if is_answered () then
+    Ok (Buffer.sub output.contents 0 (Buffer.length output.contents - String.length last_line))
+  else Error (Buffer.contents output.contents)
+
+let stop coprocess =
+  Unix.close coprocess.standard_input;
+  Unix.close coprocess.standard_output;
+  (try Unix.kill coprocess.pid Sys.sigkill with Unix.Unix_error (ESRCH, _, _) -> ());
+  ignore (await coprocess.pid)

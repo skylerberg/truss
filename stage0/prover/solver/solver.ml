@@ -3,7 +3,12 @@ let steps = 1_000_000
 let cardinality_bounds = [ 2; 3; 4 ]
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Solver" format
 
-type t = { run_z3 : string -> string; queries_run : int Atomic.t }
+type t = {
+  answer_query : question:string -> value_request:string -> string;
+  stop : unit -> unit;
+  queries_run : int Atomic.t;
+}
+
 type sexp = Atom of string | List of sexp list
 type unknown = Out_of_steps | Incomplete of string
 type answer = Proven | Counterexample of (Logic.symbol * sexp) list | Unknown of unknown
@@ -76,41 +81,6 @@ let parse_sexps text =
   in
   parse_all 0 []
 
-let is_answer output =
-  match parse_sexps output with Atom ("sat" | "unsat" | "unknown") :: _ -> true | _ -> false
-
-let run_program program input =
-  let status, output, errors = Process.run ~input program [ "-in"; "-smt2" ] in
-  if is_answer output then output
-  else
-    raise_bug
-      "Z3 exited with status %d without answering a query, writing `%s` to stdout and `%s` to \
-       stderr"
-      status (String.trim output) (String.trim errors)
-
-let find () =
-  let program =
-    match Sys.getenv_opt "TRUSS_Z3" with Some program when program <> "" -> program | _ -> "z3"
-  in
-  match Process.run program [ "--version" ] with
-  | exception Unix.Unix_error _ ->
-      Error
-        (Printf.sprintf
-           "The prover needs Z3 %s, and `%s` could not be run. Install it, or set TRUSS_Z3 to its \
-            path."
-           version program)
-  | 0, output, _ ->
-      let expected = "Z3 version " ^ version in
-      if String.starts_with ~prefix:expected output then
-        Ok { run_z3 = run_program program; queries_run = Atomic.make 0 }
-      else
-        Error
-          (Printf.sprintf
-             "The prover is pinned to Z3 %s, since another version can answer differently, but \
-              `%s` is %s."
-             version program (String.trim output))
-  | _, _, errors -> Error (Printf.sprintf "`%s --version` failed: %s" program (String.trim errors))
-
 let header =
   Printf.sprintf
     "(set-option :produce-models true)\n\
@@ -118,6 +88,105 @@ let header =
      (set-option :sat.random_seed 0)\n\
      (set-option :rlimit %d)\n"
     steps
+
+let info_request = "(get-info :reason-unknown)\n(get-info :rlimit)\n"
+let end_of_answer = "truss.end-of-answer"
+let echo_end_of_answer = Printf.sprintf "(echo \"%s\")\n" end_of_answer
+
+type pool = { program : string; lock : Mutex.t; mutable idle : Process.coprocess list }
+
+let start_z3 program = Process.start program [ "-in"; "-smt2" ]
+
+let ask ?(then_ = "") z3 commands =
+  match Process.converse z3 (commands ^ echo_end_of_answer ^ then_) ~until:end_of_answer with
+  | Ok output -> output
+  | Error output ->
+      raise_bug "Z3 stopped without answering a query, after writing `%s`" (String.trim output)
+
+let take_idle pool =
+  Mutex.protect pool.lock (fun () ->
+      match pool.idle with
+      | [] -> None
+      | z3 :: idle ->
+          pool.idle <- idle;
+          Some z3)
+
+let answer_from pool ~question ~value_request =
+  let z3 = match take_idle pool with Some z3 -> z3 | None -> start_z3 pool.program in
+  match
+    let verdict = ask z3 question in
+    let value_request =
+      match parse_sexps verdict with
+      | Atom "sat" :: _ -> value_request
+      | Atom ("unsat" | "unknown") :: _ -> ""
+      | _ -> raise_bug "Z3 answered a query with `%s`" (String.trim verdict)
+    in
+    let rest = ask z3 (value_request ^ info_request) ~then_:"(reset)\n" in
+    if String.starts_with ~prefix:"(error" rest then
+      raise_bug "Z3 answered a request for values with `%s`" (String.trim rest);
+    verdict ^ rest
+  with
+  | output ->
+      Mutex.protect pool.lock (fun () -> pool.idle <- z3 :: pool.idle);
+      output
+  | exception error ->
+      Process.stop z3;
+      raise error
+
+let stop_idle pool =
+  let idle =
+    Mutex.protect pool.lock (fun () ->
+        let idle = pool.idle in
+        pool.idle <- [];
+        idle)
+  in
+  List.iter Process.stop idle
+
+let read_version output =
+  match parse_sexps output with
+  | [ List [ Atom ":version"; Atom literal ] ] when String.starts_with ~prefix:"\"" literal -> (
+      match String.split_on_char ' ' (read_string_literal literal) with
+      | number :: _ -> Some number
+      | [] -> None)
+  | _ -> None
+
+let find () =
+  let program =
+    match Sys.getenv_opt "TRUSS_Z3" with Some program when program <> "" -> program | _ -> "z3"
+  in
+  let report_not_run () =
+    Error
+      (Printf.sprintf
+         "The prover needs Z3 %s, and `%s` could not be run. Install it, or set TRUSS_Z3 to its \
+          path."
+         version program)
+  in
+  match start_z3 program with
+  | exception Unix.Unix_error _ -> report_not_run ()
+  | z3 -> (
+      match
+        Process.converse z3 ("(get-info :version)\n" ^ echo_end_of_answer) ~until:end_of_answer
+      with
+      | Ok output when read_version output = Some version ->
+          let pool = { program; lock = Mutex.create (); idle = [ z3 ] } in
+          Ok
+            {
+              answer_query = answer_from pool;
+              stop = (fun () -> stop_idle pool);
+              queries_run = Atomic.make 0;
+            }
+      | Ok output ->
+          Process.stop z3;
+          Error
+            (Printf.sprintf
+               "The prover is pinned to Z3 %s, since another version can answer differently, but \
+                `%s` answers `(get-info :version)` with `%s`."
+               version program (String.trim output))
+      | Error _ ->
+          Process.stop z3;
+          report_not_run ())
+
+let stop solver = solver.stop ()
 
 type request = {
   query : Logic.query;
@@ -146,12 +215,11 @@ let make_request ?(symbols = []) ?(terms = []) query =
     value_arguments = List.map snd requested;
   }
 
-let make_input ~value_arguments text =
-  header ^ text
-  ^ (if value_arguments = [] then ""
-     else Printf.sprintf "(get-value (%s))\n" (String.concat " " value_arguments))
-  ^ "(get-info :reason-unknown)\n(get-info :rlimit)\n"
+let request_values value_arguments =
+  if value_arguments = [] then ""
+  else Printf.sprintf "(get-value (%s))\n" (String.concat " " value_arguments)
 
+let make_input ~value_arguments text = header ^ text ^ request_values value_arguments ^ info_request
 let show_input request = make_input ~value_arguments:request.value_arguments request.text
 
 type status = Unsatisfiable | Satisfiable of sexp option list | Undecided of unknown
@@ -185,15 +253,15 @@ type solved = { answer : answer; runs : run list }
 let solve solver ~find_output request =
   let runs = ref [] in
   let check ~is_asking_values text =
-    let input =
-      make_input ~value_arguments:(if is_asking_values then request.value_arguments else []) text
-    in
+    let value_arguments = if is_asking_values then request.value_arguments else [] in
+    let input = make_input ~value_arguments text in
     let output =
       match find_output input with
       | Some output -> output
       | None ->
           Atomic.incr solver.queries_run;
-          solver.run_z3 input
+          solver.answer_query ~question:(header ^ text)
+            ~value_request:(request_values value_arguments)
     in
     runs := { input; output } :: !runs;
     read_status output
@@ -290,5 +358,12 @@ let solve_all ?(find_output = fun _ -> None) solver requests =
 
 module For_testing = struct
   let count_queries_run solver = Atomic.get solver.queries_run
-  let make ~run_z3 = { run_z3; queries_run = Atomic.make 0 }
+
+  let make ~run_z3 =
+    {
+      answer_query =
+        (fun ~question ~value_request -> run_z3 (question ^ value_request ^ info_request));
+      stop = ignore;
+      queries_run = Atomic.make 0;
+    }
 end

@@ -1167,15 +1167,20 @@ let has_uninterpreted_sort query =
   Dynarray.exists (fun sort -> not (Sort_table.mem numbering.datatypes sort)) numbering.sort_order
 
 let render_term { numbering; _ } term =
+  let is_member_of_a_declared_datatype name =
+    match Symbol_table.find_opt numbering.member_of name with
+    | Some (datatype, _) -> Sort_table.mem numbering.sort_names datatype
+    | None -> false
+  in
   let rec is_named = function
     | Symbol name -> Symbol_table.mem numbering.symbol_names name
     | Integer _ | Boolean _ | Bits _ -> true
     | Apply (name, arguments) ->
-        (Symbol_table.mem numbering.member_of name || Symbol_table.mem numbering.symbol_names name)
+        (is_member_of_a_declared_datatype name || Symbol_table.mem numbering.symbol_names name)
         && List.for_all is_named arguments
     | Operation (_, arguments) -> List.for_all is_named arguments
     | Is (constructor, argument) ->
-        Symbol_table.mem numbering.member_of constructor && is_named argument
+        is_member_of_a_declared_datatype constructor && is_named argument
     | Forall _ | Exists _ -> false
   in
   if is_named term then begin
