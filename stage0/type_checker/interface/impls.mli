@@ -45,7 +45,12 @@ val list_no_bounds : bounds
 val list_required_bounds :
   Types.generic list -> Types.substitution -> (Types.ty * Types.trait_reference) list
 
-val inherits_method : Types.trait_interface -> Types.impl_interface -> Types.trait_method -> bool
+type method_code =
+  | Method_of_impl of { impl : Path.t; substitution : Types.substitution }
+  | Declaration_for_view
+
+val locate_method :
+  Lookups.t -> Types.evidence -> name:string -> receiver:Path.receiver -> method_code option
 
 type obligation =
   | Provides of Types.trait_method

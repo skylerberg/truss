@@ -830,7 +830,8 @@ let find_impl (context : State.context) (trait : Types.trait_reference) (ty : Ty
     Interface.Impls.resolve_evidence context.lookups.interface Types.no_substitution ~self_type:ty
       ~trait Bound
   with
-  | Impl { impl; substitution } -> Some (impl, substitution)
+  | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
+      Some (impl, substitution)
   | Bound -> None
 
 let is_potential = function

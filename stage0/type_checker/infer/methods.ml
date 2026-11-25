@@ -586,11 +586,9 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
     Conversions.read_expected_head state (Types.strip_view written_receiver_type)
   in
   let is_implemented_by_the_view (trait : Types.trait_reference) =
-    is_view_receiver
-    &&
     match State.find_evidence state written_receiver_type trait with
-    | Some (Evidence (Impl _)) -> true
-    | Some (Evidence Bound | Built_in | Accepted _) | None -> false
+    | Some (Evidence (Derived_for_view _)) -> true
+    | Some (Evidence (Impl _ | Bound) | Built_in | Accepted _) | None -> false
   in
   let has_mode_keyword = List.mem_assoc value.id state.keyword_modes in
   let lent_mode =

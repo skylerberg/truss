@@ -822,7 +822,8 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
           (Path.show trait.trait) (Path.show restated.declared_by)
   in
   match Interface.Impls.find_evidence lookups.interface ~list_bounds for_type declared with
-  | Some (Evidence (Impl { impl; substitution })) -> (
+  | Some (Evidence (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }))
+    -> (
       let evidence : Types.evidence = Impl { impl; substitution } in
       let signature =
         match Interface.Impls.read_signature lookups.interface restated_path with

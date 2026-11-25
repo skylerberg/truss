@@ -220,7 +220,7 @@ let build_real_implementation (state : Lowering.state) ~user capability =
         with
         | Impl { impl = default_impl; _ } ->
             Well_known.make_impl_method_path Default_default ~impl:default_impl
-        | Bound ->
+        | Derived_for_view _ | Bound ->
             Definitions.raise_bug "%s implements %s and has no impl of Default"
               (Types.show for_type) (Path.show capability)
       in

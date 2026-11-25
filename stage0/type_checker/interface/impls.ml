@@ -273,6 +273,30 @@ let inherits_method (trait : Types.trait_interface) (impl : Types.impl_interface
     (declared : Types.trait_method) =
   declared.provided && Option.is_none (Types.find_implementing_receiver trait impl declared)
 
+type method_code =
+  | Method_of_impl of { impl : Path.t; substitution : Types.substitution }
+  | Declaration_for_view
+
+let locate_method lookups (evidence : Types.evidence) ~name ~receiver =
+  match evidence with
+  | Impl { impl; substitution } -> Some (Method_of_impl { impl; substitution })
+  | Derived_for_view { viewed; substitution } ->
+      let is_inherited =
+        match Definition.find_impl_interface lookups viewed with
+        | Some viewed_impl -> (
+            match Definition.find_trait_interface lookups viewed_impl.implements.trait with
+            | Some trait -> (
+                match Definition.find_method_of_trait trait ~name ~receiver with
+                | Some declared -> inherits_method trait viewed_impl declared
+                | None -> false)
+            | None -> false)
+        | None -> false
+      in
+      Some
+        (if is_inherited then Declaration_for_view
+         else Method_of_impl { impl = viewed; substitution })
+  | Bound -> None
+
 type obligation =
   | Provides of Types.trait_method
   | Bounds_associated_type of { name : string; chosen : Types.ty; bound : Types.trait_reference }
@@ -327,10 +351,10 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
               find_evidence lookups ~list_bounds ~depth ~checks_conditions (Types.strip_view type_)
                 wanted
             with
-            | Some (Evidence (Impl { impl; substitution })) as viewed
+            | Some (Evidence (Impl { impl = viewed; substitution }))
               when derives_impl_for_view lookups ~list_bounds ~depth ~checks_conditions ~view:type_
-                     impl substitution ->
-                viewed
+                     viewed substitution ->
+                Some (Evidence (Derived_for_view { viewed; substitution }))
             | Some _ | None -> None)
         | Types.Named _ ->
             List.find_map
@@ -492,7 +516,9 @@ and project_declared_type lookups ~list_bounds ?defining type_ (trait : Types.tr
   | Some fixed -> Some fixed
   | None -> (
       match find_evidence lookups ~list_bounds ~checks_conditions:false type_ trait with
-      | Some (Evidence (Impl { impl; substitution })) -> (
+      | Some
+          (Evidence (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }))
+        -> (
           match Definition.find_impl_interface lookups impl with
           | Some interface ->
               Option.iter (fun defining -> defining := impl :: !defining) defining;
@@ -529,7 +555,9 @@ and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Type
             Properties.recursion_limit))
   else
     match find_evidence lookups ~list_bounds ~checks_conditions:false type_ trait with
-    | Some (Evidence (Impl { impl; substitution })) -> (
+    | Some
+        (Evidence (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }))
+      -> (
         match Definition.find_impl_interface lookups impl with
         | Some interface ->
             normalize_capabilities lookups ~list_bounds ~depth:(depth + 1)
@@ -616,7 +644,10 @@ and decide_bound_condition lookups ~list_bounds ~depth (bound : Types.bound_cond
         match
           find_evidence lookups ~list_bounds ~depth ~checks_conditions:false subject bound.bound
         with
-        | Some (Evidence (Impl { impl; substitution })) -> (
+        | Some
+            (Evidence
+               (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }))
+          -> (
             match Definition.find_impl_interface lookups impl with
             | Some interface ->
                 decide_condition lookups ~list_bounds ~depth:(depth + 1)
@@ -793,7 +824,7 @@ let resolve_evidence lookups substitution ~self_type ~trait (evidence : Types.ev
       with
       | Some (Evidence evidence) -> evidence
       | Some (Built_in | Accepted _) | None -> Bound)
-  | Impl _ as evidence -> evidence
+  | (Impl _ | Derived_for_view _) as evidence -> evidence
 
 let read_scope (lookups : Lookups.t) (key : Resolve.Names.key) :
     Environment.known_bounds Environment.scope =

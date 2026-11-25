@@ -1,7 +1,6 @@
 type lookups = { interface : Interface.Lookups.t; mir : Parts.lookups }
 type resolution = { target : Path.t option; supplied : Path.t list Lazy.t }
 
-val inherits_method : Interface.Lookups.t -> Path.t -> name:string -> receiver:Path.receiver -> bool
 val resolve_callee : Interface.Lookups.t -> Types.substitution -> 'operand Core.target -> resolution
 
 type supplier = Call | Named_function of Path.t | Provide

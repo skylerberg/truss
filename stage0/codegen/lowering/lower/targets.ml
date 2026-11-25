@@ -3,13 +3,12 @@ let resolve_trait_method (context : Definitions.context) substitution
     ~(instantiation : Types.instantiation) ~(evidence : Types.evidence) :
     Path.t * Ground.instantiation =
   match
-    Interface.Impls.resolve_evidence context.lookups.interface substitution ~self_type ~trait
-      evidence
+    Interface.Impls.locate_method context.lookups.interface
+      (Interface.Impls.resolve_evidence context.lookups.interface substitution ~self_type ~trait
+         evidence)
+      ~name ~receiver
   with
-  | Impl { impl; _ }
-    when Option.is_some
-           (Ground.find_viewed (Monomorphic.ground context.monomorphic substitution self_type))
-         && Mir.Call_edges.inherits_method context.lookups.interface impl ~name ~receiver ->
+  | Some Declaration_for_view ->
       let own = Monomorphic.ground_instantiation context.monomorphic substitution instantiation in
       let of_trait =
         Ground.Type (Monomorphic.ground context.monomorphic substitution self_type)
@@ -19,7 +18,7 @@ let resolve_trait_method (context : Definitions.context) substitution
       in
       ( Path.Method { owner = trait.trait; name; receiver },
         { own with type_arguments = of_trait @ own.type_arguments } )
-  | Impl { impl; substitution = arguments } ->
+  | Some (Method_of_impl { impl; substitution = arguments }) ->
       let impl_arguments =
         List.map
           (fun (generic : Types.generic) ->
@@ -33,7 +32,7 @@ let resolve_trait_method (context : Definitions.context) substitution
       let own = Monomorphic.ground_instantiation context.monomorphic substitution instantiation in
       ( Path.Method { owner = impl; name; receiver },
         { own with type_arguments = impl_arguments @ own.type_arguments } )
-  | Bound ->
+  | None ->
       Definitions.raise_bug "no impl of %s for %s" (Types.show_trait trait)
         (Types.show (Types.substitute substitution self_type))
 

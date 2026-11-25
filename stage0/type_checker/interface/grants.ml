@@ -75,7 +75,7 @@ let describe_missing ~subject ~of_ capability =
 
 let rec list_evidence_uses lookups ~list_bounds (evidence : Impls.solution) =
   match evidence with
-  | Evidence (Impl { impl; substitution }) -> (
+  | Evidence (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }) -> (
       match Definition.find_impl_interface lookups impl with
       | None -> []
       | Some interface ->
