@@ -26,12 +26,13 @@ let run ~position =
           ~line:(line - 1) ~column:(column - 1)
       in
       let names = Database.make_name_lookups database in
+      let source_lookups = Database.make_source_lookups database in
       let symbol_at =
         List.find_map
           (fun (declaration : Resolve.Names.declaration) ->
             let key = declaration.key in
-            let ({ base; _ } : Resolve.Names.place) = names.read_place key in
-            let text = names.read_text key in
+            let ({ base; _ } : Resolve.Names.place) = source_lookups.read_place key in
+            let text = source_lookups.read_text key in
             if base <= offset && offset <= base + String.length text then
               match Database.read_resolved database key with
               | Some resolved ->
@@ -40,7 +41,7 @@ let run ~position =
                       (fun (checked : Infer.checked) -> checked.tables)
                       (Database.read_checked_body database key)
                   in
-                  Inspect.explain_at ~path:key.path (names.read_spans key)
+                  Inspect.explain_at ~path:key.path (source_lookups.read_spans key)
                     (names.read_definition key) resolved tables ~text (offset - base)
               | None -> None
             else None)
@@ -52,7 +53,9 @@ let run ~position =
           else Output.print_line "Nothing there.";
           0
       | Some explanation ->
-          let signature = Option.bind explanation.refers_to (Signatures.find_signature names) in
+          let signature =
+            Option.bind explanation.refers_to (Signatures.find_signature names source_lookups)
+          in
           if json then
             Json.print
               (Json.make_document ~diagnostics:[]

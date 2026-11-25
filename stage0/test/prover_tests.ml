@@ -3031,7 +3031,9 @@ let () =
     | Obligations { obligations; _ } ->
         List.find_map
           (fun (obligation : Prover.Obligation.t) ->
-            if obligation.code = code then Some obligation.query else None)
+            if Catalog.Prover_description.find_code obligation.obligation = code then
+              Some obligation.query
+            else None)
           obligations
     | Unsupported _ | Not_proven_here -> None
   in

@@ -169,7 +169,7 @@ let fetch name version ~hash =
 
 let load_published name version ~hash =
   match fetch name version ~hash with
-  | Error reason -> Error reason
+  | Error reason -> Error (Project_catalog.Problem.Unavailable reason)
   | Ok directory ->
       let files = Registry.Content.list_all_files directory in
       Registry.Selection.read_manifest_and_record ~read:(fun file -> List.assoc_opt file files) name
@@ -320,17 +320,22 @@ let load_package_databases snapshot =
        (fun (name, _) -> if depends_on_project [] name then None else Some (load_named name))
        hashes
 
-let describe_failed_dependency name version ~is_loaded failed =
+let describe_failed_dependency name version ~is_loaded failed : Project_catalog.Problem.t =
   match failed with
   | (source, (first : Diagnostic.t) :: _) :: _ ->
       let line, column = Source.compute_position source first.span.start in
-      Printf.sprintf "`%s` %s does not check %s. It has %s; the first is at %s:%d:%d: %s"
-        (Path.show_package name) (Registry.Version.show version)
-        (if is_loaded then "with this toolchain" else "against this project's packages")
-        (Diagnostic.show_count
-           (List.fold_left (fun total (_, diagnostics) -> total + List.length diagnostics) 0 failed)
-           "error" "errors")
-        (Source.path source) line column first.message
+      Failed_dependency
+        {
+          name;
+          version;
+          is_loaded;
+          errors =
+            List.fold_left (fun total (_, diagnostics) -> total + List.length diagnostics) 0 failed;
+          path = Source.path source;
+          line;
+          column;
+          first = first.message;
+        }
   | _ -> Compiler_bug.raise_bug ~stage:"Workspace" "a failed package lists no diagnostic"
 
 let list_dependency_problems snapshot database =
@@ -346,7 +351,7 @@ let list_dependency_problems snapshot database =
             {
               Project.file = Project.lock_file;
               line = None;
-              message =
+              problem =
                 describe_failed_dependency name version ~is_loaded:(List.mem name loaded) failed;
             })
     (List.filter
@@ -706,7 +711,7 @@ let plan_lock snapshot ~set ~all =
               ~is_local ~load:load_published
           in
           if problems <> [] then
-            Error (String.concat " " (List.map Registry.Selection.describe_problem problems))
+            Error (String.concat " " (List.map Project_catalog.describe_selection_problem problems))
           else
             let after =
               Registry.Selection.lock

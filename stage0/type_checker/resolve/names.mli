@@ -1,4 +1,4 @@
-type kind =
+type kind = Language.Definition_kind.t =
   | Function
   | Type
   | Trait
@@ -17,10 +17,11 @@ val convert_named : named -> kind
 val show_kind : kind -> string
 val is_constant : kind -> bool
 
-type visibility = Private | Internal | Public | Public_opaque
-type key = { module_ : Path.module_; path : Path.t; ordinal : int }
+type visibility = Language.Visibility.t = Private | Internal | Public | Public_opaque
+type key = Path.key = { module_ : Path.module_; path : Path.t; ordinal : int }
 type declaration = { key : key; kind : kind; visibility : visibility; generic : bool }
 type place = { file : Path.file; base : int }
+type file_order = { file : Path.file; index : int }
 
 val show_key : key -> string
 val extract_signature_name : Syntax.signature -> Syntax.name
@@ -49,10 +50,9 @@ type lookups = {
   list_declarations_in : Path.file -> declaration list;
   list_package_declarations : Path.package -> declaration list;
   read_definition : key -> Syntax.definition;
-  read_text : key -> string;
-  read_spans : key -> Source.Definition_span.t array;
-  list_syntax_errors : key -> Source.Definition_span.t list;
-  read_place : key -> place;
+  read_order : key -> Source.Node_order.t;
+  list_broken_parts : key -> Parts.part list;
+  read_file_order : key -> file_order;
   find_container : key -> key option;
   list_contained : key -> key list;
   list_members : Path.t -> string -> key list;
@@ -60,6 +60,12 @@ type lookups = {
   list_impls_of_type : Path.package -> Path.t -> (Path.t * Path.t) list;
   list_impls_of_trait : Path.package -> Path.t -> Path.t list;
   list_law_proofs : Path.package -> law_proof_name -> key list;
+}
+
+type source = {
+  read_text : key -> string;
+  read_spans : key -> Source.Definition_span.t array;
+  read_place : key -> place;
 }
 
 val resolve_used_module : lookups -> from:Path.module_ -> Syntax.path -> Path.module_
@@ -72,7 +78,7 @@ val find_definition : lookups -> Path.t -> (key * Syntax.definition) option
 
 type generic_kind = Type_kind | Value_kind
 
-val find_syntax_error : lookups -> key -> Parts.part -> Diagnostic.reported option
+val find_syntax_error : lookups -> key -> Parts.part -> Catalog.reported option
 val is_broken : lookups -> key -> Parts.part -> bool
 val list_builtin_generics : Language.Builtin_type.t -> (string * generic_kind) list
 val find_generics : lookups -> Path.t -> (string * generic_kind) list option
@@ -85,8 +91,6 @@ module Scope : sig
   val is_value_kind : named -> bool
   val is_visible : from:Path.module_ -> Path.module_ -> visibility -> bool
   val is_restricted_module : from:Path.module_ -> Path.module_ -> bool
-  val restricted_module_message : string
-  val describe_path_start : Path.module_ -> string
 
   type module_lookup =
     | Found_module of { module_ : Path.module_; imported : Path.module_ option }
@@ -123,7 +127,6 @@ val choose_member : Path.t lookup list -> Path.t -> Path.t lookup
 val map_visible : ('visible -> 'converted) -> 'visible lookup -> 'converted lookup
 val choose_visible : 'visible lookup list -> 'visible lookup
 val collect_visible : 'visible lookup list -> 'visible list lookup
-val describe_hidden : Path.t -> visibility -> string
 
 val list_declaring_trait_lookups :
   lookups -> visible_packages:Path.package list -> from:Path.module_ -> string -> Path.t lookup list

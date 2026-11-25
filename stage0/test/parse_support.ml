@@ -3,6 +3,7 @@ let make_source text = Source.create ~path:"test.truss" text
 
 let parse text =
   let file, diagnostics = Parser.parse_source (make_source text) in
+  let diagnostics = List.map (Syntax_catalog.Syntax_diagnostic.render ~text) diagnostics in
   if
     diagnostics = []
     && List.exists

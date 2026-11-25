@@ -8,12 +8,13 @@ let read_head (state : State.state) ?default_at type_ =
 let read_expected_head state type_ = read_head state type_
 
 let read_actual_head state (value : Syntax.expression) type_ =
-  read_head state ~default_at:(State.read_span state value.id) type_
+  read_head state ~default_at:(Written value.id) type_
 
 let read_checked_head state env (value : Syntax.expression) =
   read_actual_head state value (Hooks.check_expression state env value)
 
-let list_copy_fixes (state : State.state) (written : Syntax.expression) ~view ~owner =
+let find_view_copy (state : State.state) (written : Syntax.expression) ~view ~owner :
+    Catalog.Inference.view_copy option =
   let is_copyable =
     State.decide_property state Interface.Properties.Copyable owner = Interface.Properties.Holds
   in
@@ -22,28 +23,22 @@ let list_copy_fixes (state : State.state) (written : Syntax.expression) ~view ~o
     | Some viewed -> State.unify ~modulo_views:true state viewed owner
     | None -> false
   in
-  if not (is_copyable && is_view_of_owner) then []
+  if not (is_copyable && is_view_of_owner) then None
   else
-    let title = "Copy the view with `copy()`." in
-    let span = State.read_span state written.id in
     let is_postfix (value : Syntax.expression) =
       match value.kind with
       | Name _ | Member _ | Call _ | Bracket _ | Parenthesized _ | Self_value -> true
       | _ -> false
     in
-    match written.kind with
-    | Mode (_, inner) when is_postfix inner ->
-        [ State.fix title [ State.insert (State.read_span state inner.id).stop ".copy()" ] ]
-    | _ when is_postfix written -> [ State.fix title [ State.insert span.stop ".copy()" ] ]
-    | _ ->
-        [
-          State.fix title
-            [ State.replace span (Printf.sprintf "(%s).copy()" (State.quote_span state span)) ];
-        ]
+    Some
+      (match written.kind with
+      | Mode (_, inner) when is_postfix inner -> Append_copy (Written inner.id)
+      | _ when is_postfix written -> Append_copy (Written written.id)
+      | _ -> Wrap_copy (Written written.id))
 
 let convert_scalar_or_function (state : State.state) (env : State.env)
-    ?(expression : Syntax.expression option) (span : Source.Definition_span.t) ~is_argument ~is_read
-    ~refuse ~actual ~expected ~actual_type ~wanted =
+    ?(expression : Syntax.expression option) at ~is_argument ~is_read ~refuse ~actual ~expected
+    ~actual_type ~wanted =
   match (actual_type, wanted, expression) with
   | Types.Never, _, _ -> Some (Tables.From_never, expected)
   | Types.Integer, _, Some _
@@ -83,7 +78,7 @@ let convert_scalar_or_function (state : State.state) (env : State.env)
               superset = wanted_function.uses;
               report_missing =
                 (fun _ ->
-                  Failures.report_mismatch state span
+                  Failures.report_mismatch state at
                     ~expected:(State.finalize_type state expected)
                     ~actual:(State.finalize_type state actual));
             }
@@ -94,14 +89,14 @@ let convert_scalar_or_function (state : State.state) (env : State.env)
   | _ -> if State.unify ~modulo_views:is_read state wanted actual_type then None else refuse ()
 
 let convert (state : State.state) (env : State.env) ?argument
-    ?(expression : Syntax.expression option) (span : Source.Definition_span.t) ~actual ~expected =
+    ?(expression : Syntax.expression option) at ~actual ~expected =
   let record_conversions conversions =
     match expression with
     | Some (written : Syntax.expression) ->
         state.tables.conversions.(written.id) <- state.tables.conversions.(written.id) @ conversions
     | None -> ()
   in
-  let actual_type = read_head state ~default_at:span actual in
+  let actual_type = read_head state ~default_at:at actual in
   let wanted = read_expected_head state expected in
   let is_read = argument = Some Language.Mode.Read in
   let refuse () =
@@ -111,17 +106,13 @@ let convert (state : State.state) (env : State.env) ?argument
       | None -> false
     in
     if argument = Some Language.Mode.Mut && is_view_of_wanted () then
-      State.report state Wrong_mode span
-        "This is a view, and a view is read-only, so it cannot be passed `mut`. Pass the place \
-         that it views."
-    else begin
-      let fixes =
-        match expression with
-        | Some written -> list_copy_fixes state written ~view:actual_type ~owner:wanted
-        | None -> []
-      in
-      Failures.report_mismatch ~fixes state span ~expected ~actual
-    end;
+      State.report state (View_passed_mut { at })
+    else
+      Failures.report_mismatch
+        ?copy:
+          (Option.bind expression (fun written ->
+               find_view_copy state written ~view:actual_type ~owner:wanted))
+        state at ~expected ~actual;
     None
   in
   let is_known : Types.ty -> bool = function
@@ -157,9 +148,9 @@ let convert (state : State.state) (env : State.env) ?argument
       | None ->
           record_conversions
             (Option.to_list
-               (convert_scalar_or_function state env ?expression span
+               (convert_scalar_or_function state env ?expression at
                   ~is_argument:(Option.is_some argument) ~is_read ~refuse ~actual ~expected
                   ~actual_type ~wanted)))
 
 let coerce state env ?argument (value : Syntax.expression) ~actual ~expected =
-  convert state env ?argument ~expression:value (State.read_span state value.id) ~actual ~expected
+  convert state env ?argument ~expression:value (Written value.id) ~actual ~expected

@@ -2,7 +2,7 @@ let make_variable ?(numbers = []) label = Logic.Symbol.Variable { label; numbers
 
 type unsupported = {
   location : Obligation.location;
-  construct : string;
+  construct : Catalog.Prover.construct;
   foreign_definition : string option;
 }
 
@@ -17,10 +17,8 @@ let is_in_home_package (context : State.context) (source : State.source) =
     (Path.locate_package context.home.path)
   = 0
 
-let raise_unsupported location format =
-  Printf.ksprintf
-    (fun construct -> raise (Unsupported { location; construct; foreign_definition = None }))
-    format
+let raise_unsupported location construct =
+  raise (Unsupported { location; construct; foreign_definition = None })
 
 let run_in_source (context : State.context) (source : State.source) read =
   try read ()
@@ -37,15 +35,6 @@ let read_parameter_name (parameter : Mir.parameter) =
   match Mir.find_local_name parameter.local with
   | Some name -> name
   | None -> raise_bug "a parameter that no definition names"
-
-let rec show_callee (path : Path.t) =
-  match path with
-  | Top { name; _ } -> name
-  | Method { owner = Impl { for_type; _ } | Derived { type_ = for_type; _ }; name; _ }
-  | Method { owner = for_type; name; _ }
-  | Member_constant { owner = for_type; name } ->
-      show_callee for_type ^ "." ^ name
-  | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> Path.show path
 
 let is_in_recursion_group (context : State.context) node =
   let is_inherited_from declaration member =
@@ -205,65 +194,26 @@ let locate (context : State.context) (source : State.source) origin =
 let add_hole (context : State.context) hole =
   if not (List.mem hole context.holes) then context.holes <- hole :: context.holes
 
-let insert_line_before_body (context : State.context) (line : Obligation.message) =
-  let names = context.lookups.interface.names in
-  let text = names.read_text context.home in
-  let brace =
-    match names.read_definition context.home with
-    | { kind = Function { body; _ }; _ } ->
-        Some (Source.Definition_span.locate (names.read_spans context.home) body.id).start
-    | _ -> None
-  in
-  let edit at before =
-    Some { Obligation.at; replacement = (Obligation.Text (before ^ "  ") :: line) @ [ Text "\n" ] }
-  in
-  match brace with
-  | Some at when at > 0 && text.[at - 1] = '\n' ->
-      edit (Source.Definition_span.make_zero_width at) ""
-  | Some at when at > 0 && text.[at - 1] = ' ' ->
-      edit (Source.Definition_span.make (at - 1) at) "\n"
+let find_signature (context : State.context) =
+  match context.lookups.interface.names.read_definition context.home with
+  | { kind = Function { signature; body; _ }; _ } -> Some (signature, body)
   | _ -> None
 
-let make_panic_fix (context : State.context) =
-  let names = context.lookups.interface.names in
-  let edit =
-    match names.read_definition context.home with
-    | { kind = Function { signature; _ }; _ } -> (
-        let locate id = Source.Definition_span.locate (names.read_spans context.home) id in
-        match
-          ( List.find_opt
-              (fun (clause : Syntax.clause) -> match clause.kind with Uses _ -> true | _ -> false)
-              signature.clauses,
-            signature.clauses )
-        with
-        | Some uses, _ ->
-            Some
-              {
-                Obligation.at = Source.Definition_span.make_zero_width (locate uses.id).stop;
-                replacement = [ Text ", Panic" ];
-              }
-        | None, first :: _ ->
-            Some
-              {
-                Obligation.at = Source.Definition_span.make_zero_width (locate first.id).start;
-                replacement = [ Text "uses Panic\n  " ];
-              }
-        | None, [] -> insert_line_before_body context [ Text "uses Panic" ])
-    | _ -> None
-  in
-  match edit with
-  | Some edit when not context.inherits_precondition ->
-      [ { Obligation.title = [ Text "Add `uses Panic`" ]; edits = [ edit ] } ]
-  | Some _ | None -> []
-
-let make_requires_fix (context : State.context) required =
-  match insert_line_before_body context (Obligation.Text "requires " :: required) with
-  | Some edit when not context.inherits_precondition ->
+let make_panic_fix (context : State.context) : Catalog.Prover.fix list =
+  match find_signature context with
+  | Some (signature, body) when not context.inherits_precondition ->
       [
-        {
-          Obligation.title = (Obligation.Text "Add `requires " :: required) @ [ Text "`" ];
-          edits = [ edit ];
-        };
+        Add_panic
+          (match
+             ( List.find_opt
+                 (fun (clause : Syntax.clause) ->
+                   match clause.kind with Uses _ -> true | _ -> false)
+                 signature.clauses,
+               signature.clauses )
+           with
+          | Some uses, _ -> After_uses (Written uses.id)
+          | None, first :: _ -> Before_clause (Written first.id)
+          | None, [] -> Before_body (Written body.id));
       ]
   | Some _ | None -> []
 
@@ -339,25 +289,28 @@ let show_truss_goal context term =
     printed
   else None
 
-let add_requires (context : State.context) (frame : State.frame) (required : Obligation.message) =
-  let required =
-    match context.condition with
-    | [] -> required
-    | condition -> required @ [ Obligation.Text (" when " ^ Types.show_condition condition) ]
-  in
-  match frame.condition with
-  | Logic.Boolean true -> make_requires_fix context required
-  | condition -> (
-      match show_truss_goal context condition with
-      | Some premise ->
-          make_requires_fix context
-            ((Obligation.Text ("(" ^ premise ^ ") ==> (") :: required) @ [ Obligation.Text ")" ])
-      | None -> make_requires_fix context required)
+let add_requires (context : State.context) (frame : State.frame) required : Catalog.Prover.fix list
+    =
+  match find_signature context with
+  | Some (_, body) when not context.inherits_precondition ->
+      [
+        Add_requires
+          {
+            body = Written body.id;
+            required;
+            premise =
+              (match frame.condition with
+              | Logic.Boolean true -> None
+              | condition -> show_truss_goal context condition);
+            condition = context.condition;
+          };
+      ]
+  | Some _ | None -> []
 
-let rec make_closed_obligation context (frame : State.frame) code location message goal =
+let rec make_closed_obligation context (frame : State.frame) location obligation goal =
   if not frame.makes_obligations then None
   else if not (Logic.mentions frame.bound goal || Logic.mentions frame.bound frame.condition) then
-    Some (make_obligation context frame code location message goal)
+    Some (make_obligation context frame location obligation goal)
   else
     let names = List.map (fun (name, _, _) -> name) frame.binders in
     let goal =
@@ -370,10 +323,10 @@ let rec make_closed_obligation context (frame : State.frame) code location messa
         Some
           (make_obligation context
              { frame with condition = Logic.Boolean true }
-             code location message closed)
+             location obligation closed)
     | None -> None
 
-and make_obligation (context : State.context) (frame : State.frame) code location message goal :
+and make_obligation (context : State.context) (frame : State.frame) location obligation goal :
     Obligation.t =
   let query =
     Logic.prune
@@ -384,9 +337,9 @@ and make_obligation (context : State.context) (frame : State.frame) code locatio
       }
   in
   {
-    code;
+    obligation;
+    instance = [];
     location;
-    message;
     cited = None;
     fixes = [];
     query;
@@ -425,8 +378,9 @@ let is_panic_obligation : Diagnostic.Code.prover -> bool = function
 let find_counter_condition (context : State.context) counter =
   if List.mem counter context.conditional_counters then context.condition else []
 
-let oblige ?cited ?(fixes = []) ?holds_when (context : State.context) (frame : State.frame) code
-    location message goal =
+let oblige ?cited ?(fixes = []) ?holds_when (context : State.context) (frame : State.frame) location
+    obligation goal =
+  let code = Catalog.Prover_description.find_code obligation in
   let holds_when = Option.value holds_when ~default:context.obligation_condition in
   if
     (is_panic_obligation code && context.panics)
@@ -438,7 +392,7 @@ let oblige ?cited ?(fixes = []) ?holds_when (context : State.context) (frame : S
   then assume context frame goal
   else
     match
-      make_closed_obligation context frame code location message
+      make_closed_obligation context frame location obligation
         (add_quantifier_facts
            ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
            context goal)
@@ -449,7 +403,7 @@ let oblige ?cited ?(fixes = []) ?holds_when (context : State.context) (frame : S
           match fixes with
           | [] when is_home_body -> (
               match show_truss_goal context goal with
-              | Some required -> add_requires context frame [ Text required ]
+              | Some required -> add_requires context frame [ Code required ]
               | None -> [])
           | fixes -> fixes
         in
@@ -462,59 +416,24 @@ let oblige ?cited ?(fixes = []) ?holds_when (context : State.context) (frame : S
         assume context frame goal
     | None -> ()
 
-let quote_span text (span : Source.Definition_span.t) =
-  if span.stop = span.start then raise_bug "a quote of an empty span at %d" span.start
-  else Source.Definition_span.quote text span
-
-let quote_home (context : State.context) origin =
-  let names = context.lookups.interface.names in
-  quote_span (names.read_text context.home)
-    (Source.Definition_span.locate (names.read_spans context.home) (Core_walk.locate_origin origin))
-
-let describe_call (context : State.context) (at : Obligation.location) ?callee () =
-  match at with
-  | Whole_definition -> (
-      match callee with Some callee -> Printf.sprintf "a call to `%s`" callee | None -> "a call")
-  | Node origin ->
-      Core_walk.describe_call origin ?callee ~quote:(fun () -> quote_home context origin) ()
-
 let reject_recursion_through_supplied_code (context : State.context) (frame : State.frame) location
     (statement : Mir.statement) =
-  let reject text = oblige context frame Termination location [ Text text ] (Logic.Boolean false) in
+  let reject supplied =
+    oblige context frame location (Recursion_through_supply supplied) (Logic.Boolean false)
+  in
   let reject_supply (supplier : Mir.Call_edges.supplier) code =
     let recursive = List.filter (is_in_recursion_group context) code in
     (match supplier with
     | Named_function path when List.exists (Path.equal path) recursive ->
-        reject
-          (Printf.sprintf
-             "Naming `%s` as a value reaches back here, and such a use passes no arguments the \
-              prover can compare, so the recursion cannot be shown to end: write it as a direct \
-              call on a part."
-             (Path.show path))
+        reject (Named_function path)
     | Named_function _ | Call | Provide -> ());
     List.iter
       (fun owner ->
-        let owner = Path.show owner in
         reject
           (match supplier with
-          | Call ->
-              Printf.sprintf
-                "%s uses `%s` where a bound needs it, and its methods reach back here. Such a use \
-                 passes no arguments the prover can compare, so the recursion cannot be shown to \
-                 end: write it as a direct call on a part."
-                (String.capitalize_ascii (describe_call context location ()))
-                owner
-          | Named_function path ->
-              Printf.sprintf
-                "Naming `%s` as a value uses `%s` where a bound needs it, and its methods reach \
-                 back here. Such a use passes no arguments the prover can compare, so the \
-                 recursion cannot be shown to end."
-                (Path.show path) owner
-          | Provide ->
-              Printf.sprintf
-                "This `provide` gives `%s`, whose methods call back here, so the prover cannot \
-                 show that the recursion ends."
-                owner))
+          | Call -> Bound_through_call { call = { at = location; callee = None }; owner }
+          | Named_function path -> Bound_through_name { path; owner }
+          | Provide -> Provided owner))
       (List.sort_uniq Path.compare
          (List.filter_map
             (fun (node : Path.t) -> match node with Method { owner; _ } -> Some owner | _ -> None)
@@ -527,17 +446,9 @@ let reject_recursion_through_supplied_code (context : State.context) (frame : St
       (Mir.Call_edges.list_statement_edges context.lookups.interface frame.substitution statement)
 
 let find_recursive_callee (context : State.context) (frame : State.frame) location callee =
-  let reject target origin =
-    oblige context frame Termination location
-      [
-        Text
-          (Printf.sprintf
-             "%s reaches back here through code that its `impl` %s. No measure can be stated for \
-              that code, so the recursion cannot be shown to end."
-             (String.capitalize_ascii
-                (describe_call context location ~callee:(show_callee target) ()))
-             origin);
-      ]
+  let reject target impl =
+    oblige context frame location
+      (Recursion_through_impl { call = { at = location; callee = Some target }; impl })
       (Logic.Boolean false);
     None
   in
@@ -546,18 +457,17 @@ let find_recursive_callee (context : State.context) (frame : State.frame) locati
   with
   | Some target when frame.makes_obligations && is_in_recursion_group context target -> (
       match context.lookups.mir.find_form_origin target with
-      | Some (Derived _, _) when context.terminates -> reject target "derives"
-      | Some (Inherited _, _) when context.terminates -> reject target "inherits from its trait"
+      | Some (Derived _, _) when context.terminates -> reject target Derives
+      | Some (Inherited _, _) when context.terminates -> reject target Inherits
       | Some ((Written _ | Derived _ | Inherited _), _) | None -> Some target)
   | Some _ | None -> None
 
-let reject_uncompared_recursion (context : State.context) frame location recursive_callee ~describe
-    =
+let reject_uncompared_recursion (context : State.context) frame location recursive_callee =
   if context.terminates then
     Option.iter
       (fun callee ->
-        oblige context frame Termination location
-          [ Text (describe (show_callee callee)) ]
+        oblige context frame location
+          (Uncompared_recursion { call = { at = location; callee = Some callee } })
           (Logic.Boolean false))
       recursive_callee
 
@@ -586,50 +496,33 @@ let is_evaluated_constant (context : State.context) path code =
        (Types.find_specification_only_type
           (Interface.Definition.read_constant_type context.lookups.interface path))
 
-let name_dependency (dependency : Mir.Call_edges.dependency) =
-  match dependency.kind with
-  | Read -> Path.show dependency.path
-  | Direct_call | Supplied _ -> show_callee dependency.path
-
-let describe_dependency (dependency : Mir.Call_edges.dependency) =
-  let verb =
-    match dependency.kind with Read -> "reads" | Direct_call -> "calls" | Supplied _ -> "uses"
-  in
-  let name = name_dependency dependency in
-  match dependency.omitted with
-  | None -> Printf.sprintf "This %s `%s`" verb name
-  | Some (Field field) ->
-      Printf.sprintf "This leaves out the field `%s`, whose default %s `%s`" field verb name
-  | Some (Argument parameter) ->
-      Printf.sprintf "This leaves out the argument `%s`, whose default %s `%s`" parameter verb name
-
-let describe_constant_cycle ~cyclic (dependency : Mir.Call_edges.dependency) =
-  let cyclic_name = Path.show cyclic in
-  let consequence = Printf.sprintf "so `%s` would be computed from itself." cyclic_name in
-  let part = match dependency.kind with Read -> "value" | Direct_call | Supplied _ -> "code" in
-  let described = describe_dependency dependency in
-  match (dependency.omitted, Path.equal dependency.path cyclic) with
-  | None, true -> Printf.sprintf "%s in its own value, %s" described consequence
-  | None, false ->
-      Printf.sprintf "%s, whose %s depends on `%s`, %s" described part cyclic_name consequence
-  | Some _, true -> Printf.sprintf "%s, %s" described consequence
-  | Some _, false ->
-      Printf.sprintf "%s. The %s of `%s` depends on `%s`, %s" described part
-        (name_dependency dependency) cyclic_name consequence
+let make_catalog_dependency (dependency : Mir.Call_edges.dependency) : Catalog.Prover.dependency =
+  {
+    kind = (match dependency.kind with Read -> Reads | Direct_call -> Calls | Supplied _ -> Uses);
+    path = dependency.path;
+    omitted =
+      Option.map
+        (fun (omitted : Mir.Call_edges.omitted) : Catalog.Prover.omitted ->
+          match omitted with
+          | Field field -> Omitted_field field
+          | Argument parameter -> Omitted_argument parameter)
+        dependency.omitted;
+  }
 
 let reject_constant_cycle (context : State.context) (frame : State.frame) (code : Mir.t) =
   if context.lookups.list_recursion_group context.node <> [] then
     List.iter
       (fun (dependency : Mir.Call_edges.dependency) ->
         if is_in_recursion_group context dependency.path then
-          oblige context frame Constant_cycle (Node dependency.origin)
-            [ Text (describe_constant_cycle ~cyclic:context.node dependency) ]
+          oblige context frame (Node dependency.origin)
+            (Constant_cycle
+               { cyclic = context.node; dependency = make_catalog_dependency dependency })
             (Logic.Boolean false))
       (Mir.Call_edges.list_dependencies
          { interface = context.lookups.interface; mir = context.lookups.mir }
          Types.no_substitution code)
 
-type circular_proof = { location : Obligation.location; shows : string }
+type circular_proof = { location : Obligation.location; proof : Catalog.Prover.circular_proof }
 
 let is_in_proof_cycle (context : State.context) path =
   List.exists (Path.equal path) (context.lookups.list_proof_group context.node)
@@ -640,11 +533,15 @@ let has_proof_cycle (context : State.context) =
     (fun member -> not (is_in_recursion_group context member))
     (context.lookups.list_proof_group context.node)
 
-let list_circular_dependencies context ~describe dependencies =
+let list_circular_dependencies context ~make_proof dependencies =
   List.filter_map
     (fun (dependency : Mir.Call_edges.dependency) ->
       if is_in_proof_cycle context dependency.path then
-        Some { location = Node dependency.origin; shows = describe dependency }
+        Some
+          {
+            location = Obligation.Node dependency.origin;
+            proof = make_proof (make_catalog_dependency dependency);
+          }
       else None)
     dependencies
 
@@ -661,37 +558,23 @@ let list_circular_instance_uses (context : State.context) (frame : State.frame) 
                 (match instance.used.origin with
                 | Some origin -> locate context frame.source origin
                 | None -> Whole_definition);
-              shows =
-                (if Path.equal dependency context.node then
-                   Printf.sprintf
-                     "A value of type `%s` is used here, and the invariant of that type or of a \
-                      part of it depends on `%s`, so the invariant would be proven from itself."
-                     (Types.show instance.used.type_) (show_callee dependency)
-                 else
-                   Printf.sprintf
-                     "A value of type `%s` is used here. The invariant of that type or of a part \
-                      of it depends on `%s`, whose proof depends on `%s`, so the invariant would \
-                      be proven from itself."
-                     (Types.show instance.used.type_) (show_callee dependency)
-                     (show_callee context.node));
+              proof =
+                Circular_instance { type_ = instance.used.type_; dependency; cyclic = context.node };
             }
       | Some _ | None -> None)
     (Mir.Call_edges.list_instance_uses lookups context.node)
 
-let list_circular_clauses (context : State.context) frame ~type_name =
+let list_circular_clauses (context : State.context) frame ~type_ =
   let lookups : Mir.Call_edges.lookups =
     { interface = context.lookups.interface; mir = context.lookups.mir }
   in
-  let describe ~clause ~verb dependency =
-    Printf.sprintf "%s, whose proof depends on the %s of `%s`, so the %s would be %s from itself."
-      (describe_dependency dependency) clause type_name clause verb
+  let make_proof clause dependency : Catalog.Prover.circular_proof =
+    Circular_clause { clause; type_; dependency }
   in
   if has_proof_cycle context then
-    list_circular_dependencies context
-      ~describe:(describe ~clause:"invariant" ~verb:"proven")
+    list_circular_dependencies context ~make_proof:(make_proof Invariant_clause)
       (Mir.Call_edges.list_invariant_dependencies lookups context.node)
-    @ list_circular_dependencies context
-        ~describe:(describe ~clause:"potential" ~verb:"defined")
+    @ list_circular_dependencies context ~make_proof:(make_proof Potential_clause)
         (Mir.Call_edges.list_potential_dependencies lookups context.node)
     @ list_circular_instance_uses context frame lookups
   else []
@@ -708,23 +591,6 @@ let list_circular_contracts (context : State.context) frame =
     let lookups : Mir.Call_edges.lookups =
       { interface = context.lookups.interface; mir = context.lookups.mir }
     in
-    let describe (dependency : Mir.Call_edges.dependency) =
-      if Path.equal dependency.path context.node then
-        Printf.sprintf "%s in its own contract, so the contract would be proven from itself."
-          (describe_dependency dependency)
-      else
-        Printf.sprintf
-          "%s, whose proof depends on the contract of `%s`, so the contract would be proven from \
-           itself."
-          (describe_dependency dependency) (show_callee context.node)
-    in
-    let describe_inherited (dependency : Mir.Call_edges.dependency) =
-      Printf.sprintf
-        "The contract that this method takes from its trait %s `%s`, whose proof depends on the \
-         contract of `%s`, so the contract would be proven from itself."
-        (match dependency.kind with Read -> "reads" | Direct_call | Supplied _ -> "calls")
-        (name_dependency dependency) (show_callee context.node)
-    in
     let written = Mir.Call_edges.list_contract_dependencies lookups context.node in
     let is_written (inherited : Mir.Call_edges.dependency) =
       List.exists
@@ -732,10 +598,14 @@ let list_circular_contracts (context : State.context) frame =
         written
     in
     match
-      list_circular_dependencies context ~describe written
+      list_circular_dependencies context
+        ~make_proof:(fun dependency -> Circular_contract { cyclic = context.node; dependency })
+        written
       @ List.map
           (fun (circular : circular_proof) -> { circular with location = Whole_definition })
-          (list_circular_dependencies context ~describe:describe_inherited
+          (list_circular_dependencies context
+             ~make_proof:(fun dependency ->
+               Circular_inherited_contract { cyclic = context.node; dependency })
              (List.filter
                 (fun inherited -> not (is_written inherited))
                 (Mir.Call_edges.list_inherited_contract_dependencies lookups context.node)))
@@ -747,15 +617,9 @@ let list_circular_contracts (context : State.context) frame =
         if List.exists (has_circular_clause lookups group) group then [] else circular
 
 let reject_circular_proof context frame (circular : circular_proof) =
-  oblige context frame Circular_proof circular.location [ Text circular.shows ]
-    (Logic.Boolean false)
+  oblige context frame circular.location (Circular_proof circular.proof) (Logic.Boolean false)
 
-let quote (source : State.source) origin = Obligation.Quote (source.key, origin)
-
-let quote_origin (context : State.context) (frame : State.frame) origin =
-  if not (is_home context frame.source) then
-    raise_bug "a quote of %s, outside the definition being proven" frame.source.name;
-  quote_home context origin
+let quote (source : State.source) origin : Catalog.Prover.quoted = { key = source.key; origin }
 
 let find_bounds (ty : Types.ty) =
   if Types.is_builtin Character ty then Some (Z.zero, Z.of_int 0x10FFFF)
@@ -956,7 +820,8 @@ let find_impl (context : State.context) (trait : Types.trait_reference) (ty : Ty
     Interface.Impls.resolve_evidence context.lookups.interface Types.no_substitution ~self_type:ty
       ~trait Bound
   with
-  | Impl { impl; substitution } -> Some (impl, substitution)
+  | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
+      Some (impl, substitution)
   | Bound -> None
 
 let is_potential = function

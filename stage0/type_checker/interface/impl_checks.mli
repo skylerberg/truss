@@ -15,6 +15,5 @@ val check_impl_method :
   Path.receiver ->
   Types.signature ->
   Types.impl_interface ->
-  trait_span:Source.Definition_span.t ->
   Syntax.path_type ->
   unit

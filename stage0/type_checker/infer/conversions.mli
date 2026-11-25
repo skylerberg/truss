@@ -7,7 +7,7 @@ val convert :
   State.env ->
   ?argument:Language.Mode.t ->
   ?expression:Syntax.expression ->
-  Source.Definition_span.t ->
+  Core.origin ->
   actual:Types.ty ->
   expected:Types.ty ->
   unit

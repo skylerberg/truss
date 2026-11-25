@@ -1,0 +1,24 @@
+(library
+ (name catalog)
+ (modules_without_implementation
+  nodes
+  usage
+  package
+  typing
+  resolve
+  patterns
+  capabilities
+  ownership
+  inference
+  prover)
+ (libraries
+  description
+  diagnostic
+  compiler_bug
+  source
+  core
+  path
+  language
+  types
+  grant
+  zarith))

@@ -1,11 +1,9 @@
-let comment_message = "Truss has no comments. Say this with a name, a contract, or a test instead."
-
 let lex_line_comment (cursor : Cursor.t) =
   let start = cursor.position in
   let stop = Cursor.compute_end_of_line cursor start in
   cursor.position <- stop;
   cursor.line_is_blank <- false;
-  Cursor.report cursor ~code:Comment (Source.make_span start stop) comment_message
+  Cursor.report cursor (Source.make_span start stop) (Comment { is_closed = true })
 
 let lex_block_comment (cursor : Cursor.t) =
   let start = cursor.position in
@@ -31,9 +29,7 @@ let lex_block_comment (cursor : Cursor.t) =
   | Some line_break when cursor.first_line_break = None ->
       cursor.first_line_break <- Some line_break
   | _ -> ());
-  Cursor.report cursor ~code:Comment (Source.make_span start stop)
-    (if closed then comment_message
-     else comment_message ^ " This comment is never closed, so it runs to the end of the file.")
+  Cursor.report cursor (Source.make_span start stop) (Comment { is_closed = closed })
 
 let record_semicolon (cursor : Cursor.t) =
   cursor.semicolons <- cursor.position :: cursor.semicolons;
@@ -49,15 +45,16 @@ let report_semicolons (cursor : Cursor.t) ~line_break =
         cursor.first_line_break <- Some (Source.make_span first (first + 1));
       List.iter
         (fun start ->
-          Cursor.report cursor ~code:Semicolon
+          Cursor.report cursor
             ~fixes:
               [
-                Diagnostic.fix
-                  (if line_break then "Replace the `;` with a line break" else "Remove the `;`")
-                  [ Source_text.remove_trivia cursor ~start ~stop:(start + 1) ~line_break ];
+                {
+                  action = (if line_break then Replace_semicolon else Remove_semicolon);
+                  edits = [ Source_text.remove_trivia cursor ~start ~stop:(start + 1) ~line_break ];
+                };
               ]
             (Source.make_span start (start + 1))
-            "Statements end at a line break. Truss has no `;`.")
+            Semicolon)
         semicolons
 
 let lex_attribute (cursor : Cursor.t) =
@@ -65,37 +62,35 @@ let lex_attribute (cursor : Cursor.t) =
   let stop = Cursor.compute_end_of_line cursor start in
   cursor.position <- stop;
   cursor.line_is_blank <- false;
-  Cursor.report cursor ~code:Attribute (Source.make_span start stop)
-    "Truss has no attributes. A type lists the traits it derives in a `derives` clause, and a test \
-     is a `test` definition."
+  Cursor.report cursor (Source.make_span start stop) Attribute
 
 let scan (cursor : Cursor.t) ~inline =
   let start = cursor.position in
   let is offset character = Cursor.is_at cursor (start + offset) character in
-  let reject ~code length message =
-    Source_text.reject ~code cursor ~length message;
+  let reject length problem =
+    Source_text.reject cursor ~length problem;
     true
   in
   if is 0 '/' && (is 1 '/' || is 1 '*') then
-    if inline then reject ~code:Comment 2 comment_message
+    if inline then reject 2 (Comment { is_closed = true })
     else begin
       if is 1 '/' then lex_line_comment cursor else lex_block_comment cursor;
       true
     end
   else if is 0 '#' && (is 1 '[' || (is 1 '!' && is 2 '[')) then
-    if inline then reject ~code:Attribute 1 "Truss has no attributes."
+    if inline then reject 1 Inline_attribute
     else begin
       lex_attribute cursor;
       true
     end
   else if is 0 '#' then
-    if inline then reject ~code:Comment 1 comment_message
+    if inline then reject 1 (Comment { is_closed = true })
     else begin
       lex_line_comment cursor;
       true
     end
   else if is 0 ';' then
-    if inline then reject ~code:Semicolon 1 "Truss has no `;`."
+    if inline then reject 1 Inline_semicolon
     else begin
       record_semicolon cursor;
       true

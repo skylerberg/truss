@@ -7,7 +7,8 @@ let read_manifest_block () =
 let expect_malformed_at line text =
   match Manifest.parse text with
   | exception Manifest.Malformed { line = actual; _ } when actual = line -> ()
-  | exception Manifest.Malformed { line = actual; message } ->
+  | exception Manifest.Malformed { line = actual; problem } ->
+      let message = Project_catalog.describe_manifest_problem problem in
       Harness.fail "at line %d: %s" actual message
   | _ -> Harness.fail "accepted"
 
@@ -106,14 +107,16 @@ let () =
   Harness.test "a version, as other languages' manifests have, is malformed, with the replacement"
     (fun () ->
       (match Manifest.parse "[package]\nname = \"a\"\nversion = \"1.0\"\n" with
-      | exception Manifest.Malformed { line = 3; message } ->
+      | exception Manifest.Malformed { line = 3; problem } ->
+          let message = Project_catalog.describe_manifest_problem problem in
           if not (String.includes ~affix:"holds no version" message) then
             Harness.fail "said %s" message
       | _ -> Harness.fail "accepted");
       (match
          Manifest.parse "[package]\nname = \"a\"\n[dependencies]\njson = { version = \"2.1\" }\n"
        with
-      | exception Manifest.Malformed { line = 4; message } ->
+      | exception Manifest.Malformed { line = 4; problem } ->
+          let message = Project_catalog.describe_manifest_problem problem in
           if not (String.includes ~affix:"json = []" message) then Harness.fail "said %s" message
       | _ -> Harness.fail "accepted");
       expect_malformed_at 4 "[package]\nname = \"a\"\n[dependencies]\njson = \"2.1\"\n");
@@ -175,7 +178,8 @@ let () =
           ()
       | _ -> Harness.fail "read differently");
       match Manifest.parse "[package]\nname = \"a\"\n[dependencies]\nb = [\"c#d\"]\n" with
-      | exception Manifest.Malformed { line = 4; message } ->
+      | exception Manifest.Malformed { line = 4; problem } ->
+          let message = Project_catalog.describe_manifest_problem problem in
           if not (String.includes ~affix:"`c#d`" message) then Harness.fail "said %s" message
       | _ -> Harness.fail "accepted a capability named `c#d`");
   Harness.test "a grant that is neither a capability's name nor a path is malformed, at its line"
