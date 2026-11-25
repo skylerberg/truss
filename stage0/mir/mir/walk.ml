@@ -184,15 +184,10 @@ let iter_formula_places visit formula =
   visit_formula ~on_locals:ignore ~on_value:(visit_operand visit) (visit_statement_places visit)
     formula
 
-let visit_local_types visit (locals : Tree.local_info array) =
-  Array.iter (fun (info : Tree.local_info) -> visit info.type_) locals
+let iter_locals visit code = visit_code ~on_locals:(Array.iter visit) ~on_value:ignore ignore code
 
-let iter_local_types visit code =
-  visit_code ~on_locals:(visit_local_types visit) ~on_value:ignore ignore code
-
-let iter_formula_local_types visit (formula : Tree.formula) =
-  visit formula.type_;
-  visit_formula ~on_locals:(visit_local_types visit) ~on_value:ignore ignore formula
+let iter_formula_locals visit formula =
+  visit_formula ~on_locals:(Array.iter visit) ~on_value:ignore ignore formula
 
 let list_evaluated_asserts (code : Tree.t) =
   let evaluated = ref [] in

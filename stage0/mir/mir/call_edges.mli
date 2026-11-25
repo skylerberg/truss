@@ -26,6 +26,14 @@ type dependency = {
 }
 
 val list_dependencies : lookups -> Types.substitution -> Tree.t -> dependency list
-val list_invariant_cycles : lookups -> Path.t -> (dependency * Path.t) list
+val list_contract_dependencies : lookups -> Path.t -> dependency list
+val list_invariant_dependencies : lookups -> Path.t -> dependency list
+val list_potential_dependencies : lookups -> Path.t -> dependency list
+
+type type_use = { type_ : Types.ty; origin : Core.origin option }
+type supplied_to_type = { used : type_use; code : Path.t list }
+
+val list_code_supplied_to_types : lookups -> Path.t -> supplied_to_type list
+val list_assumed_paths : lookups -> Path.t -> Path.t list
 val resolve_node : lookups -> Path.t -> Types.substitution -> Path.t
 val list_path_edges : lookups -> Path.t -> Path.t list

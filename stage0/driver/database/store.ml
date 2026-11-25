@@ -473,7 +473,8 @@ let mark_position_holders_stale store ~(target : endpoint) ~markers ~stages =
      unit = source))"
     [ Integer target.kind; Integer target.id; Text target.name; Integer markers; Integer stages ]
 
-type call_graph = { unit_kind : int; node_kind : int; calls : int }
+type proof_graph = { unit_kind : int; node_kind : int; markers : int }
+type proof_edge = { source : int; target : int; markers : int }
 
 let list_schema_names store = "main" :: List.map snd store.attached
 
@@ -499,11 +500,11 @@ let make_closure name arms =
   Printf.sprintf "%s(node) AS (SELECT value FROM json_each(?4) UNION %s)" name
     (String.concat " UNION " arms)
 
-let bind_call_graph graph ~seeds : cell list =
+let bind_proof_graph graph ~seeds : cell list =
   [
     Integer graph.unit_kind;
     Integer graph.node_kind;
-    Integer graph.calls;
+    Integer graph.markers;
     Text (encode_integers seeds);
   ]
 
@@ -513,23 +514,28 @@ let list_cycle_nodes store graph ~seeds =
        "WITH RECURSIVE %s, %s SELECT node FROM forward INTERSECT SELECT node FROM backward"
        (make_closure "forward" (make_successor_arms store ~of_:"forward"))
        (make_closure "backward" (make_predecessor_arms store ~of_:"backward")))
-    (bind_call_graph graph ~seeds)
+    (bind_proof_graph graph ~seeds)
     (fun row -> Sql.read_integer row 0)
 
-let list_call_pairs store graph ~nodes =
+let list_proof_edges store graph ~nodes =
   Sql.list_rows store.sql
     (Printf.sprintf "WITH scope(node) AS (SELECT value FROM json_each(?4)) %s"
        (String.concat " UNION "
           (List.map
              (fun schema ->
                Printf.sprintf
-                 "SELECT scope.node, e.target FROM scope CROSS JOIN %s.edge e ON e.source_kind = \
-                  ?1 AND e.source = scope.node AND e.target_kind = ?2 WHERE (e.markers & ?3) != 0 \
-                  AND +e.target IN (SELECT node FROM scope)"
+                 "SELECT scope.node, e.target, e.markers & ?3 FROM scope CROSS JOIN %s.edge e ON \
+                  e.source_kind = ?1 AND e.source = scope.node AND e.target_kind = ?2 WHERE \
+                  (e.markers & ?3) != 0 AND +e.target IN (SELECT node FROM scope)"
                  schema)
              (list_schema_names store))))
-    (bind_call_graph graph ~seeds:nodes)
-    (fun row -> (Sql.read_integer row 0, Sql.read_integer row 1))
+    (bind_proof_graph graph ~seeds:nodes)
+    (fun row ->
+      {
+        source = Sql.read_integer row 0;
+        target = Sql.read_integer row 1;
+        markers = Sql.read_integer row 2;
+      })
 
 type read_edge = { source_kind : int; source : int; target_kind : int; target : int }
 
@@ -590,11 +596,16 @@ let list_keys_of_paths store ~paths =
         (fun row -> (Sql.read_integer row 0, Sql.read_blob row 1)))
     (list_schema_names store)
 
-let mark_group_stale store ~stage ~path =
-  Sql.run store.sql
-    "INSERT OR IGNORE INTO main.stale (stage, id) SELECT ?1, path FROM main.recursion_group WHERE \
-     representative = (SELECT representative FROM main.recursion_group WHERE path = ?2)"
-    [ Integer stage; Integer path ]
+let mark_groups_stale store ~stage ~path =
+  List.iter
+    (fun table ->
+      Sql.run store.sql
+        (Printf.sprintf
+           "INSERT OR IGNORE INTO main.stale (stage, id) SELECT ?1, path FROM main.%s WHERE \
+            representative = (SELECT representative FROM main.%s WHERE path = ?2)"
+           table table)
+        [ Integer stage; Integer path ])
+    [ "recursion_group"; "proof_group" ]
 
 type item = { id : int; key : string; label : string; definition : int option }
 

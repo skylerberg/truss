@@ -86,17 +86,15 @@ let list_code_supplied_to_generics interface ?(instance = Types.no_substitution)
     (list_code_supplied_to_bound interface instance)
     (Interface.Impls.list_required_bounds generics substitution)
 
+let rec bind_generics substitution (generics : Types.generic list) arguments =
+  match (generics, arguments) with
+  | generic :: generics, argument :: arguments ->
+      bind_generics (Types.bind_argument generic.generic argument substitution) generics arguments
+  | _ -> substitution
+
 let list_code_supplied_to_callee interface instance path ~bound_by_owner type_arguments =
   match Interface.Impls.read_signature interface path with
   | Some (signature : Types.signature) ->
-      let rec bind_generics substitution (generics : Types.generic list) arguments =
-        match (generics, arguments) with
-        | generic :: generics, argument :: arguments ->
-            bind_generics
-              (Types.bind_argument generic.generic argument substitution)
-              generics arguments
-        | _ -> substitution
-      in
       list_code_supplied_to_generics interface ~instance signature.generics
         (bind_generics bound_by_owner
            (List.filter
@@ -374,41 +372,6 @@ let list_path_edges (lookups : lookups) path =
        (fun code -> list_paths (list_dependencies lookups (find_instance lookups path) code))
        (Option.to_list (find_code lookups path)))
 
-module Path_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Path.t
-end))
-
-let list_field_types (interface : Interface.Lookups.t) path =
-  match Interface.Definition.find_type_interface interface path with
-  | Some { shape = Record fields; _ } ->
-      List.map (fun (field : Types.field) -> field.field_type) fields
-  | Some { shape = Sum variants; _ } ->
-      List.concat_map
-        (fun (variant : Types.variant) ->
-          List.map
-            (fun (field : Types.field) -> field.field_type)
-            (Option.value ~default:[] variant.fields))
-        variants
-  | Some _ | None -> []
-
-let list_held_types (interface : Interface.Lookups.t) types =
-  let held = Path_table.create 16 in
-  let rec hold type_ =
-    ignore
-      (Types.exists
-         (function
-           | Types.Named { path; _ } ->
-               if not (Path_table.mem held path) then begin
-                 Path_table.replace held path ();
-                 List.iter hold (list_field_types interface path)
-               end;
-               false
-           | _ -> false)
-         type_)
-  in
-  List.iter hold types;
-  List.of_seq (Path_table.to_seq_keys held)
-
 let list_contract_formulas (contract : Tree.contract) =
   let list_clauses requirements =
     List.map (fun (requirement : Tree.requirement) -> requirement.clause) requirements
@@ -423,11 +386,42 @@ let list_contract_formulas (contract : Tree.contract) =
       (fun (_, (callback : Tree.callback)) -> callback.requires @ callback.ensures)
       contract.callbacks
 
-let list_invariants (lookups : lookups) type_ =
+let find_contract (lookups : lookups) path =
+  Option.map (fun (read : _ Parts.sourced) -> read.form) (Parts.read_contract lookups.mir path)
+
+let list_contract_dependencies (lookups : lookups) path =
+  List.concat_map
+    (list_formula_dependencies lookups (find_instance lookups path))
+    (Option.fold ~none:[] ~some:list_contract_formulas (find_contract lookups path))
+
+let list_clause_dependencies (lookups : lookups) type_ ~list_clauses =
   match Parts.read_type_clauses lookups.mir type_ with
   | Some { form = clauses; _ } ->
-      List.map (fun (requirement : Tree.requirement) -> requirement.clause) clauses.invariants
+      List.concat_map
+        (list_formula_dependencies lookups Types.no_substitution)
+        (list_clauses clauses)
   | None -> []
+
+let list_invariant_dependencies lookups type_ =
+  list_clause_dependencies lookups type_ ~list_clauses:(fun (clauses : Tree.type_clauses) ->
+      List.map (fun (requirement : Tree.requirement) -> requirement.clause) clauses.invariants)
+
+let list_potential_dependencies lookups type_ =
+  list_clause_dependencies lookups type_ ~list_clauses:(fun (clauses : Tree.type_clauses) ->
+      Option.to_list clauses.potential)
+
+let list_field_types (interface : Interface.Lookups.t) path =
+  match Interface.Definition.find_type_interface interface path with
+  | Some { shape = Record fields; _ } ->
+      List.map (fun (field : Types.field) -> field.field_type) fields
+  | Some { shape = Sum variants; _ } ->
+      List.concat_map
+        (fun (variant : Types.variant) ->
+          List.map
+            (fun (field : Types.field) -> field.field_type)
+            (Option.value ~default:[] variant.fields))
+        variants
+  | Some _ | None -> []
 
 let list_signature_types (lookups : lookups) path =
   match Interface.Definition.find_interface lookups.interface path with
@@ -437,72 +431,88 @@ let list_signature_types (lookups : lookups) path =
       @ [ (match signature.output with Returns type_ | Lends (_, type_) -> type_) ]
   | Some (Constant_interface _) ->
       [ Interface.Definition.read_constant_type lookups.interface path ]
-  | Some
-      ( Type_interface _ | Trait_interface _ | Impl_interface _ | Law_proof_interface _
-      | Error_interface _ )
-  | None ->
+  | Some (Type_interface _) -> list_field_types lookups.interface path
+  | Some (Trait_interface _ | Impl_interface _ | Law_proof_interface _ | Error_interface _) | None
+    ->
       []
 
-type usage = { held : Path.t list; dependencies : Path.t list Lazy.t }
+module Type_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Types.ty
+end))
 
-let read_usage (lookups : lookups) ~is_in_package path =
+type type_use = { type_ : Types.ty; origin : Core.origin option }
+
+let list_type_uses (lookups : lookups) path =
   let instance = find_instance lookups path in
-  let code = Option.to_list (find_code lookups path) in
-  let contract =
-    Option.map (fun (read : _ Parts.sourced) -> read.form) (Parts.read_contract lookups.mir path)
+  let uses = Type_table.create 16 in
+  let ordered = ref [] in
+  let note origin type_ =
+    ignore
+      (Types.exists
+         (fun part ->
+           (match part with
+           | Types.Named _ when not (Type_table.mem uses part) ->
+               Type_table.replace uses part ();
+               ordered := { type_ = part; origin } :: !ordered
+           | _ -> ());
+           false)
+         (substitute_type lookups.interface instance type_))
   in
-  let formulas = Option.fold ~none:[] ~some:list_contract_formulas contract in
-  let types = ref (list_signature_types lookups path) in
-  let note type_ = types := type_ :: !types in
+  let note_local (info : Tree.local_info) = note (Some info.origin) info.type_ in
+  let contract = find_contract lookups path in
+  Option.iter (Walk.iter_locals note_local) (find_code lookups path);
+  List.iter
+    (fun (formula : Tree.formula) ->
+      Walk.iter_formula_locals note_local formula;
+      note None formula.type_)
+    (Option.fold ~none:[] ~some:list_contract_formulas contract);
   Option.iter
     (fun (contract : Tree.contract) ->
-      List.iter (fun (parameter : Tree.parameter) -> note parameter.type_) contract.parameters)
+      List.iter (fun (parameter : Tree.parameter) -> note None parameter.type_) contract.parameters)
     contract;
-  List.iter (Walk.iter_local_types note) code;
-  List.iter (Walk.iter_formula_local_types note) formulas;
-  let held = list_held_types lookups.interface !types in
-  {
-    held;
-    dependencies =
-      lazy
-        (List.sort_uniq Path.compare
-           (List.concat_map list_paths
-              (List.map (list_dependencies lookups instance) code
-              @ List.map (list_formula_dependencies lookups instance) formulas
-              @ List.map
-                  (list_formula_dependencies lookups Types.no_substitution)
-                  (List.concat_map (list_invariants lookups) (List.filter is_in_package held)))));
-  }
+  List.iter (note None) (list_signature_types lookups path);
+  List.rev !ordered
 
-let list_invariant_cycles (lookups : lookups) type_ =
-  let package = Path.locate_package type_ in
-  let is_in_package path = Path.compare_package (Path.locate_package path) package = 0 in
-  let usages = Path_table.create 32 in
-  let read_usage path =
-    match Path_table.find_opt usages path with
-    | Some usage -> usage
-    | None ->
-        let usage = read_usage lookups ~is_in_package path in
-        Path_table.replace usages path usage;
-        usage
+let list_code_supplied_to_type (interface : Interface.Lookups.t) (type_ : Types.ty) =
+  match type_ with
+  | Named { path; arguments = _ :: _ as arguments } -> (
+      match Interface.Definition.find_type_interface interface path with
+      | Some { type_generics; _ } ->
+          list_code_supplied_to_generics interface type_generics
+            (bind_generics Types.no_substitution type_generics arguments)
+      | None -> [])
+  | _ -> []
+
+type supplied_to_type = { used : type_use; code : Path.t list }
+
+let list_code_supplied_to_types (lookups : lookups) path =
+  List.filter_map
+    (fun (used : type_use) ->
+      match list_code_supplied_to_type lookups.interface used.type_ with
+      | [] -> None
+      | code -> Some { used; code })
+    (list_type_uses lookups path)
+
+let has_fields (interface : Interface.Lookups.t) path =
+  match Interface.Definition.find_type_interface interface path with
+  | Some { shape = Record _ | Sum _; _ } -> true
+  | Some _ | None -> false
+
+let list_assumed_paths (lookups : lookups) path =
+  let package = Path.locate_package path in
+  let is_type_of_package (used : type_use) =
+    match used.type_ with
+    | Named { path = head; _ }
+      when Path.compare_package (Path.locate_package head) package = 0
+           && has_fields lookups.interface head ->
+        Some head
+    | _ -> None
   in
-  let find_user start =
-    let visited = Path_table.create 32 in
-    let rec find path =
-      if (not (is_in_package path)) || Path_table.mem visited path then None
-      else begin
-        Path_table.replace visited path ();
-        let usage = read_usage path in
-        if List.exists (Path.equal type_) usage.held then Some path
-        else List.find_map find (Lazy.force usage.dependencies)
-      end
-    in
-    find start
-  in
-  List.concat_map
-    (fun invariant ->
-      List.filter_map
-        (fun (dependency : dependency) ->
-          Option.map (fun user -> (dependency, user)) (find_user dependency.path))
-        (list_formula_dependencies lookups Types.no_substitution invariant))
-    (list_invariants lookups type_)
+  List.sort_uniq Path.compare
+    (list_paths (list_contract_dependencies lookups path)
+    @ list_paths (list_invariant_dependencies lookups path)
+    @ list_paths (list_potential_dependencies lookups path)
+    @ List.filter_map is_type_of_package (list_type_uses lookups path)
+    @ List.concat_map
+        (fun (supplied : supplied_to_type) -> supplied.code)
+        (list_code_supplied_to_types lookups path))

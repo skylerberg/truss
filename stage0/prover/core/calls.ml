@@ -357,7 +357,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     | [], _ | _, [] -> ()
     end;
   let precondition_clauses = Contracts.select_precondition_clauses contract in
-  let required =
+  let read_required () =
     let entry = read_entry_frame precondition_clauses in
     List.map
       (fun (requirement : Mir.requirement) ->
@@ -383,7 +383,16 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         term)
       precondition_clauses.requires
   in
-  let required = Logic.conjunction required in
+  let required =
+    if List.exists (Path.equal path) context.reading_requires then Logic.Boolean true
+    else begin
+      let reading_requires = context.reading_requires in
+      context.reading_requires <- path :: reading_requires;
+      Fun.protect
+        ~finally:(fun () -> context.reading_requires <- reading_requires)
+        (fun () -> Logic.conjunction (read_required ()))
+    end
+  in
   if not (context.panics || Types.has_capability (Built_in Panic) invocation.uses) then begin
     let clauses = contract.callee_clauses in
     let entry = read_entry_frame clauses in

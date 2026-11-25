@@ -51,10 +51,12 @@ val find_recursive_callee :
 
 val is_evaluated_constant : State.context -> Path.t -> Mir.t -> bool
 val reject_constant_cycle : State.context -> State.frame -> Mir.t -> unit
-val list_invariant_cycles : State.context -> (Mir.Call_edges.dependency * Path.t) list
 
-val reject_invariant_cycle :
-  State.context -> State.frame -> type_name:string -> Mir.Call_edges.dependency * Path.t -> unit
+type circular_proof
+
+val list_circular_clauses : State.context -> State.frame -> type_name:string -> circular_proof list
+val list_circular_contracts : State.context -> State.frame -> circular_proof list
+val reject_circular_proof : State.context -> State.frame -> circular_proof -> unit
 
 val reject_uncompared_recursion :
   State.context ->

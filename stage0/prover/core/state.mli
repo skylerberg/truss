@@ -138,6 +138,7 @@ type context = {
   mutable enclosing_provides : Mir.provided list list;
   mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
   mutable instantiating : Path.t list;
+  mutable reading_requires : Path.t list;
   mutable axiomatizing : Logic.symbol list;
   axiom_clauses : unit Tables.Axiom_clause_table.t;
   mutable open_axioms : open_axiom list;

@@ -421,6 +421,33 @@ let expect_recursion_group text ~of_:name ~expected =
     Harness.fail "the recursion group of %s is [%s], not [%s]" name (show_paths group)
       (show_paths expected)
 
+let expect_proof_group text ~of_:name ~expected =
+  let database = build [ ("app.main", text) ] in
+  let group =
+    (Database.For_testing.make_proof_lookups database).list_proof_group (make_main_path name)
+  in
+  let show_paths paths = String.concat "; " (List.map Path.show paths) in
+  if not (List.equal Path.equal group expected) then
+    Harness.fail "the proof group of %s is [%s], not [%s]" name (show_paths group)
+      (show_paths expected)
+
+let counter_bounded_by_its_builder =
+  "type Counter(count: UInt64)\n\
+  \  invariant count <= bound()\n\
+   fn bound() -> UInt64 {\n\
+  \  Counter(count: 0).count\n\
+   }\n"
+
+let counter_bounded_by_a_constant_function =
+  "type Counter(count: UInt64)\n\
+  \  invariant count <= bound()\n\
+   fn bound() -> UInt64 {\n\
+  \  10\n\
+   }\n\
+   fn first() -> Counter {\n\
+  \  Counter(count: 0)\n\
+   }\n"
+
 let make_level_source ~height =
   Printf.sprintf
     "trait Level {\n\
@@ -898,7 +925,25 @@ let () =
           ~after:[ ("app.main", make_configured_source "Config()") ]
       in
       expect_included recomputed ~parts:[ Call_edges (make_main_path "make") ];
-      expect_untouched recomputed ~is_excluded:(fun computed -> computed.stage = Group_recursion));
+      expect_untouched recomputed ~is_excluded:(fun computed ->
+          computed = locate (Recursion_group (make_main_path "start"))));
+  Harness.test
+    "a type whose invariant calls a function that builds the type is one proof group with it, and \
+     no recursion group" (fun () ->
+      let counter = make_main_path "Counter" and bound = make_main_path "bound" in
+      expect_proof_group counter_bounded_by_its_builder ~of_:"Counter"
+        ~expected:(List.sort Path.compare [ counter; bound ]);
+      expect_proof_group counter_bounded_by_its_builder ~of_:"bound"
+        ~expected:(List.sort Path.compare [ counter; bound ]);
+      expect_recursion_group counter_bounded_by_its_builder ~of_:"bound" ~expected:[]);
+  Harness.test "a function that uses a type whose invariant does not reach it has no proof group"
+    (fun () ->
+      expect_proof_group counter_bounded_by_a_constant_function ~of_:"first" ~expected:[];
+      expect_proof_group counter_bounded_by_a_constant_function ~of_:"Counter" ~expected:[]);
+  Harness.test "a function whose contract calls it is its own proof group" (fun () ->
+      expect_proof_group "fn clamp(n: UInt64) -> UInt64\n  ensures clamp(n) <= 3\n{\n  n\n}\n"
+        ~of_:"clamp"
+        ~expected:[ make_main_path "clamp" ]);
   Harness.test "a derived method's call edges read its generated MIR" (fun () ->
       expect_reads
         (build [ ("app.main", version_deriving_over_a_key) ])

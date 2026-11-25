@@ -528,16 +528,14 @@ public type Interval =
 
 - `self` names the value, and a record's fields can be named directly.
 - Repeated invariants all hold, and each may rely on the ones before it.
-- An invariant cannot depend on a definition that uses a value of the
-  invariant's type. Such a definition assumes the invariant, so the
-  invariant would be proven from itself: a circular proof, in which a false
-  postcondition can be proven. The invariant depends on each function it
-  calls and each constant it reads. A definition depends on the functions it
-  calls and the constants it reads, in its body and in its contract, on the
-  code supplied to its generic callees, and on the invariants of the types
-  whose values it uses. A definition uses a type when a parameter, a result,
-  or a local has that type or a type that holds it. An invariant may call a
-  function of a field's type, as `invariant used <= span.width()` does.
+- An invariant cannot call a function whose proof depends on the
+  invariant's type (see [Circular proofs](#circular-proofs)). A function that
+  uses a value of the type assumes the invariant, so the invariant would be
+  proven from itself. `invariant self.value() <= 10` is such an error, and
+  so is `invariant through(count) >= 0` where `through` builds a value of
+  the type. An invariant states its condition over the fields of `self`, and
+  may call a function of a field's type, as `invariant used <= span.width()`
+  does. The same rule holds for a `potential`.
 - Invariants are proven, never checked when the program runs. An invariant
   holds wherever other code can observe the value: when it is built,
   directly or with `with`, passed to a call, or returned, and when its
@@ -3081,6 +3079,38 @@ theorem sorted_up_to(items: List[Int64], last: UInt64)
 - A derived `Ordered` states its comparison in its `ensures`.
 - A clause applies only where every name that it mentions is visible.
 - A function with a `requires` is defined only where it holds.
+
+### Circular proofs
+
+A proof assumes the contract of each function that its definition calls and
+the invariant of each value that the definition uses. A proof that assumes a
+fact whose own proof assumes it back proves nothing: a false postcondition
+can be proven that way.
+
+- The proof of a definition depends on these definitions, and on the
+  definitions that their proofs depend on:
+
+  | The definition has | Its proof depends on |
+  |---|---|
+  | A call or a read of a constant, in its body or in its contract | The callee or the constant, and the code that the call supplies |
+  | A value of a type of its own package: a parameter, a result, a local, or, for a type, a field | The type |
+  | A value of a generic type, with a type argument for a type parameter that has a bound | Every method of the type argument's `impl` of the bound |
+  | An invariant or a `potential`, for a type | Each function that the clause calls and each constant it reads |
+
+- A cycle of these dependencies is an error unless calls alone form it. A
+  cycle of calls is a recursion, which a measure shows to end (see
+  [Termination](#termination)). The error is reported where the cycle leaves
+  a specification:
+
+  | Where the cycle closes | Reported at |
+  |---|---|
+  | An invariant or a `potential` calls into the cycle | The call in the clause |
+  | A contract calls into the cycle, and no invariant does | The call in the contract |
+  | A generic type's bound supplies code of the cycle, and no invariant calls into it | The value of that type |
+
+  `fn clamp(n: UInt64) -> UInt64 requires clamp(n) >= 0` is an error at the
+  call in its `requires`. A recursive function's `ensures` may call the
+  function, since its body's calls already form that cycle.
 
 ### Writing specifications
 

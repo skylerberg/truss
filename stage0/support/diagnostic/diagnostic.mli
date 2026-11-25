@@ -255,7 +255,7 @@ module Code : sig
     | Invariant
     | Termination
     | Constant_cycle
-    | Invariant_cycle
+    | Circular_proof
     | Evaluation
     | Panic
     | Assertion

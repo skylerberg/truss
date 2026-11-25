@@ -275,7 +275,8 @@ call a helper while the list is unsorted.
 | Rule | Reason |
 |---|---|
 | An invariant belongs to the whole type, never to one variant. | It can state a fact about the whole value, such as a bound that holds in every variant, and a clause after the last variant is unambiguous. A condition on one variant is a `match` in the invariant, or a field whose type carries the condition. |
-| An invariant cannot depend on a definition that uses a value of its type. | A contract is proven for arguments that meet their invariants, so such a definition assumes the invariant, and an invariant that reads its contract is a circular proof. With `invariant self.value() <= 10` and `ensures result <= 10` on `value`, `Counter(count: 500)` proved: the check of the new value assumed the postcondition, which was proven only of a value that already met the invariant. The cycle needs no `self`: `invariant through(count) >= 0` is circular when `through` builds a `Counter`, since a false postcondition of a method that `through` calls then proves from the invariant. The rule also rejects a call on a part of the same type, such as `left.height()` in a tree, which is sound by induction on the value: the prover has no measure over the size of a value to check that induction, so such an invariant is stated over the parts' fields. |
+| An invariant cannot call a function whose proof depends on its type. | A contract is proven for arguments that meet their invariants, so a function that uses a value of the type assumes the invariant, and an invariant that reads its contract is a circular proof. With `invariant self.value() <= 10` and `ensures result <= 10` on `value`, `Counter(count: 500)` proved: the check of the new value assumed the postcondition, which was proven only of a value that already met the invariant. The cycle needs no `self`: `invariant through(count) >= 0` is circular when `through` builds a `Counter`, since a false postcondition of a method that `through` calls then proves from the invariant. |
+| An invariant cannot call a function on a part of the same type either, such as `rest[0].head()`. | Some such invariants are sound by induction on the value, and some are not: where `head` reaches a function that builds a larger value around its argument, a false postcondition of `head` proved. Telling the two apart needs every way back to the invariant to be on a part, which [Termination](#termination) asks of a recursive call and the prover compares only for calls. Until it compares the same for an invariant, the condition is stated over the part's fields, with a pattern. |
 | An invariant clause that calls a definition private to its type's module is opaque in other modules. | The clause can only be proven where its definition is visible, so other modules gain nothing from the definition, and each obligation that holds a value of the type would carry it: `Map`'s index invariant added about 1 MB of axioms to every obligation of `Set`, `json`, and `toml`, and some ran out of steps. A module that builds the value from its fields cannot prove the clause, so no module can make a value that breaks it. |
 | A type with an invariant can still expose its fields. | An invariant protects facts about the contents of a value. `opaque` does a different job: it controls where a value is constructed and hides the representation ([Visibility](#visibility)). |
 
@@ -1378,6 +1379,21 @@ the start.
 ### Bodies and contracts in proofs
 
 Rules: [Bodies and contracts in proofs](SPECIFICATION.md#bodies-and-contracts-in-proofs).
+
+**A cycle of proofs is one fact of the dependency graph.** The proof of a
+definition depends on its callees, on the functions its contract calls, on
+the types whose values it uses, and, for a type, on the functions its
+invariant calls. Each is an edge that the definition's own pass lists, and a
+cycle is a strongly connected component of those edges, as a recursion is of
+calls. A check that searched other definitions for the cycle would read
+their bodies, and would be recomputed by every edit to one. The rule is in
+[Circular proofs](SPECIFICATION.md#circular-proofs).
+
+| Rule | Reason |
+|---|---|
+| A contract cannot call a function whose proof depends on the contract, outside a recursion. | The proof of a clause assumes the contract of each call in it. With `ensures result == n` and `ensures clamp(n) <= 3` on `clamp`, the second clause proved from itself, and `clamp(500) <= 3` held for every caller. A recursion is different: its body's calls form the cycle, and a measure shows that it ends. |
+| A value of a generic type cannot be used where its bound's code depends on the user. | `Box[Item: Measured]` with `invariant item.measure() >= 0` names no `impl`, so its own proof sees no cycle. The cycle exists at `Box[Marker]`, where `Marker.measure` calls a function that takes a `Box[Marker]`, and is reported at that value. |
+| A cycle through an invariant is reported at the invariant alone. | Every function on the cycle whose contract calls another is on it too, and reporting each would hide the one clause to change. |
 
 **A caller's proof reads the contract of its callee, never its body.** A
 function whose body is its definition, such as `is_sorted`, states the body

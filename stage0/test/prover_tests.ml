@@ -250,40 +250,62 @@ let () =
       expect_not_proven Fixtures.Prover.constant_calling_outside_a_requires "prover.requires")
 
 let () =
-  let expect_one_cycle = Support.expect_one_diagnostic ~check in
+  let expect_circular = Support.expect_one_diagnostic ~check in
+  let expect_circular_at_each text ~count =
+    let codes = list_codes text in
+    if codes <> List.init count (fun _ -> "prover.circular_proof") then
+      Harness.fail "found [%s]" (String.concat "; " codes)
+  in
   Harness.test "an invariant that calls a method of its type is an error" (fun () ->
-      expect_one_cycle Fixtures.Prover.invariant_calling_a_method_of_its_type
-        "prover.invariant_cycle"
+      expect_circular Fixtures.Prover.invariant_calling_a_method_of_its_type "prover.circular_proof"
         ~says:
-          "This calls `Counter.value`, which uses a value of type `Counter` and so assumes this \
-           invariant, so the invariant would be proven from itself."
+          "This calls `Counter.value`, whose proof depends on the invariant of `Counter`, so the \
+           invariant would be proven from itself."
         ~at:("self.value()", 1));
   Harness.test "an invariant that calls a function that builds a value of its type is an error"
     (fun () ->
-      expect_one_cycle Fixtures.Prover.invariant_calling_a_function_that_builds_its_type
-        "prover.invariant_cycle" ~says:"This calls `through`, which uses a value of type `Counter`"
+      expect_circular Fixtures.Prover.invariant_calling_a_function_that_builds_its_type
+        "prover.circular_proof"
+        ~says:"This calls `through`, whose proof depends on the invariant of `Counter`"
         ~at:("through(count)", 1));
   Harness.test "an invariant that reaches a user of its type through a call is an error" (fun () ->
-      expect_one_cycle Fixtures.Prover.invariant_calling_a_function_that_reaches_a_user_of_its_type
-        "prover.invariant_cycle"
-        ~says:"This calls `bound`, which reaches `widest`. `widest` uses a value of type `Counter`"
+      expect_circular Fixtures.Prover.invariant_calling_a_function_that_reaches_a_user_of_its_type
+        "prover.circular_proof"
+        ~says:"This calls `bound`, whose proof depends on the invariant of `Counter`"
         ~at:("bound()", 1));
   Harness.test "an invariant that reaches a user of its type through a contract is an error"
     (fun () ->
-      expect_one_cycle
+      expect_circular
         Fixtures.Prover.invariant_calling_a_function_whose_contract_calls_a_user_of_its_type
-        "prover.invariant_cycle" ~says:"This calls `stated`, which reaches `measured`."
+        "prover.circular_proof"
+        ~says:"This calls `stated`, whose proof depends on the invariant of `Counter`"
         ~at:("stated(count)", 1));
   Harness.test "invariants of two types that build each other are an error at each type" (fun () ->
-      match list_codes Fixtures.Prover.invariants_of_two_types_that_build_each_other with
-      | [ "prover.invariant_cycle"; "prover.invariant_cycle" ] -> ()
-      | found -> Harness.fail "found [%s]" (String.concat "; " found));
+      expect_circular_at_each Fixtures.Prover.invariants_of_two_types_that_build_each_other ~count:2);
   Harness.test "an invariant that calls a method of an element of its own type is an error"
     (fun () ->
-      expect_one_cycle Fixtures.Prover.invariant_calling_a_method_of_an_element_of_its_type
-        "prover.invariant_cycle" ~says:"This calls `Chain.head`" ~at:("rest[0].head()", 1));
+      expect_circular Fixtures.Prover.invariant_calling_a_method_of_an_element_of_its_type
+        "prover.circular_proof" ~says:"This calls `Chain.head`" ~at:("rest[0].head()", 1));
   Harness.test "an invariant may call a function of a field's type" (fun () ->
-      expect_proven Fixtures.Prover.invariant_calling_a_function_of_a_field)
+      expect_proven Fixtures.Prover.invariant_calling_a_function_of_a_field);
+  Harness.test "a requires that calls its own function is an error, and its caller is read"
+    (fun () ->
+      expect_circular Fixtures.Prover.requires_calling_its_own_function "prover.circular_proof"
+        ~says:"This calls `clamp` in its own contract, so the contract would be proven from itself."
+        ~at:("clamp(n)", 1));
+  Harness.test "an ensures that calls its own function is an error" (fun () ->
+      expect_circular Fixtures.Prover.ensures_calling_its_own_function "prover.circular_proof"
+        ~says:"This calls `clamp` in its own contract" ~at:("clamp(n)", 1));
+  Harness.test "contracts of two functions that call each other are an error at each" (fun () ->
+      expect_circular_at_each Fixtures.Prover.contracts_of_two_functions_that_call_each_other
+        ~count:2);
+  Harness.test "a recursive function's ensures may call the function" (fun () ->
+      expect_proven Fixtures.Prover.recursive_function_whose_ensures_calls_itself);
+  Harness.test
+    "a generic type's invariant that calls an impl is an error where the impl uses the type"
+    (fun () ->
+      expect_circular_at_each
+        Fixtures.Prover.invariant_of_a_generic_type_calling_the_impl_that_uses_it ~count:2)
 
 let list_evaluated_definitions text =
   let database = Support.make_database (Support.setup [ ("app.main", text) ]) in
