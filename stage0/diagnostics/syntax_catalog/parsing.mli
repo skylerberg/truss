@@ -114,8 +114,6 @@ type problem =
       found : string;
       correction : string option;
     }
-  | Whole_type_quantifier of { quantifier : string }
-  | Implies_in_code
   | Echo_in_specification
   | Try_in_parallel
   | Return_in_parallel

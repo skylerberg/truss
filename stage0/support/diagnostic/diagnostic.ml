@@ -88,7 +88,6 @@ module Code = struct
     | Lambda_annotation
     | Impl_parameters
     | Null_coalescing
-    | Specification_only
     | Misplaced_assert
     | Misplaced_proof
     | Misplaced_loop_exit
@@ -380,7 +379,6 @@ module Code = struct
     | Lambda_annotation -> "lambda_annotation"
     | Impl_parameters -> "impl_parameters"
     | Null_coalescing -> "null_coalescing"
-    | Specification_only -> "specification_only"
     | Misplaced_assert -> "misplaced_assert"
     | Misplaced_proof -> "misplaced_proof"
     | Misplaced_loop_exit -> "misplaced_loop_exit"

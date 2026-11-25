@@ -2093,10 +2093,11 @@ let () =
       expect_one_diagnostic Fixtures.Infer.function_parameter_requiring_an_integer "types.mismatch");
   Harness.test "a trait method without a body has its clauses checked" (fun () ->
       expect_one_diagnostic Fixtures.Infer.trait_method_ensuring_a_sum_with_true "types.no_impl");
-  Harness.test "==> in a compiled body" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.implication_in_a_body "types.specification_only");
   Harness.test "a quantifier over a type in a compiled body" (fun () ->
       expect_one_diagnostic Fixtures.Infer.quantifier_over_int64_in_a_body
+        "types.specification_only");
+  Harness.test "a quantifier over a type in a test" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.quantifier_over_a_type_in_a_test
         "types.specification_only");
   Harness.test "a quantifier's range from an Integer to a UInt64 is a range of Integer" (fun () ->
       let text = Fixtures.Infer.range_in_a_specification_from_an_integer_to_a_uint64 in
@@ -2607,7 +2608,7 @@ let () =
         ~says:"Move this into a function"
         ~at:("if true { true } else { false }", 1));
   Harness.test "the condition of an assertion by evaluation is code, in a theorem too" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.assertion_by_evaluation_with_an_implication
+      expect_one_diagnostic Fixtures.Infer.assertion_by_evaluation_over_a_whole_type
         "types.specification_only")
 
 let () =

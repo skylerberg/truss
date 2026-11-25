@@ -1,4 +1,8 @@
 let () =
+  Codegen_support.test "an implication evaluates its right operand only where its left holds"
+    (fun () ->
+      Codegen_support.expect_output Fixtures.Lowering.implication_guarding_an_index
+        "test 0 passed\n");
   Codegen_support.test "an index of a list out of bounds is reported where the index is written"
     (fun () ->
       Codegen_support.expect_output Fixtures.Lowering.grid_cell_index_out_of_bounds
