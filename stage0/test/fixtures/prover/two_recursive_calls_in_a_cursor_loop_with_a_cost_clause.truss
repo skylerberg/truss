@@ -1,0 +1,16 @@
+fn f(count: UInt64, items: own List[UInt64]) -> UInt64
+  requires items.length() == 2
+  decreases count
+  cost time O(count)
+{
+  if count == 0 {
+    return 0
+  }
+  var total: UInt64 = 0
+  for _ in own items
+    cost time O(visited.length() * count)
+  {
+    total = f(count - 1, [0, 0])
+  }
+  total
+}

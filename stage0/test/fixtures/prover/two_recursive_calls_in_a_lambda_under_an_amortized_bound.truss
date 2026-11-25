@@ -1,0 +1,18 @@
+fn once(visit: fn() -> UInt64) -> UInt64
+  cost time O(time(visit))
+{
+  visit()
+}
+
+fn f(count: UInt64) -> UInt64
+  decreases count
+  cost amortized time O(count)
+{
+  if count == 0 {
+    return 0
+  }
+  once(fn() {
+    let _ = f(count - 1)
+    f(count - 1)
+  })
+}

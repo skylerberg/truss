@@ -153,6 +153,7 @@ type context = {
   mutable conditional_counters : Costs.counter list;
   mutable bounded_counters : Costs.counter list;
   mutable recursive_costs_assumed : int;
+  mutable lambdas_assuming_recursive_costs : Logic.term list;
   fresh_order : int Tables.Symbol_table.t;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;
