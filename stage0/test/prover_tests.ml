@@ -3071,6 +3071,12 @@ let () =
       expect_not_proven Fixtures.Prover.copy_of_a_string_in_constant_time "prover.cost");
   Harness.test "a list of views passed `own` or `mut` holds no potential for its elements"
     (fun () -> expect_proven Fixtures.Prover.list_of_views_passed_on_in_constant_amortized_time);
+  Harness.test "a loop that pushes views is charged no potential for their owners" (fun () ->
+      expect_proven Fixtures.Prover.loops_pushing_views_within_an_amortized_bound);
+  Harness.test "a copy of a list of views costs time in its length, whatever the strings' lengths"
+    (fun () -> expect_proven Fixtures.Prover.copy_of_a_list_of_views_within_its_length);
+  Harness.test "a copy of a list of views does not cost constant time" (fun () ->
+      expect_not_proven Fixtures.Prover.copy_of_a_list_of_views_in_constant_time "prover.cost");
   Harness.test "a view holds no potential, so returning one costs constant amortized time"
     (fun () -> expect_proven Fixtures.Prover.view_returned_in_constant_amortized_time);
   Harness.test "a finite cursor collects through a bound in its remaining count of nexts" (fun () ->
