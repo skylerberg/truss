@@ -689,121 +689,141 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 in
                 let make_fields_then_built variant (fields : Types.field list) end_ : Core.block =
                   let required, defaulted =
-                    match variant with
-                    | None ->
-                        List.partition
-                          (fun (field : Types.field) -> not field.field_has_default)
-                          fields
-                    | Some _ -> (fields, [])
+                    List.partition (fun (field : Types.field) -> not field.field_has_default) fields
                   in
-                  let read =
-                    List.map (fun (field : Types.field) -> (field, make_local ())) required
+                  let optional_type (field : Types.field) =
+                    Types.make_named (Well_known.make_path Option) [ field.field_type ]
                   in
-                  let built = make_local () in
-                  let built_place : Core.place =
-                    Local { local = built; type_ = self_type; origin }
+                  let use_local (field : Types.field) local : Core.expression =
+                    node field.field_type (Use (Local { local; type_ = field.field_type; origin }))
+                  in
+                  let read_required =
+                    List.map
+                      (fun (field : Types.field) -> (field.field_name, make_local ()))
+                      required
+                  in
+                  let read_optional =
+                    List.map
+                      (fun (field : Types.field) -> (field.field_name, make_local ()))
+                      defaulted
                   in
                   let lets =
                     List.map
-                      (fun ((field : Types.field), local) ->
-                        bind_local local field.field_type ~is_var:false
+                      (fun (field : Types.field) ->
+                        bind_local
+                          (List.assoc field.field_name read_required)
+                          field.field_type ~is_var:false
                           (read_field Deserialize_required field field.field_type))
-                      read
+                      required
+                    @ List.map
+                        (fun (field : Types.field) ->
+                          bind_local
+                            (List.assoc field.field_name read_optional)
+                            (optional_type field) ~is_var:false
+                            (read_field Deserialize_optional field (optional_type field)))
+                        defaulted
                   in
-                  let construct =
+                  let defaults_applied =
                     node self_type
                       (Construct
                          {
                            variant;
                            fields =
                              List.map
-                               (fun ((field : Types.field), local) ->
+                               (fun (field : Types.field) ->
                                  ( field.field_name,
                                    Some
                                      (Core.Value
-                                        (node field.field_type
-                                           (Use (Local { local; type_ = field.field_type; origin }))))
-                                 ))
-                               read
+                                        (use_local field
+                                           (List.assoc field.field_name read_required))) ))
+                               required
                              @ List.map
                                  (fun (field : Types.field) -> (field.field_name, None))
                                  defaulted;
                          })
                   in
-                  let updates =
+                  let bound =
+                    List.map (fun (field : Types.field) -> (field, make_local ())) fields
+                  in
+                  let bound_patterns =
                     List.map
-                      (fun (field : Types.field) ->
-                        let optional =
-                          Types.make_named (Well_known.make_path Option) [ field.field_type ]
-                        in
+                      (fun ((field : Types.field), local) ->
+                        ( field.field_name,
+                          make_binding field.field_type ~is_var:false ~mode:Own local ))
+                      bound
+                  in
+                  let destructure =
+                    pattern self_type
+                      (match variant with
+                      | None -> Record bound_patterns
+                      | Some variant -> Variant { variant; fields = bound_patterns })
+                  in
+                  let field_value ((field : Types.field), bound_local) =
+                    match List.assoc_opt field.field_name read_optional with
+                    | None -> use_local field bound_local
+                    | Some optional_local ->
+                        let optional = optional_type field in
                         let present = make_local () in
-                        statement
-                          (Evaluate
-                             (node unit
-                                (Match
-                                   {
-                                     scrutinees =
-                                       [
-                                         Operands.build Own
-                                           (read_field Deserialize_optional field optional);
-                                       ];
-                                     arms =
-                                       [
-                                         arm
-                                           (pattern optional
-                                              (Variant
-                                                 {
-                                                   variant = Well_known.show_variant Option_some;
-                                                   fields =
-                                                     [
-                                                       ( Well_known.show_field Option_some_value,
-                                                         make_binding field.field_type ~is_var:false
-                                                           ~mode:Own present );
-                                                     ];
-                                                 }))
+                        node field.field_type
+                          (Match
+                             {
+                               scrutinees =
+                                 [
+                                   Operands.build Own
+                                     (node optional
+                                        (Use
+                                           (Local
+                                              { local = optional_local; type_ = optional; origin })));
+                                 ];
+                               arms =
+                                 [
+                                   arm
+                                     (pattern optional
+                                        (Variant
                                            {
-                                             statements =
+                                             variant = Well_known.show_variant Option_some;
+                                             fields =
                                                [
-                                                 statement
-                                                   (Assign
-                                                      {
-                                                        target =
-                                                          (match variant with
-                                                          | None ->
-                                                              Field
-                                                                {
-                                                                  base = built_place;
-                                                                  field = field.field_name;
-                                                                  type_ = field.field_type;
-                                                                  origin;
-                                                                }
-                                                          | Some _ ->
-                                                              raise_bug
-                                                                "a variant's field with a default");
-                                                        value =
-                                                          node field.field_type
-                                                            (Use
-                                                               (Local
-                                                                  {
-                                                                    local = present;
-                                                                    type_ = field.field_type;
-                                                                    origin;
-                                                                  }));
-                                                      });
+                                                 ( Well_known.show_field Option_some_value,
+                                                   make_binding field.field_type ~is_var:false
+                                                     ~mode:Own present );
                                                ];
-                                             value = None;
-                                           };
-                                         arm (pattern optional Wildcard)
-                                           { statements = []; value = None };
-                                       ];
-                                   }))))
-                      defaulted
+                                           }))
+                                     (make_giving_block (use_local field present));
+                                   arm (pattern optional Wildcard)
+                                     (make_giving_block (use_local field bound_local));
+                                 ];
+                             })
+                  in
+                  let built = make_local () in
+                  let built_place : Core.place =
+                    Local { local = built; type_ = self_type; origin }
+                  in
+                  let rebuilt =
+                    node self_type
+                      (Construct
+                         {
+                           variant;
+                           fields =
+                             List.map
+                               (fun (field, bound_local) ->
+                                 ( field.Types.field_name,
+                                   Some (Core.Value (field_value (field, bound_local))) ))
+                               bound;
+                         })
+                  in
+                  let build =
+                    bind_local built self_type ~is_var:false
+                      (node self_type
+                         (Match
+                            {
+                              scrutinees = [ Operands.build Own defaults_applied ];
+                              arms = [ arm destructure (make_giving_block rebuilt) ];
+                            }))
                   in
                   {
                     statements =
-                      lets
-                      @ [ bind_local built self_type ~is_var:(defaulted <> []) construct ]
-                      @ updates
+                      lets @ [ build ]
                       @ [ finish end_ ]
                       @ List.map (make_invariant_check built_place) invariant_clauses;
                     value =
