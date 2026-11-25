@@ -115,12 +115,21 @@ manifest above it is a project by itself.
 
 [test]
 time_limit = 10
+
+[build]
+x86_64_level = "v2"
 ```
 
 - The project's manifest may also hold a `[package]`, when the project's
   root is itself a package.
 - `time_limit` is the time each test of the project may take, in seconds. It
   is 10 unless the manifest says otherwise.
+- `x86_64_level` is the microarchitecture level of x86-64 that the project's
+  programs are built for: `"v1"`, which is the baseline, `"v2"`, `"v3"`, or
+  `"v4"`. It is `"v3"` unless the manifest says otherwise. Before `main`
+  runs, a program checks the CPU for each feature of its level. Where one is
+  missing, the program names it and the level to write here, and exits with
+  status 126. The level changes no result of a program.
 - Two packages of a project cannot have the same name.
 - A project's package takes the place of the registry's package of the same
   name, for every package of the build.

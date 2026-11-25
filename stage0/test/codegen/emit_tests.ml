@@ -1277,3 +1277,106 @@ let () =
       match Convention.classify_parameter env Own (make_array_type 4) with
       | Some (Value _) -> ()
       | _ -> Codegen_support.fail "a small array that is given away is passed by address")
+
+let count_expected_results (cases : (Memory_layout.integer * Lowered.rvalue * string) list) =
+  let passed = 0 in
+  let locals =
+    Codegen_support.local (Codegen_support.value Codegen_support.int32)
+    :: List.concat_map
+         (fun (integer, _, _) ->
+           [
+             Codegen_support.local (Raw (Integer integer));
+             Codegen_support.local (Raw Bool);
+             Codegen_support.local (Codegen_support.value Codegen_support.int32);
+           ])
+         cases
+  in
+  let statements =
+    Lowered.Assign (Codegen_support.at passed, Use (Codegen_support.constant_int32 0))
+    :: List.concat
+         (List.mapi
+            (fun index (integer, rvalue, expected) ->
+              let result = 1 + (3 * index) in
+              let is_expected = result + 1 and counted = result + 2 in
+              [
+                Lowered.Assign (Codegen_support.at result, rvalue);
+                Assign
+                  ( Codegen_support.at is_expected,
+                    Compare
+                      ( Equal,
+                        Codegen_support.copy result,
+                        Constant (Integer (integer, Z.of_string expected)) ) );
+                Assign
+                  ( Codegen_support.at counted,
+                    Convert (Codegen_support.copy is_expected, Integer Int32) );
+                Assign
+                  ( Codegen_support.at passed,
+                    Binary (Add, Codegen_support.copy passed, Codegen_support.copy counted) );
+              ])
+            cases)
+  in
+  Codegen_support.entry locals
+    [ Codegen_support.block statements (Return (Some (Codegen_support.copy passed))) ]
+
+let make_integer_constant integer text = Lowered.Constant (Integer (integer, Z.of_string text))
+
+let make_binary_case (integer, op, left, right, expected) =
+  ( integer,
+    Lowered.Binary (op, make_integer_constant integer left, make_integer_constant integer right),
+    expected )
+
+let make_unary_case (integer, op, operand, expected) =
+  (integer, Lowered.Unary (op, make_integer_constant integer operand), expected)
+
+let expect_every_result cases =
+  Codegen_support.expect_status (List.length cases) [ count_expected_results cases ]
+
+let () =
+  Codegen_support.test "addition, subtraction, multiplication, and negation wrap in every width"
+    (fun () ->
+      expect_every_result
+        (List.map make_binary_case
+           [
+             (Int8, Add, "127", "1", "-128");
+             (Int8, Subtract, "-128", "1", "127");
+             (Int8, Multiply, "100", "3", "44");
+             (UInt8, Add, "255", "1", "0");
+             (UInt8, Multiply, "255", "255", "1");
+             (Int16, Add, "32767", "1", "-32768");
+             (Int16, Multiply, "-32768", "-1", "-32768");
+             (UInt16, Multiply, "65535", "65535", "1");
+             (UInt16, Subtract, "0", "1", "65535");
+             (Int32, Add, "2147483647", "1", "-2147483648");
+             (Int32, Multiply, "65536", "65536", "0");
+             (UInt32, Multiply, "4294967295", "4294967295", "1");
+             (Int64, Add, "9223372036854775807", "1", "-9223372036854775808");
+             (Int64, Subtract, "-9223372036854775808", "1", "9223372036854775807");
+             (Int64, Multiply, "9223372036854775807", "2", "-2");
+             (UInt64, Subtract, "0", "1", "18446744073709551615");
+           ]
+        @ List.map make_unary_case
+            [
+              (Int8, Negate, "-128", "-128");
+              (Int32, Negate, "-2147483648", "-2147483648");
+              (Int64, Negate, "-9223372036854775808", "-9223372036854775808");
+              (UInt32, Negate, "1", "4294967295");
+            ]));
+  Codegen_support.test
+    "arithmetic that does not overflow gives the sum, the difference, the product, and the opposite"
+    (fun () ->
+      expect_every_result
+        (List.map make_binary_case
+           [
+             (Int8, Add_without_overflow, "100", "27", "127");
+             (Int8, Multiply_without_overflow, "-64", "2", "-128");
+             (UInt16, Multiply_without_overflow, "255", "257", "65535");
+             (Int32, Subtract_without_overflow, "-2147483647", "1", "-2147483648");
+             (Int64, Add_without_overflow, "9223372036854775806", "1", "9223372036854775807");
+             (Int64, Multiply_without_overflow, "-4611686018427387904", "2", "-9223372036854775808");
+             (UInt64, Subtract_without_overflow, "18446744073709551615", "1", "18446744073709551614");
+           ]
+        @ List.map make_unary_case
+            [
+              (Int8, Negate_without_overflow, "127", "-127");
+              (Int64, Negate_without_overflow, "-9223372036854775807", "9223372036854775807");
+            ]))

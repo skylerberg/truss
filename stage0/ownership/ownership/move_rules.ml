@@ -2,138 +2,56 @@ module Place_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Moves.path
 end))
 
-type verdict =
-  | Moves
-  | Reads
-  | Refused of (Context.context -> Source.Definition_span.t -> Types.ty -> unit)
-
-let make_scrutinee_fix context (owned : Context.owned_scrutinee) =
-  let scrutinee = Context.show_root context (Local owned.scrutinee) in
-  let fix =
-    Diagnostic.fix
-      (Printf.sprintf "Move `%s` with `own`." scrutinee)
-      [
-        Diagnostic.insert
-          (Source.Definition_span.make_zero_width
-             (Context.locate_origin context owned.written).start)
-          "own ";
-      ]
-  in
-  (Printf.sprintf "%s`%s`" (if owned.is_part then "part of " else "") scrutinee, scrutinee, fix)
+type verdict = Moves | Reads | Refused of (Context.context -> Core.origin -> Types.ty -> unit)
 
 let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captured : verdict =
-  let shown = Context.show context place in
-  let refuse message =
+  let shown = Context.find_place context place in
+  let refuse make =
     Refused
       (fun context at type_ ->
-        Context.report context Not_owned at
-          ~fixes:(Context.copy_fix context "Copy it." type_ origin)
-          message)
+        Context.report context (make at (Context.find_copy context type_ origin)))
   in
   let root_mode : Language.Mode.t =
     if is_captured then Read else Context.classify_binding_mode context place.root
   in
   let views_literal = (not is_captured) && Context.views_literal context place.root in
   if Context.find_place_without_keyword context origin = Some Mut then
-    Refused
-      (fun context at type_ ->
-        Context.report context Needs_lent_mut at
-          ~fixes:
-            (Diagnostic.fix "Lend it `mut`."
-               [ Diagnostic.insert (Source.Definition_span.make_zero_width at.start) "mut " ]
-            :: Context.copy_fix context "Pass a copy." type_ origin)
-          (Printf.sprintf
-             "`%s` is a place in a value that is lent `mut`, so the place is lent `mut` too. Pass \
-              it `mut`, or pass a copy."
-             shown))
+    refuse (fun at copy -> Needs_lent_mut { at; place = shown; copy })
   else if is_returned && root_mode <> Own then
     if Context.is_view context type_ then Reads
     else
-      Refused
-        (fun context at type_ ->
+      refuse (fun at copy ->
           match Context.find_owned_scrutinee context place.root with
-          | Some owned ->
-              let viewed, scrutinee, fix = make_scrutinee_fix context owned in
-              Context.report context Needs_owned at
-                ~fixes:(fix :: Context.copy_fix context "Return a copy." type_ origin)
-                (Printf.sprintf
-                   "A returned value must be owned, and `%s` views %s. Move `%s` with `own` where \
-                    `%s` is bound, or return a copy."
-                   shown viewed scrutinee
-                   (Context.show_root context place.root))
-          | None ->
-              Context.report context Needs_owned at
-                ~fixes:(Context.copy_fix context "Return a copy." type_ origin)
-                (Printf.sprintf "A returned value must be owned, and `%s` %s. Return a copy." shown
-                   (if views_literal then "views a string literal" else "is not owned here")))
+          | Some scrutinee -> Returned_view_of_scrutinee { at; place = shown; scrutinee; copy }
+          | None -> Returned_unowned { at; place = shown; views_literal; copy })
   else if List.exists (function Place.Element _ | Range _ -> true | Field _ -> false) place.steps
   then
     match List.rev place.steps with
     | Range _ :: _ ->
         Refused
           (fun context at type_ ->
-            Context.report context Not_owned at
-              ~fixes:(Context.copy_fix context "Copy it." type_ origin)
-              (Printf.sprintf
-                 "`%s` is a range of a collection, and elements cannot be moved out of their \
-                  collection. Copy it, or keep a view of it in a place of type `%s`."
-                 shown
-                 (Types.show (Types.make_view type_))))
-    | Element _ :: _ ->
-        refuse
-          (Printf.sprintf
-             "`%s` is an element, which cannot be moved out of its collection. Copy it, or take it \
-              out with a method such as `remove`."
-             shown)
-    | Field _ :: _ | [] ->
-        refuse
-          (Printf.sprintf
-             "`%s` is part of an element, which cannot be moved out of its collection. Copy it, or \
-              take it out with a method such as `remove`."
-             shown)
+            Context.report context
+              (Moved_range
+                 {
+                   at;
+                   place = shown;
+                   copy = Context.find_copy context type_ origin;
+                   view_type = Types.make_view type_;
+                 }))
+    | Element _ :: _ | Field _ :: _ | [] ->
+        refuse (fun at copy -> Moved_element { at; place = shown; copy })
   else
     match (root_mode, place.root) with
-    | Read, Constant _ ->
-        refuse
-          (Printf.sprintf "`%s` is %s, so it cannot be moved. Copy it instead." shown
-             (if place.steps = [] then "a constant" else "part of a constant"))
+    | Read, Constant _ -> refuse (fun at copy -> Moved_constant { at; place = shown; copy })
     | Read, _ when views_literal ->
-        refuse
-          (Printf.sprintf
-             "`%s` views a string literal, so it cannot be moved: its new owner would free the \
-              literal's static buffer. Copy it instead."
-             shown)
+        refuse (fun at copy -> Moved_literal_view { at; place = shown; copy })
     | Read, _ ->
-        Refused
-          (fun context at type_ ->
+        refuse (fun at copy ->
             match Context.find_owned_scrutinee context place.root with
-            | Some owned ->
-                let viewed, scrutinee, fix = make_scrutinee_fix context owned in
-                Context.report context Not_owned at
-                  ~fixes:(fix :: Context.copy_fix context "Copy it." type_ origin)
-                  (Printf.sprintf
-                     "`%s` views %s, so it cannot be moved. Move `%s` with `own` where `%s` is \
-                      bound, or copy `%s`."
-                     shown viewed scrutinee
-                     (Context.show_root context place.root)
-                     shown)
-            | None ->
-                Context.report context Not_owned at
-                  ~fixes:(Context.copy_fix context "Copy it." type_ origin)
-                  (Printf.sprintf "`%s` is %s, so it cannot be moved. Copy it instead." shown
-                     (if place.steps = [] then "a view" else "part of a view")))
+            | Some scrutinee -> Moved_view_of_scrutinee { at; place = shown; scrutinee; copy }
+            | None -> Moved_view { at; place = shown; copy })
     | (Own | Mut), _ when Context.find_place_without_keyword context origin = Some Own ->
-        Refused
-          (fun context at type_ ->
-            Context.report context Needs_owned at
-              ~fixes:
-                (Diagnostic.fix "Move it with `own`."
-                   [ Diagnostic.insert (Source.Definition_span.make_zero_width at.start) "own " ]
-                :: Context.copy_fix context "Copy it." type_ origin)
-              (Printf.sprintf
-                 "An owned value is needed here, and `%s` is a place. Pass it `own` to move it, or \
-                  copy it."
-                 shown))
+        refuse (fun at copy -> Needs_own_keyword { at; place = shown; copy })
     | (Own | Mut), _ -> Moves
 
 let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
@@ -189,23 +107,19 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
             match (find_place moved, find_first_move state moved) with
             | Some shown, Some moved_origin ->
                 Place_table.replace reported_use_after_move moved ();
-                let shown = Context.show context shown in
-                Context.report context Use_after_move
-                  (Context.locate_origin context origin)
-                  ~notes:
-                    [
-                      ( Context.locate_origin context moved_origin,
-                        Printf.sprintf "`%s` is moved here." shown );
-                    ]
-                  ~fixes:
-                    (Context.copy_fix context "Pass a copy at the move instead."
-                       (read_moved_type moved_origin) moved_origin)
-                  (Printf.sprintf "`%s` is used after it was moved." shown)
+                Context.report context
+                  (Use_after_move
+                     {
+                       at = origin;
+                       place = Context.find_place context shown;
+                       moved = moved_origin;
+                       copy = Context.find_copy context (read_moved_type moved_origin) moved_origin;
+                     })
             | _ -> ())
         | _ -> ())
   in
   let reported_not_reinitialized = Place_table.create 8 in
-  let check_reinitialized state ~locals ?(is_moved_in_scope = fun _ -> true) ~at make_message =
+  let check_reinitialized state ~locals ?(is_moved_in_scope = fun _ -> true) make_diagnostic =
     List.iter
       (fun local ->
         if Moves.is_lent_mut moves local then
@@ -214,31 +128,21 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
               match (find_place moved, find_first_move state moved) with
               | Some shown, Some moved_origin when is_moved_in_scope moved ->
                   Place_table.replace reported_not_reinitialized moved ();
-                  let moved_span = Context.locate_origin context moved_origin in
-                  let root = Context.show context { shown with steps = [] } in
-                  Context.report context Not_reinitialized
-                    (Option.value ~default:moved_span at)
-                    ~notes:(if at = None then [] else [ (moved_span, "It is moved out here.") ])
-                    (make_message (Context.show context shown) root)
+                  Context.report context
+                    (make_diagnostic ~moved:moved_origin (Context.find_place context shown))
               | _ -> ())
           | _ -> ())
       locals
   in
   let all_locals = List.init (Array.length body.locals) Fun.id in
-  let describe_scope_end moved root =
-    Printf.sprintf
-      "`%s` is moved out here and not reinitialized. `%s` is lent `mut`, so every part of it must \
-       be initialized when its loop iteration, its `match` arm, or its lambda ends."
-      moved root
+  let at_scope_end ~moved place : Catalog.Ownership.t =
+    Not_reinitialized_at_scope_end { moved; place }
   in
   let check_at_return at state =
     if returns_to_caller then
-      check_reinitialized state ~locals:all_locals ~at:(Some at) (fun moved _ ->
-          Printf.sprintf
-            "`%s` is moved out and not reinitialized. The caller owns it, so assign it a value \
-             before the function returns."
-            moved)
-    else check_reinitialized state ~locals:body.parameters ~at:None describe_scope_end
+      check_reinitialized state ~locals:all_locals (fun ~moved place ->
+          Not_reinitialized_at_return { at; moved; place })
+    else check_reinitialized state ~locals:body.parameters at_scope_end
   in
   let concurrent_branches =
     Array.to_list body.blocks
@@ -272,18 +176,17 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
               | _ -> ())
             (Moves.list_given_by statement);
           List.iter
-            (fun local -> check_reinitialized state ~locals:[ local ] ~at:None describe_scope_end)
+            (fun local -> check_reinitialized state ~locals:[ local ] at_scope_end)
             (Moves.list_ended statement);
           Moves.apply moves state statement)
         basic.statements;
-      let at = Context.locate_origin context basic.terminator_origin in
       check_uses state (Moves.list_terminator_uses moves basic);
       match basic.terminator with
-      | Return _ -> check_at_return at state
+      | Return _ -> check_at_return basic.terminator_origin state
       | Iteration_end { loop } ->
           check_reinitialized state
             ~locals:[ (Mir.Graph.read_loop_head body loop).part ]
-            ~at:None describe_scope_end
+            at_scope_end
       | Join _ ->
           List.iter
             (fun (blocks, entry) ->
@@ -292,14 +195,7 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
                 check_reinitialized state ~locals:all_locals
                   ~is_moved_in_scope:(fun moved ->
                     Moves.find_possibly_empty moves branch_entry moved = None)
-                  ~at:None
-                  (fun moved _ ->
-                    Printf.sprintf
-                      "`%s` is moved out in this branch and not reinitialized in it. If another \
-                       branch exits the `concurrent` block early, the code after the block does \
-                       not run, so each branch must reinitialize each place lent `mut` that it \
-                       moves out of."
-                      moved))
+                  (fun ~moved place -> Not_reinitialized_in_branch { moved; place }))
             concurrent_branches
       | Goto _ | Branch _ | For _ | Fork _ | Yield _ | Cancel _ | Resume _ | Unreachable
       | Written_unreachable | Todo ->

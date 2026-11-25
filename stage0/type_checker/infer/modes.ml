@@ -1,3 +1,4 @@
+type mutation = Catalog.Inference.mutation = Assignment | Passed_mut
 type immutable = Read_only of string | Captured of string | Lent_read_only | Not_a_place
 
 let find_immutable_name state (name : Syntax.name) =
@@ -5,9 +6,7 @@ let find_immutable_name state (name : Syntax.name) =
   | Some (Local id) -> (
       let captured =
         match state.lambdas with
-        | (lambda : Source.Definition_span.t) :: _ ->
-            let binding = State.read_span state id in
-            binding.start < lambda.start || binding.start >= lambda.stop
+        | lambda :: _ -> not (State.contains state ~outer:lambda ~inner:id)
         | [] -> false
       in
       match Hashtbl.find_opt state.locals id with
@@ -39,7 +38,7 @@ let rec find_immutable state (env : State.env) (value : Syntax.expression) : imm
       | None -> Some Not_a_place)
   | _ -> Some Not_a_place
 
-let use_mutable_index (state : State.state) ~(report_with : Diagnostic.Code.types option)
+let use_mutable_index (state : State.state) ~(report_with : mutation option)
     (value : Syntax.expression) =
   match Tables.find_call state.tables value.id with
   | Some
@@ -75,22 +74,19 @@ let use_mutable_index (state : State.state) ~(report_with : Diagnostic.Code.type
                })
       | None ->
           Option.iter
-            (fun code ->
+            (fun by ->
               let assigns =
                 Option.is_some
                   (State.find_evidence state self_type
                      (Types.make_trait_reference ~arguments:[] (Well_known.make_path Index_assign)))
               in
-              State.report state code (State.read_span state value.id)
-                (Printf.sprintf
-                   "An element of `%s` cannot be mutated in place: `%s` implements `Index`, which \
-                    lends an element read-only, and not `IndexMut`.%s"
-                   (State.show state self_type) (State.show state self_type)
-                   (if assigns then " Assign the whole element with `=`." else "")))
+              State.report state
+                (Index_not_mutable
+                   { at = Written value.id; by; self_type = State.zonk state self_type; assigns }))
             report_with)
   | _ -> ()
 
-let rec use_mutable_indexes (state : State.state) ~(report_with : Diagnostic.Code.types option)
+let rec use_mutable_indexes (state : State.state) ~(report_with : mutation option)
     (value : Syntax.expression) =
   match value.kind with
   | Member (base, _) | Parenthesized base | Mode (_, base) ->
@@ -99,8 +95,6 @@ let rec use_mutable_indexes (state : State.state) ~(report_with : Diagnostic.Cod
       State.check_when_final state (fun () -> use_mutable_index state ~report_with value);
       use_mutable_indexes state ~report_with base
   | _ -> ()
-
-type mutation = Assignment | Passed_mut
 
 let rec find_viewing_base (state : State.state) (place : Syntax.expression) =
   match place.kind with
@@ -111,78 +105,40 @@ let rec find_viewing_base (state : State.state) (place : Syntax.expression) =
       | _ -> find_viewing_base state base)
   | _ -> None
 
-let check_view_writes state ~code (value : Syntax.expression) =
+let check_view_writes state ~(by : mutation) (value : Syntax.expression) =
   State.check_when_final state (fun () ->
       Option.iter
         (fun (base : Syntax.expression) ->
-          State.report state code (State.read_span state value.id)
-            (Printf.sprintf
-               "`%s` is a view, and a view is read-only, so nothing is written through it. Write \
-                through the place that it views."
-               (State.quote_span state (State.read_span state base.id))))
+          State.report state (View_written { at = Written value.id; by; view = Written base.id }))
         (find_viewing_base state value))
 
-let locate_mode_keyword state (value : Syntax.expression) (inner : Syntax.expression) =
-  Source.Definition_span.make (State.read_span state value.id).start
-    (State.read_span state inner.id).start
-
 let mutate state env ~(by : mutation) (value : Syntax.expression) =
-  let code : Diagnostic.Code.types =
-    match by with Assignment -> Not_assignable | Passed_mut -> Wrong_mode
-  in
+  let at : Core.origin = Written value.id in
   (match (find_immutable state env value, by) with
-  | _ when State.is_formula env ->
-      State.report state Not_in_specification (State.read_span state value.id)
-        (Printf.sprintf
-           "Nothing in a specification, a proof, or a quantifier's body can be %s: the prover \
-            reads them as formulas, which mutate nothing."
-           (match by with Assignment -> "assigned" | Passed_mut -> "passed `mut`"))
+  | _ when State.is_formula env -> State.report state (Mutation_in_formula { at; by })
   | None, _ -> ()
-  | Some (Captured name), _ ->
-      State.report state code (State.read_span state value.id)
-        (Printf.sprintf
-           "A lambda cannot mutate its captures, and `%s` is from outside it. Return the new value \
-            instead, or use a loop."
-           name)
-  | Some (Read_only name), _ ->
-      State.report state code (State.read_span state value.id)
-        (Printf.sprintf
-           "`%s` cannot be mutated here: only a `var`, a `mut` parameter, or `mut self`, and their \
-            parts, can be %s."
-           name
-           (match by with Assignment -> "assigned" | Passed_mut -> "passed `mut`"))
-  | Some Lent_read_only, Assignment ->
-      State.report state code (State.read_span state value.id)
-        ~fixes:
-          [
-            State.fix "Pass it `mut`."
-              [ State.insert (State.read_span state value.id).start "mut " ];
-          ]
-        "This part is lent read-only, so it cannot be mutated. Pass the place it is lent from \
-         `mut`, so that it is lent `mut`."
+  | Some (Captured name), _ -> State.report state (Captured_mutation { at; by; name })
+  | Some (Read_only name), _ -> State.report state (Read_only_mutation { at; by; name })
+  | Some Lent_read_only, Assignment -> State.report state (Lent_read_only_assigned { at })
   | Some Not_a_place, Assignment -> (
       match value.kind with
       | Mode (mode, inner) when Places.is_place state.State.resolved state.State.tables inner ->
-          State.report state Redundant_mode (State.read_span state value.id)
-            ~fixes:
-              [
-                State.fix "Remove the keyword."
-                  [ Diagnostic.delete (locate_mode_keyword state value inner) ];
-              ]
-            (Printf.sprintf "An assignment writes its target, so `%s` takes no `%s`."
-               (State.quote_span state (State.read_span state inner.id))
-               (match mode with Mut -> "mut" | Own -> "own"))
-      | _ ->
-          State.report state code (State.read_span state value.id)
-            "Only a place, such as a variable, a field, or an element, can be assigned.")
+          State.report state
+            (Mode_on_assignment_target
+               {
+                 at;
+                 inner = Written inner.id;
+                 keyword = (match mode with Mut -> Mut | Own -> Own);
+               })
+      | _ -> State.report state (Not_assignable_place { at }))
   | Some (Lent_read_only | Not_a_place), Passed_mut -> ());
   (match find_immutable state env value with
-  | None when not (State.is_formula env) -> check_view_writes state ~code value
+  | None when not (State.is_formula env) -> check_view_writes state ~by value
   | Some _ | None -> ());
   use_mutable_indexes state value
     ~report_with:
       (match find_immutable state env value with
-      | None when not (State.is_formula env) -> Some code
+      | None when not (State.is_formula env) -> Some by
       | _ -> None)
 
 let rec note_place_without_keyword (state : State.state) env (place : Syntax.expression) ~needs =
@@ -227,33 +183,16 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
   match (parameter.mode, classify_argument state value) with
   | Read, (Place | Temporary | Lent _) -> ()
   | Read, With_mode (_, inner) ->
-      State.report state Redundant_mode (State.read_span state value.id)
-        ~fixes:
-          [
-            State.fix "Remove the keyword."
-              [ Diagnostic.delete (locate_mode_keyword state value inner) ];
-          ]
-        (Printf.sprintf "`%s` only reads its argument, so it takes no mode keyword." name)
+      State.report state
+        (Mode_on_read_argument { at = Written value.id; inner = Written inner.id; parameter = name })
   | Mut, With_mode (Mut, inner) -> mutate state env ~by:Passed_mut inner
   | Mut, Place ->
-      State.report state Missing_mode (State.read_span state value.id)
-        ~fixes:
-          [
-            State.fix "Pass it `mut`."
-              [ State.insert (State.read_span state value.id).start "mut " ];
-          ]
-        (Printf.sprintf "`%s` may mutate its argument, so the call site passes it `mut`." name)
+      State.report state (Missing_mut_argument { at = Written value.id; parameter = name })
   | Mut, Lent Mut -> mutate state env ~by:Passed_mut value
   | Mut, Lent (Read | Own) ->
-      State.report state Wrong_mode (State.read_span state value.id)
-        (Printf.sprintf
-           "`%s` may mutate its argument, and this part is lent read-only. Pass the place it is \
-            lent from `mut`, so that it is lent `mut`."
-           name)
+      State.report state (Lent_read_only_argument { at = Written value.id; parameter = name })
   | Mut, (Temporary | With_mode (Own, _)) ->
-      State.report state Wrong_mode (State.read_span state value.id)
-        (Printf.sprintf "`%s` mutates its argument in place, so it must be a place passed `mut`."
-           name)
+      State.report state (Temporary_passed_mut { at = Written value.id; parameter = name })
   | Own, With_mode (Own, inner) ->
       State.check_when_final state (fun () ->
           let final_type = State.finalize_type state type_ in
@@ -261,22 +200,14 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
             State.decide_property state Interface.Properties.Plain final_type
             = Interface.Properties.Holds
           then
-            State.report state Redundant_mode (State.read_span state value.id)
-              ~fixes:
-                [
-                  State.fix "Remove the keyword."
-                    [ Diagnostic.delete (locate_mode_keyword state value inner) ];
-                ]
-              (Printf.sprintf "`%s` copies implicitly, so it needs no `own`."
-                 (Types.show final_type)))
+            State.report state
+              (Redundant_own { at = Written value.id; inner = Written inner.id; type_ = final_type }))
   | Own, (Temporary | Lent _) -> ()
   | Own, Place when Hashtbl.find_opt state.yielded value.id = Some Mut ->
       note_place_without_keyword state env value ~needs:Mut
   | Own, Place -> note_place_without_keyword state env value ~needs:Own
   | Own, With_mode (Mut, _) ->
-      State.report state Wrong_mode (State.read_span state value.id)
-        (Printf.sprintf "`%s` takes ownership of its argument, so it is passed `own`, not `mut`."
-           name)
+      State.report state (Mut_for_own { at = Written value.id; parameter = name })
   | (Mut | Own), With_mode (Read, _) -> ()
 
 let note_owned_value state env (value : Syntax.expression) =

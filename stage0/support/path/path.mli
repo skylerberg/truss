@@ -49,3 +49,5 @@ val equal : t -> t -> bool
 val hash : t -> int
 
 module Map : Map.S with type key = t
+
+type key = { module_ : module_; path : t; ordinal : int }

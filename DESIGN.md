@@ -380,7 +380,7 @@ rule excludes `Plain` arguments, such as indexes, so that case is rare.
 | A range is passed `mut` only to a parameter that its function declares `modifies items[..]`. | A range has no capacity of its own, so a `push` through it would write over the elements that follow it. The clause states that the callee keeps the length, which the body check enforces and the caller's proof uses, so one function serves a whole list and a range of one. |
 | A read-only argument is compared with its parameter's type without `view`, so a `List[view String]` passes to a `List[String]` parameter and a `view String` looks up a `Map[String, Int64]`. | A view has the layout of the type that it views, and a callee cannot mutate, move, drop, or store a read-only parameter, so it cannot tell a view from an owned value. Without the rule a lookup would allocate a `String`, and a function over a list of texts would be written twice. |
 | A parameter declared `T` is lent for the call, and one declared `view T` may be stored. | Most functions only read their arguments, so the plain type is the short spelling and promises the caller that nothing stays borrowed. A function that keeps a view says so in its signature, where the caller's ownership check reads it: the argument then stays borrowed while the stored view is live. |
-| A view implements a trait of its viewed type only when every method of the trait takes `self` read-only and takes `Self` only in read-only parameters. | The view calls the viewed type's methods, which are compiled for an owner. A method that took `self` or a `Self` argument by `own` would drop the elements that the view only borrows: a double free. |
+| A view implements a trait through an `impl` that the compiler derives: it forwards each method that the viewed type's `impl` writes, and inherits the rest with the view as `Self`. The derived `impl` must be acceptable as any `impl` is. | Stated as a condition of its own, the rule is a second list of what an `impl` must meet, and an entry that the list lacks is a hole: it once lacked the traits that a trait requires. Stated as an `impl`, it has no list. A forwarded method is compiled for an owner, so the call's own typing keeps a view from an `own` or `mut` parameter, where the method would drop or write elements that the view borrows. An inherited method knows `Self` only through the trait and the traits that it requires, so compiled for `Self = view T` it copies and drops views and writes no element. `Ordered` is the case that matters: its `impl` writes `compare`, and `max`, `min`, and `clamp` are inherited, so a view is a key of a `Map` and an element that `sort` orders. |
 
 ### Lending methods
 
@@ -979,6 +979,8 @@ proves the operation, and its release build checks nothing.
 | Code that uses `Panic unless C` proves its integer operations where `C` holds. | A function that declares `Panic` for one `expect` would otherwise lose the compile-time check of every other operation. The condition keeps the check for the instantiations that never panic. |
 | A lambda whose capabilities are inferred takes `Panic` for an integer operation where the code it is written in has `Panic`. | A lambda passed to `map` would otherwise have to prove what the code around it need not. A lambda passed as a function type without `Panic` still proves its operations, since its caller relies on that type. |
 | Indexing, slicing, and `unreachable` are proven in code that has `Panic` too. | Indexing and slicing state their bounds as a `requires`, which every caller proves. `unreachable` claims that the point is not reached, and a crash there would contradict the claim. Code that panics on purpose calls `Panic.crash`, which its signature shows. |
+| A release build compiles a proven operation on a signed integer as C arithmetic whose overflow is undefined, and a `wrapping_` method as unsigned arithmetic. | The C compiler then has the fact that the prover proved: it folds `value + 1 > value`, and it counts the iterations of a loop whose signed counter steps by more than one. Under `-fwrapv` both kinds of operation wrapped, so the C compiler could assume nothing about either. |
+| A proven operation on an unsigned integer, and a proven index, tell the C compiler nothing. | C has no unsigned arithmetic whose overflow is undefined, so the fact can only be an assumption: `if (overflowed) __builtin_unreachable()`. Clang 21 turns that into an addition that does not wrap, and then vectorizes a loop over `values[index * 2]` that it otherwise does not. Apple clang 17 keeps the overflow check's intrinsic instead and stops vectorizing a loop that it vectorizes without the assumption. An assumption therefore waits for a test of what the C compiler does with one. |
 
 **A panic cannot be caught.** Code that caught a panic could hold a value
 whose invariant was broken partway through an update. A program that must
@@ -1636,6 +1638,31 @@ Rules: [The registry](PACKAGES.md#the-registry).
 | A package is published as its source. | The code that a reviewer reads in the registry is the code that compiles. |
 | The registry keeps an append-only public log of the hash of every version, as Go's checksum database does. | The registry cannot give two users different code under one version. |
 | The registry signs the proofs and test results that it computed for a release. | Proving a whole dependency tree on a machine that starts with nothing, such as an agent's new container, is the cost that GOALS.md sets out to remove. Each signed result is a function of its key, so a registry that signed a false result is caught by anyone who recomputes it. |
+
+## Target CPUs
+
+**An x86-64 program is built for the x86-64-v3 level:** AVX2, FMA, BMI1,
+BMI2, LZCNT, MOVBE, F16C, and the features of the levels below. A project's
+manifest can name another level, from `"v1"`, the baseline, to `"v4"`. An
+ARM64 program is built for the C compiler's default: ARMv8.0 on Linux, and
+Apple silicon on macOS.
+
+| Option | Consequence |
+|---|---|
+| The x86-64 baseline, which Go and Rust build for | `fused_multiply_add`, `floor`, `ceiling`, `truncate`, and `round_to_even` are each a call into the C library, and `count_ones` is a sequence of about 20 instructions. The standard library's float functions are written with them ([Floats](#floats)), so they run at the level of the build. A C program calls a C library that selects its `sin` for the CPU when the program loads. |
+| x86-64-v2 | The rounding functions and `count_ones` are one instruction each. `fused_multiply_add` is still a call, and `leading_zeros` still branches on zero. |
+| x86-64-v3 | Each of them is one instruction, and a vectorized loop uses 256-bit registers. The program does not run on Intel's CPUs before Haswell (2013), on AMD's before Excavator (2015), on Atom-class cores before Gracemont (2021), or under an emulator or a virtual machine that provides no AVX. |
+| The CPU of the machine that builds | The program then depends on where it was built. A build is not reproducible, and an object in a cache that another machine restores can hold instructions that the machine lacks. |
+
+| Rule | Reason |
+|---|---|
+| The level changes no result. | Two float operations are fused only where the code calls `fused_multiply_add`, and the C compiler may not reorder float arithmetic. A cached test result holds at every level (*determinism*). |
+| A development build has the level of a release build. | At a lower level a test would run the C library's `fma` and rounding functions, and the released program the CPU's instructions. |
+| A program checks the CPU for each feature it was built for before `main` runs, and exits with status 126 after naming one that is missing. | Without the check the program is killed by an illegal instruction signal, at whichever instruction the CPU lacks first, and neither the signal nor its address names the feature. Go's programs make the same check when they are built for a level above the baseline. |
+| The message names the highest level that the machine has. | The fix is then one line of the manifest, which an agent can write without knowing the CPU. |
+| The level is the project's, written in its manifest. | A program has one level, so a dependency cannot choose it, and a project deploys to machines that its manifest can record. An environment variable would be set again on every machine that builds. |
+| A manifest names a level, never a CPU or one feature. | The four levels are every value, so the check covers each one in full. A feature outside the levels would need a row of its own in the check, and a CPU's name is known only to the C compilers released after the CPU. |
+| ARM64 keeps the C compiler's default. | Raising the level on Linux gives the atomic instructions of ARMv8.1, and excludes the Cortex-A72 of the Raspberry Pi 4. |
 
 ## Omitted features
 

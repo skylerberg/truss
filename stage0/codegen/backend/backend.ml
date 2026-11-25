@@ -21,7 +21,8 @@ type t = {
 }
 
 let make_positions (lookups : Lowering.lowered_lookups) =
-  Lowering.Positions.create lookups.interface.names ~read_source:lookups.read_source
+  Lowering.Positions.create lookups.interface.names ~source:lookups.source
+    ~read_source:lookups.read_source
 
 let make_env backend = Lowering.make_env backend.lookups.system backend.lookups.interface
 
@@ -37,7 +38,9 @@ type location = Lowering.Positions.location = { file : Path.file; line : int; co
 let locate_todo_type (lookups : Lowering.lowered_lookups) positions (path : Path.t) =
   let names = lookups.interface.names in
   match
-    Option.map (fun key -> (names.read_definition key, names.read_spans key)) (names.find_key path)
+    Option.map
+      (fun key -> (names.read_definition key, lookups.source.read_spans key))
+      (names.find_key path)
   with
   | Some ({ kind = Type_definition { name; _ }; _ }, spans) ->
       Lowering.Positions.locate positions path spans.(name.id).start

@@ -126,9 +126,8 @@ recursion_group (definition, state, representative, members)
 usage_check     (definition, state)
 ownership       (definition, state, must_be_disjoint)
 proof           (definition, state, value)
-hole            (definition, position, home, start, stop)
-verdict         (definition, position, code, start, stop, shows, proven, trusts_compiled_code,
-                 failure, cited, cited_start, cited_stop)
+hole            (definition, position, home, location)
+verdict         (definition, position, code, site, proven, trusts_compiled_code, failure)
 ```
 
 One row can hold several facts. A group of columns that some reader takes
@@ -168,14 +167,16 @@ unit's object in the user's cache.
 ### Diagnostics
 
 ```sql
-diagnostic (stage, definition, file, position, severity, code, start, stop,
-            message, detail)
+diagnostic (stage, definition, file, position, severity, code, detail)
 ```
 
-A stage writes a diagnostic's row with the fact that reports it. A
-definition's diagnostic holds spans relative to the definition, so a
-definition that moves in its file keeps its rows. A listing joins
-`definition` for the file and the base.
+A stage writes a diagnostic's row with the fact that reports it. The
+`detail` is the diagnostic's catalog value, which names nodes and holds
+no spans and no text, so a definition that moves in its file, or is
+reformatted, keeps its rows. A listing joins `definition` for the key,
+renders the value with the definition's spans and text, and places the
+result by the base. A question about a diagnostic's message goes through
+`truss check --json`, not through this table.
 
 ### Edges and work
 
@@ -372,7 +373,7 @@ runs the evaluation again.
 | The solver's answers stay in the user's cache, keyed by query, and a `verdict` row records the answer that an obligation got. | Worktrees and CI share answers. A command with no change reads verdicts and runs no part of the prover. |
 | `Prover.decide` splits into `Prover.pose`, which gives a proof's queries, and `Prover.list_states`, which renders the solver's answers. Decide calls both. | Each half is a pure function, and the solver's run between them is the orchestrator's. |
 | A proof's obligations stay in the `proof` value, and no `obligation` table holds them. | A query states the result of running each evaluation that it names, so it is known only when Decide runs, and Decide is the one reader of an obligation. The rows an editor or an agent reads are the `verdict` rows: a site, its message, and whether it is proven. |
-| A `verdict` row holds its failure as a diagnostic relative to its definition, and the clause that the failure cites as a definition and a span in it. The listing places both in their files. | A diagnostic placed in a file would be stale after every edit above it. Placed by `definition.base` when it is listed, a verdict is computed again only when its proof or the spans it names change. |
+| A `verdict` row holds its site and its failure as catalog values, and the failure names the clause it cites as a node in that clause's definition. The listing renders both and places them in their files. | A rendered diagnostic would be stale after every reformat of the definitions it names, and every edit above them. Rendered when it is listed, a verdict is computed again only when its proof changes. |
 | A fact is unchanged where its row holds the same bytes. | A pass is a function of its input, so it builds an equal value with the same sharing, and the value marshals to the same bytes. If a pass ever built an equal value with other sharing, the fact would count as changed, which costs a recomputation and leaves no stale read. A write therefore unmarshals no value to compare it, and a column may hold bytes that are no marshaled value. |
 | An item whose layout needs a type defined as `todo` is lowered to that type's path, and a test key holds the paths of every such type that its item reaches. | `test`, `build`, and `holes` ask which types defined as `todo` a root reaches. The root's key answers, so no command walks the edges of the units that could not be lowered to find the types again. |
 | A fact names the stage that writes it, and forgetting a unit removes the facts of its stage. | A recipe that lists its stage's facts a second time can forget a unit and leave the unit's row. |
@@ -411,7 +412,8 @@ runs the evaluation again.
 
 | Column | Read whole by |
 |---|---|
-| `syntax.tree`, `syntax.spans` | Resolve, Elaborate, Infer |
+| `syntax.tree` | Resolve, Elaborate, Infer |
+| `syntax.spans` | The node order and the broken parts that Resolve and Infer read, the listing of diagnostics, Lower |
 | `resolved.names`, `brackets`, `holes` | Elaborate, Infer, `explain` |
 | `header.value`, `interface.value` | Every stage after Elaborate |
 | `contract.form`, `body.form`, `body.tables` | Build MIR, Check bodies |

@@ -3,7 +3,7 @@ type kind = Upper | Lower
 type checked = {
   kind : kind;
   name : string;
-  problem : (Diagnostic.Code.lexer * string) option;
+  problem : Syntax_catalog.Lexing.name_problem option;
   fix : string option;
 }
 

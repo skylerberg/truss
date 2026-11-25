@@ -49,15 +49,9 @@ let note_place (context : State.context) (frame : State.frame) ~node ~origin val
                         Logic.less_equal other_stop other_start;
                       ]
               in
-              Facts.oblige context frame Disjoint
+              Facts.oblige context frame
                 (Facts.locate context frame.source origin)
-                [
-                  Text "`";
-                  quote first;
-                  Text "` and `";
-                  quote second;
-                  Text "` may reach the same elements, which are used together.";
-                ]
+                (May_alias { first = quote first; second = quote second })
                 apart
           | _ -> ())
       context.disjoint
@@ -98,7 +92,7 @@ let replace_field context ty variant field whole new_value =
             (fun (name, _) ->
               if name = field then new_value else select_field context ty variant name whole)
             fields )
-  | None -> Facts.raise_unsupported Whole_definition "the fields of `%s`" (Types.show ty)
+  | None -> Facts.raise_unsupported Whole_definition (Fields_of ty)
 
 let find_record_field_type context ty field =
   match Facts.find_constructors context ty with
@@ -335,16 +329,13 @@ let find_own_callback (context : State.context) local =
     (fun (parameter, name, callback) -> if parameter = local then Some (name, callback) else None)
     context.callbacks
 
-let check_callback_contract context frame location ~name inputs requires arguments ~promised ~why =
+let check_callback_contract context frame location ~name inputs requires arguments ~promised ~reason
+    =
   let inside = make_callback_contract_frame frame inputs arguments in
   List.iter
     (fun (clause : Mir.formula) ->
-      Facts.oblige context (Facts.restrict frame promised) Requires location
-        [
-          Text (Printf.sprintf "`%s` %s, so its `" name why);
-          Facts.quote frame.source clause.origin;
-          Text "` may not hold.";
-        ]
+      Facts.oblige context (Facts.restrict frame promised) location
+        (Callback_requirement { name; reason; clause = Facts.quote frame.source clause.origin })
         (snd (read_specification context inside clause)))
     requires
 
@@ -359,7 +350,7 @@ let check_escaping_callback context frame local =
       check_callback_contract context frame
         (Facts.locate context frame.source (List.hd requires).origin)
         ~name inputs requires arguments ~promised:(Logic.Boolean true)
-        ~why:"is used as a value whose type promises nothing of its arguments"
+        ~reason:Used_as_unpromising_value
   | _ -> ()
 
 let run_reading_callback : 'a. _ -> (unit -> 'a) -> 'a =
@@ -504,7 +495,7 @@ let has_callback_promises context frame invocation position =
   <> []
 
 let check_callback_promises context frame ~location (invocation : Invocation.t)
-    (passed : State.passed) ~described ~assume values =
+    (passed : State.passed) ~unpromised ~assume values =
   match find_parameter_type context frame invocation passed.position with
   | Some (Types.Function expected)
     when has_callback_promises context frame invocation passed.position ->
@@ -519,12 +510,8 @@ let check_callback_promises context frame ~location (invocation : Invocation.t)
       assume at_call expected ~entries ~exits ~result;
       List.iter
         (fun (quoted, promise) ->
-          Facts.oblige context at_call Ensures location
-            [
-              Text "This argument's parameter promises `";
-              quoted;
-              Text ("` of each result of the function passed for it, " ^ described);
-            ]
+          Facts.oblige context at_call location
+            (Callback_promise { promise = quoted; unpromised })
             promise)
         (list_callback_promises context frame invocation passed.position known ~entries ~exits
            ~result)
@@ -548,22 +535,20 @@ let check_forwarded_callback context frame (site : Invocation.site) (invocation 
             ~promised:
               (Logic.conjunction
                  (list_callback_facts context frame invocation passed.position known arguments))
-            ~why:"is passed for a parameter that may not promise its `requires`"
+            ~reason:Passed_for_unpromising_parameter
       | _ -> check_escaping_callback context frame local)
   | _ -> ());
   let location = Facts.locate context frame.source site.origin in
   match find_own_callback context local with
   | Some (name, _) ->
       check_callback_promises context frame ~location invocation passed
-        ~described:(Printf.sprintf "and the type of `%s` may not promise it." name)
+        ~unpromised:(Type_may_not_promise name)
         ~assume:(fun at_call _ -> assume_own_callback_ensures context at_call local)
         values
   | None ->
       check_callback_promises context frame ~location invocation passed
-        ~described:
+        ~unpromised:
           (match local with
-          | Declared { name; _ } ->
-              Printf.sprintf "and the type of `%s` promises nothing of its results." name
-          | Self | Trait_parameter _ | Synthetic _ ->
-              "and nothing promises it of the function passed here.")
+          | Declared { name; _ } -> Type_promises_nothing name
+          | Self | Trait_parameter _ | Synthetic _ -> Nothing_promises)
         ~assume:assume_nothing values

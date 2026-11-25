@@ -7,7 +7,8 @@ let read_manifest_block () =
 let expect_malformed_at line text =
   match Manifest.parse text with
   | exception Manifest.Malformed { line = actual; _ } when actual = line -> ()
-  | exception Manifest.Malformed { line = actual; message } ->
+  | exception Manifest.Malformed { line = actual; problem } ->
+      let message = Project_catalog.describe_manifest_problem problem in
       Harness.fail "at line %d: %s" actual message
   | _ -> Harness.fail "accepted"
 
@@ -33,16 +34,18 @@ let () =
                ];
            };
        time_limit_seconds = None;
+       x86_64_level = None;
       } ->
           ()
       | _ -> Harness.fail "read differently");
-  Harness.test "PACKAGES.md's project manifest is a project with a time limit, and no package"
-    (fun () ->
+  Harness.test
+    "PACKAGES.md's project manifest is a project with a time limit and an x86-64 level, and no \
+     package" (fun () ->
       let text = File_system.read (Harness.make_workspace_path "PACKAGES.md") in
       let manifest = String.concat "\n" (Documents.list_block_after text "## Projects") in
       if not (Manifest.has_project_table manifest) then Harness.fail "not a project";
       match Manifest.parse manifest with
-      | { package = None; time_limit_seconds = Some 10 } -> ()
+      | { package = None; time_limit_seconds = Some 10; x86_64_level = Some V2 } -> ()
       | _ -> Harness.fail "read differently");
   Harness.test "a manifest has a package, a project, or both" (fun () ->
       let both = "[project]\n[package]\nname = \"a\"\n" in
@@ -104,14 +107,16 @@ let () =
   Harness.test "a version, as other languages' manifests have, is malformed, with the replacement"
     (fun () ->
       (match Manifest.parse "[package]\nname = \"a\"\nversion = \"1.0\"\n" with
-      | exception Manifest.Malformed { line = 3; message } ->
+      | exception Manifest.Malformed { line = 3; problem } ->
+          let message = Project_catalog.describe_manifest_problem problem in
           if not (String.includes ~affix:"holds no version" message) then
             Harness.fail "said %s" message
       | _ -> Harness.fail "accepted");
       (match
          Manifest.parse "[package]\nname = \"a\"\n[dependencies]\njson = { version = \"2.1\" }\n"
        with
-      | exception Manifest.Malformed { line = 4; message } ->
+      | exception Manifest.Malformed { line = 4; problem } ->
+          let message = Project_catalog.describe_manifest_problem problem in
           if not (String.includes ~affix:"json = []" message) then Harness.fail "said %s" message
       | _ -> Harness.fail "accepted");
       expect_malformed_at 4 "[package]\nname = \"a\"\n[dependencies]\njson = \"2.1\"\n");
@@ -173,7 +178,8 @@ let () =
           ()
       | _ -> Harness.fail "read differently");
       match Manifest.parse "[package]\nname = \"a\"\n[dependencies]\nb = [\"c#d\"]\n" with
-      | exception Manifest.Malformed { line = 4; message } ->
+      | exception Manifest.Malformed { line = 4; problem } ->
+          let message = Project_catalog.describe_manifest_problem problem in
           if not (String.includes ~affix:"`c#d`" message) then Harness.fail "said %s" message
       | _ -> Harness.fail "accepted a capability named `c#d`");
   Harness.test "a grant that is neither a capability's name nor a path is malformed, at its line"

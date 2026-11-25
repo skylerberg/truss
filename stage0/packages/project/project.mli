@@ -12,7 +12,7 @@ val make_file_path : directory:string -> Path.file -> string
 val find_package_directory : is_package:(string -> bool) -> string -> string option
 
 type source_file = { path : string; directory : string; file : Path.file }
-type problem = { file : string; line : int option; message : string }
+type problem = { file : string; line : int option; problem : Project_catalog.Problem.t }
 
 val show_problem : problem -> string
 
@@ -21,6 +21,7 @@ type layout = {
   files : source_file list;
   problems : problem list;
   time_limit_ms : int;
+  x86_64_level : X86_64_level.t;
 }
 
 type selection = {

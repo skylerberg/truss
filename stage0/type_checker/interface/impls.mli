@@ -45,7 +45,20 @@ val list_no_bounds : bounds
 val list_required_bounds :
   Types.generic list -> Types.substitution -> (Types.ty * Types.trait_reference) list
 
-val reads_self_only : Lookups.t -> Path.t -> bool
+type method_code =
+  | Method_of_impl of { impl : Path.t; substitution : Types.substitution }
+  | Declaration_for_view
+
+val locate_method :
+  Lookups.t -> Types.evidence -> name:string -> receiver:Path.receiver -> method_code option
+
+type obligation =
+  | Provides of Types.trait_method
+  | Bounds_associated_type of { name : string; chosen : Types.ty; bound : Types.trait_reference }
+  | Requires of Types.trait_reference
+
+val list_obligations :
+  Types.trait_interface -> Types.impl_interface -> self:Types.ty -> obligation list
 
 val find_evidence :
   Lookups.t ->
@@ -123,19 +136,17 @@ end
 val read_signature : Lookups.t -> Path.t -> Types.signature option
 val read_scope : Lookups.t -> Resolve.Names.key -> Environment.known_bounds Environment.scope
 
-type declaring_clause =
+type declaring_clause = Catalog.Capabilities.declaring_clause =
   | Own_uses
   | Impl_uses
   | Associated_capability_set of { name : string; is_defined : bool; is_named : bool }
 
-type capability_declaration =
+type capability_declaration = Catalog.Capabilities.declaration =
   | Declared_by of declaring_clause
   | Fixed_by_trait of { trait : Types.trait_reference; method_name : string }
 
 val find_capability_declaration :
   Lookups.t -> Path.t -> Types.capability -> capability_declaration option
-
-val show_declaring_clause : declaring_clause -> string -> string
 
 val decide_property :
   Properties.property -> Lookups.t -> list_bounds:bounds -> Types.ty -> Properties.decision

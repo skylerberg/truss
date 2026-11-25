@@ -12,10 +12,11 @@ type hole = {
 
 let list_holes snapshot database (names : Resolve.Names.lookups)
     (declaration : Resolve.Names.declaration) =
+  let source_lookups = Database.make_source_lookups database in
   let key = declaration.key in
   match Database.read_resolved database key with
   | Some resolved ->
-      let ({ file; base } : Resolve.Names.place) = names.read_place key in
+      let ({ file; base } : Resolve.Names.place) = source_lookups.read_place key in
       let source = Command_packages.read_source snapshot database file in
       List.map
         (fun (hole : Inspect.hole) ->
@@ -29,7 +30,7 @@ let list_holes snapshot database (names : Resolve.Names.lookups)
             in_scope = hole.scope;
             blocks = [];
           })
-        (Inspect.list_holes (names.read_spans key) (names.read_definition key) resolved
+        (Inspect.list_holes (source_lookups.read_spans key) (names.read_definition key) resolved
            (Option.map
               (fun (checked : Infer.checked) -> checked.tables)
               (Database.read_checked_body database key)))

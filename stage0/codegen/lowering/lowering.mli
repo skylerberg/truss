@@ -20,6 +20,7 @@ type linked =
 type lowered_lookups = {
   system : Libc.system;
   read_source : Path.file -> Source.t;
+  source : Resolve.Names.source;
   interface : Interface.Lookups.t;
   find_lowered : Lowered.Item.t -> (lowered, unbuildable) result option;
   find_evaluation : Lowered.Item.t -> evaluation option;
@@ -41,6 +42,7 @@ val is_evaluated : lowered -> bool
 val render_unit :
   Libc.system ->
   Interface.Lookups.t ->
+  source:Resolve.Names.source ->
   Profile.t ->
   read_source:(Path.file -> Source.t) ->
   is_worked_on:(Path.package -> bool) ->

@@ -3,7 +3,7 @@ type kind = Upper | Lower
 type checked = {
   kind : kind;
   name : string;
-  problem : (Diagnostic.Code.lexer * string) option;
+  problem : Syntax_catalog.Lexing.name_problem option;
   fix : string option;
 }
 
@@ -58,52 +58,32 @@ let correct_case name =
       else to_camel name
   | _ -> to_snake name
 
-let find_case_problem name =
-  let message =
-    if String.starts_with ~prefix:"_" name then Some "Names cannot start with `_`."
-    else if classify_name name = Upper then
-      if not (String.contains name '_') then None
-      else if not (String.exists is_lower name) then
-        Some
-          (Printf.sprintf
-             "`%s` is written like a constant from another language. Constants are values, so \
-              their names are lower_snake_case."
-             name)
-      else Some "A name that starts with an uppercase letter is UpperCamelCase, with no `_`."
-    else if String.exists is_upper name then
-      Some
-        "A name that starts with a lowercase letter is lower_snake_case, with no uppercase letters."
-    else if String.ends_with ~suffix:"_" name then Some "Names cannot end with `_`."
-    else if String.includes ~affix:"__" name then
-      Some "`_` appears only singly, between the parts of a name."
-    else None
-  in
-  Option.map (fun message -> (Diagnostic.Code.Name_case, message)) message
+let find_case_problem name : Syntax_catalog.Lexing.name_problem option =
+  if String.starts_with ~prefix:"_" name then Some Leading_underscore
+  else if classify_name name = Upper then
+    if not (String.contains name '_') then None
+    else if not (String.exists is_lower name) then Some (Constant_case name)
+    else Some Upper_with_underscore
+  else if String.exists is_upper name then Some Lower_with_upper
+  else if String.ends_with ~suffix:"_" name then Some Trailing_underscore
+  else if String.includes ~affix:"__" name then Some Doubled_underscore
+  else None
 
-let find_first_non_ascii name =
+let find_first_non_ascii name : Syntax_catalog.Lexing.character option =
   Option.map
     (fun index ->
       let decoded = String.get_utf_8_uchar name index in
-      Printf.sprintf "`%s` (U+%04X)"
-        (String.sub name index (Uchar.utf_decode_length decoded))
-        (Uchar.to_int (Uchar.utf_decode_uchar decoded)))
+      Syntax_catalog.Lexing.Unicode
+        {
+          text = String.sub name index (Uchar.utf_decode_length decoded);
+          code_point = Uchar.to_int (Uchar.utf_decode_uchar decoded);
+        })
     (String.find_first_index (Fun.negate Char.Ascii.is_valid) name)
 
 let check name =
   match find_first_non_ascii name with
   | Some character ->
-      {
-        kind = classify_name name;
-        name;
-        problem =
-          Some
-            ( Diagnostic.Code.Name_not_ascii,
-              Printf.sprintf
-                "Names use only ASCII letters, digits, and `_`, and %s is not ASCII. Text in any \
-                 language goes in strings."
-                character );
-        fix = None;
-      }
+      { kind = classify_name name; name; problem = Some (Not_ascii character); fix = None }
   | None -> (
       match find_case_problem name with
       | None -> { kind = classify_name name; name; problem = None; fix = None }

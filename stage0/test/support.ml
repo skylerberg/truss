@@ -69,9 +69,11 @@ let read_source packages (file : Path.file) =
   | None -> failwith ("no file " ^ Path.show_file file)
 
 let parse_errors packages file =
+  let source = read_source packages file in
   List.map
-    (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
-    (snd (Parser.parse_source (read_source packages file)))
+    (fun diagnostic ->
+      (Syntax_catalog.Syntax_diagnostic.render ~text:(Source.text source) diagnostic).message)
+    (snd (Parser.parse_source source))
 
 let list_codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
@@ -149,6 +151,7 @@ let collect_core_nodes packages (key : Resolve.Names.key) : core_nodes =
       }
 
 let make_names packages = Database.make_name_lookups (make_database packages)
+let make_source packages = Database.make_source_lookups (make_database packages)
 
 let list_declarations packages (module_ : Path.module_) =
   (make_names packages).list_declarations module_
@@ -247,7 +250,11 @@ let prove database file = Database.prove database (In_files [ file ])
 
 let c_compiler =
   lazy
-    (match C_compiler.find ~objects:(Cache.make_objects_directory (Workspace.open_cache ())) () with
+    (match
+       C_compiler.find ~x86_64_level:X86_64_level.default
+         ~objects:(Cache.make_objects_directory (Workspace.open_cache ()))
+         ()
+     with
     | Ok c_compiler -> c_compiler
     | Error message ->
         prerr_endline message;

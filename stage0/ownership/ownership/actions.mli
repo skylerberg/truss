@@ -38,10 +38,10 @@ type action =
 
 type position = { block : Mir.Graph.block; index : int }
 type step = { action : action; origin : Core.origin }
-type fork_join_block = { keyword : string; branches : position list list }
+type fork_join_block = { schedule : Language.Loop_mode.t; branches : position list list }
 
 type fork_join_loop = {
-  keyword : string;
+  schedule : Language.Loop_mode.t;
   body : position list;
   pattern_locals : Core.local list;
   temporaries : Mir.local list;
