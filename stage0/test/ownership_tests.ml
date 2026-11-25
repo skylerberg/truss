@@ -264,18 +264,31 @@ let () =
           "Declare `items` as a view, as in `items: view List[Int64]`, so that each caller keeps \
            its argument borrowed."
         ~fixed:(keep "items: view List[Int64]"));
-  Harness.test "a view of a part of a borrowed parameter stored in a `mut` parameter escapes"
-    (fun () ->
-      expect_one_diagnostic
-        "type Bag(items: List[Int64])\n\
-         type Held(viewed: view List[Int64])\n\
-         fn keep(held: mut Held, bag: Bag) {\n\
-        \  held.viewed = bag.items\n\
-         }\n"
-        "ownership.view_escapes"
-        ~says:
-          "Take the stored part of `bag` as a view, such as a `view List` or a `view String`, so \
-           that each caller keeps its argument borrowed.");
+  List.iter
+    (fun (subject, parameter, stored) ->
+      Harness.test
+        (Printf.sprintf "a view of %s stored in a `mut` parameter escapes, with no fix" subject)
+        (fun () ->
+          let text =
+            "type Bag(items: List[Int64])\n\
+             type Held(viewed: view List[Int64])\n\
+             fn keep(held: mut Held, " ^ parameter ^ ") {\n  held.viewed = " ^ stored ^ "\n}\n"
+          in
+          let root = List.hd (String.split_on_char '.' stored) in
+          expect_one_diagnostic text "ownership.view_escapes"
+            ~says:
+              (Printf.sprintf
+                 "Take the stored part of `%s` as a view, such as a `view List` or a `view \
+                  String`, so that each caller keeps its argument borrowed."
+                 root);
+          List.iter
+            (fun (diagnostic : Diagnostic.t) ->
+              if diagnostic.fixes <> [] then Harness.fail "offered a fix")
+            (check (Support.setup [ ("app.main", text) ]) (Support.parse_file "app.main"))))
+    [
+      ("a part of a borrowed parameter", "bag: Bag", "bag.items");
+      ("a `mut` parameter", "items: mut List[Int64]", "items");
+    ];
   Harness.test "a lending method can lend the whole of a local it owns" (fun () ->
       expect_fine
         (make_lending_source "first_sorted" "(self) lends List[String]"

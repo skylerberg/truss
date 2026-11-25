@@ -276,7 +276,7 @@ let cover_with_mode_keyword context (place : Core.origin) : Core.origin Catalog.
 
 let find_view_declaration context (root : Place.root) : Catalog.Ownership.view_declaration option =
   match root with
-  | Local local -> (
+  | Local local when classify_binding_mode context root = Read -> (
       match
         (Local_table.find_opt context.origins local, Local_table.find_opt context.types local)
       with
@@ -286,4 +286,4 @@ let find_view_declaration context (root : Place.root) : Catalog.Ownership.view_d
               { type_node = Written type_node; view_type = Types.make_view type_ })
             (Hashtbl.find_opt (Lazy.force context.parameter_types) name)
       | _ -> None)
-  | Temporary _ | Constant _ | Environment -> None
+  | Local _ | Temporary _ | Constant _ | Environment -> None
