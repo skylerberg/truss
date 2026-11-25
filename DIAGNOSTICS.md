@@ -12,7 +12,7 @@ text, and its fixes to text edits.
 3. Make a pass that builds diagnostic text fail to compile, not merely
    stand out in review.
 
-## The compiler today
+## The compiler before the catalog
 
 The survey ran over `origin/main` after #1250.
 
@@ -127,7 +127,7 @@ text.
 A fix is a title, written in `describe`, and a list of edits on nodes.
 Every fix built after parsing falls into these edits:
 
-| Edit | Uses today | Reads text today |
+| Edit | Uses | Read text before the catalog |
 |---|---|---|
 | Replace a node with code | Write `UInt64`, `None`, `_`, a view type, `generic X`, a constant's path, the checked method; every spelling fix | No |
 | Insert code before a node | `mut `, `own `, `indirect `, `let _ = `, a label | No |
@@ -138,9 +138,10 @@ Every fix built after parsing falls into these edits:
 | Add lines after a node, at its indentation | The missing arms of a `match` | Yes |
 | Add a clause to a signature, or a capability to `uses` | The prover's `requires` and `uses Panic` | Yes |
 
-Every edit that reads text today becomes a layout decision in the
-renderer. The survey found no fix that needs an edit outside this table.
-The lexer and the parser keep span edits, which they build from tokens.
+Every edit that read text became a layout decision in the renderer. The
+survey found no fix that needs an edit outside this table. The lexer's and
+the parser's edits name spans, since they report before a tree exists, and
+their description modules write the code.
 
 ## Enforcement
 
@@ -180,7 +181,7 @@ the printers that fill them.
 One pull request converts everything, and the old mechanisms go in it:
 
 1. Add the payload pieces, `description`, the node edits, and the
-   renderer. Store descriptions in the database, and render them where
+   renderer. Store catalog values in the database, and render them where
    diagnostics are listed.
 2. Convert one family at a time: its codes become catalog constructors,
    and its call sites report them. Delete the pass's `report` wrapper,
