@@ -118,17 +118,6 @@ let assume_laws (context : State.context) frame (trait : Types.trait_reference) 
       (Interface.Properties.list_bound_closure context.lookups.interface ~self:ty trait)
   end
 
-let has_method_cost (context : State.context) (callee : Invocation.callee) (path : Path.t) =
-  match (callee, path) with
-  | Trait_method { trait; evidence = Bound; _ }, Method { owner; _ }
-    when Path.equal owner trait.trait ->
-      true
-  | Trait_method _, _ -> (
-      match Contracts.read_signature context path with
-      | Some (signature : Types.signature) -> Types.terminates signature.uses
-      | None -> true)
-  | (Function _ | Capability_method _ | Intrinsic _ | Indirect ()), _ -> false
-
 let read_named_ensures context (frame : State.frame) (clauses : State.clauses)
     (expected : Types.function_type) ~entries ~exits ~result =
   let inside =

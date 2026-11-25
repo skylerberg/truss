@@ -11,7 +11,7 @@ type decision = {
   declares : bool;
 }
 
-type view_copy = Append_copy of Core.origin | Wrap_copy of Core.origin
+type view_copy = Append_copy of Core.origin | Wrap_copy of Core.origin | Copy_where_given
 type widening = { side : side; operand : Core.origin; target : Types.ty }
 type impl_need = { needing : Types.ty; condition : Types.trait_reference }
 

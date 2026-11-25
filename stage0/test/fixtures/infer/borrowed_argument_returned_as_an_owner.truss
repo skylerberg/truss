@@ -1,0 +1,4 @@
+fn first_of(names: List[String]) -> Option[String] {
+  let found = Some(names[0])
+  found
+}

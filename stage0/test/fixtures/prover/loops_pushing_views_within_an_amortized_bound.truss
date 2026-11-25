@@ -1,0 +1,35 @@
+type Collected(parts: List[view String], seen: UInt64)
+
+fn onto_a_local(text: view String, count: UInt64) -> List[view String]
+  cost amortized time O(count)
+{
+  var parts: List[view String] = []
+  for index in 0..count
+    cost time O(index)
+  {
+    mut parts.push(text)
+  }
+  parts
+}
+
+fn onto_a_parameter(parts: mut List[view String], text: view String, count: UInt64)
+  cost amortized time O(count)
+{
+  for index in 0..count
+    cost time O(index)
+  {
+    mut parts.push(text)
+  }
+}
+
+fn onto_a_field(text: view String, count: UInt64) -> Collected
+  cost amortized time O(count)
+{
+  var collected = Collected(parts: [], seen: 0)
+  for index in 0..count
+    cost time O(index)
+  {
+    mut collected.parts.push(text)
+  }
+  collected
+}

@@ -9,8 +9,10 @@ val select_field : State.context -> Types.ty -> string option -> string -> Logic
 val replace_field :
   State.context -> Types.ty -> string option -> string -> Logic.term -> Logic.term -> Logic.term
 
-val find_part :
-  State.context -> Types.ty -> Logic.term -> string list -> (Types.ty * Logic.term) option
+val find_root : State.context -> State.frame -> Locals.local -> (Types.ty * Logic.term) option
+
+val find_changed_part :
+  State.context -> State.frame -> State.changed_part -> (Types.ty * Logic.term) option
 
 val replace_part :
   State.context ->
@@ -71,14 +73,6 @@ val list_callback_facts :
 
 val find_parameter_type : State.context -> State.frame -> Invocation.t -> int -> Types.ty option
 
-val make_callback_ensures_frame :
-  State.frame ->
-  Core.local list ->
-  entries:Logic.term list ->
-  exits:Logic.term list ->
-  result:Logic.term ->
-  State.frame
-
 val list_callback_promises :
   State.context ->
   State.frame ->
@@ -98,13 +92,6 @@ val assume_own_callback_ensures :
   exits:Logic.term list ->
   result:Logic.term ->
   unit
-
-val declare_callback_results :
-  State.context ->
-  State.frame ->
-  Types.function_type ->
-  Logic.term list ->
-  Logic.term list * Logic.term
 
 val check_callback_promises :
   State.context ->

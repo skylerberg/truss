@@ -248,6 +248,7 @@ and show_expression (value : Syntax.expression) =
 and show_bracket_item = function
   | Item value -> show_expression value
   | Item_constraint (name, type_) -> name.text ^ " = " ^ show_type_expression type_
+  | Item_type type_ -> show_type_expression type_
 
 and show_argument (argument : Syntax.argument) =
   match argument.label with

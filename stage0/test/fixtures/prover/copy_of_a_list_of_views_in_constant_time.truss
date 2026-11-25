@@ -1,0 +1,5 @@
+fn copied(parts: List[view String]) -> List[view String]
+  cost amortized time O(1)
+{
+  parts.copy()
+}

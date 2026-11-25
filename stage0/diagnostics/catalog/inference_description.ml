@@ -94,22 +94,23 @@ let describe_mismatch :
     Inference.mismatch -> Diagnostic.Code.types * string * Nodes.node Description.fix list =
   function
   | Expected { expected; actual; copy } ->
-      let fixes =
+      let copy_the_view edit = [ fix "Copy the view with `copy()`." [ edit ] ] in
+      let advice, fixes =
         match copy with
-        | Some copy ->
-            [
-              fix "Copy the view with `copy()`."
-                [
-                  (match copy with
-                  | Append_copy written -> Build.insert_after written [ Text ".copy()" ]
-                  | Wrap_copy written ->
-                      Build.replace written [ Text "("; Build.quote written; Text ").copy()" ]);
-                ];
-            ]
-        | None -> []
+        | Some (Append_copy written) ->
+            ("", copy_the_view (Build.insert_after written [ Text ".copy()" ]))
+        | Some (Wrap_copy written) ->
+            ( "",
+              copy_the_view
+                (Build.replace written [ Text "("; Build.quote written; Text ").copy()" ]) )
+        | Some Copy_where_given ->
+            ( " The value holds a view where an owned value is expected, and a view converts to no \
+               owned value. Where the viewed place is given, copy it with `copy()`.",
+              [] )
+        | None -> ("", [])
       in
       ( Mismatch,
-        Printf.sprintf "Expected %s, found %s." (show_shown expected) (show_shown actual),
+        Printf.sprintf "Expected %s, found %s.%s" (show_shown expected) (show_shown actual) advice,
         fixes )
   | Loop_element { element; annotated } ->
       ( Mismatch,

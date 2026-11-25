@@ -1,0 +1,77 @@
+type Boxed[Value](value: Value)
+
+type Both[Value](first: Value, second: Value)
+
+let greeting: String = "hello"
+
+fn pick[Value](first: own Value, second: own Value) -> Value {
+  second
+}
+
+test "a variant of an element views it" {
+  let names: List[String] = ["apple".copy(), "pear".copy()]
+  let found = Some(names[0])
+  assert found == Some("apple")
+  assert names == ["apple", "pear"]
+}
+
+test "a list literal and a map literal of elements view them" {
+  let names: List[String] = ["apple".copy(), "pear".copy()]
+  let both = [names[1], names[0]]
+  assert both == ["pear", "apple"]
+  let lengths = [names[0]: 5, names[1]: 4]
+  assert lengths.get("pear") == Some(4)
+  assert names == ["apple", "pear"]
+}
+
+test "a record of elements views them" {
+  let names: List[String] = ["apple".copy(), "pear".copy()]
+  let box = Boxed(value: names[1])
+  assert box.value == "pear"
+  let both = Both(first: names[0], second: names[1])
+  assert both.first == "apple" && both.second == "pear"
+  assert names == ["apple", "pear"]
+}
+
+test "a variant of a local, of a constant, and of a lent part views it" {
+  let name = "apple".copy()
+  let found = Some(name)
+  assert found == Some("apple")
+  assert name == "apple"
+  assert Some(greeting) == Some("hello")
+  let wrapped = Some(found.expect("present"))
+  assert wrapped == Some("apple")
+}
+
+test "a generic function given elements returns a view" {
+  let names: List[String] = ["apple".copy(), "pear".copy()]
+  let chosen = pick(names[0], second: names[1])
+  assert chosen == "pear"
+  assert names == ["apple", "pear"]
+}
+
+test "a variant of a range views the range" {
+  let numbers: List[Int64] = [1, 2, 3]
+  let tail = Some(numbers[1..])
+  assert tail == Some([2, 3])
+  assert numbers == [1, 2, 3]
+}
+
+test "a `var` of a variant of an element is assigned other views" {
+  let names: List[String] = ["apple".copy(), "pear".copy()]
+  var found = Some(names[0])
+  found = Some(names[1])
+  assert found == Some("pear")
+  found = None
+  assert found.is_none()
+}
+
+test "`own` moves a local into a variant, which then owns it" {
+  let name = "apple".copy()
+  var found = Some(own name)
+  match mut found {
+    Some(text) => mut text.push("s")
+    None => {}
+  }
+  assert found == Some("apples")
+}

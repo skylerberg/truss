@@ -30,7 +30,6 @@ val add_requires :
 
 val find_value_code : State.context -> Logic.term -> Catalog.Code.t option
 val remove_panic_condition : Types.capability_set -> Types.capability_set
-val find_counter_condition : State.context -> Costs.counter -> Types.condition
 
 val oblige :
   ?cited:Resolve.Names.key * Core.origin ->
@@ -82,6 +81,7 @@ val make_obligation :
 val locate : State.context -> State.source -> Core.origin -> Obligation.location
 val add_hole : State.context -> Resolve.Names.key * Obligation.location -> unit
 val quote : State.source -> Core.origin -> Catalog.Prover.quoted
+val describe_local : State.context -> State.frame -> Locals.local -> Catalog.Prover.value
 val is_home : State.context -> State.source -> bool
 val is_in_home_package : State.context -> State.source -> bool
 val find_bounds : Types.ty -> (Z.t * Z.t) option
@@ -117,9 +117,6 @@ val find_impl :
   State.context -> Types.trait_reference -> Types.ty -> (Path.t * Types.substitution) option
 
 val find_local_type : State.context -> State.frame -> Locals.key -> Types.ty option
-val mentions_potential : Logic.term -> bool
-val list_potentials : Logic.term -> Logic.term list
-val take_potential_as_zero : Logic.term -> Logic.term
 val restrict : State.frame -> Logic.term -> State.frame
 val name_path_condition : State.context -> State.frame -> Logic.term -> Logic.term
 

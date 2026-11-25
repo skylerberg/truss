@@ -1385,6 +1385,13 @@ let () =
     (fun () -> expect_fine Fixtures.Infer.lists_written_through_parameters_and_ranges);
   Harness.test "a view implements a trait whose inherited methods take `Self` by `own`" (fun () ->
       expect_fine Fixtures.Infer.views_in_ordered_positions);
+  Harness.test "a view is written as a type argument of a function and of a type" (fun () ->
+      expect_fine Fixtures.Infer.view_written_as_a_type_argument);
+  Harness.test "a view of a number is no type argument" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.view_of_a_number_written_as_a_type_argument
+        "types.not_viewable");
+  Harness.test "a `mut self` method that a trait provides rebinds a view receiver" (fun () ->
+      expect_fine Fixtures.Infer.view_receiver_of_a_provided_method_that_rebinds_self);
   Harness.test "a view satisfies no bound whose impl writes a method that takes `self` by `own`"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.view_given_to_a_bound_whose_impl_owns_self
@@ -1401,6 +1408,11 @@ let () =
   Harness.test "a view satisfies no bound whose trait has a `mut self` method" (fun () ->
       expect_one_diagnostic Fixtures.Infer.view_written_through_a_copy_in_generic_code
         "types.unsatisfied_bound" ~says:"a view implements a trait only where");
+  Harness.test "a place given where a type parameter is undecided makes the type argument a view"
+    (fun () -> expect_fine Fixtures.Infer.views_inferred_for_borrowed_arguments);
+  Harness.test "a value built from a place is no owner where one is returned" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.borrowed_argument_returned_as_an_owner "types.mismatch"
+        ~says:"holds a view where an owned value is expected");
   List.iter
     (fun (construct, text) ->
       Harness.test (construct ^ " cannot be passed `mut`") (fun () ->
