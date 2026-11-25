@@ -14,7 +14,7 @@ fn counts_of(words: List[String]) -> Map[String, Int64] {
   counts
 }
 
-test "a map of strings is read with string slices" {
+test "a map of strings is read with views of strings" {
   let text = "pear fig pear plum pear fig"
   let counts = counts_of(text.split(" "))
   assert counts.length() == 3
@@ -25,7 +25,7 @@ test "a map of strings is read with string slices" {
   assert counts[text.substring(0, to: 4)] == 3
 }
 
-test "a set and a list of strings are searched with string slices" {
+test "a set and a list of strings are searched with views of strings" {
   let text = "pear fig"
   let names: Set[String] = ["fig", "plum"]
   let listed: List[String] = ["pear", "plum"]
@@ -35,7 +35,7 @@ test "a set and a list of strings are searched with string slices" {
   assert !listed.contains(text.substring(5, to: 8))
 }
 
-test "a map of lists is read with slices, and a removal takes one" {
+test "a map of lists is read with ranges, and a removal takes one" {
   var tables: Map[List[UInt8], Int64] = [:]
   mut tables.insert([1, 2, 3], value: 7)
   let bytes: List[UInt8] = [0, 1, 2, 3]

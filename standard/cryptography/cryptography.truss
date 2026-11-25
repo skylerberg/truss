@@ -4307,8 +4307,8 @@ fn deterministic_nonce(curve: Curve, elliptic_curve: elliptic.Curve, private: Li
   for separator in separators {
     var input = value.copy()
     mut input.push(separator)
-    mut input.append_slice(private)
-    mut input.append_slice(hashed)
+    mut input.append_items(private)
+    mut input.append_items(hashed)
     key = keyed_hash(curve, key: key, message: input)
     value = keyed_hash(curve, key: key, message: value)
   }
@@ -4317,7 +4317,7 @@ fn deterministic_nonce(curve: Curve, elliptic_curve: elliptic.Curve, private: Li
     var stream: List[UInt8] = []
     while stream.length() < size {
       value = keyed_hash(curve, key: key, message: value)
-      mut stream.append_slice(value)
+      mut stream.append_items(value)
     }
     let candidate = modular.limbs_from_bytes(stream[..size], count: size / 4)
     if elliptic_curve.is_valid_scalar(candidate) {
@@ -4638,7 +4638,7 @@ fn public_operation(key: RsaPublicKey, signature: List[UInt8]) -> Option[List[UI
 
 fn pkcs1_encoding(function: HashFunction, digest: List[UInt8], size: UInt64) -> Option[List[UInt8]] {
   var info = digest_info(function)
-  mut info.append_slice(digest)
+  mut info.append_items(digest)
   if size < info.length() + 11 {
     return None
   }
@@ -4663,8 +4663,8 @@ public fn RsaPublicKey.verify_pkcs1(self, function: HashFunction, message: List[
 
 fn pss_hash(function: HashFunction, digest: List[UInt8], salt: List[UInt8]) -> List[UInt8] {
   var input: List[UInt8] = List.filled(0, count: 8)
-  mut input.append_slice(digest)
-  mut input.append_slice(salt)
+  mut input.append_items(digest)
+  mut input.append_items(salt)
   function.digest(input)
 }
 
@@ -4855,7 +4855,7 @@ public fn RsaPrivateKey.sign_pss(self, function: HashFunction, message: List[UIn
   let hashed = pss_hash(function, digest: function.digest(message), salt: salt)
   var plain_block: List[UInt8] = List.filled(0, count: length.saturating_subtract(hash_length + hash_length + 2))
   mut plain_block.push(1)
-  mut plain_block.append_slice(salt)
+  mut plain_block.append_items(salt)
   let mask = mask_generation(function, seed: hashed, length: plain_block.length())
   var block: List[UInt8] = List.with_capacity(plain_block.length())
   for index in 0..plain_block.length() {
