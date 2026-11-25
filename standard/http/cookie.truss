@@ -84,7 +84,7 @@ public fn Cookie.header(self) -> Result[String, Error] {
 }
 
 public fn Cookie.removal(name: String, path: String = "/") -> Cookie {
-  Cookie(name: name.to_string(), value: "", path: Some(path.to_string()), max_age_seconds: Some(0))
+  Cookie(name: name.copy(), value: "", path: Some(path.copy()), max_age_seconds: Some(0))
 }
 
 public fn Request.cookies(self) -> List[CookiePair] {
@@ -99,7 +99,7 @@ public fn Request.cookies(self) -> List[CookiePair] {
             if value.length() >= 2 && value.starts_with("\"") && value.ends_with("\"") {
               value = value.part(1, to: value.length() - 1)
             }
-            mut pairs.push(CookiePair(name: part.part(0, to: at).trim().to_string(), value: value.to_string()))
+            mut pairs.push(CookiePair(name: part.part(0, to: at).trim().copy(), value: value.copy()))
           }
           None => {}
         }
@@ -163,7 +163,7 @@ public fn CookieKey.generate() -> CookieKey
 }
 
 fn signature_of(key: CookieKey, name: String, value: String) -> String {
-  var message = name.to_string()
+  var message = name.copy()
   mut message.push("=")
   mut message.push(value)
   let code = cryptography.hmac_sha256(key.signing, message: message.bytes())
@@ -209,7 +209,7 @@ public fn CookieKey.seal(self, cookie: own Cookie) -> Cookie
   var sealed = own cookie
   let nonce = cryptography.Nonce.generate()
   let ciphertext = cryptography.seal(self.sealing, nonce: nonce, plaintext: sealed.value.bytes(), associated_data: sealed.name.bytes())
-  var bytes = nonce.bytes[..].to_list()
+  var bytes = nonce.bytes[..].copy()
   mut bytes.append(own ciphertext)
   sealed.value = base64.encode(bytes, alphabet: base64.Alphabet.UrlSafe, padding: false)
   sealed
@@ -327,5 +327,5 @@ public fn Session.cookie(self, key: CookieKey, name: String = "session", max_age
 {
   var payload = "${self.issued.unix_seconds()}\n"
   mut payload.push(self.values.encode())
-  key.seal(Cookie(name: name.to_string(), value: own payload, max_age_seconds: Some(max_age_seconds)))
+  key.seal(Cookie(name: name.copy(), value: own payload, max_age_seconds: Some(max_age_seconds)))
 }

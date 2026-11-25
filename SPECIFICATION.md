@@ -692,8 +692,7 @@ var longest: view String = words[0]
   view of one is expected.
 - **A view converts to no owned value.** `copy()` makes a `List` or a
   `String` that owns copies of the viewed elements, and a view where an
-  owned value is needed is an error with that fix. `to_list()` and
-  `to_string()` make the same copy and state its cost.
+  owned value is needed is an error with that fix.
 - **A read-only parameter takes a view whatever its declared type says.**
   A parameter declared `List[String]` takes a `List[view String]`, and one
   declared `Map[String, Int64]` is looked up with a `view String`: in a
@@ -1636,8 +1635,8 @@ mut grid.cell(position).visit()
   ```truss
   fn tally(counts: mut Map[String, UInt64], word: String) {
     match counts.get(word) {
-      Some(count) => counts[word.to_string()] = count.saturating_add(1)
-      None => counts[word.to_string()] = 1
+      Some(count) => counts[word.copy()] = count.saturating_add(1)
+      None => counts[word.copy()] = 1
     }
   }
   ```

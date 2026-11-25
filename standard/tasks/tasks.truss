@@ -723,7 +723,7 @@ impl Tasks for SeededTasks
   fn wait(self, key: UInt64, ticket: UInt64, reason: String) {
     let blocked = intrinsic.shared_update(
       self.scheduler,
-      input: reason.to_string(),
+      input: reason.copy(),
       change: fn(scheduler, description) {
         mut scheduler.wait(key, ticket: ticket, reason: own description)
       },

@@ -90,7 +90,7 @@ fn report_confusable(scanner: mut Scanner, start: UInt64, length: UInt64, replac
   let fixes = if follows_joining_confusable(scanner, start, replacement) {
     []
   } else {
-    scanner.list_code_fixes(span, codes: [replacement.to_string()])
+    scanner.list_code_fixes(span, codes: [replacement.copy()])
   }
   let shown = scanner.show_character(start)
   report(
@@ -369,7 +369,7 @@ fn decode_character_escape(content: String) -> String
     "\\'" => "'"
     _ => {
       if !content.starts_with("\\u{") {
-        return content.to_string()
+        return content.copy()
       }
       let digits = content.substring(3, to: content.length() - 1)
       if digits.is_empty() || digits.length() > 7 {
@@ -421,7 +421,7 @@ fn lex_character_literal(scanner: mut Scanner, tag: String, literal_start: UInt6
   store_literal(
     mut scanner,
     literal: token.StringLiteral(
-      tag: Some(token.Tag(name: tag.to_string(), span: source.make_zero_width(literal_start))),
+      tag: Some(token.Tag(name: tag.copy(), span: source.make_zero_width(literal_start))),
       form: token.Form.Ordinary,
       first: token.Text(own value, span: source.make_span(start + 1, stop: stop - 1)),
       rest: [],
@@ -769,7 +769,7 @@ fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing
   let Some(value_length) = rest_of_line.find(closing) else {
     return None
   }
-  let value = rest_of_line.substring(0, to: value_length).to_string()
+  let value = rest_of_line.substring(0, to: value_length).copy()
   let text_stop = text_start + value_length
   let stop = text_stop + closing.length()
   let reads_differently = value.contains("\\") || value.contains("$") || value.contains("\"") || quote_joins_before(scanner, index: start)

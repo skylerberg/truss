@@ -534,7 +534,7 @@ fn take_tuple_word(cursor: mut TokenCursor) -> Option[TupleWord]
   if !is_word || cursor.peek_ahead(1) != token.Kind.Keyword(token.Keyword.Type) {
     return None
   }
-  let written = cursor.name(kind).to_string()
+  let written = cursor.name(kind).copy()
   let word = take(mut cursor).span
   let removal = source.make_span(word.start, cursor.peek().span.start)
   if written == "tuple" {

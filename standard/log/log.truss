@@ -28,27 +28,27 @@ public type Field(name: String, value: Value)
   derives Equal
 
 public fn Field.string(name: String, value: String) -> Field {
-  Field(name: name.to_string(), value: Value.String(value.to_string()))
+  Field(name: name.copy(), value: Value.String(value.copy()))
 }
 
 public fn Field.integer(name: String, value: Int64) -> Field {
-  Field(name: name.to_string(), value: Value.Integer(value))
+  Field(name: name.copy(), value: Value.Integer(value))
 }
 
 public fn Field.float(name: String, value: Float64) -> Field {
-  Field(name: name.to_string(), value: Value.Float(value))
+  Field(name: name.copy(), value: Value.Float(value))
 }
 
 public fn Field.bool(name: String, value: Bool) -> Field {
-  Field(name: name.to_string(), value: Value.Bool(value))
+  Field(name: name.copy(), value: Value.Bool(value))
 }
 
 public fn Field.duration(name: String, value: Duration) -> Field {
-  Field(name: name.to_string(), value: Value.Duration(value))
+  Field(name: name.copy(), value: Value.Duration(value))
 }
 
 public fn Field.display[Shown: Display](name: String, value: Shown) -> Field {
-  Field(name: name.to_string(), value: Value.String("${value}"))
+  Field(name: name.copy(), value: Value.String("${value}"))
 }
 
 public type Record(level: Level, message: String, fields: List[Field])
@@ -58,7 +58,7 @@ public fn debug(message: String, fields: own List[Field] = [])
   uses Log
 {
   if Log.enabled(Level.Debug) {
-    Log.record(Record(level: Level.Debug, message: message.to_string(), fields: own fields))
+    Log.record(Record(level: Level.Debug, message: message.copy(), fields: own fields))
   }
 }
 
@@ -66,7 +66,7 @@ public fn information(message: String, fields: own List[Field] = [])
   uses Log
 {
   if Log.enabled(Level.Information) {
-    Log.record(Record(level: Level.Information, message: message.to_string(), fields: own fields))
+    Log.record(Record(level: Level.Information, message: message.copy(), fields: own fields))
   }
 }
 
@@ -74,7 +74,7 @@ public fn warning(message: String, fields: own List[Field] = [])
   uses Log
 {
   if Log.enabled(Level.Warning) {
-    Log.record(Record(level: Level.Warning, message: message.to_string(), fields: own fields))
+    Log.record(Record(level: Level.Warning, message: message.copy(), fields: own fields))
   }
 }
 
@@ -82,7 +82,7 @@ public fn error(message: String, fields: own List[Field] = [])
   uses Log
 {
   if Log.enabled(Level.Error) {
-    Log.record(Record(level: Level.Error, message: message.to_string(), fields: own fields))
+    Log.record(Record(level: Level.Error, message: message.copy(), fields: own fields))
   }
 }
 

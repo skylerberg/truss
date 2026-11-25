@@ -41,7 +41,7 @@ public fn FixedEnvironment.new(platform: own Platform, current_directory: own Pa
 
 public fn FixedEnvironment.with_variable(own self, name: String, value: String) -> FixedEnvironment {
   var changed = own self
-  mut changed.variables.insert(name.to_string(), value: value.to_string())
+  mut changed.variables.insert(name.copy(), value: value.copy())
   changed
 }
 
@@ -53,9 +53,9 @@ public fn FixedEnvironment.with_location(own self, location: Location, path: own
 
 public fn FixedEnvironment.with_zone(own self, name: String, rules: own List[UInt8], local: Bool = false) -> FixedEnvironment {
   var changed = own self
-  mut changed.zones.insert(name.to_string(), value: own rules)
+  mut changed.zones.insert(name.copy(), value: own rules)
   if local {
-    changed.local_zone = Some(name.to_string())
+    changed.local_zone = Some(name.copy())
   }
   changed
 }

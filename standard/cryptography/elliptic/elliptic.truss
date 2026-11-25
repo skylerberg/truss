@@ -75,7 +75,7 @@ internal fn Curve.scalars(self) -> modular.Field {
 }
 
 internal fn Curve.order(self) -> List[UInt64] {
-  self.scalars.modulus_limbs().to_list()
+  self.scalars.modulus_limbs().copy()
 }
 
 internal fn Curve.identity(self) -> Point {

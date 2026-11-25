@@ -9,7 +9,7 @@ public opaque type Path(text: String)
   derives Copyable
 
 public fn Path.new(text: String) -> Path {
-  Path(text: text.to_string())
+  Path(text: text.copy())
 }
 
 public fn Path.from_bytes(bytes: own List[UInt8]) -> Option[Path]
@@ -142,10 +142,10 @@ internal fn join_paths(first: String, second: String) -> Path
   cost time O(first.length() + second.length())
 {
   if second.length() > 0 && second.byte(0) == 47 {
-    return Path(text: second.to_string())
+    return Path(text: second.copy())
   }
   if first.length() == 0 {
-    return Path(text: second.to_string())
+    return Path(text: second.copy())
   }
   if first.length() > UInt64.maximum / 4 || second.length() > UInt64.maximum / 4 {
     intrinsic.crash("a path cannot hold that many bytes")
@@ -195,7 +195,7 @@ public fn Path.join_confined(self, part: Path) -> Result[Path, SystemError]
     return Err(SystemError.PermissionDenied)
   }
   let joined = if part_text.length() == 1 && part_text.byte(0) == 46 {
-    Path(text: self.text.to_string())
+    Path(text: self.text.copy())
   } else {
     self.join_path(inner)
   }
@@ -218,7 +218,7 @@ public fn Path.parent(self) -> Option[Path]
   {
     end -= 1
   }
-  Some(Path(text: text.part(0, to: end).to_string()))
+  Some(Path(text: text.part(0, to: end).copy()))
 }
 
 public fn Path.file_name(self) -> Option[view String]
@@ -263,7 +263,7 @@ public fn Path.with_extension(self, extension: String) -> Path
   let text = self.text
   let name = last_component(text)
   if name.is_empty() || is_dot_or_dot_dot(text, span: name) {
-    return Path(text: text.to_string())
+    return Path(text: text.copy())
   }
   let stem = text.part(0, to: extension_start(text, name: name))
   if stem.length() > UInt64.maximum / 4 || extension.length() > UInt64.maximum / 4 {
@@ -464,7 +464,7 @@ public fn Path.relative_to(self, base: Path) -> Option[Path]
     }
   }
   let rest = next_component(text, from: mine)
-  Some(Path(text: text.part(rest.start, to: text.length()).to_string()))
+  Some(Path(text: text.part(rest.start, to: text.length()).copy()))
 }
 
 impl Equal for Path {
@@ -761,7 +761,7 @@ public fn write_atomically(file: Path, contents: List[UInt8]) -> Result[Unit, Sy
     Some(name) => name
     None => return Err(SystemError.InvalidInput)
   }
-  var temporary_name = name.to_string()
+  var temporary_name = name.copy()
   mut temporary_name.push(".")
   mut temporary_name.push(Random.next().format(radix: 16, minimum_digits: 16))
   mut temporary_name.push(".tmp")
@@ -854,7 +854,7 @@ public fn create_temporary_directory(parent: Path, prefix: String) -> Result[Pat
 {
   var failure = SystemError.AlreadyExists
   for _ in 0..16 {
-    var name = prefix.to_string()
+    var name = prefix.copy()
     mut name.push(Random.next().format(radix: 16, minimum_digits: 16))
     let directory = parent.join(name)
     match FileWrite.create_directory(directory) {
@@ -1163,7 +1163,7 @@ public fn Glob.matches(self, path: Path) -> Bool
   }
   var names: List[String] = []
   for name in path.components() {
-    mut names.push(name.to_string())
+    mut names.push(name.copy())
   }
   wildcard_matches(
     self.components.length(),
@@ -1388,7 +1388,7 @@ public fn MemoryFiles.with_bytes(own self, file: Path, contents: List[UInt8]) ->
     mut changed.remove_tree(path, keep_directory: !components.is_empty())
     if components.is_empty() {
       let inode = mut changed.add_inode(
-        InodeKind.Bytes(contents: contents.to_list()),
+        InodeKind.Bytes(contents: contents.copy()),
         permissions: Permissions.from_mode(0o644),
       )
       mut changed.names.insert(own path, value: inode)
@@ -1441,7 +1441,7 @@ internal fn MemoryFiles.set_time(mut self, now: Instant) {
 fn reversed_components(path: Path) -> List[String] {
   var components: List[String] = []
   for component in path.components() {
-    mut components.push(component.to_string())
+    mut components.push(component.copy())
   }
   mut components.reverse()
   components
@@ -1909,7 +1909,7 @@ impl FileRead for MemoryFiles
     for entry in self.names {
       if entry.key.parent() is Some(parent) && parent == located.path {
         if entry.key.file_name() is Some(name) && self.kind_of(entry.value) is Some(kind) {
-          mut entries.push(DirectoryEntry(name: name.to_string(), kind: kind))
+          mut entries.push(DirectoryEntry(name: name.copy(), kind: kind))
         }
       }
     }
@@ -1940,7 +1940,7 @@ impl FileWrite for MemoryFiles
   uses RunForever
 {
   fn write(mut self, file: Path, contents: List[UInt8]) -> Result[Unit, SystemError] {
-    mut self.write_bytes(file, contents: contents.to_list())
+    mut self.write_bytes(file, contents: contents.copy())
   }
 
   fn write_text(mut self, file: Path, contents: String) -> Result[Unit, SystemError] {

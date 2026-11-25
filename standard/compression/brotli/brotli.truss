@@ -24,7 +24,7 @@ impl Display for Error {
 }
 
 fn malformed[Value](message: String) -> Result[Value, Error] {
-  Err(Error.Malformed(message: message.to_string()))
+  Err(Error.Malformed(message: message.copy()))
 }
 
 let insert_length_bases: Array[UInt64, 24] = [
@@ -528,14 +528,14 @@ fn dictionary_word(stream: mut Stream, length: UInt64, word_id: UInt64, output: 
   if start > words.length() || length > words.length() - start {
     return malformed("a dictionary word outside the dictionary")
   }
-  var word = words[start..start + length].to_list()
+  var word = words[start..start + length].copy()
   let kind: UInt64 = intrinsic.convert(transform_kinds[transform])
   if kind >= 3 && kind <= 11 {
     let omitted = if kind - 2 > word.length() { word.length() } else { kind - 2 }
-    word = word[omitted..].to_list()
+    word = word[omitted..].copy()
   } else if kind >= 12 && kind <= 20 {
     let omitted = if kind - 11 > word.length() { word.length() } else { kind - 11 }
-    word = word[..word.length() - omitted].to_list()
+    word = word[..word.length() - omitted].copy()
   } else if kind == 1 {
     let _ = ferment(mut word, at: 0)
   } else if kind == 2 {
@@ -720,7 +720,7 @@ fn window_bits(bits: mut Bits) -> Result[UInt32, Error] {
 }
 
 public fn decompress(input: List[UInt8], limit: UInt64 = 268435456) -> Result[List[UInt8], Error] {
-  var bits = Bits(bytes: input.to_list(), position: 0)
+  var bits = Bits(bytes: input.copy(), position: 0)
   if input.is_empty() {
     return malformed("no stream header")
   }

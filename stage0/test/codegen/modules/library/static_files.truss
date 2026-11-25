@@ -28,7 +28,7 @@ fn exchange(raw: String) -> String
 fn body_bytes_of(reply: List[UInt8]) -> List[UInt8] {
   for index in 0..reply.length() {
     if index + 4 <= reply.length() && reply[index] == 13 && reply[index + 1] == 10 && reply[index + 2] == 13 && reply[index + 3] == 10 {
-      return reply[index + 4..].to_list()
+      return reply[index + 4..].copy()
     }
   }
   []

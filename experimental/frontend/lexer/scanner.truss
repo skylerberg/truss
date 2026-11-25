@@ -351,7 +351,7 @@ fn Scanner.extract_indentation(self, offset: UInt64) -> String
   uses Panic
 {
   let start = self.source.compute_line_start(offset)
-  self.text(start, stop: self.skip_spaces(start)).to_string()
+  self.text(start, stop: self.skip_spaces(start)).copy()
 }
 
 fn Scanner.count_spaces_before(self, offset: UInt64) -> UInt64

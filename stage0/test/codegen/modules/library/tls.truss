@@ -263,7 +263,7 @@ fn mutual(port: UInt16, required: tls.ClientCertificates, protocols: List[String
 {
   var listener = NetworkServer.listen(network.SocketAddress(address: network.IpAddress.loopback, port: port)).expect("the port is free")
   var config = server_config()
-  config.protocols = protocols.to_list()
+  config.protocols = protocols.copy()
   config.client_certificates = required
   config.client_roots = [certificate(client_ca_pem)]
   concurrent {

@@ -45,9 +45,9 @@ public fn Registry.copy(self) -> Registry {
 fn index_of(entries: tasks.Cell[List[Entry]], name: String, labels: List[Label], kind: Kind, bounds: List[Float64]) -> UInt64
   uses Tasks
 {
-  let wanted = name.to_string()
-  let wanted_labels = labels.to_list()
-  let wanted_bounds = bounds.to_list()
+  let wanted = name.copy()
+  let wanted_labels = labels.copy()
+  let wanted_bounds = bounds.copy()
   entries.update(fn(listed) {
     for index in 0..listed.length() {
       if listed[index].name == wanted && listed[index].labels == wanted_labels && listed[index].kind == kind {

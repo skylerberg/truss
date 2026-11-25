@@ -55,7 +55,7 @@ fn find_rename(text: String, diagnostic: source.Diagnostic) -> Option[Rename]
     return None
   }
   let edit = fix.edits[0]
-  Some(Rename(spelling: text.substring(diagnostic.span.start, to: diagnostic.span.stop).to_string(), renamed: edit.replacement.copy()))
+  Some(Rename(spelling: text.substring(diagnostic.span.start, to: diagnostic.span.stop).copy(), renamed: edit.replacement.copy()))
 }
 
 fn remove_colliding_renames(

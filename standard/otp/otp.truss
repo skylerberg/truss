@@ -19,9 +19,9 @@ public type Totp(secret: List[UInt8], digits: UInt32 = 6, period_seconds: Int64 
 
 fn mac(algorithm: Algorithm, key: List[UInt8], message: List[UInt8]) -> List[UInt8] {
   match algorithm {
-    Sha1 => cryptography.hmac_sha1(key, message: message)[..].to_list()
-    Sha256 => cryptography.hmac_sha256(key, message: message)[..].to_list()
-    Sha512 => cryptography.hmac_sha512(key, message: message)[..].to_list()
+    Sha1 => cryptography.hmac_sha1(key, message: message)[..].copy()
+    Sha256 => cryptography.hmac_sha256(key, message: message)[..].copy()
+    Sha512 => cryptography.hmac_sha512(key, message: message)[..].copy()
   }
 }
 

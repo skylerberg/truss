@@ -36,7 +36,7 @@ test "data that zlib and gzip compressed decompresses to their input" uses RunFo
 }
 
 test "compress's output decompresses to its input, in each format and at each level" uses RunForever {
-  let inputs: List[List[UInt8]] = [[], "a".bytes().to_list(), pattern(1000), pattern(70000)]
+  let inputs: List[List[UInt8]] = [[], "a".bytes().copy(), pattern(1000), pattern(70000)]
   let formats: List[compression.Format] = [compression.Format.Deflate, compression.Format.Zlib, compression.Format.Gzip]
   let levels: List[compression.Level] = [compression.Level.Fastest, compression.Level.Balanced, compression.Level.Smallest]
   for input in inputs {

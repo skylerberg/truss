@@ -16,10 +16,10 @@ public type CorsPolicy(
 fn allowed_origin(policy: CorsPolicy, origin: String) -> Option[String] {
   for allowed in policy.origins {
     if allowed == "*" {
-      return Some(if policy.allow_credentials { origin.to_string() } else { "*" })
+      return Some(if policy.allow_credentials { origin.copy() } else { "*" })
     }
     if allowed == origin {
-      return Some(origin.to_string())
+      return Some(origin.copy())
     }
   }
   None
@@ -45,7 +45,7 @@ public fn cors(
   uses Tasks, generic Granted, RunForever
 {
   let origin = match request.header("Origin") {
-    Some(origin) => origin.to_string()
+    Some(origin) => origin.copy()
     None => {
       next(own request, mut responder)
       return
@@ -148,7 +148,7 @@ public fn request_id(
 {
   var incoming = own request
   let id = match incoming.header("X-Request-ID") {
-    Some(given) => if is_request_id(given) { given.to_string() } else { Random.next().format(radix: 16, minimum_digits: 16) }
+    Some(given) => if is_request_id(given) { given.copy() } else { Random.next().format(radix: 16, minimum_digits: 16) }
     None => Random.next().format(radix: 16, minimum_digits: 16)
   }
   mut incoming.headers.set("X-Request-ID", value: id)
@@ -165,9 +165,9 @@ public fn log_requests(
 {
   let started = Clock.monotonic()
   let method = "${request.method}"
-  let path = request.path().to_string()
+  let path = request.path().copy()
   let id = match request.header("X-Request-ID") {
-    Some(given) => given.to_string()
+    Some(given) => given.copy()
     None => ""
   }
   next(own request, mut responder)
@@ -263,7 +263,7 @@ public fn RateLimiter.take(self, key: String) -> Decision
 {
   let now = Clock.monotonic().total_milliseconds()
   let policy = self.policy
-  let name = key.to_string()
+  let name = key.copy()
   self.buckets.update(fn(buckets) {
     let current = match mut buckets.get(name.copy()) {
       Some(bucket) => refilled(bucket, policy: policy, now: now)
