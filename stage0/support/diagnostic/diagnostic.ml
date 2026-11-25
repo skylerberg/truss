@@ -607,17 +607,12 @@ type 'span diagnostic = {
 
 type t = Source.span diagnostic
 
-let make ?(severity : severity = Error) ?(notes = []) ?(fixes = []) ~code span message =
-  { code; severity; message; span; notes; fixes }
-
 let is_error (diagnostic : _ diagnostic) = diagnostic.severity = Error
 let show_severity : severity -> string = function Error -> "error" | Warning -> "warning"
 
 type reported = Reported
 
-let make_reported (_ : _ diagnostic) = Reported
 let reported_elsewhere = Reported
-let fix title edits = { title; edits }
 let replace span replacement = { span; replacement }
 let insert at replacement = { span = at; replacement }
 let delete span = { span; replacement = "" }
@@ -885,3 +880,10 @@ let to_json_object source diagnostic =
     (encode_json_string diagnostic.message)
     (encode_json_span source diagnostic.span)
     (String.concat "," notes) (String.concat "," fixes)
+
+module For_rendering = struct
+  let make ?(severity : severity = Error) ?(notes = []) ?(fixes = []) ~code span message =
+    { code; severity; message; span; notes; fixes }
+
+  let fix title edits = { title; edits }
+end

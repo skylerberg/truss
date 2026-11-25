@@ -25,7 +25,7 @@ type target =
   | Visited
   | Final
   | Specification_function of specification_function
-  | Unknown of Diagnostic.reported
+  | Unknown of Catalog.reported
 
 type bracket = Index | Type_arguments | Method_bracket
 

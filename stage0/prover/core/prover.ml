@@ -292,10 +292,8 @@ let resolve_location (names : Resolve.Names.lookups) (key : Resolve.Names.key)
     | Node origin -> Core_walk.locate_origin origin
     | Whole_definition -> (names.read_definition key).id)
 
-type site = { code : Diagnostic.Code.prover; shows : Catalog.Prover.t }
-
 type state = {
-  site : site;
+  site : Catalog.Prover.t;
   is_proven : bool;
   trusts_compiled_code : bool;
   failure : Catalog.Prover.t option;
@@ -316,7 +314,7 @@ let list_evaluations = function
   | Unsupported _ | Not_proven_here -> []
 
 type posed_obligation = {
-  site : site;
+  site : Catalog.Prover.t;
   obligation : Obligation.t;
   query : Logic.query;
   has_run_result : bool;
@@ -415,11 +413,6 @@ type posed =
   | Unreadable of Catalog.Prover.t
   | Posed of { obligations : posed_obligation list; failed_evaluation : Catalog.Prover.t option }
 
-let make_site shows =
-  match (Catalog.describe (Prover shows)).code with
-  | Prover code -> { code; shows }
-  | _ -> Compiler_bug.raise_bug ~stage:"Prover" "a proof site has a code of another family"
-
 let pose ~runs proof =
   let runs = Evaluation_table.of_seq (List.to_seq runs) in
   match proof with
@@ -433,13 +426,12 @@ let pose ~runs proof =
             List.map
               (fun (obligation : Obligation.t) ->
                 pose_obligation runs
-                  (make_site
-                     (Proves
-                        {
-                          location = obligation.location;
-                          instance = obligation.instance;
-                          obligation = obligation.obligation;
-                        }))
+                  (Proves
+                     {
+                       location = obligation.location;
+                       instance = obligation.instance;
+                       obligation = obligation.obligation;
+                     })
                   obligation)
               outcome.obligations;
           failed_evaluation =
@@ -492,12 +484,7 @@ let explain_failure (posed : posed_obligation) answer ~is_refuted : Catalog.Prov
            })
 
 let fail_site failure =
-  {
-    site = make_site failure;
-    is_proven = false;
-    trusts_compiled_code = false;
-    failure = Some failure;
-  }
+  { site = failure; is_proven = false; trusts_compiled_code = false; failure = Some failure }
 
 let list_states posed ~answers ~refutations =
   match posed with

@@ -292,10 +292,10 @@ module Code : sig
 end
 
 type 'span edit = { span : 'span; replacement : string }
-type 'span fix = { title : string; edits : 'span edit list }
+type 'span fix = private { title : string; edits : 'span edit list }
 type severity = Error | Warning
 
-type 'span diagnostic = {
+type 'span diagnostic = private {
   code : Code.t;
   severity : severity;
   message : string;
@@ -306,17 +306,7 @@ type 'span diagnostic = {
 
 type t = Source.span diagnostic
 
-val make :
-  ?severity:severity ->
-  ?notes:('span * string) list ->
-  ?fixes:'span fix list ->
-  code:Code.t ->
-  'span ->
-  string ->
-  'span diagnostic
-
 val is_error : _ diagnostic -> bool
-val fix : string -> 'span edit list -> 'span fix
 val replace : 'span -> string -> 'span edit
 val insert : 'span -> string -> 'span edit
 val delete : 'span -> 'span edit
@@ -325,7 +315,6 @@ val show_count : int -> string -> string -> string
 
 type reported
 
-val make_reported : _ diagnostic -> reported
 val reported_elsewhere : reported
 val map_spans : ('a -> 'b) -> 'a diagnostic -> 'b diagnostic
 val apply_edits : string -> Source.span edit list -> string
@@ -335,3 +324,16 @@ val render : is_colored:bool -> Source.t -> t -> string
 val to_json_object : Source.t -> t -> string
 val encode_json_string : string -> string
 val quote : string -> string
+
+module For_rendering : sig
+  val make :
+    ?severity:severity ->
+    ?notes:('span * string) list ->
+    ?fixes:'span fix list ->
+    code:Code.t ->
+    'span ->
+    string ->
+    'span diagnostic
+
+  val fix : string -> 'span edit list -> 'span fix
+end

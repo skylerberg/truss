@@ -80,7 +80,10 @@ let describe : diagnostic -> description = function
   | Inference diagnostic -> Inference_description.describe diagnostic
   | Prover diagnostic -> Prover_description.describe diagnostic
 
+type reported = Diagnostic.reported
+
 let make_reported (_ : diagnostic) = Diagnostic.reported_elsewhere
+let reported_elsewhere = Diagnostic.reported_elsewhere
 
 module Usage = Usage
 module Usage_description = Usage_description

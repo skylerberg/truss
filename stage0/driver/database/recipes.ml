@@ -777,8 +777,8 @@ let run_decide (database : Tracker.t) answered (row : Store.definition) =
             (fun ({ site; is_proven; trusts_compiled_code; failure } : Prover.state) : Store.verdict
                ->
               {
-                code = Diagnostic.Code.name (Prover site.code);
-                site = Marshal.to_string site.shows [];
+                code = Diagnostic.Code.name (Catalog.describe (Prover site)).code;
+                site = Marshal.to_string site [];
                 is_proven;
                 trusts_compiled_code;
                 failure = Option.map (fun failure -> Marshal.to_string failure []) failure;

@@ -224,12 +224,12 @@ let render_fix ~rejects_edit source (fix : _ fix) =
   match List.filter_map Fun.id edits with
   | rendered
     when List.length rendered = List.length edits && not (List.exists rejects_edit rendered) ->
-      Some (Diagnostic.fix (render_pieces source fix.title) rendered)
+      Some (Diagnostic.For_rendering.fix (render_pieces source fix.title) rendered)
   | _ -> None
 
 let render_with ?(rejects_edit = fun _ -> false) source (description : _ t) =
   let start, stop = locate_location source description.location in
-  Diagnostic.make ~severity:description.severity
+  Diagnostic.For_rendering.make ~severity:description.severity
     ~fixes:(List.filter_map (render_fix ~rejects_edit source) description.fixes)
     ~notes:
       (List.map

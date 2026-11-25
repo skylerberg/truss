@@ -5,4 +5,4 @@ val find_syntax_error :
   syntax_errors:Source.Definition_span.t list ->
   Syntax.definition ->
   part ->
-  Diagnostic.reported option
+  Catalog.reported option

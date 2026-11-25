@@ -32,7 +32,7 @@ type target = Walk.target =
   | Visited
   | Final
   | Specification_function of specification_function
-  | Unknown of Diagnostic.reported
+  | Unknown of Catalog.reported
 
 type bracket = Walk.bracket = Index | Type_arguments | Method_bracket
 type section = Walk.section = Interface | Contract | Body

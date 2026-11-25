@@ -1,5 +1,5 @@
 val find_refused_class : State.state -> sides:(Types.ty * Types.ty) list -> int option
-val report_decided_in_specification : State.state -> Core.origin -> int -> Diagnostic.reported
+val report_decided_in_specification : State.state -> Core.origin -> int -> Catalog.reported
 val list_class_pairs : State.state -> Types.ty * Types.ty -> (int * Types.ty) list
 
 val add_mismatch_diagnostic :
@@ -7,14 +7,14 @@ val add_mismatch_diagnostic :
   Core.origin ->
   sides:(Types.ty * Types.ty) list ->
   Catalog.Inference.mismatch ->
-  Diagnostic.reported
+  Catalog.reported
 
 val add_operand_mismatch :
   State.state ->
   at:Core.origin ->
   left:Core.origin * Types.ty ->
   right:Core.origin * Types.ty ->
-  Diagnostic.reported
+  Catalog.reported
 
 val report_mismatch :
   ?copy:Catalog.Inference.view_copy ->
@@ -30,11 +30,11 @@ val report_requirement :
   ?associated:string * Types.ty * Types.ty ->
   impl_need:Catalog.Inference.impl_need option ->
   Types.ty ->
-  Diagnostic.reported
+  Catalog.reported
 
 val report_failure :
   State.state ->
   State.goal ->
   ?associated:string * Types.ty * Types.ty ->
   Types.ty ->
-  Diagnostic.reported
+  Catalog.reported

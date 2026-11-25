@@ -149,7 +149,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
               start_type
             end
         | Some only, None | None, Some only -> check_expression state env only
-        | None, None -> Types.Error Diagnostic.reported_elsewhere
+        | None, None -> Types.Error Catalog.reported_elsewhere
       in
       Types.Named { path = Well_known.make_path Range; arguments = [ Types.Type element ] }
   | Quantified { binder; body; _ } ->
@@ -195,7 +195,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
         implementations;
       Statements.check_block_value state env ?expected body
   | Block body -> Statements.check_block_value state env ?expected body
-  | Expression_error -> Types.Error Diagnostic.reported_elsewhere
+  | Expression_error -> Types.Error Catalog.reported_elsewhere
 
 and check_member_value state env (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) =

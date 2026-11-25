@@ -66,7 +66,11 @@ type diagnostic =
   | Prover of Prover.t
 
 val describe : diagnostic -> description
-val make_reported : diagnostic -> Diagnostic.reported
+
+type reported = Diagnostic.reported
+
+val make_reported : diagnostic -> reported
+val reported_elsewhere : reported
 val read_entry_siblings : Core.origin range list -> int -> Core.origin siblings
 
 module Usage = Usage

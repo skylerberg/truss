@@ -16,10 +16,8 @@ val list_evaluations : proof -> Obligation.evaluation list
 val resolve_location :
   Resolve.Names.lookups -> Resolve.Names.key -> Obligation.location -> Source.Definition_span.t
 
-type site = { code : Diagnostic.Code.prover; shows : Catalog.Prover.t }
-
 type state = {
-  site : site;
+  site : Catalog.Prover.t;
   is_proven : bool;
   trusts_compiled_code : bool;
   failure : Catalog.Prover.t option;
@@ -35,5 +33,5 @@ val list_states :
   posed -> answers:Solver.answer list -> refutations:Solver.answer list -> state list
 
 module For_testing : sig
-  val list_queries : posed -> (site * string) list
+  val list_queries : posed -> (Catalog.Prover.t * string) list
 end

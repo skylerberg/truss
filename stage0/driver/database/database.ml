@@ -1181,14 +1181,14 @@ module For_testing = struct
            match find_proof database key with
            | Some (Value proof) ->
                List.map
-                 (fun (({ code; shows } : Prover.site), input) ->
+                 (fun (site, input) ->
                    let shown =
                      Renderer.render
                        (make_render_lookups database (Hashtbl.create 1))
-                       key (Prover shows)
+                       key (Prover site)
                    in
                    ( {
-                       code = Diagnostic.Code.name (Prover code);
+                       code = Diagnostic.Code.name shown.code;
                        span = shown.span;
                        shows = shown.message;
                      },

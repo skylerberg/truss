@@ -51,5 +51,5 @@ let find_syntax_error ~spans ~syntax_errors definition part =
   | None -> None
   | Some span ->
       if List.exists (fun syntax_error -> lies_in all syntax_error span) syntax_errors then
-        Some Diagnostic.reported_elsewhere
+        Some Catalog.reported_elsewhere
       else None

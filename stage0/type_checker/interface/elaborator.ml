@@ -8,7 +8,7 @@ type t = {
   bounds : Types.trait_reference list Parameter_table.t;
   known_bounds : Properties.Bounds.t;
   condition : Types.condition;
-  broken_parameters : Diagnostic.reported Parameter_table.t;
+  broken_parameters : Catalog.reported Parameter_table.t;
   self_type : Types.ty option;
   self_trait : Types.trait_reference option;
   self_associated : (string * Types.ty) list;
@@ -178,7 +178,7 @@ let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
       match elaborate_function_type context function_type with
       | Ok function_type -> Types.Function function_type
       | Error report -> Types.Error report)
-  | Type_error -> Types.Error Diagnostic.reported_elsewhere
+  | Type_error -> Types.Error Catalog.reported_elsewhere
 
 and elaborate_self context (at : Core.origin) =
   match context.self_type with
@@ -263,7 +263,7 @@ and elaborate_count_name context (name : Syntax.name) : Types.argument =
   | _ -> raise_bug "`%s` is not resolved as a type argument" name.text
 
 and check_arity context (path : Syntax.path_type) shown expected :
-    (unit, Diagnostic.reported) Stdlib.result =
+    (unit, Catalog.reported) Stdlib.result =
   match expected with
   | None -> Ok ()
   | Some expected -> (
@@ -336,9 +336,9 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
   | _ -> raise_bug "`%s` is not resolved as a type" shown
 
 and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_type) :
-    (Types.trait_reference, Diagnostic.reported) Stdlib.result =
+    (Types.trait_reference, Catalog.reported) Stdlib.result =
   let shown = show_path path.path in
-  let build_trait_reference trait : (Types.trait_reference, Diagnostic.reported) Stdlib.result =
+  let build_trait_reference trait : (Types.trait_reference, Catalog.reported) Stdlib.result =
     let associated =
       List.sort compare
         (List.filter_map
@@ -513,7 +513,7 @@ and elaborate_parameter_type context mode (written : Syntax.type_expression) =
   | _ -> type_
 
 and elaborate_function_type context (written : Syntax.function_type) :
-    (Types.function_type, Diagnostic.reported) Stdlib.result =
+    (Types.function_type, Catalog.reported) Stdlib.result =
   let inputs =
     List.map
       (fun (input : Syntax.function_input) ->
@@ -571,10 +571,10 @@ and elaborate_capability_uses context uses =
           else [ Types.Capability_unless_values (Built_in Panic) ])
     uses
 
-and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Stdlib.result =
+and elaborate_costs context clauses : (Types.cost list, Catalog.reported) Stdlib.result =
   let report_error diagnostic = Error (record_diagnostic context.diagnostics diagnostic) in
   let elaborate_counted (path : Syntax.path_type) (method_ : Syntax.name option) :
-      (Types.resource, Diagnostic.reported) Stdlib.result =
+      (Types.resource, Catalog.reported) Stdlib.result =
     let shown = show_path path.path in
     match find_target context path.path.last with
     | Some (Definition (Capability, capability)) -> (
@@ -601,7 +601,7 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
       (fun (clause : Syntax.clause) ->
         match clause.kind with
         | Cost cost ->
-            let resource : (Types.resource, Diagnostic.reported) Stdlib.result =
+            let resource : (Types.resource, Catalog.reported) Stdlib.result =
               match cost.resource with
               | Metric metric -> Ok (Metric metric)
               | Calls (Call_capability path) -> elaborate_counted path None
@@ -1077,7 +1077,7 @@ let elaborate_fields context (written : Syntax.field list) =
     written
 
 let elaborate_container (context : t) (path : Path.t) (definition : Syntax.definition) :
-    (Environment.container, Diagnostic.reported) Stdlib.result * t =
+    (Environment.container, Catalog.reported) Stdlib.result * t =
   match definition.kind with
   | Trait { generics; requires; members; _ } ->
       let trait_generics = elaborate_generics context path generics in
@@ -1419,7 +1419,7 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
            (elaborate_signature
               { context with self_capabilities = []; is_in_capability; is_in_impl }
               ~owner:path ~head:[] ~self_type:header.container_scope.self_type signature))
-  | _ -> make_elaborated_interface context (Error_interface Diagnostic.reported_elsewhere)
+  | _ -> make_elaborated_interface context (Error_interface Catalog.reported_elsewhere)
 
 let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let resolved = lookups.read_resolved Interface key in
@@ -1429,7 +1429,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   Compiler_bug.run_while_doing ~stage:"Interface" (Resolve.Names.show_key key) (fun () ->
       let context = create_declared lookups resolved ~spans empty_scope in
       let make_error_interface () =
-        make_elaborated_interface context (Error_interface Diagnostic.reported_elsewhere)
+        make_elaborated_interface context (Error_interface Catalog.reported_elsewhere)
       in
       match
         ( Resolve.Names.find_syntax_error lookups.names key Header,

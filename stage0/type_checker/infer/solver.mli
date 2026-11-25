@@ -14,7 +14,7 @@ val require_within :
   State.state ->
   Types.ty ->
   Language.Builtin_type.t list ->
-  reason:(Types.ty -> Diagnostic.reported) ->
+  reason:(Types.ty -> Catalog.reported) ->
   Types.ty
 
 val resolve_associated_type :

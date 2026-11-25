@@ -735,7 +735,9 @@ let () =
 let () =
   Harness.test "at most 200 diagnostics are shown, then a count" (fun () ->
       let make_diagnostic offset =
-        Diagnostic.make ~code:(Lexer Semicolon) (Source.make_span offset (offset + 1)) "x"
+        Diagnostic.For_rendering.make ~code:(Lexer Semicolon)
+          (Source.make_span offset (offset + 1))
+          "x"
       in
       let shown = Description.select_shown (List.init 250 make_diagnostic) in
       if List.length shown <> Description.For_testing.limit + 1 then
@@ -752,7 +754,7 @@ let () =
         (snd (lex text)));
   Harness.test "overlapping edits are refused" (fun () ->
       let fix =
-        Diagnostic.fix "x"
+        Diagnostic.For_rendering.fix "x"
           [ Diagnostic.delete (Source.make_span 0 2); Diagnostic.delete (Source.make_span 1 3) ]
       in
       match Diagnostic.apply_edits "abc" fix.edits with
@@ -763,9 +765,9 @@ let semicolon_source = Source.create ~path:"test.truss" "let a = 1;\n"
 
 let make_semicolon_diagnostic severity =
   let semicolon = Source.make_span 9 10 in
-  Diagnostic.make ~severity ~code:(Lexer Semicolon)
+  Diagnostic.For_rendering.make ~severity ~code:(Lexer Semicolon)
     ~notes:[ (Source.make_span 0 3, "The statement starts here.") ]
-    ~fixes:[ Diagnostic.fix "Delete the semicolon." [ Diagnostic.delete semicolon ] ]
+    ~fixes:[ Diagnostic.For_rendering.fix "Delete the semicolon." [ Diagnostic.delete semicolon ] ]
     semicolon "A semicolon ends no statement."
 
 let remove_escapes text =

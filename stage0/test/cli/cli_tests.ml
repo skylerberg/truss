@@ -715,20 +715,29 @@ let () =
 let edit start stop replacement = Diagnostic.replace (Source.make_span start stop) replacement
 
 let make_diagnostic ~fixes start stop =
-  Diagnostic.make ~fixes ~code:(Usage Unused_variable) (Source.make_span start stop) "x."
+  Diagnostic.For_rendering.make ~fixes ~code:(Usage Unused_variable) (Source.make_span start stop)
+    "x."
 
 let () =
   test "edits apply at the offsets of the text they were made for" (fun () ->
       expect_string ~expected:"A bb C"
         (Diagnostic.apply_edits "a bb c" [ edit 0 1 "A"; edit 5 6 "C" ]));
   test "a fix that overlaps an earlier one waits for the next round" (fun () ->
-      let first = make_diagnostic ~fixes:[ Diagnostic.fix "one" [ edit 0 3 "x" ] ] 0 3 in
-      let second = make_diagnostic ~fixes:[ Diagnostic.fix "two" [ edit 2 4 "y" ] ] 2 4 in
+      let first =
+        make_diagnostic ~fixes:[ Diagnostic.For_rendering.fix "one" [ edit 0 3 "x" ] ] 0 3
+      in
+      let second =
+        make_diagnostic ~fixes:[ Diagnostic.For_rendering.fix "two" [ edit 2 4 "y" ] ] 2 4
+      in
       if Diagnostic.list_machine_applicable [ first; second ] <> [ first ] then fail "chose both");
   test "a diagnostic with several fixes is left for the person or agent to choose" (fun () ->
       let choice =
         make_diagnostic
-          ~fixes:[ Diagnostic.fix "one" [ edit 0 1 "x" ]; Diagnostic.fix "two" [ edit 0 1 "y" ] ]
+          ~fixes:
+            [
+              Diagnostic.For_rendering.fix "one" [ edit 0 1 "x" ];
+              Diagnostic.For_rendering.fix "two" [ edit 0 1 "y" ];
+            ]
           0 1
       in
       if Diagnostic.list_machine_applicable [ choice ] <> [] then fail "chose one");
