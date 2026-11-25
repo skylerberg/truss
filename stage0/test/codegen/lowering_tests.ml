@@ -66,6 +66,52 @@ let () =
         \  called at example/main.truss:12:3\n\
         \  called at example/main.truss:17:10\n")
 
+let () =
+  let shelf : Path.t = Top { module_ = Codegen_support.example; name = "Shelf" } in
+  let make_method (name, mode, _) : Lowered.Item.t =
+    Code
+      {
+        path = Method { owner = shelf; name; receiver = Instance mode };
+        instantiation = Ground.no_instantiation;
+        assumes_condition = false;
+      }
+  in
+  let deferred_drops =
+    [
+      ("first", Language.Mode.Read, []);
+      ("nothing", Read, []);
+      ("title", Read, [ "Option[String]" ]);
+      ("report", Read, [ "Report" ]);
+      ("labeled", Read, [ "String" ]);
+      ("scratch", Mut, [ "Option[String]" ]);
+      ("slot", Mut, [ "Option[String]" ]);
+    ]
+  in
+  Codegen_support.test
+    "a lending method defers a drop of a value it made when the value holds something to drop or \
+     is lent `mut`" (fun () ->
+      let _, backend =
+        Codegen_support.load
+          ~roots:(List.map make_method deferred_drops)
+          Fixtures.Lowering.shelf_lending_values_it_makes
+      in
+      List.iter
+        (fun ((name, _, expected_types) as lending) ->
+          let dropped_types =
+            List.filter_map
+              (function Lowered.Item.Untyped_drop ty -> Some (Ground.to_string ty) | _ -> None)
+              (Emit_c.references
+                 (Backend.For_testing.compile_fragment backend (make_method lending)))
+          in
+          Codegen_support.expect_string
+            ~expected:(name ^ ": " ^ String.concat ", " expected_types)
+            (name ^ ": " ^ String.concat ", " dropped_types))
+        deferred_drops);
+  Codegen_support.test "a value that a lending method made is dropped once, as its caller left it"
+    (fun () ->
+      Codegen_support.expect_output Fixtures.Lowering.shelf_lending_values_it_makes
+        "test 0 passed\ntest 1 passed\n")
+
 let expect_fold name ~folded ~run source =
   Codegen_support.test name (fun () ->
       let database, backend =

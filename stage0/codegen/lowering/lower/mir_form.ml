@@ -3,6 +3,18 @@ type deferred =
   | Deferred_write_back of { source : Lowered.place; ty : Ground.ty }
   | Deferred_free of string
 
+type lent_value =
+  | Owned of { dropped_as : Ground.ty option }
+  | Holds_lent_places of (Lowered.projection list * deferred) list
+
+let make_owned state ty =
+  Owned { dropped_as = (if Lowering.is_trivial state ty then None else Some ty) }
+
+let list_deferred = function
+  | Owned { dropped_as = Some ty } -> [ ([], Deferred_drop ty) ]
+  | Owned { dropped_as = None } -> []
+  | Holds_lent_places deferred -> deferred
+
 let provide (state : Lowering.state) (provided : Mir.provided list) ~can_use_tasks ~site =
   let enclosing = state.evidence in
   let implementations =
@@ -659,35 +671,33 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
     if outlives written && Lowering.is_reached_through_pointer state lowered then Some lowered
     else None
   in
-  let rec write (yielded : Mir.yielded) (destination : Lowered.place) :
-      (Lowered.projection list * deferred) list =
+  let rec write (yielded : Mir.yielded) (destination : Lowered.place) : lent_value =
     match yielded with
     | Part operand -> (
         let ty = Mir_places.compute_operand_type state operand in
-        let list_deferred_drops () =
-          if Lowering.is_trivial state ty then [] else [ ([], Deferred_drop ty) ]
-        in
+        let owned = make_owned state ty in
         match operand with
         | Borrow { place = { root = Local local; projections = [] } as written; _ } when owns local
           ->
             Lowering.take state (Mir_places.lower_place state written) ty ~destination;
-            list_deferred_drops ()
-        | Borrow { place = written; _ } -> (
+            owned
+        | Borrow { place = written; _ } ->
             Emit_c.Ir_builder.emit state.builder
               (Assign (destination, Use (Copy (Mir_places.lower_place state written))));
-            match (find_lent_in_place written, mode) with
-            | Some source, Mut -> [ ([], Deferred_write_back { source; ty }) ]
-            | Some _, (Read | Own) -> []
-            | None, Mut when outlives written ->
-                Definitions.raise_bug "a place lent `mut` that is not reached through a pointer"
-            | None, _ ->
-                if not (outlives written || Lowering.is_trivial state ty) then
-                  Definitions.raise_bug "a lent part of %s that the method owns"
-                    (Ground.to_string ty);
-                [])
+            Holds_lent_places
+              (match (find_lent_in_place written, mode) with
+              | Some source, Mut -> [ ([], Deferred_write_back { source; ty }) ]
+              | Some _, (Read | Own) -> []
+              | None, Mut when outlives written ->
+                  Definitions.raise_bug "a place lent `mut` that is not reached through a pointer"
+              | None, _ ->
+                  if not (outlives written || Lowering.is_trivial state ty) then
+                    Definitions.raise_bug "a lent part of %s that the method owns"
+                      (Ground.to_string ty);
+                  [])
         | Use _ | Take _ | Immediate _ ->
             Mir_places.write_operand state operand destination;
-            list_deferred_drops ())
+            owned)
     | Built { variant; fields; type_; _ } ->
         let ty = Lowering.ground state type_ in
         let field_types = List.assoc variant (Mir_places.list_variants state ty) in
@@ -696,7 +706,7 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
             (fun (name, (field : Mir.yielded option)) ->
               let field_ty = List.assoc name field_types in
               let value = Lowering.allocate_local state (Value field_ty) in
-              let deferred =
+              let field_value =
                 match field with
                 | Some field -> write field value
                 | None ->
@@ -704,23 +714,38 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
                       lower_field_default_place state ty ~variant ~field:name
                     in
                     Lowering.take state default default_ty ~destination:value;
-                    if Lowering.is_trivial state default_ty then []
-                    else [ ([], Deferred_drop default_ty) ]
+                    make_owned state default_ty
               in
               ( (name, if Lowering.is_trivial state field_ty then Lowered.Copy value else Move value),
-                List.map
-                  (fun (inside, deferred) ->
-                    (Mir_places.make_field_projection variant name :: inside, deferred))
-                  deferred ))
+                field_value ))
             fields
         in
         Emit_c.Ir_builder.emit state.builder
           (Assign (destination, Build { ty; variant; fields = List.map fst built }));
-        (match variant with
-          | Some variant when Memory_layout.is_indirect state.context.env ty variant ->
-              [ ([], Deferred_free variant) ]
-          | _ -> [])
-        @ List.concat_map snd built
+        let is_indirect =
+          match variant with
+          | Some variant -> Memory_layout.is_indirect state.context.env ty variant
+          | None -> false
+        in
+        let field_values = List.map snd built in
+        let needs_no_drop =
+          mode = Read && (not is_indirect)
+          && List.for_all (fun value -> list_deferred value = []) field_values
+        in
+        if List.for_all (function Owned _ -> true | Holds_lent_places _ -> false) field_values
+        then if needs_no_drop then Owned { dropped_as = None } else make_owned state ty
+        else
+          Holds_lent_places
+            ((match variant with
+               | Some variant when is_indirect -> [ ([], Deferred_free variant) ]
+               | _ -> [])
+            @ List.concat_map
+                (fun ((name, _), field_value) ->
+                  List.map
+                    (fun (inside, deferred) ->
+                      (Mir_places.make_field_projection variant name :: inside, deferred))
+                    (list_deferred field_value))
+                built)
   in
   let defer_call intrinsic arguments =
     Emit_c.Ir_builder.emit state.builder
@@ -769,7 +794,7 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
                        result = Returned slot_pointer;
                      }));
             let slot = Lowered.project slot_pointer Deref in
-            List.iter (defer slot) (write part slot);
+            List.iter (defer slot) (list_deferred (write part slot));
             Address { place = slot; writable = mode = Mut }
       in
       match Lowering.find_result_place state with

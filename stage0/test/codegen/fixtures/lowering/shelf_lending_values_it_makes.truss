@@ -1,0 +1,70 @@
+type Shelf(books: List[String])
+
+type Labeled(book: String, label: String)
+
+type Report(title: String, note: Option[String])
+
+fn Shelf.first(self) lends Option[String] {
+  if self.books.length() > 0 {
+    Some(self.books[0])
+  } else {
+    None
+  }
+}
+
+fn Shelf.nothing(self) lends Option[Option[String]] {
+  Some(None)
+}
+
+fn Shelf.title(self) lends Option[String] {
+  if self.books.length() > 0 {
+    Some("${self.books[0]}!")
+  } else {
+    None
+  }
+}
+
+fn Shelf.report(self) lends Report {
+  Report(title: "${self.books.length()} books", note: None)
+}
+
+fn Shelf.labeled(self, index: UInt64) lends Labeled {
+  Labeled(book: self.books[index], label: "book ${index}")
+}
+
+fn Shelf.scratch(mut self) lends mut Option[String] {
+  None
+}
+
+type Slot(book: String, note: Option[String])
+
+fn Shelf.slot(mut self, index: UInt64) lends mut Slot {
+  Slot(book: mut self.books[index], note: None)
+}
+
+test "a lent constructor of values that the method made" {
+  let empty = Shelf(books: [])
+  assert empty.first() is None
+  assert empty.title() is None
+  assert empty.nothing() is Some(None)
+
+  let shelf = Shelf(books: ["${1}st", "${2}nd"])
+  if shelf.first() is Some(book) {
+    assert book.length() == 3
+  }
+  if shelf.title() is Some(title) {
+    assert title.length() == 4
+  }
+  assert shelf.report().title.length() == 7
+  assert shelf.report().note is None
+  assert shelf.labeled(1).book.length() == 3
+  assert shelf.labeled(1).label.length() == 6
+}
+
+test "a caller fills a value that the method made and lent `mut`" {
+  var shelf = Shelf(books: ["${1}st"])
+  mut shelf.scratch() = Some("${2} left behind")
+  mut shelf.slot(0).note = Some("${3} noted")
+  mut shelf.slot(0).book = "${4}th"
+  assert shelf.books[0].length() == 3
+}

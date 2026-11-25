@@ -585,8 +585,12 @@ let compute_target_type context frame run (target : Mir.place) =
   | { root = Local local; projections = [] } -> run.infos.(local).type_
   | _ -> compute_place_type context frame run target
 
-let lends_places (part : Mir.yielded) =
-  match part with Built _ | Part (Borrow _) -> true | Part (Use _ | Take _ | Immediate _) -> false
+let rec lends_places (part : Mir.yielded) =
+  match part with
+  | Part (Borrow _) -> true
+  | Part (Use _ | Take _ | Immediate _) -> false
+  | Built { fields; _ } ->
+      List.exists (fun (_, field) -> Option.fold ~none:false ~some:lends_places field) fields
 
 let rec read_yielded_value context frame run ~origin (part : Mir.yielded) =
   match part with
