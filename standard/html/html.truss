@@ -74,53 +74,53 @@ type Content =
   | Text(text: String)
   | Markup(text: String)
 
-public opaque type Part(content: Content)
+public opaque type Interpolation(content: Content)
 
-impl From[view String] for Part {
-  fn from(value: own view String) -> Part {
-    Part(content: Content.Text(text: value.to_string()))
+impl From[view String] for Interpolation {
+  fn from(value: own view String) -> Interpolation {
+    Interpolation(content: Content.Text(text: value.to_string()))
   }
 }
 
-impl From[String] for Part {
-  fn from(value: own String) -> Part {
-    Part(content: Content.Text(text: own value))
+impl From[String] for Interpolation {
+  fn from(value: own String) -> Interpolation {
+    Interpolation(content: Content.Text(text: own value))
   }
 }
 
-impl From[Int64] for Part {
-  fn from(value: own Int64) -> Part {
-    Part(content: Content.Text(text: "${value}"))
+impl From[Int64] for Interpolation {
+  fn from(value: own Int64) -> Interpolation {
+    Interpolation(content: Content.Text(text: "${value}"))
   }
 }
 
-impl From[UInt64] for Part {
-  fn from(value: own UInt64) -> Part {
-    Part(content: Content.Text(text: "${value}"))
+impl From[UInt64] for Interpolation {
+  fn from(value: own UInt64) -> Interpolation {
+    Interpolation(content: Content.Text(text: "${value}"))
   }
 }
 
-impl From[Float64] for Part {
-  fn from(value: own Float64) -> Part {
-    Part(content: Content.Text(text: "${value}"))
+impl From[Float64] for Interpolation {
+  fn from(value: own Float64) -> Interpolation {
+    Interpolation(content: Content.Text(text: "${value}"))
   }
 }
 
-impl From[Bool] for Part {
-  fn from(value: own Bool) -> Part {
-    Part(content: Content.Text(text: if value { "true" } else { "false" }))
+impl From[Bool] for Interpolation {
+  fn from(value: own Bool) -> Interpolation {
+    Interpolation(content: Content.Text(text: if value { "true" } else { "false" }))
   }
 }
 
-impl From[Html] for Part {
-  fn from(value: own Html) -> Part {
-    Part(content: Content.Markup(text: own value.text))
+impl From[Html] for Interpolation {
+  fn from(value: own Html) -> Interpolation {
+    Interpolation(content: Content.Markup(text: own value.text))
   }
 }
 
-impl From[List[Html]] for Part {
-  fn from(value: own List[Html]) -> Part {
-    Part(content: Content.Markup(text: Html.joined(value).text.copy()))
+impl From[List[Html]] for Interpolation {
+  fn from(value: own List[Html]) -> Interpolation {
+    Interpolation(content: Content.Markup(text: Html.joined(value).text.copy()))
   }
 }
 
@@ -399,7 +399,7 @@ fn is_safe_url(text: String) -> Bool {
 }
 
 impl FromTemplate for Html {
-  type Part = Part
+  type Interpolation = Interpolation
 
   fn is_valid_template(literals: List[text.Literal]) -> Bool
   {
@@ -411,15 +411,15 @@ impl FromTemplate for Html {
     true
   }
 
-  fn from_template(template: Template[Part]) -> Html
+  fn from_template(template: Template[Interpolation]) -> Html
   {
     let kinds = places(template.literals)
     var output = ""
     for index in 0..template.literals.length() {
       mut output.push(template.literals[index].text())
-      if index < template.parts.length() && index < kinds.length() {
+      if index < template.interpolations.length() && index < kinds.length() {
         let place = kinds[index]
-        match template.parts[index].content {
+        match template.interpolations[index].content {
           Text(text) => match place {
             InValue(url) => if url && !is_safe_url(text) {
               mut output.push("about:invalid")

@@ -617,8 +617,8 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
   | String literal -> (
       match elaboration with
       | Some (Literal literal) -> build_literal literal
-      | Some (Template (Tagged { from_template; part; part_conversions })) ->
-          build_tagged_string form env value literal ~from_template ~part ~part_conversions
+      | Some (Template (Tagged { from_template; interpolation_type; conversions })) ->
+          build_tagged_string form env value literal ~from_template ~interpolation_type ~conversions
       | Some (Template (Interpolated { displays })) ->
           build_interpolated_string form env ~origin:(make_rewrite_origin value.id) literal displays
       | None when Option.is_none literal.tag && literal.rest = [] ->
@@ -1202,7 +1202,7 @@ and build_interpolated_string form env ~origin (literal : Syntax.string_literal)
                       ~lends:None))));
       ]
   in
-  let make_display part (display : Tables.call) =
+  let make_display interpolated (display : Tables.call) =
     make_statement
       (Evaluate
          (make Types.unit
@@ -1211,7 +1211,7 @@ and build_interpolated_string form env ~origin (literal : Syntax.string_literal)
                   ~callee:(convert_callee form display.callee)
                   ~arguments:
                     [
-                      Operands.build_argument Read (build_expression form env part);
+                      Operands.build_argument Read (build_expression form env interpolated);
                       { mode = Mut; value = Place text_place };
                     ]
                   ~lends:None))))
@@ -1222,14 +1222,15 @@ and build_interpolated_string form env ~origin (literal : Syntax.string_literal)
         let_text
         :: List.concat
              (List.map2
-                (fun (part, after) display -> make_display part display :: push after)
+                (fun (interpolated, after) display ->
+                  make_display interpolated display :: push after)
                 literal.rest displays);
       value = Some (make Types.string_type (Use text_place));
     }
 
 and build_tagged_string form env (value : Syntax.expression) (literal : Syntax.string_literal)
-    ~(from_template : Tables.call) ~(part : Types.ty) ~(part_conversions : Tables.call option list)
-    : Core.kind =
+    ~(from_template : Tables.call) ~(interpolation_type : Types.ty)
+    ~(conversions : Tables.call option list) : Core.kind =
   let origin = make_rewrite_origin value.id in
   let make = make_synthetic_expression form ~origin in
   let make_list element elements =
@@ -1247,22 +1248,26 @@ and build_tagged_string form env (value : Syntax.expression) (literal : Syntax.s
                (fun (written : Syntax.text) -> Language.Literal.Text written.value)
                (literal.first :: List.map snd literal.rest))))
   in
-  let parts =
+  let interpolations =
     List.map2
-      (fun ((written : Syntax.expression), _) (conversion : Tables.call option) ->
+      (fun ((interpolated : Syntax.expression), _) (conversion : Tables.call option) ->
         match conversion with
         | Some call ->
-            make_synthetic_expression form ~origin:(make_rewrite_origin written.id)
+            make_synthetic_expression form
+              ~origin:(make_rewrite_origin interpolated.id)
               call.callee_result
-              (Call (build_call form env ~construct:written.id ~lends:None call))
-        | None -> build_expression form env written)
-      literal.rest part_conversions
+              (Call (build_call form env ~construct:interpolated.id ~lends:None call))
+        | None -> build_expression form env interpolated)
+      literal.rest conversions
   in
   let template =
     make
-      (Types.make_named (Well_known.make_path Template) [ part ])
+      (Types.make_named (Well_known.make_path Template) [ interpolation_type ])
       (build_record
-         [ (Template_literals, make_literals ()); (Template_parts, make_list part parts) ])
+         [
+           (Template_literals, make_literals ());
+           (Template_interpolations, make_list interpolation_type interpolations);
+         ])
   in
   let call_tag callee type_ argument : Core.expression =
     make type_

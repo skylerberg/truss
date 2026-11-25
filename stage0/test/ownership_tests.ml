@@ -696,7 +696,7 @@ let () =
       expect_one_diagnostic
         (keep ^ Fixtures.Ownership.list_moved_then_bound)
         "ownership.use_after_move" ~at:("items\n  look", 1));
-  Harness.test "a tagged string moves its parts, and a plain string reads them" (fun () ->
+  Harness.test "a tagged string moves its interpolations, and a plain string reads them" (fun () ->
       let shout = Fixtures.Ownership.shout in
       expect_one_diagnostic (shout ^ Fixtures.Ownership.shout_of_a_name) "ownership.not_owned";
       expect_fine (shout ^ Fixtures.Ownership.shout_of_a_copied_name);

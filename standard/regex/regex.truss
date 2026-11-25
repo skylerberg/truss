@@ -937,36 +937,36 @@ fn compile(text: String, placeholders: Bool) -> Result[Regex, ParseError]
   Ok(Regex(pattern: text.to_string(), program: own program, group_names: own builder.names))
 }
 
-public opaque type Part(source: String)
+public opaque type Interpolation(source: String)
 
-impl From[view String] for Part {
-  fn from(value: own view String) -> Part {
-    Part(source: escape(value))
+impl From[view String] for Interpolation {
+  fn from(value: own view String) -> Interpolation {
+    Interpolation(source: escape(value))
   }
 }
 
-impl From[String] for Part {
-  fn from(value: own String) -> Part {
-    Part(source: escape(value))
+impl From[String] for Interpolation {
+  fn from(value: own String) -> Interpolation {
+    Interpolation(source: escape(value))
   }
 }
 
-impl From[Character] for Part {
-  fn from(value: own Character) -> Part {
+impl From[Character] for Interpolation {
+  fn from(value: own Character) -> Interpolation {
     var text = ""
     mut text.push_character(value)
-    Part(source: escape(text))
+    Interpolation(source: escape(text))
   }
 }
 
-impl From[Regex] for Part {
-  fn from(value: own Regex) -> Part {
-    Part(source: value.pattern.copy())
+impl From[Regex] for Interpolation {
+  fn from(value: own Regex) -> Interpolation {
+    Interpolation(source: value.pattern.copy())
   }
 }
 
 impl FromTemplate for Regex {
-  type Part = Part
+  type Interpolation = Interpolation
 
   fn is_valid_template(literals: List[text.Literal]) -> Bool
   {
@@ -985,7 +985,7 @@ impl FromTemplate for Regex {
     literals.length() > 0 && compile(pattern, placeholders: true) is Ok(_)
   }
 
-  fn from_template(template: Template[Part]) -> Regex
+  fn from_template(template: Template[Interpolation]) -> Regex
   {
     var pattern = ""
     var index: UInt64 = 0
@@ -994,9 +994,9 @@ impl FromTemplate for Regex {
       decreases template.literals.length() - index
     {
       mut pattern.push(template.literals[index].text())
-      if index < template.parts.length() {
+      if index < template.interpolations.length() {
         mut pattern.push("(?:")
-        mut pattern.push(template.parts[index].source)
+        mut pattern.push(template.interpolations[index].source)
         mut pattern.push(")")
       }
       index += 1
