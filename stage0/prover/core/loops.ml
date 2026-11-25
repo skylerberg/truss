@@ -488,29 +488,25 @@ let exit_loop context ~(clause_at : State.frame) (exit_ : State.frame) costs ~it
   in
   { exit_ with spent }
 
-let list_held_values context (entry : State.frame) (changed : State.changed_part list) =
-  List.filter_map
-    (fun part ->
-      Option.map
-        (fun (ty, _) ->
-          (ty, fun (at : State.frame) -> Option.map snd (find_changed_part context at part)))
-        (find_changed_part context entry part))
-    changed
-
-let sum_held held measure (at : State.frame) =
-  List.fold_left
-    (fun total (ty, read) ->
-      match read at with Some term -> Costs.plus total (measure at ty term) | None -> total)
-    Costs.zero held
-
-let measure_held_potential context held =
-  sum_held held (fun at ty term -> Amounts.compute_accessible_potential context at ty term)
-
 let measure_held_gains context (entry : State.frame) (changed : State.changed_part list) =
-  let held = list_held_values context entry changed in
-  let measure_whole = measure_held_potential context held
+  let held =
+    List.filter_map
+      (fun part ->
+        Option.map
+          (fun (ty, _) ->
+            (ty, fun (at : State.frame) -> Option.map snd (find_changed_part context at part)))
+          (find_changed_part context entry part))
+      changed
+  in
+  let sum_held measure (at : State.frame) =
+    List.fold_left
+      (fun total (ty, read) ->
+        match read at with Some term -> Costs.plus total (measure at ty term) | None -> total)
+      Costs.zero held
+  in
+  let measure_whole = sum_held (fun at ty term -> Amounts.compute_potential context at ty term)
   and measure_elements =
-    sum_held held (fun _ ty term -> Amounts.compute_elements_potential context ty term)
+    sum_held (fun _ ty term -> Amounts.compute_elements_potential context ty term)
   in
   lazy
     (let holds_potential = List.exists (fun (ty, _) -> Amounts.has_potential context ty) held in
@@ -557,14 +553,6 @@ let havoc context frame (changed : State.changed_part list) =
               | Core_local Self -> { frame with self = Some term }
               | root -> { frame with locals = Locals.add root term frame.locals })))
     frame changed
-
-let forget_changes context frame (changed : State.changed_part list) =
-  let measure = measure_held_potential context (list_held_values context frame changed) in
-  let forgotten = havoc context frame changed in
-  Operations.spend context forgotten (fun (counter : Costs.counter) ->
-      if counter.amortized then
-        Costs.minus (Costs.at_least_zero (measure forgotten)) (measure frame)
-      else Costs.zero)
 
 let list_validity_obligations context (entry : State.frame) (changed : State.changed_part list) =
   List.filter_map

@@ -799,9 +799,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           match lent_final with
           | Some leave ->
               Costs.minus
-                (Amounts.compute_accessible_potential context after declared_result_type result)
-                (Amounts.compute_accessible_potential context after declared_result_type
-                   (leave result))
+                (Amounts.compute_potential context after declared_result_type result)
+                (Amounts.compute_potential context after declared_result_type (leave result))
           | None -> Costs.zero)
       | `Returns -> Amounts.compute_potential context after declared_result_type result)
   in
@@ -973,7 +972,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             ~unpromised:Nothing_promises ~assume:Validity.assume_nothing values
       | Lambda -> ())
     values;
-  let result_type = Facts.substitute_type context frame site.type_ in
+  let declared_result_type = Facts.substitute_declared_type context frame site.type_ in
+  let result_type = Types.erase_views declared_result_type in
   let is_update_step = calls_update_step context invocation in
   (match invocation.callee with
   | Intrinsic _ -> ()
@@ -1094,7 +1094,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                   (Some
                      (fun () ->
                        Amounts.compute_call_potential_change context ~before:frame ~after:frame
-                         values ~changed:[] ~result_type ~result:(Logic.equal left right)))
+                         values ~changed:[] ~result_type:declared_result_type
+                         ~result:(Logic.equal left right)))
                 (Amounts.compute_callee_amount
                    ~method_cost:(fun metric ->
                      Amounts.compute_method_cost context frame metric invocation.callee)
@@ -1164,7 +1165,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                                     Some (passed.position, place.read frame)
                                 | _ -> None)
                               values)
-                         ~result_type ~result))
+                         ~result_type:declared_result_type ~result))
                 (compute_function_value_amount context frame ~location function_type callee_term)
           | _ -> Operations.spend context frame (Operations.declare_unknown_amount context frame)
         in
@@ -1234,7 +1235,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                    (fun ((passed : State.passed), later) ->
                      if passed.mode = Language.Mode.Mut then Some (passed.position, later) else None)
                    (List.combine values changed))
-              ~result_type ~result
+              ~result_type:declared_result_type ~result
         in
         let frame =
           Operations.spend_operation context frame ~potential_change:(Some potential_change)

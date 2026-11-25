@@ -1,6 +1,6 @@
 type Holder(meters: view List[Meter], tag: UInt32)
 
-fn hold(meters: List[Meter]) -> Holder
+fn hold(meters: view List[Meter]) -> Holder
   ensures identical(result.meters, meters)
   cost amortized time O(1)
 {

@@ -648,10 +648,6 @@ let compute_elements_potential context (ty : Types.ty) term =
   in
   sum_elements ~enclosing:[] ty term
 
-let compute_accessible_potential context frame (ty : Types.ty) term =
-  if Types.is_view ty then compute_elements_potential context (Types.erase_views ty) term
-  else compute_potential context frame ty term
-
 let has_declared_potential context ty = Option.is_some (find_potential_clause context ty)
 
 let compute_arguments_potential_change context ~(before : State.frame) ~(after : State.frame)
@@ -664,8 +660,8 @@ let compute_arguments_potential_change context ~(before : State.frame) ~(after :
           | Some later ->
               Costs.plus total
                 (Costs.minus
-                   (compute_accessible_potential context after passed.declared_type later)
-                   (compute_accessible_potential context before passed.declared_type passed.term))
+                   (compute_potential context after passed.declared_type later)
+                   (compute_potential context before passed.declared_type passed.term))
           | None -> total)
       | Own -> Costs.minus total (compute_potential context before passed.declared_type passed.term)
       | Read -> total)

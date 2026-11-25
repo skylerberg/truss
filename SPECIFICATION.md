@@ -1361,8 +1361,7 @@ fn List[Element].push(mut self, item: own Element)
   views belongs to their owner, so a `List[view String]` holds only its own.
 - **Potential is owned like the value that holds it.** `own` transfers it.
   `mut` lends it, and the borrower's bound covers the change. Read-only
-  access accounts for none, and the change through a `mut` view is the
-  change in the potential of the elements it reaches.
+  access, a view's included, changes none.
 - A type that declares a `cost potential`, or holds a value that does, is not
   `Plain`, since an implicit copy would duplicate its potential. A type
   parameter bounded by `Plain` holds no potential.

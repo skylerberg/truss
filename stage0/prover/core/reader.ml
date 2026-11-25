@@ -371,6 +371,40 @@ let compute_changes ?(also = []) context run (frame : State.frame) (blocks : Mir
            parts))
     parts
 
+let find_declared_root_type context frame run root =
+  match
+    Seq.find_map
+      (fun (local, (info : Mir.local_info)) ->
+        if Locals.make_key run.infos local = root then Some info.type_ else None)
+      (Array.to_seqi run.infos)
+  with
+  | Some ty -> Facts.substitute_declared_type context frame ty
+  | None -> Facts.raise_bug "a changed local that the run does not declare"
+
+let forget_changes context run (frame : State.frame) (changed : State.changed_part list) =
+  let roots =
+    List.map
+      (fun root -> (root, find_declared_root_type context frame run root))
+      (List.sort_uniq compare (List.map (fun (part : State.changed_part) -> part.root) changed))
+  in
+  let measure (at : State.frame) =
+    List.fold_left
+      (fun total (root, ty) ->
+        match
+          match root with
+          | Locals.Core_local Self -> at.self
+          | root -> Locals.find_opt root at.locals
+        with
+        | Some term -> Costs.plus total (Amounts.compute_potential context at ty term)
+        | None -> total)
+      Costs.zero roots
+  in
+  let forgotten = Loops.havoc context frame changed in
+  Operations.spend context forgotten (fun (counter : Costs.counter) ->
+      if counter.amortized then
+        Costs.minus (Costs.at_least_zero (measure forgotten)) (measure frame)
+      else Costs.zero)
+
 let read_operand context frame run (operand : Mir.operand) =
   match operand with
   | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> read_place context frame run place
@@ -686,14 +720,16 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
         Logic.Is
           (Facts.make_constructor_symbol ty (Some variant), read_place context frame run place) )
   | Copy copied_operand ->
-      let ty = compute_operand_type context frame copied_operand in
+      let declared =
+        Facts.substitute_declared_type context frame (Mir.extract_operand_type copied_operand)
+      in
       let term = translate_operand copied_operand in
       let literal =
         match copied_operand with
         | Borrow { place = { root = Literal { value; _ }; projections = [] }; _ } -> Some value
         | _ -> None
       in
-      (Values.copy_value ?literal context frame ty term, term)
+      (Values.copy_value ?literal context frame ~declared term, term)
   | Convert { conversion = Widen; value; converts_function_expression } ->
       Operations.check_widened location ~is_written:converts_function_expression
         (compute_operand_type context frame value)
@@ -1077,7 +1113,7 @@ and read_statement context frame run (statement : Mir.statement) =
           (List.mapi (fun index branch -> (index, branch)) branches)
       in
       let forget_other_branches (index, (exited : State.frame)) =
-        Loops.forget_changes context exited
+        forget_changes context run exited
           (compute_changes context run exited
              (List.filteri (fun other _ -> other <> index) branches))
       in

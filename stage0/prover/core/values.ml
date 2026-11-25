@@ -602,7 +602,8 @@ let apply_specification_function context frame ~location (measure : Core.specifi
       (frame, Lambdas.apply_callback_ensures context function_type values)
   | _ -> Facts.raise_unsupported location Specification_function
 
-let copy_value ?literal (context : State.context) frame ty term =
+let copy_value ?literal (context : State.context) frame ~(declared : Types.ty) term =
+  let ty = Types.erase_views declared in
   let literal =
     match (literal, ty) with
     | Some (Language.Literal.Elements _), Types.Named { arguments = [ Types.Type element ]; _ }
@@ -615,7 +616,7 @@ let copy_value ?literal (context : State.context) frame ty term =
   if
     context.counters = []
     || Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.bounds ty
-       && not (try Amounts.has_potential context ty with Facts.Unsupported _ -> true)
+       && not (try Amounts.has_potential context declared with Facts.Unsupported _ -> true)
   then frame
   else
     let declare_copy_cost_of metric copied =
@@ -637,7 +638,7 @@ let copy_value ?literal (context : State.context) frame ty term =
         (Amounts.find_buffer context ty)
     in
     Operations.spend_operation context frame
-      ~potential_change:(Some (fun () -> Amounts.compute_potential context frame ty term))
+      ~potential_change:(Some (fun () -> Amounts.compute_potential context frame declared term))
       (fun (counter : Costs.counter) ->
         let make_plain amount = { Costs.amount; counted = No_potential } in
         let make_unknown () =

@@ -56,9 +56,6 @@ val has_declared_potential : State.context -> Types.ty -> bool
 val compute_declared_potential :
   State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term
 
-val compute_accessible_potential :
-  State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term
-
 val compute_arguments_potential_change :
   State.context ->
   before:State.frame ->

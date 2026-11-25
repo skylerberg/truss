@@ -620,6 +620,10 @@ public fn List[Element].append(mut self, other: own List[Element])
   {
     intrinsic.storage_push(mut self.storage, value: intrinsic.storage_pop(mut rest.storage))
   }
+  proof {
+    assert forall i in 0..self.model().length() =>
+      identical(self.model()[i], old(self.model()).concatenate(other.model())[i])
+  }
 }
 
 public fn List[Element: Copyable].append_items(mut self, items: List[Element])

@@ -185,6 +185,7 @@ let keep_promise ?restated context (frame : State.frame) (promise : promise) ~(a
   let counting = classify_counting promise
   and clause = Facts.quote promise.written_in promise.clause.origin in
   Facts.oblige context frame location ~holds_when:promise.clause.holds_when
+    ~can_be_required:(promise.counter.counting <> Units)
     (Cost_promise
        (match restated with
        | Some (for_type, name, trait, declared) ->

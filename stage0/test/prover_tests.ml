@@ -1980,7 +1980,11 @@ let () =
     (fun () ->
       expect_not_proven (meter ^ Fixtures.Prover.meter_built_in_constant_time) "prover.cost");
   Harness.test "a type that declares a potential is not `Plain`" (fun () ->
-      expect_not_proven (meter ^ Fixtures.Prover.meter_copied_implicitly) "ownership.not_owned";
+      expect_not_proven
+        (meter ^ Fixtures.Prover.meter_copied_implicitly)
+        "ownership.not_owned"
+        ~fixed:("var copy = meter", "var copy = meter.copy()")
+        ~left_after_fix:[ "prover.cost" ];
       expect_not_proven Fixtures.Prover.plain_credit_declared "types.cannot_derive");
   Harness.test "a type parameter bounded by `Plain` holds no potential" (fun () ->
       expect_proven Fixtures.Prover.plain_values_read_twice);
