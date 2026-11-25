@@ -1,0 +1,13 @@
+trait Advances {
+  fn follow(mut self, next: own Self) {
+    self = own next
+  }
+}
+
+impl Advances for String {}
+
+fn followed(first: view String, second: view String) -> view String {
+  var current: view String = first
+  mut current.follow(second)
+  current
+}

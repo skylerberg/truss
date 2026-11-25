@@ -1,0 +1,15 @@
+fn greatest[Value: Ordered](first: own Value, second: own Value) -> Value {
+  own first.max(own second)
+}
+
+fn later(first: view String, second: view String) -> view String {
+  greatest[view String](first, second: second)
+}
+
+fn collected(first: view String) -> List[List[view String]] {
+  var names = List[view String].with_capacity(1)
+  mut names.push(first)
+  var nested = List[List[view String]].with_capacity(1)
+  mut nested.push(own names)
+  nested
+}

@@ -304,7 +304,7 @@ fn is_open_range_item(item: syntax.BracketItem) -> Bool {
       Range(start, stop, ..) => start.is_none() || stop.is_none()
       _ => false
     }
-    ItemConstraint(..) => false
+    ItemConstraint(..) | ItemType(..) => false
   }
 }
 
@@ -314,7 +314,7 @@ fn open_range_operator(item: syntax.BracketItem) -> Option[UInt64] {
       Range(start, operator_id, stop, ..) => if start.is_none() || stop.is_none() { Some(operator_id) } else { None }
       _ => None
     }
-    ItemConstraint(..) => None
+    ItemConstraint(..) | ItemType(..) => None
   }
 }
 
@@ -455,6 +455,9 @@ fn parse_bracket_item(cursor: mut TokenCursor) -> Result[syntax.BracketItem, Fai
     let name = take_name(mut cursor)
     advance(mut cursor)
     return Ok(syntax.BracketItem.ItemConstraint(own name, value: parse_type_expression(mut cursor)?))
+  }
+  if cursor.peek_kind() == token.Kind.Keyword(token.Keyword.View) {
+    return Ok(syntax.BracketItem.ItemType(parse_type_expression(mut cursor)?))
   }
   Ok(syntax.BracketItem.Item(parse_expression(mut cursor, open_range: true)?))
 }
