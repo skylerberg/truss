@@ -133,9 +133,22 @@ module Symbol_table = Hashtbl.Make (Structural_key.Make (struct
   type t = symbol
 end))
 
-module Term_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = term
-end))
+let rec hash_term term =
+  let combine hash part = (hash * 31) + part in
+  let hash_terms seed terms =
+    List.fold_left (fun hash term -> combine hash (hash_term term)) seed terms
+  in
+  match term with
+  | Symbol symbol -> combine 1 (Hashtbl.hash symbol)
+  | Integer value -> combine 2 (Z.hash value)
+  | Boolean value -> combine 3 (Hashtbl.hash value)
+  | Bits (width, value) -> combine (combine 4 width) (Z.hash value)
+  | Apply (symbol, arguments) -> hash_terms (combine 5 (Hashtbl.hash symbol)) arguments
+  | Is (symbol, argument) -> combine (combine 6 (Hashtbl.hash symbol)) (hash_term argument)
+  | Operation (operator, arguments) -> hash_terms (combine 7 (Hashtbl.hash operator)) arguments
+  | Forall (variables, triggers, body) ->
+      hash_terms (combine 8 (Hashtbl.hash variables)) (body :: triggers)
+  | Exists (variables, body) -> combine (combine 9 (Hashtbl.hash variables)) (hash_term body)
 
 let show_bits width value =
   "#b" ^ String.init width (fun index -> if Z.testbit value (width - 1 - index) then '1' else '0')
@@ -815,11 +828,19 @@ let prune query =
     | _ -> fun () -> List.exists (Symbol_table.mem reached) symbols
   in
   let distinct =
-    let seen = Term_table.create 64 in
+    let alike_by_start = Hashtbl.create 64 in
     List.filter
       (fun fact ->
-        let is_new = not (Term_table.mem seen fact) in
-        Term_table.replace seen fact ();
+        let start_hash = Hashtbl.hash_param 64 256 fact in
+        let whole_hash = lazy (hash_term fact) in
+        let is_new =
+          not
+            (List.exists
+               (fun (other_hash, other) ->
+                 Lazy.force other_hash = Lazy.force whole_hash && other = fact)
+               (Hashtbl.find_all alike_by_start start_hash))
+        in
+        if is_new then Hashtbl.add alike_by_start start_hash (whole_hash, fact);
         is_new)
       query.facts
   in
@@ -858,6 +879,17 @@ type numbering = {
   sort_names : string Sort_table.t;
   sort_order : sort Dynarray.t;
 }
+
+let list_conjunct_queries query =
+  let rec list_conjuncts = function
+    | Operation (And, parts) -> List.concat_map list_conjuncts parts
+    | Operation (Implies, [ premise; conclusion ]) ->
+        List.map (fun part -> Operation (Implies, [ premise; part ])) (list_conjuncts conclusion)
+    | goal -> [ goal ]
+  in
+  match list_conjuncts query.goal with
+  | [] | [ _ ] -> []
+  | goals -> List.map (fun goal -> prune { query with goal }) goals
 
 let rec render_sort_name numbering = function
   | Int -> "Int"

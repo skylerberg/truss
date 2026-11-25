@@ -244,10 +244,10 @@ public fn serve_directory(
     return mut responder.send(own refused)
   }
   let path = request.path()
-  if !path.starts_with(prefix) {
-    return mut responder.send(Response.text("not found", status: Status.not_found))
+  let relative = match path.strip_prefix(prefix) {
+    Some(relative) => relative
+    None => return mut responder.send(Response.text("not found", status: Status.not_found))
   }
-  let relative = path.part(prefix.length(), to: path.length())
   let decoded = match url.decode_component(relative) {
     Ok(decoded) => own decoded
     Err(_) => return mut responder.send(Response.text("not found", status: Status.not_found))

@@ -1342,6 +1342,12 @@ let () =
         "prover.invariant");
   Harness.test "a private method that takes mut self is a step of an update" (fun () ->
       expect_proven (span ^ Fixtures.Prover.span_restore));
+  Harness.test "a step of an update assumes the invariants of its fields" (fun () ->
+      expect_proven (span ^ Fixtures.Prover.step_passing_a_field_that_meets_its_invariant));
+  Harness.test "a step of an update leaves its fields meeting their invariants" (fun () ->
+      expect_not_proven
+        (span ^ Fixtures.Prover.step_leaving_a_field_past_its_invariant)
+        "prover.invariant");
   Harness.test "a public method that takes mut self is not a step of an update" (fun () ->
       expect_not_proven (span ^ Fixtures.Prover.span_restored_by_a_public_method) "prover.invariant");
   Harness.test "a method of a private trait that takes mut self is not a step of an update"
@@ -2166,7 +2172,14 @@ let () =
   Harness.test "an element mutated through a lend that keeps its invariant proves" (fun () ->
       expect_proven Fixtures.Prover.span_high_raised_through_a_lend);
   Harness.test "a lent part meets its invariant" (fun () ->
-      expect_not_proven Fixtures.Prover.positive_lent_by_a_source "prover.invariant");
+      let packages = Support.setup [ ("app.main", Fixtures.Prover.positive_lent_by_a_source) ] in
+      let messages =
+        List.map
+          (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
+          (check packages (Support.parse_file "app.main"))
+      in
+      if not (List.exists (String.includes ~affix:"may not hold for the part lent here") messages)
+      then Harness.fail "%s" (String.concat "; " messages));
   Harness.test "a loop keeps the validity of each value it mutates" (fun () ->
       expect_proven Fixtures.Prover.positive_reassigned_in_a_loop);
   Harness.test "an iteration must keep the validity of each value the loop mutates" (fun () ->
@@ -2498,6 +2511,8 @@ let () =
     (fun () -> expect_proven Fixtures.Prover.loop_pushing_the_values_of_a_callbacks_options);
   Harness.test "a loop that appends a callback's lists costs their lengths and the callback's time"
     (fun () -> expect_proven Fixtures.Prover.loop_appending_lists_that_a_callback_returns);
+  Harness.test "a cost bound may call a method of the result, whose invariant holds" (fun () ->
+      expect_proven Fixtures.Prover.cost_bound_reading_a_method_of_the_result);
   Harness.test "a loop that appends a callback's lists spends their lengths" (fun () ->
       expect_not_proven
         Fixtures.Prover.loop_appending_lists_that_a_callback_returns_without_their_lengths
@@ -2551,6 +2566,15 @@ let public_doubling =
    {\n\
   \  limit_count * 2\n\
    }\n"
+
+let () =
+  Harness.test "another package does not assume an opaque type's invariant" (fun () ->
+      match
+        check_across Fixtures.Prover.public_counter_with_an_invariant
+          Fixtures.Prover.value_bounded_by_another_packages_invariant
+      with
+      | [ { code; _ } ] when Diagnostic.Code.name code = "prover.ensures" -> ()
+      | actual -> Harness.fail "%s" (String.concat "; " (Support.list_codes actual)))
 
 let () =
   Harness.test "a caller in another package reads its callee's contract" (fun () ->
@@ -2727,6 +2751,8 @@ let () =
         "prover.requires")
 
 let () =
+  Harness.test "a value returned from a concurrent block is the winning branch's" (fun () ->
+      expect_proven Fixtures.Prover.value_returned_from_a_concurrent_branch);
   Harness.test "a concurrent for may return early, with a value known by its type" (fun () ->
       expect_proven Fixtures.Prover.any_negative_through_a_concurrent_for);
   Harness.test "a value returned from a concurrent for is not known to be any one iteration's"
@@ -3267,6 +3293,54 @@ let () =
       goal = Logic.Operation (operator, [ Logic.Symbol symbol; Logic.Symbol symbol ]);
     }
   in
+  Harness.test "a value passed as it was received asks the solver nothing about its invariant"
+    (fun () ->
+      let database =
+        Support.make_database
+          (Support.setup [ ("app.main", Fixtures.Prover.value_with_an_invariant_passed_unchanged) ])
+      in
+      match
+        List.filter
+          (fun (state : Database.proof_state) -> state.site.code = "prover.invariant")
+          (Support.list_proof_states database (Support.parse_file "app.main"))
+      with
+      | [] -> ()
+      | states -> Harness.fail "%d obligations about the invariant" (List.length states));
+  Harness.test "two facts that differ only deep inside hash differently" (fun () ->
+      let make_symbol label = Logic.Symbol (Logic.Symbol.Variable { label; numbers = [] }) in
+      let nest last =
+        List.fold_right
+          (fun index inner -> Logic.Operation (And, [ make_symbol (string_of_int index); inner ]))
+          (List.init 300 Fun.id) (make_symbol last)
+      in
+      if Logic.hash_term (nest "first") = Logic.hash_term (nest "second") then
+        Harness.fail "the hash reads only the start of a term");
+  Harness.test "a conjunction under a premise splits into one pruned query per conjunct" (fun () ->
+      let make_symbol label = Logic.Symbol.Variable { label; numbers = [] } in
+      let premise = make_symbol "premise"
+      and first = make_symbol "first"
+      and second = make_symbol "second" in
+      let query =
+        {
+          Logic.declarations =
+            List.map (fun symbol -> Logic.Constant (symbol, Logic.Bool)) [ premise; first; second ];
+          facts = [ Logic.Symbol first ];
+          goal =
+            Logic.( ==> ) (Logic.Symbol premise)
+              (Logic.( &&& ) (Logic.Symbol first) (Logic.Symbol second));
+        }
+      in
+      match Logic.list_conjunct_queries query with
+      | [ about_first; about_second ] ->
+          if about_first.goal <> Logic.( ==> ) (Logic.Symbol premise) (Logic.Symbol first) then
+            Harness.fail "the first query's goal is not the first conjunct";
+          if about_second.goal <> Logic.( ==> ) (Logic.Symbol premise) (Logic.Symbol second) then
+            Harness.fail "the second query's goal is not the second conjunct";
+          if about_first.facts <> [ Logic.Symbol first ] then
+            Harness.fail "the first query lost the fact it reads";
+          if about_second.facts <> [] then
+            Harness.fail "the second query keeps a fact that its goal does not reach"
+      | queries -> Harness.fail "%d queries" (List.length queries));
   let find_solver () =
     match Solver.find () with Ok solver -> solver | Error message -> Harness.fail "%s" message
   in

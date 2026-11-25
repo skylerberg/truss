@@ -1,0 +1,9 @@
+use standard.text.utf8
+
+fn greeting() -> String {
+  let bytes: List[UInt8] = [104, 105]
+  proof {
+    utf8.ascii_is_valid(bytes.model())
+  }
+  String.from_valid_utf8(own bytes)
+}

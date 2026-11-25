@@ -18,6 +18,7 @@ use standard.serialization
 use standard.streams
 use standard.tasks
 use standard.text
+use standard.text.utf8
 use standard.tls
 use standard.url
 use standard.x509
@@ -1337,7 +1338,7 @@ fn forwarded_hops(headers: Headers) -> List[view String] {
         var hop: Option[view String] = None
         for pair in element.split(";") {
           let trimmed = pair.trim()
-          if trimmed.length() > 4 && trimmed.part(0, to: 4).equal_ignoring_ascii_case("for=") {
+          if trimmed.length() > 4 && trimmed.get_substring(0, to: 4) is Some(head) && head.equal_ignoring_ascii_case("for=") {
             hop = Some(trimmed.part(4, to: trimmed.length()))
           }
         }
@@ -1968,7 +1969,11 @@ fn path_pieces(path: String) -> List[view String]
 {
   var pieces: List[view String] = []
   var start: UInt64 = 0
-  for index in 0..path.length() {
+  for index in 0..path.length()
+    invariant start <= index + 1
+    invariant start <= path.length()
+    invariant path.is_boundary(start)
+  {
     if path.byte(index) == 47 {
       if start <= index {
         mut pieces.push(path.part(start, to: index))
@@ -2503,9 +2508,12 @@ fn read_status[Stream: streams.Duplex](
     if !(text.starts_with("HTTP/1.1 ") || text.starts_with("HTTP/1.0 ")) || text.length() < 12 {
       return Err(malformed("a status line that is not HTTP/1.1"))
     }
-    let code = match UInt16.parse(text.part(9, to: 12)) {
-      Ok(code) => code
-      Err(_) => return Err(malformed("a status code that is not three digits"))
+    let code = match text.get_substring(9, to: 12) {
+      Some(digits) => match UInt16.parse(digits) {
+        Ok(code) => code
+        Err(_) => return Err(malformed("a status code that is not three digits"))
+      }
+      None => return Err(malformed("a status code that is not three digits"))
     }
     let headers = read_headers(connection, inbox: mut inbox, budget: mut budget)?
     if code >= 100 && code < 200 && code != 101 {
@@ -3484,6 +3492,9 @@ public fn EventParser.next(mut self, body: mut Body) -> Result[Option[Event], Er
         if !self.is_started {
           self.is_started = true
           if line.starts_with("\u{feff}") {
+            proof {
+              utf8.match_lies_between_boundaries(line.model(), part: "\u{feff}".model(), at: 0)
+            }
             line = line.part(3, to: line.length()).copy()
           }
         }

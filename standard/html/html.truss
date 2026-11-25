@@ -36,7 +36,10 @@ impl Display for Html {
 
 fn push_escaped(output: mut String, text: String) {
   var run: UInt64 = 0
-  for index in 0..text.length() {
+  for index in 0..text.length()
+    invariant run <= index
+    invariant text.is_boundary(run)
+  {
     let byte = text.byte(index)
     let replacement = if byte == 38 {
       "&amp;"
@@ -220,7 +223,10 @@ fn end_tag(scanner: mut Scanner)
   }
 }
 
-fn step(scanner: mut Scanner, byte: UInt8, rest: String)
+fn step(scanner: mut Scanner, byte: UInt8, text: String, next: UInt64)
+  requires 0 < next
+  requires next <= text.length()
+  requires text.model()[next - 1] == byte
 {
   match scanner.state {
     Data => {
@@ -236,7 +242,7 @@ fn step(scanner: mut Scanner, byte: UInt8, rest: String)
       } else if byte == 47 {
         scanner.state = State.EndTag
       } else if byte == 33 {
-        if rest.starts_with("--") {
+        if text.part(next, to: text.length()).starts_with("--") {
           scanner.state = State.Comment
           scanner.dashes = 0
         } else {
@@ -333,7 +339,7 @@ fn step(scanner: mut Scanner, byte: UInt8, rest: String)
       }
     }
     RawText => {
-      if byte == 60 && closes_raw_text(rest, tag: scanner.raw_tag) {
+      if byte == 60 && closes_raw_text(text.part(next, to: text.length()), tag: scanner.raw_tag) {
         scanner.state = State.EndTag
       }
     }
@@ -343,7 +349,7 @@ fn step(scanner: mut Scanner, byte: UInt8, rest: String)
 fn scan(scanner: mut Scanner, text: String)
 {
   for index in 0..text.length() {
-    step(mut scanner, byte: text.byte(index), rest: text.part(index + 1, to: text.length()))
+    step(mut scanner, byte: text.byte(index), text: text, next: index + 1)
   }
 }
 
@@ -383,7 +389,10 @@ fn is_safe_url(text: String) -> Bool {
   var scheme_end: UInt64 = 0
   var found = false
   var colon = false
-  for index in 0..trimmed.length() {
+  for index in 0..trimmed.length()
+    invariant colon ==> found
+    invariant found ==> scheme_end < trimmed.length() && trimmed.model()[scheme_end] <= 127
+  {
     let byte = trimmed.byte(index)
     if !found && (byte == 58 || byte == 47 || byte == 63 || byte == 35) {
       found = true

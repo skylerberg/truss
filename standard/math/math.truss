@@ -2,6 +2,7 @@ use standard.core
 use standard.intrinsic
 use standard.numbers.float_math
 use standard.text
+use standard.text.utf8
 
 public let pi: Float64 = 3.141592653589793
 
@@ -780,6 +781,7 @@ fn digit_group(radix: UInt32) -> DigitGroup
 
 public fn BigInteger.format(self, radix: UInt32 = 10) -> String
   uses Panic unless 2 <= radix && radix <= 36
+  ensures result.is_ascii()
 {
   if radix < 2 || radix > 36 {
     Panic.crash("the radix is not between 2 and 36")
@@ -790,12 +792,14 @@ public fn BigInteger.format(self, radix: UInt32 = 10) -> String
   var digits: List[UInt8] = []
   var rounds = self.bit_length()
   while rounds > 0 && limbs.length() > 0
+    invariant forall i in 0..digits.length() => digits.model()[i] <= 127
     decreases rounds
   {
     var part = divide_small(mut limbs, divisor: group.divisor)
     var written: UInt64 = 0
     while written < group.digits
       invariant written <= group.digits
+      invariant forall i in 0..digits.length() => digits.model()[i] <= 127
       decreases group.digits - written
     {
       let digit: UInt8 = intrinsic.convert(part % base)
@@ -806,6 +810,7 @@ public fn BigInteger.format(self, radix: UInt32 = 10) -> String
     rounds -= 1
   }
   while digits.length() > 0 && digits[digits.length() - 1] == 48
+    invariant forall i in 0..digits.length() => digits.model()[i] <= 127
     decreases digits.length()
   {
     let _ = mut digits.pop()
@@ -822,10 +827,14 @@ public fn BigInteger.format(self, radix: UInt32 = 10) -> String
     invariant index <= digits.length()
     invariant intrinsic.storage_length(output) == digits.length() - index
     invariant intrinsic.storage_capacity(output) == digits.length()
+    invariant forall i in 0..intrinsic.storage_length(output) => intrinsic.storage_model(output)[i] <= 127
     decreases index
   {
     index -= 1
     intrinsic.storage_push(mut output, value: digits[index])
+  }
+  proof {
+    utf8.ascii_is_valid(intrinsic.storage_model(output))
   }
   String(storage: own output)
 }
