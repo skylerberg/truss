@@ -7,7 +7,7 @@ internal type SystemNetworkClient()
 impl NetworkClient for SystemNetworkClient
   uses RunForever, capabilities.System
 {
-  fn resolve(self, host: StringSlice) -> Result[List[network.IpAddress], SystemError] {
+  fn resolve(self, host: String) -> Result[List[network.IpAddress], SystemError] {
     sockets.addresses_of(host)
   }
 

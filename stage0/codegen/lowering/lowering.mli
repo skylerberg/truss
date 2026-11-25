@@ -72,7 +72,7 @@ end
 module For_testing : sig
   module Intrinsics : sig
     type argument = Intrinsics.argument = Place of Lowered.place | Value of Lowered.operand
-    type types = Intrinsics.types = { uint64 : Ground.ty; string_slice : Ground.ty }
+    type types = Intrinsics.types = { uint64 : Ground.ty; string : Ground.ty }
 
     val lower :
       ?value_arguments:Z.t list ->

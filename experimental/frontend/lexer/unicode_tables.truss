@@ -273,7 +273,7 @@ let control_ranges: Array[UInt32, 4] = [
   0, 31, 127, 159,
 ]
 
-fn find_forbidden_name(code: UInt32) -> Option[StringSlice] {
+fn find_forbidden_name(code: UInt32) -> Option[view String] {
   match code {
     0 => Some("NULL")
     1 => Some("START OF HEADING")

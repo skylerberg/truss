@@ -27,11 +27,20 @@ let headers =
 #endif
 #include <netinet/in.h>
 #include <netdb.h>
+#if defined(__x86_64__)
+#include <cpuid.h>
+#endif
 |}
 
 let failing =
   {|
-static void truss_write_all(int descriptor, const void *bytes, size_t length) {
+#if defined(__x86_64__)
+#define TRUSS_BASELINE_CPU __attribute__((target("arch=x86-64")))
+#else
+#define TRUSS_BASELINE_CPU
+#endif
+
+TRUSS_BASELINE_CPU static void truss_write_all(int descriptor, const void *bytes, size_t length) {
   const char *next = bytes;
   while (length > 0) {
     ssize_t written = write(descriptor, next, length);
@@ -208,6 +217,140 @@ static void truss_install_signal_dispositions(void) {
   sigaddset(&runtime, SIGURG);
   pthread_sigmask(SIG_UNBLOCK, &runtime, NULL);
 }
+|}
+
+let assumed_cpu_features =
+  {|
+#if defined(__x86_64__)
+enum { truss_cpuid_1_ecx, truss_cpuid_7_ebx, truss_cpuid_80000001_ecx, truss_cpuid_registers };
+enum { truss_osxsave_bit = 27, truss_avx_state = 0x06, truss_avx512_state = 0xe6 };
+#ifdef __APPLE__
+enum { truss_os_enables_avx512_state_at_first_use = 1 };
+#else
+enum { truss_os_enables_avx512_state_at_first_use = 0 };
+#endif
+
+struct truss_cpu_feature {
+  const char *name;
+  uint8_t level;
+  uint8_t cpuid_register;
+  uint8_t bit;
+  uint8_t xcr0_state;
+};
+
+static const struct truss_cpu_feature truss_assumed_cpu_features[] = {
+#ifdef __SSE3__
+    {"SSE3", 2, truss_cpuid_1_ecx, 0, 0},
+#endif
+#ifdef __SSSE3__
+    {"SSSE3", 2, truss_cpuid_1_ecx, 9, 0},
+#endif
+#ifdef __GCC_HAVE_SYNC_COMPARE_AND_SWAP_16
+    {"CMPXCHG16B", 2, truss_cpuid_1_ecx, 13, 0},
+#endif
+#ifdef __SSE4_1__
+    {"SSE4.1", 2, truss_cpuid_1_ecx, 19, 0},
+#endif
+#ifdef __SSE4_2__
+    {"SSE4.2", 2, truss_cpuid_1_ecx, 20, 0},
+#endif
+#ifdef __POPCNT__
+    {"POPCNT", 2, truss_cpuid_1_ecx, 23, 0},
+#endif
+#ifdef __LAHF_SAHF__
+    {"LAHF-SAHF", 2, truss_cpuid_80000001_ecx, 0, 0},
+#endif
+#ifdef __AVX__
+    {"AVX", 3, truss_cpuid_1_ecx, 28, truss_avx_state},
+#endif
+#ifdef __AVX2__
+    {"AVX2", 3, truss_cpuid_7_ebx, 5, truss_avx_state},
+#endif
+#ifdef __FMA__
+    {"FMA", 3, truss_cpuid_1_ecx, 12, truss_avx_state},
+#endif
+#ifdef __F16C__
+    {"F16C", 3, truss_cpuid_1_ecx, 29, truss_avx_state},
+#endif
+#ifdef __BMI__
+    {"BMI1", 3, truss_cpuid_7_ebx, 3, 0},
+#endif
+#ifdef __BMI2__
+    {"BMI2", 3, truss_cpuid_7_ebx, 8, 0},
+#endif
+#ifdef __LZCNT__
+    {"LZCNT", 3, truss_cpuid_80000001_ecx, 5, 0},
+#endif
+#ifdef __MOVBE__
+    {"MOVBE", 3, truss_cpuid_1_ecx, 22, 0},
+#endif
+#ifdef __XSAVE__
+    {"OSXSAVE", 3, truss_cpuid_1_ecx, truss_osxsave_bit, 0},
+#endif
+#ifdef __AVX512F__
+    {"AVX512F", 4, truss_cpuid_7_ebx, 16, truss_avx512_state},
+#endif
+#ifdef __AVX512DQ__
+    {"AVX512DQ", 4, truss_cpuid_7_ebx, 17, truss_avx512_state},
+#endif
+#ifdef __AVX512CD__
+    {"AVX512CD", 4, truss_cpuid_7_ebx, 28, truss_avx512_state},
+#endif
+#ifdef __AVX512BW__
+    {"AVX512BW", 4, truss_cpuid_7_ebx, 30, truss_avx512_state},
+#endif
+#ifdef __AVX512VL__
+    {"AVX512VL", 4, truss_cpuid_7_ebx, 31, truss_avx512_state},
+#endif
+    {NULL, 0, 0, 0, 0},
+};
+
+__attribute__((constructor)) TRUSS_BASELINE_CPU static void truss_require_assumed_cpu_features(void) {
+  unsigned int eax, ebx, ecx, edx;
+  unsigned int registers[truss_cpuid_registers] = {0};
+  __cpuid(0, eax, ebx, ecx, edx);
+  unsigned int highest_leaf = eax;
+  if (highest_leaf >= 1) {
+    __cpuid(1, eax, ebx, ecx, edx);
+    registers[truss_cpuid_1_ecx] = ecx;
+  }
+  if (highest_leaf >= 7) {
+    __cpuid_count(7, 0, eax, ebx, ecx, edx);
+    registers[truss_cpuid_7_ebx] = ebx;
+  }
+  __cpuid(0x80000000, eax, ebx, ecx, edx);
+  if (eax >= 0x80000001) {
+    __cpuid(0x80000001, eax, ebx, ecx, edx);
+    registers[truss_cpuid_80000001_ecx] = ecx;
+  }
+  unsigned int xcr0 = 0;
+  if (registers[truss_cpuid_1_ecx] >> truss_osxsave_bit & 1) {
+    unsigned int high;
+    __asm__ __volatile__("xgetbv" : "=a"(xcr0), "=d"(high) : "c"(0));
+  }
+  if (truss_os_enables_avx512_state_at_first_use && (xcr0 & truss_avx_state) == truss_avx_state)
+    xcr0 |= truss_avx512_state;
+  const struct truss_cpu_feature *missing = NULL;
+  for (const struct truss_cpu_feature *feature = truss_assumed_cpu_features; feature->name != NULL; feature++) {
+    int is_present = (registers[feature->cpuid_register] >> feature->bit & 1) &&
+                     (xcr0 & feature->xcr0_state) == feature->xcr0_state;
+    if (!is_present && (missing == NULL || feature->level < missing->level)) missing = feature;
+  }
+  if (missing == NULL) return;
+  static const char needs[] = "This program needs a CPU with ";
+  static const char lacks[] = ", which this machine lacks. To build it for this machine, set x86_64_level = \"v";
+  static const char in_manifest[] = "\" under [build] in the project's truss.toml.\n";
+  size_t name_length = 0;
+  while (missing->name[name_length] != 0) name_length += 1;
+  char supported_level = (char)('0' + missing->level - 1);
+  truss_write_all(2, needs, sizeof needs - 1);
+  truss_write_all(2, missing->name, name_length);
+  truss_write_all(2, lacks, sizeof lacks - 1);
+  truss_write_all(2, &supported_level, 1);
+  truss_write_all(2, in_manifest, sizeof in_manifest - 1);
+  _exit(126);
+}
+#endif
 |}
 
 let allocation =
@@ -2143,6 +2286,7 @@ let render_runtime ~tests =
       headers;
       Emit_c.shared_structs;
       failing;
+      assumed_cpu_features;
       allocation;
       threads;
       resolving;

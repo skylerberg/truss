@@ -1,4 +1,4 @@
-type Labeled(view: Slice[Int64], name: String)
+type Labeled(viewed: view List[Int64], name: String)
 
-type Window(view: Slice[Int64])
+type Window(viewed: view List[Int64])
 

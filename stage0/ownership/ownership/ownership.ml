@@ -65,7 +65,8 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
             (match elaborated.interface with
             | Function_interface _ | Constant_interface _ -> true
             | _ -> false);
-        Modified_parts.check context key code.tree
+        Modified_parts.check context key code.tree;
+        Modified_parts.check_ranges context code.tree
       end;
       List.iter
         (fun (_, asserted) -> check_graph (Mir.expand asserted) ~returns_to_caller:false)

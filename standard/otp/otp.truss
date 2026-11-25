@@ -17,7 +17,7 @@ public fn Algorithm.name(self) -> String {
 
 public type Totp(secret: List[UInt8], digits: UInt32 = 6, period_seconds: Int64 = 30, algorithm: Algorithm = Algorithm.Sha1)
 
-fn mac(algorithm: Algorithm, key: Slice[UInt8], message: Slice[UInt8]) -> List[UInt8] {
+fn mac(algorithm: Algorithm, key: List[UInt8], message: List[UInt8]) -> List[UInt8] {
   match algorithm {
     Sha1 => cryptography.hmac_sha1(key, message: message)[..].to_list()
     Sha256 => cryptography.hmac_sha256(key, message: message)[..].to_list()
@@ -25,7 +25,7 @@ fn mac(algorithm: Algorithm, key: Slice[UInt8], message: Slice[UInt8]) -> List[U
   }
 }
 
-fn truncated(code: Slice[UInt8]) -> UInt32 {
+fn truncated(code: List[UInt8]) -> UInt32 {
   if code.length() < 20 {
     intrinsic.crash("an HMAC is at least 20 bytes")
   }
@@ -39,7 +39,7 @@ fn truncated(code: Slice[UInt8]) -> UInt32 {
 
 let powers_of_ten: Array[UInt32, 10] = [1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000]
 
-public fn hotp(secret: Slice[UInt8], counter: UInt64, digits: UInt32 = 6, algorithm: Algorithm = Algorithm.Sha1) -> String
+public fn hotp(secret: List[UInt8], counter: UInt64, digits: UInt32 = 6, algorithm: Algorithm = Algorithm.Sha1) -> String
   uses Panic unless digits >= 6 && digits <= 9
 {
   if digits < 6 || digits > 9 {
@@ -50,7 +50,7 @@ public fn hotp(secret: Slice[UInt8], counter: UInt64, digits: UInt32 = 6, algori
   for index in 0..width {
     mut message.push(intrinsic.convert((counter >> (8 * (7 - index))) & 255))
   }
-  let value = truncated(mac(algorithm, key: secret, message: message.slice()).slice())
+  let value = truncated(mac(algorithm, key: secret, message: message))
   let length: UInt64 = intrinsic.convert(digits)
   let number = "${value % powers_of_ten[length]}"
   var text = ""
@@ -96,7 +96,7 @@ fn Totp.code_for_step(self, step: Int64) -> String
   uses Panic unless self.digits >= 6 && self.digits <= 9
   requires step >= 0
 {
-  hotp(self.secret.slice(), counter: intrinsic.convert(step), digits: self.digits, algorithm: self.algorithm)
+  hotp(self.secret, counter: intrinsic.convert(step), digits: self.digits, algorithm: self.algorithm)
 }
 
 public fn Totp.code(self) -> String
@@ -105,7 +105,7 @@ public fn Totp.code(self) -> String
   self.code_at(Clock.now().unix_seconds())
 }
 
-public fn Totp.verify_at(self, code: StringSlice, unix_seconds: Int64, last_step: Option[Int64] = None, window: Int64 = 1) -> Option[Int64]
+public fn Totp.verify_at(self, code: String, unix_seconds: Int64, last_step: Option[Int64] = None, window: Int64 = 1) -> Option[Int64]
   uses Panic unless self.digits >= 6 && self.digits <= 9 && self.period_seconds >= 1 && window >= 0 && window <= 10
 {
   if window < 0 || window > 10 {
@@ -125,7 +125,7 @@ public fn Totp.verify_at(self, code: StringSlice, unix_seconds: Int64, last_step
       None => true
     }
     let expected = self.code_for_step(step)
-    if cryptography.constant_time_equal(expected.slice().bytes(), second: code.bytes()) && is_new && matched == None {
+    if cryptography.constant_time_equal(expected.bytes(), second: code.bytes()) && is_new && matched == None {
       matched = Some(step)
     }
     if step == Int64.maximum {
@@ -136,14 +136,14 @@ public fn Totp.verify_at(self, code: StringSlice, unix_seconds: Int64, last_step
   matched
 }
 
-public fn Totp.verify(self, code: StringSlice, last_step: Option[Int64] = None, window: Int64 = 1) -> Option[Int64]
+public fn Totp.verify(self, code: String, last_step: Option[Int64] = None, window: Int64 = 1) -> Option[Int64]
   uses Clock, Panic unless self.digits >= 6 && self.digits <= 9 && self.period_seconds >= 1 && window >= 0 && window <= 10
 {
   self.verify_at(code, unix_seconds: Clock.now().unix_seconds(), last_step: last_step, window: window)
 }
 
-public fn Totp.uri(self, issuer: StringSlice, account: StringSlice) -> String {
+public fn Totp.uri(self, issuer: String, account: String) -> String {
   let label = "${url.encode_component(issuer)}:${url.encode_component(account)}"
-  let secret = base32.encode(self.secret.slice(), padding: false)
+  let secret = base32.encode(self.secret, padding: false)
   "otpauth://totp/${label}?secret=${secret}&issuer=${url.encode_component(issuer)}&algorithm=${self.algorithm.name()}&digits=${self.digits}&period=${self.period_seconds}"
 }

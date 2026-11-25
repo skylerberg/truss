@@ -12,10 +12,6 @@ let rec holds_elements (layout : Memory_layout.t) =
   | Niche_encoded { dataful; _ } -> holds_elements dataful.payload
   | Zero_size | Scalar _ | Tag_only _ -> false
 
-let is_slice : Ground.ty -> bool = function
-  | Named { path; _ } -> Well_known.is Slice path
-  | _ -> false
-
 let classify_parameter env (mode : Language.Mode.t) ty =
   let layout = Memory_layout.of_type env ty in
   if layout.size = 0 then None
@@ -26,7 +22,6 @@ let classify_parameter env (mode : Language.Mode.t) ty =
       | Read ->
           if small && not (holds_elements layout) then Lowered.Value ty
           else Pointer { target = Value ty; writable = false }
-      | Mut when is_slice ty -> Value ty
       | Mut -> Pointer { target = Value ty; writable = true }
       | Own -> if small then Value ty else Pointer { target = Value ty; writable = true })
 

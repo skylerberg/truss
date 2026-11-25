@@ -1,5 +1,5 @@
 fn pick(
-  items: Slice[UInt8],
+  items: List[UInt8],
   choose: (fn(count: UInt64) -> UInt64 uses generic Granted requires count > 0 ensures result < count),
 ) -> UInt8
   uses generic Granted
@@ -19,13 +19,13 @@ fn whole(count: UInt64) -> UInt64 {
   count
 }
 
-fn first(deck: Slice[UInt8]) -> UInt8
+fn first(deck: List[UInt8]) -> UInt8
   requires deck.length() > 0
 {
   pick(deck, choose: lowest)
 }
 
-fn past_the_end(deck: Slice[UInt8]) -> UInt8
+fn past_the_end(deck: List[UInt8]) -> UInt8
   requires deck.length() > 0
 {
   pick(deck, choose: whole)

@@ -55,40 +55,65 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
             | Top { name; _ } | Method { name; _ } -> name
             | path -> Path.show path
           in
+          let find_storage_field (container : Types.modified) =
+            match
+              Interface.Definition.find_field_path_type interface ~package
+                (Types.read_parameter_at signature container.position).type_ container.field_path
+            with
+            | Ok (Named { path; arguments }) -> (
+                match
+                  Option.bind (Interface.Definition.find_type_interface interface path)
+                    (fun type_interface -> Types.instantiate_fields type_interface arguments)
+                with
+                | Some [ field ] when Types.is_builtin Storage field.field_type ->
+                    Some field.field_name
+                | _ -> None)
+            | Ok _ | Error _ -> None
+          in
+          let is_named_by (container : Types.modified) (part : Types.modified) =
+            Types.is_part_within ~container part
+            || container.is_elements && part.is_elements
+               &&
+               match find_storage_field container with
+               | Some storage -> part.field_path = container.field_path @ [ storage ]
+               | None -> false
+          in
           let changes =
             List.filter_map
-              (fun ((origin : Core.origin), (place : Mir.place)) ->
-                match place.root with
+              (fun (changed : Mir.changed) ->
+                match changed.place.root with
                 | Local local ->
                     Option.map
                       (fun position ->
-                        (origin, position, Mir.list_leading_fields place.projections))
+                        let field_path, is_elements = Mir.classify_changed_part changed in
+                        (changed.origin, { Types.position; field_path; is_elements }))
                       (List.find_index (Int.equal local) tree.body.parameters)
                 | Constant _ | Literal _ -> None)
               (Mir.list_changed_places
                  ~list_modified:
-                   (Mir.list_callee_modified_fields
+                   (Mir.list_callee_modified_parts
                       ~read_signature:(Interface.Impls.read_signature interface)
                       interface Types.no_substitution)
                  [ tree.body.code ])
           in
           let reported = ref [] in
           List.iter
-            (fun (origin, position, fields) ->
+            (fun (origin, (part : Types.modified)) ->
               let allowed =
-                Option.value ~default:[] (Types.list_modified_fields signature position)
+                Option.value ~default:[] (Types.list_modified_parts signature part.position)
               in
               if
-                List.mem position framed
+                List.mem part.position framed
                 && not
-                     (List.exists (fun prefix -> Types.is_field_path_prefix prefix fields) allowed
-                     || List.mem (position, fields) !reported)
+                     (List.exists (fun container -> is_named_by container part) allowed
+                     || List.mem part !reported)
               then begin
-                reported := (position, fields) :: !reported;
-                let shown = String.concat "." (name_parameter position :: fields) in
+                reported := part :: !reported;
+                let shown = Types.show_modified_part ~root:(name_parameter part.position) part in
+                let is_whole = part.field_path = [] && not part.is_elements in
                 let fixes =
-                  match (fields, written_entries) with
-                  | _ :: _, Some entries -> (
+                  match (is_whole, written_entries) with
+                  | false, Some entries -> (
                       match List.rev entries with
                       | last :: _ ->
                           let stop = (Lazy.force context.spans).(last.id).stop in
@@ -111,45 +136,51 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
                      "%s changes here, and the `modifies` clause of `%s` does not name it. The \
                       proofs of its callers take every part of `%s` that the clause does not name \
                       to keep its value."
-                     (if fields = [] then Printf.sprintf "All of `%s`" shown
+                     (if is_whole then Printf.sprintf "All of `%s`" shown
                       else Printf.sprintf "`%s`" shown)
-                     shown_function (name_parameter position))
+                     shown_function (name_parameter part.position))
               end)
             changes;
           match written_entries with
           | Some entries when not (is_trait_method interface key || has_todo tree) ->
               let spans = Lazy.force context.spans in
-              let is_changed position fields =
+              let is_changed (written : Types.modified) =
                 List.exists
-                  (fun (_, changed_position, changed_fields) ->
-                    changed_position = position
-                    && (Types.is_field_path_prefix fields changed_fields
-                       || Types.is_field_path_prefix changed_fields fields))
+                  (fun (_, (changed : Types.modified)) ->
+                    changed.position = written.position
+                    && (Types.is_field_path_prefix written.field_path changed.field_path
+                       || Types.is_field_path_prefix changed.field_path written.field_path))
                   changes
               in
               let written_parts =
                 List.map
                   (fun (entry : Syntax.expression) ->
-                    Option.bind (Interface.Elaborator.split_field_path entry) (fun (root, names) ->
+                    Option.bind (Interface.Elaborator.split_part entry)
+                      (fun (root, names, is_elements) ->
                         Option.map
                           (fun position ->
-                            (position, List.map (fun (name : Syntax.name) -> name.text) names, root))
+                            ( {
+                                Types.position;
+                                field_path = List.map (fun (name : Syntax.name) -> name.text) names;
+                                is_elements;
+                              },
+                              root ))
                           (Types.find_parameter_position signature root)))
                   entries
               in
               List.iteri
                 (fun index written_part ->
                   match written_part with
-                  | Some (position, fields, root)
-                    when List.mem position framed
-                         && List.mem { Types.position; field_path = fields } signature.modifies
-                         && not (is_changed position fields) ->
-                      let shown = String.concat "." (root :: fields) in
+                  | Some ((written : Types.modified), root)
+                    when List.mem written.position framed
+                         && List.mem written signature.modifies
+                         && not (is_changed written) ->
+                      let shown = Types.show_modified_part ~root written in
                       let has_changed_part =
                         List.exists
                           (function
-                            | Some (other, other_fields, _) ->
-                                other = position && is_changed other other_fields
+                            | Some ((other : Types.modified), _) ->
+                                other.position = written.position && is_changed other
                             | None -> false)
                           written_parts
                       in
@@ -170,7 +201,8 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
                           (if
                              has_changed_part
                              || List.exists
-                                  (fun (_, changed_position, _) -> changed_position = position)
+                                  (fun (_, (changed : Types.modified)) ->
+                                    changed.position = written.position)
                                   changes
                            then
                              Printf.sprintf
@@ -186,3 +218,41 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
                   | Some _ | None -> ())
                 written_parts
           | Some _ | None -> ()))
+
+let check_ranges (context : Context.context) (tree : Mir.t) =
+  let interface = context.lookups.interface in
+  let list_modified =
+    Mir.list_callee_modified_parts
+      ~read_signature:(Interface.Impls.read_signature interface)
+      interface Types.no_substitution
+  in
+  let keeps_length callee position =
+    match list_modified callee position with
+    | Some parts ->
+        List.for_all (fun (part : Types.modified) -> part.field_path = [] && part.is_elements) parts
+    | None -> false
+  in
+  let check_call (call : Mir.call) =
+    List.iteri
+      (fun position (argument : Mir.argument) ->
+        match argument with
+        | { mode = Mut; value = Borrow { place; origin; _ } | Use { place; origin; _ }; _ } -> (
+            match List.rev place.projections with
+            | Range _ :: _ when not (keeps_length call.callee position) ->
+                Context.report context Resized_range
+                  (Context.locate_origin context origin)
+                  (Printf.sprintf
+                     "This range is passed `mut` to %s, which may change the length of its \
+                      argument, and a range has a fixed length. Pass the whole list, or declare \
+                      that the function changes only elements, with `modifies` and `[..]`."
+                     (Context.describe_call context call.origin))
+            | _ -> ())
+        | _ -> ())
+      call.arguments
+  in
+  Mir.iter_code
+    (fun (statement : Mir.statement) ->
+      match statement.kind with
+      | Basic (Call { call; _ } | Lend { call; _ }) -> check_call call
+      | _ -> ())
+    tree

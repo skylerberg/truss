@@ -1,6 +1,5 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Writing" format
 let output_ty = Storage.make_storage_type (Ground.make_builtin UInt8)
-let bytes_ty = Storage.make_view_type (Ground.make_builtin UInt8)
 
 let make_output_parameter env =
   match Convention.classify_parameter env Mut output_ty with
@@ -35,7 +34,7 @@ let emit_write_call env builder ~output (writer : Well_known.t) ty (place : Lowe
        })
 
 let emit_write_bytes_call env builder ~output writer ~buffer ~length =
-  let view = Emit_c.Ir_builder.allocate_local builder (Value bytes_ty) in
+  let bytes = Emit_c.Ir_builder.allocate_local builder (Value output_ty) in
   Emit_c.Ir_builder.emit builder
-    (Assign (Lowered.make_local_place view, Storage.build_view bytes_ty ~buffer ~length));
-  emit_write_call env builder ~output writer bytes_ty (Lowered.make_local_place view)
+    (Assign (Lowered.make_local_place bytes, Storage.build_borrowed output_ty ~buffer ~length));
+  emit_write_call env builder ~output writer output_ty (Lowered.make_local_place bytes)

@@ -126,7 +126,7 @@ and specification_function =
   | Calls
 
 and construction = Array | Specification_only
-and conversion = Widen | To_integer | From_integer | View_to_owned
+and conversion = Widen | To_integer | From_integer | To_view
 
 and binder =
   | Over_type of { local : local; type_ : Types.ty }

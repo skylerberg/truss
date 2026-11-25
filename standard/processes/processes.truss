@@ -29,8 +29,8 @@ impl From[String] for Argument {
   }
 }
 
-impl From[StringSlice] for Argument {
-  fn from(value: own StringSlice) -> Argument {
+impl From[view String] for Argument {
+  fn from(value: own view String) -> Argument {
     Argument(text: value.to_string())
   }
 }
@@ -59,7 +59,7 @@ fn finish_word(words: mut List[String], word: mut String) {
   mut words.push(map.exchange(mut word, value: ""))
 }
 
-fn split_into_words(words: mut List[String], word: mut String, in_word: Bool, text: StringSlice) -> Bool {
+fn split_into_words(words: mut List[String], word: mut String, in_word: Bool, text: String) -> Bool {
   var inside = in_word
   var start: UInt64 = 0
   var position: UInt64 = 0
@@ -91,7 +91,7 @@ fn split_into_words(words: mut List[String], word: mut String, in_word: Bool, te
 impl FromTemplate for Command {
   type Part = Argument
 
-  fn is_valid_template(literals: Slice[text.Literal]) -> Bool
+  fn is_valid_template(literals: List[text.Literal]) -> Bool
   {
     if literals.length() == 0 {
       return false
@@ -152,7 +152,7 @@ impl FromTemplate for Command {
   }
 }
 
-public fn Command.new(program: StringSlice) -> Command {
+public fn Command.new(program: String) -> Command {
   Command(
     program: program.to_string(),
     arguments: [],
@@ -165,13 +165,13 @@ public fn Command.new(program: StringSlice) -> Command {
   )
 }
 
-public fn Command.argument(own self, argument: StringSlice) -> Command {
+public fn Command.argument(own self, argument: String) -> Command {
   var command = own self
   mut command.arguments.push(argument.to_string())
   command
 }
 
-public fn Command.arguments(own self, arguments: Slice[String]) -> Command {
+public fn Command.arguments(own self, arguments: List[String]) -> Command {
   var command = own self
   for argument in arguments {
     mut command.arguments.push(argument.copy())
@@ -179,7 +179,7 @@ public fn Command.arguments(own self, arguments: Slice[String]) -> Command {
   command
 }
 
-public fn Command.variable(own self, name: StringSlice, value: StringSlice) -> Command {
+public fn Command.variable(own self, name: String, value: String) -> Command {
   var command = own self
   mut command.variables.push(Variable(name: name.to_string(), value: value.to_string()))
   command
@@ -215,16 +215,16 @@ public fn Command.error_output(own self, error_output: Redirect) -> Command {
   command
 }
 
-public fn Command.program(self) -> StringSlice
+public fn Command.program(self) -> view String
   cost time O(1)
 {
-  self.program.slice()
+  self.program
 }
 
-public fn Command.argument_list(self) -> Slice[String]
+public fn Command.argument_list(self) -> view List[String]
   cost time O(1)
 {
-  self.arguments.slice()
+  self.arguments
 }
 
 public type ExitStatus =
@@ -274,7 +274,7 @@ public type Output(status: ExitStatus, output: List[UInt8], error_output: List[U
 public fn Output.text(self) -> Result[String, text.Utf8Error]
   cost time O(self.output.length())
 {
-  let copied = StringSlice(bytes: self.output.slice().elements).to_string()
+  let copied = String.viewing(self.output).to_string()
   String.from_utf8(own copied.to_bytes())
 }
 
@@ -325,7 +325,7 @@ public fn Child.signal(mut self, signal: Signal) -> Result[Unit, SystemError]
 public opaque type ChildInput(handle: streams.Handle)
 
 impl streams.Writer for ChildInput {
-  fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
+  fn write(mut self, bytes: List[UInt8]) -> Result[UInt64, SystemError]
     uses Handles
   {
     Handles.write(self.handle, bytes: bytes)

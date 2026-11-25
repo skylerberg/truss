@@ -1,5 +1,5 @@
 use app.shapes
 
-fn f(all: Slice[shapes.Shape]) -> List[UInt64] {
+fn f(all: List[shapes.Shape]) -> List[UInt64] {
   all.map(shapes.Shape.secret)
 }

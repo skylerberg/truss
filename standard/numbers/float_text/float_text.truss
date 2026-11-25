@@ -564,7 +564,7 @@ fn digit_at(digits: Digits, position: Int64) -> UInt8 {
   let index: UInt64 = intrinsic.convert(position)
   match digits {
     Short(digits: buffer, count) => if index < count && index < 20 { buffer[index] } else { 48 }
-    Long(digits: storage) => if index < intrinsic.storage_length(storage) { intrinsic.view_at(intrinsic.storage_view(storage), index: index) } else { 48 }
+    Long(digits: storage) => if index < intrinsic.storage_length(storage) { intrinsic.storage_at(storage, index: index) } else { 48 }
   }
 }
 
@@ -604,7 +604,7 @@ fn digits_of(number: ScaledDecimal) -> DecimalDigits
 fn trim_trailing_zeros(digits: mut intrinsic.Storage[UInt8]) {
   for _ in 0..intrinsic.storage_length(digits) {
     let length = intrinsic.storage_length(digits)
-    if length == 0 || intrinsic.view_at(intrinsic.storage_view(digits), index: length - 1) != 48 {
+    if length == 0 || intrinsic.storage_at(digits, index: length - 1) != 48 {
       return
     }
     let _ = intrinsic.storage_pop(mut digits)
@@ -626,11 +626,11 @@ fn limbs_of(value: UInt64) -> intrinsic.Storage[UInt64] {
   limbs
 }
 
-fn multiplied(limbs: intrinsic.View[UInt64], factor: UInt64) -> intrinsic.Storage[UInt64] {
+fn multiplied(limbs: intrinsic.Storage[UInt64], factor: UInt64) -> intrinsic.Storage[UInt64] {
   var product: intrinsic.Storage[UInt64] = intrinsic.storage_with_capacity(0)
   var carry: UInt64 = 0
-  for index in 0..intrinsic.view_length(limbs) {
-    let part = intrinsic.wrapping_multiply(intrinsic.view_at(limbs, index: index), right: factor)
+  for index in 0..intrinsic.storage_length(limbs) {
+    let part = intrinsic.wrapping_multiply(intrinsic.storage_at(limbs, index: index), right: factor)
     let total = intrinsic.wrapping_add(part, right: carry)
     push_limb(mut product, value: total % limb_base)
     carry = total / limb_base
@@ -652,13 +652,13 @@ fn multiplied_by_power(limbs: own intrinsic.Storage[UInt64], base: UInt64, count
   let step_factor: UInt64 = if base == 2 { 536870912 } else if base == 5 { 1220703125 } else { 1000000000 }
   var product = own limbs
   for _ in 0..count / step {
-    product = multiplied(intrinsic.storage_view(product), factor: step_factor)
+    product = multiplied(product, factor: step_factor)
   }
   var rest: UInt64 = 1
   for _ in 0..count % step {
     rest = intrinsic.wrapping_multiply(rest, right: base)
   }
-  multiplied(intrinsic.storage_view(product), factor: rest)
+  multiplied(product, factor: rest)
 }
 
 fn multiplied_by_power_of_ten(limbs: own intrinsic.Storage[UInt64], count: UInt64) -> intrinsic.Storage[UInt64] {
@@ -667,17 +667,17 @@ fn multiplied_by_power_of_ten(limbs: own intrinsic.Storage[UInt64], count: UInt6
     push_limb(mut shifted, value: 0)
   }
   for index in 0..intrinsic.storage_length(limbs) {
-    push_limb(mut shifted, value: intrinsic.view_at(intrinsic.storage_view(limbs), index: index))
+    push_limb(mut shifted, value: intrinsic.storage_at(limbs, index: index))
   }
   multiplied_by_power(own shifted, base: 10, count: count % 9)
 }
 
-fn significant_limbs(limbs: intrinsic.View[UInt64]) -> UInt64
-  ensures result <= intrinsic.view_length(limbs)
+fn significant_limbs(limbs: intrinsic.Storage[UInt64]) -> UInt64
+  ensures result <= intrinsic.storage_length(limbs)
 {
-  var count = intrinsic.view_length(limbs)
-  while count > 0 && intrinsic.view_at(limbs, index: count - 1) == 0
-    invariant count <= intrinsic.view_length(limbs)
+  var count = intrinsic.storage_length(limbs)
+  while count > 0 && intrinsic.storage_at(limbs, index: count - 1) == 0
+    invariant count <= intrinsic.storage_length(limbs)
     decreases count
   {
     count -= 1
@@ -685,7 +685,7 @@ fn significant_limbs(limbs: intrinsic.View[UInt64]) -> UInt64
   count
 }
 
-fn compare_limbs(left: intrinsic.View[UInt64], right: intrinsic.View[UInt64]) -> Int64 {
+fn compare_limbs(left: intrinsic.Storage[UInt64], right: intrinsic.Storage[UInt64]) -> Int64 {
   let left_count = significant_limbs(left)
   let right_count = significant_limbs(right)
   if left_count != right_count {
@@ -693,9 +693,9 @@ fn compare_limbs(left: intrinsic.View[UInt64], right: intrinsic.View[UInt64]) ->
   }
   for offset in 0..left_count {
     let index = left_count - 1 - offset
-    if index < intrinsic.view_length(right) {
-      let first = intrinsic.view_at(left, index: index)
-      let second = intrinsic.view_at(right, index: index)
+    if index < intrinsic.storage_length(right) {
+      let first = intrinsic.storage_at(left, index: index)
+      let second = intrinsic.storage_at(right, index: index)
       if first != second {
         return if first < second { -1 } else { 1 }
       }
@@ -704,11 +704,11 @@ fn compare_limbs(left: intrinsic.View[UInt64], right: intrinsic.View[UInt64]) ->
   0
 }
 
-fn decimal_of_limbs(limbs: intrinsic.View[UInt64]) -> intrinsic.Storage[UInt8] {
+fn decimal_of_limbs(limbs: intrinsic.Storage[UInt64]) -> intrinsic.Storage[UInt8] {
   var digits: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(0)
   let count = significant_limbs(limbs)
   for offset in 0..count {
-    let limb = intrinsic.view_at(limbs, index: count - 1 - offset)
+    let limb = intrinsic.storage_at(limbs, index: count - 1 - offset)
     for place in 0..9 {
       let digit: UInt8 = intrinsic.convert((limb / small_powers_of_ten[8 - place]) % 10)
       if offset > 0 || intrinsic.storage_length(digits) > 0 || digit != 0 {
@@ -729,7 +729,7 @@ fn exact_digits(mantissa: UInt64, exponent: Int64) -> ExactDigits
   } else {
     multiplied_by_power(limbs_of(mantissa), base: 5, count: intrinsic.convert(0 - exponent))
   }
-  var digits = decimal_of_limbs(intrinsic.storage_view(limbs))
+  var digits = decimal_of_limbs(limbs)
   let length = intrinsic.storage_length(digits)
   if length > 1000 {
     intrinsic.crash("more digits than a float has in float conversion")
@@ -754,10 +754,10 @@ fn rounded(number: own ExactDigits, keep: Int64) -> DecimalDigits
   if kept >= length {
     return DecimalDigits(digits: Digits.Long(digits: own digits), point: point)
   }
-  let view = intrinsic.storage_view(digits)
-  let next_digit = intrinsic.view_at(view, index: kept)
+  let viewed = digits
+  let next_digit = intrinsic.storage_at(viewed, index: kept)
   let has_more_digits = kept + 1 < length
-  let is_odd = kept > 0 && intrinsic.view_at(view, index: kept - 1) % 2 == 1
+  let is_odd = kept > 0 && intrinsic.storage_at(viewed, index: kept - 1) % 2 == 1
   let rounds_up = next_digit > 53 || (next_digit == 53 && (has_more_digits || is_odd))
   intrinsic.storage_shorten(mut digits, length: kept)
   if !rounds_up {
@@ -766,7 +766,7 @@ fn rounded(number: own ExactDigits, keep: Int64) -> DecimalDigits
   }
   for _ in 0..kept {
     let last = intrinsic.storage_length(digits)
-    if last == 0 || intrinsic.view_at(intrinsic.storage_view(digits), index: last - 1) != 57 {
+    if last == 0 || intrinsic.storage_at(digits, index: last - 1) != 57 {
       break
     }
     let _ = intrinsic.storage_pop(mut digits)
@@ -776,7 +776,7 @@ fn rounded(number: own ExactDigits, keep: Int64) -> DecimalDigits
     push_digit(mut digits, value: 49)
     return DecimalDigits(digits: Digits.Long(digits: own digits), point: point + 1)
   }
-  let digit = intrinsic.view_at(intrinsic.storage_view(digits), index: last - 1)
+  let digit = intrinsic.storage_at(digits, index: last - 1)
   if digit < 48 || digit > 56 {
     intrinsic.crash("a digit that is not a decimal digit in float conversion")
   }
@@ -811,11 +811,11 @@ fn write_exponent(output: mut intrinsic.Storage[UInt8], exponent: Int64) {
 fn write_named(output: mut intrinsic.Storage[UInt8], decoded: Decoded) -> Bool {
   match decoded {
     NotANumber => {
-      writing.append(mut output, bytes: "NaN".slice().bytes)
+      writing.append(mut output, bytes: "NaN".storage)
       true
     }
     Infinite(is_negative) => {
-      writing.append(mut output, bytes: if is_negative { "-infinity".slice().bytes } else { "infinity".slice().bytes })
+      writing.append(mut output, bytes: if is_negative { "-infinity".storage } else { "infinity".storage })
       true
     }
     Finite(is_negative: _, mantissa: _, exponent: _) => false
@@ -832,7 +832,7 @@ fn write_shortest_layout(output: mut intrinsic.Storage[UInt8], is_negative: Bool
   let digits = number.digits
   let length = length_of(digits)
   if length == 0 {
-    writing.append(mut output, bytes: "0.0".slice().bytes)
+    writing.append(mut output, bytes: "0.0".storage)
     return
   }
   let count: Int64 = intrinsic.convert(length)
@@ -846,13 +846,13 @@ fn write_shortest_layout(output: mut intrinsic.Storage[UInt8], is_negative: Bool
     }
     write_exponent(mut output, exponent: exponent)
   } else if point <= 0 {
-    writing.append(mut output, bytes: "0.".slice().bytes)
+    writing.append(mut output, bytes: "0.".storage)
     write_zeros(mut output, count: 0 - point)
     write_digits(mut output, digits: digits, from: 0, to: count)
   } else if point >= count {
     write_digits(mut output, digits: digits, from: 0, to: count)
     write_zeros(mut output, count: point - count)
-    writing.append(mut output, bytes: ".0".slice().bytes)
+    writing.append(mut output, bytes: ".0".storage)
   } else {
     write_digits(mut output, digits: digits, from: 0, to: point)
     writing.byte(mut output, value: 46)
@@ -990,13 +990,13 @@ fn is_digit(byte: UInt8) -> Bool
   48 <= byte && byte <= 57
 }
 
-fn is_named(text: intrinsic.View[UInt8], from: UInt64, bytes: intrinsic.View[UInt8]) -> Bool {
-  let length = intrinsic.view_length(bytes)
-  if from > intrinsic.view_length(text) || intrinsic.view_length(text) - from != length {
+fn is_named(text: intrinsic.Storage[UInt8], from: UInt64, bytes: intrinsic.Storage[UInt8]) -> Bool {
+  let length = intrinsic.storage_length(bytes)
+  if from > intrinsic.storage_length(text) || intrinsic.storage_length(text) - from != length {
     return false
   }
   for index in 0..length {
-    if intrinsic.view_at(text, index: from + index) != intrinsic.view_at(bytes, index: index) {
+    if intrinsic.storage_at(text, index: from + index) != intrinsic.storage_at(bytes, index: index) {
       return false
     }
   }
@@ -1012,15 +1012,15 @@ fn signed_count(count: UInt64) -> Int64
   intrinsic.convert(count)
 }
 
-fn read_exponent(text: intrinsic.View[UInt8], from: UInt64) -> Int64
+fn read_exponent(text: intrinsic.Storage[UInt8], from: UInt64) -> Int64
   ensures -1000000000000000 <= result && result <= 1000000000000000
 {
   var is_negative = false
   var written: Int64 = 0
-  for index in from..intrinsic.view_length(text)
+  for index in from..intrinsic.storage_length(text)
     invariant 0 <= written && written <= 1000000000000000
   {
-    let byte = intrinsic.view_at(text, index: index)
+    let byte = intrinsic.storage_at(text, index: index)
     if byte == 45 {
       is_negative = true
     } else if 48 <= byte && byte <= 57 && written < 100000000000000 {
@@ -1040,20 +1040,20 @@ fn accumulated(significand: UInt64, byte: UInt8) -> UInt64
   significand * 10 + digit
 }
 
-fn read_text(text: intrinsic.View[UInt8]) -> ReadText
+fn read_text(text: intrinsic.Storage[UInt8]) -> ReadText
   ensures !(result is Number(text: decimal) && decimal.significand >= 10000000000000000000)
 {
-  let length = intrinsic.view_length(text)
+  let length = intrinsic.storage_length(text)
   if length == 0 {
     return ReadText.Unreadable(error: core.ParseFloatError.Empty)
   }
-  let first = intrinsic.view_at(text, index: 0)
+  let first = intrinsic.storage_at(text, index: 0)
   let is_negative = first == 45
   let from: UInt64 = if is_negative || first == 43 { 1 } else { 0 }
-  if is_named(text, from: from, bytes: "NaN".slice().bytes) {
+  if is_named(text, from: from, bytes: "NaN".storage) {
     return ReadText.NotANumberText
   }
-  if is_named(text, from: from, bytes: "infinity".slice().bytes) {
+  if is_named(text, from: from, bytes: "infinity".storage) {
     return ReadText.InfinityText(is_negative: is_negative)
   }
   var stop = length
@@ -1067,7 +1067,7 @@ fn read_text(text: intrinsic.View[UInt8]) -> ReadText
     invariant significand < 10000000000000000000
     invariant digits <= index && fraction <= index && dropped <= index
   {
-    let byte = intrinsic.view_at(text, index: index)
+    let byte = intrinsic.storage_at(text, index: index)
     if byte == 46 && !is_fraction {
       is_fraction = true
     } else if 48 <= byte && byte <= 57 {
@@ -1098,14 +1098,14 @@ fn read_text(text: intrinsic.View[UInt8]) -> ReadText
     return ReadText.Unreadable(error: core.ParseFloatError.InvalidCharacter(offset: from))
   }
   var exponent = signed_count(dropped) - signed_count(fraction)
-  if stop < length && (intrinsic.view_at(text, index: stop) == 101 || intrinsic.view_at(text, index: stop) == 69) {
+  if stop < length && (intrinsic.storage_at(text, index: stop) == 101 || intrinsic.storage_at(text, index: stop) == 69) {
     var start = stop + 1
-    if start < length && (intrinsic.view_at(text, index: start) == 43 || intrinsic.view_at(text, index: start) == 45) {
+    if start < length && (intrinsic.storage_at(text, index: start) == 43 || intrinsic.storage_at(text, index: start) == 45) {
       start += 1
     }
     var end = length
     for index in start..length {
-      if !is_digit(intrinsic.view_at(text, index: index)) {
+      if !is_digit(intrinsic.storage_at(text, index: index)) {
         end = index
         break
       }
@@ -1170,17 +1170,17 @@ fn nearest_bits(significand: UInt64, exponent: Int64, is_negative: Bool, precisi
   packed(is_negative, significand: unrounded_round(scaled), binary: 0 - binary, precision: precision)
 }
 
-fn all_digits(text: intrinsic.View[UInt8]) -> ExactDigits
+fn all_digits(text: intrinsic.Storage[UInt8]) -> ExactDigits
   ensures -5000000000000000000 <= result.point && result.point <= 1000000000000000
 {
   var digits: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(0)
   var fraction: UInt64 = 0
   var is_fraction = false
-  var exponent_start = intrinsic.view_length(text)
-  for index in 0..intrinsic.view_length(text)
+  var exponent_start = intrinsic.storage_length(text)
+  for index in 0..intrinsic.storage_length(text)
     invariant fraction <= index
   {
-    let byte = intrinsic.view_at(text, index: index)
+    let byte = intrinsic.storage_at(text, index: index)
     if byte == 101 || byte == 69 {
       exponent_start = index + 1
       break
@@ -1199,8 +1199,8 @@ fn all_digits(text: intrinsic.View[UInt8]) -> ExactDigits
   ExactDigits(digits: own digits, point: read_exponent(text, from: exponent_start) - signed_count(fraction))
 }
 
-fn limbs_of_digits(digits: intrinsic.View[UInt8]) -> intrinsic.Storage[UInt64] {
-  let count = intrinsic.view_length(digits)
+fn limbs_of_digits(digits: intrinsic.Storage[UInt8]) -> intrinsic.Storage[UInt64] {
+  let count = intrinsic.storage_length(digits)
   var limbs: intrinsic.Storage[UInt64] = intrinsic.storage_with_capacity(0)
   var end = count
   while end > 0
@@ -1210,7 +1210,7 @@ fn limbs_of_digits(digits: intrinsic.View[UInt8]) -> intrinsic.Storage[UInt64] {
     let start = if end > 9 { end - 9 } else { 0 }
     var limb: UInt64 = 0
     for index in start..end {
-      let byte: UInt64 = intrinsic.convert(intrinsic.view_at(digits, index: index))
+      let byte: UInt64 = intrinsic.convert(intrinsic.storage_at(digits, index: index))
       limb = intrinsic.wrapping_add(intrinsic.wrapping_multiply(limb, right: 10), right: intrinsic.wrapping_subtract(byte, right: 48))
     }
     push_limb(mut limbs, value: limb)
@@ -1219,7 +1219,7 @@ fn limbs_of_digits(digits: intrinsic.View[UInt8]) -> intrinsic.Storage[UInt64] {
   limbs
 }
 
-fn rounds_to_upper(text: intrinsic.View[UInt8], lower: UInt64, precision: Precision) -> Bool {
+fn rounds_to_upper(text: intrinsic.Storage[UInt8], lower: UInt64, precision: Precision) -> Bool {
   let parts = match decode(lower, precision: precision) {
     Finite(is_negative: _, mantissa, exponent) => ScaledDecimal(significand: mantissa, exponent: exponent)
     _ => ScaledDecimal(significand: 0, exponent: subnormal_exponent(precision))
@@ -1229,7 +1229,7 @@ fn rounds_to_upper(text: intrinsic.View[UInt8], lower: UInt64, precision: Precis
   }
   let number = all_digits(text)
   let midpoint_exponent = parts.exponent - 1
-  var left = limbs_of_digits(intrinsic.storage_view(number.digits))
+  var left = limbs_of_digits(number.digits)
   var right = limbs_of(parts.significand * 2 + 1)
   if number.point >= 0 {
     left = multiplied_by_power_of_ten(own left, count: intrinsic.convert(number.point))
@@ -1241,11 +1241,11 @@ fn rounds_to_upper(text: intrinsic.View[UInt8], lower: UInt64, precision: Precis
   } else {
     left = multiplied_by_power(own left, base: 2, count: intrinsic.convert(0 - midpoint_exponent))
   }
-  let order = compare_limbs(intrinsic.storage_view(left), right: intrinsic.storage_view(right))
+  let order = compare_limbs(left, right: right)
   order > 0 || (order == 0 && parts.significand % 2 == 1)
 }
 
-fn parsed_bits(text: intrinsic.View[UInt8], precision: Precision, overflow: Int64, underflow: Int64) -> Result[UInt64, core.ParseFloatError]
+fn parsed_bits(text: intrinsic.Storage[UInt8], precision: Precision, overflow: Int64, underflow: Int64) -> Result[UInt64, core.ParseFloatError]
   requires -400 <= underflow && overflow <= 400
 {
   match read_text(text) {
@@ -1272,14 +1272,14 @@ fn parsed_bits(text: intrinsic.View[UInt8], precision: Precision, overflow: Int6
   }
 }
 
-internal fn parse_float64(text: intrinsic.View[UInt8]) -> Result[Float64, core.ParseFloatError] {
+internal fn parse_float64(text: intrinsic.Storage[UInt8]) -> Result[Float64, core.ParseFloatError] {
   match parsed_bits(text, precision: Precision.Double, overflow: 310, underflow: -345) {
     Ok(bits) => Ok(intrinsic.from_bits[UInt64, Float64](bits))
     Err(error) => Err(error)
   }
 }
 
-internal fn parse_float32(text: intrinsic.View[UInt8]) -> Result[Float32, core.ParseFloatError] {
+internal fn parse_float32(text: intrinsic.Storage[UInt8]) -> Result[Float32, core.ParseFloatError] {
   match parsed_bits(text, precision: Precision.Single, overflow: 40, underflow: -70) {
     Ok(bits) => Ok(intrinsic.from_bits[UInt32, Float32](intrinsic.convert(bits % 4294967296)))
     Err(error) => Err(error)

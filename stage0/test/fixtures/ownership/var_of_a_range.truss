@@ -1,0 +1,4 @@
+fn f(items: List[Int64]) -> UInt64 {
+  var part = items[1..]
+  part.length()
+}

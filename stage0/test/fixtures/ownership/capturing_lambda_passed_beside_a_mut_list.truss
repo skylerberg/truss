@@ -1,0 +1,11 @@
+fn arrange[Element](items: mut List[Element], before: fn(Element, Element) -> Bool)
+  modifies items[..]
+{
+  todo
+}
+
+fn by_key[Element](items: mut List[Element], key: fn(Element) -> Int64)
+  modifies items[..]
+{
+  arrange(mut items, before: fn(first, second) { key(first) < key(second) })
+}

@@ -22,7 +22,7 @@ fn intrinsic_free_convert(byte: UInt8) -> Int64 {
   value
 }
 
-fn largest[Item: Ordered + Copyable](items: Slice[Item]) -> Option[Item] {
+fn largest[Item: Ordered + Copyable](items: List[Item]) -> Option[Item] {
   var best: Option[Item] = None
   for item in items {
     if best is Some(current) && current >= item {
@@ -78,8 +78,8 @@ fn checked(text: own String) -> Result[String, ParseError] {
   Ok(own text)
 }
 
-fn twice(text: StringSlice) -> Result[UInt64, ParseError] {
-  let value = checked(text.to_string())?
+fn twice(text: String) -> Result[UInt64, ParseError] {
+  let value = checked(text.copy())?
   Ok(value.length() * 2)
 }
 

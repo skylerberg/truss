@@ -1,6 +1,6 @@
 tuple type Span(low: Int64, high: Int64)
 
-fn tally(counts: Map[String, Int64], words: Slice[String], amounts: Slice[Int64], bytes: Slice[UInt8]) -> UInt64 {
+fn tally(counts: Map[String, Int64], words: List[String], amounts: List[Int64], bytes: List[UInt8]) -> UInt64 {
   var total: UInt64 = 0
   for name, count in counts {
     if count > 0 {

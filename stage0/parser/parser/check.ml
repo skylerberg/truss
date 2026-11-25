@@ -116,6 +116,7 @@ and check_placement cursor ~top (type_ : Syntax.type_expression) =
         inputs;
       Option.iter (check_placement cursor ~top:false) output
   | Path_type path -> check_path_placement cursor path
+  | View_type viewed -> check_placement cursor ~top:false viewed
   | Self_type _ | Associated _ | Type_error -> ()
 
 and check_path_placement cursor (path : Syntax.path_type) =
@@ -224,6 +225,7 @@ and check_trait_argument cursor ~is_law_proof (type_ : Syntax.type_expression) =
             function, such as `type Callback(run: fn(Int64) -> Int64)`, as the argument.")
   | Associated (parameter, name) -> report_associated_type (parameter.text ^ "." ^ name.text)
   | Self_type (Some name) -> report_associated_type ("Self." ^ name.text)
+  | View_type viewed -> check_trait_argument cursor ~is_law_proof viewed
   | Self_type None | Type_error -> ()
 
 let check_header_trait cursor ~is_law_proof (trait_ : Syntax.path_type) =

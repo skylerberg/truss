@@ -21,7 +21,7 @@ let list_type_parts declarations (type_ : Path.t) =
     match declaration.key.path with Impl { for_type; _ } -> Path.equal for_type type_ | _ -> false
   in
   List.filter is_member declarations
-  @ Path_argument.list_view_methods declarations type_
+  @ Path_argument.list_array_methods_of_list declarations type_
   @ List.filter is_impl declarations
 
 let list_target_declarations (names : Resolve.Names.lookups) packages :

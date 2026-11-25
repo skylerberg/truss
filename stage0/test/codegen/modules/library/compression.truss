@@ -1,14 +1,14 @@
 use standard.compression
 use standard.hex
 
-fn bytes_of(text: StringSlice) -> List[UInt8] {
+fn bytes_of(text: String) -> List[UInt8] {
   match hex.decode(text) {
     Ok(bytes) => own bytes
     Err(_) => []
   }
 }
 
-fn text_of(bytes: Slice[UInt8]) -> String {
+fn text_of(bytes: List[UInt8]) -> String {
   String.from_utf8_lossy(bytes)
 }
 

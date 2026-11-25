@@ -78,6 +78,47 @@ let report_dangling_view (context : Context.context) at ~views ~doing ~fix =
       true
   | None -> false
 
+let advise_view_parameter (context : Context.context) (root : Place.root) =
+  let parameter = Context.show_root context root in
+  let declared =
+    match root with
+    | Local local -> (
+        match
+          ( Context.Local_table.find_opt context.origins local,
+            Context.Local_table.find_opt context.types local )
+        with
+        | Some origin, Some type_ when Types.is_viewable type_ -> Some (origin, type_)
+        | _ -> None)
+    | Temporary _ | Constant _ | Environment -> None
+  in
+  match declared with
+  | Some (origin, type_) ->
+      let text = Lazy.force context.text in
+      let rec skip_to_type index =
+        if index < String.length text && (text.[index] = ' ' || text.[index] = ':') then
+          skip_to_type (index + 1)
+        else index
+      in
+      ( [
+          Diagnostic.fix "Declare it `view`."
+            [
+              Diagnostic.insert
+                (Source.Definition_span.make_zero_width
+                   (skip_to_type (Context.locate_origin context origin).stop))
+                "view ";
+            ];
+        ],
+        Printf.sprintf
+          "Declare `%s` as a view, as in `%s: %s`, so that each caller keeps its argument borrowed."
+          parameter parameter
+          (Types.show (Types.make_view type_)) )
+  | None ->
+      ( [],
+        Printf.sprintf
+          "Take the stored part of `%s` as a view, such as a `view List` or a `view String`, so \
+           that each caller keeps its argument borrowed."
+          parameter )
+
 let check_disjoint (context : Context.context) first second ~on_overlap =
   match Place.classify_overlap first second with
   | Overlapping -> on_overlap ()
@@ -390,19 +431,21 @@ let check_body context (actions : Actions.t) moves =
                         mutate that part and invalidate the view."
                        (Context.show_root context place.root)
                        (Context.show_root context place.root))
-              | None, false, Some parameter ->
+              | None, false, Some parameter_view ->
                   let parameter =
-                    Context.show_root context (Actions.extract_viewed_place parameter).root
+                    Context.show_root context (Actions.extract_viewed_place parameter_view).root
                   in
-                  Context.report context View_escapes at
+                  let fixes, advice =
+                    advise_view_parameter context (Actions.extract_viewed_place parameter_view).root
+                  in
+                  Context.report context View_escapes at ~fixes
                     (Printf.sprintf
                        "This stores a view of `%s` in `%s`, which outlives this function, but `%s` \
                         is only borrowed for the call, and the caller does not expect it to stay \
-                        borrowed afterwards. Take `%s` as a view type, such as a `Slice`, to store \
-                        a view of it."
+                        borrowed afterwards. %s"
                        parameter
                        (Context.show_root context place.root)
-                       parameter parameter)
+                       parameter advice)
               | None, false, None -> ())
       | Yield_point { views; parts; forwarded } -> (
           let forwarded = resolve here.views forwarded in

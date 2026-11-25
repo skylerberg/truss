@@ -47,12 +47,15 @@ and constant =
 and function_ref = Item of Item.t | Nested of int
 
 type signature = { parameters : ty list; result : ty option; returns : bool }
-type unary = Negate | Not | Complement
+type unary = Negate | Negate_without_overflow | Not | Complement
 
 type binary =
   | Add
   | Subtract
   | Multiply
+  | Add_without_overflow
+  | Subtract_without_overflow
+  | Multiply_without_overflow
   | Divide
   | Remainder
   | Bit_and
@@ -145,7 +148,6 @@ type static_value =
   | Static_variant of string * (string * static_value) list
   | Static_array of static_value list
   | Static_storage of { element : Ground.ty; elements : static_value list; capacity : int }
-  | Static_view of { element : Ground.ty; elements : static_value list }
 
 type rvalue =
   | Use of operand

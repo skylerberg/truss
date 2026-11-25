@@ -649,7 +649,7 @@ let rec make_value : Lowered.static_value -> Prover.Obligation.value = function
   | Static_record fields -> Constructed { variant = None; fields = make_fields fields }
   | Static_variant (variant, fields) ->
       Constructed { variant = Some variant; fields = make_fields fields }
-  | Static_array elements | Static_storage { elements; _ } | Static_view { elements; _ } ->
+  | Static_array elements | Static_storage { elements; _ } ->
       Elements (List.map make_value elements)
 
 and make_fields fields = List.map (fun (name, value) -> (name, make_value value)) fields

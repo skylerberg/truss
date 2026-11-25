@@ -1,6 +1,6 @@
-fn show(text: StringSlice) {}
+fn show(text: String) {}
 
-fn rest(names: Slice[String]) -> Slice[String] {
+fn rest(names: List[String]) -> view List[String] {
   names
 }
 

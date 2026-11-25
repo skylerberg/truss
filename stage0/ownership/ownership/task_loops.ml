@@ -31,10 +31,10 @@ let check context (mir : Mir.Graph.t) =
                     (Context.locate_origin context origin)
                     (Printf.sprintf
                        "Data race: the iterations of a `%s for` run at the same time, and each is \
-                        lent an element of %s to mutate. Only a `List`, a `Slice`, or an `Array` \
-                        lends its elements to iterations that run at the same time: its elements \
-                        at different positions are different places. Loop over a `mut Slice` of \
-                        the collection's storage, or use a `for` loop."
+                        lent an element of %s to mutate. Only a `List` or an `Array` lends its \
+                        elements to iterations that run at the same time: its elements at \
+                        different positions are different places. Loop over a `mut` range of the \
+                        collection's list, or use a `for` loop."
                        keyword
                        (match find_collection_type body ~inside lent with
                        | Some collection -> Printf.sprintf "`%s`" (Types.show collection)

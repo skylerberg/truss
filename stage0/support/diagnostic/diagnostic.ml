@@ -197,8 +197,7 @@ module Code = struct
     | Implements_built_in_capability
     | Impl_uses
     | Impl_modifies
-    | Mut_self_for_slice
-    | Read_only_owning_parameter
+    | Not_viewable
     | Unknown_associated_type
     | Unknown_associated_capability
     | Not_a_field_path
@@ -234,6 +233,7 @@ module Code = struct
     | Needs_lent_mut
     | Task_outlives_view
     | Undeclared_change
+    | Resized_range
 
   type capabilities =
     | Not_available
@@ -491,8 +491,7 @@ module Code = struct
     | Implements_built_in_capability -> "implements_built_in_capability"
     | Impl_uses -> "impl_uses"
     | Impl_modifies -> "impl_modifies"
-    | Mut_self_for_slice -> "mut_self_for_slice"
-    | Read_only_owning_parameter -> "read_only_owning_parameter"
+    | Not_viewable -> "not_viewable"
     | Unknown_associated_type -> "unknown_associated_type"
     | Unknown_associated_capability -> "unknown_associated_capability"
     | Not_a_field_path -> "not_a_field_path"
@@ -535,6 +534,7 @@ module Code = struct
     | Needs_lent_mut -> "needs_lent_mut"
     | Task_outlives_view -> "task_outlives_view"
     | Undeclared_change -> "undeclared_change"
+    | Resized_range -> "resized_range"
 
   let name_capabilities_code code =
     match code with

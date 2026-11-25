@@ -17,7 +17,7 @@ val replace_part :
   Types.ty ->
   Logic.term ->
   string list ->
-  (Types.ty -> Logic.term) ->
+  (Types.ty -> Logic.term -> Logic.term) ->
   Logic.term option
 
 val make_type_frame :

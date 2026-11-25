@@ -1,13 +1,13 @@
 use standard.url
 
-fn shows(text: StringSlice, expected: StringSlice) -> Bool {
+fn shows(text: String, expected: String) -> Bool {
   match url.parse(text) {
     Ok(parsed) => "${parsed}" == expected
     Err(_) => false
   }
 }
 
-fn fails(text: StringSlice, expected: url.ParseError) -> Bool {
+fn fails(text: String, expected: url.ParseError) -> Bool {
   url.parse(text) == Err(expected)
 }
 
@@ -112,7 +112,7 @@ test "text is percent-encoded and decoded" {
   assert url.decode_query("a=1&%C3=2") == Err(url.ParseError.InvalidCharacter(offset: 4))
 }
 
-fn joins(reference: StringSlice, expected: StringSlice) -> Bool {
+fn joins(reference: String, expected: String) -> Bool {
   match url.parse("http://a/b/c/d;p?q") {
     Ok(start) => match start.join(reference) {
       Ok(parsed) => "${parsed}" == expected
@@ -199,14 +199,14 @@ test "URLs are equal when their parts are" {
 }
 
 test "a template builds a URL around values that are percent-encoded" {
-  let user = "ada lovelace/1"
+  let user: view String = "ada lovelace/1"
   let page: Int64 = 2
-  let built = url.Url"https://example.com/users/${user.slice()}/posts?page=${page}&q=${"a&b=c"}#${"top"}"
+  let built = url.Url"https://example.com/users/${user}/posts?page=${page}&q=${"a&b=c"}#${"top"}"
   assert "${built}" == "https://example.com/users/ada%20lovelace%2F1/posts?page=2&q=a%26b%3Dc#top"
   assert built.path_segments() == ["users", "ada lovelace/1", "posts"]
   assert built.query_parameter("q") == Some("a&b=c")
-  let empty = ""
-  let rooted = url.Url"file:///${empty.slice()}/notes"
+  let empty: view String = ""
+  let rooted = url.Url"file:///${empty}/notes"
   assert rooted.path() == "//notes"
   let plain = url.Url"mailto:${"a b"}@example.com"
   assert plain.path() == "a%20b@example.com"

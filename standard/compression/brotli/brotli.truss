@@ -23,7 +23,7 @@ impl Display for Error {
   }
 }
 
-fn malformed[Value](message: StringSlice) -> Result[Value, Error] {
+fn malformed[Value](message: String) -> Result[Value, Error] {
   Err(Error.Malformed(message: message.to_string()))
 }
 
@@ -65,7 +65,7 @@ let block_count_omitted: UInt64 = 16777216
 
 let longest_code: UInt64 = 15
 
-fn byte_at(bytes: Slice[UInt8], at: UInt64) -> UInt64
+fn byte_at(bytes: List[UInt8], at: UInt64) -> UInt64
   ensures result <= UInt8.maximum
 {
   if at < bytes.length() { intrinsic.convert(bytes[at]) } else { 0 }
@@ -77,7 +77,7 @@ fn Bits.peek(self, count: UInt32) -> UInt32
   requires count <= 24
 {
   let at = self.position / 8
-  let bytes = self.bytes.slice()
+  let bytes = self.bytes
   let word = byte_at(bytes, at: at) | (byte_at(bytes, at: at.saturating_add(1)) << 8) | (byte_at(bytes, at: at.saturating_add(2)) << 16) | (byte_at(bytes, at: at.saturating_add(3)) << 24)
   let shifted = word >> (self.position % 8)
   let mask: UInt64 = (1 << intrinsic.convert[UInt32, UInt64](count)) - 1
@@ -118,7 +118,7 @@ fn single_symbol(symbol: UInt64) -> PrefixCode {
   PrefixCode(counts: List.filled(0, count: longest_code + 1), symbols: [intrinsic.convert(symbol & 0xFFFF)])
 }
 
-fn code_from_lengths(lengths: Slice[UInt8]) -> Result[PrefixCode, Error] {
+fn code_from_lengths(lengths: List[UInt8]) -> Result[PrefixCode, Error] {
   var counts: List[UInt64] = List.filled(0, count: longest_code + 1)
   for length in lengths {
     let index: UInt64 = intrinsic.convert(length)
@@ -224,7 +224,7 @@ fn read_simple_code(bits: mut Bits, alphabet_size: UInt64) -> Result[PrefixCode,
       lengths[symbol] = depths[index]
     }
   }
-  code_from_lengths(lengths.slice())
+  code_from_lengths(lengths)
 }
 
 fn read_code_length_code(bits: mut Bits, skipped: UInt64) -> Result[PrefixCode, Error] {
@@ -254,7 +254,7 @@ fn read_code_length_code(bits: mut Bits, skipped: UInt64) -> Result[PrefixCode, 
   if space != 0 {
     return malformed("a code length code that is not complete")
   }
-  code_from_lengths(lengths.slice())
+  code_from_lengths(lengths)
 }
 
 fn read_complex_code(bits: mut Bits, alphabet_size: UInt64, skipped: UInt64) -> Result[PrefixCode, Error] {
@@ -316,7 +316,7 @@ fn read_complex_code(bits: mut Bits, alphabet_size: UInt64, skipped: UInt64) -> 
   if space != 0 {
     return malformed("code lengths that do not complete a prefix code")
   }
-  code_from_lengths(lengths.slice())
+  code_from_lengths(lengths)
 }
 
 fn read_prefix_code(bits: mut Bits, alphabet_size: UInt64) -> Result[PrefixCode, Error] {
@@ -447,7 +447,7 @@ fn read_codes(bits: mut Bits, count: UInt64, alphabet_size: UInt64) -> Result[Li
   Ok(own codes)
 }
 
-fn code_at(codes: Slice[PrefixCode], index: UInt64) -> Result[PrefixCode, Error] {
+fn code_at(codes: List[PrefixCode], index: UInt64) -> Result[PrefixCode, Error] {
   if index < codes.length() { Ok(codes[index].copy()) } else { malformed("a prefix code index outside its trees") }
 }
 
@@ -469,7 +469,7 @@ fn literal_context(mode: UInt8, last: UInt64, before: UInt64) -> UInt64
   }
 }
 
-fn byte_before(output: Slice[UInt8], distance: UInt64) -> UInt64 {
+fn byte_before(output: List[UInt8], distance: UInt64) -> UInt64 {
   if distance <= output.length() && distance > 0 { intrinsic.convert(output[output.length() - distance]) } else { 0 }
 }
 
@@ -547,7 +547,7 @@ fn dictionary_word(stream: mut Stream, length: UInt64, word_id: UInt64, output: 
     }
   }
   append_affix(mut output, affix: intrinsic.convert(transform_prefixes[transform]))
-  mut output.append_slice(word.slice())
+  mut output.append_slice(word)
   append_affix(mut output, affix: intrinsic.convert(transform_suffixes[transform]))
   Ok(Unit)
 }
@@ -628,7 +628,7 @@ fn decode_compressed(bits: mut Bits, stream: mut Stream, output: mut List[UInt8]
     }
     let before = output.length()
     mut command_blocks.advance(bits: mut bits)?
-    let command = code_at(command_codes.slice(), index: command_blocks.current)?.decode(bits: mut bits)?
+    let command = code_at(command_codes, index: command_blocks.current)?.decode(bits: mut bits)?
     let cell = command >> 6
     if cell >= insert_code_starts.length() {
       return malformed("an insert-and-copy code outside its alphabet")
@@ -653,10 +653,10 @@ fn decode_compressed(bits: mut Bits, stream: mut Stream, output: mut List[UInt8]
     for _ in 0..insert_length {
       mut literal_blocks.advance(bits: mut bits)?
       let mode = if literal_blocks.current < modes.length() { modes[literal_blocks.current] } else { 0 }
-      let context = literal_context(mode, last: byte_before(output.slice(), distance: 1), before: byte_before(output.slice(), distance: 2))
+      let context = literal_context(mode, last: byte_before(output, distance: 1), before: byte_before(output, distance: 2))
       let slot = literal_blocks.current.saturating_multiply(64).saturating_add(context)
       let tree: UInt64 = if slot < literal_map.length() { intrinsic.convert(literal_map[slot]) } else { 0 }
-      let literal = code_at(literal_codes.slice(), index: tree)?.decode(bits: mut bits)?
+      let literal = code_at(literal_codes, index: tree)?.decode(bits: mut bits)?
       mut output.push(intrinsic.convert(literal & 255))
     }
     if output.length() >= end {
@@ -671,7 +671,7 @@ fn decode_compressed(bits: mut Bits, stream: mut Stream, output: mut List[UInt8]
       let context = if copy_length > 4 { 3 } else { copy_length - 2 }
       let slot = distance_blocks.current.saturating_multiply(4).saturating_add(context)
       let tree: UInt64 = if slot < distance_map.length() { intrinsic.convert(distance_map[slot]) } else { 0 }
-      let code = code_at(distance_codes.slice(), index: tree)?.decode(bits: mut bits)?
+      let code = code_at(distance_codes, index: tree)?.decode(bits: mut bits)?
       distance = distance_of(code, bits: mut bits, stream: stream, postfix_bits: postfix_bits, direct: direct)?
       is_pushed = code != 0
     }
@@ -719,7 +719,7 @@ fn window_bits(bits: mut Bits) -> Result[UInt32, Error] {
   Ok(if low == 0 { 17 } else { 8 + low })
 }
 
-public fn decompress(input: Slice[UInt8], limit: UInt64 = 268435456) -> Result[List[UInt8], Error] {
+public fn decompress(input: List[UInt8], limit: UInt64 = 268435456) -> Result[List[UInt8], Error] {
   var bits = Bits(bytes: input.to_list(), position: 0)
   if input.is_empty() {
     return malformed("no stream header")

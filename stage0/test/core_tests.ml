@@ -137,17 +137,7 @@ let () =
           | Match { scrutinees; _ } -> List.map show_operand scrutinees
           | _ -> [])
         (list_expressions form))
-    [ "place shape" ];
-  expect "a list passed to a `mut Slice` parameter is passed as a `mut` range of the whole list"
-    Fixtures.Core.list_passed_to_a_mut_slice_parameter
-    (fun form ->
-      List.filter_map
-        (fun (call : Core.call) ->
-          if Core_lint.show_target call.callee.target = "app.main.clear" then
-            Some (String.concat ", " (List.map show_argument call.arguments))
-          else None)
-        (list_calls form))
-    [ "mut place items[0..]" ]
+    [ "place shape" ]
 
 let () =
   List.iter
@@ -163,7 +153,7 @@ let () =
                  fn take(count: Int64) -> Int64 {\n\
                 \  count\n\
                  }\n\n\
-                 fn g(items: Slice[Int64], config: Config) -> Int64\n\
+                 fn g(items: List[Int64], config: Config) -> Int64\n\
                 \  uses RunForever\n\
                  {\n\
                 \  var hole = todo\n\
@@ -175,7 +165,7 @@ let () =
       "let result = hole.method(items)";
       "let mapped = items.map(fn(item) { item + hole })";
       "let indexed = hole[0]";
-      "let sliced = hole[1..]";
+      "let ranged = hole[1..]";
       "let sum = hole + 1";
       "let negated = -hole";
       "let same = hole == 1";
@@ -381,7 +371,7 @@ let () =
     ];
   expect "the allocations of a callback are a specification function of the resource"
     Fixtures.Core.cost_naming_allocations_of_a_callback_and_a_bounds_method list_applied
-    [ "call standard.list.Slice.length"; "allocations"; "allocated_bytes" ];
+    [ "call standard.list.List.length"; "allocations"; "allocated_bytes" ];
   Harness.test "in a trait, `time(Self.method)` names the trait's own method" (fun () ->
       Support.expect_no_diagnostics
         ~check:(fun packages module_ ->
@@ -558,7 +548,7 @@ let () =
       (Core_lint.show_target callee.target)
       (String.concat ", " (list_capabilities callee.uses))
   in
-  let text = Fixtures.Core.slice_match_on_a_constant_and_loop_over_a_ticking_countdown in
+  let text = Fixtures.Core.range_match_on_a_constant_and_loop_over_a_ticking_countdown in
   expect
     "a pattern that compares with a constant and a loop over a cursor each hold their callee with \
      the capability set that the callee gives"
@@ -600,7 +590,7 @@ let () =
     [
       "standard.core.Cursor.next uses [app.main.Meter]";
       "standard.core.Equal.equal uses []";
-      "standard.list.Slice.length uses []";
+      "standard.list.List.length uses []";
     ];
   Harness.test "the callee of an intrinsic holds the capabilities that the intrinsic uses"
     (fun () ->

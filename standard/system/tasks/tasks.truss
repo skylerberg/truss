@@ -30,7 +30,7 @@ impl Tasks for SystemTasks
     intrinsic.runtime_tasks_watch(key)
   }
 
-  fn wait(self, key: UInt64, ticket: UInt64, reason: StringSlice) {
+  fn wait(self, key: UInt64, ticket: UInt64, reason: String) {
     let _ = intrinsic.runtime_tasks_wait(key, ticket: ticket)
   }
 

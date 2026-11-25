@@ -209,10 +209,9 @@ let collect context (mir : Mir.Graph.t) ~mode_keywords =
     Array.iteri
       (fun local (info : Mir.local_info) ->
         (match info.kind with
-        | Source { local = core; _ } -> (
-            match Mir.find_local_name core with
-            | Some name -> Local_table.replace context.names core name
-            | None -> Local_table.replace context.origins core info.origin)
+        | Source { local = core; _ } ->
+            Local_table.replace context.origins core info.origin;
+            Option.iter (Local_table.replace context.names core) (Mir.find_local_name core)
         | Temporary | Lent _ -> ());
         match info.kind with
         | Source { local = core; mode; is_var; is_binding = true }

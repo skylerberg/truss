@@ -1,6 +1,6 @@
 type overload =
   | Type_overload of Path.t
-  | View_overload of Path.t
+  | List_overload of Path.t
   | Trait_overload of Types.trait_reference * Types.trait_method
 
 let classify_receiver_mode (arguments : Syntax.argument list) : Language.Mode.t =
@@ -10,10 +10,10 @@ let classify_receiver_mode (arguments : Syntax.argument list) : Language.Mode.t 
   | _ -> Read
 
 let describe_missing_method state type_ name =
-  match Types.find_view (State.normalize state type_) with
-  | Some view ->
-      Printf.sprintf "`%s` has no method `%s`, and neither has its view `%s`."
-        (State.show state type_) name (State.show state view)
+  match Types.find_list_of_array (State.normalize state type_) with
+  | Some list ->
+      Printf.sprintf "`%s` has no method `%s`, and neither has `%s`, whose methods an `Array` has."
+        (State.show state type_) name (State.show state list)
   | None -> Printf.sprintf "`%s` has no method `%s`." (State.show state type_) name
 
 let rec check_name (state : State.state) (env : State.env) (value : Syntax.expression)
@@ -150,6 +150,7 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
          (String.capitalize_ascii (State.describe state base_type))
          member.text)
   in
+  let base_type = Types.strip_view base_type in
   match base_type with
   | Types.Named { path; arguments } -> (
       match Members.find_fields state.lookups path arguments with
@@ -232,11 +233,10 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
         | Hidden hidden -> Members.make_hidden_error state (State.read_span state member.id) hidden
         | Absent ->
             State.make_error_type state Unknown_member (State.read_span state member.id)
-              (match Types.find_view type_ with
-              | Some (Types.Named { path = Top { name; _ } as view; _ })
-                when Members.has_visible_method state view member.text ->
-                  Printf.sprintf
-                    "`%s` has no member `%s` of its own. The method is its view's: `%s.%s`."
+              (match Types.find_list_of_array type_ with
+              | Some (Types.Named { path = Top { name; _ } as list; _ })
+                when Members.has_visible_method state list member.text ->
+                  Printf.sprintf "`%s` has no member `%s` of its own. The method is `%s.%s`."
                     (State.show state type_) member.text name member.text
               | _ -> Printf.sprintf "`%s` has no member `%s`." (State.show state type_) member.text)
       )
@@ -485,8 +485,10 @@ and resolve_overloads state receiver_type name :
     in
     let lookup_type_method =
       list_methods_of (fun method_path -> Type_overload method_path) (Some receiver_type)
-    and lookup_view_method =
-      list_methods_of (fun method_path -> View_overload method_path) (Types.find_view receiver_type)
+    and lookup_list_method =
+      list_methods_of
+        (fun method_path -> List_overload method_path)
+        (Types.find_list_of_array receiver_type)
     in
     Ok
       (Resolve.Names.collect_visible
@@ -502,7 +504,11 @@ and resolve_overloads state receiver_type name :
                              (fun (trait, method_) -> Trait_overload (trait, method_))
                              (choose_trait_method name receiver candidate methods))
                          candidates
-                   @ [ lookup_view_method receiver ])))
+                   @ [
+                       (match receiver with
+                       | Path.Instance Own | Static -> Resolve.Names.Absent
+                       | Instance (Read | Mut) -> lookup_list_method receiver);
+                     ])))
             [ Path.Instance Read; Instance Mut; Instance Own ]))
 
 and instantiate_trait_method state ~written ~self_type (trait : Types.trait_reference)

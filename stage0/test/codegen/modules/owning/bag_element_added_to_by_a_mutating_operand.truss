@@ -14,11 +14,11 @@ impl Add[Int64] for Bag {
   }
 }
 
-fn parse(text: StringSlice) -> Result[Int64, String] {
+fn parse(text: String) -> Result[Int64, String] {
   if text == "bad" { Err("bad") } else { Ok(1) }
 }
 
-fn bump(bag: mut Bag, text: StringSlice) -> Result[Int64, String] {
+fn bump(bag: mut Bag, text: String) -> Result[Int64, String] {
   bag += parse(text)?
   Ok(0)
 }

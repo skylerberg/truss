@@ -1,6 +1,11 @@
 type dependency = { package : Path.package; capabilities : Grant.capability list }
 type package = { name : Path.package; truss : string option; dependencies : dependency list }
-type t = { package : package option; time_limit_seconds : int option }
+
+type t = {
+  package : package option;
+  time_limit_seconds : int option;
+  x86_64_level : X86_64_level.t option;
+}
 
 let default_time_limit_seconds = 10
 
@@ -264,10 +269,10 @@ let parse text =
   let list_entries name = match find_table name with Some table -> table.entries | None -> [] in
   List.iter
     (fun (table : table) ->
-      if not (List.mem table.name [ "package"; "dependencies"; "test"; "project" ]) then
+      if not (List.mem table.name [ "package"; "dependencies"; "test"; "build"; "project" ]) then
         raise_malformed table.line
           "A manifest has no table `[%s]`. Its tables are `[package]`, `[dependencies]`, \
-           `[project]`, and `[test]`."
+           `[project]`, `[test]`, and `[build]`."
           table.name)
     tables;
   let name = ref None and truss = ref None in
@@ -308,6 +313,23 @@ let parse text =
           time_limit_seconds := Some seconds
       | key -> raise_malformed entry.line "`[test]` has no key `%s`. Its key is `time_limit`." key)
     (list_entries "test");
+  let x86_64_level = ref None in
+  List.iter
+    (fun (entry : entry) ->
+      match entry.key with
+      | "x86_64_level" -> (
+          match X86_64_level.parse (read_text entry) with
+          | Some level -> x86_64_level := Some level
+          | None ->
+              raise_malformed entry.line
+                "`x86_64_level` is the level of x86-64 CPU that programs are built for: %s."
+                (String.concat ", "
+                   (List.map
+                      (fun level -> Printf.sprintf "`%S`" (X86_64_level.show level))
+                      X86_64_level.all)))
+      | key ->
+          raise_malformed entry.line "`[build]` has no key `%s`. Its key is `x86_64_level`." key)
+    (list_entries "build");
   List.iter
     (fun (entry : entry) -> raise_malformed entry.line "`[project]` has no key `%s`." entry.key)
     (list_entries "project");
@@ -331,7 +353,7 @@ let parse text =
   in
   if package = None && find_table "project" = None then
     raise_malformed 1 "A manifest has a `[package]` table, a `[project]` table, or both.";
-  { package; time_limit_seconds = !time_limit_seconds }
+  { package; time_limit_seconds = !time_limit_seconds; x86_64_level = !x86_64_level }
 
 let has_project_table text =
   List.exists (fun (table : table) -> table.name = "project") (fst (read_tables text))

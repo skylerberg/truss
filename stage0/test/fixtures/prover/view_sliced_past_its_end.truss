@@ -1,5 +1,0 @@
-use standard.intrinsic
-
-fn tail(elements: intrinsic.View[UInt8]) -> intrinsic.View[UInt8] {
-  intrinsic.view_slice(elements, start: 1, stop: intrinsic.view_length(elements))
-}

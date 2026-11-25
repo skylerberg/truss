@@ -1,0 +1,4 @@
+fn f(items: List[Int64]) {
+  let part: view List[Int64] = items[..]
+  keep(part)
+}

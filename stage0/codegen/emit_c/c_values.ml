@@ -227,18 +227,41 @@ let render_comparison (emission : Emission.t) fc ((comparison, left, right) : Lo
   | Ieee_less -> compare "<"
   | Ieee_less_equal -> compare "<="
 
+let find_wrapping_type : Memory_layout.scalar -> string option = function
+  | Integer (Int8 | UInt8 | Int16 | UInt16 | Int32) -> Some "uint32_t"
+  | Integer Int64 -> Some "uint64_t"
+  | Integer (UInt32 | UInt64)
+  | Float32 | Float64 | Bool | Character | Pointer _ | Nullable_pointer _ ->
+      None
+
 let render_binary (emission : Emission.t) (op : Lowered.binary) (left, a_ty) (right, _) =
   let scalar = classify_scalar emission a_ty in
   let c_type = C_types.render_scalar_type emission.types scalar in
+  let render_operation left symbol right =
+    Text "(" ++ left ++ Text (" " ^ symbol ^ " ") ++ right ++ Text ")"
+  in
   let render_arithmetic symbol =
-    let operation = Text "(" ++ left ++ Text (" " ^ symbol ^ " ") ++ right ++ Text ")" in
+    let operation = render_operation left symbol right in
     if is_float scalar then operation else render_cast c_type operation
+  in
+  let render_wrapping_arithmetic symbol =
+    match find_wrapping_type scalar with
+    | Some wrapping_type ->
+        render_cast c_type
+          (render_operation
+             (render_cast (Text wrapping_type) left)
+             symbol
+             (render_cast (Text wrapping_type) right))
+    | None -> render_arithmetic symbol
   in
   let mask = Printf.sprintf " & %d)" (compute_bit_width scalar - 1) in
   match op with
-  | Add -> render_arithmetic "+"
-  | Subtract -> render_arithmetic "-"
-  | Multiply -> render_arithmetic "*"
+  | Add -> render_wrapping_arithmetic "+"
+  | Subtract -> render_wrapping_arithmetic "-"
+  | Multiply -> render_wrapping_arithmetic "*"
+  | Add_without_overflow -> render_arithmetic "+"
+  | Subtract_without_overflow -> render_arithmetic "-"
+  | Multiply_without_overflow -> render_arithmetic "*"
   | Divide -> render_arithmetic "/"
   | Remainder ->
       if is_float scalar then
@@ -260,9 +283,14 @@ let render_unary (emission : Emission.t) (op : Lowered.unary) (operand_text, a_t
   let scalar = classify_scalar emission a_ty in
   let c_type = C_types.render_scalar_type emission.types scalar in
   match op with
-  | Negate ->
-      if is_float scalar then Text "(-" ++ operand_text ++ Text ")"
-      else render_cast c_type (Text "-" ++ operand_text)
+  | Negate -> (
+      match find_wrapping_type scalar with
+      | Some wrapping_type ->
+          render_cast c_type (Text "-" ++ render_cast (Text wrapping_type) operand_text)
+      | None ->
+          if is_float scalar then Text "(-" ++ operand_text ++ Text ")"
+          else render_cast c_type (Text "-" ++ operand_text))
+  | Negate_without_overflow -> render_cast c_type (Text "-" ++ operand_text)
   | Not -> render_cast (Text "uint8_t") (Text "!" ++ operand_text)
   | Complement -> render_cast c_type (Text "~" ++ operand_text)
 
@@ -522,8 +550,6 @@ let rec render_initializer (emission : Emission.t) ty (value : Lowered.static_va
   | Zero_size, _ -> None
   | _, Static_storage { element; elements; capacity } ->
       render_sequence (list_storage_fields capacity) element elements
-  | _, Static_view { element; elements } ->
-      render_sequence Storage.list_view_fields element elements
   | Scalar _, Static_scalar constant -> Some (fst (render_constant emission constant))
   | Struct fields, Static_record values ->
       Some (C_text.render_braces (render_fields fields values ""))

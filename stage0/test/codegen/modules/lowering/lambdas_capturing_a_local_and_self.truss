@@ -1,6 +1,6 @@
 type Scale(factor: Int64)
 
-fn Scale.scaled(self, items: Slice[Int64]) -> List[Int64] {
+fn Scale.scaled(self, items: List[Int64]) -> List[Int64] {
   items.map(fn(item) { item * self.factor })
 }
 
@@ -8,11 +8,11 @@ fn apply(transform: fn(Int64) -> Int64, value: Int64) -> Int64 {
   transform(value)
 }
 
-fn add_all(items: Slice[Int64], amount: Int64) -> List[Int64] {
+fn add_all(items: List[Int64], amount: Int64) -> List[Int64] {
   items.map(fn(item) { item + amount })
 }
 
-fn longest_over(names: Slice[String], least: UInt64) -> UInt64 {
+fn longest_over(names: List[String], least: UInt64) -> UInt64 {
   var most = least
   let lengths = names.map(fn(name) { name.length() })
   for length in lengths {

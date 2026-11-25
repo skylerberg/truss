@@ -1,4 +1,4 @@
-fn f(names: Slice[String]) -> UInt64 {
+fn f(names: List[String]) -> UInt64 {
   var count: UInt64 = 0
   for name in names {
     count = count + name.length()

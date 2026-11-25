@@ -39,10 +39,9 @@ let weights =
     ("standard.json", 1513);
     ("standard.jwk", 492);
     ("standard.jwt", 1004);
-    ("standard.list", 104);
+    ("standard.list", 827);
     ("standard.list.array", 43);
     ("standard.list.array_views", 42);
-    ("standard.list.slice", 723);
     ("standard.list.views", 50);
     ("standard.log", 7);
     ("standard.map", 822);
@@ -87,10 +86,9 @@ let weights =
     ("standard.system.terminals", 4);
     ("standard.system.test_runner", 28);
     ("standard.tasks", 74);
-    ("standard.text", 152);
+    ("standard.text", 349);
     ("standard.text.character", 21);
     ("standard.text.grapheme_breaks", 1);
-    ("standard.text.string_slice", 197);
     ("standard.text.string_views", 30);
     ("standard.text.unicode_data", 184);
     ("standard.text.unicode_tables", 296);

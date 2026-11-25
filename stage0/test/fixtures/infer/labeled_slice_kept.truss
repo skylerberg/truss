@@ -1,3 +1,0 @@
-fn f(items: Slice[Int64]) {
-  keep(Labeled(view: items[..], name: "a".copy()))
-}

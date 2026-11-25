@@ -53,13 +53,14 @@ let make_sequence_range context element sequence ~start ~stop =
       | _ -> ());
   range_of sequence start stop
 
-let apply_slice context (frame : State.frame) ~node (site : Invocation.site) ~(base_type : Types.ty)
+let apply_range context (frame : State.frame) ~node (site : Invocation.site) ~(base_type : Types.ty)
     ~collection ~low ~high =
   let location = Facts.locate context frame.source site.origin in
   let element =
     match base_type with
     | Types.Named { arguments = Types.Type element :: _; _ } -> element
-    | _ -> Facts.raise_unsupported location "a slice of `%s`" (Types.show base_type)
+    | _ when Types.is_well_known String base_type -> Types.make_builtin UInt8
+    | _ -> Facts.raise_unsupported location "a range of `%s`" (Types.show base_type)
   in
   let is_sequence =
     match base_type with
@@ -71,7 +72,7 @@ let apply_slice context (frame : State.frame) ~node (site : Invocation.site) ~(b
     else
       match Models.find_model context base_type collection ~element with
       | Some model -> model
-      | None -> Facts.raise_unsupported location "a slice of `%s`" (Types.show base_type)
+      | None -> Facts.raise_unsupported location "a range of `%s`" (Types.show base_type)
   in
   let length = Models.make_sequence_length context element model in
   let is_whole =
@@ -88,20 +89,22 @@ let apply_slice context (frame : State.frame) ~node (site : Invocation.site) ~(b
     Facts.oblige context frame Out_of_bounds location
       [ Text "`"; Facts.quote frame.source site.origin; Text "` may not be within the collection." ]
       Logic.(less_equal (int 0) low &&& less_equal low high &&& less_equal high length);
-  let range = make_sequence_range context element model ~start:low ~stop:high in
+  let range =
+    if is_whole then model else make_sequence_range context element model ~start:low ~stop:high
+  in
   if is_sequence then (frame, range, low, high)
   else begin
     Validity.note_place context frame ~node ~origin:site.origin (Run (low, high));
-    let slice_type = Facts.substitute_type context frame site.type_ in
-    let symbol = Logic.Symbol.Slice_of base_type in
+    let range_type_of_site = Facts.substitute_type context frame site.type_ in
+    let symbol = Logic.Symbol.Range_of base_type in
     Facts.declare context
       (Logic.Function
          ( symbol,
            [ Facts.declare_sort context base_type; Logic.Int; Logic.Int ],
-           Facts.declare_sort context slice_type ));
+           Facts.declare_sort context range_type_of_site ));
     let viewed = Logic.Apply (symbol, [ collection; low; high ]) in
-    Facts.assume context frame (Facts.make_in_range slice_type viewed);
-    (match Models.find_model context slice_type viewed ~element with
+    Facts.assume context frame (Facts.make_in_range range_type_of_site viewed);
+    (match Models.find_model context range_type_of_site viewed ~element with
     | Some viewed_model -> Facts.assume context frame (Logic.equal viewed_model range)
     | None -> ());
     (frame, viewed, low, high)
@@ -227,7 +230,7 @@ let call_libc context frame ~(site : Invocation.site) (function_ : Libc.function
           | _, None -> ())
       | Some (Libc.Elements (scalar, extent)), Some view, _ -> (
           let element = make_element_type scalar in
-          let elements = make_buffer_model context View element view in
+          let elements = make_buffer_model context Storage element view in
           match count extent with
           | Some counted ->
               require "have the elements it reads"
@@ -435,7 +438,6 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
           (Types.show array_type)
   in
   let length sequence = Models.make_sequence_length context element sequence in
-  let view = model_buffer context frame View element in
   let capacity term = make_buffer_capacity context element term in
   let storage = model_storage context frame element in
   let require ?(requirement = "have the room it writes into") condition =
@@ -477,7 +479,6 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
   in
   match operation with
   | Storage_model -> storage (read_operand 0)
-  | View_model -> view (read_operand 0)
   | Array_model ->
       let array = read_passed 0 in
       Models.make_array_model context frame array.type_ array.term
@@ -489,7 +490,6 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
         Logic.(equal (length (storage known)) (int 0) &&& equal (capacity known) (read_operand 0));
       known
   | Storage_length -> length (storage (read_operand 0))
-  | View_length -> length (view (read_operand 0))
   | Storage_capacity ->
       let buffer = read_operand 0 in
       ignore (storage buffer);
@@ -599,13 +599,9 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
   | Storage_swap ->
       assume_capacity_kept ();
       assume_swapped (storage (read_operand 0)) (read_changed_storage ())
-  | View_swap -> assume_swapped (view (read_operand 0)) (view (List.hd changed))
-  | Storage_view ->
-      Facts.assume context frame (Logic.equal (view known) (storage (read_operand 0)));
-      known
-  | Compare_bytes -> make_byte_order context (view (read_operand 0)) (view (read_operand 1))
+  | Compare_bytes -> make_byte_order context (storage (read_operand 0)) (storage (read_operand 1))
   | Find_byte ->
-      let bytes = view (read_operand 0) and byte = read_operand 1 in
+      let bytes = storage (read_operand 0) and byte = read_operand 1 in
       let limit = make_index_name () in
       Facts.assume context frame
         Logic.(
@@ -615,10 +611,10 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       Facts.assume context frame
         (all limit (Logic.int 0) known Logic.(not_ (equal (at bytes (Symbol limit)) byte)));
       known
-  | View_slice ->
+  | Storage_range ->
       let start = read_operand 1 and stop = read_operand 2 in
-      let whole = view (read_operand 0) and part = view known in
-      require ~requirement:"be given a range within the view"
+      let whole = storage (read_operand 0) and part = storage known in
+      require ~requirement:"be given a range within the storage"
         Logic.(
           less_equal (int 0) start &&& less_equal start stop &&& less_equal stop (length whole));
       let limit = make_index_name () in
@@ -628,12 +624,15 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
            (Logic.equal (at part (Logic.Symbol limit))
               (at whole (Logic.add start (Logic.Symbol limit)))));
       known
-  | View_address -> (
+  | Storage_as ->
+      ignore (Facts.declare_sort context result_type);
+      Logic.Apply (Facts.make_constructor_symbol result_type None, [ read_operand 0 ])
+  | Storage_address -> (
       match find_scalar_bytes element with
       | Some bytes ->
           let length =
             Models.make_sequence_length context element
-              (make_buffer_model context View element (read_operand 0))
+              (make_buffer_model context Storage element (read_operand 0))
           in
           Facts.assume context frame
             Logic.(
@@ -641,13 +640,6 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
               &&& (greater length (int 0) ==> greater_equal known (int 1)));
           known
       | None -> known)
-  | Array_view ->
-      let array = read_passed 0 in
-      Facts.assume context frame
-        (Logic.equal
-           (make_buffer_model context View element known)
-           (Models.make_array_model context frame array.type_ array.term));
-      known
   | Storage_from_array ->
       let array = read_passed 0 in
       let elements = make_buffer_model context Storage element known in
@@ -671,9 +663,7 @@ let translate_lend context frame ~(site : Invocation.site) (lend : Intrinsic.len
   match (types, values) with
   | element :: _, [ container; index ] ->
       let sequence =
-        match lend with
-        | Storage_at -> model_storage context frame element container.term
-        | View_at -> model_buffer context frame View element container.term
+        match lend with Storage_at -> model_storage context frame element container.term
       in
       require_element context frame site element index.term sequence;
       index_element context element sequence index.term
@@ -735,7 +725,7 @@ let translate_runtime context frame ~(site : Invocation.site) (runtime : Intrins
            Libc.architectures)
   | Environment_entry ->
       let byte = Types.make_builtin UInt8 in
-      let model = make_buffer_model context View byte (Lazy.force known) in
+      let model = make_buffer_model context Storage byte (Lazy.force known) in
       let length = Models.make_sequence_length context byte model in
       (match
          Models.index_sequence context byte model (Logic.Symbol (Facts.make_variable "entry.index"))
@@ -812,9 +802,10 @@ let declare_buffer_slack context (ty : Types.ty) term =
   Logic.Apply (symbol, [ term ])
 
 let find_sequence_element context frame (sequence : Types.ty) =
-  match sequence with
+  match Types.strip_view sequence with
   | Types.Named { arguments = Types.Type element :: _; _ } ->
       Facts.substitute_type context frame element
+  | text when Types.is_well_known String text -> Types.make_builtin UInt8
   | _ -> Facts.raise_bug "an element of `%s`, which is no sequence" (Types.show sequence)
 
 let find_sequence_model context frame (sequence : Types.ty) term =
@@ -862,22 +853,15 @@ let write_sequence context frame (sequence : Types.ty) before ~write_model =
         ignore (Facts.declare_sort context sequence);
         let buffer = Validity.select_field context sequence None field before in
         let written = Facts.arrive context frame "changed" buffer_type in
-        let builtin =
-          match buffer_type with
-          | Types.Named { path; _ } -> (
-              match Well_known.find_builtin_type path with
-              | Some ((Storage | View) as builtin) -> builtin
-              | _ -> Facts.raise_bug "the field of `%s` is no buffer" (Types.show sequence))
-          | _ -> Facts.raise_bug "the field of `%s` is no buffer" (Types.show sequence)
-        in
+        if not (Types.is_builtin Storage buffer_type) then
+          Facts.raise_bug "the field of `%s` is no buffer" (Types.show sequence);
         write_model
-          ~before:(make_buffer_model context builtin element buffer)
-          ~after:(make_buffer_model context builtin element written);
-        if builtin = Storage then
-          Facts.assume context frame
-            (Logic.equal
-               (make_buffer_capacity context element written)
-               (make_buffer_capacity context element buffer));
+          ~before:(make_buffer_model context Storage element buffer)
+          ~after:(make_buffer_model context Storage element written);
+        Facts.assume context frame
+          (Logic.equal
+             (make_buffer_capacity context element written)
+             (make_buffer_capacity context element buffer));
         let after = Logic.Apply (Facts.make_constructor_symbol sequence None, [ written ]) in
         write_model
           ~before:(find_sequence_model context frame sequence before)
@@ -903,29 +887,38 @@ let write_sequence_element context frame (sequence : Types.ty) before index part
   write_sequence context frame sequence before ~write_model:(fun ~before ~after ->
       replace_element context frame element ~before ~after index part)
 
-let write_sequence_range context frame (sequence : Types.ty) before ~start ~stop slice =
+let write_sequence_range context frame (sequence : Types.ty) before ~start ~stop
+    ~(range_type : Types.ty) range =
   let element = find_sequence_element context frame sequence in
-  let slice_model =
-    find_sequence_model context frame
-      (Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] })
-      slice
-  in
+  let range_model = find_sequence_model context frame range_type range in
   write_sequence context frame sequence before ~write_model:(fun ~before ~after ->
       assume_unchanged_outside context frame element ~before ~after ~start ~stop;
       Facts.assume context frame
-        (Logic.equal (make_sequence_range context element after ~start ~stop) slice_model);
+        (Logic.equal (make_sequence_range context element after ~start ~stop) range_model);
       let replaced = make_sequence_range context element before ~start ~stop in
       Facts.assume context frame
         (make_each_sum context element (fun sum _ ->
              Logic.equal
                (Logic.add (sum after) (sum replaced))
-               (Logic.add (sum before) (sum slice_model)))))
+               (Logic.add (sum before) (sum range_model)))))
 
-let assume_same_length context frame (sequence : Types.ty) ~before ~after =
+let replace_elements context frame (sequence : Types.ty) before =
   let element = find_sequence_element context frame sequence in
-  Facts.assume context frame
-    (Logic.equal
-       (Models.make_sequence_length context element
-          (find_sequence_model context frame sequence after))
-       (Models.make_sequence_length context element
-          (find_sequence_model context frame sequence before)))
+  let keep_length ~before ~after =
+    Facts.assume context frame
+      (Logic.equal
+         (Models.make_sequence_length context element after)
+         (Models.make_sequence_length context element before))
+  in
+  if Types.is_builtin Storage sequence then begin
+    let after = Facts.arrive context frame "changed" sequence in
+    keep_length
+      ~before:(make_buffer_model context Storage element before)
+      ~after:(make_buffer_model context Storage element after);
+    Facts.assume context frame
+      (Logic.equal
+         (make_buffer_capacity context element after)
+         (make_buffer_capacity context element before));
+    after
+  end
+  else write_sequence context frame sequence before ~write_model:keep_length

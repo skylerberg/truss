@@ -16,21 +16,21 @@ impl Display for Error {
   }
 }
 
-fn malformed(what: StringSlice) -> Error {
+fn malformed(what: String) -> Error {
   var message = "a certificate whose "
   mut message.push(what)
   mut message.push(" is malformed")
   Error(message: own message)
 }
 
-fn oid(text: StringSlice) -> List[UInt8] {
+fn oid(text: String) -> List[UInt8] {
   match hex.decode(text) {
     Ok(bytes) => own bytes
     Err(_) => []
   }
 }
 
-fn is_oid(value: der.Value, expected: StringSlice) -> Bool {
+fn is_oid(value: der.Value, expected: String) -> Bool {
   match value {
     ObjectIdentifier(bytes) => bytes == oid(expected)
     _ => false
@@ -74,8 +74,8 @@ public opaque type Certificate(
 )
   derives Equal, Copyable
 
-public fn Certificate.encoded(self) -> Slice[UInt8] {
-  self.encoded.slice()
+public fn Certificate.encoded(self) -> view List[UInt8] {
+  self.encoded
 }
 
 public fn Certificate.public_key(self) -> PublicKey {
@@ -90,13 +90,13 @@ public fn Certificate.not_after(self) -> Instant {
   self.not_after
 }
 
-public fn Certificate.dns_names(self) -> Slice[String] {
-  self.dns_names.slice()
+public fn Certificate.dns_names(self) -> view List[String] {
+  self.dns_names
 }
 
-public fn Certificate.common_name(self) -> Option[StringSlice] {
+public fn Certificate.common_name(self) -> Option[view String] {
   match self.common_name {
-    Some(name) => Some(name.slice())
+    Some(name) => Some(name)
     None => None
   }
 }
@@ -123,7 +123,7 @@ fn text_of(value: der.Value) -> Option[String] {
   }
 }
 
-fn digits(bytes: Slice[UInt8], from: UInt64, count: UInt64) -> Option[UInt32] {
+fn digits(bytes: List[UInt8], from: UInt64, count: UInt64) -> Option[UInt32] {
   if from > bytes.length() || bytes.length() - from < count {
     return None
   }
@@ -146,13 +146,13 @@ fn time_of(value: der.Value) -> Option[Instant] {
       if bytes.length() != year_digits + 11 || bytes[bytes.length() - 1] != 90 {
         return None
       }
-      let written = digits(bytes.slice(), from: 0, count: year_digits)?
+      let written = digits(bytes, from: 0, count: year_digits)?
       let year = if long { written } else if written < 50 { written.saturating_add(2000) } else { written.saturating_add(1900) }
-      let month = digits(bytes.slice(), from: year_digits, count: 2)?
-      let day = digits(bytes.slice(), from: year_digits + 2, count: 2)?
-      let hour = digits(bytes.slice(), from: year_digits + 4, count: 2)?
-      let minute = digits(bytes.slice(), from: year_digits + 6, count: 2)?
-      let second = digits(bytes.slice(), from: year_digits + 8, count: 2)?
+      let month = digits(bytes, from: year_digits, count: 2)?
+      let day = digits(bytes, from: year_digits + 2, count: 2)?
+      let hour = digits(bytes, from: year_digits + 4, count: 2)?
+      let minute = digits(bytes, from: year_digits + 6, count: 2)?
+      let second = digits(bytes, from: year_digits + 8, count: 2)?
       if year > 9999 || month > 12 || day > 31 || hour > 23 || minute > 59 || second > 59 {
         return None
       }
@@ -181,7 +181,7 @@ fn pss_hash(parameters: der.Value) -> Option[cryptography.HashFunction] {
     match item {
       Tagged(number, bytes, ..) => {
         if number == 0 {
-          let identifier = der.parse(bytes.slice()).ok()?
+          let identifier = der.parse(bytes).ok()?
           let parts = items_of(identifier)
           if parts.length() > 0 {
             return hash_of_identifier(parts[0])
@@ -246,13 +246,13 @@ public fn public_key_of(info: der.Value) -> Option[PublicKey]
   }
   if is_oid(algorithm[0], expected: "2a8648ce3d0201") && algorithm.length() == 2 {
     let curve = find_named_curve(algorithm[1])?
-    return match cryptography.EcdsaVerifyingKey.from_sec1(curve, bytes: key.slice()) {
+    return match cryptography.EcdsaVerifyingKey.from_sec1(curve, bytes: key) {
       Some(verifying) => Some(PublicKey.Ecdsa(key: own verifying))
       None => None
     }
   }
   if is_oid(algorithm[0], expected: "2a864886f70d010101") {
-    let numbers = items_of(der.parse(key.slice()).ok()?)
+    let numbers = items_of(der.parse(key).ok()?)
     if numbers.length() != 2 {
       return None
     }
@@ -264,7 +264,7 @@ public fn public_key_of(info: der.Value) -> Option[PublicKey]
       Integer(bytes) => bytes.copy()
       _ => return None
     }
-    return match cryptography.RsaPublicKey.new(modulus.slice(), exponent: exponent.slice()) {
+    return match cryptography.RsaPublicKey.new(modulus, exponent: exponent) {
       Some(rsa) => Some(PublicKey.Rsa(key: own rsa))
       None => None
     }
@@ -342,7 +342,7 @@ fn read_extensions(list: der.Value) -> Option[Extensions] {
     }
     let critical = parts.length() == 3 && parts[1] == der.Value.Boolean(value: true)
     let content = match parts[parts.length() - 1] {
-      OctetString(bytes) => der.parse(bytes.slice()).ok()?
+      OctetString(bytes) => der.parse(bytes).ok()?
       _ => return None
     }
     let identifier = parts[0]
@@ -406,7 +406,7 @@ fn read_extensions(list: der.Value) -> Option[Extensions] {
   Some(own found)
 }
 
-public fn Certificate.parse(encoded: Slice[UInt8]) -> Result[Certificate, Error]
+public fn Certificate.parse(encoded: List[UInt8]) -> Result[Certificate, Error]
   uses Panic
 {
   let whole = match der.parse(encoded) {
@@ -460,7 +460,7 @@ public fn Certificate.parse(encoded: Slice[UInt8]) -> Result[Certificate, Error]
     match field {
       Tagged(number, bytes, ..) => {
         if number == 3 {
-          let list = match der.parse(bytes.slice()) {
+          let list = match der.parse(bytes) {
             Ok(list) => own list
             Err(_) => return Err(malformed("extensions"))
           }
@@ -495,7 +495,7 @@ public fn Certificate.parse(encoded: Slice[UInt8]) -> Result[Certificate, Error]
   ))
 }
 
-public fn pem_blocks(text: StringSlice, label: StringSlice) -> List[List[UInt8]] {
+public fn pem_blocks(text: String, label: String) -> List[List[UInt8]] {
   var begin = "-----BEGIN "
   mut begin.push(label)
   mut begin.push("-----")
@@ -525,17 +525,17 @@ public fn pem_blocks(text: StringSlice, label: StringSlice) -> List[List[UInt8]]
   blocks
 }
 
-public fn parse_pem(text: StringSlice) -> Result[List[Certificate], Error]
+public fn parse_pem(text: String) -> Result[List[Certificate], Error]
   uses Panic
 {
   var certificates: List[Certificate] = []
   for block in pem_blocks(text, label: "CERTIFICATE") {
-    mut certificates.push(Certificate.parse(block.slice())?)
+    mut certificates.push(Certificate.parse(block)?)
   }
   Ok(own certificates)
 }
 
-public fn ecdsa_signature_from_der(encoded: Slice[UInt8], size: UInt64) -> Option[List[UInt8]] {
+public fn ecdsa_signature_from_der(encoded: List[UInt8], size: UInt64) -> Option[List[UInt8]] {
   let parts = items_of(der.parse(encoded).ok()?)
   if parts.length() != 2 {
     return None
@@ -545,7 +545,7 @@ public fn ecdsa_signature_from_der(encoded: Slice[UInt8], size: UInt64) -> Optio
   Some(own raw)
 }
 
-public fn ecdsa_signature_to_der(raw: Slice[UInt8]) -> List[UInt8] {
+public fn ecdsa_signature_to_der(raw: List[UInt8]) -> List[UInt8] {
   let half = raw.length() / 2
   der.encode(der.Value.Sequence(items: [der.unsigned_integer(raw[..half]), der.unsigned_integer(raw[half..])]))
 }
@@ -557,7 +557,7 @@ fn curve_size(key: cryptography.EcdsaVerifyingKey) -> UInt64 {
   }
 }
 
-public fn PublicKey.verify(self, algorithm: SignatureAlgorithm, message: Slice[UInt8], signature: Slice[UInt8]) -> Bool
+public fn PublicKey.verify(self, algorithm: SignatureAlgorithm, message: List[UInt8], signature: List[UInt8]) -> Bool
   uses Panic
 {
   match self {
@@ -568,7 +568,7 @@ public fn PublicKey.verify(self, algorithm: SignatureAlgorithm, message: Slice[U
         _ => return false
       }
       match ecdsa_signature_from_der(signature, size: curve_size(key)) {
-        Some(raw) => key.verify_digest(digest.slice(), signature: raw.slice())
+        Some(raw) => key.verify_digest(digest, signature: raw)
         None => false
       }
     }
@@ -602,24 +602,24 @@ public fn PublicKey.verify(self, algorithm: SignatureAlgorithm, message: Slice[U
 public fn Certificate.is_signed_by(self, issuer: Certificate) -> Bool
   uses Panic
 {
-  self.issuer == issuer.subject && issuer.public_key.verify(self.algorithm, message: self.signed.slice(), signature: self.signature.slice())
+  self.issuer == issuer.subject && issuer.public_key.verify(self.algorithm, message: self.signed, signature: self.signature)
 }
 
-fn lowered(text: StringSlice) -> String {
+fn lowered(text: String) -> String {
   text.to_ascii_lowercase()
 }
 
-public fn Certificate.matches_host(self, host: StringSlice) -> Bool {
+public fn Certificate.matches_host(self, host: String) -> Bool {
   match network.IpAddress.parse(host) {
     Ok(address) => return self.ip_addresses.contains(address)
     Err(_) => {}
   }
   let wanted = lowered(host)
-  let wanted_text = wanted.slice()
+  let wanted_text = wanted
   let trimmed = if wanted_text.ends_with(".") { wanted_text.part(0, to: wanted_text.length() - 1) } else { wanted_text }
   for name in self.dns_names {
     let pattern = lowered(name)
-    let pattern_text = pattern.slice()
+    let pattern_text = pattern
     if pattern_text == trimmed {
       return true
     }
@@ -683,9 +683,9 @@ fn check_time(certificate: Certificate, now: Instant) -> Result[Unit, VerifyErro
 }
 
 public fn verify_chain(
-  chain: Slice[Certificate],
-  roots: Slice[Certificate],
-  host: StringSlice,
+  chain: List[Certificate],
+  roots: List[Certificate],
+  host: String,
   now: Instant,
 ) -> Result[Unit, VerifyError]
   uses Panic
@@ -704,7 +704,7 @@ public fn verify_chain(
   verify_path(chain, roots: roots, now: now)
 }
 
-public fn verify_client_chain(chain: Slice[Certificate], roots: Slice[Certificate], now: Instant) -> Result[Unit, VerifyError]
+public fn verify_client_chain(chain: List[Certificate], roots: List[Certificate], now: Instant) -> Result[Unit, VerifyError]
   uses Panic
 {
   if chain.is_empty() {
@@ -718,7 +718,7 @@ public fn verify_client_chain(chain: Slice[Certificate], roots: Slice[Certificat
   verify_path(chain, roots: roots, now: now)
 }
 
-fn verify_path(chain: Slice[Certificate], roots: Slice[Certificate], now: Instant) -> Result[Unit, VerifyError]
+fn verify_path(chain: List[Certificate], roots: List[Certificate], now: Instant) -> Result[Unit, VerifyError]
   uses Panic
   requires chain.length() >= 1
 {
@@ -781,7 +781,7 @@ public fn system_roots() -> Result[List[Certificate], SystemError]
       Ok(text) => {
         var roots: List[Certificate] = []
         for block in pem_blocks(text, label: "CERTIFICATE") {
-          match Certificate.parse(block.slice()) {
+          match Certificate.parse(block) {
             Ok(root) => mut roots.push(own root)
             Err(_) => {}
           }
@@ -806,7 +806,7 @@ fn integer_bytes(value: der.Value) -> Option[List[UInt8]] {
   }
 }
 
-public fn parse_private_key(encoded: Slice[UInt8]) -> Option[PrivateKey]
+public fn parse_private_key(encoded: List[UInt8]) -> Option[PrivateKey]
   uses Panic
 {
   let parts = items_of(der.parse(encoded).ok()?)
@@ -823,7 +823,7 @@ public fn parse_private_key(encoded: Slice[UInt8]) -> Option[PrivateKey]
   }
   if is_oid(algorithm[0], expected: "2a8648ce3d0201") && algorithm.length() == 2 {
     let curve = find_named_curve(algorithm[1])?
-    let fields = items_of(der.parse(inner.slice()).ok()?)
+    let fields = items_of(der.parse(inner).ok()?)
     if fields.length() < 2 {
       return None
     }
@@ -831,32 +831,32 @@ public fn parse_private_key(encoded: Slice[UInt8]) -> Option[PrivateKey]
       OctetString(bytes) => bytes.copy()
       _ => return None
     }
-    return match cryptography.EcdsaSigningKey.from_scalar(curve, bytes: scalar.slice()) {
+    return match cryptography.EcdsaSigningKey.from_scalar(curve, bytes: scalar) {
       Some(key) => Some(PrivateKey.Ecdsa(key: own key))
       None => None
     }
   }
   if is_oid(algorithm[0], expected: "2a864886f70d010101") {
-    let fields = items_of(der.parse(inner.slice()).ok()?)
+    let fields = items_of(der.parse(inner).ok()?)
     if fields.length() < 9 {
       return None
     }
-    let public_key = cryptography.RsaPublicKey.new(integer_bytes(fields[1])?.slice(), exponent: integer_bytes(fields[2])?.slice())?
+    let public_key = cryptography.RsaPublicKey.new(integer_bytes(fields[1])?, exponent: integer_bytes(fields[2])?)?
     return match cryptography.RsaPrivateKey.new(
       public_key,
-      exponent: integer_bytes(fields[3])?.slice(),
-      first_prime: integer_bytes(fields[4])?.slice(),
-      second_prime: integer_bytes(fields[5])?.slice(),
-      first_exponent: integer_bytes(fields[6])?.slice(),
-      second_exponent: integer_bytes(fields[7])?.slice(),
-      coefficient: integer_bytes(fields[8])?.slice(),
+      exponent: integer_bytes(fields[3])?,
+      first_prime: integer_bytes(fields[4])?,
+      second_prime: integer_bytes(fields[5])?,
+      first_exponent: integer_bytes(fields[6])?,
+      second_exponent: integer_bytes(fields[7])?,
+      coefficient: integer_bytes(fields[8])?,
     ) {
       Some(key) => Some(PrivateKey.Rsa(key: own key))
       None => None
     }
   }
   if is_oid(algorithm[0], expected: "2b6570") {
-    let seed = match der.parse(inner.slice()).ok()? {
+    let seed = match der.parse(inner).ok()? {
       OctetString(bytes) => bytes.copy()
       _ => return None
     }

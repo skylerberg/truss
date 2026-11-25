@@ -1,4 +1,4 @@
-fn group(words: Slice[String]) -> Map[String, UInt64] {
+fn group(words: List[String]) -> Map[String, UInt64] {
   var group_of: Map[String, UInt64] = [:]
   for word in words {
     let key = word.copy()

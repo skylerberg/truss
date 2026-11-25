@@ -417,12 +417,11 @@ let rec make_static_literal monomorphic (ty : Ground.ty) (literal : Language.Lit
             Lowered.Static_scalar (Integer (UInt8, Z.of_int (Char.code text.[index]))))
     | Elements elements -> List.map (make_static_literal monomorphic element) elements
   in
-  match (Storage.find_storage_element ty, Storage.find_view_element ty) with
-  | Some element, _ ->
+  match Storage.find_storage_element ty with
+  | Some element ->
       let elements = make_elements element in
       Static_storage { element; elements; capacity = List.length elements }
-  | None, Some element -> Static_view { element; elements = make_elements element }
-  | None, None -> (
+  | None -> (
       match Monomorphic.compute_shape monomorphic ty with
       | Record [ (field, Typed part) ] ->
           Static_record [ (field, make_static_literal monomorphic part literal) ]
@@ -434,51 +433,6 @@ let lower_literal_place (state : Lowering.state) (ty : Ground.ty) literal =
     (Assign (built, Data { ty; value = make_static_literal state.context.monomorphic ty literal }));
   built
 
-let lower_owner_of_view (state : Lowering.state) ~(owner : Ground.ty) ~(view : Ground.ty)
-    (viewed : Lowered.place) (destination : Lowered.place) =
-  let storage_field, storage =
-    match Monomorphic.compute_shape state.context.monomorphic owner with
-    | Record [ (field, Typed storage) ] when Storage.find_storage_element storage <> None ->
-        (field, storage)
-    | _ -> Definitions.raise_bug "%s owns no storage" (Ground.to_string owner)
-  in
-  let view_place =
-    match Monomorphic.compute_shape state.context.monomorphic view with
-    | Record [ (field, Typed field_ty) ] when Storage.find_view_element field_ty <> None ->
-        Lowered.project viewed (Field field)
-    | _ -> Definitions.raise_bug "%s views no storage" (Ground.to_string view)
-  in
-  let built = Lowering.allocate_local state (Value storage) in
-  Emit_c.Ir_builder.emit state.builder
-    (Assign
-       ( built,
-         Storage.build_borrowed storage
-           ~buffer:(Copy (Storage.project_buffer view_place))
-           ~length:(Copy (Storage.project_length view_place)) ));
-  Emit_c.Ir_builder.emit state.builder
-    (Assign
-       (destination, Build { ty = owner; variant = None; fields = [ (storage_field, Copy built) ] }))
-
-let lower_slice (state : Lowering.state) ~element ~buffer ~length =
-  let view_type = Storage.make_view_type element in
-  let view = Lowering.allocate_temporary state view_type in
-  Emit_c.Ir_builder.emit state.builder (Assign (view, Storage.build_view view_type ~buffer ~length));
-  let slice_type : Ground.ty =
-    Named { path = Well_known.make_path Slice; arguments = [ Type element ] }
-  in
-  let slice = Lowering.allocate_temporary state slice_type in
-  (match (Memory_layout.of_type state.context.env slice_type).form with
-  | Struct [ field ] ->
-      Emit_c.Ir_builder.emit state.builder
-        (Assign
-           (slice, Build { ty = slice_type; variant = None; fields = [ (field.name, Copy view) ] }))
-  | _ -> Definitions.raise_bug "a `Slice` that is not one view");
-  slice
-
-let lower_static_constant (state : Lowering.state) path : Lowered.place =
-  let ty = Interface.Definition.read_constant_type state.context.lookups.interface path in
-  { root = Static { item = Constant path; ty = Lowering.ground state ty }; projections = [] }
-
 let read_list_parts monomorphic ty =
   match Monomorphic.compute_shape monomorphic ty with
   | Record [ (field, Typed storage) ] -> (
@@ -486,6 +440,22 @@ let read_list_parts monomorphic ty =
       | Some element -> (field, storage, element)
       | None -> Definitions.raise_bug "%s is not a list" (Ground.to_string ty))
   | _ -> Definitions.raise_bug "%s is not a list" (Ground.to_string ty)
+
+let lower_borrowed_sequence (state : Lowering.state) (sequence : Ground.ty) ~buffer ~length =
+  let field, storage, _ = read_list_parts state.context.monomorphic sequence in
+  let borrowed_storage = Lowering.allocate_local state (Value storage) in
+  Emit_c.Ir_builder.emit state.builder
+    (Assign (borrowed_storage, Storage.build_borrowed storage ~buffer ~length));
+  let borrowed = Lowering.allocate_local state (Value sequence) in
+  Emit_c.Ir_builder.emit state.builder
+    (Assign
+       ( borrowed,
+         Build { ty = sequence; variant = None; fields = [ (field, Copy borrowed_storage) ] } ));
+  borrowed
+
+let lower_static_constant (state : Lowering.state) path : Lowered.place =
+  let ty = Interface.Definition.read_constant_type state.context.lookups.interface path in
+  { root = Static { item = Constant path; ty = Lowering.ground state ty }; projections = [] }
 
 let pull_loop state ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
     ~(body : Lowered.place -> unit) =

@@ -140,7 +140,7 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
       Interface.Definition.find_trait_interface lookups.interface impl.implements.trait )
   with
   | Types.Named { path; _ }, Some trait when not trait.is_capability ->
-      let view = Types.find_view impl.for_type in
+      let list_of_array = Types.find_list_of_array impl.for_type in
       let list_counted_members owner =
         Resolve.Names.list_members_visible_to_package lookups.interface.names
           ~package:declaration.key.module_.package owner
@@ -148,19 +148,20 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
       List.filter_map
         (fun (method_ : Types.trait_method) ->
           let own = list_counted_members path method_.method_name
-          and of_view =
-            match view with
-            | Some (Types.Named view) ->
+          and of_list =
+            match list_of_array with
+            | Some (Types.Named list) ->
                 List.filter
                   (fun (key : Resolve.Names.key) ->
                     match key.path with Method { receiver; _ } -> receiver <> Static | _ -> false)
-                  (list_counted_members view.path method_.method_name)
+                  (list_counted_members list.path method_.method_name)
             | _ -> []
           in
           let describe_method ~is_own =
-            match view with
-            | Some view when not is_own ->
-                Printf.sprintf "the `%s` of its view `%s`" method_.method_name (Types.show view)
+            match list_of_array with
+            | Some list when not is_own ->
+                Printf.sprintf "the `%s` of `%s`, whose methods an `Array` has" method_.method_name
+                  (Types.show list)
             | _ -> Printf.sprintf "a `%s` of its own" method_.method_name
           in
           let is_same_version (key : Resolve.Names.key) =
@@ -180,14 +181,14 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
                  message)
           in
           let is_own_version = List.exists is_same_version own in
-          if is_own_version || List.exists is_same_version of_view then
+          if is_own_version || List.exists is_same_version of_list then
             make_clash
               (Printf.sprintf "`%s` has %s, which takes %s, so it cannot also get one from `%s`."
                  (Types.show impl.for_type)
                  (describe_method ~is_own:is_own_version)
                  (Path.show_receiver method_.method_receiver)
                  (Types.show_trait impl.implements))
-          else if own = [] && of_view = [] then None
+          else if own = [] && of_list = [] then None
           else if declaration.key.module_.package <> Path.locate_package path then
             make_clash
               (Printf.sprintf

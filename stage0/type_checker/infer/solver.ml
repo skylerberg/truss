@@ -254,9 +254,14 @@ let decide_implements state (goal : State.goal) trait =
       match State.find_domain state subject with
       | None -> Waits
       | Some domain -> decide_number state goal trait ~subject ~wanted domain)
-  | Types.Named _, None, _, None ->
+  | Types.Named _, None, _, None -> (
       if has_unknowns state wanted.trait_arguments then Waits
-      else select state goal trait ~subject ~wanted
+      else
+        match Types.find_viewed subject with
+        | Some viewed when Interface.Impls.reads_self_only state.lookups.interface wanted.trait ->
+            select state goal trait ~subject:(State.normalize state viewed) ~wanted
+        | Some _ -> Fails Unmet
+        | None -> select state goal trait ~subject ~wanted)
   | (Types.Parameter _ | Projection _), None, _, None ->
       decide_by_bounds state goal trait ~subject ~wanted
   | (Types.Function _ | Never | Integer | Error _), None, _, None -> Fails Unmet

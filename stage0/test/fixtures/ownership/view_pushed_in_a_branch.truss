@@ -1,6 +1,6 @@
 fn f(often: Bool) -> UInt64 {
   var data: List[Int64] = [1, 2, 3]
-  var views: List[Slice[Int64]] = []
+  var views: List[view List[Int64]] = []
   if often {
     mut views.push(data[0..2])
   }

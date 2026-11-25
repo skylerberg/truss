@@ -184,7 +184,8 @@ public fn Generator.chance(mut self, probability: Float64) -> Bool
   mut self.unit() < probability
 }
 
-public fn Generator.fill(mut self, buffer: mut Slice[UInt8])
+public fn Generator.fill(mut self, buffer: mut List[UInt8])
+  modifies buffer[..]
   cost time O(buffer.length())
 {
   var word: UInt64 = 0
@@ -199,7 +200,8 @@ public fn Generator.fill(mut self, buffer: mut Slice[UInt8])
   }
 }
 
-public fn Generator.shuffle[Element](mut self, items: mut Slice[Element])
+public fn Generator.shuffle[Element](mut self, items: mut List[Element])
+  modifies items[..]
   ensures items.model().is_permutation_of(old(items.model()))
   ensures forall i in 0..items.length() => old(items.model()).contains(items[i])
   cost time O(items.length())
@@ -220,7 +222,7 @@ public fn Generator.shuffle[Element](mut self, items: mut Slice[Element])
   }
 }
 
-public fn Generator.choose_index[Element](mut self, items: Slice[Element]) -> Option[UInt64]
+public fn Generator.choose_index[Element](mut self, items: List[Element]) -> Option[UInt64]
   ensures match result {
     Some(index) => index < items.length()
     None => items.length() == 0

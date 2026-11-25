@@ -1,4 +1,4 @@
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Panic
 {
   parallel for letter in Character"\u{D700}"..=Character"\u{E001}" {

@@ -44,7 +44,7 @@ fn permute(state: mut Array[UInt64, 25]) {
 
 internal type Sponge(state: Array[UInt64, 25], rate: UInt64, position: UInt64)
 
-fn absorb_block(state: mut Array[UInt64, 25], block: Slice[UInt8]) {
+fn absorb_block(state: mut Array[UInt64, 25], block: List[UInt8]) {
   let lanes = block.length() / 8
   for lane in 0..lanes {
     if lane < 25 && 8 * lane + 8 <= block.length() {
@@ -58,7 +58,7 @@ fn absorb_block(state: mut Array[UInt64, 25], block: Slice[UInt8]) {
   }
 }
 
-internal fn absorb(rate: UInt64, message: Slice[UInt8], suffix: UInt8) -> Sponge {
+internal fn absorb(rate: UInt64, message: List[UInt8], suffix: UInt8) -> Sponge {
   var state: Array[UInt64, 25] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   if rate == 0 || rate > 200 || rate % 8 != 0 {
     return Sponge(state: state, rate: 136, position: 0)
@@ -79,7 +79,7 @@ internal fn absorb(rate: UInt64, message: Slice[UInt8], suffix: UInt8) -> Sponge
   if last.length() == rate {
     last[rate - 1] = last[rate - 1] | 128
   }
-  absorb_block(mut state, block: last.slice())
+  absorb_block(mut state, block: last)
   permute(mut state)
   Sponge(state: state, rate: rate, position: 0)
 }
@@ -101,7 +101,7 @@ internal fn squeeze(sponge: mut Sponge, count: UInt64) -> List[UInt8] {
   output
 }
 
-internal fn hash(rate: UInt64, message: Slice[UInt8], suffix: UInt8, count: UInt64) -> List[UInt8] {
+internal fn hash(rate: UInt64, message: List[UInt8], suffix: UInt8, count: UInt64) -> List[UInt8] {
   var sponge = absorb(rate, message: message, suffix: suffix)
   squeeze(mut sponge, count: count)
 }

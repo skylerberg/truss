@@ -45,6 +45,7 @@ fn walk_type_expression(cursor: mut TokenCursor, visitor: Visitor, written: synt
         walk_clause(mut cursor, visitor, clause)
       }
     }
+    ViewType(viewed) => walk_type_expression(mut cursor, visitor, written: viewed)
     SelfType(_) | Associated(..) | TypeError => {}
   }
 }
@@ -68,7 +69,7 @@ fn walk_capability_reference(cursor: mut TokenCursor, visitor: Visitor, referenc
   }
 }
 
-fn walk_condition(cursor: mut TokenCursor, visitor: Visitor, condition: Slice[syntax.BoundCondition])
+fn walk_condition(cursor: mut TokenCursor, visitor: Visitor, condition: List[syntax.BoundCondition])
   uses Panic, RunForever
 {
   for bound in condition {

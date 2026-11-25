@@ -140,21 +140,20 @@ let check_real_implementations (state : Checking.state) (resolved : Resolve.reso
     uses
 
 let main_message =
-  "`main` must have exactly the signature `fn main(arguments: Slice[String]) -> ExitCode`."
+  "`main` must have exactly the signature `fn main(arguments: List[String]) -> ExitCode`."
 
 let check_main state resolved (clauses : Syntax.clause list) (signature : Types.signature) span =
-  let slice_of_string =
+  let list_of_strings =
     match signature.parameters with
     | [
      {
        name = "arguments";
        mode = Read;
-       type_ =
-         Named { path = slice; arguments = [ Type (Named { path = string; arguments = [] }) ] };
+       type_ = Named { path = list; arguments = [ Type (Named { path = string; arguments = [] }) ] };
        has_default = false;
      };
     ] ->
-        Well_known.is Slice slice && Well_known.is String string
+        Well_known.is List list && Well_known.is String string
     | _ -> false
   in
   let exit_code =
@@ -162,7 +161,7 @@ let check_main state resolved (clauses : Syntax.clause list) (signature : Types.
     | Returns (Named { path; arguments = [] }) -> Well_known.is Exit_code path
     | _ -> false
   in
-  if not (slice_of_string && exit_code && signature.generics = [] && signature.receiver = None) then
+  if not (list_of_strings && exit_code && signature.generics = [] && signature.receiver = None) then
     Checking.report state Main_signature span main_message;
   check_real_implementations state resolved ~recipient:"`main`"
     (List.concat_map
@@ -535,18 +534,29 @@ let check_modifies (state : Checking.state) (written : Syntax.signature)
     (signature : Types.signature) =
   let package = Path.locate_package state.key.path in
   let check_entry (value : Syntax.expression) =
-    match Elaborator.split_field_path value with
+    match Elaborator.split_part value with
     | None -> ()
-    | Some (root, names) -> (
+    | Some (root, names, is_elements) -> (
         let fields = List.map (fun (name : Syntax.name) -> name.text) names in
         match Types.find_parameter_position signature root with
-        | Some position when List.mem { Types.position; field_path = fields } signature.modifies
-          -> (
+        | Some position
+          when List.mem { Types.position; field_path = fields; is_elements } signature.modifies -> (
             let shown prefix = String.concat "." (root :: prefix) in
             match
               Definition.find_field_path_type state.lookups ~package
                 (Types.read_parameter_at signature position).type_ fields
             with
+            | Ok type_
+              when is_elements
+                   && not
+                        (Types.is_error type_
+                        || Option.is_some (Types.find_sequence_element type_)
+                        || Types.is_builtin Storage type_) ->
+                Checking.report state Not_a_field_path state.spans.(value.id)
+                  (Printf.sprintf
+                     "`%s` is of type `%s`, which is no `List` and no `Array`, so it has no \
+                      elements for `[..]` to name."
+                     (shown fields) (Types.show type_))
             | Ok _ | Error Broken_type -> ()
             | Error ((No_fields { type_; prefix } | Variant_fields { type_; prefix }) as error) ->
                 let reason =

@@ -13,7 +13,7 @@ public type CorsPolicy(
 )
   derives Equal
 
-fn allowed_origin(policy: CorsPolicy, origin: StringSlice) -> Option[String] {
+fn allowed_origin(policy: CorsPolicy, origin: String) -> Option[String] {
   for allowed in policy.origins {
     if allowed == "*" {
       return Some(if policy.allow_credentials { origin.to_string() } else { "*" })
@@ -25,7 +25,7 @@ fn allowed_origin(policy: CorsPolicy, origin: StringSlice) -> Option[String] {
   None
 }
 
-fn joined(parts: Slice[String]) -> String {
+fn joined(parts: List[String]) -> String {
   var text = ""
   for part in parts {
     if !text.is_empty() {
@@ -65,14 +65,14 @@ public fn cors(
         for method in policy.methods {
           mut methods.push("${method}")
         }
-        mut responder.set_header("Access-Control-Allow-Methods", value: joined(methods.slice()))
-        mut responder.set_header("Access-Control-Allow-Headers", value: joined(policy.headers.slice()))
+        mut responder.set_header("Access-Control-Allow-Methods", value: joined(methods))
+        mut responder.set_header("Access-Control-Allow-Headers", value: joined(policy.headers))
         mut responder.set_header("Access-Control-Max-Age", value: "${policy.max_age_seconds}")
         let _ = mut responder.send(Response.new(status: Status.no_content))
         return
       }
       if !policy.exposed.is_empty() {
-        mut responder.set_header("Access-Control-Expose-Headers", value: joined(policy.exposed.slice()))
+        mut responder.set_header("Access-Control-Expose-Headers", value: joined(policy.exposed))
       }
     }
     None => {
@@ -126,7 +126,7 @@ public fn secure_headers(
   next(own request, mut responder)
 }
 
-fn is_request_id(text: StringSlice) -> Bool {
+fn is_request_id(text: String) -> Bool {
   if text.is_empty() || text.length() > 128 {
     return false
   }
@@ -258,7 +258,7 @@ fn wait_seconds(milli_tokens: Int64, policy: RateLimit) -> Int64 {
   wait_milliseconds.saturating_add(999) / 1000
 }
 
-public fn RateLimiter.take(self, key: StringSlice) -> Decision
+public fn RateLimiter.take(self, key: String) -> Decision
   uses Tasks, Clock
 {
   let now = Clock.monotonic().total_milliseconds()
@@ -317,7 +317,7 @@ fn is_safe_method(method: Method) -> Bool {
   method == Method.Get || method == Method.Head || method == Method.Options
 }
 
-fn is_trusted_origin(policy: CsrfPolicy, origin: StringSlice) -> Bool {
+fn is_trusted_origin(policy: CsrfPolicy, origin: String) -> Bool {
   for trusted in policy.trusted_origins {
     if trusted.equal_ignoring_ascii_case(origin) {
       return true
@@ -326,7 +326,7 @@ fn is_trusted_origin(policy: CsrfPolicy, origin: StringSlice) -> Bool {
   false
 }
 
-fn host_of_origin(origin: StringSlice) -> Option[StringSlice] {
+fn host_of_origin(origin: String) -> Option[view String] {
   let rest = match origin.find("://") {
     Some(at) => origin.split_at(at).second.strip_prefix("://").unwrap_or("")
     None => return None

@@ -1,7 +1,14 @@
 type t
 
 val variables : string list
-val find : ?debug_prefix_maps:(string * string) list -> objects:string -> unit -> (t, string) result
+
+val find :
+  ?debug_prefix_maps:(string * string) list ->
+  x86_64_level:X86_64_level.t ->
+  objects:string ->
+  unit ->
+  (t, string) result
+
 val make_fingerprint : t -> Profile.t -> string
 
 type source = { name : string; text_hash : string; render : unit -> string }

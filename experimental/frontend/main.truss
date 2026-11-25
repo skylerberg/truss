@@ -4,7 +4,7 @@ use frontend.show
 use frontend.source
 use frontend.token
 
-fn escape(value: StringSlice) -> String {
+fn escape(value: String) -> String {
   var buffer = String.with_capacity(value.length())
   for character in value.characters() {
     if character == Character"\"" {
@@ -173,7 +173,7 @@ fn show_token(tables: token.Tables, index: UInt64) -> String
   }
 }
 
-fn print_tokens(path: StringSlice, text: own String)
+fn print_tokens(path: String, text: own String)
   uses Console, Panic, RunForever
 {
   let result = lexer.lex(source.Source.create(path, own text))
@@ -187,7 +187,7 @@ fn print_tokens(path: StringSlice, text: own String)
   }
 }
 
-fn print_file(path: StringSlice, text: own String)
+fn print_file(path: String, text: own String)
   uses Console, Panic, RunForever
 {
   let lexed = lexer.lex(source.Source.create(path, own text))
@@ -207,7 +207,7 @@ fn print_file(path: StringSlice, text: own String)
 
 type Timing(lexing: Int64, parsing: Int64)
 
-fn measure(path: StringSlice, text: StringSlice, rounds: UInt64) -> Timing
+fn measure(path: String, text: String, rounds: UInt64) -> Timing
   uses Clock, Panic, RunForever
 {
   var best_lexing: Int64 = Int64.maximum
@@ -240,7 +240,7 @@ fn measure(path: StringSlice, text: StringSlice, rounds: UInt64) -> Timing
   Timing(lexing: best_lexing, parsing: best_parsing)
 }
 
-fn time_files(rounds: UInt64, paths: Slice[String])
+fn time_files(rounds: UInt64, paths: List[String])
   uses Console, Clock, FileRead, Panic, RunForever
 {
   var total_lexing: Int64 = 0
@@ -255,7 +255,7 @@ fn time_files(rounds: UInt64, paths: Slice[String])
   Console.print_line("${total_lexing} ${total_parsing} total")
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Console, Clock, FileRead, Panic, RunForever
 {
   if arguments.length() < 2 {

@@ -8,7 +8,7 @@ fn doubled(value: Int64) -> Int64 {
   value.saturating_multiply(2)
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Panic
 {
   let pure: fn(Int64) -> Int64 = fn(value) { value.saturating_add(1) }

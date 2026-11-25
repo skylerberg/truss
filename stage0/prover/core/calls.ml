@@ -107,12 +107,16 @@ let havoc_mut context (frame : State.frame) (values : State.passed list) ~is_upd
           if is_update_step && passed.position = 0 then place.note_changed_in_place ();
           let arrive ty = Facts.arrive context frame "changed" ty in
           let changed =
-            Option.bind (list_modified passed.position) (fun field_paths ->
+            Option.bind (list_modified passed.position) (fun parts ->
                 List.fold_left
-                  (fun whole fields ->
+                  (fun whole (part : Types.modified) ->
                     Option.bind whole (fun whole ->
-                        Validity.replace_part context passed.type_ whole fields arrive))
-                  (Some passed.term) field_paths)
+                        Validity.replace_part context passed.type_ whole part.field_path
+                          (fun part_type before ->
+                            if part.is_elements then
+                              Intrinsics.replace_elements context frame part_type before
+                            else arrive part_type)))
+                  (Some passed.term) parts)
           in
           place.write frame (match changed with Some term -> term | None -> arrive passed.type_)
       | _ -> frame)
@@ -246,7 +250,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   in
   let self_of self = Option.map fst self
   and find_self_type clauses self =
-    Option.map (fun (_, ty) -> Types.substitute (substitution_of clauses) ty) self
+    Option.map (fun (_, ty) -> Types.substitute_erased (substitution_of clauses) ty) self
   in
   let read_entry_frame (clauses : State.clauses) =
     let locals, types, self = bind (list_bindings clauses) in
@@ -414,7 +418,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let after =
     havoc_mut context frame values
       ~is_update_step:(calls_update_step context invocation)
-      ~list_modified:(Contracts.list_modified_fields context path)
+      ~list_modified:(Contracts.list_modified_parts context path)
   in
   let in_quantifier = is_logic_call && frame.binders <> [] in
   let state term =
@@ -431,23 +435,11 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         | _ -> None)
       values
   in
-  List.iteri
-    (fun position (parameter : Mir.parameter) ->
-      match
-        ( parameter.mode,
-          List.find_opt (fun (passed : State.passed) -> passed.position = position) values,
-          List.assoc_opt position changed )
-      with
-      | Language.Mode.Mut, Some passed, Some after_term
-        when Types.is_well_known Slice parameter.type_ ->
-          Intrinsics.assume_same_length context after passed.type_ ~before:passed.term
-            ~after:after_term
-      | _ -> ())
-    callee_clauses.parameters;
   let callee_bindings = list_bindings callee_clauses in
   let callee_arguments = List.filter_map snd callee_bindings in
   let is_on_bound_values = List.exists (Logic.mentions after.bound) callee_arguments in
-  let result_type = Facts.substitute_type context frame site.type_ in
+  let declared_result_type = Facts.substitute_declared_type context frame site.type_ in
+  let result_type = Types.erase_views declared_result_type in
   let applied_as = ref None in
   let definition = ref None in
   let is_limited_call = ref false in
@@ -461,8 +453,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             | Some passed -> Facts.declare_sort context passed.type_
             | None ->
                 Facts.declare_sort context
-                  ((Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
-                     (Types.substitute (substitution_of callee_clauses) parameter.type_)))
+                  (Types.erase_views
+                     ((Interface.Impls.normalize context.lookups.interface
+                         ~list_bounds:context.bounds)
+                        (Types.substitute (substitution_of callee_clauses) parameter.type_))))
           callee_bindings
       in
       let result_sort = Facts.declare_sort context result_type in
@@ -472,8 +466,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         when self.local = Self
              && Well_known.is_method Model_model (Method { owner = trait.path; name; receiver }) ->
           Models.rank_model context
-            ((Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
-               (Types.substitute (substitution_of callee_clauses) self.type_))
+            (Types.erase_views
+               ((Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
+                  (Types.substitute (substitution_of callee_clauses) self.type_)))
             ~model:result_type ~impl function_symbol
       | _ -> ());
       let symbol =
@@ -573,7 +568,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       Logic.conjunction
         (List.map2
            (fun ((parameter : Mir.parameter), _) input ->
-             let ty = Types.substitute (substitution_of callee_clauses) parameter.type_ in
+             let ty = Types.substitute_erased (substitution_of callee_clauses) parameter.type_ in
              Logic.( &&& ) (Facts.make_in_range ty input)
                (Validity.make_validity context outside ~assuming:true ty input))
            callee_bindings inputs)
@@ -844,10 +839,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           match lent_final with
           | Some leave ->
               Costs.minus
-                (Amounts.compute_potential context after result_type result)
-                (Amounts.compute_potential context after result_type (leave result))
+                (Amounts.compute_potential context after declared_result_type result)
+                (Amounts.compute_potential context after declared_result_type (leave result))
           | None -> Costs.zero)
-      | `Returns -> Amounts.compute_potential context after result_type result)
+      | `Returns -> Amounts.compute_potential context after declared_result_type result)
       values
   in
   let declared_clauses = Contracts.list_declared_clauses contract in
@@ -1023,7 +1018,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
   let list_arguments (type_arguments : Types.argument list) =
     List.map
       (fun argument ->
-        match Types.substitute_argument frame.substitution argument with
+        match Types.substitute_argument_erased frame.substitution argument with
         | Types.Type ty -> Types.Type (Facts.substitute_type context frame ty)
         | other -> other)
       type_arguments
@@ -1065,7 +1060,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     | None ->
         let frame =
           havoc_mut context frame values ~is_update_step
-            ~list_modified:(Contracts.list_modified_fields context path)
+            ~list_modified:(Contracts.list_modified_parts context path)
         in
         let frame =
           Operations.spend context frame
