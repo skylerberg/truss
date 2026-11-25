@@ -56,6 +56,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       conditional_counters = [];
       bounded_counters = [];
       recursive_costs_assumed = 0;
+      lambdas_assuming_recursive_costs = [];
       fresh_order = Tables.Symbol_table.create 64;
       logs = [];
       powers = [];

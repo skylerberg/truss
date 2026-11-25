@@ -900,7 +900,7 @@ let make_callback_cost (context : State.context) frame (metric : Language.Metric
       cost
 
 let compute_function_value_amount context frame ~location (function_type : Types.function_type)
-    callee_term (counter : Costs.counter) =
+    callee_term ~values (counter : Costs.counter) =
   let compute_call_amount metric =
     let make_cost () =
       make_callback_cost context frame metric (Types.Function function_type) callee_term
@@ -920,6 +920,9 @@ let compute_function_value_amount context frame ~location (function_type : Types
         cost
   in
   match counter.resource with
+  | _ when counter.counting = Units && Amounts.passes_lambda_assuming_recursive_costs context values
+    ->
+      Operations.declare_unknown_amount context frame counter
   | Metric metric -> compute_call_amount metric
   | Calls (Through term) ->
       if Amounts.lambda_captures_target context callee_term term then
@@ -1123,7 +1126,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           | _ when context.counters = [] -> frame
           | Some (Types.Function function_type, callee_term, _) ->
               Operations.spend context frame
-                (compute_function_value_amount context frame ~location function_type callee_term)
+                (compute_function_value_amount context frame ~location function_type callee_term
+                   ~values)
           | _ -> Operations.spend context frame (Operations.declare_unknown_amount context frame)
         in
         let result =

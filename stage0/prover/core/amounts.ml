@@ -68,11 +68,9 @@ let compute_promised_amount (context : State.context) frame (counter : Costs.cou
   | Order_of amount, Units ->
       let amount = evaluate amount in
       let amount =
-        if is_recursive_call then begin
-          context.recursive_costs_assumed <- context.recursive_costs_assumed + 1;
+        if is_recursive_call then
           let hypothesis = Costs.at_least_zero (Costs.bound amount) in
           if counter.resource = Metric Time then Costs.plus hypothesis (Logic.int 1) else hypothesis
-        end
         else Costs.units (if change = Costs.zero then Costs.reduce_constants amount else amount)
       in
       Costs.minus amount change
@@ -189,10 +187,17 @@ let make_conditional_amount condition amount =
   | Logic.Boolean false -> Costs.zero
   | condition -> Logic.ite condition amount Costs.zero
 
+let passes_lambda_assuming_recursive_costs (context : State.context) (values : State.passed list) =
+  List.exists
+    (fun (passed : State.passed) -> List.mem passed.term context.lambdas_assuming_recursive_costs)
+    values
+
 let compute_callee_amount ?(method_cost : (Language.Metric.t -> Logic.term) option)
     (context : State.context) after ~is_recursive ~clauses:(declared_clauses : State.clauses list)
     ~(bind_frame : State.clauses -> State.frame) ~uses ~(values : State.passed list) ~change
     (counter : Costs.counter) =
+  if is_recursive && counter.counting = Units then
+    context.recursive_costs_assumed <- context.recursive_costs_assumed + 1;
   let is_recursive_call =
     is_recursive && counter.counting = Units && List.mem counter context.bounded_counters
   in
@@ -234,50 +239,58 @@ let compute_callee_amount ?(method_cost : (Language.Metric.t -> Logic.term) opti
             Some (if amortized_first then amortized @ plain else plain @ amortized))
       declared_clauses
   in
-  match counter.resource with
-  | Calls (Capability capability | Capability_method (capability, _)) ->
-      compute_capability_amount context after ~uses capability counter ~direct:(fun () ->
-          match find_first_clauses () with
-          | Some (clause :: _) -> compute_amount clause
-          | Some [] | None -> Operations.declare_unknown_amount context after counter)
-  | Calls (Through term) when make_reach_formula context after values term = Logic.Boolean false ->
-      Costs.zero
-  | Calls (Through term) -> (
-      let reaches = make_reach_formula context after values term in
-      let receiving =
-        List.filter_map
-          (fun (passed : State.passed) -> if passed.term = term then Some passed.position else None)
-          values
-      in
-      let captured =
-        List.exists
-          (fun (passed : State.passed) -> lambda_captures_target context passed.term term)
-          values
-      in
-      match find_first_clauses () with
-      | Some clauses
-        when (not captured) && List.length clauses >= List.length receiving && receiving <> [] ->
-          List.fold_left
-            (fun total clause -> Costs.plus total (compute_amount clause))
-            Costs.zero clauses
-      | _ ->
-          make_conditional_amount reaches (Operations.declare_unknown_amount context after counter))
-  | Metric _ -> (
-      let compute_method_amount () =
-        match (method_cost, counter.resource, counter.counting) with
-        | Some compute_cost, Metric Time, Units ->
-            Costs.minus
-              (Costs.plus (compute_cost Time) (Logic.int 1))
-              (match change with
-              | Some compute_change -> compute_growth compute_change
-              | None -> Costs.zero)
-        | Some compute_cost, Metric ((Allocations | Allocated_bytes) as metric), _ ->
-            compute_amount_within context after counter (compute_cost metric)
-        | _ -> Operations.declare_unknown_amount context after counter
-      in
-      match find_first_clauses () with
-      | Some (clause :: _) -> compute_amount clause
-      | Some [] | None -> compute_method_amount ())
+  if
+    counter.counting = Units && (not is_recursive_call)
+    && passes_lambda_assuming_recursive_costs context values
+  then Operations.declare_unknown_amount context after counter
+  else
+    match counter.resource with
+    | Calls (Capability capability | Capability_method (capability, _)) ->
+        compute_capability_amount context after ~uses capability counter ~direct:(fun () ->
+            match find_first_clauses () with
+            | Some (clause :: _) -> compute_amount clause
+            | Some [] | None -> Operations.declare_unknown_amount context after counter)
+    | Calls (Through term) when make_reach_formula context after values term = Logic.Boolean false
+      ->
+        Costs.zero
+    | Calls (Through term) -> (
+        let reaches = make_reach_formula context after values term in
+        let receiving =
+          List.filter_map
+            (fun (passed : State.passed) ->
+              if passed.term = term then Some passed.position else None)
+            values
+        in
+        let captured =
+          List.exists
+            (fun (passed : State.passed) -> lambda_captures_target context passed.term term)
+            values
+        in
+        match find_first_clauses () with
+        | Some clauses
+          when (not captured) && List.length clauses >= List.length receiving && receiving <> [] ->
+            List.fold_left
+              (fun total clause -> Costs.plus total (compute_amount clause))
+              Costs.zero clauses
+        | _ ->
+            make_conditional_amount reaches
+              (Operations.declare_unknown_amount context after counter))
+    | Metric _ -> (
+        let compute_method_amount () =
+          match (method_cost, counter.resource, counter.counting) with
+          | Some compute_cost, Metric Time, Units ->
+              Costs.minus
+                (Costs.plus (compute_cost Time) (Logic.int 1))
+                (match change with
+                | Some compute_change -> compute_growth compute_change
+                | None -> Costs.zero)
+          | Some compute_cost, Metric ((Allocations | Allocated_bytes) as metric), _ ->
+              compute_amount_within context after counter (compute_cost metric)
+          | _ -> Operations.declare_unknown_amount context after counter
+        in
+        match find_first_clauses () with
+        | Some (clause :: _) -> compute_amount clause
+        | Some [] | None -> compute_method_amount ())
 
 let find_generic_argument context frame (operation : Intrinsic.operation) type_arguments name =
   let generics = (Intrinsic_signatures.make_signature operation).generics in
