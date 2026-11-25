@@ -633,7 +633,9 @@ fn Option[Value].take(mut self) -> Option[Value] {
 
 - **`Plain` types copy implicitly.** A type made only of fixed-size data with
   nothing on the heap, such as the integers, floats, `Bool`, `Character`,
-  and records, sum types, and `Array`s built only from those, is `Plain`.
+  and records, sum types, and `Array`s built only from those, is `Plain`. A
+  type that declares a `cost potential` is not (see
+  [Amortized costs](#amortized-costs)).
 - **A name bound to a `Plain` value is a copy.** A `let`, or a pattern of a
   `match` or an `is`, that binds a `Plain` value without `mut` copies it, so
   the place it was bound from can be assigned while the name is live. A
@@ -1358,12 +1360,38 @@ fn List[Element].push(mut self, item: own Element)
   parts' potentials, and belongs to that value alone; `copy()` pays for the
   new one. A view holds no potential: the potential of the elements that it
   views belongs to their owner, so a `List[view String]` holds only its own.
+- **Potential is owned like the value that holds it.** `own` transfers it.
+  `mut` lends it, and the borrower's bound covers the change. Read-only
+  access, a view's included, changes none.
+- A type that declares a `cost potential`, or holds a value that does, is not
+  `Plain`, since an implicit copy would duplicate its potential. A type
+  parameter bounded by `Plain` holds no potential.
 - `cost amortized time O(f)` promises that the actual cost, plus the change
   in the potential of the values the function mutates or returns, is within
-  `O(f)`. `amortized` works with every resource that takes an `O(...)` bound.
+  `O(f)`. `amortized` takes only an `O(...)` bound, on `time`, `allocations`,
+  or `allocated_bytes`. Potential pays for no calls, and an exact count with
+  `<=` or `==` cannot borrow from it.
 - A function may state a plain and an amortized bound on one resource. A
-  caller with an amortized bound counts the amortized one, and any other
-  caller the plain one.
+  caller counts each call by the bound of its own kind.
+- A caller with an amortized bound counts a callee's amortized bound as
+  stated, and never reads the potential that the callee changes. It counts
+  a callee that states only a plain bound at that bound plus the change in
+  the potential of the values the call mutates, consumes, or returns.
+- A caller with an amortized bound also counts the potential that its own
+  code makes. A value it builds counts its type's potential. A write counts
+  the change in the potential of the values that contain the written place.
+- A caller with a plain bound counts a callee's plain bound. Where the
+  callee states only an amortized bound, the caller counts that bound less
+  the change in potential. A function that pushes only onto a list it
+  creates empty therefore has a plain bound, since the list starts with no
+  potential to spend.
+- **A capability method's `O(...)` bound counts the change in the potential
+  of its provider,** whether or not it is `amortized`. An `impl` of the
+  capability is checked so, and a caller counts the bound as stated. A plain
+  bound of a function that uses a capability is therefore relative to the
+  potential its provider holds, and the function with the `provide` block
+  counts, in its plain bounds, the potential that the provider held when the
+  block began.
 
 ### Function types
 
@@ -1388,6 +1416,9 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log))
 - **A function type takes only functions whose capabilities its `uses`
   names,** so one without `RunForever` takes only functions that terminate
   (see [Termination](#termination)).
+- A function type's bound is met only by a bound of the same kind: a plain
+  bound does not stand for an amortized one, nor an amortized bound for a
+  plain one.
 - Clauses after a definition's result type belong to the definition.
 - A function type's `requires` and `ensures` are a callback's contract (see
   [Callback contracts](#callback-contracts)).
@@ -3189,8 +3220,8 @@ an invariant, a law, or a proof.
   places of a `List` or an `Array`, and the values that any
   other collection's `element` lends. A pattern that does not match a value
   leaves that value out.
-- A quantifier over a type and `==>` appear only in specifications and in
-  functions for specifications only.
+- A quantifier over a type appears only in specifications and in functions
+  for specifications only.
 - A quantifier's body runs to the end of the expression.
 - Integer arithmetic in a specification is exact. It is done on `Integer`, a
   prelude type that exists only in specifications, of which every built-in

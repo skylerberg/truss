@@ -4140,8 +4140,8 @@ specification can say more than code can:
   terminates. A function whose `uses` is a capability parameter, such as
   `map`, can be called in one with a pure lambda.
 - A quantifier over a range is also an expression in code, which runs as a
-  loop that stops when it knows the answer. A quantifier over a type, and
-  `==>`, appear only in specifications.
+  loop that stops when it knows the answer. A quantifier over a type appears
+  only in specifications.
 
 ```truss
 fn contains_zero(numbers: List[Int64]) -> Bool
@@ -4407,9 +4407,11 @@ test "a zero undoes the entry before it" {
   the iterations, and the values the loop does not mutate bound one
   iteration. Here the loop runs `entries.length()` times, and each
   iteration costs `O(1)`.
-- `recorded_entries` states `cost amortized` because `push` states only
-  `cost amortized time O(1)`. A function whose `cost` is `amortized` counts
-  each call at the callee's amortized cost.
+- `recorded_entries` states `cost amortized`, so the prover counts each
+  call at the callee's amortized cost and never reads the potential of
+  `recorded`. A function with a plain `cost` can call `push` too. The
+  prover then counts the potential that `push` may spend, which is none for
+  a list the function creates empty.
 
 A loop needs a `cost` clause where that count fails: where it is too large,
 or where one iteration's cost depends on a value the loop mutates. A loop
@@ -5160,7 +5162,7 @@ From the tightest binding to the loosest:
 | `..`, `..=` | Ranges, excluding and including the end |
 | `==`, `!=`, `<`, `<=`, `>`, `>=`, `is` | Comparison and pattern test |
 | `&&`, `\|\|` | Logical and and or, which evaluate the right side only when needed and do not mix |
-| `==>` | Implication, in specifications |
+| `==>` | Implication |
 
 - **Precedence is a partial order.** Bitwise operators `&`, `|`, `^`, `<<`,
   and `>>` combine only with themselves, `&&` and `||` do not mix, and

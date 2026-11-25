@@ -111,7 +111,6 @@ let find_code : Parsing.problem -> Diagnostic.Code.parser = function
   | Reserved_word _ | Loop_keyword | Constant_keyword _ -> Reserved_word
   | Nesting_too_deep _ | Chain_too_long _ -> Nesting_too_deep
   | Misspelled_cost_word _ -> Cost_word
-  | Whole_type_quantifier _ | Implies_in_code -> Specification_only
   | Echo_in_specification -> Echo_in_specification
   | Try_in_parallel | Return_in_parallel | Break_in_parallel_for | Loop_exit_from_parallel_branch _
     ->
@@ -170,6 +169,7 @@ let find_code : Parsing.problem -> Diagnostic.Code.parser = function
       Open_range
   | Let_else_brace _ -> Let_else_brace
   | Amortized_loop_cost -> Loop_cost_bound
+  | Amortized_bound -> Amortized_bound
   | Float_pattern -> Float_pattern
   | Use_after_definition _ -> Use_after_definition
   | Lowest_operand _ | Chained _ | Mixed_and_or _ | Unordered_operators _ | Mixed_bitwise _
@@ -223,17 +223,6 @@ let describe_problem : Parsing.problem -> Source.span Description.piece list = f
            | Bound_word -> "a bound")
            (String.concat ", " (List.map (fun word -> "`" ^ word ^ "`") words))
            found)
-  | Whole_type_quantifier { quantifier } ->
-      say
-        (Printf.sprintf
-           "`%s` over a whole type cannot run, so it is only for specifications and the bodies of \
-            functions for specifications only. Quantify over a range or a collection, as in `%s i \
-            in 0..count => ...`."
-           quantifier quantifier)
-  | Implies_in_code ->
-      say
-        "`==>` is only for specifications and the bodies of functions for specifications only; in \
-         code, write `!a || b`."
   | Echo_in_specification -> say "`echo` is not allowed in specifications, which never run."
   | Try_in_parallel ->
       say
@@ -509,6 +498,11 @@ let describe_problem : Parsing.problem -> Source.span Description.piece list = f
       say
         "A loop's `cost` bounds the loop's cost so far, so it is never `amortized`. Potential \
          belongs to the values the loop mutates, which the function's own `cost` accounts for."
+  | Amortized_bound ->
+      say
+        "`amortized` applies only to an `O(...)` bound on `time`, `allocations`, or \
+         `allocated_bytes`. Potential is credit spent on time or memory, so it pays for no calls, \
+         and an exact count with `<=` or `==` cannot borrow from it."
   | Interpolated_pattern -> say "A string in a pattern cannot have interpolations."
   | Float_pattern ->
       say

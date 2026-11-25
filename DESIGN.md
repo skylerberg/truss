@@ -708,6 +708,22 @@ potential. Mutable value semantics guarantees that no value is shared, so
 amortized bounds compose. A value's potential includes the potential of its
 parts, so a push onto a list inside a list is paid for by the inner list.
 
+**A caller with an amortized bound counts an amortized callee at its
+bound.** The callee's bound already counts the change in the potential of
+the values it changes, so the caller's proof never reads the potential of a
+type that the caller does not define. The caller pays only for the
+potential that its own code makes: the values it builds, the fields it
+writes, and the results and changes of a callee that states only a plain
+bound. A caller with a plain bound counts the potential that an amortized
+callee may spend, which is none for a list that the caller creates empty.
+
+**Potential is credit that a value owns.** That reading is what lets a
+caller skip its callees' potential, and it holds only where the potential
+follows ownership: `own` transfers it, `mut` lends it, and read-only access
+touches none. So a view holds none, a `Plain` type holds none, since an
+implicit copy would duplicate it, and a capability's provider, which no
+caller can read, is lent to every call of the capability's methods.
+
 **There are no expected-time bounds.** A hash map is O(1) only on average,
 on the assumption that hashes behave randomly. No proof can promise that
 against input chosen by an attacker, and proving expected bounds needs
@@ -720,6 +736,10 @@ worst case instead.
 | `O(f)` bounds the cost for every input, not only for large inputs. | The textbook definition is a limit, which a prover handles poorly, and it gives wrong answers for bounds in several variables. |
 | A bound can mention `result`. | An output-sensitive bound, such as the bound of a function that returns its matches, cannot be stated otherwise. |
 | The `time` of a generic function counts the methods of its bounds. | `O(self.length())` would be false for `contains` on a list of strings, where one comparison is not one step. `String` could not keep a promise of `O(1)` on `Equal.equal`, and a second trait for constant-time comparison would give every generic method two overloads. |
+| A type that declares a `cost potential` is not `Plain`. | An implicit copy would give two values one potential, and an amortized callee could spend it twice. |
+| A capability method's bound counts the change in its provider's potential, plain or `amortized`. | No caller can read a provider, which a `provide` block outside it supplies. The `impl` is where the provider's potential changes, so the `impl` is where the change is checked, and a collecting provider can still state a bound. |
+| `amortized` takes only an `O(...)` bound on `time`, `allocations`, or `allocated_bytes`. | Potential is credit in time or memory. Counted against calls it would let a push's credit pay for calls, and an exact `<=` or `==` count has no slack to borrow. |
+| A caller with an amortized bound counts an amortized callee at the callee's bound, not at its actual cost less the potential it makes. | Counting actual cost made every caller cancel each callee's potential against its own, through the capacity of `List`'s storage. In a loop the cancellation was syntactic, so a loop that pushed on one path and not the other failed to prove. |
 | A function that calls a callback bounds its allocations with `allocations(visit)`, and its allocated bytes with `allocated_bytes(visit)`. | `Option.map` allocates what its callback allocates. Without the term it states no allocation bound, and a function with `cost allocations <= 0` then calls no combinator, even with a lambda that allocates nothing. The alternative is an allocation clause on the type of every callback, which rejects each function that states none. |
 
 ### Function types
@@ -1444,7 +1464,7 @@ Rules: [Writing specifications](SPECIFICATION.md#writing-specifications).
 |---|---|
 | A function called in a specification is pure: it uses no capability, not even `Panic` or `RunForever`, except `Panic unless` a condition that the specification proves. | A function that might not return, or might end the program, has no value to reason about, and a definition that is not well founded would make the logic unsound. |
 | A specification is read left to right. | `index < items.length() && items[index] > 0` is well defined. |
-| `==>` exists, and only in specifications. | "If this holds, then that holds" is the commonest form of a specification, and `!a \|\| b` hides it. `==>` binds more loosely than `&&` and `\|\|`, as in Dafny. Code already has `if`. |
+| `==>` exists. | "If this holds, then that holds" is the commonest form of a specification, and `!a \|\| b` hides it. `==>` binds more loosely than `&&` and `\|\|`, as in Dafny. |
 | Integer arithmetic in a specification is exact. | A specification cannot have an overflow bug, and `decreases high - low` can be negative, which is the case that the prover must rule out. |
 | An `Integer` converts implicitly where a built-in integer is expected. | The obligation that the value fits is proven either way. |
 | A function for specifications has no keyword. | Its signature already mentions a type that exists only in specifications. |

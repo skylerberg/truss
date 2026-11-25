@@ -562,11 +562,15 @@ let describe : Inference.t -> Nodes.description = function
   | Self_type_as_value { at = origin } ->
       make Not_a_value (Build.at origin)
         (say "`Self` is a type. Build a value of it, or call one of its methods.")
-  | Quantifier_over_type_in_code { at = origin } ->
+  | Quantifier_over_type_in_code { at = origin; quantifier } ->
+      let keyword = match quantifier with Forall -> "forall" | Exists -> "exists" in
       make Specification_only (Build.at origin)
         (say
-           "A quantifier over a whole type cannot run, so it is only for specifications and the \
-            bodies of functions for specifications only. Quantify over a range or a collection.")
+           (Printf.sprintf
+              "`%s` over a whole type cannot run, so it is only for specifications and the bodies \
+               of functions for specifications only. Quantify over a range or a collection, as in \
+               `%s i in 0..count => ...`."
+              keyword keyword))
   | Static_method_as_value { at = origin; name } ->
       make Not_a_value (Build.at origin)
         (say (Printf.sprintf "`%s` is a method; call it with `(...)`." name))
@@ -971,11 +975,6 @@ let describe : Inference.t -> Nodes.description = function
         (say
            "`?` works on a `Result` in a function that returns a `Result`, and on an `Option` in a \
             function that returns an `Option`. Convert between them with `ok_or` or `ok`.")
-  | Implies_in_code { at = origin } ->
-      make Specification_only (Build.at origin)
-        (say
-           "`==>` is only for specifications and the bodies of functions for specifications only; \
-            in code, write `!a || b`.")
   | String_addition { at = origin; join } ->
       let write_piece = function
         | Inference.Fragment fragment -> [ Build.quote fragment ]

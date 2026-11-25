@@ -7,6 +7,15 @@ val convert_from_integer :
 
 val spend : State.context -> State.frame -> (Costs.counter -> Logic.term) -> State.frame
 val declare_unknown_amount : State.context -> State.frame -> Costs.counter -> Logic.term
+
+val spend_operation :
+  State.context ->
+  State.frame ->
+  potential_change:(unit -> Logic.term) option ->
+  ?note:(Costs.counter -> Logic.term -> unit) ->
+  (Costs.counter -> Costs.charge) ->
+  State.frame
+
 val list_impl_packages : State.context -> Types.ty -> Path.package list
 
 val make_equality :

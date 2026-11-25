@@ -179,7 +179,7 @@ type t =
   | Runs_in_formula of { at : Core.origin; construct : formula_construct }
   | Self_outside_method of { at : Core.origin }
   | Self_type_as_value of { at : Core.origin }
-  | Quantifier_over_type_in_code of { at : Core.origin }
+  | Quantifier_over_type_in_code of { at : Core.origin; quantifier : Language.Quantifier.t }
   | Static_method_as_value of { at : Core.origin; name : string }
   | Method_with_type_arguments_as_value of { at : Core.origin }
   | String_indexed of { at : Core.origin }
@@ -289,7 +289,6 @@ type t =
   | Shift_amount_not_unsigned of { at : Core.origin; excluded : shown }
   | Try_error_mismatch of { at : Core.origin; output_error : Types.ty; error : Types.ty }
   | Try_misused of { at : Core.origin }
-  | Implies_in_code of { at : Core.origin }
   | String_addition of { at : Core.origin; join : (joined_piece * joined_piece) option }
   | Alternative_type_mismatch of {
       at : Core.origin;

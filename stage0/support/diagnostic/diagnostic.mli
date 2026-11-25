@@ -58,6 +58,7 @@ module Code : sig
     | Repeated_clause
     | Cost_word
     | Loop_cost_bound
+    | Amortized_bound
     | Function_type_cost_bound
     | Function_type_names
     | Misplaced_callback_contract
@@ -88,7 +89,6 @@ module Code : sig
     | Lambda_annotation
     | Impl_parameters
     | Null_coalescing
-    | Specification_only
     | Misplaced_assert
     | Misplaced_proof
     | Misplaced_loop_exit

@@ -141,7 +141,16 @@ let render_helper_name = function
 let helpers =
   [
     ( Lend,
-      {|__attribute__((unused)) static inline void *truss_lend_allocate(struct truss_lend *lend, uint64_t size, uint64_t alignment) {
+      {|__attribute__((unused)) static inline void truss_lend_init(struct truss_lend *lend) {
+  lend->deferred = 0;
+  lend->blocks = 0;
+  lend->used = 0;
+  lend->lends = 0;
+}
+__attribute__((unused)) static inline void truss_lend_init_mark(struct truss_lend_mark *mark) {
+  mark->is_lent = 0;
+}
+__attribute__((unused)) static inline void *truss_lend_allocate(struct truss_lend *lend, uint64_t size, uint64_t alignment) {
   uint64_t start = (lend->used + alignment - 1) & ~(alignment - 1);
   if (alignment <= 16 && start + size <= sizeof lend->storage) {
     lend->used = start + size;

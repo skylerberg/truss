@@ -790,6 +790,24 @@ let replace_element context frame element ~before ~after index part =
            &&& not_ (equal (Symbol limit) index)
            ==> equal (at after (Symbol limit)) (at before (Symbol limit))) ))
 
+let keeps_potential : Intrinsic.operation -> bool = function
+  | Scalar _ | Lend _
+  | Buffer
+      ( Storage_swap | Compare_bytes | Find_byte | Storage_length | Storage_capacity | Storage_range
+      | Storage_as | Storage_model | Array_model | Storage_address )
+  | Runtime
+      ( Crash | Handle_from | Handle_descriptor | Run_test | Report_tests_to | Live_blocks
+      | Environment_entry | Coroutine_resume | Coroutine_suspend | Holds_invariant | Shared_key
+      | System_is_os _ | System_is_architecture _ | Libc_number _ ) ->
+      true
+  | Buffer
+      ( Storage_empty | Storage_with_capacity | Storage_set_capacity | Storage_lengthen
+      | Storage_shorten | Storage_push | Storage_pop | Storage_insert | Storage_remove
+      | Storage_from_array | Array_from_storage )
+  | Runtime (Handle_release | Coroutine_start | Tasks_spawn | Shared_new | Shared_update | Libc _)
+    ->
+      false
+
 let declare_buffer_slack context (ty : Types.ty) term =
   let symbol = Logic.Symbol.Slack ty in
   Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));

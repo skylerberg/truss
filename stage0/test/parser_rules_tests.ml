@@ -284,19 +284,6 @@ let () =
 let () =
   Harness.test "a quantifier over a range is an expression in code" (fun () ->
       Parse_support.expect_statement "let x = forall i in s => i" "(let x (forall (in i s) i))");
-  Harness.test "a quantifier over a type in a test" (fun () ->
-      Parse_support.expect_error Fixtures.Parser_rules.quantifier_over_a_type_in_a_test
-        ~code:Specification_only ~at:"forall");
-  Harness.test "==> in a test" (fun () ->
-      Parse_support.expect_error Fixtures.Parser_rules.implication_in_a_test
-        ~code:Specification_only ~at:"==>");
-  Harness.test "==> in a constant" (fun () ->
-      Parse_support.expect_error "let x: Bool = a ==> b" ~code:Specification_only ~at:"==>");
-  Harness.test "==> and a quantifier over a type in a function's body are left to the type checker"
-    (fun () ->
-      Parse_support.expect_definition
-        Fixtures.Parser_rules.implication_and_quantifier_in_a_function_body
-        "(fn f () -> Bool (block (==> a (forall value: Int64 (== value value)))))");
   Harness.test "a lending method's parameter cannot be named final" (fun () ->
       Parse_support.expect_error Fixtures.Parser_rules.lending_method_with_a_parameter_named_final
         ~code:Reserved_specification_name ~at:"final";
@@ -307,6 +294,13 @@ let () =
   Harness.test "a loop's cost is not amortized" (fun () ->
       Parse_support.expect_body_error "while a\n  cost amortized time O(1)\n{}"
         ~code:Loop_cost_bound ~at:"cost");
+  Harness.test "an amortized bound is an O bound on a metric" (fun () ->
+      Parse_support.expect_error "fn f()\n  cost amortized allocations <= 0\n{}"
+        ~code:Amortized_bound ~at:"amortized";
+      Parse_support.expect_error "fn f(visit: fn())\n  cost amortized calls(visit) O(1)\n{}"
+        ~code:Amortized_bound ~at:"amortized";
+      Parse_support.expect_error "fn f(visit: (fn() cost amortized allocations == 0)) {}"
+        ~code:Amortized_bound ~at:"amortized");
   Harness.test "specifications allow forall" (fun () ->
       Parse_support.expect_definition
         "type S(items: List[Int64])\n  invariant forall i in items => i > 0"

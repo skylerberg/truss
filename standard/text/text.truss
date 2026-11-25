@@ -724,6 +724,7 @@ impl From[Character] for String {
 public fn String.to_bytes(own self) -> List[UInt8]
   ensures result.length() == self.length()
   cost time O(1)
+  cost amortized time O(1)
   cost allocations == 0
 {
   List(storage: own self.storage)
