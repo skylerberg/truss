@@ -543,7 +543,7 @@ and resolve_bracket state scope (value : Syntax.expression) base items =
   List.iter
     (function
       | Syntax.Item item -> resolve_expression state scope item
-      | Item_constraint (_, type_) -> resolve_type_expression state scope type_)
+      | Item_constraint (_, type_) | Item_type type_ -> resolve_type_expression state scope type_)
     items
 
 and check_place state (written : Syntax.expression) (inner : Syntax.expression) =

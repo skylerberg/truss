@@ -1,0 +1,63 @@
+trait Advances {
+  fn follow(mut self, next: own Self) {
+    self = own next
+  }
+}
+
+impl Advances for String {}
+
+fn advance[Value: Advances](current: mut Value, next: own Value) {
+  mut current.follow(own next)
+}
+
+fn greatest[Value: Ordered](first: own Value, second: own Value) -> Value {
+  own first.max(own second)
+}
+
+type Holder(text: view String)
+
+test "a view is an explicit type argument of a function" {
+  let first = "apple".copy()
+  let second = "pear".copy()
+  let apple: view String = first
+  let pear: view String = second
+  assert greatest[view String](apple, second: pear) == "pear"
+  assert first == "apple" && second == "pear"
+}
+
+test "a view is an explicit type argument of a type" {
+  let first = "apple".copy()
+  let second = "pear".copy()
+  var names = List[view String].with_capacity(2)
+  mut names.push(first)
+  mut names.push(second)
+  assert names == ["apple", "pear"]
+  var nested = List[List[view String]].with_capacity(1)
+  mut nested.push(own names)
+  assert nested[0].length() == 2
+  assert first == "apple" && second == "pear"
+}
+
+test "generic code rebinds a view through a `mut self` method" {
+  let first = "apple".copy()
+  let second = "pear".copy()
+  var current: view String = first
+  advance(mut current, next: second)
+  assert current == "pear"
+  assert first == "apple"
+}
+
+test "a `mut self` method that a trait provides rebinds a view receiver" {
+  let first = "apple".copy()
+  let second = "pear".copy()
+  var current: view String = first
+  mut current.follow(second)
+  assert current == "pear"
+  var holder = Holder(text: first)
+  mut holder.text.follow(second)
+  assert holder.text == "pear"
+  var held: List[view String] = [first]
+  mut held[0].follow(second)
+  assert held[0] == "pear"
+  assert first == "apple"
+}

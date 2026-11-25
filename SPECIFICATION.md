@@ -908,6 +908,7 @@ let connection = connect(host, secure: false)?
 ```truss
 let value = parse[Int64](text)?
 let builder = List[String].with_capacity(64)
+let words = List[view String].with_capacity(64)
 ```
 
 Type arguments that cannot be inferred are written in brackets after the
@@ -917,6 +918,7 @@ function's name.
   type, or a trait, and is an index otherwise. After a `.`, it holds type
   arguments when the name is a method of the receiver.
 - The written arguments give the generic parameters in brackets, in order.
+- A type argument that is a view is written `view T`, as in a declared type.
 - A capability parameter takes no type argument, since it is written at its
   uses and not in brackets: `for_each[String](names, visit: greet)` gives
   `Item` alone.
@@ -2377,7 +2379,7 @@ postfix    = primary { "." LOWER_NAME
 brackets   = bracket_item { "," bracket_item } [ "," ]
            | [ additive ] ".." [ additive ]
            | [ additive ] "..=" additive ;
-bracket_item = expression | UPPER_NAME "=" type ;
+bracket_item = expression | UPPER_NAME "=" type | "view" type ;
 
 primary    = INTEGER | FLOAT | STRING | TAGGED_STRING
            | "true" | "false" | "todo" | "unreachable" | "break" | "continue"

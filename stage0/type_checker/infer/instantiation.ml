@@ -134,13 +134,17 @@ and check_written_arguments state items : (Types.argument list, Types.ty) result
   let arguments =
     List.filter_map
       (function
-        | Syntax.Item item -> Some (check_type_argument state item) | Item_constraint _ -> None)
+        | Syntax.Item item -> Some (check_type_argument state item)
+        | Item_type written ->
+            Some
+              (Types.Type (Interface.Elaborator.elaborate_type (State.read_context state) written))
+        | Item_constraint _ -> None)
       items
   in
   let errors =
     List.filter_map
       (function
-        | Syntax.Item _ -> None
+        | Syntax.Item _ | Item_type _ -> None
         | Item_constraint ((name : Syntax.name), _) ->
             Some
               (State.make_error_type state (Associated_in_type_arguments { at = Written name.id })))
