@@ -13,7 +13,8 @@ let resolve_item state (callee : Mir.callee) : Path.t * Ground.instantiation =
 
 let read_callee_signature (state : Lowering.state) path instantiation =
   let signature = Definitions.read_signature state.context path in
-  (signature, Monomorphic.make_signature_substitution signature instantiation)
+  ( signature,
+    Instances.make_substitution state.context.lookups.interface path signature instantiation )
 
 let resolve_call_signature state (callee : Mir.callee) =
   let path, instantiation = resolve_item state callee in
@@ -105,8 +106,8 @@ let lower_intrinsic state ?reported (operation : Intrinsic.operation) ~type_argu
                 Intrinsics.Place (Mir_places.lower_operand_place state borrowed)
             | passed ->
                 let ty = Mir_places.compute_operand_type state passed in
-                if Storage.find_storage_element ty <> None || Storage.find_view_element ty <> None
-                then Intrinsics.Place (Mir_places.lower_operand_place state passed)
+                if Storage.find_storage_element ty <> None then
+                  Intrinsics.Place (Mir_places.lower_operand_place state passed)
                 else Intrinsics.Value (Mir_places.lower_operand state passed))
           arguments
       in

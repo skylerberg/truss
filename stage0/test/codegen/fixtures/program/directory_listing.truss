@@ -1,10 +1,10 @@
 use standard.files
 
-fn say(text: StringSlice) uses Console {
+fn say(text: String) uses Console {
   Console.print_line(text)
 }
 
-fn kind_of(entries: Slice[files.DirectoryEntry], name: StringSlice) -> String {
+fn kind_of(entries: List[files.DirectoryEntry], name: String) -> String {
   for entry in entries {
     if entry.name == name {
       return if entry.kind == files.FileKind.File {
@@ -21,7 +21,7 @@ fn kind_of(entries: Slice[files.DirectoryEntry], name: StringSlice) -> String {
   "missing".copy()
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Console, FileRead, FileWrite
 {
   let directory = Path.new("${arguments[1]}/listed")

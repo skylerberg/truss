@@ -85,6 +85,7 @@ let is_struct types (ty : Ground.ty) =
   | Zero_size | Scalar _ | Tag_only _ -> false
 
 let rec render_value_type types (ty : Ground.ty) : C_text.t =
+  let ty = Ground.erase_views ty in
   match (compute_layout types ty).form with
   | Zero_size -> Text "void"
   | Scalar scalar -> render_scalar_type types scalar
@@ -121,7 +122,7 @@ let render_member_type types : Memory_layout.member -> C_text.t = function
   | Raw scalar -> render_scalar_type types scalar
 
 let list_held_keys types : Memory_layout.member -> C_text.key list = function
-  | Typed ty when is_struct types ty -> [ Type ty ]
+  | Typed ty when is_struct types ty -> [ Type (Ground.erase_views ty) ]
   | Typed _ | Raw _ -> []
 
 let render_member ~indent c_type name = Text indent ++ c_type ++ Text (" " ^ name ^ ";\n")
@@ -249,7 +250,8 @@ and define_text types (key : C_text.key) =
             List.concat_map
               (fun (_, ty) ->
                 match ty with
-                | Lowered.Value ty when is_struct types ty -> [ C_text.Type ty ]
+                | Lowered.Value ty when is_struct types ty ->
+                    [ C_text.Type (Ground.erase_views ty) ]
                 | _ -> [])
               fields;
         }

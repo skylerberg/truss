@@ -40,9 +40,6 @@ type diagnostic = {
   file : int option;
   is_error : bool;
   code : string;
-  start : int;
-  stop : int;
-  message : string;
   detail : string;
 }
 
@@ -76,10 +73,11 @@ val mark_stage_of_sources_stale :
 
 val mark_position_holders_stale : t -> target:endpoint -> markers:int -> stages:int -> unit
 
-type call_graph = { unit_kind : int; node_kind : int; calls : int }
+type proof_graph = { unit_kind : int; node_kind : int; markers : int }
+type proof_edge = { source : int; target : int; markers : int }
 
-val list_cycle_nodes : t -> call_graph -> seeds:int list -> int list
-val list_call_pairs : t -> call_graph -> nodes:int list -> (int * int) list
+val list_cycle_nodes : t -> proof_graph -> seeds:int list -> int list
+val list_proof_edges : t -> proof_graph -> nodes:int list -> proof_edge list
 
 type read_edge = { source_kind : int; source : int; target_kind : int; target : int }
 
@@ -92,7 +90,7 @@ val list_edges_into :
 val list_definitions_identified : t -> ids:int list -> (int * int * string) list
 val mark_paths_stale : t -> stage:int -> paths:int list -> unit
 val list_keys_of_paths : t -> paths:int list -> (int * string) list
-val mark_group_stale : t -> stage:int -> path:int -> unit
+val mark_groups_stale : t -> stage:int -> path:int -> unit
 
 type item = { id : int; key : string; label : string; definition : int option }
 
@@ -132,7 +130,14 @@ val list_claimed_among :
 
 val merge : string list -> into:string -> unit
 
-type located = { stage : int; base : int option; is_in_test : bool; detail : string }
+type placed = { file : string; base : int; stop : int; spans : string }
+
+type located = {
+  stage : int;
+  definition : (string * placed) option;
+  is_in_test : bool;
+  detail : string;
+}
 
 val list_file_diagnostics : t -> schema -> file:int -> test_kind:int -> located list
 val has_error : t -> package:string -> last_stage:int -> hidden_stage:int option -> bool
@@ -141,25 +146,21 @@ type scope = Everything | Packages of string list | Files of int list
 
 val find_unproven_definition : t -> scope:scope -> origin:int -> string option
 
-type hole = { home : int; start : int; stop : int }
+type hole = { home : int; location : string }
 
 val list_holes : t -> schema -> definition:int -> hole list
 val replace_holes : t -> definition:int -> hole list -> unit
 
-type citation = { cited : int; clause_start : int; clause_stop : int }
-
 type verdict = {
   code : string;
-  start : int;
-  stop : int;
-  shows : string;
+  site : string;
   is_proven : bool;
   trusts_compiled_code : bool;
   failure : string option;
-  citation : citation option;
 }
 
-val list_file_verdicts : t -> file:int -> (int * verdict) list
+val list_file_verdicts : t -> file:int -> (string * placed * verdict) list
+val find_placed : t -> schema -> definition:int -> placed option
 val replace_verdicts : t -> definition:int -> verdict list -> bool
 
 val list_differing_rows :
@@ -312,6 +313,7 @@ val replace_module_law_proofs :
 
 val has_module : t -> schema -> module_:int -> bool
 val find_place : t -> schema -> definition:int -> (string * int) option
+val find_file_order : t -> schema -> definition:int -> (string * int) option
 val find_text : t -> schema -> definition:int -> string option
 val find_definition_key : t -> schema -> id:int -> string option
 val list_member_keys : t -> schema -> owner:int -> member:string -> origin:int -> string list

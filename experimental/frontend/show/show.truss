@@ -1,7 +1,7 @@
 use frontend.syntax
 
-fn make_form(head: StringSlice, parts: Slice[String]) -> String {
-  var pieces: List[StringSlice] = []
+fn make_form(head: String, parts: List[String]) -> String {
+  var pieces: List[view String] = []
   if !head.is_empty() {
     mut pieces.push(head)
   }
@@ -13,7 +13,7 @@ fn make_form(head: StringSlice, parts: Slice[String]) -> String {
   "(${pieces.join(" ")})"
 }
 
-fn show_optional_type(value: Option[syntax.TypeExpression], prefix: StringSlice) -> String
+fn show_optional_type(value: Option[syntax.TypeExpression], prefix: String) -> String
   uses RunForever
 {
   match value {
@@ -23,7 +23,7 @@ fn show_optional_type(value: Option[syntax.TypeExpression], prefix: StringSlice)
 }
 
 internal fn show_path(path: syntax.NamePath) -> String {
-  var names: List[StringSlice] = []
+  var names: List[view String] = []
   for name in path.modules {
     mut names.push(name.text)
   }
@@ -31,14 +31,14 @@ internal fn show_path(path: syntax.NamePath) -> String {
   names.join(".")
 }
 
-fn show_mode(mode: syntax.Mode) -> StringSlice {
+fn show_mode(mode: syntax.Mode) -> view String {
   match mode {
     Mut => "mut"
     Own => "own"
   }
 }
 
-fn show_intended_keyword(intended: syntax.IntendedKind) -> StringSlice {
+fn show_intended_keyword(intended: syntax.IntendedKind) -> view String {
   match intended {
     IntendedFunction => "fn"
     IntendedConstant => "let"
@@ -49,7 +49,7 @@ fn show_intended_keyword(intended: syntax.IntendedKind) -> StringSlice {
   }
 }
 
-fn show_operation(operation: syntax.Operation) -> StringSlice {
+fn show_operation(operation: syntax.Operation) -> view String {
   match operation {
     Arithmetic(arithmetic) => match arithmetic {
       Multiply => "*"
@@ -70,7 +70,7 @@ fn show_operation(operation: syntax.Operation) -> StringSlice {
   }
 }
 
-fn show_binary(binary: syntax.Binary) -> StringSlice {
+fn show_binary(binary: syntax.Binary) -> view String {
   match binary {
     Operation(operation) => show_operation(operation)
     Comparison(comparison) => match comparison {
@@ -96,7 +96,7 @@ fn show_assignment(assignment: syntax.Assignment) -> String {
   }
 }
 
-fn escape(value: StringSlice) -> String {
+fn escape(value: String) -> String {
   var buffer = String.with_capacity(value.length())
   for character in value.characters() {
     if character == Character"\"" {
@@ -123,6 +123,7 @@ fn show_type_expression(written: syntax.TypeExpression) -> String
     }
     Associated(parameter, name) => "${parameter.text}.${name.text}"
     FunctionType(function_type) => show_function_type(function_type)
+    ViewType(viewed) => "view ${show_type_expression(viewed)}"
     TypeError => "error"
   }
 }
@@ -187,7 +188,7 @@ fn show_generic(parameter: syntax.GenericParameter) -> String
   }
 }
 
-fn show_path_types(path_types: Slice[syntax.PathType], separator: StringSlice) -> String
+fn show_path_types(path_types: List[syntax.PathType], separator: String) -> String
   uses RunForever
 {
   var shown: List[String] = []
@@ -197,7 +198,7 @@ fn show_path_types(path_types: Slice[syntax.PathType], separator: StringSlice) -
   shown.join(separator)
 }
 
-fn show_generics(parameters: Slice[syntax.GenericParameter]) -> String
+fn show_generics(parameters: List[syntax.GenericParameter]) -> String
   uses RunForever
 {
   if parameters.is_empty() {
@@ -221,7 +222,7 @@ fn show_capability_reference(reference: syntax.CapabilityReference) -> String
   }
 }
 
-fn show_condition(condition: Slice[syntax.BoundCondition]) -> String
+fn show_condition(condition: List[syntax.BoundCondition]) -> String
   uses RunForever
 {
   var shown: List[String] = []
@@ -270,13 +271,14 @@ fn show_clause(clause: syntax.Clause) -> String
     Requires(value) => make_form("requires", parts: [show_expression(value)])
     Ensures(value) => make_form("ensures", parts: [show_expression(value)])
     Decreases(measures) => make_form("decreases", parts: show_expressions(measures))
+    Modifies(parts) => make_form("modifies", parts: show_expressions(parts))
     Cost(clause: cost_clause) => show_cost(cost_clause)
     ClauseError => "error"
   }
   show_conditional(own shown, condition: clause.condition)
 }
 
-fn show_expressions(values: Slice[syntax.Expression]) -> List[String]
+fn show_expressions(values: List[syntax.Expression]) -> List[String]
   uses RunForever
 {
   var shown: List[String] = []
@@ -286,7 +288,7 @@ fn show_expressions(values: Slice[syntax.Expression]) -> List[String]
   shown
 }
 
-fn show_metric(metric: syntax.Metric) -> StringSlice {
+fn show_metric(metric: syntax.Metric) -> view String {
   match metric {
     Time => "time"
     Allocations => "allocations"
@@ -298,7 +300,7 @@ fn show_cost(cost_clause: syntax.CostClause) -> String
   uses RunForever
 {
   let resource = match cost_clause.resource {
-    Metric(metric) => show_metric(metric).to_string()
+    Metric(metric) => show_metric(metric).copy()
     Calls(target) => match target {
       CallParameter(name) => make_form("calls", parts: [name.text.copy()])
       CallCapability(path_type) => make_form("calls", parts: [show_path_type(path_type)])
@@ -311,7 +313,7 @@ fn show_cost(cost_clause: syntax.CostClause) -> String
     Exactly(value) => make_form("==", parts: [show_expression(value)])
   }
   let amortized = if cost_clause.is_amortized { "amortized" } else { "" }
-  make_form("cost", parts: [amortized.to_string(), own resource, own bound])
+  make_form("cost", parts: [amortized.copy(), own resource, own bound])
 }
 
 fn show_string_literal(literal: syntax.StringLiteral) -> String
@@ -474,7 +476,7 @@ fn show_update(update: syntax.Update) -> String
     FieldUpdate(path, value) => if path.is_empty() {
       show_expression(value)
     } else {
-      var names: List[StringSlice] = []
+      var names: List[view String] = []
       for name in path {
         mut names.push(name.text)
       }
@@ -628,7 +630,7 @@ fn show_pattern(written: syntax.Pattern) -> String
   }
 }
 
-fn show_pattern_fields(fields: Slice[syntax.PatternField]) -> List[String]
+fn show_pattern_fields(fields: List[syntax.PatternField]) -> List[String]
   uses RunForever
 {
   var shown: List[String] = []
@@ -643,7 +645,7 @@ fn show_pattern_fields(fields: Slice[syntax.PatternField]) -> List[String]
   shown
 }
 
-fn show_visibility(visibility: Option[syntax.Visibility]) -> StringSlice {
+fn show_visibility(visibility: Option[syntax.Visibility]) -> view String {
   match visibility {
     None => ""
     Some(written) => match written {
@@ -679,7 +681,7 @@ fn show_parameter(parameter: syntax.Parameter) -> String
     }
     NamedParameter(name, mode, annotation, default) => {
       let shown_mode = match mode {
-        Some(written) => show_mode(written).to_string()
+        Some(written) => show_mode(written).copy()
         None => ""
       }
       let shown_default = match default {
@@ -692,7 +694,7 @@ fn show_parameter(parameter: syntax.Parameter) -> String
   }
 }
 
-fn show_parameters(parameters: Slice[syntax.Parameter]) -> String
+fn show_parameters(parameters: List[syntax.Parameter]) -> String
   uses RunForever
 {
   var shown: List[String] = []
@@ -737,7 +739,7 @@ fn show_law(law_definition: syntax.LawDefinition) -> String
   make_form("law", parts)
 }
 
-fn show_fields(fields: Slice[syntax.Field]) -> String
+fn show_fields(fields: List[syntax.Field]) -> String
   uses RunForever
 {
   var shown: List[String] = []
@@ -757,7 +759,7 @@ fn show_fields(fields: Slice[syntax.Field]) -> String
   make_form("", parts: shown)
 }
 
-fn show_capability_list(capabilities: Slice[syntax.CapabilityReference]) -> String
+fn show_capability_list(capabilities: List[syntax.CapabilityReference]) -> String
   uses RunForever
 {
   if capabilities.is_empty() {
@@ -884,7 +886,7 @@ fn show_definition(definition: syntax.Definition, methods: own List[String]) -> 
     )
     DefinitionError(intended, name) => {
       let shown_intended = match intended {
-        Some(kind) => show_intended_keyword(kind).to_string()
+        Some(kind) => show_intended_keyword(kind).copy()
         None => ""
       }
       let shown_name = match name {

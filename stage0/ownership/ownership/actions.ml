@@ -38,10 +38,10 @@ type action =
 
 type position = { block : Mir.Graph.block; index : int }
 type step = { action : action; origin : Core.origin }
-type fork_join_block = { keyword : string; branches : position list list }
+type fork_join_block = { schedule : Language.Loop_mode.t; branches : position list list }
 
 type fork_join_loop = {
-  keyword : string;
+  schedule : Language.Loop_mode.t;
   body : position list;
   pattern_locals : Core.local list;
   temporaries : Mir.local list;
@@ -178,11 +178,22 @@ let is_temporary builder (place : Mir.place) =
   | Local local -> (lookup_local_info builder local).kind = Temporary
   | Constant _ | Literal _ -> false
 
+let is_inside_view builder (place : Mir.place) =
+  (match place.root with
+    | Local local -> Types.is_view (lookup_local_info builder local).type_
+    | Constant _ | Literal _ -> false)
+  || List.exists
+       (fun (projection : Mir.projection) ->
+         match projection with
+         | Element { sequence; _ } | Range { sequence; _ } -> Types.is_view sequence
+         | Field _ | Variant_field _ -> false)
+       place.projections
+
 let access_place builder (place : Mir.place) ~(borrowed_as : Types.ty option) =
   let place = resolve_alias builder place in
   let ranges_an_owner =
     match List.rev place.projections with
-    | Range { sequence; _ } :: _ -> not (Context.is_view builder.context sequence)
+    | Range { sequence; _ } :: _ -> not (Types.is_view sequence)
     | (Element _ | Field _ | Variant_field _) :: _ | [] -> false
   in
   match (track_place builder place, borrowed_as) with
@@ -190,8 +201,10 @@ let access_place builder (place : Mir.place) ~(borrowed_as : Types.ty option) =
   | Some tracked, None -> Views [ Copy_of_view_in tracked ]
   | Some tracked, Some type_ ->
       Place_of
-        (if Context.lends_nothing builder.context type_ && not ranges_an_owner then
-           Copy_of_view_in tracked
+        (if
+           is_inside_view builder place
+           || (Context.lends_nothing builder.context type_ && not ranges_an_owner)
+         then Copy_of_view_in tracked
          else Borrow_of tracked)
   | None, _ -> (
       match place.root with
@@ -265,12 +278,9 @@ let find_lent_place builder (mode : Language.Mode.t) operand =
   | Views _ -> None
 
 let find_stored_type builder (mode : Language.Mode.t) operand =
-  match (access_argument builder mode operand, find_operand_type operand) with
-  | Place_of _, Some (Named { path; arguments = Type element :: _ }) when Well_known.is Slice path
-    ->
-      Some element
-  | Place_of _, type_ -> type_
-  | Views _, _ -> None
+  match access_argument builder mode operand with
+  | Place_of _ -> find_operand_type operand
+  | Views _ -> None
 
 let list_lent_places builder (operand : Mir.operand) =
   match (access_value builder operand, operand) with
@@ -486,7 +496,11 @@ let emit_bound_value builder (local : Mir.local) (core : Core.local) (value : Mi
       List.map (fun view -> Copy_of_view_in (extract_viewed_place view)) views
     else views
   in
-  if holds_views || views <> [] then emit builder (Bind_views { locals = [ core ]; views }) origin
+  let aliases_literal =
+    match value with Operand (Borrow { place = { root = Literal _; _ }; _ }) -> true | _ -> false
+  in
+  if holds_views || aliases_literal || views <> [] then
+    emit builder (Bind_views { locals = [ core ]; views }) origin
 
 let list_returned_temporaries (body : Mir.Graph.body) =
   let returned = ref [] in
@@ -608,9 +622,7 @@ let emit_statement builder (statement : Mir.Graph.statement) =
               read_uses builder uses;
               match value with
               | Operand (Borrow { place; _ }) -> hold builder target (Alias place)
-              | Convert { conversion = View_to_owned; _ } ->
-                  hold builder target (compute_rvalue_held builder value)
-              | _ -> raise_bug "a lent local that holds neither a borrow nor the owner of a view")
+              | _ -> raise_bug "a lent local that holds no borrow")
           | Source { local = core; _ } ->
               read_uses builder uses;
               emit_bound_value builder local core value origin
@@ -812,7 +824,7 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
         | Fork { concurrent; branches; _ } ->
             Some
               {
-                keyword = (if concurrent then "concurrent" else "parallel");
+                schedule = (if concurrent then Concurrent else Parallel);
                 branches =
                   List.map
                     (fun (branch : Mir.Graph.branch) -> list_positions branch.blocks)
@@ -828,7 +840,7 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
           ->
             Some
               {
-                keyword = (if loop.schedule = Parallel then "parallel" else "concurrent");
+                schedule = loop.schedule;
                 body =
                   List.filter
                     (fun position ->

@@ -144,6 +144,11 @@ let check_call_types context (node : Core.expression) (call : Core.call) =
         List.iteri
           (fun position (expected, (argument : Core.argument)) ->
             let found = read_operand_type argument.value in
+            let expected, found =
+              match argument.mode with
+              | Read -> (Types.erase_views expected, Types.erase_views found)
+              | Mut | Own -> (expected, found)
+            in
             if not (fits context ~expected ~found) then
               context.report
                 "argument %d of a call of `%s` has the type `%s`, and its parameter `%s`" position
@@ -340,8 +345,8 @@ let check_semantics context (form : Core.t) =
        })
     form.definition
 
-let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolve.Names.key option)
-    (form : Core.t) =
+let check_form (interface : Interface.Lookups.t) (source_lookups : Resolve.Names.source)
+    ~(path : Path.t) ~(key : Resolve.Names.key option) (form : Core.t) =
   let list_bounds =
     let of_key key =
       Interface.Properties.Bounds.of_known (interface.read_elaborated_interface key).scope.bounds
@@ -357,8 +362,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let at = ref None in
   let name = match key with Some key -> Resolve.Names.show_key key | None -> Path.show path in
   let source =
-    lazy
-      (Option.map (fun key -> (interface.names.read_spans key, interface.names.read_text key)) key)
+    lazy (Option.map (fun key -> (source_lookups.read_spans key, source_lookups.read_text key)) key)
   in
   let quote () =
     match (!at, Lazy.force source) with
@@ -476,7 +480,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         check_type "a call's `Self`" self_type;
         check_instantiation "a call" instantiation;
         match evidence with
-        | Impl { substitution; _ } ->
+        | Impl { substitution; _ } | Derived_for_view { substitution; _ } ->
             List.iter
               (fun (_, inner) -> check_argument "an `impl`'s type argument" inner)
               (Types.For_testing.list_arguments substitution)
@@ -696,7 +700,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                          Core.argument) ->
                          check_mutable_place "a range passed `mut`" base
                      | { mode = Mut; value = Value _; _ } ->
-                         report "a `mut` parameter receives a value that is not a slice"
+                         report "a `mut` parameter receives a value that is not a range"
                      | { mode = Mut; value = Place core_place; _ } ->
                          check_mutable_place "a `mut` argument" core_place
                      | { mode = Own; value = Place _; _ } ->
@@ -861,8 +865,8 @@ let check_written_origins (interface : Interface.Lookups.t) (key : Resolve.Names
     }
     form.definition
 
-let check interface (key : Resolve.Names.key) form =
-  check_form interface ~path:key.path ~key:(Some key) form;
+let check interface source_lookups (key : Resolve.Names.key) form =
+  check_form interface source_lookups ~path:key.path ~key:(Some key) form;
   check_written_origins interface key form
 
 let check_derived_origins path (form : Core.t) =
@@ -882,8 +886,8 @@ let check_derived_origins path (form : Core.t) =
     }
     form.definition
 
-let check_derived interface path form =
-  check_form interface ~path ~key:None form;
+let check_derived interface source_lookups path form =
+  check_form interface source_lookups ~path ~key:None form;
   check_derived_origins path form
 
 let list_provided_methods interface (impl : Types.impl_interface) =
@@ -911,7 +915,7 @@ let check_derived_impls database interface (type_ : Path.t) =
             let path : Path.t = Method { owner = impl; name; receiver } in
             match Database.For_testing.read_derived_form database path with
             | Some form ->
-                check_derived interface path form;
+                check_derived interface (Database.make_source_lookups database) path form;
                 count + 1
             | None when List.mem name provided -> count
             | None -> Harness.fail "`%s` has no core form for `%s`" (Path.show impl) name
@@ -937,7 +941,7 @@ let check_file database (file : Path.file) =
       let written =
         match Database.read_checked_body database key with
         | Some checked ->
-            check interface key checked.form;
+            check interface (Database.make_source_lookups database) key checked.form;
             1
         | None -> 0
       in

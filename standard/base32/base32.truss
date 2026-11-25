@@ -47,14 +47,14 @@ fn symbol_value(byte: UInt8) -> UInt8
   }
 }
 
-fn byte_at(bytes: Slice[UInt8], index: UInt64) -> UInt8
+fn byte_at(bytes: List[UInt8], index: UInt64) -> UInt8
   cost time O(1)
   cost allocations == 0
 {
   if index < bytes.length() { bytes[index] } else { 0 }
 }
 
-fn symbol_at(bytes: Slice[UInt8], start: UInt64, position: UInt64) -> UInt8
+fn symbol_at(bytes: List[UInt8], start: UInt64, position: UInt64) -> UInt8
   requires start <= bytes.length()
   requires position < 8
   ensures result < 32
@@ -80,7 +80,7 @@ fn symbol_at(bytes: Slice[UInt8], start: UInt64, position: UInt64) -> UInt8
   }
 }
 
-public fn encode(bytes: Slice[UInt8], padding: Bool = true) -> String
+public fn encode(bytes: List[UInt8], padding: Bool = true) -> String
   cost time O(bytes.length())
   cost allocations <= 1
 {
@@ -107,14 +107,14 @@ public fn encode(bytes: Slice[UInt8], padding: Bool = true) -> String
   String(storage: own output)
 }
 
-fn value_at(text: Slice[UInt8], symbol_count: UInt64, index: UInt64) -> UInt8
+fn value_at(text: List[UInt8], symbol_count: UInt64, index: UInt64) -> UInt8
   requires symbol_count <= text.length()
   ensures result <= 32
 {
   if index < symbol_count { symbol_value(text[index]) } else { 0 }
 }
 
-fn byte_of(text: Slice[UInt8], symbol_count: UInt64, index: UInt64) -> UInt8
+fn byte_of(text: List[UInt8], symbol_count: UInt64, index: UInt64) -> UInt8
   requires symbol_count <= text.length()
   requires index <= UInt64.maximum / 4
 {
@@ -136,7 +136,7 @@ fn byte_of(text: Slice[UInt8], symbol_count: UInt64, index: UInt64) -> UInt8
   }
 }
 
-public fn decode(text: StringSlice) -> Result[List[UInt8], DecodeError] {
+public fn decode(text: String) -> Result[List[UInt8], DecodeError] {
   let symbols = text.bytes()
   if symbols.length() > UInt64.maximum / 4 {
     intrinsic.crash("a string cannot hold that many bytes")

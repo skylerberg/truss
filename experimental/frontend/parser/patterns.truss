@@ -8,7 +8,7 @@ fn make_pattern_node(cursor: mut TokenCursor, start: UInt64, kind: own syntax.Pa
   syntax.Pattern(own kind, id: allocate_id_from(mut cursor, start_index: start))
 }
 
-fn range_bound() -> StringSlice {
+fn range_bound() -> view String {
   "a literal or a constant with its module or type, such as `http.last`"
 }
 

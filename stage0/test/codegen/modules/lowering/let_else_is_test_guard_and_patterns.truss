@@ -27,7 +27,7 @@ fn area(box: Box) -> Int64 {
   across * up
 }
 
-fn total_area(boxes: Slice[Box]) -> Int64 {
+fn total_area(boxes: List[Box]) -> Int64 {
   var total = 0
   for (width: across, height: up) in boxes {
     total += across * up

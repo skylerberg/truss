@@ -1,9 +1,0 @@
-fn rest_after[Element](items: Slice[Element], after: Element) -> Slice[Element] {
-  items[1..]
-}
-
-fn f(names: Slice[String], text: mut String) -> UInt64 {
-  let rest = rest_after(names, after: text.slice())
-  mut text.clear()
-  rest.length()
-}

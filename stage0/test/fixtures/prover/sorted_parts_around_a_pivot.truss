@@ -1,4 +1,5 @@
-fn sort_part[Element: Ordered](items: mut Slice[Element])
+fn sort_part[Element: Ordered](items: mut List[Element])
+  modifies items[..]
   ensures items.is_sorted()
   ensures items.model().is_permutation_of(old(items.model()))
   ensures forall i in 0..items.length() => old(items.model()).contains(items[i])
@@ -6,7 +7,8 @@ fn sort_part[Element: Ordered](items: mut Slice[Element])
   todo
 }
 
-fn sort_around[Element: Ordered](items: mut Slice[Element], middle: UInt64)
+fn sort_around[Element: Ordered](items: mut List[Element], middle: UInt64)
+  modifies items[..]
   requires middle < items.length()
   requires forall i in 0..middle => items[i] < items[middle]
   requires forall i in middle..items.length() => items[middle] <= items[i]

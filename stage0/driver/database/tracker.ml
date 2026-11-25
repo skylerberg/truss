@@ -54,9 +54,7 @@ let mark_readers_of_all tracker targets =
       ~markers:reads
 
 let stages_holding_positions =
-  List.fold_left
-    (fun stages stage -> stages lor (1 lsl Kind.rank_stage stage))
-    0 [ Kind.Prove; Lower; Decide ]
+  List.fold_left (fun stages stage -> stages lor (1 lsl Kind.rank_stage stage)) 0 [ Kind.Lower ]
 
 let mark_position_holders tracker target id name =
   if tracker.records_reads then
@@ -66,11 +64,11 @@ let mark_position_holders tracker target id name =
 let import_kind = Kind.rank_target (Entity Import)
 let definition_kind = Kind.rank_target (Entity Definition)
 
-let call_graph : Store.call_graph =
+let proof_graph : Store.proof_graph =
   {
     unit_kind = Kind.rank_stage List_calls;
     node_kind = definition_kind;
-    calls = Kind.encode_markers [ Calls ];
+    markers = Kind.encode_markers [ Calls; Assumes ];
   }
 
 let package_kind = Kind.rank_target (Entity Package)
@@ -116,11 +114,11 @@ let follow_edge_changes tracker (stage : Kind.stage) id changes =
     begin if
       List.exists
         (fun (change : Store.edge_change) ->
-          change.changed.kind = definition_kind && differs change Calls)
+          change.changed.kind = definition_kind && (differs change Calls || differs change Assumes))
         changes
     then begin
       mark_stale tracker Group_recursion id;
-      Store.mark_group_stale tracker.store ~stage:(Kind.rank_stage Group_recursion) ~path:id
+      Store.mark_groups_stale tracker.store ~stage:(Kind.rank_stage Group_recursion) ~path:id
     end
     end
 
@@ -403,35 +401,32 @@ let forget tracker stage id =
     (Store.replace_diagnostics tracker.store ~stage:(Kind.rank_stage stage) ~unit:id ~package:"" []);
   ignore (Store.unmark_stale tracker.store ~stage:(Kind.rank_stage stage) ~id)
 
-let encode_diagnostic ~definition ~file (diagnostic : _ Diagnostic.diagnostic) ~start ~stop :
-    Store.diagnostic =
+let encode_diagnostic ~definition ~file (description : _ Description.t) detail : Store.diagnostic =
   {
     definition;
     file;
-    is_error = Diagnostic.is_error diagnostic;
-    code = Diagnostic.Code.name diagnostic.code;
-    start;
-    stop;
-    message = diagnostic.message;
-    detail = Marshal.to_string diagnostic [];
+    is_error = description.severity = Error;
+    code = Diagnostic.Code.name description.code;
+    detail = Marshal.to_string detail [];
   }
 
 let replace_file_diagnostics tracker stage ~package ~file diagnostics =
   Store.replace_diagnostics tracker.store ~stage:(Kind.rank_stage stage) ~unit:file
     ~package:(Path.show_package package)
     (List.map
-       (fun (diagnostic : Diagnostic.t) ->
-         encode_diagnostic ~definition:None ~file:(Some file) diagnostic
-           ~start:diagnostic.span.start ~stop:diagnostic.span.stop)
+       (fun diagnostic ->
+         encode_diagnostic ~definition:None ~file:(Some file)
+           (Renderer.describe_file_diagnostic diagnostic)
+           diagnostic)
        diagnostics)
 
 let replace_placed_diagnostics tracker stage ~package ~unit placed =
   Store.replace_diagnostics tracker.store ~stage:(Kind.rank_stage stage) ~unit
     ~package:(Path.show_package package)
     (List.map
-       (fun (definition, (diagnostic : Diagnostic.in_definition)) ->
-         encode_diagnostic ~definition:(Some definition) ~file:None diagnostic
-           ~start:diagnostic.span.start ~stop:diagnostic.span.stop)
+       (fun (definition, diagnostic) ->
+         encode_diagnostic ~definition:(Some definition) ~file:None (Catalog.describe diagnostic)
+           diagnostic)
        placed)
 
 let replace_definition_diagnostics tracker stage ~package ~definition diagnostics =

@@ -7,22 +7,16 @@ let find_refused_class (state : State.state) ~sides =
   Option.bind state.unifier.refused_code_unknown (fun root ->
       if List.exists (fun (side, _) -> holds_class state root side) sides then Some root else None)
 
-let report_decided_in_specification (state : State.state) span root =
-  let message =
-    match
-      Array.find_index
-        (Option.fold ~none:false ~some:(holds_class state root))
-        state.tables.local_types
-    with
-    | Some local ->
-        let name = State.quote_span state (State.read_span state local) in
-        Printf.sprintf "A specification cannot decide the type of `%s`. Declare `%s` with a type."
-          name name
-    | None ->
-        "A specification cannot decide a type that code computes with. Give the call its type \
-         arguments."
+let report_decided_in_specification (state : State.state) at root =
+  let local =
+    Array.find_index
+      (Option.fold ~none:false ~some:(holds_class state root))
+      state.tables.local_types
   in
-  let report = State.add_diagnostic state Decided_in_specification span message in
+  let report =
+    State.add_diagnostic state
+      (Decided_in_specification { at; local = Option.map (fun local -> Core.Written local) local })
+  in
   Unify.poison state.unifier root report;
   report
 
@@ -46,43 +40,13 @@ let rec list_class_pairs (state : State.state) (side, wanted) =
            arguments wanted_arguments)
   | _ -> []
 
-let explain_decision (site : State.decision_site) ~name ~decided =
-  let took where = Printf.sprintf "%s took its default type, `%s`, %s." name decided where in
-  let needs user =
-    Printf.sprintf "%s needs the type of %s, so %s takes its default type `%s` here." user name name
-      decided
-  in
-  match site with
-  | Use ->
-      ( Printf.sprintf "An earlier statement decided that the type of %s is `%s`." name decided,
-        Printf.sprintf "This statement decides that the type of %s is `%s`." name decided )
-  | Statement_end -> (took "at an earlier statement", needs "This statement")
-  | Actual_head ->
-      ( took "where the type of an earlier value was needed",
-        Printf.sprintf "The type of this value is needed here, so %s takes its default type `%s`."
-          name decided )
-  | Method_call -> (took "at an earlier method call", needs "Method lookup")
-
-let make_declaration_remedy name = Printf.sprintf "Declare `%s` with a type." name
-
-let show_declaration : Path.t -> string = function
-  | Method { owner; name; _ } -> Path.show_name owner ^ "." ^ name
-  | path -> Path.show_name path
-
-let make_bracket_remedy declared_on (parameter : Types.generic) =
-  Printf.sprintf "Give `%s` its %s in brackets." (show_declaration declared_on)
-    (match parameter.kind with
-    | Types.Type_generic _ -> "type arguments"
-    | Value_generic -> "arguments")
-
-let find_log_report (state : State.state) ~fixes code span message (root, wanted) =
+let find_log_report (state : State.state) at mismatch (root, wanted) =
   let entries =
     List.map (fun (logged : State.logged) -> logged.entry) (State.list_class_log state root)
   in
   let literals =
     List.filter_map (function State.Literal { literal; _ } -> Some literal | _ -> None) entries
   in
-  let quote id = State.quote_span state (State.read_span state id) in
   let wanted_type = State.normalize state wanted in
   let wanted = State.zonk state wanted in
   match
@@ -97,17 +61,19 @@ let find_log_report (state : State.state) ~fixes code span message (root, wanted
   with
   | Some (State.Literal { allowed; _ })
     when State.is_within state wanted Types.float_types && not (State.is_float_domain allowed) ->
-      let spell_as_float literal =
+      let read_number literal =
         match state.tables.elaborations.(literal) with
-        | Some (Literal (Integer_value number)) ->
-            Printf.sprintf "`%s` as `%s.0`" (quote literal) (Z.to_string number)
-        | _ -> State.raise_bug "`%s` is no integer literal" (quote literal)
+        | Some (Literal (Integer_value number)) -> (Core.Written literal, number)
+        | _ -> State.raise_bug "a number class holds a literal that is not an integer"
       in
       Some
-        (State.add_diagnostic state Integer_for_float span
-           (Printf.sprintf "An integer literal is never a float, and %s is expected here. Write %s."
-              (State.describe state wanted)
-              (String.concat " and " (List.map spell_as_float literals))))
+        (State.add_diagnostic state
+           (Integer_for_float
+              {
+                at;
+                wanted = State.make_shown state wanted;
+                literals = List.map read_number literals;
+              }))
   | Some (State.Literal { allowed; report_excluded; _ })
     when State.is_within state wanted
            (if State.is_float_domain allowed then Types.float_types
@@ -118,54 +84,53 @@ let find_log_report (state : State.state) ~fixes code span message (root, wanted
       let local = List.find_map (function State.Local local -> Some local | _ -> None) entries in
       let name =
         match (local, literals) with
-        | Some local, _ -> quote local
-        | None, literal :: _ -> quote literal
+        | Some local, _ -> local
+        | None, literal :: _ -> literal
         | None, [] -> State.raise_bug "a number class has no literal"
       in
-      let explanation, note =
-        explain_decision site ~name:(Printf.sprintf "`%s`" name) ~decided:(Types.show decided_type)
-      in
-      let remedy =
+      let declares =
         match local with
-        | Some local
-          when site <> Use
-               && State.is_within state wanted Types.number_types
-               && Hashtbl.mem state.annotatable local ->
-            [ make_declaration_remedy name ]
-        | _ -> []
+        | Some local ->
+            site <> Use
+            && State.is_within state wanted Types.number_types
+            && Hashtbl.mem state.annotatable local
+        | None -> false
       in
       let report =
-        State.add_diagnostic state code span
-          ~notes:[ (decided_at, note) ]
-          ~fixes:(match site with Use -> fixes | Statement_end | Actual_head | Method_call -> [])
-          (String.concat " " (message :: explanation :: remedy))
+        State.add_diagnostic state
+          (Mismatch
+             {
+               at;
+               mismatch;
+               decision =
+                 Some { name = Written name; decided = decided_type; site; decided_at; declares };
+             })
       in
       Unify.poison state.unifier root report;
       Some report
   | Some (State.Literal _ | State.Local _ | State.Origin _) | None -> None
 
-let add_mismatch_diagnostic (state : State.state) ?(fixes = []) code
-    (span : Source.Definition_span.t) ~(sides : (Types.ty * Types.ty) list) message =
+let add_mismatch_diagnostic (state : State.state) at ~(sides : (Types.ty * Types.ty) list) mismatch
+    =
   match find_refused_class state ~sides with
-  | Some root -> report_decided_in_specification state span root
+  | Some root -> report_decided_in_specification state at root
   | None -> (
       match
         List.find_map
-          (find_log_report state ~fixes code span message)
+          (find_log_report state at mismatch)
           (List.concat_map (list_class_pairs state) sides)
       with
       | Some report -> report
-      | None -> State.add_diagnostic state ~fixes code span message)
+      | None -> State.add_diagnostic state (Mismatch { at; mismatch; decision = None }))
 
-let add_mismatch ?fixes (state : State.state) (span : Source.Definition_span.t) ~expected ~actual =
-  add_mismatch_diagnostic state ?fixes Mismatch span
+let add_mismatch ?copy (state : State.state) at ~expected ~actual =
+  add_mismatch_diagnostic state at
     ~sides:[ (actual, expected); (expected, actual) ]
-    (Printf.sprintf "Expected %s, found %s." (State.describe state expected)
-       (State.describe state actual))
+    (Expected
+       { expected = State.make_shown state expected; actual = State.make_shown state actual; copy })
 
-let add_operand_mismatch (state : State.state) ~(at : Source.Definition_span.t)
-    ~left:((left_span : Source.Definition_span.t), left)
-    ~right:((right_span : Source.Definition_span.t), right) =
+let add_operand_mismatch (state : State.state) ~at ~left:(left_origin, left)
+    ~right:(right_origin, right) =
   let left_type = State.normalize state left and right_type = State.normalize state right in
   if
     State.is_within state left_type Types.integer_types
@@ -177,60 +142,25 @@ let add_operand_mismatch (state : State.state) ~(at : Source.Definition_span.t)
           Z.geq low wider_low && Z.leq high wider_high
       | _ -> false
     in
-    let make_widening_fix side (operand : Source.Definition_span.t) target =
-      State.fix
-        (Printf.sprintf "Convert the %s side to `%s`." side (Types.show target))
-        [
-          State.replace operand
-            (Printf.sprintf "%s.from_integer(%s)" (Types.show target)
-               (State.quote_span state operand));
-        ]
-    in
-    let fixes =
+    let widening : Catalog.Inference.widening option =
       if is_range_within right_type left_type then
-        [ make_widening_fix "right" right_span left_type ]
+        Some { side = Right; operand = right_origin; target = left_type }
       else if is_range_within left_type right_type then
-        [ make_widening_fix "left" left_span right_type ]
-      else []
+        Some { side = Left; operand = left_origin; target = right_type }
+      else None
     in
-    add_mismatch_diagnostic state Mismatched_integers at
+    add_mismatch_diagnostic state at
       ~sides:[ (left, right); (right, left) ]
-      ~fixes
-      (Printf.sprintf
-         "Integer types never convert implicitly: this compares or combines `%s` with `%s`."
-         (Types.show left_type) (Types.show right_type))
+      (Mismatched_integers { left = left_type; right = right_type; widening })
   end
-  else add_mismatch state right_span ~expected:left ~actual:right
+  else add_mismatch state right_origin ~expected:left ~actual:right
 
-let report_mismatch ?fixes (state : State.state) span ~expected ~actual =
-  ignore (add_mismatch ?fixes state span ~expected ~actual)
+let report_mismatch ?copy (state : State.state) at ~expected ~actual =
+  ignore (add_mismatch ?copy state at ~expected ~actual)
 
-let describe_associated state type_ =
-  match State.zonk state type_ with
-  | Types.Projection { base; trait; name } ->
-      Printf.sprintf "the `%s` of `%s` under `%s`" name (Types.show base)
-        (Types.show_trait { trait with associated = [] })
-  | zonked -> Printf.sprintf "`%s`" (Types.show zonked)
-
-let report_unmet_bound (state : State.state) ~at ~of_type ~sides ~unmet subject
+let report_unmet_bound (state : State.state) ~at ~of_type ~sides ~impl_need subject
     (bound : Types.trait_reference) ~associated =
-  let needs =
-    Printf.sprintf "%s needs `%s: %s`"
-      (match of_type with
-      | Some type_ -> Printf.sprintf "`%s`" (State.show state type_)
-      | None -> "This")
-      (Types.show subject) (Types.show_trait bound)
-  in
   let frame = State.read_current_frame state in
-  let is_slice = Types.is_well_known Slice subject || Types.is_well_known String_slice subject in
-  let has_mut_self_method =
-    match Interface.Definition.find_trait_interface state.lookups.interface bound.trait with
-    | Some trait ->
-        List.exists
-          (fun (method_ : Types.trait_method) -> method_.method_receiver = Instance Mut)
-          trait.methods
-    | None -> false
-  in
   match
     List.find_opt
       (fun (reported, reported_bound, _) -> Types.equal reported subject && reported_bound = bound)
@@ -238,28 +168,22 @@ let report_unmet_bound (state : State.state) ~at ~of_type ~sides ~unmet subject
   with
   | Some (_, _, report) -> report
   | None ->
+      let unmet : Catalog.Inference.unmet_bound =
+        match associated with
+        | None when Types.is_view subject -> Does_not_hold_for_view
+        | None -> Does_not_hold
+        | Some (name, found, _) -> Associated_differs { name; found = State.zonk state found }
+      in
       let report =
-        add_mismatch_diagnostic state Unsatisfied_bound at ~sides
-          ((match associated with
-             | None when is_slice && has_mut_self_method ->
-                 needs
-                 ^ ", which does not hold: a slice implements no trait with a `mut self` method. \
-                    Generic code could call the method on a copy of the slice, and a copy views \
-                    the same elements."
-             | None -> needs ^ ", which does not hold."
-             | Some (name, found, _) ->
-                 Printf.sprintf "%s, and its `%s` is `%s`." needs name (State.show state found))
-          ^ unmet)
+        add_mismatch_diagnostic state at ~sides
+          (Unsatisfied_bound
+             { of_type = Option.map (State.zonk state) of_type; subject; bound; unmet; impl_need })
       in
       frame.reported_unmet_bounds <- (subject, bound, report) :: frame.reported_unmet_bounds;
       report
 
-let report_requirement (state : State.state) (goal : State.goal) ?associated ~unmet subject =
+let report_requirement (state : State.state) (goal : State.goal) ?associated ~impl_need subject =
   let shown = State.normalize state subject in
-  let does_not_implement trait =
-    Printf.sprintf "`%s` does not implement `%s`" (Types.show shown)
-      (Types.show_trait (Unify.zonk_trait state.unifier trait))
-  in
   match (goal.cause, goal.requirement) with
   | Excluded reason, _ -> reason shown
   | Bound { at; of_type }, Implements bound ->
@@ -277,43 +201,44 @@ let report_requirement (state : State.state) (goal : State.goal) ?associated ~un
                  (Unify.find_domain state.unifier (Unify.read_root state.unifier index)))
         | _ -> []
       in
-      report_unmet_bound state ~at ~of_type ~sides ~unmet shown bound ~associated
+      report_unmet_bound state ~at ~of_type ~sides ~impl_need shown bound ~associated
   | ( Operator { at; operands = Some (left, right) },
       Implements { trait_arguments = [ Types.Type argument ]; _ } )
-    when Option.is_none associated && unmet = ""
+    when Option.is_none associated && Option.is_none impl_need
          && State.is_within state goal.subject Types.number_types
          && State.is_within state argument Types.number_types ->
       add_operand_mismatch state ~at ~left:(left, goal.subject) ~right:(right, argument)
   | Operator { at; _ }, Implements trait ->
       State.add_diagnostic state
-        (if Option.is_some associated then Mismatch else No_impl)
-        at
-        ((match associated with
-           | Some (_, found, wanted) -> (
-               match State.zonk state found with
-               | Types.Projection _ ->
-                   Printf.sprintf "%s may differ from %s."
-                     (String.capitalize_ascii (describe_associated state found))
-                     (describe_associated state wanted)
-               | found ->
-                   Printf.sprintf "This operator gives `%s`, and %s is expected." (Types.show found)
-                     (describe_associated state wanted))
-           | None -> does_not_implement trait ^ ", so the operator does not apply.")
-        ^ unmet)
+        (match associated with
+        | Some (_, found, wanted) ->
+            Operator_output
+              { at; found = State.zonk state found; wanted = State.zonk state wanted; impl_need }
+        | None ->
+            Operator_not_implemented
+              { at; subject = shown; trait = Unify.zonk_trait state.unifier trait; impl_need })
   | (Method_call at | Loop at | Quantifier at), Implements trait ->
       State.add_diagnostic state
-        (match goal.cause with Loop _ | Quantifier _ -> Not_iterable | _ -> No_impl)
-        at
-        (does_not_implement trait ^ "." ^ unmet)
+        (Not_implemented
+           {
+             at;
+             subject = shown;
+             trait = Unify.zonk_trait state.unifier trait;
+             is_iteration = (match goal.cause with Loop _ | Quantifier _ -> true | _ -> false);
+             impl_need;
+           })
   | (Bound _ | Operator _ | Method_call _ | Loop _ | Quantifier _), Within _ ->
       State.raise_bug "a goal's cause does not fit its requirement"
 
 let report_failure (state : State.state) (goal : State.goal) ?associated subject =
   match (goal.needed_by, goal.requirement) with
-  | None, _ -> report_requirement state goal ?associated ~unmet:"" subject
+  | None, _ -> report_requirement state goal ?associated ~impl_need:None subject
   | Some root, Implements condition ->
       report_requirement state root root.subject
-        ~unmet:
-          (Printf.sprintf " Its impl needs `%s: %s`." (State.show state subject)
-             (Types.show_trait (Unify.zonk_trait state.unifier condition)))
+        ~impl_need:
+          (Some
+             {
+               needing = State.zonk state subject;
+               condition = Unify.zonk_trait state.unifier condition;
+             })
   | Some _, Within _ -> State.raise_bug "an impl's condition is a set of types"

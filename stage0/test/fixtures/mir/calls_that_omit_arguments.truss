@@ -16,7 +16,7 @@ fn scale(value: Int64, factor: Int64 = 3) -> Int64 {
   value * factor
 }
 
-fn count(names: Slice[String] = ["ab", "cde"]) -> UInt64 {
+fn count(names: List[String] = ["ab", "cde"]) -> UInt64 {
   names.length()
 }
 

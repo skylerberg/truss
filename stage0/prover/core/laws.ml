@@ -10,18 +10,14 @@ let check_callback_requires context frame (site : Invocation.site) through
           in
           List.iter
             (fun (clause : Mir.formula) ->
-              Facts.oblige context frame Requires
+              Facts.oblige context frame
                 (Facts.locate context frame.source site.origin)
-                [
-                  Text "`";
-                  Facts.quote frame.source clause.origin;
-                  Text
-                    (Printf.sprintf "` may not hold for %s through `%s`."
-                       (Facts.describe_call context
-                          (Facts.locate context frame.source site.origin)
-                          ())
-                       name);
-                ]
+                (Callback_precondition
+                   {
+                     clause = Facts.quote frame.source clause.origin;
+                     call = { at = Facts.locate context frame.source site.origin; callee = None };
+                     name;
+                   })
                 (snd (Validity.read_specification context inside clause)))
             requires
       | _ -> ())
@@ -37,7 +33,7 @@ let list_laws (context : State.context) trait =
   | None -> []
 
 let list_law_parameter_types ~substitution (law : Mir.law) =
-  List.map (fun (_, type_) -> Types.substitute substitution type_) law.parameters
+  List.map (fun (_, type_) -> Types.substitute_erased substitution type_) law.parameters
 
 let bind_law_parameters frame source ~substitution (law : Mir.law) terms =
   let types = list_law_parameter_types ~substitution law in
@@ -233,22 +229,15 @@ let check_named_callback context (frame : State.frame) (invocation : Invocation.
         in
         List.iter
           (fun (requirement : Mir.formula) ->
-            Facts.oblige context at_call Requires location
-              [
-                Text
-                  (Printf.sprintf
-                     "`%s` may not accept every argument this parameter's type promises it: its `"
-                     (Path.show path));
-                Facts.quote callee_clauses.callee requirement.origin;
-                Text "` may not hold.";
-              ]
+            Facts.oblige context at_call location
+              (Parameter_contract
+                 { path; clause = Facts.quote callee_clauses.callee requirement.origin })
               (snd (Validity.read_specification context inside requirement)))
           (Facts.list_clauses callee_clauses.requires);
         if List.length callee_clauses.parameters = List.length expected.inputs then begin
           add_named_relation context frame expected passed.term callee_clauses;
           Validity.check_callback_promises context frame ~location invocation passed
-            ~described:
-              (Printf.sprintf "and the `ensures` of `%s` may not promise it." (Path.show path))
+            ~unpromised:(Ensures_may_not_promise path)
             ~assume:(fun at_call expected ~entries ~exits ~result ->
               List.iter (Facts.assume context at_call)
                 (read_named_ensures context at_call callee_clauses expected ~entries ~exits ~result))
@@ -256,5 +245,4 @@ let check_named_callback context (frame : State.frame) (invocation : Invocation.
         end)
   | _ ->
       if callee_clauses.requires <> [] then
-        Facts.raise_unsupported location
-          "a function passed for a parameter whose type the prover cannot read"
+        Facts.raise_unsupported location Unreadable_parameter_type

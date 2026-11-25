@@ -731,11 +731,11 @@ let () =
   in
   Harness.test "a let keeps the base temporary of a range it binds until its bindings end"
     (fun () ->
-      let mir = lower_graph Fixtures.Mir.let_of_a_slice_of_a_temporary in
+      let mir = lower_graph Fixtures.Mir.let_of_a_range_of_a_temporary in
       check_range_base_ends mir.body "middle" (fun base_end middle_end ->
           if base_end < middle_end then Harness.fail "the range's base ends before middle"));
   Harness.test "a let ends a temporary that its bindings do not view with its statement" (fun () ->
-      let mir = lower_graph Fixtures.Mir.let_of_a_temporary_slices_length in
+      let mir = lower_graph Fixtures.Mir.let_of_a_temporary_ranges_length in
       check_range_base_ends mir.body "count" (fun base_end count_end ->
           if base_end > count_end then Harness.fail "the range's base outlives its statement"));
   Harness.test "a let with an else binds its pattern only where it matches" (fun () ->
@@ -1694,7 +1694,7 @@ let () =
         (list_edges picked_of_shelf))
 
 let () =
-  let program = Fixtures.Core.slice_match_on_a_constant_and_loop_over_a_ticking_countdown in
+  let program = Fixtures.Core.range_match_on_a_constant_and_loop_over_a_ticking_countdown in
   let show_callee (callee : Mir.callee) =
     Printf.sprintf "%s uses %s"
       (match callee.target with
@@ -1747,7 +1747,7 @@ let () =
           [
             "standard.core.Cursor.next uses {Meter}";
             "standard.core.Equal.equal uses {}";
-            "standard.list.Slice.length uses {}";
+            "standard.list.List.length uses {}";
           ]);
   Harness.test "a loop over a cursor is a call edge to the cursor's `next`" (fun () ->
       expect_paths

@@ -442,13 +442,10 @@ let find_lambda_definition context frame (function_type : Types.function_type)
       | _ -> None)
   | _ -> None
 
-let check_valid ?includes_invariants context frame location ty term ~deep ~when_ =
+let check_valid ?includes_invariants context frame location ty term ~deep ~moment =
   match Validity.make_validity context frame ~assuming:false ~deep ?includes_invariants ty term with
   | Logic.Boolean true -> ()
-  | valid ->
-      Facts.oblige context frame Invariant location
-        [ Text (Printf.sprintf "The invariant of `%s` may not hold %s." (Types.show ty) when_) ]
-        valid
+  | valid -> Facts.oblige context frame location (Invariant_may_fail { type_ = ty; moment }) valid
 
 let classify_counting (cost : Mir.cost) : Costs.counting =
   match cost.bound with Order_of _ -> Units | At_most _ -> At_most | Exactly _ -> Exactly
@@ -471,7 +468,7 @@ let list_loop_counters context locals (body : Mir.body) =
                       ( { Costs.resource; counting = classify_counting cost; amortized = false },
                         condition )
                       :: !counters
-                | None -> Facts.raise_unsupported Whole_definition "this `calls` target"))
+                | None -> Facts.raise_unsupported Whole_definition Calls_target))
         | Invariant _ | Decreases _ -> ())
       loop.clauses
   in
@@ -643,7 +640,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
               (fun term ->
                 check_valid context exit_ location
                   (Facts.substitute_type context frame function_type.output)
-                  term ~deep:true ~when_:"for the value this lambda returns")
+                  term ~deep:true ~moment:Lambda_result)
               returned;
             List.iter2
               (fun parameter (mode, input) ->
@@ -653,7 +650,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                     | Some term ->
                         check_valid context exit_ location
                           (Facts.substitute_type context frame input)
-                          term ~deep:true ~when_:"for a `mut` parameter when this lambda ends"
+                          term ~deep:true ~moment:Lambda_mut_parameter
                     | None -> ())
                 | _ -> ())
               written.code.parameters function_type.inputs)
@@ -677,14 +674,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
               (fun result ->
                 List.iter
                   (fun (quoted, promise) ->
-                    Facts.oblige context exit_ Ensures location
-                      [
-                        Text "`";
-                        quoted;
-                        Text
-                          "` may not hold of a result of this lambda, and the type of the \
-                           parameter it is passed for promises it.";
-                      ]
+                    Facts.oblige context exit_ location
+                      (Lambda_promise { promise = quoted })
                       promise)
                   (list_promises ~entries:arguments ~exits ~result))
               result)
@@ -703,17 +694,15 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                   | No_more_than limit -> Logic.less_equal spent (Logic.Integer limit)
                   | Exactly_cost limit -> Logic.equal spent (Logic.Integer limit)
                 in
-                let difference, verb =
-                  match counter.counting with
-                  | Units | At_most -> ("more than", "allows")
-                  | Exactly -> ("more or less than", "states")
-                in
-                Facts.oblige context exit_ Cost location
-                  [
-                    Text
-                      (Printf.sprintf "This lambda may spend %s its type, `%s`, %s." difference
-                         (Types.show ty) verb);
-                  ]
+                Facts.oblige context exit_ location
+                  (Lambda_cost
+                     {
+                       counting =
+                         (match counter.counting with
+                         | Units | At_most -> Upper_bound
+                         | Exactly -> Exact);
+                       type_ = ty;
+                     })
                   goal)
               promised)
           exits;
@@ -735,17 +724,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                   ( bound,
                     List.filter_map
                       (fun ((exit_ : State.frame), spent) ->
-                        Facts.make_closed_obligation context exit_ Cost location
-                          [
-                            Text
-                              (Printf.sprintf
-                                 "The prover cannot show that a call of this lambda %s than the \
-                                  bound it found for every call, which a cost here relies on."
-                                 (match metric with
-                                 | Time -> "takes no more time"
-                                 | Allocations -> "makes no more allocations"
-                                 | Allocated_bytes -> "allocates no more bytes"));
-                          ]
+                        Facts.make_closed_obligation context exit_ location
+                          (Lambda_call_above_bound { metric })
                           (Logic.less_equal spent bound))
                       (List.combine exits spent) ) ))
               (Costs.find_cost_bound ~varies:(Facts.mentions_fresh_after context mark) ~facts most))
@@ -822,6 +802,7 @@ let make_passed_values context frame (invocation : Invocation.t)
             origin = Some site.origin;
             passed_place = None;
             type_ = Facts.substitute_type context frame site.type_;
+            declared_type = Facts.substitute_declared_type context frame site.type_;
             term;
           })
     arguments

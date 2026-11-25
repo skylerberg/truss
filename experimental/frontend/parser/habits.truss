@@ -8,7 +8,7 @@ fn spell_node(cursor: TokenCursor, id: UInt64) -> Option[String]
   cursor.spell(cursor.read_file_span(id))
 }
 
-fn report_habit(cursor: mut TokenCursor, code: StringSlice, span: source.Span, message: StringSlice, fix_title: StringSlice, edits: own List[source.Edit])
+fn report_habit(cursor: mut TokenCursor, code: String, span: source.Span, message: String, fix_title: String, edits: own List[source.Edit])
   uses Panic, RunForever
 {
   var joins = false
@@ -206,7 +206,7 @@ fn report_turbofish(cursor: mut TokenCursor, colons: token.Token, less: token.To
   )
 }
 
-fn report_angle_brackets(cursor: mut TokenCursor, angles: Slice[token.Token])
+fn report_angle_brackets(cursor: mut TokenCursor, angles: List[token.Token])
   uses Panic, RunForever
 {
   var edits: List[source.Edit] = []
@@ -245,7 +245,7 @@ fn report_qualified_variant(cursor: mut TokenCursor, qualifier_start: UInt64, va
   )
 }
 
-fn show_macro_advice(name: StringSlice) -> StringSlice {
+fn show_macro_advice(name: String) -> view String {
   match name {
     "println" | "print" | "eprintln" | "eprint" => " Print with `Console.print_line(text)`, and build the text with `\${...}` in a string."
     "format" => " Build text with `\${...}` in a string."
@@ -445,7 +445,7 @@ fn report_null_coalescing(cursor: mut TokenCursor, value: syntax.Expression, fir
   )
 }
 
-fn singularize(word: StringSlice) -> Option[String]
+fn singularize(word: String) -> Option[String]
   uses Panic
 {
   let length = word.length()
@@ -455,7 +455,7 @@ fn singularize(word: StringSlice) -> Option[String]
   let is_excluded = word.ends_with("ss") || word.ends_with("us") || word.ends_with("is") || word.ends_with("ses")
     || word.ends_with("xes") || word.ends_with("zes") || word.ends_with("ches") || word.ends_with("shes")
   if length > 1 && word.ends_with("s") && !is_excluded {
-    return Some(word.substring(0, to: length - 1).to_string())
+    return Some(word.substring(0, to: length - 1).copy())
   }
   None
 }
@@ -471,19 +471,19 @@ fn derive_parameter_name(callee: syntax.Expression) -> String
     _ => None
   }
   match own candidate {
-    Some(name) => if name != "it" && token.find_word(name).is_none() { name } else { "element".to_string() }
-    None => "element".to_string()
+    Some(name) => if name != "it" && token.find_word(name).is_none() { name } else { "element".copy() }
+    None => "element".copy()
   }
 }
 
 fn report_trailing_lambda(
   cursor: mut TokenCursor,
   callee: syntax.Expression,
-  parameter: StringSlice,
+  parameter: String,
   opening: token.Token,
   closing: token.Token,
   next: token.Token,
-  uses_of_it: Slice[token.Token],
+  uses_of_it: List[token.Token],
 )
   uses Panic, RunForever
 {
@@ -510,14 +510,14 @@ fn report_trailing_lambda(
   )
 }
 
-fn is_integer_type_name(name: StringSlice) -> Bool {
+fn is_integer_type_name(name: String) -> Bool {
   match name {
     "Int8" | "Int16" | "Int32" | "Int64" | "UInt8" | "UInt16" | "UInt32" | "UInt64" => true
     _ => false
   }
 }
 
-fn make_conversion_fix(target_spelling: StringSlice, name: StringSlice, value: source.Span, target: source.Span) -> source.Fix
+fn make_conversion_fix(target_spelling: String, name: String, value: source.Span, target: source.Span) -> source.Fix
   uses Panic
 {
   source.make_fix(
@@ -529,7 +529,7 @@ fn make_conversion_fix(target_spelling: StringSlice, name: StringSlice, value: s
   )
 }
 
-fn is_simple_spelling(text: StringSlice) -> Bool {
+fn is_simple_spelling(text: String) -> Bool {
   for byte in text.bytes() {
     let is_allowed = byte == 95 || byte == 46 || (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57)
     if !is_allowed {
@@ -617,7 +617,7 @@ fn report_loop(cursor: mut TokenCursor, loop_token: token.Token)
 fn report_constant_keyword(cursor: mut TokenCursor, written: token.Token)
   uses Panic, RunForever
 {
-  let word: StringSlice = match written.kind {
+  let word: view String = match written.kind {
     Reserved(reserved) => token.spell_reserved(reserved)
     _ => ""
   }

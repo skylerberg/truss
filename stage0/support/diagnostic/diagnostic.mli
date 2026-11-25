@@ -196,10 +196,13 @@ module Code : sig
     | Missing_required_impl
     | Implements_built_in_capability
     | Impl_uses
-    | Mut_self_for_slice
-    | Read_only_owning_parameter
+    | Impl_modifies
+    | Not_viewable
     | Unknown_associated_type
     | Unknown_associated_capability
+    | Not_a_field_path
+    | Read_only_part
+    | Repeated_part
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
 
@@ -208,6 +211,7 @@ module Code : sig
     | Unused_function
     | Unused_constant
     | Unused_run_forever
+    | Unmodified_part
     | Unreachable_code
     | Self_comparison
 
@@ -228,6 +232,8 @@ module Code : sig
     | Lent_mut_in_variant
     | Needs_lent_mut
     | Task_outlives_view
+    | Undeclared_change
+    | Resized_range
 
   type capabilities =
     | Not_available
@@ -249,6 +255,7 @@ module Code : sig
     | Invariant
     | Termination
     | Constant_cycle
+    | Circular_proof
     | Evaluation
     | Panic
     | Assertion
@@ -286,10 +293,10 @@ module Code : sig
 end
 
 type 'span edit = { span : 'span; replacement : string }
-type 'span fix = { title : string; edits : 'span edit list }
+type 'span fix = private { title : string; edits : 'span edit list }
 type severity = Error | Warning
 
-type 'span diagnostic = {
+type 'span diagnostic = private {
   code : Code.t;
   severity : severity;
   message : string;
@@ -299,49 +306,35 @@ type 'span diagnostic = {
 }
 
 type t = Source.span diagnostic
-type in_definition = Source.Definition_span.t diagnostic
-
-val make :
-  ?severity:severity ->
-  ?notes:('span * string) list ->
-  ?fixes:'span fix list ->
-  code:Code.t ->
-  'span ->
-  string ->
-  'span diagnostic
 
 val is_error : _ diagnostic -> bool
-val fix : string -> 'span edit list -> 'span fix
 val replace : 'span -> string -> 'span edit
 val insert : 'span -> string -> 'span edit
 val delete : 'span -> 'span edit
-val list_spelling_fixes : 'span -> written:string -> string list -> 'span fix list
+val find_closest : string -> string list -> string option
 val show_count : int -> string -> string -> string
 
 type reported
 
-val make_reported : _ diagnostic -> reported
 val reported_elsewhere : reported
 val map_spans : ('a -> 'b) -> 'a diagnostic -> 'b diagnostic
 val apply_edits : string -> Source.span edit list -> string
 val list_machine_applicable : t list -> t list
-
-module Collector : sig
-  type diagnostic := t
-  type t
-
-  val create : unit -> t
-  val add : t -> diagnostic -> unit
-  val to_list : t -> diagnostic list
-end
-
-val select_shown : t list -> t list
 val paint_severity : is_colored:bool -> severity -> string -> string
 val render : is_colored:bool -> Source.t -> t -> string
 val to_json_object : Source.t -> t -> string
 val encode_json_string : string -> string
 val quote : string -> string
 
-module For_testing : sig
-  val limit : int
+module For_rendering : sig
+  val make :
+    ?severity:severity ->
+    ?notes:('span * string) list ->
+    ?fixes:'span fix list ->
+    code:Code.t ->
+    'span ->
+    string ->
+    'span diagnostic
+
+  val fix : string -> 'span edit list -> 'span fix
 end

@@ -35,7 +35,7 @@ impl Log for SystemLog
       }
     }
     mut line.push("\n")
-    let _ = calls.write_fully(2, bytes: line.slice().bytes)
+    let _ = calls.write_fully(2, bytes: line.storage)
   }
 
   fn enabled(self, level: log.Level) -> Bool {
@@ -43,7 +43,7 @@ impl Log for SystemLog
   }
 }
 
-fn quoted(line: mut String, text: StringSlice) {
+fn quoted(line: mut String, text: String) {
   mut line.push_byte(34)
   var run: UInt64 = 0
   for index in 0..text.length()

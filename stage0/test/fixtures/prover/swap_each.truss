@@ -1,4 +1,5 @@
-fn swap_each[Element](part: mut Slice[Element])
+fn swap_each[Element](part: mut List[Element])
+  modifies part[..]
   requires part.length() >= 1
   cost time O(part.length())
 {

@@ -1,4 +1,4 @@
-fn starts_with_zero(text: StringSlice) -> Bool
+fn starts_with_zero(text: String) -> Bool
   requires text.length() > 0
   ensures result == (text.byte(0) == 48)
 {

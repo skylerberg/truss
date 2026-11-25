@@ -1,4 +1,4 @@
-fn group(words: Slice[String]) -> List[List[String]] {
+fn group(words: List[String]) -> List[List[String]] {
   var groups: List[List[String]] = []
   var positions: Map[String, UInt64] = [:]
   for word in words {

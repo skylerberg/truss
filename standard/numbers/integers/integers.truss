@@ -144,13 +144,13 @@ public trait FixedWidthInteger:
     }
   }
 
-  fn exact_sum(items: Slice[Self]) -> Integer
+  fn exact_sum(items: List[Self]) -> Integer
     ensures result == items.model().sum(fn(item) { item })
   {
     items.model().sum(fn(item) { item })
   }
 
-  fn sum(items: Slice[Self]) -> Self
+  fn sum(items: List[Self]) -> Self
     requires Self.minimum_value() <= Self.exact_sum(items) && Self.exact_sum(items) <= Self.maximum_value()
     ensures result == Self.exact_sum(items)
     cost time O(items.length())
@@ -158,7 +158,7 @@ public trait FixedWidthInteger:
     Self.wrapping_sum(items)
   }
 
-  fn checked_sum(items: Slice[Self]) -> Option[Self]
+  fn checked_sum(items: List[Self]) -> Option[Self]
     cost time O(items.length())
   {
     var total: Self = 0
@@ -168,7 +168,7 @@ public trait FixedWidthInteger:
     Some(total)
   }
 
-  fn saturating_sum(items: Slice[Self]) -> Self
+  fn saturating_sum(items: List[Self]) -> Self
     cost time O(items.length())
   {
     var total: Self = 0
@@ -178,7 +178,7 @@ public trait FixedWidthInteger:
     total
   }
 
-  fn wrapping_sum(items: Slice[Self]) -> Self
+  fn wrapping_sum(items: List[Self]) -> Self
     ensures (Self.exact_sum(items) - result) % (Self.maximum_value() - Self.minimum_value() + 1) == 0
     cost time O(items.length())
   {
@@ -429,7 +429,7 @@ public trait FixedWidthInteger:
   fn reverse_bits(self) -> Self
     cost time O(1)
 
-  fn parse_radix(text: StringSlice, radix: UInt32) -> Result[Self, core.ParseIntegerError]
+  fn parse_radix(text: String, radix: UInt32) -> Result[Self, core.ParseIntegerError]
     uses Panic unless 2 <= radix && radix <= 36
     cost time O(text.length())
   {

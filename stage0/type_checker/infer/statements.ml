@@ -1,6 +1,6 @@
 let make_trait known = Types.make_trait_reference ~arguments:[] (Well_known.make_path known)
 
-let record_integer_range state ~(loop : Syntax.id) ~described ~admits_integer
+let record_integer_range state ~(loop : Syntax.id) ~owner ~admits_integer
     (range : Syntax.expression) element ~inclusive =
   State.check_when_final state (fun () ->
       let element = State.finalize_type state element in
@@ -11,8 +11,7 @@ let record_integer_range state ~(loop : Syntax.id) ~described ~admits_integer
             :: (if admits_integer then [ Language.Builtin_type.Integer ] else []))
       then State.elaborate state loop (Loop (Integer_range { element; inclusive }))
       else if not (Types.is_error element) then
-        State.report state Not_iterable (State.read_span state range.id)
-          (Printf.sprintf "%s range is of integers, not `%s`." described (Types.show element)))
+        State.report state (Range_not_integer { at = Written range.id; owner; element }))
 
 let statement_diverges (state : State.state) =
   State.diverges ~is_never:(fun (value : Syntax.expression) ->
@@ -31,8 +30,8 @@ let rec check_block_value state env ?expected (written : Syntax.block) =
             if statement_diverges state last then Types.Never else Types.unit)
     | (first : Syntax.statement) :: rest ->
         ignore
-          (Solver.run_in_statement state env (State.read_span state first.id) (fun () ->
-               check_statement state env first ~last:false));
+          (Solver.run_in_statement state env (Written first.id) (fun () ->
+               check_statement state { env with binds_view = false } first ~last:false));
         infer_statements_value rest
   in
   infer_statements_value written.statements
@@ -49,16 +48,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
               not
                 (final_type = Types.unit || final_type = Types.Never || Types.is_error final_type
                || final_type = Types.Hole)
-            then
-              State.report state Unused_value (State.read_span state value.id)
-                ~fixes:
-                  [
-                    State.fix "Discard it on purpose."
-                      [ State.insert (State.read_span state value.id).start "let _ = " ];
-                  ]
-                (Printf.sprintf
-                   "This value of type `%s` is not used. Use it, or discard it with `let _ =`."
-                   (Types.show final_type)))
+            then State.report state (Unused_value { at = Written value.id; type_ = final_type }))
   | Let { is_var; pattern = written_pattern; annotation; value; else_ } ->
       let type_ =
         match annotation with
@@ -69,14 +59,14 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
             Hooks.check state env value annotated;
             annotated
         | None -> (
-            let type_ = Hooks.check_expression state env value in
+            let type_ = Hooks.check_expression state { env with binds_view = not is_var } value in
             match written_pattern.kind with
             | Variant _ | Record _ | Tuple _ | Literal (Literal_string _) ->
                 Conversions.read_actual_head state value type_
             | _ -> type_)
       in
       if is_var then begin
-        State.reject_in_formula state env (State.read_span state written.id) "A `var`";
+        State.reject_in_formula state env (Written written.id) Var_binding;
         Modes.note_owned_value state env value
       end;
       (match else_ with
@@ -84,10 +74,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
           let else_type = check_block_value state env block in
           match Conversions.read_expected_head state else_type with
           | Types.Never -> ()
-          | _ ->
-              State.report state Mismatch (State.read_span state block.id)
-                "The `else` of a `let` must leave the block, with `return`, `break`, `continue`, \
-                 or `unreachable`.")
+          | _ -> State.report state (Let_else_falls_through { at = Written block.id }))
       | None -> ());
       let mode =
         if is_var then Language.Mode.Own
@@ -122,23 +109,21 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
                   ~right:(Some (value, right_type))
               in
               if not (State.unify state result target_type) then
-                Failures.report_mismatch state (State.read_span state value.id)
-                  ~expected:target_type ~actual:result
+                Failures.report_mismatch state (Written value.id) ~expected:target_type
+                  ~actual:result
           | Shift _ ->
               ignore
                 (Operators.infer_shift_result state
-                   ~left:(State.read_span state written_target.id, target_type)
-                   ~right:(State.read_span state value.id, right_type))
+                   ~left:(Core.Written written_target.id, target_type)
+                   ~right:(Core.Written value.id, right_type))
           | Bitwise _ ->
               if not (State.unify state target_type right_type) then
-                Failures.report_mismatch state (State.read_span state value.id)
-                  ~expected:target_type ~actual:right_type;
-              ignore
-                (Operators.infer_bitwise_result state
-                   (State.read_span state written_target.id)
-                   target_type)))
+                Failures.report_mismatch state (Written value.id) ~expected:target_type
+                  ~actual:right_type;
+              ignore (Operators.infer_bitwise_result state (Written written_target.id) target_type))
+      )
   | For { pattern = written_pattern; annotation; iterable; clauses; body; _ } ->
-      State.reject_in_formula state env (State.read_span state written.id) "A `for` loop";
+      State.reject_in_formula state env (Written written.id) For_statement;
       let mode, inner =
         match iterable.kind with
         | Mode (mode, inner)
@@ -149,7 +134,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
         | _ -> (Language.Mode.Read, iterable)
       in
       let loop_element = ref None in
-      Solver.run_in_statement state env (State.read_span state iterable.id) (fun () ->
+      Solver.run_in_statement state env (Written iterable.id) (fun () ->
           let element, variable_mode = check_loop_iterable state env written ~mode inner in
           (match annotation with
           | Some written_annotation ->
@@ -158,11 +143,13 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
               in
               if not (State.unify state element annotated) then
                 ignore
-                  (Failures.add_mismatch_diagnostic state Mismatch
-                     (State.read_span state written_annotation.id)
+                  (Failures.add_mismatch_diagnostic state (Written written_annotation.id)
                      ~sides:[ (element, annotated) ]
-                     (Printf.sprintf "Each element of this loop is %s, not %s."
-                        (State.describe state element) (State.describe state annotated)))
+                     (Loop_element
+                        {
+                          element = State.make_shown state element;
+                          annotated = State.make_shown state annotated;
+                        }))
           | None -> (
               match written_pattern.kind with
               | Binding name -> Hashtbl.replace state.annotatable name.id ()
@@ -181,19 +168,18 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
         clauses;
       check_loop_body state env body
   | While { condition = test; clauses; body } ->
-      State.reject_in_formula state env (State.read_span state written.id) "A `while` loop";
-      Solver.run_in_statement state env (State.read_span state test.id) (fun () ->
+      State.reject_in_formula state env (Written written.id) While_statement;
+      Solver.run_in_statement state env (Written test.id) (fun () ->
           Hooks.check state env test Types.bool);
       List.iter (check_loop_clause state env) clauses;
       check_loop_body state env body
   | Parallel body | Concurrent body ->
       let concurrent = match written.kind with Concurrent _ -> true | _ -> false in
-      State.reject_in_formula state env
-        (State.read_span state written.id)
-        (if concurrent then "A `concurrent` block" else "A `parallel` block");
+      State.reject_in_formula state env (Written written.id)
+        (if concurrent then Concurrent_block else Parallel_block);
       List.iter
         (fun (branch : Syntax.statement) ->
-          Solver.run_in_statement state env (State.read_span state branch.id) (fun () ->
+          Solver.run_in_statement state env (Written branch.id) (fun () ->
               check_statement state env branch ~last:false))
         body.statements
   | Proof body -> check_loop_body state { env with specification = true } body
@@ -225,7 +211,7 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
           Interface.Definition.find_trait_method state.lookups.interface trait.trait ~name ~receiver
         )
       with
-      | Some (Interface.Impls.Evidence (Impl _ | Bound)), Some _ ->
+      | Some (Interface.Impls.Evidence (Impl _ | Derived_for_view _ | Bound)), Some _ ->
           let index = make_trait Index in
           let make_parameter parameter_name type_ : Types.parameter_info =
             { name = parameter_name; mode = Own; type_; has_default = false }
@@ -235,20 +221,18 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
             (Calls.check_argument state env key
                (make_parameter "key"
                   (Solver.resolve_associated_type state base_type index Index_key
-                     ~at:(State.read_span state key.id)))
-               ~has_generic_type:false);
+                     ~at:(Written key.id))));
           ignore
             (Calls.check_argument state env value
                (make_parameter "value"
                   (Solver.resolve_associated_type state base_type index Index_output
-                     ~at:(State.read_span state value.id)))
-               ~has_generic_type:false);
+                     ~at:(Written value.id))));
           State.elaborate state written.id
             (Call
                (Tables.make_method_call trait Index_assign_assign ~self_type:base_type
                   ~result:Types.unit
                   [ (base, Mut); (key, Own); (value, Own) ]));
-          Solver.require state (Method_call (State.read_span state written.id)) base_type trait;
+          Solver.require state (Method_call (Written written.id)) base_type trait;
           true
       | _ -> false)
   | _ -> false
@@ -256,7 +240,7 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
 and check_loop_body state env (body : Syntax.block) =
   List.iter
     (fun (written : Syntax.statement) ->
-      Solver.run_in_statement state env (State.read_span state written.id) (fun () ->
+      Solver.run_in_statement state env (Written written.id) (fun () ->
           check_statement state env written ~last:false))
     body.statements
 
@@ -300,12 +284,12 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
       let range_type = State.normalize state (Hooks.check_expression state env iterable) in
       match range_type with
       | Types.Named { arguments = [ Types.Type element ]; _ } ->
-          record_integer_range state ~loop:written.id ~described:"A `for` loop's"
-            ~admits_integer:false iterable element ~inclusive;
+          record_integer_range state ~loop:written.id ~owner:Range_of_loop ~admits_integer:false
+            iterable element ~inclusive;
           (element, mode)
       | _ -> State.raise_bug "a range is not of the range type")
   | _ -> (
-      let at = State.read_span state iterable.id in
+      let at : Core.origin = Written iterable.id in
       let type_ = Conversions.read_checked_head state env iterable in
       match type_ with
       | Types.Error _ | Types.Hole -> (type_, mode)
@@ -325,31 +309,23 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
                 (Pulled { cursor = type_; cursor_call = None; remaining = None });
               (Solver.resolve_associated_type state type_ cursor Cursor_element ~at, Own)
           | None ->
-              ( State.make_error_type state Not_iterable at
-                  (match mode with
-                  | Language.Mode.Read ->
-                      Printf.sprintf
-                        "A `for` loop cannot go over %s: it implements neither `Iterable` nor \
-                         `Cursor`."
-                        (State.describe state type_)
-                  | Mut ->
-                      Printf.sprintf
-                        "A `for` loop cannot mutate the elements of %s: it implements neither \
-                         `IterableMut` nor `Cursor`."
-                        (State.describe state type_)
-                  | Own ->
-                      Printf.sprintf
-                        "A `for` loop cannot consume %s: it implements neither `IntoCursor` nor \
-                         `Cursor`."
-                        (State.describe state type_)),
+              ( State.make_error_type state
+                  (Not_iterable_loop
+                     {
+                       at;
+                       mode;
+                       is_view = Types.is_view type_;
+                       type_ = State.make_shown state type_;
+                     }),
                 mode )))
 
 and find_elements_loop state ~cause ~at type_ (lends : Language.Mode.t) =
   let iterable = make_trait Iterable in
   let lending_method =
     match (Types.find_sequence_element type_, lends) with
-    | Some _, _ -> None
-    | None, Mut -> Some (make_trait Iterable_mut, Well_known.Iterable_mut_element)
+    | Some _, (Read | Own) -> None
+    | Some _, Mut when not (Types.is_view type_) -> None
+    | _, Mut -> Some (make_trait Iterable_mut, Well_known.Iterable_mut_element)
     | None, (Read | Own) -> Some (iterable, Iterable_element)
   in
   let required = match lending_method with Some (trait, _) -> trait | None -> iterable in
@@ -392,12 +368,7 @@ and find_consuming_loop state ~cause ~at type_ =
           },
         (match State.find_evidence state cursor cursor_trait with
         | Some _ -> Solver.resolve_associated_type state cursor cursor_trait Cursor_element ~at
-        | None ->
-            State.make_error_type state Not_iterable at
-              (Printf.sprintf
-                 "The `IntoCursor` impl of `%s` gives `%s` as its `Cursor`, which does not \
-                  implement `Cursor`."
-                 (Types.show type_) (Types.show cursor))),
+        | None -> State.make_error_type state (Cursor_not_cursor { at; type_; cursor })),
         Language.Mode.Own )
   else None
 

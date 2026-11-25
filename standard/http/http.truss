@@ -36,7 +36,7 @@ public type Method =
   | Other(name: String)
   derives Equal, Hash, Ordered
 
-public fn Method.from_name(name: StringSlice) -> Method
+public fn Method.from_name(name: String) -> Method
 {
   if name == "GET" {
     Method.Get
@@ -57,7 +57,7 @@ public fn Method.from_name(name: StringSlice) -> Method
   } else if name == "TRACE" {
     Method.Trace
   } else {
-    Method.Other(name: name.to_string())
+    Method.Other(name: name.copy())
   }
 }
 
@@ -114,7 +114,7 @@ public let Status.service_unavailable: Status = Status(code: 503)
 public let Status.gateway_timeout: Status = Status(code: 504)
 public let Status.http_version_not_supported: Status = Status(code: 505)
 
-public fn Status.reason(self) -> StringSlice {
+public fn Status.reason(self) -> view String {
   match self.code {
     100 => "Continue"
     101 => "Switching Protocols"
@@ -170,37 +170,37 @@ public fn Headers.length(self) -> UInt64 {
   self.entries.length()
 }
 
-public fn Headers.entries(self) -> Slice[Header] {
-  self.entries.slice()
+public fn Headers.entries(self) -> view List[Header] {
+  self.entries
 }
 
-public fn Headers.get(self, name: StringSlice) -> Option[StringSlice] {
+public fn Headers.get(self, name: String) -> Option[view String] {
   for entry in self.entries {
     if entry.name.equal_ignoring_ascii_case(name) {
-      return Some(entry.value.slice())
+      return Some(entry.value)
     }
   }
   None
 }
 
-public fn Headers.contains(self, name: StringSlice) -> Bool {
+public fn Headers.contains(self, name: String) -> Bool {
   self.get(name) is Some(_)
 }
 
-public fn Headers.add(mut self, name: StringSlice, value: StringSlice) {
-  mut self.entries.push(Header(name: name.to_string(), value: value.to_string()))
+public fn Headers.add(mut self, name: String, value: String) {
+  mut self.entries.push(Header(name: name.copy(), value: value.copy()))
 }
 
-public fn Headers.remove(mut self, name: StringSlice) {
+public fn Headers.remove(mut self, name: String) {
   mut self.entries.retain(fn(entry) { !entry.name.equal_ignoring_ascii_case(name) })
 }
 
-public fn Headers.set(mut self, name: StringSlice, value: StringSlice) {
+public fn Headers.set(mut self, name: String, value: String) {
   mut self.remove(name)
   mut self.add(name, value: value)
 }
 
-fn has_token(header: Option[StringSlice], token: StringSlice) -> Bool {
+fn has_token(header: Option[String], token: String) -> Bool {
   match header {
     Some(value) => {
       for part in value.split(",") {
@@ -224,21 +224,21 @@ public type Request(
   client_certificates: List[x509.Certificate] = [],
 )
 
-public fn Request.path(self) -> StringSlice {
-  match self.target.slice().find("?") {
-    Some(at) => self.target.slice().part(0, to: at)
-    None => self.target.slice()
+public fn Request.path(self) -> view String {
+  match self.target.find("?") {
+    Some(at) => self.target.part(0, to: at)
+    None => self.target
   }
 }
 
-public fn Request.query(self) -> Option[StringSlice] {
-  match self.target.slice().find("?") {
-    Some(at) => Some(self.target.slice().part(at + 1, to: self.target.length()))
+public fn Request.query(self) -> Option[view String] {
+  match self.target.find("?") {
+    Some(at) => Some(self.target.part(at + 1, to: self.target.length()))
     None => None
   }
 }
 
-public fn Request.query_parameter(self, name: StringSlice) -> Option[String] {
+public fn Request.query_parameter(self, name: String) -> Option[String] {
   match self.query() {
     Some(query) => match url.decode_query(query) {
       Ok(parameters) => {
@@ -255,7 +255,7 @@ public fn Request.query_parameter(self, name: StringSlice) -> Option[String] {
   }
 }
 
-public fn Request.header(self, name: StringSlice) -> Option[StringSlice] {
+public fn Request.header(self, name: String) -> Option[view String] {
   self.headers.get(name)
 }
 
@@ -279,7 +279,7 @@ public fn Request.json[Item: serialization.Deserialize](own self) -> Result[Item
   uses Handles, Tasks, RunForever
 {
   let bytes = own self.bytes()?
-  match json.parse_bytes(bytes.slice()) {
+  match json.parse_bytes(bytes) {
     Ok(value) => match json.from_value[Item](own value) {
       Ok(item) => Ok(own item)
       Err(error) => Err(Error.Json(error: json.Error.Deserialize(error: own error)))
@@ -306,8 +306,8 @@ public fn Body.from_bytes(bytes: own List[UInt8]) -> Body {
   Body(source: Source.Memory(bytes: own bytes, position: 0), pending: [], limit: limit, received: 0)
 }
 
-public fn Body.from_text(text: StringSlice) -> Body {
-  Body.from_bytes(text.bytes().to_list())
+public fn Body.from_text(text: String) -> Body {
+  Body.from_bytes(text.bytes().copy())
 }
 
 fn channel_body(chunks: tasks.Channel[flow.Chunk], credit: own Option[Credit], limit: UInt64) -> Body {
@@ -322,7 +322,7 @@ fn next_chunk(source: mut Source) -> Result[Option[List[UInt8]], Error]
       if position >= bytes.length() {
         return Ok(None)
       }
-      let piece = bytes[position..].to_list()
+      let piece = bytes[position..].copy()
       position = bytes.length()
       Ok(Some(own piece))
     }
@@ -413,7 +413,7 @@ public fn Body.read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[
   }
   let count = if self.pending.length() < limit { self.pending.length() } else { limit }
   let unread = self.pending.bytes()
-  mut buffer.append_slice(unread[..count])
+  mut buffer.append_items(unread[..count])
   mut self.pending.skip(count)
   Ok(count)
 }
@@ -454,12 +454,12 @@ public fn Body.copy_to[Sink: streams.Writer](mut self, sink: mut Sink) -> Result
   uses Handles, Tasks, RunForever
 {
   let first = mut self.pending.take_all()
-  system(mut sink.write_all(first.slice()))?
+  system(mut sink.write_all(first))?
   var copied: UInt64 = first.length()
   while true {
     match received_piece(mut self)? {
       Some(piece) => {
-        system(mut sink.write_all(piece.slice()))?
+        system(mut sink.write_all(piece))?
         copied = copied.saturating_add(piece.length())
       }
       None => return Ok(copied)
@@ -514,11 +514,11 @@ fn merged_fields(preset: Headers, headers: Headers, has_length: Bool) -> List[hp
   fields
 }
 
-public fn Responder.set_header(mut self, name: StringSlice, value: StringSlice) {
+public fn Responder.set_header(mut self, name: String, value: String) {
   mut self.preset.set(name, value: value)
 }
 
-public fn Responder.add_header(mut self, name: StringSlice, value: StringSlice) {
+public fn Responder.add_header(mut self, name: String, value: String) {
   mut self.preset.add(name, value: value)
 }
 
@@ -584,7 +584,7 @@ fn Responder.switch_protocols(mut self, fields: own List[hpack.Field]) -> Result
   deliver(self, message: flow.Outbound.Head(stream: self.stream, status: 101, fields: own fields, is_end: false, ack: self.ack.copy()))
 }
 
-public fn Responder.write(mut self, bytes: Slice[UInt8]) -> Result[Unit, Error]
+public fn Responder.write(mut self, bytes: List[UInt8]) -> Result[Unit, Error]
   uses Tasks, RunForever
 {
   if self.phase == Phase.Waiting {
@@ -597,7 +597,7 @@ public fn Responder.write(mut self, bytes: Slice[UInt8]) -> Result[Unit, Error]
     return Ok(Unit)
   }
   self.bytes_sent = self.bytes_sent.saturating_add(bytes.length())
-  deliver(self, message: flow.Outbound.Data(stream: self.stream, bytes: bytes.to_list(), is_end: false, ack: self.ack.copy()))
+  deliver(self, message: flow.Outbound.Data(stream: self.stream, bytes: bytes.copy(), is_end: false, ack: self.ack.copy()))
 }
 
 public fn Responder.finish(mut self) -> Result[Unit, Error]
@@ -652,7 +652,7 @@ public fn Responder.stream[Input: streams.Reader](
     if count == 0 {
       return mut self.finish()
     }
-    mut self.write(buffer.slice())?
+    mut self.write(buffer)?
   }
 }
 
@@ -663,26 +663,26 @@ public fn Response.new(status: Status = Status.ok) -> Response {
   Response(status: status)
 }
 
-public fn Response.text(body: StringSlice, status: Status = Status.ok) -> Response {
+public fn Response.text(body: String, status: Status = Status.ok) -> Response {
   var headers = Headers.new()
   mut headers.add("Content-Type", value: "text/plain; charset=utf-8")
-  Response(status: status, headers: own headers, body: body.bytes().to_list())
+  Response(status: status, headers: own headers, body: body.bytes().copy())
 }
 
 public fn Response.html(page: html.Html, status: Status = Status.ok) -> Response {
   var headers = Headers.new()
   mut headers.add("Content-Type", value: "text/html; charset=utf-8")
-  Response(status: status, headers: own headers, body: page.text().bytes().to_list())
+  Response(status: status, headers: own headers, body: page.text().bytes().copy())
 }
 
 public fn Response.json[Item: serialization.Serialize](item: Item, status: Status = Status.ok) -> Response {
   var headers = Headers.new()
   mut headers.add("Content-Type", value: "application/json")
   let text = json.encode(item)
-  Response(status: status, headers: own headers, body: text.slice().bytes().to_list())
+  Response(status: status, headers: own headers, body: text.bytes().copy())
 }
 
-fn is_compressible(content_type: Option[StringSlice]) -> Bool {
+fn is_compressible(content_type: Option[String]) -> Bool {
   match content_type {
     Some(value) => value.starts_with("text/") || value.starts_with("application/json")
       || value.starts_with("application/javascript") || value.starts_with("application/xml")
@@ -691,7 +691,7 @@ fn is_compressible(content_type: Option[StringSlice]) -> Bool {
   }
 }
 
-internal fn encoded_body(bytes: Slice[UInt8], coding: StringSlice) -> List[UInt8]
+internal fn encoded_body(bytes: List[UInt8], coding: String) -> List[UInt8]
   uses RunForever
 {
   if coding == "zstd" {
@@ -706,7 +706,7 @@ internal fn coding_on_the_fly(request: Request) -> Option[String] {
     return None
   }
   let offered: List[String] = ["zstd", "gzip"]
-  request.preferred_encoding(offered.slice())
+  request.preferred_encoding(offered)
 }
 
 public fn Response.compressed(own self, request: Request) -> Response
@@ -719,7 +719,7 @@ public fn Response.compressed(own self, request: Request) -> Response
   mut response.headers.add("Vary", value: "Accept-Encoding")
   match coding_on_the_fly(request) {
     Some(coding) => {
-      response.body = encoded_body(response.body.slice(), coding: coding)
+      response.body = encoded_body(response.body, coding: coding)
       mut response.headers.set("Content-Encoding", value: coding)
     }
     None => {}
@@ -727,7 +727,7 @@ public fn Response.compressed(own self, request: Request) -> Response
   response
 }
 
-public fn Response.with_header(own self, name: StringSlice, value: StringSlice) -> Response {
+public fn Response.with_header(own self, name: String, value: String) -> Response {
   var response = own self
   mut response.headers.set(name, value: value)
   response
@@ -769,8 +769,8 @@ impl Display for Error {
   }
 }
 
-fn malformed(message: StringSlice) -> Error {
-  Error.Malformed(message: message.to_string())
+fn malformed(message: String) -> Error {
+  Error.Malformed(message: message.copy())
 }
 
 fn system[Value](outcome: own Result[Value, SystemError]) -> Result[Value, Error] {
@@ -784,7 +784,7 @@ public fn format_date(instant: Instant) -> String {
   date.format(instant)
 }
 
-public fn parse_date(text: StringSlice) -> Option[Instant] {
+public fn parse_date(text: String) -> Option[Instant] {
   date.parse(text)
 }
 
@@ -853,7 +853,7 @@ fn is_token_byte(byte: UInt8) -> Bool {
     || byte == 45 || byte == 46 || byte == 94 || byte == 95 || byte == 96 || byte == 124 || byte == 126
 }
 
-fn is_token(text: StringSlice) -> Bool {
+fn is_token(text: String) -> Bool {
   if text.is_empty() {
     return false
   }
@@ -880,7 +880,7 @@ fn read_headers[Stream: streams.Duplex](
         if line.is_empty() {
           return Ok(own headers)
         }
-        let text = line.slice()
+        let text = line
         if text.byte(0) == 32 || text.byte(0) == 9 {
           return Err(malformed("a header folded onto a second line"))
         }
@@ -919,7 +919,7 @@ fn read_head[Stream: streams.Duplex](
       }
     }
   }
-  let parts: List[StringSlice] = request_line.slice().split(" ")
+  let parts: List[view String] = request_line.split(" ")
   if parts.length() != 3 || !is_token(parts[0]) || parts[1].is_empty() {
     return Err(malformed("a request line that is not a method, a target, and a version"))
   }
@@ -930,7 +930,7 @@ fn read_head[Stream: streams.Duplex](
   let headers = read_headers(connection, inbox: mut inbox, budget: mut budget)?
   Ok(Some(Head(
     method: Method.from_name(parts[0]),
-    target: parts[1].to_string(),
+    target: parts[1].copy(),
     version_one_zero: version == "HTTP/1.0",
     headers: own headers,
   )))
@@ -940,7 +940,7 @@ fn content_length(headers: Headers) -> Result[Option[UInt64], Error] {
   var declared: Option[UInt64] = None
   for entry in headers.entries() {
     if entry.name.equal_ignoring_ascii_case("Content-Length") {
-      let digits = entry.value.slice()
+      let digits = entry.value
       var digits_only = !digits.is_empty()
       for byte in digits.bytes() {
         if byte < 48 || byte > 57 {
@@ -977,7 +977,7 @@ fn framing_of(headers: Headers, is_response: Bool) -> Result[Framing, Error] {
       if length is Some(_) {
         return Err(malformed("both Transfer-Encoding and Content-Length"))
       }
-      let codings: List[StringSlice] = coding.split(",")
+      let codings: List[view String] = coding.split(",")
       match codings.last() {
         Some(last) => {
           if !last.trim().equal_ignoring_ascii_case("chunked") {
@@ -1063,9 +1063,9 @@ fn next_piece[Stream: streams.Duplex](
           Some(line) => own line
           None => return Err(Error.Closed)
         }
-        let size_text = match line.slice().find(";") {
-          Some(at) => line.slice().part(0, to: at).trim()
-          None => line.slice().trim()
+        let size_text = match line.find(";") {
+          Some(at) => line.part(0, to: at).trim()
+          None => line.trim()
         }
         let size = match UInt64.parse_radix(size_text, radix: 16) {
           Ok(size) => size
@@ -1127,13 +1127,13 @@ fn has_body(status: Status) -> Bool {
   !(status.code < 200 || status.code == 204 || status.code == 304)
 }
 
-fn push_text(bytes: mut List[UInt8], text: StringSlice) {
-  mut bytes.append_slice(text.bytes())
+fn push_text(bytes: mut List[UInt8], text: String) {
+  mut bytes.append_items(text.bytes())
 }
 
 type Written(is_chunked: Bool, is_closing: Bool)
 
-fn head_bytes(status: UInt16, fields: Slice[hpack.Field], is_end: Bool, version_one_zero: Bool, close: Bool) -> List[UInt8]
+fn head_bytes(status: UInt16, fields: List[hpack.Field], is_end: Bool, version_one_zero: Bool, close: Bool) -> List[UInt8]
   uses Clock
 {
   var head: List[UInt8] = List.with_capacity(256)
@@ -1247,8 +1247,8 @@ fn write_one[Stream: streams.Duplex](
           can_continue = false
         }
         is_closing = is_closing || stopping.is_closed()
-        let bytes = head_bytes(status, fields: fields.slice(), is_end: is_end, version_one_zero: version_one_zero, close: is_closing)
-        let is_sent = connection.send_all(bytes.slice()) is Ok(_)
+        let bytes = head_bytes(status, fields: fields, is_end: is_end, version_one_zero: version_one_zero, close: is_closing)
+        let is_sent = connection.send_all(bytes) is Ok(_)
         can_continue = can_continue && is_sent
         let _ = ack.send(is_sent)
       }
@@ -1258,16 +1258,16 @@ fn write_one[Stream: streams.Duplex](
           if !bytes.is_empty() {
             push_text(mut framed, text: bytes.length().format(radix: 16))
             push_text(mut framed, text: "\r\n")
-            mut framed.append_slice(bytes.slice())
+            mut framed.append_items(bytes)
             push_text(mut framed, text: "\r\n")
           }
           if is_end {
             push_text(mut framed, text: "0\r\n\r\n")
           }
         } else {
-          mut framed.append_slice(bytes.slice())
+          mut framed.append_items(bytes)
         }
-        let is_sent = framed.is_empty() || connection.send_all(framed.slice()) is Ok(_)
+        let is_sent = framed.is_empty() || connection.send_all(framed) is Ok(_)
         can_continue = can_continue && is_sent
         let _ = ack.send(is_sent)
       }
@@ -1301,7 +1301,7 @@ public type ServerOptions(
 )
   derives Equal
 
-fn is_trusted(address: network.IpAddress, trusted: Slice[network.IpNetwork]) -> Bool {
+fn is_trusted(address: network.IpAddress, trusted: List[network.IpNetwork]) -> Bool {
   for network in trusted {
     if network.contains(address) {
       return true
@@ -1310,7 +1310,7 @@ fn is_trusted(address: network.IpAddress, trusted: Slice[network.IpNetwork]) -> 
   false
 }
 
-fn forwarded_address(text: StringSlice) -> Option[network.IpAddress] {
+fn forwarded_address(text: String) -> Option[network.IpAddress] {
   var value = text.trim()
   if value.starts_with("\"") && value.ends_with("\"") && value.length() >= 2 {
     value = value.part(1, to: value.length() - 1)
@@ -1330,12 +1330,12 @@ fn forwarded_address(text: StringSlice) -> Option[network.IpAddress] {
   }
 }
 
-fn forwarded_hops(headers: Headers) -> List[StringSlice] {
-  var hops: List[StringSlice] = []
+fn forwarded_hops(headers: Headers) -> List[view String] {
+  var hops: List[view String] = []
   match headers.get("Forwarded") {
     Some(forwarded) => {
       for element in forwarded.split(",") {
-        var hop: Option[StringSlice] = None
+        var hop: Option[view String] = None
         for pair in element.split(";") {
           let trimmed = pair.trim()
           if trimmed.length() > 4 && trimmed.get_substring(0, to: 4) is Some(head) && head.equal_ignoring_ascii_case("for=") {
@@ -1359,7 +1359,7 @@ fn forwarded_hops(headers: Headers) -> List[StringSlice] {
   hops
 }
 
-fn client_of(peer: Option[network.SocketAddress], headers: Headers, trusted: Slice[network.IpNetwork]) -> Option[network.IpAddress] {
+fn client_of(peer: Option[network.SocketAddress], headers: Headers, trusted: List[network.IpNetwork]) -> Option[network.IpAddress] {
   var client = match peer {
     Some(address) => address.address
     None => return None
@@ -1509,9 +1509,9 @@ fn refuse[Stream: streams.Duplex](connection: Stream, error: Error)
     hpack.Field(name: "Content-Type", value: "text/plain; charset=utf-8"),
     hpack.Field(name: "Content-Length", value: "${text.length()}"),
   ]
-  var bytes = head_bytes(status.code, fields: fields.slice(), is_end: false, version_one_zero: false, close: true)
+  var bytes = head_bytes(status.code, fields: fields, is_end: false, version_one_zero: false, close: true)
   push_text(mut bytes, text: text)
-  let _ = connection.send_all(bytes.slice())
+  let _ = connection.send_all(bytes)
 }
 
 fn await_request[Stream: streams.Duplex](connection: Stream, inbox: mut streams.ByteQueue, stopping: tasks.Channel[Unit]) -> Bool
@@ -1538,7 +1538,7 @@ fn serve_one[Stream: streams.Duplex](
   options: ServerOptions,
   stopping: tasks.Channel[Unit],
   peer: Option[network.SocketAddress],
-  certificates: Slice[x509.Certificate],
+  certificates: List[x509.Certificate],
 )
   uses Tasks, Handles, Clock, generic Granted, RunForever
 {
@@ -1595,7 +1595,7 @@ fn serve_one[Stream: streams.Duplex](
         }
       }
       {
-        let client = client_of(peer, headers: head.headers, trusted: options.trusted_proxies.slice())
+        let client = client_of(peer, headers: head.headers, trusted: options.trusted_proxies)
         let request = Request(
           method: own head.method,
           target: own head.target,
@@ -1603,7 +1603,7 @@ fn serve_one[Stream: streams.Duplex](
           body: channel_body(chunks, credit: None, limit: body_limit),
           peer: peer,
           client: client,
-          client_certificates: certificates.to_list(),
+          client_certificates: certificates.copy(),
         )
         var responder = new_responder(outbound, stream: 0, is_head: is_head)
         let outcome = run_handler(handler, request: own request, responder: mut responder, gone: gone, seconds: options.request_timeout_seconds)
@@ -1629,12 +1629,12 @@ fn serve_one[Stream: streams.Duplex](
   }
 }
 
-fn is_connection_specific(name: StringSlice) -> Bool {
+fn is_connection_specific(name: String) -> Bool {
   name.equal_ignoring_ascii_case("connection") || name.equal_ignoring_ascii_case("keep-alive") || name.equal_ignoring_ascii_case("proxy-connection")
     || name.equal_ignoring_ascii_case("transfer-encoding") || name.equal_ignoring_ascii_case("upgrade")
 }
 
-fn has_uppercase(name: StringSlice) -> Bool {
+fn has_uppercase(name: String) -> Bool {
   for byte in name.bytes() {
     if 65 <= byte && byte <= 90 {
       return true
@@ -1645,7 +1645,7 @@ fn has_uppercase(name: StringSlice) -> Bool {
 
 type Arrived(method: Method, target: String, headers: Headers)
 
-fn arrived_of(fields: Slice[hpack.Field]) -> Result[Arrived, Status] {
+fn arrived_of(fields: List[hpack.Field]) -> Result[Arrived, Status] {
   var method: Option[String] = None
   var path: Option[String] = None
   var authority: Option[String] = None
@@ -1654,7 +1654,7 @@ fn arrived_of(fields: Slice[hpack.Field]) -> Result[Arrived, Status] {
   var headers = Headers.new()
   var cookies: List[String] = []
   for field in fields {
-    let name = field.name.slice()
+    let name = field.name
     if name.starts_with(":") {
       if is_regular {
         return Err(Status.bad_request)
@@ -1719,19 +1719,19 @@ fn answer_arrival(
   handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions,
   peer: Option[network.SocketAddress],
-  certificates: Slice[x509.Certificate],
+  certificates: List[x509.Certificate],
 )
   uses Tasks, Clock, generic Granted, RunForever
 {
   let limits = options.limits
   let stream = arrival.stream
   var responder = new_responder(arrival.outbound.copy(), stream: stream, is_head: false)
-  match arrived_of(arrival.fields.slice()) {
+  match arrived_of(arrival.fields) {
     Ok(arrived) => {
       let is_head = arrived.method == Method.Head
       responder = new_responder(arrival.outbound.copy(), stream: stream, is_head: is_head)
       let credit = Some(Credit(outbound: arrival.outbound.copy(), stream: stream))
-      let client = client_of(peer, headers: arrived.headers, trusted: options.trusted_proxies.slice())
+      let client = client_of(peer, headers: arrived.headers, trusted: options.trusted_proxies)
       let request = Request(
         method: own arrived.method,
         target: own arrived.target,
@@ -1739,7 +1739,7 @@ fn answer_arrival(
         body: channel_body(arrival.chunks.copy(), credit: own credit, limit: limits.body_bytes),
         peer: peer,
         client: client,
-        client_certificates: certificates.to_list(),
+        client_certificates: certificates.copy(),
       )
       let outcome = run_handler(handler, request: own request, responder: mut responder, gone: arrival.cancelled, seconds: options.request_timeout_seconds)
       if outcome == Handled.Completed {
@@ -1819,7 +1819,7 @@ fn serve_secured(
     Some(secured) => own secured
     None => return
   }
-  if secured.protocol() == Some("h2".slice()) {
+  if secured.protocol() == Some("h2") {
     two.serve(secured, inbox: [], header_limit: options.limits.head_bytes, stopping: stopping, respond: fn(arrival) {
       answer_arrival(own arrival, handler: handler, options: options, peer: peer, certificates: secured.peer_certificates())
     })
@@ -1956,18 +1956,18 @@ public opaque type Route(method: Option[Method], segments: List[Segment], traili
 public opaque type Parameters(names: List[String], values: List[String])
   derives Equal
 
-public fn Parameters.get(self, name: StringSlice) -> Option[StringSlice] {
+public fn Parameters.get(self, name: String) -> Option[view String] {
   for index in 0..self.names.length() {
     if self.names[index] == name && index < self.values.length() {
-      return Some(self.values[index].slice())
+      return Some(self.values[index])
     }
   }
   None
 }
 
-fn path_pieces(path: StringSlice) -> List[StringSlice]
+fn path_pieces(path: String) -> List[view String]
 {
-  var pieces: List[StringSlice] = []
+  var pieces: List[view String] = []
   var start: UInt64 = 0
   for index in 0..path.length()
     invariant start <= index + 1
@@ -1987,7 +1987,7 @@ fn path_pieces(path: StringSlice) -> List[StringSlice]
   pieces
 }
 
-fn is_parameter_name(name: StringSlice) -> Bool
+fn is_parameter_name(name: String) -> Bool
 {
   if name.is_empty() {
     return false
@@ -2000,10 +2000,10 @@ fn is_parameter_name(name: StringSlice) -> Bool
   true
 }
 
-fn parse_route(text: StringSlice) -> Option[Route]
+fn parse_route(text: String) -> Option[Route]
 {
   var method: Option[Method] = None
-  var path = text
+  var path: view String = text
   match text.find(" ") {
     Some(space) => {
       let name = text.part(0, to: space)
@@ -2041,33 +2041,33 @@ fn parse_route(text: StringSlice) -> Option[Route]
           return None
         }
       }
-      mut names.push(name.to_string())
-      mut segments.push(if rest { Segment.Rest(name: name.to_string()) } else { Segment.Named(name: name.to_string()) })
+      mut names.push(name.copy())
+      mut segments.push(if rest { Segment.Rest(name: name.copy()) } else { Segment.Named(name: name.copy()) })
     } else if piece.contains("{") || piece.contains("}") {
       return None
     } else if !(last && piece.is_empty()) {
-      mut segments.push(Segment.Fixed(text: piece.to_string()))
+      mut segments.push(Segment.Fixed(text: piece.copy()))
     }
   }
   let trailing_slash = path.length() > 1 && path.ends_with("/")
   Some(Route(method: own method, segments: own segments, trailing_slash: trailing_slash))
 }
 
-public fn Route.parse(text: StringSlice) -> Option[Route] {
+public fn Route.parse(text: String) -> Option[Route] {
   parse_route(text)
 }
 
 impl FromTemplate for Route {
   type Part = String
 
-  fn is_valid_template(literals: Slice[text.Literal]) -> Bool
+  fn is_valid_template(literals: List[text.Literal]) -> Bool
   {
     literals.length() == 1 && parse_route(literals[0].text()) is Some(_)
   }
 
   fn from_template(template: Template[String]) -> Route
   {
-    let text = if template.literals.length() > 0 { template.literals[0].text() } else { "/".slice() }
+    let text = if template.literals.length() > 0 { template.literals[0].text() } else { "/" }
     match parse_route(text) {
       Some(route) => own route
       None => Route(method: None, segments: [], trailing_slash: false)
@@ -2158,14 +2158,14 @@ public type ClientOptions(
 public type Proxy(http: Option[url.Url] = None, https: Option[url.Url] = None, excluded: List[String] = [])
   derives Equal
 
-fn first_variable(names: Slice[String]) -> Option[String]
+fn first_variable(names: List[String]) -> Option[String]
   uses Environment
 {
   for name in names {
     match Environment.variable(name) {
       Some(value) => {
-        if !value.slice().trim().is_empty() {
-          return Some(value.slice().trim().to_string())
+        if !value.trim().is_empty() {
+          return Some(value.trim().copy())
         }
       }
       None => {}
@@ -2179,22 +2179,22 @@ fn proxy_url(text: own Option[String]) -> Option[url.Url] {
     Some(value) => own value
     None => return None
   }
-  let full = if value.slice().contains("://") { own value } else { "http://${value}" }
+  let full = if value.contains("://") { own value } else { "http://${value}" }
   url.parse(full).ok()
 }
 
 public fn proxy_from_environment() -> Option[Proxy]
   uses Environment
 {
-  let http = proxy_url(first_variable(["HTTP_PROXY", "http_proxy"].slice()))
-  let https = proxy_url(first_variable(["HTTPS_PROXY", "https_proxy"].slice()))
+  let http = proxy_url(first_variable(["HTTP_PROXY", "http_proxy"]))
+  let https = proxy_url(first_variable(["HTTPS_PROXY", "https_proxy"]))
   if http is None && https is None {
     return None
   }
   var excluded: List[String] = []
-  match first_variable(["NO_PROXY", "no_proxy"].slice()) {
+  match first_variable(["NO_PROXY", "no_proxy"]) {
     Some(listed) => {
-      for entry in listed.slice().split(",") {
+      for entry in listed.split(",") {
         let trimmed = entry.trim()
         if !trimmed.is_empty() {
           mut excluded.push(trimmed.to_ascii_lowercase())
@@ -2206,7 +2206,7 @@ public fn proxy_from_environment() -> Option[Proxy]
   Some(Proxy(http: own http, https: own https, excluded: own excluded))
 }
 
-fn network_of(entry: StringSlice) -> Option[network.IpNetwork] {
+fn network_of(entry: String) -> Option[network.IpNetwork] {
   let slash = entry.find("/")?
   let halves = entry.split_at(slash)
   let address = network.parse_address(halves.first).ok()?
@@ -2214,11 +2214,11 @@ fn network_of(entry: StringSlice) -> Option[network.IpNetwork] {
   network.IpNetwork.new(address, prefix_length: length)
 }
 
-fn is_excluded(excluded: Slice[String], host: StringSlice) -> Bool {
+fn is_excluded(excluded: List[String], host: String) -> Bool {
   let name = host.strip_prefix("[").unwrap_or(host)
   let bare = name.strip_suffix("]").unwrap_or(name).to_ascii_lowercase()
   for entry in excluded {
-    let listed = entry.slice()
+    let listed = entry
     if listed == "*" {
       return true
     }
@@ -2237,17 +2237,17 @@ fn is_excluded(excluded: Slice[String], host: StringSlice) -> Bool {
       None => {}
     }
     let suffix = listed.strip_prefix(".").unwrap_or(listed)
-    if bare == suffix || (bare.slice().ends_with(suffix) && bare.slice().ends_with(".${suffix}")) {
+    if bare == suffix || (bare.ends_with(suffix) && bare.ends_with(".${suffix}")) {
       return true
     }
   }
   false
 }
 
-fn proxy_for(options: ClientOptions, host: StringSlice, is_secure: Bool) -> Option[url.Url] {
+fn proxy_for(options: ClientOptions, host: String, is_secure: Bool) -> Option[url.Url] {
   match options.proxy {
     Some(proxy) => {
-      if is_excluded(proxy.excluded.slice(), host: host) {
+      if is_excluded(proxy.excluded, host: host) {
         None
       } else if is_secure {
         proxy.https.copy()
@@ -2263,14 +2263,14 @@ fn basic_authorization(proxy: url.Url) -> Option[String] {
   let information = proxy.user_information()?
   let decoded = match url.decode_component(information) {
     Ok(text) => own text
-    Err(_) => information.to_string()
+    Err(_) => information.copy()
   }
-  Some("Basic ${base64.encode(decoded.slice().bytes())}")
+  Some("Basic ${base64.encode(decoded.bytes())}")
 }
 
 type Forwarding(authorization: Option[String])
 
-fn tunnel(connection: mut network.Connection, host: StringSlice, port: UInt16, authorization: Option[String], limits: Limits) -> Result[Unit, Error]
+fn tunnel(connection: mut network.Connection, host: String, port: UInt16, authorization: Option[String], limits: Limits) -> Result[Unit, Error]
   uses Handles, Tasks, RunForever
 {
   var request = "CONNECT ${host}:${port} HTTP/1.1\r\nHost: ${host}:${port}\r\n"
@@ -2279,7 +2279,7 @@ fn tunnel(connection: mut network.Connection, host: StringSlice, port: UInt16, a
     None => {}
   }
   mut request.push("\r\n")
-  system(connection.send_all(request.slice().bytes()))?
+  system(connection.send_all(request.bytes()))?
   var inbox: streams.ByteQueue = []
   let opening = read_status(connection, inbox: mut inbox, limits: limits)?
   if opening.status.code < 200 || opening.status.code > 299 {
@@ -2291,7 +2291,7 @@ fn tunnel(connection: mut network.Connection, host: StringSlice, port: UInt16, a
   Ok(Unit)
 }
 
-fn content_codings(header: Option[StringSlice]) -> List[String] {
+fn content_codings(header: Option[String]) -> List[String] {
   var codings: List[String] = []
   match header {
     Some(value) => {
@@ -2307,11 +2307,11 @@ fn content_codings(header: Option[StringSlice]) -> List[String] {
   codings
 }
 
-fn is_decodable(coding: StringSlice) -> Bool {
+fn is_decodable(coding: String) -> Bool {
   coding == "gzip" || coding == "x-gzip" || coding == "br" || coding == "zstd"
 }
 
-fn decoded_body(bytes: Slice[UInt8], coding: StringSlice, limit: UInt64) -> Result[List[UInt8], Error]
+fn decoded_body(bytes: List[UInt8], coding: String, limit: UInt64) -> Result[List[UInt8], Error]
   uses RunForever
 {
   if coding == "br" {
@@ -2355,7 +2355,7 @@ fn decoded(status: Status, headers: own Headers, body: own List[UInt8], limits: 
     decreases index
   {
     index -= 1
-    plain = decoded_body(plain.slice(), coding: codings[index], limit: limits.body_bytes)?
+    plain = decoded_body(plain, coding: codings[index], limit: limits.body_bytes)?
   }
   var plain_headers = own headers
   mut plain_headers.remove("Content-Encoding")
@@ -2366,7 +2366,7 @@ fn decoded(status: Status, headers: own Headers, body: own List[UInt8], limits: 
 fn request_target(url: url.Url) -> String {
   var target = ""
   let path = url.path()
-  mut target.push(if path.is_empty() { "/".slice() } else { path })
+  mut target.push(if path.is_empty() { "/" } else { path })
   match url.query() {
     Some(query) => {
       mut target.push("?")
@@ -2441,15 +2441,15 @@ fn request_head(method: Method, url: url.Url, headers: Headers, body_length: UIn
 fn request_fields(method: Method, url: url.Url, headers: Headers, body_length: UInt64) -> List[hpack.Field] {
   var fields: List[hpack.Field] = [
     hpack.Field(name: ":method", value: "${method}"),
-    hpack.Field(name: ":scheme", value: url.scheme().to_string()),
+    hpack.Field(name: ":scheme", value: url.scheme().copy()),
     hpack.Field(name: ":authority", value: match headers.get("Host") {
-      Some(host) => host.to_string()
+      Some(host) => host.copy()
       None => authority_of(url)
     }),
     hpack.Field(name: ":path", value: request_target(url)),
   ]
   for entry in headers.entries() {
-    let name = entry.name.slice().to_ascii_lowercase()
+    let name = entry.name.to_ascii_lowercase()
     if !is_connection_specific(name) && name != "host" && name != "content-length" {
       mut fields.push(hpack.Field(name: own name, value: entry.value.copy()))
     }
@@ -2504,7 +2504,7 @@ fn read_status[Stream: streams.Duplex](
       Some(line) => own line
       None => return Err(Error.Closed)
     }
-    let text = line.slice()
+    let text = line
     if !(text.starts_with("HTTP/1.1 ") || text.starts_with("HTTP/1.0 ")) || text.length() < 12 {
       return Err(malformed("a status line that is not HTTP/1.1"))
     }
@@ -2524,7 +2524,7 @@ fn read_status[Stream: streams.Duplex](
   }
 }
 
-fn start_plain(link: own Link, method: Method, url: url.Url, headers: Headers, body: Slice[UInt8], limits: Limits) -> Result[Started, Error]
+fn start_plain(link: own Link, method: Method, url: url.Url, headers: Headers, body: List[UInt8], limits: Limits) -> Result[Started, Error]
   uses Handles, Tasks, RunForever
 {
   let forwarding = match link {
@@ -2532,15 +2532,15 @@ fn start_plain(link: own Link, method: Method, url: url.Url, headers: Headers, b
     _ => None
   }
   var request = request_head(method, url: url, headers: headers, body_length: body.length(), forwarding: forwarding)
-  mut request.append_slice(body)
+  mut request.append_items(body)
   var opened = own link
   let opening = match mut opened {
     Plain(connection, inbox, ..) => {
-      system(connection.send_all(request.slice()))?
+      system(connection.send_all(request))?
       read_status(connection, inbox: mut inbox, limits: limits)?
     }
     Secure(connection, inbox) => {
-      system(connection.send_all(request.slice()))?
+      system(connection.send_all(request))?
       read_status(connection, inbox: mut inbox, limits: limits)?
     }
     Multiplexed(..) => return Err(Error.Closed)
@@ -2560,14 +2560,14 @@ fn start_plain(link: own Link, method: Method, url: url.Url, headers: Headers, b
   Ok(Started(status: opening.status, headers: own opening.headers, body: own response_body))
 }
 
-fn begin_exchange(link: own Link, method: Method, url: url.Url, headers: Headers, body: Slice[UInt8], limits: Limits) -> Result[Started, Error]
+fn begin_exchange(link: own Link, method: Method, url: url.Url, headers: Headers, body: List[UInt8], limits: Limits) -> Result[Started, Error]
   uses Handles, Tasks, RunForever
 {
   var opened = own link
   match mut opened {
     Multiplexed(session) => {
       let fields = request_fields(method, url: url, headers: headers, body_length: body.length())
-      let stream = match two.begin(mut session, fields: fields.slice(), body: body) {
+      let stream = match two.begin(mut session, fields: fields, body: body) {
         Ok(stream) => stream
         Err(failure) => return Err(multiplexing_error(failure))
       }
@@ -2580,7 +2580,7 @@ fn begin_exchange(link: own Link, method: Method, url: url.Url, headers: Headers
       for field in answer {
         if field.name == ":status" {
           status = UInt16.parse(field.value).ok()
-        } else if !field.name.slice().starts_with(":") {
+        } else if !field.name.starts_with(":") {
           mut response_headers.add(field.name, value: field.value)
         }
       }
@@ -2621,7 +2621,7 @@ fn reclaim(body: own Body) -> Option[Link]
 }
 
 fn open_link(
-  host: StringSlice,
+  host: String,
   port: UInt16,
   is_secure: Bool,
   roots: Result[List[x509.Certificate], SystemError],
@@ -2667,7 +2667,7 @@ fn open_link(
     Ok(secured) => own secured
     Err(error) => return Err(Error.Tls(error: own error))
   }
-  if secured.protocol() != Some("h2".slice()) {
+  if secured.protocol() != Some("h2") {
     return Ok(Link.Secure(connection: own secured, inbox: []))
   }
   match two.connect(own secured, header_limit: options.limits.head_bytes) {
@@ -2680,7 +2680,7 @@ fn is_idempotent(method: Method) -> Bool {
   method == Method.Get || method == Method.Head || method == Method.Put || method == Method.Delete || method == Method.Options
 }
 
-fn take_pooled(pool: mut List[Pooled], origin: StringSlice) -> Option[Link] {
+fn take_pooled(pool: mut List[Pooled], origin: String) -> Option[Link] {
   for index in 0..pool.length() {
     if index < pool.length() && pool[index].origin == origin {
       let pooled = mut pool.remove_at(index)
@@ -2721,7 +2721,7 @@ fn target_of(address: url.Url) -> Result[Target, Error] {
   Ok(Target(is_secure: is_secure, host: own host, port: port, origin: own origin))
 }
 
-fn Client.start(mut self, method: Method, address: url.Url, headers: Headers, body: Slice[UInt8], target: Target) -> Result[Started, Error]
+fn Client.start(mut self, method: Method, address: url.Url, headers: Headers, body: List[UInt8], target: Target) -> Result[Started, Error]
   uses NetworkClient, Handles, Tasks, Random, Clock, Panic, RunForever
 {
   match take_pooled(mut self.pool, origin: target.origin) {
@@ -2827,16 +2827,16 @@ fn retry_after_milliseconds(headers: Headers, now: Instant) -> Option[Int64] {
   }
 }
 
-fn is_body_header(name: StringSlice) -> Bool {
+fn is_body_header(name: String) -> Bool {
   name.equal_ignoring_ascii_case("Content-Type") || name.equal_ignoring_ascii_case("Content-Encoding")
     || name.equal_ignoring_ascii_case("Content-Language") || name.equal_ignoring_ascii_case("Content-Location")
 }
 
-fn is_credential_header(name: StringSlice) -> Bool {
+fn is_credential_header(name: String) -> Bool {
   name.equal_ignoring_ascii_case("Authorization") || name.equal_ignoring_ascii_case("Cookie") || name.equal_ignoring_ascii_case("Proxy-Authorization")
 }
 
-fn without_headers(headers: Headers, drops: fn(StringSlice) -> Bool) -> Headers {
+fn without_headers(headers: Headers, drops: fn(String) -> Bool) -> Headers {
   var kept = Headers.new()
   for entry in headers.entries() {
     if !drops(entry.name) {
@@ -2852,14 +2852,14 @@ public fn Client.stream[Output](
   url: url.Url,
   receive: (fn(Status, Headers, mut Body) -> Output uses generic Granted),
   headers: Headers = Headers(entries: []),
-  body: Slice[UInt8] = [],
+  body: List[UInt8] = [],
 ) -> Result[Output, Error]
   uses NetworkClient, Handles, Tasks, Random, Clock, Panic, generic Granted, RunForever
 {
   var current_method = method.copy()
   var address = url.copy()
   var request_headers = headers.copy()
-  var request_body = body.to_list()
+  var request_body = body.copy()
   var redirects_left = self.options.redirects
   var attempt: UInt64 = 1
   while true {
@@ -2877,7 +2877,7 @@ public fn Client.stream[Output](
         None => {}
       }
     }
-    let opened = match mut self.start(current_method, address: address, headers: sent, body: request_body.slice(), target: target) {
+    let opened = match mut self.start(current_method, address: address, headers: sent, body: request_body, target: target) {
       Ok(opened) => own opened
       Err(error) => {
         if attempt < self.options.retry.attempts && is_retryable_error(error, method: current_method) {
@@ -2898,7 +2898,7 @@ public fn Client.stream[Output](
     }
     let code = opened.status.code
     let location = match opened.headers.get("Location") {
-      Some(location) => if is_redirect(code) && self.options.redirects > 0 { Some(location.to_string()) } else { None }
+      Some(location) => if is_redirect(code) && self.options.redirects > 0 { Some(location.copy()) } else { None }
       None => None
     }
     match location {
@@ -2952,7 +2952,7 @@ public fn Client.send(
   method: Method,
   url: url.Url,
   headers: Headers = Headers(entries: []),
-  body: Slice[UInt8] = [],
+  body: List[UInt8] = [],
 ) -> Result[Response, Error]
   uses NetworkClient, Handles, Tasks, Random, Clock, Panic, RunForever
 {
@@ -2970,7 +2970,7 @@ public fn Client.send(
   outcome
 }
 
-public fn Client.get(mut self, address: StringSlice) -> Result[Response, Error]
+public fn Client.get(mut self, address: String) -> Result[Response, Error]
   uses NetworkClient, Handles, Tasks, Random, Clock, Panic, RunForever
 {
   match url.parse(address) {
@@ -2983,7 +2983,7 @@ public fn send(
   method: Method,
   url: url.Url,
   headers: Headers = Headers(entries: []),
-  body: Slice[UInt8] = [],
+  body: List[UInt8] = [],
   options: ClientOptions = ClientOptions(),
 ) -> Result[Response, Error]
   uses NetworkClient, Handles, Tasks, FileRead, Random, Clock, Panic, RunForever
@@ -2992,7 +2992,7 @@ public fn send(
   mut client.send(method, url: url, headers: headers, body: body)
 }
 
-public fn get(address: StringSlice, options: ClientOptions = ClientOptions()) -> Result[Response, Error]
+public fn get(address: String, options: ClientOptions = ClientOptions()) -> Result[Response, Error]
   uses NetworkClient, Handles, Tasks, FileRead, Random, Clock, Panic, RunForever
 {
   var client = Client.new(options)
@@ -3006,7 +3006,7 @@ public type Message =
 
 type Sending(outbound: tasks.Channel[flow.Outbound], ack: tasks.Channel[Bool], masks: Option[random.Generator], is_closed: Bool)
 
-fn send_frame(sending: mut Sending, opcode: UInt8, payload: Slice[UInt8], is_final: Bool, is_compressed: Bool = false) -> Result[Unit, Error]
+fn send_frame(sending: mut Sending, opcode: UInt8, payload: List[UInt8], is_final: Bool, is_compressed: Bool = false) -> Result[Unit, Error]
   uses Tasks, RunForever
 {
   if sending.is_closed {
@@ -3054,14 +3054,14 @@ public opaque type WebSocketWriter(sending: Sending, compresses: Bool)
 
 let compression_minimum: UInt64 = 256
 
-fn send_message(sending: mut Sending, opcode: UInt8, payload: Slice[UInt8], compresses: Bool) -> Result[Unit, Error]
+fn send_message(sending: mut Sending, opcode: UInt8, payload: List[UInt8], compresses: Bool) -> Result[Unit, Error]
   uses Tasks, RunForever
 {
   if compresses && payload.length() >= compression_minimum {
     var packed = compression.compress(payload, format: compression.Format.Deflate, level: compression.Level.Fastest)
     mut packed.push(0)
     if packed.length() < payload.length() {
-      return send_frame(mut sending, opcode: opcode, payload: packed.slice(), is_final: true, is_compressed: true)
+      return send_frame(mut sending, opcode: opcode, payload: packed, is_final: true, is_compressed: true)
     }
   }
   send_frame(mut sending, opcode: opcode, payload: payload, is_final: true)
@@ -3075,7 +3075,7 @@ fn fail_socket(reader: mut WebSocketReader, code: UInt16, reason: own String) ->
   uses Tasks, RunForever
 {
   let payload = websocket.close_payload(code, reason: reason)
-  let _ = send_frame(mut reader.sending, opcode: websocket.close_opcode, payload: payload.slice(), is_final: true)
+  let _ = send_frame(mut reader.sending, opcode: websocket.close_opcode, payload: payload, is_final: true)
   reader.close_code = Some(code)
   Error.Malformed(message: own reason)
 }
@@ -3102,16 +3102,16 @@ public fn WebSocketReader.receive(mut self) -> Result[Option[Message], Error]
         }
         let opcode = frame.opcode
         if opcode == websocket.ping_opcode {
-          send_frame(mut self.sending, opcode: websocket.pong_opcode, payload: frame.payload.slice(), is_final: true)?
+          send_frame(mut self.sending, opcode: websocket.pong_opcode, payload: frame.payload, is_final: true)?
         } else if opcode == websocket.close_opcode {
-          let code = match websocket.close_code(frame.payload.slice()) {
+          let code = match websocket.close_code(frame.payload) {
             Ok(code) => code
             Err(code) => return Err(fail_socket(mut self, code: code, reason: "a close frame with an invalid code"))
           }
           self.close_code = Some(code)
           if !self.sending.is_closed {
             let reply = if code == 1005 { [] } else { websocket.close_payload(code, reason: "") }
-            let _ = send_frame(mut self.sending, opcode: websocket.close_opcode, payload: reply.slice(), is_final: true)
+            let _ = send_frame(mut self.sending, opcode: websocket.close_opcode, payload: reply, is_final: true)
           }
           return Ok(None)
         } else if opcode != websocket.pong_opcode {
@@ -3135,8 +3135,8 @@ public fn WebSocketReader.receive(mut self) -> Result[Option[Message], Error]
             self.fragment_opcode = 0
             if self.is_fragment_compressed {
               self.is_fragment_compressed = false
-              mut bytes.append_slice([0, 0, 255, 255][..])
-              bytes = match compression.inflate_flushed(bytes.slice(), limit: self.limit) {
+              mut bytes.append_items([0, 0, 255, 255][..])
+              bytes = match compression.inflate_flushed(bytes, limit: self.limit) {
                 Ok(plain) => own plain
                 Err(TooLarge(_)) => return Err(fail_socket(mut self, code: websocket.message_too_big, reason: "a message larger than the limit"))
                 Err(_) => return Err(fail_socket(mut self, code: websocket.invalid_data, reason: "a compressed message that does not decompress"))
@@ -3164,43 +3164,43 @@ public fn WebSocketWriter.send(mut self, message: Message) -> Result[Unit, Error
   uses Tasks, RunForever
 {
   match message {
-    Text(text) => send_message(mut self.sending, opcode: websocket.text_opcode, payload: text.slice().bytes(), compresses: self.compresses)
-    Binary(bytes) => send_message(mut self.sending, opcode: websocket.binary_opcode, payload: bytes.slice(), compresses: self.compresses)
+    Text(text) => send_message(mut self.sending, opcode: websocket.text_opcode, payload: text.bytes(), compresses: self.compresses)
+    Binary(bytes) => send_message(mut self.sending, opcode: websocket.binary_opcode, payload: bytes, compresses: self.compresses)
   }
 }
 
-public fn WebSocketWriter.send_text(mut self, text: StringSlice) -> Result[Unit, Error]
+public fn WebSocketWriter.send_text(mut self, text: String) -> Result[Unit, Error]
   uses Tasks, RunForever
 {
   send_message(mut self.sending, opcode: websocket.text_opcode, payload: text.bytes(), compresses: self.compresses)
 }
 
-public fn WebSocketWriter.send_binary(mut self, bytes: Slice[UInt8]) -> Result[Unit, Error]
+public fn WebSocketWriter.send_binary(mut self, bytes: List[UInt8]) -> Result[Unit, Error]
   uses Tasks, RunForever
 {
   send_message(mut self.sending, opcode: websocket.binary_opcode, payload: bytes, compresses: self.compresses)
 }
 
-public fn WebSocketWriter.ping(mut self, payload: Slice[UInt8] = []) -> Result[Unit, Error]
+public fn WebSocketWriter.ping(mut self, payload: List[UInt8] = []) -> Result[Unit, Error]
   uses Tasks, RunForever
 {
   let length = if payload.length() > 125 { 125 } else { payload.length() }
   send_frame(mut self.sending, opcode: websocket.ping_opcode, payload: payload[0..length], is_final: true)
 }
 
-public fn WebSocketWriter.close(mut self, code: UInt16 = 1000, reason: StringSlice = "") -> Result[Unit, Error]
+public fn WebSocketWriter.close(mut self, code: UInt16 = 1000, reason: String = "") -> Result[Unit, Error]
   uses Tasks, RunForever
 {
   if self.sending.is_closed {
     return Ok(Unit)
   }
   let payload = websocket.close_payload(code, reason: reason)
-  send_frame(mut self.sending, opcode: websocket.close_opcode, payload: payload.slice(), is_final: true)
+  send_frame(mut self.sending, opcode: websocket.close_opcode, payload: payload, is_final: true)
 }
 
-public fn WebSocket.protocol(self) -> Option[StringSlice] {
+public fn WebSocket.protocol(self) -> Option[view String] {
   match self.protocol {
-    Some(name) => Some(name.slice())
+    Some(name) => Some(name)
     None => None
   }
 }
@@ -3217,19 +3217,19 @@ public fn WebSocket.send(mut self, message: Message) -> Result[Unit, Error]
   mut self.writer.send(message)
 }
 
-public fn WebSocket.send_text(mut self, text: StringSlice) -> Result[Unit, Error]
+public fn WebSocket.send_text(mut self, text: String) -> Result[Unit, Error]
   uses Tasks, RunForever
 {
   mut self.writer.send_text(text)
 }
 
-public fn WebSocket.send_binary(mut self, bytes: Slice[UInt8]) -> Result[Unit, Error]
+public fn WebSocket.send_binary(mut self, bytes: List[UInt8]) -> Result[Unit, Error]
   uses Tasks, RunForever
 {
   mut self.writer.send_binary(bytes)
 }
 
-public fn WebSocket.close(mut self, code: UInt16 = 1000, reason: StringSlice = "") -> Result[Unit, Error]
+public fn WebSocket.close(mut self, code: UInt16 = 1000, reason: String = "") -> Result[Unit, Error]
   uses Handles, Tasks, RunForever
 {
   mut self.writer.close(code, reason: reason)?
@@ -3277,7 +3277,7 @@ fn new_socket(
   WebSocket(reader: own reader, writer: own writer, protocol: own protocol)
 }
 
-fn offered_protocol(header: Option[StringSlice], protocols: Slice[String]) -> Option[String] {
+fn offered_protocol(header: Option[String], protocols: List[String]) -> Option[String] {
   match header {
     Some(value) => {
       for part in value.split(",") {
@@ -3297,7 +3297,7 @@ fn offered_protocol(header: Option[StringSlice], protocols: Slice[String]) -> Op
 public fn accept_websocket(
   request: own Request,
   responder: mut Responder,
-  protocols: Slice[String] = [],
+  protocols: List[String] = [],
   message_limit: UInt64 = 16777216,
   compresses: Bool = true,
 ) -> Result[WebSocket, Error]
@@ -3305,12 +3305,12 @@ public fn accept_websocket(
 {
   let is_upgrade = request.method == Method.Get && has_token(request.headers.get("Connection"), token: "upgrade")
     && has_token(request.headers.get("Upgrade"), token: "websocket")
-  let key = request.headers.get("Sec-WebSocket-Key").unwrap_or("".slice()).trim().to_string()
+  let key = request.headers.get("Sec-WebSocket-Key").unwrap_or("").trim().copy()
   if !is_upgrade || !websocket.is_valid_key(key) {
     let _ = mut responder.send(Response.text("a WebSocket upgrade is expected here", status: Status.bad_request))
     return Err(malformed("a request that is not a WebSocket upgrade"))
   }
-  if request.headers.get("Sec-WebSocket-Version").unwrap_or("".slice()).trim() != "13" {
+  if request.headers.get("Sec-WebSocket-Version").unwrap_or("").trim() != "13" {
     let refused = Response.text("only WebSocket version 13 is supported", status: Status(code: 426)).with_header("Sec-WebSocket-Version", value: "13")
     let _ = mut responder.send(own refused)
     return Err(Error.Unsupported(message: "a WebSocket version other than 13"))
@@ -3349,7 +3349,7 @@ public fn Responder.start_events(mut self, headers: Headers = Headers(entries: [
   mut self.start(Status.ok, headers: all)
 }
 
-fn push_field(output: mut String, name: StringSlice, value: StringSlice) {
+fn push_field(output: mut String, name: String, value: String) {
   mut output.push(name)
   mut output.push(": ")
   mut output.push(value)
@@ -3372,14 +3372,14 @@ public fn Responder.send_event(mut self, event: Event) -> Result[Unit, Error]
     Some(retry) => push_field(mut text, name: "retry", value: "${retry}")
     None => {}
   }
-  for line in event.data.slice().split("\n") {
+  for line in event.data.split("\n") {
     push_field(mut text, name: "data", value: line)
   }
   mut text.push("\n")
-  mut self.write(text.slice().bytes())
+  mut self.write(text.bytes())
 }
 
-public fn Responder.send_comment(mut self, comment: StringSlice) -> Result[Unit, Error]
+public fn Responder.send_comment(mut self, comment: String) -> Result[Unit, Error]
   uses Tasks, RunForever
 {
   var text = ""
@@ -3389,7 +3389,7 @@ public fn Responder.send_comment(mut self, comment: StringSlice) -> Result[Unit,
     mut text.push("\n")
   }
   mut text.push("\n")
-  mut self.write(text.slice().bytes())
+  mut self.write(text.bytes())
 }
 
 public opaque type EventParser(
@@ -3406,7 +3406,7 @@ public fn EventParser.new() -> EventParser {
   EventParser(pending: [], data: "", has_data: false, name: None, id: None, retry: None, is_started: false)
 }
 
-fn line_end(bytes: Slice[UInt8]) -> Option[UInt64]
+fn line_end(bytes: List[UInt8]) -> Option[UInt64]
   ensures !(result is Some(index) && index >= bytes.length())
 {
   for index in 0..bytes.length() {
@@ -3428,7 +3428,7 @@ fn take_event(parser: mut EventParser) -> Option[Event] {
   Some(Event(data: own data, name: own name, id: parser.id.copy(), retry_milliseconds: parser.retry))
 }
 
-fn parse_field(parser: mut EventParser, line: StringSlice) {
+fn parse_field(parser: mut EventParser, line: String) {
   if line.starts_with(":") {
     return
   }
@@ -3439,7 +3439,7 @@ fn parse_field(parser: mut EventParser, line: StringSlice) {
   }
   var value = match colon {
     Some(at) => line.part(at + 1, to: line.length())
-    None => "".slice()
+    None => ""
   }
   if value.starts_with(" ") {
     value = value.part(1, to: value.length())
@@ -3451,10 +3451,10 @@ fn parse_field(parser: mut EventParser, line: StringSlice) {
     mut parser.data.push(value)
     parser.has_data = true
   } else if field == "event" {
-    parser.name = Some(value.to_string())
+    parser.name = Some(value.copy())
   } else if field == "id" {
     if !value.contains("\u{0}") {
-      parser.id = Some(value.to_string())
+      parser.id = Some(value.copy())
     }
   } else if field == "retry" {
     match UInt64.parse(value) {
@@ -3491,11 +3491,11 @@ public fn EventParser.next(mut self, body: mut Body) -> Result[Option[Event], Er
         searched = 0
         if !self.is_started {
           self.is_started = true
-          if line.slice().starts_with("\u{feff}") {
+          if line.starts_with("\u{feff}") {
             proof {
               utf8.match_lies_between_boundaries(line.model(), part: "\u{feff}".model(), at: 0)
             }
-            line = line.slice().part(3, to: line.length()).to_string()
+            line = line.part(3, to: line.length()).copy()
           }
         }
         if line.is_empty() {
@@ -3524,7 +3524,7 @@ fn write_raw[Stream: streams.Duplex](connection: Stream, outbound: tasks.Channel
   for message in outbound.messages() {
     match own message {
       Data(bytes, ack, ..) => {
-        let _ = ack.send(connection.send_all(bytes.slice()) is Ok(_))
+        let _ = ack.send(connection.send_all(bytes) is Ok(_))
       }
       Head(ack, ..) => {
         let _ = ack.send(false)
@@ -3538,9 +3538,9 @@ fn write_raw[Stream: streams.Duplex](connection: Stream, outbound: tasks.Channel
 fn run_websocket[Stream: streams.Duplex, Output](
   connection: Stream,
   inbox: own streams.ByteQueue,
-  request: Slice[UInt8],
-  key: StringSlice,
-  protocols: Slice[String],
+  request: List[UInt8],
+  key: String,
+  protocols: List[String],
   limits: Limits,
   message_limit: UInt64,
   is_deflate_offered: Bool,
@@ -3556,7 +3556,7 @@ fn run_websocket[Stream: streams.Duplex, Output](
     return Err(Error.Unsupported(message: "a server that refused the WebSocket upgrade with ${opening.status.code}"))
   }
   let expected = websocket.accept_key(key)
-  if opening.headers.get("Sec-WebSocket-Accept") != Some(expected.slice()) {
+  if opening.headers.get("Sec-WebSocket-Accept") != Some(expected) {
     return Err(malformed("a WebSocket upgrade whose Sec-WebSocket-Accept does not match the key"))
   }
   let protocol = match opening.headers.get("Sec-WebSocket-Protocol") {
@@ -3601,7 +3601,7 @@ public fn Client.websocket[Output](
   url: url.Url,
   session: (fn(mut WebSocket) -> Output uses generic Granted),
   headers: Headers = Headers(entries: []),
-  protocols: Slice[String] = [],
+  protocols: List[String] = [],
   message_limit: UInt64 = 16777216,
   compresses: Bool = true,
 ) -> Result[Output, Error]
@@ -3624,7 +3624,7 @@ public fn Client.websocket[Output](
     mut key_bytes.push(intrinsic.convert((first >> (8 * index)) & 255))
     mut key_bytes.push(intrinsic.convert((second >> (8 * index)) & 255))
   }
-  let key = base64.encode(key_bytes.slice())
+  let key = base64.encode(key_bytes)
   var upgrade = headers.copy()
   mut upgrade.set("Upgrade", value: "websocket")
   mut upgrade.set("Sec-WebSocket-Key", value: key)
@@ -3653,9 +3653,9 @@ public fn Client.websocket[Output](
       if forwarding is Some(_) {
         return Err(Error.Unsupported(message: "a ws:// WebSocket through an HTTP proxy"))
       }
-      run_websocket(connection, inbox: own inbox, request: request.slice(), key: key, protocols: protocols, limits: self.options.limits, message_limit: message_limit, is_deflate_offered: compresses, seed: seed, session: session)
+      run_websocket(connection, inbox: own inbox, request: request, key: key, protocols: protocols, limits: self.options.limits, message_limit: message_limit, is_deflate_offered: compresses, seed: seed, session: session)
     }
-    Secure(connection, inbox) => run_websocket(connection, inbox: own inbox, request: request.slice(), key: key, protocols: protocols, limits: self.options.limits, message_limit: message_limit, is_deflate_offered: compresses, seed: seed, session: session)
+    Secure(connection, inbox) => run_websocket(connection, inbox: own inbox, request: request, key: key, protocols: protocols, limits: self.options.limits, message_limit: message_limit, is_deflate_offered: compresses, seed: seed, session: session)
     Multiplexed(..) => Err(Error.Unsupported(message: "a WebSocket over HTTP/2"))
   }
 }

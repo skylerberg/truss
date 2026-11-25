@@ -119,8 +119,8 @@ and scan_after (cursor : Cursor.t) ~inline ~nesting previous =
 and scan_item cursor ~inline ~nesting =
   let start = cursor.position in
   let scan_again () = scan_item cursor ~inline ~nesting in
-  let reject length message =
-    Source_text.reject cursor ~length message;
+  let reject length problem =
+    Source_text.reject cursor ~length problem;
     scan_again ()
   in
   let make_token_item ?ending kind = Cursor.Token (make_token cursor ~inline ~start ?ending kind) in
@@ -156,8 +156,7 @@ and scan_item cursor ~inline ~nesting =
         else
           let length = Uchar.utf_decode_length decoded in
           let make_unused () =
-            reject length
-              (Printf.sprintf "%s is not used in Truss." (Cursor.show_character cursor start))
+            reject length (Unused_character (Cursor.decode_character cursor start))
           in
           match Habits.Confusables.scan cursor ~scalar_value ~length with
           | Some (Lexed kind) -> make_token_item kind
@@ -182,11 +181,7 @@ and scan_item cursor ~inline ~nesting =
               | '"' -> lex_string cursor ~tag:None ~inline ~nesting ~start
               | '$' when Strings.opens_raw_string cursor start ->
                   lex_string cursor ~tag:None ~inline ~nesting ~start
-              | '$' ->
-                  reject
-                    (Cursor.run_length cursor start '$')
-                    "`$` is used only in strings: `${...}` inside a string interpolates, and `$`s \
-                     before a raw string's `\"\"\"` choose how it interpolates."
+              | '$' -> reject (Cursor.run_length cursor start '$') Dollar_outside_string
               | '.'
                 when Cursor.satisfies cursor (start + 1) Cursor.is_digit
                      && not (follows_operand cursor) -> (
@@ -199,7 +194,7 @@ and scan_item cursor ~inline ~nesting =
               | character -> (
                   match lex_punctuation cursor character with
                   | Some kind -> make_token_item kind
-                  | None -> reject 1 (Printf.sprintf "`%c` is not used in Truss." character))))
+                  | None -> reject 1 (Unused_character (Ascii character)))))
 
 and lex_number cursor ~inline ~nesting =
   let start = cursor.position in
@@ -208,17 +203,23 @@ and lex_number cursor ~inline ~nesting =
   let checked = Habits.Number_forms.check (String.sub cursor.text start (stop - start)) in
   (match checked.problem with
   | Some problem ->
-      Cursor.report cursor ~code:problem.code
+      Cursor.report cursor
         ~fixes:
           (if Cursor.is_at cursor stop '.' then []
            else
              List.map
-               (fun (title, replacement) ->
-                 Diagnostic.fix title
-                   [ Diagnostic.replace (Source.make_span start stop) replacement ])
+               (fun ({ replacement; reading } : Numbers.fix) : Syntax_catalog.Lexing.fix ->
+                 {
+                   action =
+                     (match reading with
+                     | Some reading -> Write_reading { code = replacement; reading }
+                     | None -> Write replacement);
+                   edits =
+                     [ { replaced = Source.make_span start stop; code = Spelled replacement } ];
+                 })
                checked.fixes)
         (Source.make_span (start + problem.start) (start + problem.stop))
-        problem.message
+        (Number problem.problem)
   | None -> ());
   let integer = make_token cursor ~inline ~start checked.value in
   match Habits.Number_forms.lex_trailing_point cursor ~start ~stop checked with
@@ -293,7 +294,7 @@ and lex_name cursor ~inline ~nesting =
       | None ->
           let checked = check_name cursor spelling in
           (match checked.problem with
-          | Some (code, message) ->
+          | Some problem ->
               let opens_literal =
                 Cursor.is_at cursor stop '"' || Cursor.is_at cursor stop '\''
                 || (Cursor.is_at cursor stop '$' && Strings.opens_raw_string cursor stop)
@@ -302,13 +303,16 @@ and lex_name cursor ~inline ~nesting =
                 match checked.fix with
                 | Some fixed when (not opens_literal) || (fixed.[0] >= 'A' && fixed.[0] <= 'Z') ->
                     [
-                      Diagnostic.fix
-                        ("Write `" ^ fixed ^ "`")
-                        [ Diagnostic.replace (Source.make_span start stop) fixed ];
+                      ({
+                         action = Write fixed;
+                         edits =
+                           [ { replaced = Source.make_span start stop; code = Spelled fixed } ];
+                       }
+                        : Syntax_catalog.Lexing.fix);
                     ]
                 | Some _ | None -> []
               in
-              Cursor.report cursor ~code ~fixes (Source.make_span start stop) message
+              Cursor.report cursor ~fixes (Source.make_span start stop) (Name problem)
           | None -> ());
           if checked.kind = Names.Upper then Upper checked.name else Lower checked.name
   in

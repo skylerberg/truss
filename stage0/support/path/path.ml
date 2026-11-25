@@ -155,3 +155,5 @@ module Ordered = struct
 end
 
 module Map = Map.Make (Ordered)
+
+type key = { module_ : module_; path : t; ordinal : int }

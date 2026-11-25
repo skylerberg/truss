@@ -421,6 +421,33 @@ let expect_recursion_group text ~of_:name ~expected =
     Harness.fail "the recursion group of %s is [%s], not [%s]" name (show_paths group)
       (show_paths expected)
 
+let expect_proof_group text ~of_:name ~expected =
+  let database = build [ ("app.main", text) ] in
+  let group =
+    (Database.For_testing.make_proof_lookups database).list_proof_group (make_main_path name)
+  in
+  let show_paths paths = String.concat "; " (List.map Path.show paths) in
+  if not (List.equal Path.equal group expected) then
+    Harness.fail "the proof group of %s is [%s], not [%s]" name (show_paths group)
+      (show_paths expected)
+
+let counter_bounded_by_its_builder =
+  "type Counter(count: UInt64)\n\
+  \  invariant count <= bound()\n\
+   fn bound() -> UInt64 {\n\
+  \  Counter(count: 0).count\n\
+   }\n"
+
+let counter_bounded_by_a_constant_function =
+  "type Counter(count: UInt64)\n\
+  \  invariant count <= bound()\n\
+   fn bound() -> UInt64 {\n\
+  \  10\n\
+   }\n\
+   fn first() -> Counter {\n\
+  \  Counter(count: 0)\n\
+   }\n"
+
 let make_level_source ~height =
   Printf.sprintf
     "trait Level {\n\
@@ -522,7 +549,8 @@ let count_termination_obligations database ~of_:path =
   | Some (Value (Obligations outcome)) ->
       List.length
         (List.filter
-           (fun (obligation : Prover.Obligation.t) -> obligation.code = Termination)
+           (fun (obligation : Prover.Obligation.t) ->
+             Catalog.Prover_description.find_code obligation.obligation = Termination)
            outcome.obligations)
   | Some (Value (Unsupported _ | Not_proven_here) | Failed | Blocked) | None ->
       failwith ("the proof of " ^ Path.show path ^ " makes no obligations")
@@ -712,7 +740,7 @@ let () =
         (Type_check (make_main_key "Outer"))
         ~includes:[ Name (Tree (make_main_key "Outer")) ]
         ~excludes:[ Name (Place (make_main_key "Outer")); Name (Place (make_main_key "Inner")) ]);
-  Harness.test "a reformat inside a definition recomputes only that definition's proof" (fun () ->
+  Harness.test "a reformat inside a definition recomputes no proof" (fun () ->
       expect_recomputed
         (list_propagated
            ~before:[ ("app.main", callee_and_caller) ]
@@ -729,8 +757,36 @@ let () =
             Import_check (Support.parse_file "app.main");
             Declared (Support.parse_module "app.main");
             Parsed (Support.parse_file "app.main");
-            Proof (make_main_key "callee");
           ]);
+  Harness.test "a reformat inside a definition with a type error recomputes no check of it"
+    (fun () ->
+      let before = "public fn f() -> Int64 { \"one\" }\n"
+      and after = "public fn f() -> Int64 {\n  \"one\"\n}\n" in
+      let database = build [ ("app.main", before) ] in
+      let (), observed =
+        Database.For_testing.observe (fun () ->
+            Database.update database
+              (list_changes ~before:[ ("app.main", before) ] ~after:[ ("app.main", after) ]);
+            Database.For_testing.propagate database)
+      in
+      expect_recomputed observed.recomputed
+        ~exactly:
+          [
+            Import_check (Support.parse_file "app.main");
+            Declared (Support.parse_module "app.main");
+            Parsed (Support.parse_file "app.main");
+          ];
+      match Database.list_file_diagnostics database (Support.parse_file "app.main") with
+      | [ diagnostic ] when diagnostic.span.start = String.index after '"' -> ()
+      | diagnostics ->
+          Harness.fail "listed %s"
+            (String.concat "; "
+               (List.map
+                  (fun (diagnostic : Diagnostic.t) ->
+                    Printf.sprintf "%s at %d"
+                      (Diagnostic.Code.name diagnostic.code)
+                      diagnostic.span.start)
+                  diagnostics)));
   Harness.test "moving a definition to another file of its module recomputes no definition's part"
     (fun () ->
       expect_recomputed
@@ -898,7 +954,25 @@ let () =
           ~after:[ ("app.main", make_configured_source "Config()") ]
       in
       expect_included recomputed ~parts:[ Call_edges (make_main_path "make") ];
-      expect_untouched recomputed ~is_excluded:(fun computed -> computed.stage = Group_recursion));
+      expect_untouched recomputed ~is_excluded:(fun computed ->
+          computed = locate (Recursion_group (make_main_path "start"))));
+  Harness.test
+    "a type whose invariant calls a function that builds the type is one proof group with it, and \
+     no recursion group" (fun () ->
+      let counter = make_main_path "Counter" and bound = make_main_path "bound" in
+      expect_proof_group counter_bounded_by_its_builder ~of_:"Counter"
+        ~expected:(List.sort Path.compare [ counter; bound ]);
+      expect_proof_group counter_bounded_by_its_builder ~of_:"bound"
+        ~expected:(List.sort Path.compare [ counter; bound ]);
+      expect_recursion_group counter_bounded_by_its_builder ~of_:"bound" ~expected:[]);
+  Harness.test "a function that uses a type whose invariant does not reach it has no proof group"
+    (fun () ->
+      expect_proof_group counter_bounded_by_a_constant_function ~of_:"first" ~expected:[];
+      expect_proof_group counter_bounded_by_a_constant_function ~of_:"Counter" ~expected:[]);
+  Harness.test "a function whose contract calls it is its own proof group" (fun () ->
+      expect_proof_group "fn clamp(n: UInt64) -> UInt64\n  ensures clamp(n) <= 3\n{\n  n\n}\n"
+        ~of_:"clamp"
+        ~expected:[ make_main_path "clamp" ]);
   Harness.test "a derived method's call edges read its generated MIR" (fun () ->
       expect_reads
         (build [ ("app.main", version_deriving_over_a_key) ])

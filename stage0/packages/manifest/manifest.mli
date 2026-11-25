@@ -1,10 +1,15 @@
 type dependency = { package : Path.package; capabilities : Grant.capability list }
 type package = { name : Path.package; truss : string option; dependencies : dependency list }
-type t = { package : package option; time_limit_seconds : int option }
+
+type t = {
+  package : package option;
+  time_limit_seconds : int option;
+  x86_64_level : X86_64_level.t option;
+}
 
 val default_time_limit_seconds : int
 
-exception Malformed of { line : int; message : string }
+exception Malformed of { line : int; problem : Project_catalog.Problem.manifest }
 
 val parse : string -> t
 val has_project_table : string -> bool

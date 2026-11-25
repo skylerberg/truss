@@ -1,0 +1,27 @@
+use standard.text
+
+type Word(text: String)
+
+impl From[String] for Word {
+  fn from(value: own String) -> Word {
+    Word(text: own value)
+  }
+}
+
+type Sentence(words: List[Word])
+
+impl FromTemplate for Sentence {
+  type Part = Word
+
+  fn is_valid_template(literals: List[text.Literal]) -> Bool {
+    true
+  }
+
+  fn from_template(template: Template[Word]) -> Sentence {
+    Sentence(words: [])
+  }
+}
+
+fn f(name: String) -> Sentence {
+  Sentence"hello ${name}"
+}

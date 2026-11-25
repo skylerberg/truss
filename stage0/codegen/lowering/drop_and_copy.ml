@@ -25,7 +25,7 @@ and has_trivial_representation context ty =
   in
   match Representation.classify context.env ty with
   | Storage _ | Handle | Shared _ -> false
-  | Shape (Scalar _) -> true
+  | View _ | Shape (Scalar _) -> true
   | Shape (Record fields) -> are_trivial fields
   | Shape (Array (_, 0)) -> true
   | Shape (Array (element, _)) -> is_trivial context element
@@ -140,7 +140,7 @@ let drop context ty =
       Emit_c.Ir_builder.finish builder
         (Switch_variant { place = value; cases; default = Some after });
       Emit_c.Ir_builder.start builder after
-  | Shape (Scalar _) -> ());
+  | View _ | Shape (Scalar _) -> ());
   Emit_c.Ir_builder.finish builder (Return None);
   Emit_c.Ir_builder.build builder { parameters = [ pointer ]; result = None; returns = true }
 
@@ -232,7 +232,7 @@ let copy context ty =
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   (match Representation.classify context.env ty with
   | Handle -> raise_bug "a copy of a handle, which is not Copyable"
-  | Shape (Scalar _) -> raise_bug "a copy of the scalar %s, which is trivial" (Ground.to_string ty)
+  | View _ | Shape (Scalar _) -> raise_bug "a copy of %s, which is trivial" (Ground.to_string ty)
   | Shared _ ->
       Emit_c.Ir_builder.emit builder
         (Call

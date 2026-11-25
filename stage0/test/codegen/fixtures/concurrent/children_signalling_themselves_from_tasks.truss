@@ -13,7 +13,7 @@ fn shown(status: processes.ExitStatus) -> String {
   }
 }
 
-fn run_script(script: StringSlice) -> String
+fn run_script(script: String) -> String
   uses Processes
 {
   let command = processes.Command.new("sh")
@@ -35,7 +35,7 @@ fn signal_children() -> Endings
   )
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Console, Processes, Tasks
 {
   var first = Endings(terminated: "".copy(), piped: "".copy())

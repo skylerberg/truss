@@ -1,3 +1,0 @@
-fn f(labeled: own Labeled) -> StringSlice {
-  labeled.name.slice()
-}

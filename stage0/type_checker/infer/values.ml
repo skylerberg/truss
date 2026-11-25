@@ -5,7 +5,7 @@ let takes_literal (state : State.state) (collection : Types.ty) (trait : Types.t
         Interface.Impls.find_evidence state.lookups.interface
           ~list_bounds:(State.lookup_bounds state) ~checks_conditions:false collection trait
       with
-      | Some (Evidence (Impl _) | Evidence Bound) -> true
+      | Some (Evidence (Impl _ | Derived_for_view _ | Bound)) -> true
       | Some (Built_in | Accepted _) | None -> false)
   | _ -> false
 
@@ -17,7 +17,7 @@ let record_conversion (state : State.state) (value : Syntax.expression) elements
          elements;
          call = Tables.make_method_call trait method_ ~self_type:collection ~result:collection [];
        });
-  Solver.require state (Method_call (State.read_span state value.id)) collection trait
+  Solver.require state (Method_call (Written value.id)) collection trait
 
 let find_all options =
   List.fold_right
@@ -48,21 +48,11 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                                ~result:Types.unit
                                [ (part, Read) ])
                       | None ->
-                          State.report state No_impl (State.read_span state part.id)
-                            (Printf.sprintf
-                               "`%s` does not implement `Display`, so it cannot be interpolated."
-                               (Types.show part_type));
+                          State.report state
+                            (Not_displayable { at = Written part.id; type_ = part_type });
                           None)
                     parts)));
-      let is_view_expected =
-        parts = []
-        &&
-        match Option.map (Conversions.read_expected_head state) expected with
-        | Some expected -> Types.is_well_known String_slice expected
-        | None -> false
-      in
-      if is_view_expected then Types.make_named (Well_known.make_path String_slice) []
-      else Types.string_type
+      Types.string_type
   | Some tag -> (
       match State.find_target state tag.last with
       | Some (Definition (Type, tag_path)) ->
@@ -90,7 +80,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                   in
                   let part =
                     Solver.resolve_associated_type state tag_type template_trait From_template_part
-                      ~at:(State.read_span state literal.id)
+                      ~at:(Written literal.id)
                   in
                   Option.iter
                     (fun part_conversions ->
@@ -100,40 +90,60 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                        (List.map
                           (fun ((part_expression : Syntax.expression), part_type) ->
                             let part_type = State.finalize_type state part_type in
-                            if Types.equal part_type part then Some None
-                            else
-                              let from =
-                                Types.make_trait_reference ~arguments:[ Types.Type part_type ]
-                                  (Well_known.make_path From)
+                            let make_from source =
+                              Types.make_trait_reference ~arguments:[ Types.Type source ]
+                                (Well_known.make_path From)
+                            in
+                            let convert_from from =
+                              Some
+                                (Some
+                                   (Tables.make_method_call from From_from ~self_type:part
+                                      ~result:part
+                                      [ (part_expression, Own) ]))
+                            in
+                            let view = Types.make_view part_type in
+                            if
+                              Types.is_viewable part_type
+                              && Places.is_borrowed state.State.resolved state.State.tables
+                                   part_expression
+                              && Option.is_some (State.find_evidence state part (make_from view))
+                            then begin
+                              let rec strip_parentheses (written : Syntax.expression) =
+                                match written.kind with
+                                | Parenthesized inner -> strip_parentheses inner
+                                | _ -> written
                               in
+                              let place = strip_parentheses part_expression in
+                              state.places_without_keyword <-
+                                List.filter
+                                  (fun (noted, _) -> noted <> place.id)
+                                  state.places_without_keyword;
+                              Conversions.convert state env ~expression:part_expression
+                                (Written part_expression.id) ~actual:part_type ~expected:view;
+                              convert_from (make_from view)
+                            end
+                            else if Types.equal part_type part then Some None
+                            else
+                              let from = make_from part_type in
                               match State.find_evidence state part from with
-                              | Some _ ->
-                                  Some
-                                    (Some
-                                       (Tables.make_method_call from From_from ~self_type:part
-                                          ~result:part
-                                          [ (part_expression, Own) ]))
+                              | Some _ -> convert_from from
                               | None ->
-                                  State.report state No_impl
-                                    (State.read_span state part_expression.id)
-                                    (Printf.sprintf
-                                       "`%s` cannot become a `%s`, the part type of `%s`."
-                                       (Types.show part_type) (Types.show part)
-                                       (Types.show tag_type));
+                                  State.report state
+                                    (Template_part_conversion
+                                       {
+                                         at = Written part_expression.id;
+                                         part_type;
+                                         part;
+                                         tag_type;
+                                       });
                                   None)
                           parts))
               | None ->
                   if not (Types.is_error tag_type) then
-                    State.report state No_impl
-                      (State.read_span state literal.id)
-                      (Printf.sprintf "`%s` does not implement `FromTemplate`, so it is not a tag."
-                         (Types.show tag_type)));
+                    State.report state (Not_a_tag { at = Written literal.id; tag_type }));
           tag_type
       | Some (Unknown report) -> Types.Error report
-      | _ ->
-          State.make_error_type state Not_a_type
-            (State.read_span state tag.last.id)
-            "A string's tag is a type.")
+      | _ -> State.make_error_type state (Tag_not_a_type { at = Written tag.last.id }))
 
 and check_list_literal state env ?expected (value : Syntax.expression) items =
   let check_items element =
@@ -153,16 +163,15 @@ and check_list_literal state env ?expected (value : Syntax.expression) items =
       (match count with
       | Types.Value (Known count)
         when (not (Z.fits_int count)) || Z.to_int count <> List.length items ->
-          State.report state Mismatch (State.read_span state value.id)
-            (Printf.sprintf "This array has %d elements, and its type says %s." (List.length items)
-               (Z.to_string count))
+          State.report state
+            (Array_length { at = Written value.id; given = List.length items; count })
       | _ -> ());
       check_items element;
       array
   | Some collection when takes_literal state collection from_elements ->
       let element =
         Solver.resolve_associated_type state collection from_elements From_elements_element
-          ~at:(State.read_span state value.id)
+          ~at:(Written value.id)
       in
       check_items element;
       record_conversion state value (List_element element) collection from_elements
@@ -192,7 +201,9 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
   | expected ->
       let map =
         match expected with
-        | Some collection when takes_literal state collection from_entries -> collection
+        | Some collection when takes_literal state collection from_entries ->
+            if Option.is_some (State.find_evidence state collection from_entries) then collection
+            else Types.erase_views collection
         | _ ->
             Types.make_named (Well_known.make_path Map)
               [
@@ -200,7 +211,7 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
                 State.make_fresh_type state (Map_literal value.id);
               ]
       in
-      let at = State.read_span state value.id in
+      let at = Core.Written value.id in
       let key = Solver.resolve_associated_type state map from_entries From_entries_key ~at in
       let value_type =
         Solver.resolve_associated_type state map from_entries From_entries_value ~at
@@ -213,7 +224,7 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
 
 and check_lambda (state : State.state) env ?expected (value : Syntax.expression) parameters body =
   let locals_read_before = state.locals_read in
-  state.lambdas <- State.read_span state value.id :: state.lambdas;
+  state.lambdas <- value.id :: state.lambdas;
   let expected = Option.map (Conversions.read_expected_head state) expected in
   let make_untyped unknown =
     List.iter
@@ -234,30 +245,34 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
         let output = function_type.output in
         let lambda_env = { env with output = Some (Returns output) } in
         let body_type = Statements.check_block_value state lambda_env ~expected:output body in
-        Conversions.convert state lambda_env ?expression:(find_block_value body)
-          (State.read_span state body.id) ~actual:body_type ~expected:output;
+        Conversions.convert state lambda_env ?expression:(find_block_value body) (Written body.id)
+          ~actual:body_type ~expected:output;
         Types.Function function_type
     | Some (Types.Function function_type) ->
         make_untyped
-          (State.make_error_type state Mismatch (State.read_span state value.id)
-             (Printf.sprintf "This lambda takes %d parameters, and `%s` takes %d."
-                (List.length parameters)
-                (Types.show (Types.Function function_type))
-                (List.length function_type.inputs)))
+          (State.make_error_type state
+             (Lambda_arity
+                {
+                  at = Written value.id;
+                  given = List.length parameters;
+                  function_type = Types.Function function_type;
+                  expected = List.length function_type.inputs;
+                }))
     | Some ((Types.Error _ | Types.Hole) as unknown) -> make_untyped unknown
     | _ ->
-        let remedy =
+        let remedy : Catalog.Inference.lambda_remedy =
           match Option.bind expected (State.find_variable_origin state) with
           | Some (Generic_argument { declared_on; parameter; _ }) ->
-              Failures.make_bracket_remedy declared_on parameter
-          | Some (List_literal _ | Map_literal _) | None ->
-              "Bind it with a typed `let`, such as `let double: fn(Int64) -> Int64 = fn(x) { x * 2 \
-               }`."
+              Bracket_arguments
+                {
+                  declared_on;
+                  is_type =
+                    (match parameter.kind with Type_generic _ -> true | Value_generic -> false);
+                }
+          | Some (List_literal _ | Map_literal _) | None -> Typed_let
         in
         make_untyped
-          (State.make_error_type state Lambda_needs_type (State.read_span state value.id)
-             ("A lambda's parameter types come from where it is used, and nothing here gives them. "
-            ^ remedy))
+          (State.make_error_type state (Lambda_needs_type { at = Written value.id; remedy }))
   in
   state.lambdas <- List.tl state.lambdas;
   let rec list_newer acc list =
@@ -265,11 +280,7 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
     else match list with [] -> acc | id :: rest -> list_newer (id :: acc) rest
   in
   let read = list_newer [] state.locals_read in
-  let inside = State.read_span state value.id in
-  let is_outer id =
-    let binding = State.read_span state id in
-    binding.start < inside.start || binding.start >= inside.stop
-  in
+  let is_outer id = not (State.contains state ~outer:value.id ~inner:id) in
   let captures =
     List.fold_left
       (fun acc id -> if is_outer id && not (List.mem id acc) then acc @ [ id ] else acc)
@@ -292,7 +303,7 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
 
 and check_if state env ?expected (test : Syntax.expression) then_ else_ =
   let condition_type =
-    Solver.run_in_statement state env (State.read_span state test.id) (fun () ->
+    Solver.run_in_statement state env (Written test.id) (fun () ->
         Hooks.check_expression state env test)
   in
   Conversions.coerce state env test ~actual:condition_type ~expected:Types.bool;
@@ -303,8 +314,7 @@ and check_if state env ?expected (test : Syntax.expression) then_ else_ =
       | Types.Never -> ()
       | _ ->
           if not (State.unify state then_type Types.unit) then
-            Failures.report_mismatch state (State.read_span state then_.id) ~expected:Types.unit
-              ~actual:then_type);
+            Failures.report_mismatch state (Written then_.id) ~expected:Types.unit ~actual:then_type);
       Types.unit
   | Some branch ->
       let then_type = Statements.check_block_value state env ?expected then_ in
@@ -312,18 +322,22 @@ and check_if state env ?expected (test : Syntax.expression) then_ else_ =
         match branch with
         | Syntax.Else block ->
             ( Statements.check_block_value state env ?expected block,
-              State.read_span state block.id,
+              Core.Written block.id,
               find_block_value block )
         | Else_if branch_expression ->
             ( Hooks.check_expression state env ?expected branch_expression,
-              State.read_span state branch_expression.id,
+              Core.Written branch_expression.id,
               Some branch_expression )
       in
       join state env ~expected
         [
-          (then_type, State.read_span state then_.id, find_block_value then_);
+          (then_type, Core.Written then_.id, find_block_value then_);
           (else_type, else_span, else_end);
         ]
+
+and check_block state env ?expected (body : Syntax.block) =
+  let type_ = Statements.check_block_value state env ?expected body in
+  join state env ~expected [ (type_, Core.Written body.id, find_block_value body) ]
 
 and find_block_value (written : Syntax.block) =
   match List.rev written.statements with
@@ -344,20 +358,45 @@ and join state env ~expected branches =
           Conversions.convert state env ?expression span ~actual ~expected)
         live;
       expected
-  | (first, _, _) :: rest, None ->
-      List.iter
-        (fun (type_, span, _) ->
-          if not (State.unify state first type_) then
-            Failures.report_mismatch state span ~expected:first ~actual:type_)
-        rest;
-      first
+  | (first, _, _) :: rest, None -> (
+      let is_view (type_, _, _) = Types.is_view (Conversions.read_expected_head state type_) in
+      let is_borrowed_place ((type_, _, (expression : Syntax.expression option)) as branch) =
+        (not (is_view branch))
+        && Types.is_viewable (Conversions.read_expected_head state type_)
+        &&
+        match expression with
+        | Some written -> Places.is_borrowed state.State.resolved state.State.tables written
+        | None -> false
+      in
+      let joined_view =
+        match List.find_opt is_view live with
+        | Some branch -> Some branch
+        | None when env.State.binds_view && List.for_all is_borrowed_place live ->
+            Some (List.hd live)
+        | None -> None
+      in
+      match joined_view with
+      | Some (view, _, _) ->
+          let view = Types.make_view (Conversions.read_expected_head state view) in
+          List.iter
+            (fun (actual, span, expression) ->
+              Conversions.convert state env ?expression span ~actual ~expected:view)
+            live;
+          view
+      | None ->
+          List.iter
+            (fun (type_, span, _) ->
+              if not (State.unify state first type_) then
+                Failures.report_mismatch state span ~expected:first ~actual:type_)
+            rest;
+          first)
 
 and match_ state env ?expected scrutinees arms =
   let types =
     List.map
       (fun (scrutinee : Syntax.expression) ->
         ( scrutinee,
-          Solver.run_in_statement state env (State.read_span state scrutinee.id) (fun () ->
+          Solver.run_in_statement state env (Written scrutinee.id) (fun () ->
               Hooks.check_expression state env scrutinee) ))
       scrutinees
   in
@@ -366,9 +405,13 @@ and match_ state env ?expected scrutinees arms =
       (fun (arm : Syntax.arm) ->
         if List.length arm.patterns <> List.length types then
           let unknown =
-            State.make_error_type state Mismatch (State.read_span state arm.id)
-              (Printf.sprintf "This arm has %d patterns, and the `match` has %d values."
-                 (List.length arm.patterns) (List.length types))
+            State.make_error_type state
+              (Arm_pattern_count
+                 {
+                   at = Written arm.id;
+                   given = List.length arm.patterns;
+                   expected = List.length types;
+                 })
           in
           List.iter
             (fun written ->
@@ -383,7 +426,7 @@ and match_ state env ?expected scrutinees arms =
             arm.patterns types;
         Option.iter (fun guard -> Hooks.check state env guard Types.bool) arm.guard;
         ( check_arm_value state env ?expected arm.body,
-          State.read_span state arm.body.id,
+          Core.Written arm.body.id,
           match arm.body.kind with Expression value -> Some value | _ -> None ))
       arms
   in
@@ -403,12 +446,12 @@ and check_collection_element state env ~(quantifier : Syntax.expression)
   | ( Range { start = Some _; stop = Some _; inclusive; _ },
       Types.Named { path; arguments = [ Types.Type element ] } )
     when Well_known.is Range path ->
-      Statements.record_integer_range state ~loop:quantifier.id ~described:"A quantifier's"
+      Statements.record_integer_range state ~loop:quantifier.id ~owner:Range_of_quantifier
         ~admits_integer:true collection element ~inclusive;
       element
   | _, (Types.Error _ | Types.Hole) -> collection_type
   | _ -> (
-      let at = State.read_span state collection.id in
+      let at = Core.Written collection.id in
       match
         Statements.find_elements_loop state ~cause:(Quantifier at) ~at collection_type
           Language.Mode.Read
@@ -417,6 +460,5 @@ and check_collection_element state env ~(quantifier : Syntax.expression)
           State.elaborate state quantifier.id (Loop loop);
           element
       | None ->
-          State.make_error_type state Not_iterable at
-            (Printf.sprintf "A quantifier cannot go over %s: it does not implement `Iterable`."
-               (State.describe state collection_type)))
+          State.make_error_type state
+            (Not_iterable_quantifier { at; type_ = State.make_shown state collection_type }))

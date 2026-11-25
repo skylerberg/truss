@@ -249,6 +249,120 @@ let () =
   Harness.test "a call in a constant's value meets its callee's requires" (fun () ->
       expect_not_proven Fixtures.Prover.constant_calling_outside_a_requires "prover.requires")
 
+let () =
+  let expect_circular = Support.expect_one_diagnostic ~check in
+  let expect_circular_at_each text ~says =
+    let diagnostics = list_diagnostics text in
+    if
+      List.length diagnostics <> List.length says
+      || not
+           (List.for_all2
+              (fun (diagnostic : Diagnostic.t) affix ->
+                Diagnostic.Code.name diagnostic.code = "prover.circular_proof"
+                && String.includes ~affix diagnostic.message)
+              diagnostics says)
+    then
+      Harness.fail "found [%s]"
+        (String.concat "; "
+           (List.map
+              (fun (diagnostic : Diagnostic.t) ->
+                Diagnostic.Code.name diagnostic.code ^ ": " ^ diagnostic.message)
+              diagnostics))
+  in
+  Harness.test "an invariant that calls a method of its type is an error" (fun () ->
+      expect_circular Fixtures.Prover.invariant_calling_a_method_of_its_type "prover.circular_proof"
+        ~says:
+          "This calls `Counter.value`, whose proof depends on the invariant of `Counter`, so the \
+           invariant would be proven from itself."
+        ~at:("self.value()", 1));
+  Harness.test "an invariant that calls a function that builds a value of its type is an error"
+    (fun () ->
+      expect_circular Fixtures.Prover.invariant_calling_a_function_that_builds_its_type
+        "prover.circular_proof"
+        ~says:"This calls `through`, whose proof depends on the invariant of `Counter`"
+        ~at:("through(count)", 1));
+  Harness.test "an invariant that reaches a user of its type through a call is an error" (fun () ->
+      expect_circular Fixtures.Prover.invariant_calling_a_function_that_reaches_a_user_of_its_type
+        "prover.circular_proof"
+        ~says:"This calls `bound`, whose proof depends on the invariant of `Counter`"
+        ~at:("bound()", 1));
+  Harness.test "an invariant that reaches a user of its type through a contract is an error"
+    (fun () ->
+      expect_circular
+        Fixtures.Prover.invariant_calling_a_function_whose_contract_calls_a_user_of_its_type
+        "prover.circular_proof"
+        ~says:"This calls `stated`, whose proof depends on the invariant of `Counter`"
+        ~at:("stated(count)", 1));
+  Harness.test "invariants of two types that build each other are an error at each type" (fun () ->
+      expect_circular_at_each Fixtures.Prover.invariants_of_two_types_that_build_each_other
+        ~says:
+          [
+            "This calls `Gauge.read`, whose proof depends on the invariant of `Counter`";
+            "This calls `Counter.value`, whose proof depends on the invariant of `Gauge`";
+          ]);
+  Harness.test "an invariant that calls a method of an element of its own type is an error"
+    (fun () ->
+      expect_circular Fixtures.Prover.invariant_calling_a_method_of_an_element_of_its_type
+        "prover.circular_proof" ~says:"This calls `Chain.head`" ~at:("rest[0].head()", 1));
+  Harness.test "an invariant may call a function of a field's type" (fun () ->
+      expect_proven Fixtures.Prover.invariant_calling_a_function_of_a_field);
+  Harness.test "a requires that calls its own function is an error, and its caller is read"
+    (fun () ->
+      expect_circular Fixtures.Prover.requires_calling_its_own_function "prover.circular_proof"
+        ~says:"This calls `clamp` in its own contract, so the contract would be proven from itself."
+        ~at:("clamp(n)", 1));
+  Harness.test "an ensures that calls its own function is an error" (fun () ->
+      expect_circular Fixtures.Prover.ensures_calling_its_own_function "prover.circular_proof"
+        ~says:"This calls `clamp` in its own contract" ~at:("clamp(n)", 1));
+  Harness.test "contracts of two functions that call each other are an error at each" (fun () ->
+      expect_circular_at_each Fixtures.Prover.contracts_of_two_functions_that_call_each_other
+        ~says:
+          [
+            "This calls `second`, whose proof depends on the contract of `first`";
+            "This calls `first`, whose proof depends on the contract of `second`";
+          ]);
+  Harness.test
+    "a contract that a method takes from its trait is an error where it calls a method whose \
+     contract calls back" (fun () ->
+      expect_circular_at_each
+        Fixtures.Prover.contract_from_a_trait_calling_a_method_whose_contract_calls_back
+        ~says:
+          [
+            "This calls `Marker.measure`, whose proof depends on the contract of `Marker.limit`";
+            "The contract that this method takes from its trait calls `Marker.limit`, whose proof \
+             depends on the contract of `Marker.measure`, so the contract would be proven from \
+             itself.";
+          ]);
+  Harness.test "a recursive function's ensures may call the function" (fun () ->
+      expect_proven Fixtures.Prover.recursive_function_whose_ensures_calls_itself);
+  Harness.test
+    "a generic type's invariant that calls an impl is an error where the impl uses the type"
+    (fun () ->
+      expect_circular_at_each
+        Fixtures.Prover.invariant_of_a_generic_type_calling_the_impl_that_uses_it
+        ~says:
+          [
+            "A value of type `Box[Marker]` is used here, and the invariant of that type or of a \
+             part of it depends on `Marker.measure`, so the invariant would be proven from itself.";
+            "The invariant of that type or of a part of it depends on `Marker.measure`, whose \
+             proof depends on `held`";
+          ]);
+  Harness.test
+    "a generic type that holds itself with its type arguments swapped depends on the impls of both \
+     arguments" (fun () ->
+      expect_circular_at_each Fixtures.Prover.generic_type_holding_itself_with_swapped_arguments
+        ~says:
+          [
+            "A value of type `Alternating[Marker, Ruler]` is used here, and the invariant of that \
+             type or of a part of it depends on `Marker.measure`";
+            "A value of type `Alternating[Ruler, Marker]` is used here. The invariant of that type \
+             or of a part of it depends on `Marker.measure`, whose proof depends on `held`";
+          ]);
+  Harness.test
+    "a method of an impl may use a generic type whose invariant calls another method of the impl"
+    (fun () ->
+      expect_proven Fixtures.Prover.generic_type_whose_invariant_calls_another_method_of_the_impl)
+
 let list_evaluated_definitions text =
   let database = Support.make_database (Support.setup [ ("app.main", text) ]) in
   List.map
@@ -942,8 +1056,53 @@ let () =
       expect_proven Fixtures.Prover.range_loop_with_an_index_cost_clause);
   Harness.test "a loop over a type's own cursor calls its next" (fun () ->
       expect_proven Fixtures.Prover.countdown_loop);
-  Harness.test "a loop over a cursor in a field calls its next" (fun () ->
-      expect_proven Fixtures.Prover.countdown_in_a_field);
+  Harness.test "a loop over a cursor in a field calls its next and keeps the other fields"
+    (fun () -> expect_proven Fixtures.Prover.countdown_in_a_field);
+  (let scanner =
+     "type Scanner(length: UInt64, position: UInt64, count: UInt64)\n\
+      fn advance(scanner: mut Scanner)\n\
+     \  modifies scanner.position\n\
+     \  requires scanner.position < 1000\n\
+     \  ensures scanner.position == old(scanner.position) + 1\n\
+      {\n\
+     \  scanner.position += 1\n\
+      }\n"
+   in
+   Harness.test "a call keeps the parts that its callee's modifies clause does not name" (fun () ->
+       expect_proven
+         (scanner
+        ^ "fn step(scanner: mut Scanner)\n\
+          \  requires scanner.position < 1000\n\
+          \  ensures scanner.length == old(scanner.length) && scanner.count == old(scanner.count)\n\
+           {\n\
+          \  advance(mut scanner)\n\
+           }\n");
+       expect_not_proven
+         (scanner
+        ^ "fn step(scanner: mut Scanner)\n\
+          \  requires scanner.position < 1000\n\
+          \  ensures scanner.position == old(scanner.position)\n\
+           {\n\
+          \  advance(mut scanner)\n\
+           }\n")
+         "prover.ensures");
+   Harness.test "a loop keeps the parts that its body and its callees do not change" (fun () ->
+       let loop ~body =
+         scanner
+         ^ "fn walk(scanner: mut Scanner)\n\
+           \  requires scanner.position <= scanner.length && scanner.length < 1000\n\
+           \  ensures scanner.length == old(scanner.length) && scanner.count == old(scanner.count)\n\
+            {\n\
+           \  while scanner.position < scanner.length\n\
+           \    invariant scanner.position <= scanner.length\n\
+           \    decreases scanner.length - scanner.position\n\
+           \  {\n" ^ body ^ "\n  }\n}\n"
+       in
+       expect_proven (loop ~body:"    scanner.position += 1");
+       expect_proven (loop ~body:"    advance(mut scanner)");
+       expect_not_proven
+         (loop ~body:"    scanner.position += 1\n    scanner.count += 0")
+         "prover.ensures"));
   Harness.test "a loop over a cursor counts a body that calls an amortized callee" (fun () ->
       expect_proven Fixtures.Prover.spaced_characters);
   (let samples = Fixtures.Prover.samples in
@@ -1171,25 +1330,25 @@ let () =
       expect_not_proven Fixtures.Prover.low_bit_ensured_zero "prover.ensures")
 
 let () =
-  Harness.test "a slice's elements are its collection's, from its start" (fun () ->
-      expect_proven Fixtures.Prover.slice_element_read);
-  Harness.test "a list passed as a slice is a view with its model" (fun () ->
-      expect_proven Fixtures.Prover.count_of_a_list_as_a_slice);
-  Harness.test "two views of one list are one slice, so a function of them agrees" (fun () ->
-      expect_proven Fixtures.Prover.short_list_passed_where_a_short_slice_is_required);
-  Harness.test "two views of one string are one slice, so a function of them agrees" (fun () ->
-      expect_proven Fixtures.Prover.short_text_passed_where_a_short_slice_is_required);
-  Harness.test "a slice must be within its collection" (fun () ->
-      expect_not_proven Fixtures.Prover.slice_past_the_end "prover.out_of_bounds");
-  Harness.test "two slices lent together must not overlap" (fun () ->
-      expect_not_proven Fixtures.Prover.both_of_overlapping_slices "prover.disjoint");
+  Harness.test "a range's elements are its collection's, from its start" (fun () ->
+      expect_proven Fixtures.Prover.range_element_read);
+  Harness.test "a list passed read-only is a view with its model" (fun () ->
+      expect_proven Fixtures.Prover.count_of_a_list_as_a_range);
+  Harness.test "two views of one list are one value, so a function of them agrees" (fun () ->
+      expect_proven Fixtures.Prover.short_list_passed_where_a_short_range_is_required);
+  Harness.test "two views of one string are one value, so a function of them agrees" (fun () ->
+      expect_proven Fixtures.Prover.short_text_passed_where_a_short_range_is_required);
+  Harness.test "a range must be within its collection" (fun () ->
+      expect_not_proven Fixtures.Prover.range_past_the_end "prover.out_of_bounds");
+  Harness.test "two ranges lent together must not overlap" (fun () ->
+      expect_not_proven Fixtures.Prover.both_of_overlapping_ranges "prover.disjoint");
   Harness.test "a range copied into from an overlapping range of one list" (fun () ->
       expect_not_proven Fixtures.Prover.range_copied_from_an_overlapping_range "prover.disjoint");
   Harness.test "an element bound to `_` is still proven in bounds" (fun () ->
       expect_not_proven Fixtures.Prover.element_out_of_bounds_bound_to_a_wildcard
         "prover.out_of_bounds");
-  Harness.test "a `mut Slice` parameter keeps its length through a call that writes it" (fun () ->
-      expect_proven Fixtures.Prover.slice_parameter_keeps_its_length_through_a_call);
+  Harness.test "a `mut` list parameter whose elements alone change keeps its length through a call"
+    (fun () -> expect_proven Fixtures.Prover.range_parameter_keeps_its_length_through_a_call);
   Harness.test "two halves of a list can be lent together" (fun () ->
       expect_proven Fixtures.Prover.both_halves_of_a_list)
 
@@ -1224,8 +1383,8 @@ let () =
         not
           (String.includes
              ~affix:
-               "The call to `Shout.is_valid_template` that `Shout\"hey ${name.to_string()}\"` \
-                makes may not give `true`. This fails every time the code reaches it."
+               "The call to `Shout.is_valid_template` that `Shout\"hey ${name.copy()}\"` makes may \
+                not give `true`. This fails every time the code reaches it."
              message)
       then Harness.fail "message %S" message);
   Harness.test "a proof knows the length and the text of a template's literals with no evaluation"
@@ -1239,7 +1398,7 @@ let () =
       | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
       expect_proven (tag ^ of_any_tone "Shout\"hey\"");
       expect_not_proven
-        (tag ^ of_any_tone ~parameters:"name: StringSlice" "Shout\"hey ${name.to_string()}\"")
+        (tag ^ of_any_tone ~parameters:"name: String" "Shout\"hey ${name.copy()}\"")
         "prover.requires";
       expect_not_proven (tag ^ of_any_tone "Shout\"hello\"") "prover.requires");
   Harness.test "a template copies its literal text once, as a string literal is copied" (fun () ->
@@ -1387,8 +1546,9 @@ let () =
       expect_proven Fixtures.Prover.specification_quantifier_with_a_refutable_pattern);
   Harness.test "a quantifier over a range value reads the range's `count` and `element`" (fun () ->
       expect_proven Fixtures.Prover.quantifier_over_a_range_value);
-  Harness.test "a quantifier in a body over a set reaches every member of the set" (fun () ->
-      expect_proven Fixtures.Prover.quantifier_over_set_members_in_a_body)
+  Harness.test
+    "a quantifier in a body over a set reaches every member once the theorem that relates them is \
+     called" (fun () -> expect_proven Fixtures.Prover.quantifier_over_set_members_in_a_body)
 
 let () =
   Harness.test "a postcondition of a view's method holds of the `String` it was called on"
@@ -1814,8 +1974,8 @@ let () =
       expect_not_proven Fixtures.Prover.positive_zeroed_in_a_loop "prover.invariant")
 
 let () =
-  Harness.test "a mut slice's bounds are evaluated once" (fun () ->
-      expect_not_proven Fixtures.Prover.mut_slice_with_counted_bounds "prover.ensures");
+  Harness.test "a mut range's bounds are evaluated once" (fun () ->
+      expect_not_proven Fixtures.Prover.mut_range_with_counted_bounds "prover.ensures");
   Harness.test "a while condition's mut argument mutates the loop's state" (fun () ->
       expect_not_proven Fixtures.Prover.while_condition_stepping_a_count "prover.ensures");
   Harness.test "a match mut binding is written back to the scrutinee" (fun () ->
@@ -2180,14 +2340,9 @@ let public_doubling =
    }\n"
 
 let () =
-  Harness.test "an invariant may call a function of its type with the value it describes" (fun () ->
-      expect_proven Fixtures.Prover.public_counter_with_an_invariant_over_its_value);
-  Harness.test "an invariant does not prove the contract of a function that it calls" (fun () ->
-      expect_not_proven Fixtures.Prover.invariant_that_a_method_of_the_type_would_prove_from_itself
-        "prover.ensures");
   Harness.test "another package does not assume an opaque type's invariant" (fun () ->
       match
-        check_across Fixtures.Prover.public_counter_with_an_invariant_over_its_value
+        check_across Fixtures.Prover.public_counter_with_an_invariant
           Fixtures.Prover.value_bounded_by_another_packages_invariant
       with
       | [ { code; _ } ] when Diagnostic.Code.name code = "prover.ensures" -> ()
@@ -2281,13 +2436,12 @@ let () =
           (fun (diagnostic : Diagnostic.t) -> String.includes ~affix:"Give" diagnostic.message)
           diagnostics
       then Harness.fail "a message asks for a change to another package");
-  Harness.test "a loop that pushes on one path names the push and the list it changes" (fun () ->
-      expect_a_message_saying
-        ~says:
-          "The amortized cost of `kept.push(value)` depends on the potential of `kept`, which this \
-           loop changes, so the prover cannot bound the cost of an iteration by the values the \
-           loop does not mutate. Give the loop a `cost` clause."
-        (list_diagnostics Fixtures.Prover.loop_pushing_in_one_branch));
+  Harness.test "a loop that pushes on one path is amortized linear" (fun () ->
+      expect_proven Fixtures.Prover.loop_pushing_in_one_branch);
+  Harness.test "a loop that pushes on one path onto a fresh list is linear" (fun () ->
+      expect_proven Fixtures.Prover.loop_pushing_in_one_branch_within_a_plain_bound);
+  Harness.test "a loop that pushes on one path onto a `mut` parameter is amortized linear"
+    (fun () -> expect_proven Fixtures.Prover.loop_pushing_onto_a_parameter_in_one_branch);
   Harness.test "a loop that pushes on one path is counted by its cost clause" (fun () ->
       expect_proven Fixtures.Prover.loop_pushing_in_one_branch_with_a_cost_clause)
 
@@ -2301,7 +2455,7 @@ let () =
       let actual = read_message Fixtures.Prover.swap_in_a_list_that_may_be_empty in
       if
         not
-          (String.includes ~affix:"The clause that must hold is at `standard/list/list.truss:"
+          (String.includes ~affix:"The clause that must hold is at `standard/list/elements.truss:"
              actual)
       then Harness.fail "message %S" actual)
 
@@ -2634,6 +2788,14 @@ let () =
 let () =
   Harness.test "a string's characters collect into a list in time linear in its length" (fun () ->
       expect_proven Fixtures.Prover.characters_collected_in_linear_time);
+  Harness.test "a copy of a string or a list costs time in its length and one allocation" (fun () ->
+      expect_proven Fixtures.Prover.copies_of_a_string_and_a_list_within_their_lengths);
+  Harness.test "a copy of a string does not cost constant time" (fun () ->
+      expect_not_proven Fixtures.Prover.copy_of_a_string_in_constant_time "prover.cost");
+  Harness.test "a list of views passed `own` or `mut` holds no potential for its elements"
+    (fun () -> expect_proven Fixtures.Prover.list_of_views_passed_on_in_constant_amortized_time);
+  Harness.test "a view holds no potential, so returning one costs constant amortized time"
+    (fun () -> expect_proven Fixtures.Prover.view_returned_in_constant_amortized_time);
   Harness.test "a finite cursor collects through a bound in its remaining count of nexts" (fun () ->
       expect_proven Fixtures.Prover.finite_cursor_collected_generically);
   Harness.test "an amortized call of a supertrait's method through a subtrait bound is counted"
@@ -2768,17 +2930,17 @@ let () =
       expect_proven Fixtures.Prover.digits_of_a_bounded_value);
   Harness.test "power of two numbers is their power" (fun () ->
       expect_proven Fixtures.Prover.table_of_time_power_of_two);
-  Harness.test "a slice mutated through a call mutates its run of the list" (fun () ->
-      expect_proven ("" ^ Fixtures.Prover.zeroed_slice_of_a_list));
-  Harness.test "a slice mutated through a call mutates nothing more than it says" (fun () ->
-      expect_not_proven ("" ^ Fixtures.Prover.zeroed_slice_ensured_past_its_run) "prover.ensures");
+  Harness.test "a range mutated through a call mutates its run of the list" (fun () ->
+      expect_proven ("" ^ Fixtures.Prover.zeroed_range_of_a_list));
+  Harness.test "a range mutated through a call mutates nothing more than it says" (fun () ->
+      expect_not_proven ("" ^ Fixtures.Prover.zeroed_range_ensured_past_its_run) "prover.ensures");
   Harness.test "an unsigned left shift that fits multiplies by a power of two" (fun () ->
       expect_proven Fixtures.Prover.shift_by_four_of_a_small_byte);
   Harness.test "an unsigned right shift divides by a power of two" (fun () ->
       expect_proven Fixtures.Prover.right_shift_by_two);
   Harness.test "a left shift that may not fit is not known to multiply" (fun () ->
       expect_not_proven Fixtures.Prover.shift_by_four_of_any_byte "prover.ensures");
-  Harness.test "a loop that mutates a slice of any elements under a cost clause" (fun () ->
+  Harness.test "a loop that mutates a range of any elements under a cost clause" (fun () ->
       expect_proven Fixtures.Prover.swap_each);
   Harness.test "a quantifier's body must be well defined" (fun () ->
       expect_not_proven Fixtures.Prover.requires_quantifier_reading_past_the_end
@@ -2926,7 +3088,9 @@ let () =
     | Obligations { obligations; _ } ->
         List.find_map
           (fun (obligation : Prover.Obligation.t) ->
-            if obligation.code = code then Some obligation.query else None)
+            if Catalog.Prover_description.find_code obligation.obligation = code then
+              Some obligation.query
+            else None)
           obligations
     | Unsupported _ | Not_proven_here -> None
   in
@@ -3076,11 +3240,11 @@ let () =
       if first <> second || first = "none" then Harness.fail "%s and %s" first second)
 
 let () =
-  Harness.test "a slice of a whole array is within it" (fun () ->
+  Harness.test "a range of a whole array is within it" (fun () ->
       expect_proven Fixtures.Prover.reverse_of_a_whole_array);
   Harness.test "a loop that mutates an array's elements keeps their potentials" (fun () ->
       expect_proven Fixtures.Prover.array_reset);
-  Harness.test "a slice of an array is within it only as far as its count" (fun () ->
+  Harness.test "a range of an array is within it only as far as its count" (fun () ->
       expect_not_proven Fixtures.Prover.reverse_of_an_array_after_its_first "prover.out_of_bounds");
   Harness.test "a quantifier ranges between an Integer and a UInt64 in either order" (fun () ->
       expect_proven Fixtures.Prover.quantifier_over_ranges_between_integer_types)
@@ -3315,13 +3479,13 @@ let () =
       expect_not_proven Fixtures.Prover.count_cells_in_rows_time "prover.cost")
 
 let () =
-  Harness.test "a permutation of a range argument is a permutation of the whole slice" (fun () ->
+  Harness.test "a permutation of a range argument is a permutation of the whole range" (fun () ->
       expect_proven Fixtures.Prover.permutation_through_a_range_argument);
   Harness.test "a permutation keeps every bound of its elements" (fun () ->
       expect_proven Fixtures.Prover.bound_kept_through_a_permutation);
   Harness.test "a permutation does not strengthen a bound of its elements" (fun () ->
       expect_not_proven Fixtures.Prover.bound_strengthened_through_a_permutation "prover.ensures");
-  Harness.test "sorting both parts around a pivot sorts the slice" (fun () ->
+  Harness.test "sorting both parts around a pivot sorts the range" (fun () ->
       expect_proven Fixtures.Prover.sorted_parts_around_a_pivot);
   Harness.test "a range of a sequence holds its elements from the range's start" (fun () ->
       expect_proven Fixtures.Prover.range_of_a_sequence);
@@ -3420,8 +3584,8 @@ let () =
       expect_proven_in_standard Fixtures.Prover.storage_read_at_a_checked_index);
   Harness.test "a storage is popped only when it holds an element" (fun () ->
       expect_only_requires Fixtures.Prover.storage_popped_without_a_length);
-  Harness.test "a view is sliced only within its length" (fun () ->
-      expect_only_requires Fixtures.Prover.view_sliced_past_its_end)
+  Harness.test "a view is ranged only within its length" (fun () ->
+      expect_only_requires Fixtures.Prover.view_ranged_past_its_end)
 
 let () =
   let apply = Fixtures.Prover.apply_bounded_by_the_time_of_change in

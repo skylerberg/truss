@@ -1,10 +1,12 @@
-fn keep[Element](items: mut Slice[Element])
+fn keep[Element](items: mut List[Element])
+  modifies items[..]
   ensures items.model().is_permutation_of(old(items.model()))
 {
   todo
 }
 
-fn keep_range[Element](items: mut Slice[Element], start: UInt64, stop: UInt64)
+fn keep_range[Element](items: mut List[Element], start: UInt64, stop: UInt64)
+  modifies items[..]
   requires start <= stop
   requires stop <= items.length()
   ensures items.model().is_permutation_of(old(items.model()))

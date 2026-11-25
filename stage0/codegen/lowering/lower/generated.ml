@@ -220,7 +220,7 @@ let build_real_implementation (state : Lowering.state) ~user capability =
         with
         | Impl { impl = default_impl; _ } ->
             Well_known.make_impl_method_path Default_default ~impl:default_impl
-        | Bound ->
+        | Derived_for_view _ | Bound ->
             Definitions.raise_bug "%s implements %s and has no impl of Default"
               (Types.show for_type) (Path.show capability)
       in
@@ -253,18 +253,15 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
   Lowering.set_result_slot state (Returned (Raw (Integer Int32)));
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let signature = Definitions.read_signature context main_path in
-  let slice_ty =
+  let list_ty =
     match signature.parameters with
     | [ info ] -> Monomorphic.ground context.monomorphic Types.no_substitution info.type_
     | _ -> Definitions.raise_bug "main takes its arguments"
   in
   let string_ty =
-    match slice_ty with
+    match list_ty with
     | Named { arguments = [ Type string_ty ]; _ } -> string_ty
-    | _ -> Definitions.raise_bug "main takes a slice of %s" (Ground.to_string slice_ty)
-  in
-  let list_ty : Ground.ty =
-    Named { path = Well_known.make_path List; arguments = [ Type string_ty ] }
+    | _ -> Definitions.raise_bug "main takes a list of %s" (Ground.to_string list_ty)
   in
   let storage_field, _, _ = Targets.read_list_parts context.monomorphic list_ty in
   let list = Lowering.allocate_temporary state list_ty in
@@ -301,12 +298,12 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
         [ Copy (Lowered.make_local_place arguments_pointer); Copy (Lowered.make_local_place index) ]
         bytes;
       call Terminated_length [ Copy (Lowered.make_local_place bytes) ] length;
-      let view_ty = Storage.make_view_type (Ground.make_builtin UInt8) in
-      let view = Lowering.allocate_temporary state view_ty in
+      let bytes_ty = Storage.make_storage_type (Ground.make_builtin UInt8) in
+      let borrowed = Lowering.allocate_local state (Value bytes_ty) in
       Emit_c.Ir_builder.emit builder
         (Assign
-           ( view,
-             Storage.build_view view_ty
+           ( borrowed,
+             Storage.build_borrowed bytes_ty
                ~buffer:(Copy (Lowered.make_local_place bytes))
                ~length:(Copy (Lowered.make_local_place length)) ));
       let text = Lowering.allocate_temporary state string_ty in
@@ -314,7 +311,7 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
         (Lowered.Item.make_code text_copied_from Ground.no_instantiation)
         ~signature:(Definitions.read_signature context text_copied_from)
         ~substitution:Types.no_substitution
-        ~arguments:[ (Read, view_ty, view) ]
+        ~arguments:[ (Read, bytes_ty, borrowed) ]
         ~destination:text ~site:None ();
       lower (Buffer Storage_push) [ string_ty ]
         [
@@ -330,16 +327,10 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
     | _ -> Definitions.raise_bug "main lends"
   in
   let exit = Lowering.allocate_temporary state exit_ty in
-  let storage = Lowered.project list (Field storage_field) in
-  let slice =
-    Targets.lower_slice state ~element:string_ty
-      ~buffer:(Copy (Storage.project_buffer storage))
-      ~length:(Copy (Storage.project_length storage))
-  in
   Targets.lower_item_call state
     (Lowered.Item.make_code main_path Ground.no_instantiation)
     ~signature ~substitution:Types.no_substitution
-    ~arguments:[ (Read, slice_ty, slice) ]
+    ~arguments:[ (Read, list_ty, list) ]
     ~destination:exit ~site:None ();
   (match
      (Monomorphic.compute_shape context.monomorphic exit_ty, Lowering.find_result_place state)
@@ -372,7 +363,9 @@ let build_test_main context (item : Lowered.Item.t) test_path : Emit_c.fragment 
 let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instantiation
     ~(ty : Ground.function_type) : Emit_c.fragment =
   let signature = Definitions.read_signature context function_ in
-  let substitution = Monomorphic.make_signature_substitution signature instantiation in
+  let substitution =
+    Instances.make_substitution context.lookups.interface function_ signature instantiation
+  in
   let state = make_generated_state context ~item ~definition:function_ ~substitution in
   let builder = state.builder in
   let environment = Emit_c.Ir_builder.allocate_local builder (Raw (Nullable_pointer Opaque)) in

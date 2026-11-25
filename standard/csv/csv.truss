@@ -81,7 +81,7 @@ type ParserState(
   invariant trimmed_length <= field.length()
   invariant field.is_boundary(trimmed_length)
 
-fn advance(state: mut ParserState, text: StringSlice, index: UInt64, options: Options) -> Result[UInt64, ParseError]
+fn advance(state: mut ParserState, text: String, index: UInt64, options: Options) -> Result[UInt64, ParseError]
   requires index < text.length()
   requires text.is_boundary(index)
   ensures !(result is Ok(next) && (next <= index || next > text.length() || !text.is_boundary(next)))
@@ -162,7 +162,7 @@ fn advance(state: mut ParserState, text: StringSlice, index: UInt64, options: Op
   Ok(next)
 }
 
-public fn parse(text: StringSlice, options: Options = Options()) -> Result[List[List[String]], ParseError]
+public fn parse(text: String, options: Options = Options()) -> Result[List[List[String]], ParseError]
 {
   var state = ParserState(
     rows: [],
@@ -205,7 +205,7 @@ public fn parse(text: StringSlice, options: Options = Options()) -> Result[List[
   Ok(own state.rows)
 }
 
-fn needs_quotes(field: StringSlice, options: Options) -> Bool
+fn needs_quotes(field: String, options: Options) -> Bool
 {
   if field.length() == 0 {
     return false
@@ -227,7 +227,7 @@ fn needs_quotes(field: StringSlice, options: Options) -> Bool
   is_blank(field.decode(0).character) || field.byte(field.length() - 1) == 32 || field.byte(field.length() - 1) == 9
 }
 
-fn push_field(text: mut String, field: StringSlice, options: Options, alone: Bool)
+fn push_field(text: mut String, field: String, options: Options, alone: Bool)
 {
   if !(needs_quotes(field, options: options) || (alone && field.length() == 0)) {
     mut text.push(field)
@@ -250,7 +250,7 @@ fn push_field(text: mut String, field: StringSlice, options: Options, alone: Boo
   mut text.push_character(options.quote)
 }
 
-fn push_row(text: mut String, fields: Slice[String], options: Options)
+fn push_row(text: mut String, fields: List[String], options: Options)
 {
   for index in 0..fields.length() {
     if index > 0 {
@@ -260,17 +260,17 @@ fn push_row(text: mut String, fields: Slice[String], options: Options)
   }
 }
 
-public fn format(rows: Slice[List[String]], options: Options = Options()) -> String
+public fn format(rows: List[List[String]], options: Options = Options()) -> String
 {
   var text = ""
   for index in 0..rows.length() {
-    push_row(mut text, fields: rows[index].slice(), options: options)
+    push_row(mut text, fields: rows[index], options: options)
     mut text.push("\n")
   }
   text
 }
 
-public fn format_row(fields: Slice[String], output: mut String, options: Options = Options())
+public fn format_row(fields: List[String], output: mut String, options: Options = Options())
 {
   var text = ""
   push_row(mut text, fields: fields, options: options)
@@ -280,7 +280,7 @@ public fn format_row(fields: Slice[String], output: mut String, options: Options
 public type Table(header: List[String], rows: List[List[String]])
   derives Equal
 
-public fn parse_table(text: StringSlice, options: Options = Options()) -> Result[Table, ParseError]
+public fn parse_table(text: String, options: Options = Options()) -> Result[Table, ParseError]
 {
   var rows = parse(text, options: options)?
   if rows.length() == 0 {
@@ -290,7 +290,7 @@ public fn parse_table(text: StringSlice, options: Options = Options()) -> Result
   Ok(Table(header: own header, rows: own rows))
 }
 
-public fn Table.column(self, name: StringSlice) -> Option[UInt64]
+public fn Table.column(self, name: String) -> Option[UInt64]
   ensures match result {
     Some(index) => index < self.header.length()
     None => true
@@ -311,13 +311,13 @@ public fn Table.column(self, name: StringSlice) -> Option[UInt64]
   None
 }
 
-public fn Table.cell(self, row: UInt64, name: StringSlice) -> Option[StringSlice]
+public fn Table.cell(self, row: UInt64, name: String) -> Option[view String]
   cost time O(self.header.length() * (1 + name.length()))
 {
   match self.column(name) {
     Some(column) => {
       if row < self.rows.length() && column < self.rows[row].length() {
-        Some(self.rows[row][column].slice())
+        Some(self.rows[row][column])
       } else {
         None
       }
@@ -329,9 +329,9 @@ public fn Table.cell(self, row: UInt64, name: StringSlice) -> Option[StringSlice
 public fn Table.format(self, options: Options = Options()) -> String
 {
   var text = ""
-  push_row(mut text, fields: self.header.slice(), options: options)
+  push_row(mut text, fields: self.header, options: options)
   mut text.push("\n")
-  mut text.push(format(self.rows.slice(), options: options))
+  mut text.push(format(self.rows, options: options))
   text
 }
 
@@ -341,7 +341,7 @@ public fn RowReader[Source: streams.Reader].new(source: own Source, options: Opt
   RowReader(source: streams.BufferedReader.new(own source), options: options)
 }
 
-fn quotes_in(text: StringSlice, quote: Character) -> UInt64
+fn quotes_in(text: String, quote: Character) -> UInt64
 {
   var count: UInt64 = 0
   var index: UInt64 = 0

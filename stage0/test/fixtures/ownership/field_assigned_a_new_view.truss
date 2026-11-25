@@ -1,7 +1,7 @@
-type Pair(left: Slice[Int64], right: Slice[Int64])
+type Pair(left: view List[Int64], right: view List[Int64])
 
-fn f(other: Slice[Int64]) -> UInt64 {
-  var items = other.to_list()
+fn f(other: List[Int64]) -> UInt64 {
+  var items = other.copy()
   var pair = Pair(left: items[..], right: other[..])
   pair.right = other[..]
   mut items.push(1)

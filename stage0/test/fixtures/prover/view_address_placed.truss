@@ -1,10 +1,10 @@
 use standard.intrinsic
 
-fn placed(starts: intrinsic.View[UInt64]) -> UInt64 {
-  let first = intrinsic.view_address(starts)
+fn placed(starts: intrinsic.Storage[UInt64]) -> UInt64 {
+  let first = intrinsic.storage_address(starts)
   proof {
-    assert intrinsic.view_length(starts) == 0 || first >= 1
-    assert first + 8 * intrinsic.view_length(starts) <= 18446744073709551616
+    assert intrinsic.storage_length(starts) == 0 || first >= 1
+    assert first + 8 * intrinsic.storage_length(starts) <= 18446744073709551616
   }
   first
 }

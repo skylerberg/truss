@@ -1,6 +1,6 @@
 use standard.processes
 
-fn say(text: StringSlice) uses Console {
+fn say(text: String) uses Console {
   Console.print_line(text)
 }
 
@@ -15,7 +15,7 @@ fn shown(status: processes.ExitStatus) -> String {
   }
 }
 
-fn show(label: StringSlice, bytes: Slice[UInt8])
+fn show(label: String, bytes: List[UInt8])
   uses Console, Handles
 {
   Console.print(label)
@@ -23,7 +23,7 @@ fn show(label: StringSlice, bytes: Slice[UInt8])
   let _ = mut out.write(bytes)
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Console, Processes, Handles, RunForever
 {
   let quiet = processes.Command.new("sh").argument("-c").argument("exit 3")
@@ -62,7 +62,7 @@ fn main(arguments: Slice[String]) -> ExitCode
     if mut child.take_input() is Some(moved) {
       var input = own moved
       let sent: List[UInt8] = [112, 105, 112, 101, 100, 10]
-      let _ = mut input.write(sent.slice())
+      let _ = mut input.write(sent)
       let _ = own input.close()
     }
     if mut child.take_output() is Some(moved) {

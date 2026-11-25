@@ -44,7 +44,7 @@ fn mark_inserted_closers(tokens: mut List[token.Token])
 type Rename(spelling: String, renamed: String)
   derives Equal
 
-fn find_rename(text: StringSlice, diagnostic: source.Diagnostic) -> Option[Rename]
+fn find_rename(text: String, diagnostic: source.Diagnostic) -> Option[Rename]
   uses Panic
 {
   if diagnostic.code != "lexer.name_case" || diagnostic.fixes.length() != 1 {
@@ -55,11 +55,11 @@ fn find_rename(text: StringSlice, diagnostic: source.Diagnostic) -> Option[Renam
     return None
   }
   let edit = fix.edits[0]
-  Some(Rename(spelling: text.substring(diagnostic.span.start, to: diagnostic.span.stop).to_string(), renamed: edit.replacement.copy()))
+  Some(Rename(spelling: text.substring(diagnostic.span.start, to: diagnostic.span.stop).copy(), renamed: edit.replacement.copy()))
 }
 
 fn remove_colliding_renames(
-  text: StringSlice,
+  text: String,
   tables: token.Tables,
   name_indices: collections.SortedMap[String, UInt64],
   diagnostics: mut List[source.Diagnostic],
@@ -110,7 +110,7 @@ fn remove_colliding_renames(
 type Accepted(start: UInt64, stop: UInt64, has_insertion: Bool)
   derives Equal
 
-fn count_starts_at_most(accepted: Slice[Accepted], position: UInt64) -> UInt64
+fn count_starts_at_most(accepted: List[Accepted], position: UInt64) -> UInt64
   uses Panic
 {
   var low: UInt64 = 0
@@ -126,7 +126,7 @@ fn count_starts_at_most(accepted: Slice[Accepted], position: UInt64) -> UInt64
   low
 }
 
-fn overlaps(accepted: Slice[Accepted], edit: source.Edit) -> Bool
+fn overlaps(accepted: List[Accepted], edit: source.Edit) -> Bool
   uses Panic
 {
   let start = edit.span.start
@@ -162,7 +162,7 @@ fn accept(accepted: mut List[Accepted], edit: source.Edit)
   mut accepted.insert_at(at_most, item: Accepted(start, stop, has_insertion: is_insertion))
 }
 
-fn list_machine_applicable_edits(diagnostics: Slice[source.Diagnostic]) -> List[source.Edit]
+fn list_machine_applicable_edits(diagnostics: List[source.Diagnostic]) -> List[source.Edit]
   uses Panic
 {
   var accepted: List[Accepted] = []
@@ -188,7 +188,7 @@ fn list_machine_applicable_edits(diagnostics: Slice[source.Diagnostic]) -> List[
   edits
 }
 
-fn apply_edits(text: StringSlice, sorted: Slice[source.Edit]) -> String
+fn apply_edits(text: String, sorted: List[source.Edit]) -> String
   uses Panic
 {
   var buffer = String.with_capacity(text.length())
@@ -208,7 +208,7 @@ fn apply_edits(text: StringSlice, sorted: Slice[source.Edit]) -> String
 type Placed(original: source.Span, fixed_start: UInt64, fixed_stop: UInt64)
   derives Equal
 
-fn place_edits(sorted: Slice[source.Edit]) -> List[Placed]
+fn place_edits(sorted: List[source.Edit]) -> List[Placed]
   uses Panic
 {
   var placed: List[Placed] = []
@@ -224,7 +224,7 @@ fn place_edits(sorted: Slice[source.Edit]) -> List[Placed]
   placed
 }
 
-fn map_original_offset(placed: Slice[Placed], is_stop: Bool, offset: UInt64) -> UInt64
+fn map_original_offset(placed: List[Placed], is_stop: Bool, offset: UInt64) -> UInt64
   uses Panic
 {
   var low: UInt64 = 0
@@ -252,7 +252,7 @@ fn map_original_offset(placed: Slice[Placed], is_stop: Bool, offset: UInt64) -> 
   }
 }
 
-fn shift_span(placed: Slice[Placed], span: source.Span) -> source.Span
+fn shift_span(placed: List[Placed], span: source.Span) -> source.Span
   uses Panic
 {
   let stop = map_original_offset(placed, is_stop: true, offset: span.stop)
@@ -262,7 +262,7 @@ fn shift_span(placed: Slice[Placed], span: source.Span) -> source.Span
   source.make_span(map_original_offset(placed, is_stop: false, offset: span.start), stop)
 }
 
-fn shift_literal(literal: mut token.StringLiteral, placed: Slice[Placed])
+fn shift_literal(literal: mut token.StringLiteral, placed: List[Placed])
   uses Panic
 {
   match mut literal.tag {
@@ -276,7 +276,7 @@ fn shift_literal(literal: mut token.StringLiteral, placed: Slice[Placed])
   }
 }
 
-fn map_to_original(tables: mut token.Tables, placed: Slice[Placed])
+fn map_to_original(tables: mut token.Tables, placed: List[Placed])
   uses Panic
 {
   for current in mut tables.tokens {

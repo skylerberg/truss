@@ -1,6 +1,6 @@
 type Matrix(rows: Array[Int64, 4])
 
-fn Matrix.row(self) -> Slice[Int64] {
+fn Matrix.row(self) -> view List[Int64] {
   self.rows[..]
 }
 

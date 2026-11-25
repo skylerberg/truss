@@ -21,7 +21,7 @@ let list_type_parts declarations (type_ : Path.t) =
     match declaration.key.path with Impl { for_type; _ } -> Path.equal for_type type_ | _ -> false
   in
   List.filter is_member declarations
-  @ Path_argument.list_view_methods declarations type_
+  @ Path_argument.list_array_methods_of_list declarations type_
   @ List.filter is_impl declarations
 
 let list_target_declarations (names : Resolve.Names.lookups) packages :
@@ -45,18 +45,19 @@ let list_target_declarations (names : Resolve.Names.lookups) packages :
 
 let show_definition snapshot database (names : Resolve.Names.lookups) packages ~body ~impl
     (declaration : Resolve.Names.declaration) =
+  let source_lookups = Database.make_source_lookups database in
   let key = declaration.key in
   let opaque =
     declaration.visibility = Public_opaque && not (List.mem key.module_.package packages)
   in
-  let ({ file = written; base } : Resolve.Names.place) = names.read_place key in
+  let ({ file = written; base } : Resolve.Names.place) = source_lookups.read_place key in
   let source = Command_packages.read_source snapshot database written in
   {
     declaration;
     impl;
     file = Source.path source;
     line = fst (Source.compute_position source base);
-    text = Signatures.render_signature names ~body ~opaque key;
+    text = Signatures.render_signature names source_lookups ~body ~opaque key;
   }
 
 let find snapshot database names packages ~body text =

@@ -1,0 +1,12 @@
+fn first(n: UInt64) -> UInt64
+  ensures result == n
+  ensures second(n) <= 3
+{
+  n
+}
+
+fn second(n: UInt64) -> UInt64
+  ensures result == first(n)
+{
+  n
+}

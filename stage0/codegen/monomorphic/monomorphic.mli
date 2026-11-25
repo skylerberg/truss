@@ -13,6 +13,13 @@ val convert_capability_arguments : Ground.instantiation -> (string * Types.capab
 val make_substitution : Types.generic list -> Ground.argument list -> Types.substitution
 val make_signature_substitution : Types.signature -> Ground.instantiation -> Types.substitution
 
+val make_declaration_substitution :
+  trait:Path.t ->
+  trait_generics:Types.generic list ->
+  Types.signature ->
+  Ground.instantiation ->
+  Types.substitution
+
 val ground_instantiation :
   context -> Types.substitution -> Types.instantiation -> Ground.instantiation
 

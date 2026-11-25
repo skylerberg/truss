@@ -35,7 +35,7 @@ val record_group :
 val mark_stale : t -> Kind.stage -> int -> unit
 val mark_readers : t -> Kind.target -> int -> string -> unit
 val mark_readers_of_all : t -> (Kind.target * int * string) list -> unit
-val call_graph : Store.call_graph
+val proof_graph : Store.proof_graph
 val mark_position_holders : t -> Kind.target -> int -> string -> unit
 
 type 'value outcome = Value of 'value | Failed | Blocked
@@ -104,15 +104,10 @@ val list_facts : Kind.stage -> any_fact list
 val forget : t -> Kind.stage -> int -> unit
 
 val replace_file_diagnostics :
-  t -> Kind.stage -> package:Path.package -> file:int -> Diagnostic.t list -> bool
+  t -> Kind.stage -> package:Path.package -> file:int -> Renderer.file_diagnostic list -> bool
 
 val replace_placed_diagnostics :
-  t ->
-  Kind.stage ->
-  package:Path.package ->
-  unit:int ->
-  (int * Diagnostic.in_definition) list ->
-  bool
+  t -> Kind.stage -> package:Path.package -> unit:int -> (int * Catalog.diagnostic) list -> bool
 
 val replace_definition_diagnostics :
-  t -> Kind.stage -> package:Path.package -> definition:int -> Diagnostic.in_definition list -> unit
+  t -> Kind.stage -> package:Path.package -> definition:int -> Catalog.diagnostic list -> unit

@@ -1,3 +1,0 @@
-fn retarget(part: mut Slice[Int64], other: Slice[Int64]) {
-  part = other
-}

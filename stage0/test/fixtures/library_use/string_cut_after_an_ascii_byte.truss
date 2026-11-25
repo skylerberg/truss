@@ -1,4 +1,4 @@
-fn through(text: StringSlice, index: UInt64) -> StringSlice
+fn through(text: String, index: UInt64) -> view String
   requires index < text.length()
   requires text.byte(index) <= 127
 {

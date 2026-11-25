@@ -61,10 +61,9 @@ let list_required_fixes (context : State.context) (frame : State.frame) (clauses
     if List.for_all Option.is_some replacements then
       Facts.add_requires context frame
         [
-          Substituted
+          Substituted_clause
             {
-              key = clauses.callee.key;
-              clause = clause.origin;
+              clause = { key = clauses.callee.key; origin = clause.origin };
               replacements = List.filter_map Fun.id replacements;
               type_names;
             };
@@ -97,6 +96,30 @@ let calls_update_step (context : State.context) (invocation : Invocation.t) =
       | Some signature -> signature.is_update_step
       | None -> false)
   | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
+
+let havoc_mut context (frame : State.frame) (values : State.passed list) ~is_update_step
+    ~list_modified =
+  List.fold_left
+    (fun (frame : State.frame) (passed : State.passed) ->
+      match (passed.mode, passed.passed_place) with
+      | Language.Mode.Mut, Some place ->
+          if is_update_step && passed.position = 0 then place.note_changed_in_place ();
+          let arrive ty = Facts.arrive context frame "changed" ty in
+          let changed =
+            Option.bind (list_modified passed.position) (fun parts ->
+                List.fold_left
+                  (fun whole (part : Types.modified) ->
+                    Option.bind whole (fun whole ->
+                        Validity.replace_part context passed.type_ whole part.field_path
+                          (fun part_type before ->
+                            if part.is_elements then
+                              Intrinsics.replace_elements context frame part_type before
+                            else arrive part_type)))
+                  (Some passed.term) parts)
+          in
+          place.write frame (match changed with Some term -> term | None -> arrive passed.type_)
+      | _ -> frame)
+    frame values
 
 let list_structural_parameters context (frame : State.frame) (clauses : State.clauses) =
   List.concat
@@ -148,15 +171,9 @@ let add_restated_clauses (context : State.context) ~self_type ~bind trait name r
            ~self_type trait name receiver);
   }
 
-let describe_recursive_call context (location : Obligation.location) ~callee =
-  match location with
-  | Node (Written _) -> "This recursive call"
-  | Node (Desugared _) | Whole_definition ->
-      String.capitalize_ascii (Facts.describe_call context location ~callee ())
-
 let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
     path (contract : State.contract) (values : State.passed list) ~recursive_callee ~lent_final
-    ~havoc_mut ~substitution_of ~type_arguments =
+    ~substitution_of ~type_arguments =
   let substitution_of (clauses : State.clauses) =
     Types.combine_substitutions (substitution_of clauses) clauses.bindings
   in
@@ -226,7 +243,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   in
   let self_of self = Option.map fst self
   and find_self_type clauses self =
-    Option.map (fun (_, ty) -> Types.substitute (substitution_of clauses) ty) self
+    Option.map (fun (_, ty) -> Types.substitute_erased (substitution_of clauses) ty) self
   in
   let read_entry_frame (clauses : State.clauses) =
     let locals, types, self = bind (list_bindings clauses) in
@@ -260,40 +277,14 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             pairs
         in
         let compared =
-          match
-            List.map
-              (fun (parameter, _, _, _) ->
-                Printf.sprintf "`%s`" (Facts.read_parameter_name parameter))
-              pairs
-          with
-          | [ name ] -> name
-          | names -> "the first of " ^ String.concat " and " names ^ " that it changes"
+          List.map (fun (parameter, _, _, _) -> Facts.read_parameter_name parameter) pairs
         in
-        Facts.oblige context frame Termination location
-          [
-            Text
-              (Printf.sprintf
-                 "%s may not be on a part of %s: give the function a `decreases` clause."
-                 (describe_recursive_call context location ~callee:(Facts.show_callee path))
-                 compared);
-          ]
+        Facts.oblige context frame location
+          (Recursion_not_on_part { call = { at = location; callee = Some path }; compared })
           (Amounts.compare_lexicographically before after)
     | ([], _ | _, []) when context.terminates ->
-        Facts.oblige context frame Termination location
-          [
-            Text
-              (if is_self_call then
-                 Printf.sprintf
-                   "%s may not end: give the function a `decreases` clause for the prover to show \
-                    that the recursion ends."
-                   (describe_recursive_call context location ~callee:(Facts.show_callee path))
-               else
-                 Printf.sprintf
-                   "%s may not end: it calls back here, and both need a `decreases` clause for the \
-                    prover to show that the recursion ends."
-                   (String.capitalize_ascii
-                      (Facts.describe_call context location ~callee:(Facts.show_callee path) ())));
-          ]
+        Facts.oblige context frame location
+          (Recursion_may_not_end { call = { at = location; callee = Some path }; is_self_call })
           (Logic.Boolean false)
     | (_ :: _ as measures), (_ :: _ as callee_measures) ->
         let current_frame =
@@ -318,22 +309,20 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             callee_measures
         in
         let before, after = split_prefix before after in
-        Facts.oblige context frame Termination location
-          (Obligation.Text
-             (String.capitalize_ascii (Facts.describe_call context location ())
-             ^ " may not decrease `")
-           :: List.concat
-                (List.mapi
-                   (fun index (measure : Mir.formula) ->
-                     (if index = 0 then [] else [ Obligation.Text ", " ])
-                     @ [ Facts.quote caller measure.origin ])
-                   measures)
-          @ [ Text "`." ])
+        Facts.oblige context frame location
+          (Measure_may_not_decrease
+             {
+               call = { at = location; callee = None };
+               measures =
+                 List.map
+                   (fun (measure : Mir.formula) -> Facts.quote caller measure.origin)
+                   measures;
+             })
           (Amounts.compare_lexicographically before after)
     | [], _ | _, [] -> ()
     end;
   let precondition_clauses = Contracts.select_precondition_clauses contract in
-  let required =
+  let read_required () =
     let entry = read_entry_frame precondition_clauses in
     List.map
       (fun (requirement : Mir.requirement) ->
@@ -344,22 +333,28 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           list_required_fixes context frame precondition_clauses requirement term values
             ~type_names:(list_type_names (substitution_of precondition_clauses))
         in
-        let message : Obligation.message =
-          [
-            Text "`";
-            Facts.quote precondition_clauses.callee clause.origin;
-            Text
-              (Printf.sprintf "` may not hold for %s."
-                 (Facts.describe_call context location ~callee:(Facts.show_callee path) ()));
-          ]
-        in
-        Facts.oblige context frame Requires location ?cited ~fixes
+        Facts.oblige ?cited ~fixes
           ?holds_when:(find_clause_condition precondition_clauses clause.holds_when)
-          message term;
+          context frame location
+          (Precondition_may_fail
+             {
+               clause = Facts.quote precondition_clauses.callee clause.origin;
+               call = { at = location; callee = Some path };
+             })
+          term;
         term)
       precondition_clauses.requires
   in
-  let required = Logic.conjunction required in
+  let required =
+    if List.exists (Path.equal path) context.reading_requires then Logic.Boolean true
+    else begin
+      let reading_requires = context.reading_requires in
+      context.reading_requires <- path :: reading_requires;
+      Fun.protect
+        ~finally:(fun () -> context.reading_requires <- reading_requires)
+        (fun () -> Logic.conjunction (read_required ()))
+    end
+  in
   if not (context.panics || Types.has_capability (Built_in Panic) invocation.uses) then begin
     let clauses = contract.callee_clauses in
     let entry = read_entry_frame clauses in
@@ -371,14 +366,12 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             ~type_names:(list_type_names (substitution_of clauses))
         in
         let cited = Some (clauses.callee.key, requirement.clause.origin) in
-        Facts.oblige context frame Panic location ?cited ~fixes
-          [
-            Text "`";
-            Facts.quote clauses.callee requirement.clause.origin;
-            Text
-              (Printf.sprintf "` may not hold for %s, so the call may panic."
-                 (Facts.describe_call context location ~callee:(Facts.show_callee path) ()));
-          ]
+        Facts.oblige ?cited ~fixes context frame location
+          (Precondition_may_panic
+             {
+               clause = Facts.quote clauses.callee requirement.clause.origin;
+               call = { at = location; callee = Some path };
+             })
           term)
       clauses.panics_unless
   end;
@@ -391,7 +384,11 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
              snd (Validity.read_specification context (read_entry_frame clauses) requirement))
            (Facts.list_clauses clauses.requires))
   in
-  let after = havoc_mut frame in
+  let after =
+    havoc_mut context frame values
+      ~is_update_step:(calls_update_step context invocation)
+      ~list_modified:(Contracts.list_modified_parts context path)
+  in
   let in_quantifier = is_logic_call && frame.binders <> [] in
   let state term =
     if in_quantifier then Facts.add_frame_fact context after term
@@ -407,23 +404,11 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         | _ -> None)
       values
   in
-  List.iteri
-    (fun position (parameter : Mir.parameter) ->
-      match
-        ( parameter.mode,
-          List.find_opt (fun (passed : State.passed) -> passed.position = position) values,
-          List.assoc_opt position changed )
-      with
-      | Language.Mode.Mut, Some passed, Some after_term
-        when Types.is_well_known Slice parameter.type_ ->
-          Intrinsics.assume_same_length context after passed.type_ ~before:passed.term
-            ~after:after_term
-      | _ -> ())
-    callee_clauses.parameters;
   let callee_bindings = list_bindings callee_clauses in
   let callee_arguments = List.filter_map snd callee_bindings in
   let is_on_bound_values = List.exists (Logic.mentions after.bound) callee_arguments in
-  let result_type = Facts.substitute_type context frame site.type_ in
+  let declared_result_type = Facts.substitute_declared_type context frame site.type_ in
+  let result_type = Types.erase_views declared_result_type in
   let applied_as = ref None in
   let definition = ref None in
   let is_limited_call = ref false in
@@ -437,8 +422,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             | Some passed -> Facts.declare_sort context passed.type_
             | None ->
                 Facts.declare_sort context
-                  ((Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
-                     (Types.substitute (substitution_of callee_clauses) parameter.type_)))
+                  (Types.erase_views
+                     ((Interface.Impls.normalize context.lookups.interface
+                         ~list_bounds:context.bounds)
+                        (Types.substitute (substitution_of callee_clauses) parameter.type_))))
           callee_bindings
       in
       let result_sort = Facts.declare_sort context result_type in
@@ -448,8 +435,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         when self.local = Self
              && Well_known.is_method Model_model (Method { owner = trait.path; name; receiver }) ->
           Models.rank_model context
-            ((Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
-               (Types.substitute (substitution_of callee_clauses) self.type_))
+            (Types.erase_views
+               ((Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
+                  (Types.substitute (substitution_of callee_clauses) self.type_)))
             ~model:result_type ~impl function_symbol
       | _ -> ());
       let symbol =
@@ -508,7 +496,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     match left_valid with
     | Some (_, leave) ->
         Lambdas.check_valid context after location result_type (leave result) ~deep:true
-          ~when_:"when the lend of this part ends"
+          ~moment:When_lend_ends
     | None -> ()
   in
   let is_update_step = calls_update_step context invocation in
@@ -553,7 +541,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       Logic.conjunction
         (List.map2
            (fun ((parameter : Mir.parameter), _) input ->
-             let ty = Types.substitute (substitution_of callee_clauses) parameter.type_ in
+             let ty = Types.substitute_erased (substitution_of callee_clauses) parameter.type_ in
              Logic.( &&& ) (Facts.make_in_range ty input)
                (Validity.make_validity context outside ~assuming:true ty input))
            callee_bindings inputs)
@@ -806,7 +794,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let compute_change () =
     List.fold_left
       (fun total (passed : State.passed) ->
-        let ty = passed.type_ in
+        let ty = passed.declared_type in
         match passed.mode with
         | Language.Mode.Mut -> (
             match List.assoc_opt passed.position changed with
@@ -824,10 +812,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           match lent_final with
           | Some leave ->
               Costs.minus
-                (Amounts.compute_potential context after result_type result)
-                (Amounts.compute_potential context after result_type (leave result))
+                (Amounts.compute_potential context after declared_result_type result)
+                (Amounts.compute_potential context after declared_result_type (leave result))
           | None -> Costs.zero)
-      | `Returns -> Amounts.compute_potential context after result_type result)
+      | `Returns -> Amounts.compute_potential context after declared_result_type result)
       values
   in
   let declared_clauses = Contracts.list_declared_clauses contract in
@@ -924,17 +912,10 @@ let compute_function_value_amount context frame ~location (function_type : Types
     | _, Exactly ->
         let cost = make_cost () in
         if cost <> Costs.zero then
-          Facts.oblige context frame Cost location
+          Facts.oblige
             ~holds_when:(Facts.find_counter_condition context counter)
-            [
-              Text
-                (Printf.sprintf
-                   "Only an upper bound is known for the `%s` of %s, which may spend less, so no \
-                    `==` bound can count it. State the cost with `<=`, or give the type of the \
-                    function called an `==` bound."
-                   (Language.Metric.show metric)
-                   (Facts.describe_call context location ()));
-            ]
+            context frame location
+            (Upper_bound_in_exact_cost { metric; call = { at = location; callee = None } })
             (Logic.equal cost Costs.zero);
         cost
   in
@@ -963,11 +944,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     when (not context.panics)
          && Conditions.may_panic_for_every_value context.lookups ~current:context.current
               ~condition:context.condition invocation.uses ->
-      Facts.oblige context frame Panic location
-        (Obligation.Text
-           (String.capitalize_ascii (Facts.describe_call context location ()) ^ " may panic where `")
-         :: condition
-        @ [ Text "` holds, which the function's `uses Panic unless` rules out." ])
+      Facts.oblige context frame location
+        (Panics_where_ruled_out { call = { at = location; callee = None }; condition })
         (Logic.Boolean false)
   | Some _ | None -> ());
   List.iter
@@ -982,8 +960,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           Validity.check_forwarded_callback context frame site invocation passed local values
       | Other ->
           Validity.check_callback_promises context frame ~location invocation passed
-            ~described:"and nothing promises it of the function passed here."
-            ~assume:Validity.assume_nothing values
+            ~unpromised:Nothing_promises ~assume:Validity.assume_nothing values
       | Lambda -> ())
     values;
   let result_type = Facts.substitute_type context frame site.type_ in
@@ -995,22 +972,15 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         (fun (passed : State.passed) ->
           Lambdas.check_valid context frame location passed.type_ passed.term ~deep:true
             ~includes_invariants:(not (is_update_step && passed.position = 0))
-            ~when_:("when it is passed to " ^ Facts.describe_call context location ()))
+            ~moment:(When_passed { at = location; callee = None }))
         values);
-  let havoc_mut frame =
-    List.fold_left
-      (fun frame (passed : State.passed) ->
-        match (passed.mode, passed.passed_place) with
-        | Language.Mode.Mut, Some place ->
-            if is_update_step && passed.position = 0 then place.note_changed_in_place ();
-            place.write frame (Facts.arrive context frame "changed" passed.type_)
-        | _ -> frame)
-      frame values
+  let havoc_whole_arguments frame =
+    havoc_mut context frame values ~is_update_step ~list_modified:(fun _ -> None)
   in
   let list_arguments (type_arguments : Types.argument list) =
     List.map
       (fun argument ->
-        match Types.substitute_argument frame.substitution argument with
+        match Types.substitute_argument_erased frame.substitution argument with
         | Types.Type ty -> Types.Type (Facts.substitute_type context frame ty)
         | other -> other)
       type_arguments
@@ -1048,9 +1018,12 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     | Some contract ->
         By_contract
           (call_contract ~recursive_callee ~lent_final:leave_lent context frame site invocation path
-             contract values ~havoc_mut ~substitution_of ~type_arguments)
+             contract values ~substitution_of ~type_arguments)
     | None ->
-        let frame = havoc_mut frame in
+        let frame =
+          havoc_mut context frame values ~is_update_step
+            ~list_modified:(Contracts.list_modified_parts context path)
+        in
         let frame =
           Operations.spend context frame
             (Amounts.compute_step_amount context frame invocation values)
@@ -1102,7 +1075,9 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
               | _ -> None)
         | Some Equal_equal, _, [ left; right ] when Facts.is_equality_identity context self_type ->
             Without_contract (Some (frame, Logic.equal left right))
-        | Some Equal_equal, Impl { impl = Derived _; _ }, [ left; right ] ->
+        | ( Some Equal_equal,
+            (Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ }),
+            [ left; right ] ) ->
             let spent =
               Operations.spend context frame (fun counter ->
                   Amounts.compute_callee_amount
@@ -1121,10 +1096,10 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             in
             let path, callee_substitution =
               match evidence with
-              | Impl { impl; substitution } ->
+              | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
                   let path = Path.Method { owner = impl; name; receiver } in
                   (path, bind_callee path arguments capability_arguments ~fixed:substitution)
-              | _ -> (trait_path, trait_substitution)
+              | Bound -> (trait_path, trait_substitution)
             in
             let compute_substitution (clauses : State.clauses) =
               if clauses.inherited then trait_substitution else callee_substitution
@@ -1142,7 +1117,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                  (Contracts.find_method_contract context trait name receiver evidence)))
     | Indirect () ->
         Laws.check_callback_requires context frame site through values;
-        let frame = havoc_mut frame in
+        let frame = havoc_whole_arguments frame in
         let frame =
           match through with
           | _ when context.counters = [] -> frame
@@ -1201,7 +1176,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         let frame =
           match operation with
           | Lend _ -> frame
-          | Scalar _ | Buffer _ | Runtime _ -> havoc_mut frame
+          | Scalar _ | Buffer _ | Runtime _ -> havoc_whole_arguments frame
         in
         let changed =
           List.map
@@ -1230,9 +1205,5 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
   match modelled with
   | By_contract (frame, result) -> Some (frame, result)
   | Without_contract result ->
-      Facts.reject_uncompared_recursion context frame location recursive_callee
-        ~describe:(fun callee ->
-          String.capitalize_ascii (Facts.describe_call context location ~callee ())
-          ^ " may not end: it calls back here, and the prover reads the call without the callee's \
-             `decreases` clause.");
+      Facts.reject_uncompared_recursion context frame location recursive_callee;
       result

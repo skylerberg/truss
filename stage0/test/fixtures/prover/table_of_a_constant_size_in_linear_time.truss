@@ -1,4 +1,4 @@
-fn f(text: StringSlice) -> UInt64
+fn f(text: String) -> UInt64
   cost time O(text.length())
 {
   let table: List[UInt64] = List.filled(0, count: 1114112)

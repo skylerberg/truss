@@ -106,7 +106,7 @@ internal fn UrlPart.allows(self, byte: UInt8) -> Bool
   }
 }
 
-internal fn find_first_of(text: StringSlice, from: UInt64, to: UInt64, first: UInt8, second: UInt8, third: UInt8) -> UInt64
+internal fn find_first_of(text: String, from: UInt64, to: UInt64, first: UInt8, second: UInt8, third: UInt8) -> UInt64
   requires from <= to
   requires to <= text.length()
   ensures from <= result
@@ -128,7 +128,7 @@ internal fn find_first_of(text: StringSlice, from: UInt64, to: UInt64, first: UI
   index
 }
 
-internal fn find_last(text: StringSlice, from: UInt64, to: UInt64, byte: UInt8) -> UInt64
+internal fn find_last(text: String, from: UInt64, to: UInt64, byte: UInt8) -> UInt64
   requires from <= to
   requires to <= text.length()
   ensures from <= result
@@ -153,7 +153,7 @@ internal fn find_last(text: StringSlice, from: UInt64, to: UInt64, byte: UInt8) 
   to
 }
 
-internal fn validate(text: StringSlice, from: UInt64, to: UInt64, place: UrlPart) -> Option[ParseError]
+internal fn validate(text: String, from: UInt64, to: UInt64, place: UrlPart) -> Option[ParseError]
   requires from <= to
   requires to <= text.length()
   cost time O(to - from)
@@ -183,7 +183,7 @@ internal fn validate(text: StringSlice, from: UInt64, to: UInt64, place: UrlPart
   None
 }
 
-internal fn scheme_end(text: StringSlice) -> UInt64
+internal fn scheme_end(text: String) -> UInt64
   ensures result <= text.length()
   ensures result == text.length() || text.model()[result] == 58
   cost time O(text.length())
@@ -217,7 +217,7 @@ internal fn scheme_end(text: StringSlice) -> UInt64
   text.length()
 }
 
-internal fn parse_port(text: StringSlice, from: UInt64, to: UInt64) -> Result[Option[UInt16], ParseError]
+internal fn parse_port(text: String, from: UInt64, to: UInt64) -> Result[Option[UInt16], ParseError]
   requires from <= to
   requires to <= text.length()
   cost time O(to - from)
@@ -231,7 +231,7 @@ internal fn parse_port(text: StringSlice, from: UInt64, to: UInt64) -> Result[Op
   }
 }
 
-internal fn parse_host(text: StringSlice, from: UInt64, to: UInt64) -> Result[Host, ParseError]
+internal fn parse_host(text: String, from: UInt64, to: UInt64) -> Result[Host, ParseError]
   requires from <= to
   requires to <= text.length()
   requires text.is_boundary(from)
@@ -256,7 +256,7 @@ internal fn parse_host(text: StringSlice, from: UInt64, to: UInt64) -> Result[Ho
 
 internal type Authority(user_information: Option[String], host: Host, port: Option[UInt16])
 
-internal fn parse_authority(text: StringSlice, from: UInt64, to: UInt64) -> Result[Authority, ParseError]
+internal fn parse_authority(text: String, from: UInt64, to: UInt64) -> Result[Authority, ParseError]
   requires from <= to
   requires to <= text.length()
   requires text.is_boundary(from)
@@ -271,7 +271,7 @@ internal fn parse_authority(text: StringSlice, from: UInt64, to: UInt64) -> Resu
       Some(error) => return Err(error)
       None => {}
     }
-    user_information = Some(text.part(from, to: at).to_string())
+    user_information = Some(text.part(from, to: at).copy())
     start = at + 1
   }
   if start < to && text.byte(start) == 91 {
@@ -302,7 +302,7 @@ internal fn parse_authority(text: StringSlice, from: UInt64, to: UInt64) -> Resu
 
 internal type PathQueryFragment(path: String, query: Option[String], fragment: Option[String])
 
-internal fn parse_path_query_fragment(text: StringSlice, from: UInt64) -> Result[PathQueryFragment, ParseError]
+internal fn parse_path_query_fragment(text: String, from: UInt64) -> Result[PathQueryFragment, ParseError]
   requires from <= text.length()
   requires text.is_boundary(from)
   cost time O(text.length() - from)
@@ -322,7 +322,7 @@ internal fn parse_path_query_fragment(text: StringSlice, from: UInt64) -> Result
       Some(error) => return Err(error)
       None => {}
     }
-    query = Some(text.part(next + 1, to: query_end).to_string())
+    query = Some(text.part(next + 1, to: query_end).copy())
     next = query_end
   }
   if next < length {
@@ -330,12 +330,12 @@ internal fn parse_path_query_fragment(text: StringSlice, from: UInt64) -> Result
       Some(error) => return Err(error)
       None => {}
     }
-    fragment = Some(text.part(next + 1, to: length).to_string())
+    fragment = Some(text.part(next + 1, to: length).copy())
   }
-  Ok(PathQueryFragment(path: text.part(from, to: path_end).to_string(), query: own query, fragment: own fragment))
+  Ok(PathQueryFragment(path: text.part(from, to: path_end).copy(), query: own query, fragment: own fragment))
 }
 
-internal fn starts_authority(text: StringSlice, from: UInt64) -> Bool
+internal fn starts_authority(text: String, from: UInt64) -> Bool
   requires from <= text.length()
   ensures result == (text.length() - from >= 2 && text.byte(from) == 47 && text.byte(from + 1) == 47)
   cost time O(1)
@@ -344,7 +344,7 @@ internal fn starts_authority(text: StringSlice, from: UInt64) -> Bool
   text.length() - from >= 2 && text.byte(from) == 47 && text.byte(from + 1) == 47
 }
 
-internal fn authority_end(text: StringSlice, from: UInt64) -> UInt64
+internal fn authority_end(text: String, from: UInt64) -> UInt64
   requires from <= text.length()
   requires starts_authority(text, from: from)
   ensures from + 2 <= result
@@ -403,7 +403,7 @@ internal fn EscapeSet.allows(self, byte: UInt8) -> Bool
   }
 }
 
-fn push_escaped_bytes(output: mut intrinsic.Storage[UInt8], text: StringSlice, from: UInt64, to: UInt64)
+fn push_escaped_bytes(output: mut intrinsic.Storage[UInt8], text: String, from: UInt64, to: UInt64)
   requires from <= to
   requires to <= text.length()
   requires intrinsic.storage_length(output) + 3 * (to - from) <= intrinsic.storage_capacity(output)
@@ -427,7 +427,7 @@ fn push_escaped_bytes(output: mut intrinsic.Storage[UInt8], text: StringSlice, f
   }
 }
 
-internal fn percent_encode(text: StringSlice, how: EscapeSet) -> String
+internal fn percent_encode(text: String, how: EscapeSet) -> String
   cost time O(text.length())
 {
   if text.length() > UInt64.maximum / 8 {
@@ -477,7 +477,7 @@ internal fn percent_encode(text: StringSlice, how: EscapeSet) -> String
   String(storage: own output)
 }
 
-internal fn percent_decode_bytes(text: StringSlice, from: UInt64, to: UInt64, form: Bool) -> Result[List[UInt8], ParseError]
+internal fn percent_decode_bytes(text: String, from: UInt64, to: UInt64, form: Bool) -> Result[List[UInt8], ParseError]
   requires from <= to
   requires to <= text.length()
   ensures !(result is Ok(bytes) && bytes.length() > to - from)
@@ -513,7 +513,7 @@ internal fn percent_decode_bytes(text: StringSlice, from: UInt64, to: UInt64, fo
   Ok(List(storage: own output))
 }
 
-internal fn percent_decode(text: StringSlice, from: UInt64, to: UInt64, form: Bool) -> Result[String, ParseError]
+internal fn percent_decode(text: String, from: UInt64, to: UInt64, form: Bool) -> Result[String, ParseError]
   requires from <= to
   requires to <= text.length()
   cost time O(to - from)
@@ -525,7 +525,7 @@ internal fn percent_decode(text: StringSlice, from: UInt64, to: UInt64, form: Bo
   }
 }
 
-internal fn parse_parameter(text: StringSlice, from: UInt64, to: UInt64) -> Result[Parameter, ParseError]
+internal fn parse_parameter(text: String, from: UInt64, to: UInt64) -> Result[Parameter, ParseError]
   requires from <= to
   requires to <= text.length()
   cost time O(to - from)
@@ -536,7 +536,7 @@ internal fn parse_parameter(text: StringSlice, from: UInt64, to: UInt64) -> Resu
   Ok(Parameter(name: own name, value: own value))
 }
 
-internal fn count_byte(text: StringSlice, byte: UInt8) -> UInt64
+internal fn count_byte(text: String, byte: UInt8) -> UInt64
   ensures result <= text.length()
   cost time O(text.length())
   cost allocations == 0
@@ -571,7 +571,7 @@ internal fn find_last_slash(output: intrinsic.Storage[UInt8]) -> UInt64
   if length > 0 { length - 1 } else { 0 }
 }
 
-internal fn is_dot(text: StringSlice, from: UInt64, to: UInt64) -> Bool
+internal fn is_dot(text: String, from: UInt64, to: UInt64) -> Bool
   requires from <= to
   requires to <= text.length()
   cost time O(1)
@@ -580,7 +580,7 @@ internal fn is_dot(text: StringSlice, from: UInt64, to: UInt64) -> Bool
   to - from == 1 && text.byte(from) == 46
 }
 
-internal fn is_double_dot(text: StringSlice, from: UInt64, to: UInt64) -> Bool
+internal fn is_double_dot(text: String, from: UInt64, to: UInt64) -> Bool
   requires from <= to
   requires to <= text.length()
   cost time O(1)
@@ -589,7 +589,7 @@ internal fn is_double_dot(text: StringSlice, from: UInt64, to: UInt64) -> Bool
   to - from == 2 && text.byte(from) == 46 && text.byte(from + 1) == 46
 }
 
-internal fn remove_dot_segments(path: StringSlice) -> String
+internal fn remove_dot_segments(path: String) -> String
   ensures result.length() <= path.length()
   cost time O(path.length())
 {
@@ -626,9 +626,9 @@ internal fn remove_dot_segments(path: StringSlice) -> String
   String(storage: own output)
 }
 
-internal fn Url.merge_path(self, relative: StringSlice) -> String
+internal fn Url.merge_path(self, relative: String) -> String
 {
-  let base = self.path.slice()
+  let base = self.path
   var merged: String = ""
   if self.host is Some(_) && base.length() == 0 {
     mut merged.push("/")
@@ -642,7 +642,7 @@ internal fn Url.merge_path(self, relative: StringSlice) -> String
   merged
 }
 
-public fn parse(text: StringSlice) -> Result[Url, ParseError]
+public fn parse(text: String) -> Result[Url, ParseError]
   cost time O(text.length())
 {
   let colon = scheme_end(text)
@@ -663,19 +663,19 @@ public fn parse(text: StringSlice) -> Result[Url, ParseError]
   Ok(build_url(own scheme, authority: own authority, rest: own rest))
 }
 
-public fn encode_component(text: StringSlice) -> String
+public fn encode_component(text: String) -> String
   cost time O(text.length())
 {
   percent_encode(text, how: EscapeSet.AsComponent)
 }
 
-public fn decode_component(text: StringSlice) -> Result[String, ParseError]
+public fn decode_component(text: String) -> Result[String, ParseError]
   cost time O(text.length())
 {
   percent_decode(text, from: 0, to: text.length(), form: false)
 }
 
-public fn encode_query(parameters: Slice[Parameter]) -> String
+public fn encode_query(parameters: List[Parameter]) -> String
 {
   var output: String = ""
   for index in 0..parameters.length() {
@@ -689,7 +689,7 @@ public fn encode_query(parameters: Slice[Parameter]) -> String
   output
 }
 
-public fn decode_query(text: StringSlice) -> Result[List[Parameter], ParseError]
+public fn decode_query(text: String) -> Result[List[Parameter], ParseError]
   cost time O(text.length())
 {
   let room = count_byte(text, byte: 38) + 1
@@ -722,16 +722,16 @@ public fn decode_query(text: StringSlice) -> Result[List[Parameter], ParseError]
   }
 }
 
-public fn Url.scheme(self) -> StringSlice
+public fn Url.scheme(self) -> view String
   cost time O(1)
 {
-  self.scheme.slice()
+  self.scheme
 }
 
-public fn Url.user_information(self) -> Option[StringSlice]
+public fn Url.user_information(self) -> Option[view String]
   cost time O(1)
 {
-  self.user_information.map(fn(part) { part.slice() })
+  self.user_information.map(fn(part) { part })
 }
 
 public fn Url.host(self) lends Option[Host]
@@ -752,7 +752,7 @@ public fn Url.port_or_default(self) -> Option[UInt16]
   match self.port {
     Some(port) => Some(port)
     None => {
-      let scheme = self.scheme.slice()
+      let scheme = self.scheme
       if scheme == "http" || scheme == "ws" {
         Some(80)
       } else if scheme == "https" || scheme == "wss" {
@@ -768,16 +768,16 @@ public fn Url.port_or_default(self) -> Option[UInt16]
   }
 }
 
-public fn Url.path(self) -> StringSlice
+public fn Url.path(self) -> view String
   cost time O(1)
 {
-  self.path.slice()
+  self.path
 }
 
 public fn Url.path_segments(self) -> List[String]
   cost time O(self.path.length())
 {
-  let path = self.path.slice()
+  let path = self.path
   if path.length() == 0 {
     return []
   }
@@ -798,7 +798,7 @@ public fn Url.path_segments(self) -> List[String]
       if percent_decode(path, from: index, to: end, form: false) is Ok(segment) {
         intrinsic.storage_push(mut output, value: own segment)
       } else {
-        intrinsic.storage_push(mut output, value: path.part(index, to: end).to_string())
+        intrinsic.storage_push(mut output, value: path.part(index, to: end).copy())
       }
     }
     more = end < path.length()
@@ -807,10 +807,10 @@ public fn Url.path_segments(self) -> List[String]
   List(storage: own output)
 }
 
-public fn Url.query(self) -> Option[StringSlice]
+public fn Url.query(self) -> Option[view String]
   cost time O(1)
 {
-  self.query.map(fn(part) { part.slice() })
+  self.query.map(fn(part) { part })
 }
 
 public fn Url.query_parameters(self) -> List[Parameter]
@@ -821,7 +821,7 @@ public fn Url.query_parameters(self) -> List[Parameter]
   }
 }
 
-public fn Url.query_parameter(self, name: StringSlice) -> Option[String]
+public fn Url.query_parameter(self, name: String) -> Option[String]
 {
   let parameters = self.query_parameters()
   for index in 0..parameters.length() {
@@ -832,13 +832,13 @@ public fn Url.query_parameter(self, name: StringSlice) -> Option[String]
   None
 }
 
-public fn Url.fragment(self) -> Option[StringSlice]
+public fn Url.fragment(self) -> Option[view String]
   cost time O(1)
 {
-  self.fragment.map(fn(part) { part.slice() })
+  self.fragment.map(fn(part) { part })
 }
 
-public fn Url.join(self, reference: StringSlice) -> Result[Url, ParseError]
+public fn Url.join(self, reference: String) -> Result[Url, ParseError]
 {
   if scheme_end(reference) < reference.length() {
     var absolute = parse(reference)?
@@ -866,7 +866,7 @@ public fn Url.join(self, reference: StringSlice) -> Result[Url, ParseError]
     return Ok(own joined)
   }
   joined.query = own rest.query
-  if rest.path.slice().byte(0) == 47 {
+  if rest.path.byte(0) == 47 {
     joined.path = remove_dot_segments(rest.path)
   } else {
     let merged = self.merge_path(rest.path)
@@ -875,11 +875,11 @@ public fn Url.join(self, reference: StringSlice) -> Result[Url, ParseError]
   Ok(own joined)
 }
 
-public fn Url.with_path(own self, path: StringSlice) -> Url
+public fn Url.with_path(own self, path: String) -> Url
 {
   var changed = own self
   let escaped = percent_encode(path, how: EscapeSet.AsPath)
-  if changed.host is Some(_) && escaped.length() > 0 && escaped.slice().byte(0) != 47 {
+  if changed.host is Some(_) && escaped.length() > 0 && escaped.byte(0) != 47 {
     var rooted: String = "/"
     mut rooted.push(escaped)
     changed.path = own rooted
@@ -889,25 +889,25 @@ public fn Url.with_path(own self, path: StringSlice) -> Url
   changed
 }
 
-public fn Url.with_path_segment(own self, segment: StringSlice) -> Url
+public fn Url.with_path_segment(own self, segment: String) -> Url
 {
   var changed = own self
   let length = changed.path.length()
-  if length == 0 || changed.path.slice().byte(length - 1) != 47 {
+  if length == 0 || changed.path.byte(length - 1) != 47 {
     mut changed.path.push("/")
   }
   mut changed.path.push(percent_encode(segment, how: EscapeSet.AsComponent))
   changed
 }
 
-public fn Url.with_query(own self, parameters: Slice[Parameter]) -> Url
+public fn Url.with_query(own self, parameters: List[Parameter]) -> Url
 {
   var changed = own self
   changed.query = if parameters.length() == 0 { None } else { Some(encode_query(parameters)) }
   changed
 }
 
-public fn Url.with_query_parameter(own self, name: StringSlice, value: StringSlice) -> Url
+public fn Url.with_query_parameter(own self, name: String, value: String) -> Url
 {
   var changed = own self
   var query: String = ""
@@ -992,7 +992,7 @@ impl Display for Url {
 impl text.Parse for Url {
   type Error = ParseError
 
-  fn parse(text: StringSlice) -> Result[Url, ParseError]
+  fn parse(text: String) -> Result[Url, ParseError]
   {
     parse(text)
   }
@@ -1001,8 +1001,8 @@ impl text.Parse for Url {
 public opaque type Component(text: String)
   derives Equal
 
-impl From[StringSlice] for Component {
-  fn from(value: own StringSlice) -> Component {
+impl From[view String] for Component {
+  fn from(value: own view String) -> Component {
     Component(text: encode_component(value))
   }
 }
@@ -1028,7 +1028,7 @@ impl From[UInt64] for Component {
 impl FromTemplate for Url {
   type Part = Component
 
-  fn is_valid_template(literals: Slice[text.Literal]) -> Bool
+  fn is_valid_template(literals: List[text.Literal]) -> Bool
   {
     literals.length() > 0
       && parses_with_parts_after_authority(literals, part: "~")
@@ -1064,7 +1064,7 @@ impl FromTemplate for Url {
   }
 }
 
-internal fn template_text(literals: Slice[text.Literal], part: StringSlice) -> String
+internal fn template_text(literals: List[text.Literal], part: String) -> String
 {
   var text = ""
   var index: UInt64 = 0
@@ -1081,7 +1081,7 @@ internal fn template_text(literals: Slice[text.Literal], part: StringSlice) -> S
   text
 }
 
-internal fn path_start(text: StringSlice) -> UInt64
+internal fn path_start(text: String) -> UInt64
   ensures result <= text.length()
   cost time O(text.length())
 {
@@ -1096,7 +1096,7 @@ internal fn path_start(text: StringSlice) -> UInt64
   }
 }
 
-internal fn parses_with_parts_after_authority(literals: Slice[text.Literal], part: StringSlice) -> Bool
+internal fn parses_with_parts_after_authority(literals: List[text.Literal], part: String) -> Bool
   requires literals.length() > 0
 {
   let text = template_text(literals, part: part)

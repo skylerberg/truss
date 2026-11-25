@@ -22,9 +22,8 @@ let has_visible_method state owner name =
   | Visible _ -> true
   | Hidden _ | Absent -> false
 
-let make_hidden_error state span (hidden, visibility) =
-  State.make_error_type state Member_not_visible span
-    (Resolve.Names.describe_hidden hidden visibility)
+let make_hidden_error state at (hidden, visibility) =
+  State.make_error_type state (Hidden_member { at; hidden; visibility })
 
 let list_trait_methods (lookups : Lookups.t) trait name =
   match Interface.Definition.find_trait_interface lookups.interface trait with

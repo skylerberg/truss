@@ -5,7 +5,7 @@ internal type Point(x: List[UInt64], y: List[UInt64], z: List[UInt64])
 internal type Curve(field: modular.Field, scalars: modular.Field, b: List[UInt64], base: Point, size: UInt64)
   invariant size <= 64
 
-fn hex_limbs(text: StringSlice, count: UInt64) -> List[UInt64] {
+fn hex_limbs(text: String, count: UInt64) -> List[UInt64] {
   var bytes: List[UInt8] = []
   var index: UInt64 = 0
   while index < text.length() && text.length() - index >= 2
@@ -17,15 +17,15 @@ fn hex_limbs(text: StringSlice, count: UInt64) -> List[UInt64] {
     mut bytes.push(if high < 16 && low < 16 { high * 16 + low } else { 0 })
     index += 2
   }
-  modular.limbs_from_bytes(bytes.slice(), count: count)
+  modular.limbs_from_bytes(bytes, count: count)
 }
 
 fn make_curve(
-  prime: StringSlice,
-  order: StringSlice,
-  b: StringSlice,
-  x: StringSlice,
-  y: StringSlice,
+  prime: String,
+  order: String,
+  b: String,
+  x: String,
+  y: String,
   size: UInt64,
 ) -> Option[Curve]
   requires size <= 64
@@ -34,11 +34,11 @@ fn make_curve(
   let field = modular.Field.new(hex_limbs(prime, count: count))?
   let scalars = modular.Field.new(hex_limbs(order, count: count))?
   let base = Point(
-    x: field.to_montgomery(hex_limbs(x, count: count).slice()),
-    y: field.to_montgomery(hex_limbs(y, count: count).slice()),
+    x: field.to_montgomery(hex_limbs(x, count: count)),
+    y: field.to_montgomery(hex_limbs(y, count: count)),
     z: field.montgomery_one(),
   )
-  let curve_b = field.to_montgomery(hex_limbs(b, count: count).slice())
+  let curve_b = field.to_montgomery(hex_limbs(b, count: count))
   Some(Curve(field: own field, scalars: own scalars, b: own curve_b, base: own base, size: size))
 }
 
@@ -75,7 +75,7 @@ internal fn Curve.scalars(self) -> modular.Field {
 }
 
 internal fn Curve.order(self) -> List[UInt64] {
-  self.scalars.modulus_limbs().to_list()
+  self.scalars.modulus_limbs().copy()
 }
 
 internal fn Curve.identity(self) -> Point {
@@ -88,66 +88,66 @@ internal fn Curve.base(self) -> Point {
 
 internal fn Curve.add(self, first: Point, second: Point) -> Point {
   let field = self.field
-  let b = self.b.slice()
-  var t0 = field.multiply(first.x.slice(), second: second.x.slice())
-  var t1 = field.multiply(first.y.slice(), second: second.y.slice())
-  var t2 = field.multiply(first.z.slice(), second: second.z.slice())
-  var t3 = field.add(first.x.slice(), second: first.y.slice())
-  var t4 = field.add(second.x.slice(), second: second.y.slice())
-  t3 = field.multiply(t3.slice(), second: t4.slice())
-  t4 = field.add(t0.slice(), second: t1.slice())
-  t3 = field.subtract(t3.slice(), second: t4.slice())
-  t4 = field.add(first.y.slice(), second: first.z.slice())
-  var x3 = field.add(second.y.slice(), second: second.z.slice())
-  t4 = field.multiply(t4.slice(), second: x3.slice())
-  x3 = field.add(t1.slice(), second: t2.slice())
-  t4 = field.subtract(t4.slice(), second: x3.slice())
-  x3 = field.add(first.x.slice(), second: first.z.slice())
-  var y3 = field.add(second.x.slice(), second: second.z.slice())
-  x3 = field.multiply(x3.slice(), second: y3.slice())
-  y3 = field.add(t0.slice(), second: t2.slice())
-  y3 = field.subtract(x3.slice(), second: y3.slice())
-  var z3 = field.multiply(b, second: t2.slice())
-  x3 = field.subtract(y3.slice(), second: z3.slice())
-  z3 = field.add(x3.slice(), second: x3.slice())
-  x3 = field.add(x3.slice(), second: z3.slice())
-  z3 = field.subtract(t1.slice(), second: x3.slice())
-  x3 = field.add(t1.slice(), second: x3.slice())
-  y3 = field.multiply(b, second: y3.slice())
-  t1 = field.add(t2.slice(), second: t2.slice())
-  t2 = field.add(t1.slice(), second: t2.slice())
-  y3 = field.subtract(y3.slice(), second: t2.slice())
-  y3 = field.subtract(y3.slice(), second: t0.slice())
-  t1 = field.add(y3.slice(), second: y3.slice())
-  y3 = field.add(t1.slice(), second: y3.slice())
-  t1 = field.add(t0.slice(), second: t0.slice())
-  t0 = field.add(t1.slice(), second: t0.slice())
-  t0 = field.subtract(t0.slice(), second: t2.slice())
-  t1 = field.multiply(t4.slice(), second: y3.slice())
-  t2 = field.multiply(t0.slice(), second: y3.slice())
-  y3 = field.multiply(x3.slice(), second: z3.slice())
-  y3 = field.add(y3.slice(), second: t2.slice())
-  x3 = field.multiply(t3.slice(), second: x3.slice())
-  x3 = field.subtract(x3.slice(), second: t1.slice())
-  z3 = field.multiply(t4.slice(), second: z3.slice())
-  t1 = field.multiply(t3.slice(), second: t0.slice())
-  z3 = field.add(z3.slice(), second: t1.slice())
+  let b = self.b
+  var t0 = field.multiply(first.x, second: second.x)
+  var t1 = field.multiply(first.y, second: second.y)
+  var t2 = field.multiply(first.z, second: second.z)
+  var t3 = field.add(first.x, second: first.y)
+  var t4 = field.add(second.x, second: second.y)
+  t3 = field.multiply(t3, second: t4)
+  t4 = field.add(t0, second: t1)
+  t3 = field.subtract(t3, second: t4)
+  t4 = field.add(first.y, second: first.z)
+  var x3 = field.add(second.y, second: second.z)
+  t4 = field.multiply(t4, second: x3)
+  x3 = field.add(t1, second: t2)
+  t4 = field.subtract(t4, second: x3)
+  x3 = field.add(first.x, second: first.z)
+  var y3 = field.add(second.x, second: second.z)
+  x3 = field.multiply(x3, second: y3)
+  y3 = field.add(t0, second: t2)
+  y3 = field.subtract(x3, second: y3)
+  var z3 = field.multiply(b, second: t2)
+  x3 = field.subtract(y3, second: z3)
+  z3 = field.add(x3, second: x3)
+  x3 = field.add(x3, second: z3)
+  z3 = field.subtract(t1, second: x3)
+  x3 = field.add(t1, second: x3)
+  y3 = field.multiply(b, second: y3)
+  t1 = field.add(t2, second: t2)
+  t2 = field.add(t1, second: t2)
+  y3 = field.subtract(y3, second: t2)
+  y3 = field.subtract(y3, second: t0)
+  t1 = field.add(y3, second: y3)
+  y3 = field.add(t1, second: y3)
+  t1 = field.add(t0, second: t0)
+  t0 = field.add(t1, second: t0)
+  t0 = field.subtract(t0, second: t2)
+  t1 = field.multiply(t4, second: y3)
+  t2 = field.multiply(t0, second: y3)
+  y3 = field.multiply(x3, second: z3)
+  y3 = field.add(y3, second: t2)
+  x3 = field.multiply(t3, second: x3)
+  x3 = field.subtract(x3, second: t1)
+  z3 = field.multiply(t4, second: z3)
+  t1 = field.multiply(t3, second: t0)
+  z3 = field.add(z3, second: t1)
   Point(x: own x3, y: own y3, z: own z3)
 }
 
 fn swap_points(first: mut Point, second: mut Point, bit: Bool) {
-  let x = modular.select(bit, first: first.x.slice(), second: second.x.slice())
-  let y = modular.select(bit, first: first.y.slice(), second: second.y.slice())
-  let z = modular.select(bit, first: first.z.slice(), second: second.z.slice())
-  second.x = modular.select(bit, first: second.x.slice(), second: first.x.slice())
-  second.y = modular.select(bit, first: second.y.slice(), second: first.y.slice())
-  second.z = modular.select(bit, first: second.z.slice(), second: first.z.slice())
+  let x = modular.select(bit, first: first.x, second: second.x)
+  let y = modular.select(bit, first: first.y, second: second.y)
+  let z = modular.select(bit, first: first.z, second: second.z)
+  second.x = modular.select(bit, first: second.x, second: first.x)
+  second.y = modular.select(bit, first: second.y, second: first.y)
+  second.z = modular.select(bit, first: second.z, second: first.z)
   first.x = own x
   first.y = own y
   first.z = own z
 }
 
-internal fn Curve.multiply(self, scalar: Slice[UInt8], point: Point) -> Point {
+internal fn Curve.multiply(self, scalar: List[UInt8], point: Point) -> Point {
   var low = self.identity()
   var high = point.copy()
   for byte in scalar {
@@ -169,23 +169,23 @@ internal fn Curve.multiply(self, scalar: Slice[UInt8], point: Point) -> Point {
 internal type Affine(x: List[UInt64], y: List[UInt64])
 
 internal fn Curve.affine(self, point: Point) -> Option[Affine] {
-  if self.field.is_zero(point.z.slice()) {
+  if self.field.is_zero(point.z) {
     return None
   }
-  let inverse = self.field.invert(point.z.slice())
-  let x = self.field.from_montgomery(self.field.multiply(point.x.slice(), second: inverse.slice()).slice())
-  let y = self.field.from_montgomery(self.field.multiply(point.y.slice(), second: inverse.slice()).slice())
+  let inverse = self.field.invert(point.z)
+  let x = self.field.from_montgomery(self.field.multiply(point.x, second: inverse))
+  let y = self.field.from_montgomery(self.field.multiply(point.y, second: inverse))
   Some(Affine(x: own x, y: own y))
 }
 
 internal fn Curve.encode(self, affine: Affine) -> List[UInt8] {
   var bytes: List[UInt8] = [4]
-  mut bytes.append(modular.limbs_to_bytes(affine.x.slice(), length: self.size))
-  mut bytes.append(modular.limbs_to_bytes(affine.y.slice(), length: self.size))
+  mut bytes.append(modular.limbs_to_bytes(affine.x, length: self.size))
+  mut bytes.append(modular.limbs_to_bytes(affine.y, length: self.size))
   bytes
 }
 
-internal fn Curve.decode(self, bytes: Slice[UInt8]) -> Option[Point] {
+internal fn Curve.decode(self, bytes: List[UInt8]) -> Option[Point] {
   let size = self.size
   let first: UInt64 = 1
   if bytes.length() != first + 2 * size || bytes[0] != 4 {
@@ -194,23 +194,23 @@ internal fn Curve.decode(self, bytes: Slice[UInt8]) -> Option[Point] {
   let count = self.field.length()
   let x = modular.limbs_from_bytes(bytes[first..first + size], count: count)
   let y = modular.limbs_from_bytes(bytes[first + size..], count: count)
-  if !modular.is_less(x.slice(), second: self.field.modulus_limbs()) || !modular.is_less(y.slice(), second: self.field.modulus_limbs()) {
+  if !modular.is_less(x, second: self.field.modulus_limbs()) || !modular.is_less(y, second: self.field.modulus_limbs()) {
     return None
   }
   let field = self.field
-  let mx = field.to_montgomery(x.slice())
-  let my = field.to_montgomery(y.slice())
-  let left = field.square(my.slice())
-  let x_squared = field.square(mx.slice())
-  let x_cubed = field.multiply(x_squared.slice(), second: mx.slice())
-  let three_x = field.add(field.add(mx.slice(), second: mx.slice()).slice(), second: mx.slice())
-  let right = field.add(field.subtract(x_cubed.slice(), second: three_x.slice()).slice(), second: self.b.slice())
-  if !field.equal(left.slice(), second: right.slice()) {
+  let mx = field.to_montgomery(x)
+  let my = field.to_montgomery(y)
+  let left = field.square(my)
+  let x_squared = field.square(mx)
+  let x_cubed = field.multiply(x_squared, second: mx)
+  let three_x = field.add(field.add(mx, second: mx), second: mx)
+  let right = field.add(field.subtract(x_cubed, second: three_x), second: self.b)
+  if !field.equal(left, second: right) {
     return None
   }
   Some(Point(x: own mx, y: own my, z: field.montgomery_one()))
 }
 
-internal fn Curve.is_valid_scalar(self, scalar: Slice[UInt64]) -> Bool {
+internal fn Curve.is_valid_scalar(self, scalar: List[UInt64]) -> Bool {
   !self.scalars.is_zero(scalar) && modular.is_less(scalar, second: self.scalars.modulus_limbs())
 }

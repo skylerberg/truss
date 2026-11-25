@@ -25,7 +25,7 @@ val check_valid :
   Types.ty ->
   Logic.term ->
   deep:bool ->
-  when_:string ->
+  moment:Catalog.Prover.invariant_moment ->
   unit
 
 val remove_temporaries : 'a Locals.t -> 'a Locals.t
@@ -57,7 +57,7 @@ val translate_lambda :
     (entries:Logic.term list ->
     exits:Logic.term list ->
     result:Logic.term ->
-    (Obligation.piece * Logic.term) list) ->
+    (Catalog.Prover.quoted * Logic.term) list) ->
   State.frame * Logic.term
 
 val make_passed_values :

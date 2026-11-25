@@ -1,10 +1,10 @@
 type overload =
   | Type_overload of Path.t
-  | View_overload of Path.t
+  | List_overload of Path.t
   | Trait_overload of Types.trait_reference * Types.trait_method
 
 val classify_receiver_mode : Syntax.argument list -> Language.Mode.t
-val describe_missing_method : State.state -> Types.ty -> string -> string
+val make_method_owner : State.state -> Types.ty -> Catalog.Inference.method_owner
 val check_name : State.state -> State.env -> Syntax.expression -> Resolve.head -> Types.ty
 val check_field : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
 val check_static_member : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty

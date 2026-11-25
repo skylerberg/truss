@@ -2,10 +2,10 @@ use standard.growth
 use standard.intrinsic
 use standard.text.utf8
 
-internal fn append(output: mut intrinsic.Storage[UInt8], bytes: intrinsic.View[UInt8])
-  ensures identical(intrinsic.storage_model(output), old(intrinsic.storage_model(output)).concatenate(intrinsic.view_model(bytes)))
+internal fn append(output: mut intrinsic.Storage[UInt8], bytes: intrinsic.Storage[UInt8])
+  ensures identical(intrinsic.storage_model(output), old(intrinsic.storage_model(output)).concatenate(intrinsic.storage_model(bytes)))
 {
-  let count = intrinsic.view_length(bytes)
+  let count = intrinsic.storage_length(bytes)
   growth.reserve(mut output, additional: count)
   for index in 0..count
     invariant intrinsic.storage_length(output) == old(intrinsic.storage_length(output)) + index
@@ -13,9 +13,9 @@ internal fn append(output: mut intrinsic.Storage[UInt8], bytes: intrinsic.View[U
     invariant forall i in 0..old(intrinsic.storage_length(output)) =>
       intrinsic.storage_model(output)[i] == old(intrinsic.storage_model(output))[i]
     invariant forall i in 0..index =>
-      intrinsic.storage_model(output)[old(intrinsic.storage_length(output)) + i] == intrinsic.view_model(bytes)[i]
+      intrinsic.storage_model(output)[old(intrinsic.storage_length(output)) + i] == intrinsic.storage_model(bytes)[i]
   {
-    intrinsic.storage_push(mut output, value: intrinsic.view_at(bytes, index: index))
+    intrinsic.storage_push(mut output, value: intrinsic.storage_at(bytes, index: index))
   }
 }
 
@@ -45,9 +45,9 @@ internal fn signed(output: mut intrinsic.Storage[UInt8], value: Int64)
 internal fn boolean(output: mut intrinsic.Storage[UInt8], value: Bool)
 {
   if value {
-    append(mut output, bytes: "true".slice().bytes)
+    append(mut output, bytes: "true".storage)
   } else {
-    append(mut output, bytes: "false".slice().bytes)
+    append(mut output, bytes: "false".storage)
   }
 }
 
@@ -63,7 +63,7 @@ fn upper_hexadecimal(output: mut intrinsic.Storage[UInt8], value: UInt32)
 
 fn escaped_code(output: mut intrinsic.Storage[UInt8], code: UInt32)
 {
-  append(mut output, bytes: "\\u{".slice().bytes)
+  append(mut output, bytes: "\\u{".storage)
   upper_hexadecimal(mut output, value: code)
   growth.push(mut output, value: 125)
 }
@@ -73,18 +73,18 @@ fn escaped(output: mut intrinsic.Storage[UInt8], character: Character, quote: UI
   let code = character.code()
   let quote_code: UInt32 = intrinsic.convert(quote)
   if code == 92 {
-    append(mut output, bytes: "\\\\".slice().bytes)
+    append(mut output, bytes: "\\\\".storage)
   } else if code == quote_code {
     growth.push(mut output, value: 92)
     growth.push(mut output, value: quote)
   } else if code == 10 {
-    append(mut output, bytes: "\\n".slice().bytes)
+    append(mut output, bytes: "\\n".storage)
   } else if code == 9 {
-    append(mut output, bytes: "\\t".slice().bytes)
+    append(mut output, bytes: "\\t".storage)
   } else if code == 13 {
-    append(mut output, bytes: "\\r".slice().bytes)
+    append(mut output, bytes: "\\r".storage)
   } else if code == 0 {
-    append(mut output, bytes: "\\0".slice().bytes)
+    append(mut output, bytes: "\\0".storage)
   } else if code < 32 || code == 127 {
     escaped_code(mut output, code: code)
   } else {
@@ -95,17 +95,17 @@ fn escaped(output: mut intrinsic.Storage[UInt8], character: Character, quote: UI
 
 internal fn quoted_character(output: mut intrinsic.Storage[UInt8], value: Character)
 {
-  append(mut output, bytes: "Character\"".slice().bytes)
+  append(mut output, bytes: "Character\"".storage)
   escaped(mut output, character: value, quote: 34)
   growth.push(mut output, value: 34)
 }
 
-internal fn quoted_text(output: mut intrinsic.Storage[UInt8], text: intrinsic.View[UInt8]) {
+internal fn quoted_text(output: mut intrinsic.Storage[UInt8], text: intrinsic.Storage[UInt8]) {
   growth.push(mut output, value: 34)
-  let count = intrinsic.view_length(text)
+  let count = intrinsic.storage_length(text)
   var at: UInt64 = 0
   while at < count {
-    let first: UInt32 = intrinsic.convert(intrinsic.view_at(text, index: at))
+    let first: UInt32 = intrinsic.convert(intrinsic.storage_at(text, index: at))
     var length: UInt64 = 1
     var code = first
     if first >= 240 {
@@ -122,12 +122,12 @@ internal fn quoted_text(output: mut intrinsic.Storage[UInt8], text: intrinsic.Vi
     while following < length && at + following < count
       decreases length - following
     {
-      let next: UInt32 = intrinsic.convert(intrinsic.view_at(text, index: at + following))
+      let next: UInt32 = intrinsic.convert(intrinsic.storage_at(text, index: at + following))
       code = (code << 6) | (next & 63)
       following += 1
     }
-    if code == 36 && at + 1 < count && intrinsic.view_at(text, index: at + 1) == 123 {
-      append(mut output, bytes: "\\$".slice().bytes)
+    if code == 36 && at + 1 < count && intrinsic.storage_at(text, index: at + 1) == 123 {
+      append(mut output, bytes: "\\$".storage)
     } else {
       match Character.try_from_code(code) {
         Ok(character) => escaped(mut output, character: character, quote: 34)

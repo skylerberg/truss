@@ -35,7 +35,7 @@ impl Tasks for Scheduler {
     0
   }
 
-  fn wait(self, key: UInt64, ticket: UInt64, reason: StringSlice) {}
+  fn wait(self, key: UInt64, ticket: UInt64, reason: String) {}
 
   fn wake(self, key: UInt64) {}
 

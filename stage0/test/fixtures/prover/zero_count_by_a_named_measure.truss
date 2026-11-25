@@ -4,7 +4,7 @@ fn is_zero(place: UInt64) -> Integer
   if place == 0 { 1 } else { 0 }
 }
 
-fn zero_count(places: Slice[UInt64], count: UInt64) -> UInt64
+fn zero_count(places: List[UInt64], count: UInt64) -> UInt64
   requires places.model().sum(is_zero) <= 10
   cost time O(1 + count)
 {

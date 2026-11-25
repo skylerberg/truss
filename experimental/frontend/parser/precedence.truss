@@ -112,7 +112,7 @@ fn applies_first(language: Language, first: syntax.Binary, second: syntax.Binary
 type Grouping = LeftFirst | RightFirst
   derives Equal
 
-fn report_parentheses(cursor: mut TokenCursor, id: UInt64, message: StringSlice, fixes: own List[source.Fix])
+fn report_parentheses(cursor: mut TokenCursor, id: UInt64, message: String, fixes: own List[source.Fix])
   uses Panic
 {
   let span = cursor.read_file_span(id)
@@ -121,7 +121,7 @@ fn report_parentheses(cursor: mut TokenCursor, id: UInt64, message: StringSlice,
 
 let longest_titled_expression: UInt64 = 80
 
-fn make_titled_fix(cursor: TokenCursor, fallback: StringSlice, whole: UInt64, edits: own List[source.Edit]) -> source.Fix
+fn make_titled_fix(cursor: TokenCursor, fallback: String, whole: UInt64, edits: own List[source.Edit]) -> source.Fix
   uses Panic, RunForever
 {
   let span = cursor.read_file_span(whole)

@@ -10,7 +10,7 @@ fn first_to_wake(sleepers: Int64) -> Int64
   -1
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Tasks, Clock, Console
 {
   let before = Clock.monotonic()

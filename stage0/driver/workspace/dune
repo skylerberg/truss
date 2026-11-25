@@ -35,10 +35,12 @@
   source
   manifest
   project
+  project_catalog
   diagnostic
   file_system
   lock_file
   standard_library
   database
   registry
-  watcher))
+  watcher
+  x86_64_level))

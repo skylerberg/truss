@@ -220,9 +220,20 @@ let list_argument_unknowns unifier = function
       | Value_variable index -> [ Unknown_value index ]
       | _ -> [])
 
-let rec unify unifier (left : Types.ty) (right : Types.ty) =
+let rec unify ?(modulo_views = false) unifier (left : Types.ty) (right : Types.ty) =
   unifier.refused_code_unknown <- None;
   let left = resolve unifier left and right = resolve unifier right in
+  let is_known : Types.ty -> bool = function
+    | Variable _ | Error _ | Hole -> false
+    | Named _ | Parameter _ | Projection _ | Function _ | Never | Integer -> true
+  in
+  let left, right, modulo_views =
+    match (Types.find_viewed left, Types.find_viewed right) with
+    | Some left, Some right -> (resolve unifier left, resolve unifier right, true)
+    | Some viewed, None when modulo_views && is_known right -> (resolve unifier viewed, right, true)
+    | None, Some viewed when modulo_views && is_known left -> (left, resolve unifier viewed, true)
+    | _ -> (left, right, modulo_views)
+  in
   match (left, right) with
   | Types.Variable index, ((Types.Error _ | Types.Hole) as unknown)
   | ((Types.Error _ | Types.Hole) as unknown), Types.Variable index ->
@@ -242,7 +253,8 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
       Option.fold ~none:true ~some:(is_within unifier other) (find_domain unifier index)
       && bind unifier index other
   | Named left, Named right ->
-      Path.equal left.path right.path && unify_arguments unifier left.arguments right.arguments
+      Path.equal left.path right.path
+      && unify_arguments ~modulo_views unifier left.arguments right.arguments
   | Parameter left, Parameter right -> left = right
   | Function left, Function right ->
       List.sort_uniq compare left.costs = List.sort_uniq compare right.costs
@@ -261,13 +273,13 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
   | Never, Never | Integer, Integer -> true
   | _ -> false
 
-and unify_arguments unifier left right =
+and unify_arguments ?(modulo_views = false) unifier left right =
   unifier.refused_code_unknown <- None;
   List.length left = List.length right
   && List.for_all2
        (fun left right ->
          match (left, right) with
-         | Types.Type left, Types.Type right -> unify unifier left right
+         | Types.Type left, Types.Type right -> unify ~modulo_views unifier left right
          | Types.Value left, Types.Value right -> unify_value unifier left right
          | Types.Type (Types.Error _), _ | _, Types.Type (Types.Error _) -> true
          | _ -> false)

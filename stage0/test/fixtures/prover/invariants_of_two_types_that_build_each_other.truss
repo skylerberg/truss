@@ -1,0 +1,19 @@
+public opaque type Counter(count: UInt64)
+  invariant Gauge(level: count).read() <= 10
+
+public opaque type Gauge(level: UInt64)
+  invariant Counter(count: level).value() <= 10
+
+public fn Counter.value(self) -> UInt64
+  ensures result == self.count
+  ensures result <= 10
+{
+  self.count
+}
+
+public fn Gauge.read(self) -> UInt64
+  ensures result == self.level
+  ensures result <= 10
+{
+  self.level
+}

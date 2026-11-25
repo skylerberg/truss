@@ -107,7 +107,7 @@ internal fn format_magnitude(
 }
 
 internal fn parse_magnitude(
-  text: StringSlice,
+  text: String,
   start: UInt64,
   radix: UInt32,
   limit: UInt64,
@@ -145,7 +145,7 @@ internal fn parse_magnitude(
 impl text.Parse for Int8 {
   type Error = core.ParseIntegerError
 
-  fn parse(text: StringSlice) -> Result[Int8, core.ParseIntegerError] {
+  fn parse(text: String) -> Result[Int8, core.ParseIntegerError] {
     Int8.parse_radix(text, radix: 10)
   }
 }
@@ -153,7 +153,7 @@ impl text.Parse for Int8 {
 impl text.Parse for Int16 {
   type Error = core.ParseIntegerError
 
-  fn parse(text: StringSlice) -> Result[Int16, core.ParseIntegerError] {
+  fn parse(text: String) -> Result[Int16, core.ParseIntegerError] {
     Int16.parse_radix(text, radix: 10)
   }
 }
@@ -161,7 +161,7 @@ impl text.Parse for Int16 {
 impl text.Parse for Int32 {
   type Error = core.ParseIntegerError
 
-  fn parse(text: StringSlice) -> Result[Int32, core.ParseIntegerError] {
+  fn parse(text: String) -> Result[Int32, core.ParseIntegerError] {
     Int32.parse_radix(text, radix: 10)
   }
 }
@@ -169,7 +169,7 @@ impl text.Parse for Int32 {
 impl text.Parse for Int64 {
   type Error = core.ParseIntegerError
 
-  fn parse(text: StringSlice) -> Result[Int64, core.ParseIntegerError] {
+  fn parse(text: String) -> Result[Int64, core.ParseIntegerError] {
     Int64.parse_radix(text, radix: 10)
   }
 }
@@ -177,7 +177,7 @@ impl text.Parse for Int64 {
 impl text.Parse for UInt8 {
   type Error = core.ParseIntegerError
 
-  fn parse(text: StringSlice) -> Result[UInt8, core.ParseIntegerError] {
+  fn parse(text: String) -> Result[UInt8, core.ParseIntegerError] {
     UInt8.parse_radix(text, radix: 10)
   }
 }
@@ -185,7 +185,7 @@ impl text.Parse for UInt8 {
 impl text.Parse for UInt16 {
   type Error = core.ParseIntegerError
 
-  fn parse(text: StringSlice) -> Result[UInt16, core.ParseIntegerError] {
+  fn parse(text: String) -> Result[UInt16, core.ParseIntegerError] {
     UInt16.parse_radix(text, radix: 10)
   }
 }
@@ -193,7 +193,7 @@ impl text.Parse for UInt16 {
 impl text.Parse for UInt32 {
   type Error = core.ParseIntegerError
 
-  fn parse(text: StringSlice) -> Result[UInt32, core.ParseIntegerError] {
+  fn parse(text: String) -> Result[UInt32, core.ParseIntegerError] {
     UInt32.parse_radix(text, radix: 10)
   }
 }
@@ -201,7 +201,7 @@ impl text.Parse for UInt32 {
 impl text.Parse for UInt64 {
   type Error = core.ParseIntegerError
 
-  fn parse(text: StringSlice) -> Result[UInt64, core.ParseIntegerError] {
+  fn parse(text: String) -> Result[UInt64, core.ParseIntegerError] {
     UInt64.parse_radix(text, radix: 10)
   }
 }

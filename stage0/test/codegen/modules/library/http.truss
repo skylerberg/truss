@@ -8,21 +8,21 @@ use standard.url
 type Greeting(name: String, count: Int64)
   derives Equal, serialization.Serialize, serialization.Deserialize
 
-fn made(method: http.Method, target: StringSlice) -> http.Request {
-  http.Request(method: method.copy(), target: target.to_string())
+fn made(method: http.Method, target: String) -> http.Request {
+  http.Request(method: method.copy(), target: target.copy())
 }
 
 test "a route matches a method and a path, and gives each parameter's decoded value" {
   let user = http.Route"GET /users/{id}"
-  assert made(http.Method.Get, target: "/users/7?tab=a").matches(user) is Some(found) && found.get("id") == Some("7".slice())
+  assert made(http.Method.Get, target: "/users/7?tab=a").matches(user) is Some(found) && found.get("id") == Some("7")
   assert made(http.Method.Head, target: "/users/7").matches(user) is Some(_)
   assert made(http.Method.Post, target: "/users/7").matches(user) is None
   assert made(http.Method.Get, target: "/users/7/posts").matches(user) is None
   assert made(http.Method.Get, target: "/users/").matches(user) is None
-  assert made(http.Method.Get, target: "/users/a%20b").matches(user) is Some(spaced) && spaced.get("id") == Some("a b".slice())
+  assert made(http.Method.Get, target: "/users/a%20b").matches(user) is Some(spaced) && spaced.get("id") == Some("a b")
   let files = http.Route"/static/{path...}"
   assert made(http.Method.Delete, target: "/static/css/site.css").matches(files) is Some(rest)
-    && rest.get("path") == Some("css/site.css".slice())
+    && rest.get("path") == Some("css/site.css")
   let root = http.Route"GET /"
   assert made(http.Method.Get, target: "/").matches(root) is Some(_)
   assert made(http.Method.Get, target: "/x").matches(root) is None
@@ -43,9 +43,9 @@ test "headers are found whatever the case of their names, and set replaces every
   mut headers.add("Content-Type", value: "text/plain")
   mut headers.add("X-Tag", value: "a")
   mut headers.add("x-tag", value: "b")
-  assert headers.get("content-type") == Some("text/plain".slice())
+  assert headers.get("content-type") == Some("text/plain")
   mut headers.set("X-TAG", value: "c")
-  assert headers.length() == 2 && headers.get("x-tag") == Some("c".slice())
+  assert headers.length() == 2 && headers.get("x-tag") == Some("c")
   mut headers.remove("CONTENT-TYPE")
   assert !headers.contains("Content-Type")
 }
@@ -54,8 +54,8 @@ fn answer(request: own http.Request) -> http.Response
   uses Handles, Tasks, RunForever
 {
   if request.matches(http.Route"GET /hello/{name}") is Some(found) {
-    let name = found.get("name").unwrap_or("nobody".slice())
-    return http.Response.json(Greeting(name: name.to_string(), count: 1))
+    let name = found.get("name").unwrap_or("nobody")
+    return http.Response.json(Greeting(name: name.copy(), count: 1))
   }
   if request.matches(http.Route"POST /echo") is Some(_) {
     return match own request.json[Greeting]() {
@@ -64,11 +64,11 @@ fn answer(request: own http.Request) -> http.Response
     }
   }
   if request.matches(http.Route"GET /big") is Some(_) {
-    let words = "word ".slice().repeated(500)
-    return http.Response.text(words.slice()).compressed(request)
+    let words = "word ".repeated(500)
+    return http.Response.text(words).compressed(request)
   }
   if request.matches(http.Route"GET /page/{title}") is Some(found) {
-    let title = found.get("title").unwrap_or("".slice()).to_string()
+    let title = found.get("title").unwrap_or("").copy()
     return http.Response.html(html.Html"<h1>${own title}</h1>")
   }
   http.Response.text("no such page", status: http.Status.not_found)
@@ -87,14 +87,14 @@ fn application(request: own http.Request, responder: mut http.Responder)
       pieces += 1
       mut buffer.clear()
     }
-    let _ = mut responder.send(http.Response.text("${total} in ${pieces}".slice()))
+    let _ = mut responder.send(http.Response.text("${total} in ${pieces}"))
     return
   }
   if request.matches(http.Route"GET /stream") is Some(_) {
     let _ = mut responder.start(http.Status.ok)
     let parts: UInt64 = 3
     for index in 0..parts {
-      let _ = mut responder.write("part ${index};".slice().bytes())
+      let _ = mut responder.write("part ${index};".bytes())
     }
     let _ = mut responder.finish()
     return
@@ -106,14 +106,14 @@ fn loopback(port: UInt16) -> network.SocketAddress {
   network.SocketAddress(address: network.IpAddress.loopback, port: port)
 }
 
-fn exchange(raw: StringSlice) -> String
+fn exchange(raw: String) -> String
   uses NetworkClient, Handles, Panic, RunForever
 {
   var connection = network.connect("localhost", port: 8080).expect("the server accepts")
   let _ = mut connection.write_all(raw.bytes())
   var reply: List[UInt8] = []
   let _ = mut connection.read_to_end(mut reply)
-  String.from_utf8_lossy(reply.slice())
+  String.from_utf8_lossy(reply)
 }
 
 fn client_and_server() -> List[String]
@@ -126,7 +126,7 @@ fn client_and_server() -> List[String]
     {
       match http.get("http://localhost:8080/hello/ada") {
         Ok(response) => {
-          mut seen.push("${response.status.code} ${response.headers.get("Content-Type").unwrap_or("".slice())}")
+          mut seen.push("${response.status.code} ${response.headers.get("Content-Type").unwrap_or("")}")
           mut seen.push(response.text_body().unwrap_or(""))
         }
         Err(error) => mut seen.push("failed: ${error}")
@@ -135,7 +135,7 @@ fn client_and_server() -> List[String]
       match http.send(
         http.Method.Post,
         url: url.Url"http://localhost:8080/echo",
-        body: body.bytes().to_list(),
+        body: body.bytes().copy(),
       ) {
         Ok(response) => mut seen.push("${response.status.code} ${response.text_body().unwrap_or("")}")
         Err(error) => mut seen.push("failed: ${error}")
@@ -145,13 +145,13 @@ fn client_and_server() -> List[String]
         Err(error) => mut seen.push("failed: ${error}")
       }
       let two = exchange("GET /hello/a HTTP/1.1\r\nHost: x\r\n\r\nHEAD /hello/b HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
-      mut seen.push("${two.slice().occurrences("HTTP/1.1 200 OK")} ${two.slice().ends_with("\r\n\r\n")}")
+      mut seen.push("${two.occurrences("HTTP/1.1 200 OK")} ${two.ends_with("\r\n\r\n")}")
       let chunked = exchange("POST /echo HTTP/1.1\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n6\r\n{\"name\r\n11\r\n\":\"cy\",\"count\":1}\r\n0\r\n\r\n")
-      mut seen.push("${chunked.slice().starts_with("HTTP/1.1 201 Created")} ${chunked.slice().ends_with("{\"name\":\"cy\",\"count\":2}")}")
+      mut seen.push("${chunked.starts_with("HTTP/1.1 201 Created")} ${chunked.ends_with("{\"name\":\"cy\",\"count\":2}")}")
       let broken = exchange("GET /hello/a HTTP/1.1\r\nBad Header\r\n\r\n")
-      mut seen.push("${broken.slice().starts_with("HTTP/1.1 400 Bad Request")}")
+      mut seen.push("${broken.starts_with("HTTP/1.1 400 Bad Request")}")
       let smuggled = exchange("POST /echo HTTP/1.1\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
-      mut seen.push("${smuggled.slice().starts_with("HTTP/1.1 400")}")
+      mut seen.push("${smuggled.starts_with("HTTP/1.1 400")}")
       var accepting = http.Headers.new()
       mut accepting.add("Accept-Encoding", value: "gzip, br")
       match http.send(http.Method.Get, url: url.Url"http://localhost:8080/big", headers: accepting) {
@@ -165,13 +165,13 @@ fn client_and_server() -> List[String]
       let zipped = exchange("GET /big HTTP/1.1\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n")
       let zstd_reply = exchange("GET /big HTTP/1.1\r\nAccept-Encoding: gzip, zstd\r\nConnection: close\r\n\r\n")
       let plain = exchange("GET /big HTTP/1.1\r\nConnection: close\r\n\r\n")
-      mut seen.push("${zipped.slice().contains("Content-Encoding: gzip")} ${zstd_reply.slice().contains("Content-Encoding: zstd")} ${zipped.length() < plain.length()} ${plain.slice().contains("Vary: Accept-Encoding")}")
+      mut seen.push("${zipped.contains("Content-Encoding: gzip")} ${zstd_reply.contains("Content-Encoding: zstd")} ${zipped.length() < plain.length()} ${plain.contains("Vary: Accept-Encoding")}")
       match http.get("http://localhost:8080/page/a%3Cb") {
         Ok(response) => mut seen.push(response.text_body().unwrap_or(""))
         Err(error) => mut seen.push("failed: ${error}")
       }
       let streamed = exchange("GET /stream HTTP/1.1\r\nConnection: close\r\n\r\n")
-      mut seen.push("${streamed.slice().contains("Transfer-Encoding: chunked")} ${streamed.slice().contains("part 1;")} ${streamed.slice().ends_with("0\r\n\r\n")}")
+      mut seen.push("${streamed.contains("Transfer-Encoding: chunked")} ${streamed.contains("part 1;")} ${streamed.ends_with("0\r\n\r\n")}")
       let upload: List[UInt8] = List.filled(65, count: 5000)
       match http.send(http.Method.Post, url: url.Url"http://localhost:8080/count", body: upload) {
         Ok(response) => mut seen.push(response.text_body().unwrap_or(""))
@@ -183,7 +183,7 @@ fn client_and_server() -> List[String]
         var buffer: List[UInt8] = []
         while mut streamed_body.read(mut buffer, limit: 4) is Ok(count) && count > 0 {
           mut collected.push("[")
-          mut collected.push(String.from_utf8_lossy(buffer.slice()).slice())
+          mut collected.push(String.from_utf8_lossy(buffer))
           mut collected.push("]")
           mut buffer.clear()
         }
@@ -215,7 +215,7 @@ test "a server answers a client in a world: JSON, a body, a missing page, keep-a
     assert seen[10] == "true true true true"
     assert seen[11] == "<h1>a&lt;b</h1>"
     assert seen[12] == "true true true"
-    assert seen[13].slice().starts_with("5000 in ")
+    assert seen[13].starts_with("5000 in ")
     assert seen[14] == "200 [part][ 0;][part][ 1;][part][ 2;]"
   }
 }

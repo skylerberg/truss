@@ -153,7 +153,7 @@ public trait FloatingPoint:
     cost time O(1)
     cost allocations == 0
 
-  fn sum(items: Slice[Self]) -> Self
+  fn sum(items: List[Self]) -> Self
     cost time O(items.length())
 
   fn tangent(self) -> Self
@@ -208,15 +208,15 @@ fn format_scientific(value: Float64, decimals: UInt64) -> String {
   String(storage: own written)
 }
 
-internal fn parse_float64(text: StringSlice) -> Result[Float64, core.ParseFloatError] {
-  float_text.parse_float64(text.bytes)
+internal fn parse_float64(text: String) -> Result[Float64, core.ParseFloatError] {
+  float_text.parse_float64(text.storage)
 }
 
 impl text.Parse for Float32 {
   type Error = core.ParseFloatError
 
-  fn parse(text: StringSlice) -> Result[Float32, core.ParseFloatError] {
-    float_text.parse_float32(text.bytes)
+  fn parse(text: String) -> Result[Float32, core.ParseFloatError] {
+    float_text.parse_float32(text.storage)
   }
 }
 
@@ -477,7 +477,7 @@ internal fn arctangent_of_positive(value: Float64) -> Float64
 impl text.Parse for Float64 {
   type Error = core.ParseFloatError
 
-  fn parse(text: StringSlice) -> Result[Float64, core.ParseFloatError] {
+  fn parse(text: String) -> Result[Float64, core.ParseFloatError] {
     parse_float64(text)
   }
 }
@@ -831,7 +831,7 @@ impl FloatingPoint for Float32 {
     intrinsic.square_root(self)
   }
 
-  fn sum(items: Slice[Float32]) -> Float32
+  fn sum(items: List[Float32]) -> Float32
     cost time O(items.length())
   {
     var total: Float32 = 0.0
@@ -1494,7 +1494,7 @@ impl FloatingPoint for Float64 {
     intrinsic.square_root(self)
   }
 
-  fn sum(items: Slice[Float64]) -> Float64
+  fn sum(items: List[Float64]) -> Float64
     cost time O(items.length())
   {
     var total: Float64 = 0.0

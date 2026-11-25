@@ -11,25 +11,25 @@ fn tool() -> arguments.Parser {
     .rest("extra", help: "More files.")
 }
 
-fn parse_text(parser: arguments.Parser, text: StringSlice) -> Result[arguments.Parsed, arguments.Error] {
+fn parse_text(parser: arguments.Parser, text: String) -> Result[arguments.Parsed, arguments.Error] {
   var words: List[String] = []
   for word in text.split_whitespace() {
-    mut words.push(word.to_string())
+    mut words.push(word.copy())
   }
-  parser.parse(words.slice())
+  parser.parse(words)
 }
 
-fn fails(parser: arguments.Parser, text: StringSlice, expected: arguments.Error) -> Bool {
+fn fails(parser: arguments.Parser, text: String, expected: arguments.Error) -> Bool {
   match parse_text(parser, text: text) {
     Ok(_) => false
     Err(error) => error == expected
   }
 }
 
-fn joined(values: Slice[String]) -> String {
+fn joined(values: List[String]) -> String {
   var text = ""
   for value in values {
-    mut text.push(value.slice())
+    mut text.push(value)
     mut text.push(",")
   }
   text

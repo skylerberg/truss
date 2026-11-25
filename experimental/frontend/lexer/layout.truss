@@ -32,11 +32,11 @@ type Run(
 type TokenRange(first: UInt64, stop: UInt64, open_at_end: Bool)
   derives Equal
 
-fn spell_opener(bracket: token.Bracket) -> StringSlice {
+fn spell_opener(bracket: token.Bracket) -> view String {
   token.spell_punctuation(token.Punctuation.Open(bracket))
 }
 
-fn spell_closer(bracket: token.Bracket) -> StringSlice {
+fn spell_closer(bracket: token.Bracket) -> view String {
   token.spell_punctuation(token.Punctuation.Close(bracket))
 }
 
@@ -44,7 +44,7 @@ fn is_layout_name_byte(byte: UInt8) -> Bool {
   is_ascii_name_byte(byte)
 }
 
-fn find_word_end(text: StringSlice, offset: UInt64) -> UInt64
+fn find_word_end(text: String, offset: UInt64) -> UInt64
   uses Panic
 {
   var stop = offset
@@ -57,7 +57,7 @@ fn find_word_end(text: StringSlice, offset: UInt64) -> UInt64
 fn is_tuple_type_at(source: source.Source, offset: UInt64) -> Bool
   uses Panic
 {
-  let text = source.text.slice()
+  let text = source.text
   let stop = find_word_end(text, offset)
   if text.substring(offset, to: stop) != "tuple" {
     return false
@@ -75,7 +75,7 @@ fn starts_definition(source: source.Source, offset: UInt64) -> Bool
   if !source.starts_line(offset) {
     return false
   }
-  let text = source.text.slice()
+  let text = source.text
   let stop = find_word_end(text, offset)
   match token.find_word(text.substring(offset, to: stop)) {
     Some(kind) => match kind {
@@ -86,10 +86,10 @@ fn starts_definition(source: source.Source, offset: UInt64) -> Bool
   }
 }
 
-fn layout_indentation(source: source.Source, offset: UInt64) -> StringSlice
+fn layout_indentation(source: source.Source, offset: UInt64) -> view String
   uses Panic
 {
-  let text = source.text.slice()
+  let text = source.text
   let start = source.compute_line_start(offset)
   var stop = start
   while stop < text.length() && is_space(text.byte(stop)) {
@@ -192,7 +192,7 @@ fn find_closing_position(scanner: Scanner, run: Run, opener: Opener) -> Option[C
   }
 }
 
-fn find_closing_edits(scanner: Scanner, run: Run, openers: Slice[Opener]) -> Option[List[source.Edit]]
+fn find_closing_edits(scanner: Scanner, run: Run, openers: List[Opener]) -> Option[List[source.Edit]]
   uses Panic
 {
   var earliest: UInt64 = 0
@@ -206,7 +206,7 @@ fn find_closing_edits(scanner: Scanner, run: Run, openers: Slice[Opener]) -> Opt
     let replacement = if place.starts_line && opener.bracket == token.Bracket.Curly {
       "\n${layout_indentation(scanner.source, offset: opener.span.start)}${closer}"
     } else {
-      closer.to_string()
+      closer.copy()
     }
     mut edits.push(source.insert(source.make_zero_width(position), replacement))
     earliest = position
@@ -293,7 +293,7 @@ fn innermost_first(run: Run) -> List[Opener] {
   openers
 }
 
-fn list_closing_fixes(scanner: Scanner, run: Run, openers: Slice[Opener], title: StringSlice) -> List[source.Fix]
+fn list_closing_fixes(scanner: Scanner, run: Run, openers: List[Opener], title: String) -> List[source.Fix]
   uses Panic
 {
   match find_closing_edits(scanner, run, openers) {
@@ -302,9 +302,9 @@ fn list_closing_fixes(scanner: Scanner, run: Run, openers: Slice[Opener], title:
   }
 }
 
-fn close_all(scanner: mut Scanner, run: mut Run, position: UInt64, reason: StringSlice)
+fn close_all(scanner: mut Scanner, run: mut Run, position: UInt64, reason: String)
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics
 {
   let openers = innermost_first(run)
   let Some(innermost) = openers.get(0) else {
@@ -336,7 +336,7 @@ fn close_all(scanner: mut Scanner, run: mut Run, position: UInt64, reason: Strin
 
 fn close_bracket(scanner: mut Scanner, run: mut Run, current: token.Token, bracket: token.Bracket)
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics
 {
   let span = current.span
   if run.open_count(bracket) == 0 {
@@ -349,7 +349,6 @@ fn close_bracket(scanner: mut Scanner, run: mut Run, current: token.Token, brack
     return
   }
   while run.stack.last() is Some(opener) && opener.bracket != bracket
-    invariant scanner.continues(old(scanner))
     decreases run.stack.length()
   {
     let fixes = list_closing_fixes(scanner, run, openers: [opener], title: "Insert `${spell_closer(opener.bracket)}`")
@@ -378,7 +377,7 @@ fn finish_run(
   ends_unterminated: Bool,
 )
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics
 {
   if !run.stack.is_empty() {
     run.open_at_end = true
@@ -433,7 +432,7 @@ fn make_code_frame(mode: LayoutMode) -> CodeFrame {
 
 fn lay_out(scanner: mut Scanner, run: mut Run, mode: LayoutMode, input: LayoutInput) -> Bool
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics
   ensures input is Finish(..) ==> result
 {
   match input {
@@ -489,10 +488,11 @@ fn lay_out(scanner: mut Scanner, run: mut Run, mode: LayoutMode, input: LayoutIn
 
 fn accept_item(scanner: mut Scanner, frame: mut CodeFrame, item: Item) -> Bool
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank
   ensures frame.pending.length() == old(frame.pending.length())
   ensures item is End ==> result
   ensures item is LineEnd ==> result || old(scanner.position) < scanner.position
+  ensures old(scanner.position) <= scanner.position
 {
   let input = match mut frame.mode {
     FileMode(_) => match item {
@@ -524,7 +524,8 @@ type CodeStep = CodeFinished | StringOpened(string: StringFrame, request: Interp
 
 fn deliver(scanner: mut Scanner, frame: mut CodeFrame, item: Item) -> Bool
   uses Panic
-  ensures scanner.length == old(scanner.length)
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.previous, scanner.held, scanner.tables
   ensures old(scanner.position) <= scanner.position
   ensures old(frame.pending.length()) == 0 ==>
     frame.pending.length() == 0 && scanner.held.length() == old(scanner.held.length())
@@ -548,7 +549,9 @@ fn deliver(scanner: mut Scanner, frame: mut CodeFrame, item: Item) -> Bool
 
 fn step_code(scanner: mut Scanner, frame: mut CodeFrame, arriving: Option[Item]) -> CodeStep
   uses Panic
-  ensures scanner.length == old(scanner.length)
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.unterminated_at_end, scanner.name_indices, scanner.name_checks, scanner.previous, scanner.held,
+    scanner.semicolons, scanner.tables
   ensures old(scanner.position) <= scanner.position
   ensures result is StringOpened(..) ==> old(scanner.position) < scanner.position && old(scanner.position) < scanner.length
 {
@@ -561,7 +564,6 @@ fn step_code(scanner: mut Scanner, frame: mut CodeFrame, arriving: Option[Item])
     return CodeStep.CodeFinished
   }
   while true
-    invariant scanner.length == old(scanner.length)
     invariant old(scanner.position) <= scanner.position
     decreases scanner.count_remaining(scanner.position), 3 * frame.pending.length() + scanner.held.length()
   {
@@ -589,7 +591,9 @@ fn step_code(scanner: mut Scanner, frame: mut CodeFrame, arriving: Option[Item])
 
 fn lex_file(scanner: mut Scanner, recovery: Bool) -> TokenRange
   uses Panic
-  ensures scanner.length == old(scanner.length)
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.unterminated_at_end, scanner.name_indices, scanner.name_checks, scanner.previous, scanner.held,
+    scanner.semicolons, scanner.tables
   ensures old(scanner.position) <= scanner.position
 {
   var codes: List[CodeFrame] = [make_code_frame(mode: LayoutMode.FileMode(recovery))]
@@ -597,7 +601,6 @@ fn lex_file(scanner: mut Scanner, recovery: Bool) -> TokenRange
   var arriving: Option[Item] = None
   var interpolated: Option[InterpolationResult] = None
   while true
-    invariant scanner.length == old(scanner.length)
     invariant old(scanner.position) <= scanner.position
     decreases scanner.count_remaining(scanner.position), codes.length() + strings.length()
   {

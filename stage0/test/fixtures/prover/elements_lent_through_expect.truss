@@ -5,7 +5,7 @@ fn copied(value: Option[Int64]) -> Int64
   value.expect("the value is present")
 }
 
-fn name_length(names: Slice[String], index: UInt64) -> UInt64
+fn name_length(names: List[String], index: UInt64) -> UInt64
   uses Panic
 {
   names.get(index).expect("the index is in bounds").length()

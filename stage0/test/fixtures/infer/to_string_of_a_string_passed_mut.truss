@@ -1,3 +1,0 @@
-fn f(name: mut String) -> String {
-  mut name.to_string()
-}

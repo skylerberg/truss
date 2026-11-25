@@ -31,6 +31,6 @@ fn identity_holds[Item: Combine](value: Item) -> Bool
   Item.empty().combine(value) == value
 }
 
-fn main(arguments: Slice[String]) -> ExitCode {
+fn main(arguments: List[String]) -> ExitCode {
   if identity_holds(Maximum(3)) { ExitCode.success } else { ExitCode.failure }
 }

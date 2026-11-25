@@ -4,7 +4,7 @@ fn same(item: Int64) -> Int64
   item
 }
 
-fn f(items: Slice[Int64]) -> Bool
+fn f(items: List[Int64]) -> Bool
   requires items.length() == 2 && items[0] == 1 && items[1] == 2
   ensures !result
 {

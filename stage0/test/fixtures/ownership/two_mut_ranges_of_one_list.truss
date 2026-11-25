@@ -1,0 +1,14 @@
+fn both(first: mut List[Int64], second: mut List[Int64])
+  modifies first[..], second[..]
+{
+  for item in mut first {
+    item = 0
+  }
+  for item in mut second {
+    item = 0
+  }
+}
+
+fn f(items: mut List[Int64], middle: UInt64) {
+  both(mut items[..middle], second: mut items[middle..])
+}

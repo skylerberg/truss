@@ -48,12 +48,7 @@ type frame = {
   lends : (Logic.term * (frame -> Logic.term -> frame)) list Locals.t;
 }
 
-type changed = {
-  changed_locals : Locals.local list;
-  changes_self : bool;
-  reassigned : Locals.local list;
-}
-
+type changed_part = { root : Locals.local; fields : string list }
 type place_value = One of Logic.term | Run of Logic.term * Logic.term
 type noted_place = { origin : Core.origin; value : place_value }
 
@@ -70,6 +65,7 @@ type passed = {
   origin : Core.origin option;
   passed_place : passed_place option;
   type_ : Types.ty;
+  declared_type : Types.ty;
   term : Logic.term;
 }
 
@@ -99,7 +95,7 @@ type stated = Tables.stated =
   | Method_cost_bound of Logic.symbol
 
 type call_amount = {
-  call : Obligation.piece;
+  call : Catalog.Prover.quoted;
   callee : Path.t;
   states_cost : bool;
   counter : Costs.counter;
@@ -143,6 +139,7 @@ type context = {
   mutable enclosing_provides : Mir.provided list list;
   mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
   mutable instantiating : Path.t list;
+  mutable reading_requires : Path.t list;
   mutable axiomatizing : Logic.symbol list;
   axiom_clauses : unit Tables.Axiom_clause_table.t;
   mutable open_axioms : open_axiom list;
@@ -168,7 +165,7 @@ type context = {
   holds_potential : bool Tables.Type_table.t;
   buffers : buffer option Tables.Type_table.t;
   mutable equalities : Logic.term list;
-  mutable path_notes : (string * Logic.term) list;
+  mutable path_notes : (Catalog.Prover.path_note * Logic.term) list;
   mutable entry : Logic.symbol list;
   inherits_precondition : bool;
   mutable holes : (Resolve.Names.key * Obligation.location) list;
@@ -187,7 +184,7 @@ type context = {
   keeps_failures : bool;
   mutable panics : bool;
   mutable can_declare_panic : bool;
-  panic_condition : Obligation.message option;
+  panic_condition : Catalog.Prover.quoted list option;
   mutable obligation_condition : Types.condition;
   mutable skipped_conditions : Types.condition list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;

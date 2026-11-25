@@ -20,7 +20,7 @@ impl Display for DecodeError {
   }
 }
 
-public fn encode(bytes: Slice[UInt8], uppercase: Bool = false) -> String
+public fn encode(bytes: List[UInt8], uppercase: Bool = false) -> String
   ensures result.length() == 2 * bytes.length()
   ensures result.is_ascii()
   cost time O(bytes.length())
@@ -42,7 +42,7 @@ public fn encode(bytes: Slice[UInt8], uppercase: Bool = false) -> String
   String(storage: own output)
 }
 
-public fn decode(text: StringSlice) -> Result[List[UInt8], DecodeError]
+public fn decode(text: String) -> Result[List[UInt8], DecodeError]
   ensures match result {
     Ok(bytes) => 2 * bytes.length() == text.length()
     Err(_) => true

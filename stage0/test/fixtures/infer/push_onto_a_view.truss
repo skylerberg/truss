@@ -1,0 +1,4 @@
+fn f(name: String) {
+  var part: view String = name
+  mut part.push("x")
+}

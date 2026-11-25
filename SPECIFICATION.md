@@ -90,9 +90,9 @@ Reserved everywhere:
 ```text
 assert break capability concurrent continue cost decreases derives echo else
 ensures exists false fn for forall if impl in indirect internal invariant is law
-lends let match mut opaque own parallel proof provide public requires return self
-Self test theorem todo trait true type unless unreachable use uses var when
-while with
+lends let match modifies mut opaque own parallel proof provide public requires
+return self Self test theorem todo trait true type unless unreachable use uses
+var view when while with
 ```
 
 Reserved for later use, and an error if written:
@@ -473,6 +473,7 @@ type Expression =
 
 ```ebnf
 type           = path_type
+               | "view" type
                | "Self" [ "." UPPER_NAME ]
                | UPPER_NAME "." UPPER_NAME
                | function_type
@@ -483,6 +484,8 @@ type_arguments = "[" type_argument { "," type_argument } [ "," ] "]" ;
 type_argument  = type | INTEGER | LOWER_NAME | UPPER_NAME "=" type ;
 ```
 
+- `view T` is the type of a view of a `List` or a `String`
+  ([Views](#views)). `view` before any other type is an error.
 - `Items.Element` names an associated type of a type parameter. It names
   no associated type of an associated type: `Source.Cursor.Element` is
   written through a parameter, as in
@@ -525,14 +528,20 @@ public type Interval =
 
 - `self` names the value, and a record's fields can be named directly.
 - Repeated invariants all hold, and each may rely on the ones before it.
-- An invariant may pass `self` to a function, as `invariant self.value() <= 10`
-  does. The call needs no invariant of `self`, which the invariant states.
+- An invariant cannot call a function whose proof depends on the
+  invariant's type (see [Circular proofs](#circular-proofs)). A function that
+  uses a value of the type assumes the invariant, so the invariant would be
+  proven from itself. `invariant self.value() <= 10` is such an error, and
+  so is `invariant through(count) >= 0` where `through` builds a value of
+  the type. An invariant states its condition over the fields of `self`, and
+  may call a function of a field's type, as `invariant used <= span.width()`
+  does. The same rule holds for a `potential`.
 - Invariants are proven, never checked when the program runs. An invariant
   holds wherever other code can observe the value: when it is built,
   directly or with `with`, passed to a call, or returned, and when its
   holder ends: a `var` at the end of its scope, and a `mut` parameter or
   `mut self` when the function returns. A `with` is checked after all of
-  its updates. An element of a `List`, a `Slice`, or an `Array` meets it
+  its updates. An element of a `List` or an `Array` meets it
   when a write to a part of the element ends, as in `spans[0].low = 1` or
   `bump(mut spans[0].low)`, since the next read of the element assumes it.
 - An invariant clause that calls a definition private to its type's
@@ -632,7 +641,10 @@ fn Option[Value].take(mut self) -> Option[Value] {
   the target can assign the operand's place. The variable of a `for` loop is
   not copied: the loop lends its collection for the body.
 - **`Copyable` types have `copy()`,** whose result is identical to the
-  original.
+  original. A copy of a `List`, a `String`, or an `Array` costs one unit of
+  time and at most one allocation, plus the cost of copying each element:
+  `text.copy()` is within `cost time O(text.length())`. A copy of any other
+  type costs `time(T.copy)`.
 - **Handles are not `Copyable`,** nor is a type that holds one.
 - `Copyable` and `Plain` are prelude traits that the compiler implements and
   no `impl` can, and `Plain` requires `Copyable`. The compiler derives them
@@ -644,9 +656,10 @@ fn Option[Value].take(mut self) -> Option[Value] {
 
 ### Views
 
-A read-only parameter, a `let` bound to a place or to a string literal, the
-variable of a `for x in items` loop, and a slice refer to the original value
-instead of a copy:
+A view refers to the elements of a `List` or the bytes of a `String` that
+another value owns. A read-only parameter, a `let` bound to a place or to a
+string literal, the variable of a `for x in items` loop, and a range are
+views:
 
 ```truss
 let middle = items[1..4]
@@ -654,84 +667,103 @@ let total = middle.sum()
 mut items.push(9)
 ```
 
-While a view is live, that is, until its last use, its original cannot be
-mutated or moved. Here `push` is allowed because `middle` is not used after
-it.
+`items[1..4]` is a place of type `List[Int64]`. Binding it allocates nothing
+and copies no element. While a view is live, that is, until its last use, the
+place that it views cannot be mutated or moved. Here `push` is allowed
+because `middle` is not used after it.
 
-- **Being a view is a property of a type.** `Slice`, `StringSlice`, and a
-  lambda that reads local variables are views, and so is any type that holds
-  one anywhere, such as a cursor over a slice.
+A view that is stored or returned is declared with `view`:
+
+```truss
+type Token(text: view String, line: UInt64)
+
+fn first_word(text: String) -> view String
+
+var longest: view String = words[0]
+```
+
+- **`view T` is the type of a view of a `T`,** where `T` is a `List` or
+  `String`. It has the layout and the methods of `T`, is read-only, and is
+  `Plain`: a copy of it views the same elements, and dropping it frees
+  nothing.
+- **A place of type `T` converts to a `view T`** where one is expected: in
+  an argument, a field of a constructed value, an element of a literal, an
+  annotated binding, an assignment, and a returned value. An `Array` converts
+  to the `List` of its elements where a read-only or `mut` `List` or a
+  view of one is expected.
+- **A view converts to no owned value.** `copy()` makes a `List` or a
+  `String` that owns copies of the viewed elements, and a view where an
+  owned value is needed is an error with that fix.
+- **A read-only parameter takes a view whatever its declared type says.**
+  A parameter declared `List[String]` takes a `List[view String]`, and one
+  declared `Map[String, Int64]` is looked up with a `view String`: in a
+  read-only argument, types are compared without `view`.
+- **A parameter declared `view T` may be stored.** A parameter declared `T`
+  is lent for the call. One declared `view T` views the caller's place for
+  as long as the callee's `mut` parameter, `mut self`, or result may hold
+  it, so the function can store it there. Storing a view of a parameter
+  declared `T` is an error with a fix that declares it `view`: the caller's
+  place would be mutated while the stored view is live.
+- **Nothing is written through a view.** It is passed `mut` to nothing, its
+  elements are not assigned, and a `mut` loop does not go over it. A `var`
+  declared `view T` can be assigned: it then views other elements.
+- **A `let` binds a place read-only, and a `var` binds an owned value.**
+  `let rest = items[1..]` views the range. `var rest = items[1..]` is an
+  error, since the elements cannot be moved out of `items`: it is written
+  `var rest = items[1..].copy()` or `var rest: view List[Int64] = items[1..]`.
+  A `let` whose value is an `if`, a `match`, or a block is a view when every
+  branch gives a place of a `List` or a `String`.
+- **Being a view is a property of a type.** `view T` and a lambda that reads
+  local variables are views, and so is any type that holds one anywhere,
+  such as a record with a `view String` field or a `List[view String]`.
 - **`Storable`** is the prelude trait of every type that is not a view,
   which the compiler derives and no type declares.
-- **A view never outlives the function that made it.** It can be bound, held
+- **A view never outlives the place that it views.** It can be bound, held
   in local records and collections, and passed as an argument, but it cannot
-  go where a `Storable` value is needed, and putting it in a record or a
-  list makes that a view.
+  go where a `Storable` value is needed.
 - **A function returns a view only of the places its parameters view, or of
   the parameters themselves.** The caller treats the result as viewing
   everything that its read-only and view arguments view. An argument that
   is `Plain` lends nothing, unless it holds an `Array`: an array is stored
-  in place, so a `Slice` of it views the argument.
-- **A function stores only the views it is given.** To store a view of an
-  argument in a `mut` parameter or in `mut self`, the function takes that
-  argument as a `Slice`, a `StringSlice`, or a function. A value cannot
+  in place, so a view of its elements views the argument. A value cannot
   hold a view of a part of itself.
-- A `var` can hold a view that never escapes the function.
+- **A view implements a trait through the `impl` of its viewed type.**
+  `view T` implements `Trait` when this `impl` would be accepted: each
+  method that the `impl` of `Trait` for `T` writes is forwarded, as
+  `T.method(self, other)`, and each method that it inherits from the trait
+  is inherited again, with the view as `Self`. Every rule for an `impl`
+  applies to it. The view implements each trait that `Trait` requires, and
+  a forwarded call passes its arguments as any call does: a view passes to a
+  read-only parameter of its viewed type, and to no `own` or `mut` one. So a
+  `view String` is `Equal`, `Hash`, `Display`, and `Ordered`: a
+  `List[view String]` is sorted in place, and a `Map[view String, Int64]` is
+  keyed by views. A view implements no trait whose `impl` writes a method
+  that takes `self` by `mut` or `own`, or that returns `Self`.
 - **`mut` access is never stored.** It has a name only as a `mut` parameter,
   a `mut` loop's variable, or a lambda's `mut` parameter, and lasts for that
-  call, iteration, or `provide mut` block. Disjoint parts of one `List`,
-  `Slice`, or `Array` can be passed `mut` side by side, as in
+  call, iteration, or `provide mut` block. Disjoint ranges of one `List` or
+  `Array` can be passed `mut` side by side, as in
   `sort(mut items[..middle])` and `sort(mut items[middle..])`, when the
   prover shows that they do not overlap.
-- **A slice's elements are written only through a `mut Slice` parameter or
-  a range of a mutable place.** `mut self` of a `Slice` method is such a
-  parameter, and `mut items[1..]` such a range. A slice held in a variable,
-  a field, an element, or a pattern's binding is read-only. Assigning a
-  slice held in a variable makes it view other elements and changes none.
-- **A `mut Slice` parameter cannot be assigned,** whole or by field, so its
-  length is fixed for the call. A slice is passed `mut` only to a parameter
-  declared as a slice.
-- **A slice implements no trait with a `mut self` method,** and so
-  satisfies no bound of one.
+- **A range is passed `mut` only to a parameter whose elements alone
+  change.** The callee declares `modifies items[..]`
+  ([Changed parts](#changed-parts)), so it assigns and mutates elements but
+  cannot change the length: a `push` through a range would write past the
+  range into the elements that follow it.
 - **A temporary is dropped at the end of its statement,** except where a
   `let` keeps it until the end of the block that holds the `let`. A `let`
-  keeps the base of a slice that it binds, directly or through fields. It
-  also keeps such a base in a field of a record or variant that its value
+  keeps the base of a range or an element that it binds, directly or through
+  fields, and a temporary that its value converts to a view. It also keeps
+  such a temporary in a field of a record or variant that its value
   constructs, in a field that a `with` replaces, and in an element of an
   array literal. So `let middle = make_list()[1..4]` keeps the list for as
-  long as `middle` can be used. A `let` keeps no other temporary, such as the
-  receiver in `let part = make_list().slice()`. A view cannot be used after
-  the temporary or the local that it views is dropped.
+  long as `middle` can be used. A `let` keeps no other temporary, such as
+  the argument in `let first = first_word(make_text())`. A view cannot be
+  used after the temporary or the local that it views is dropped.
 - **A default's temporaries are dropped at the end of the statement that
-  makes the call,** as the temporaries of a written argument are. So a view
-  parameter can have an owned default: in
-  `names: Slice[String] = ["ab", "cde"]` the list lasts for the call.
-- **The implicit conversions are between a `List`, an `Array`, or a
-  `String` and its view.** One makes a view of a `List` or an `Array` where
-  a `Slice` is expected, and of a `String` where a `StringSlice` is. It
-  applies to an argument of such a parameter, and to an operand of a
-  comparison whose other operand is such a view, so `items == part[1..]`
-  compares two slices and allocates nothing. `self` is such a parameter,
-  so `StringSlice.trim(name)` takes a `String`.
-- **The other passes a view as its owning type to generic code.** A
-  read-only parameter whose declared type is a type parameter or an
-  associated type takes a `Slice` where the call instantiates that type to
-  a `List`, and a `StringSlice` where it instantiates it to `String`. So
-  `counts.get(word)` and `counts[word]` look up a `Map[String, Int64]` with
-  a `StringSlice`. The call allocates nothing, and a view that the call
-  returns views what the argument views. `self` is no such
-  parameter, and neither is a parameter declared as `List` or `String`.
-  The receiver and the other arguments instantiate the type parameter
-  first, in whatever order the arguments are written.
-- **A read-only parameter is declared as a view, never as `List` or
-  `String`.** `fn total(items: List[Int64])` is an error with a fix to
-  `Slice[Int64]`, and so is a read-only `List` or `String` input of a
-  function type. A `Slice` takes a `List`, an `Array`, and a range of
-  either, and a `StringSlice` takes a `String` and a part of one, so the
-  rule prevents a signature that makes every caller that holds a view copy
-  it into a new value. `self` has its method's type. An `impl`'s method
-  restates its trait's signature, so the rule applies where the trait
-  declares the method, and a `Self` parameter there is no `List`.
+  makes the call,** as the temporaries of a written argument are. So a
+  read-only parameter can have an owned default: in
+  `names: List[String] = ["ab", "cde"]` the list lasts for the call.
 
 ## Constants
 
@@ -875,7 +907,9 @@ clause               = "uses" capability_use { "," capability_use }
                      | "requires" expression [ "when" condition ]
                      | "ensures" expression [ "when" condition ]
                      | "decreases" expression { "," expression } [ "when" condition ]
+                     | "modifies" field_path { "," field_path }
                      | "cost" cost [ "when" condition ] ;
+field_path           = ( LOWER_NAME | "self" ) "." LOWER_NAME { "." LOWER_NAME } ;
 capability_use       = capability_reference [ "unless" unless_condition ] ;
 capability_list      = capability_reference { "," capability_reference } ;
 capability_reference = path_type
@@ -885,7 +919,7 @@ capability_reference = path_type
 ```
 
 ```truss
-public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Element) -> Option[UInt64]
+public fn binary_search[Element: Ordered](sorted: List[Element], target: Element) -> Option[UInt64]
   requires is_sorted(sorted)
   ensures match result {
     Some(index) => sorted[index] == target
@@ -904,6 +938,7 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 | `requires` | A precondition, proven at every call | Any |
 | `ensures` | A postcondition, proven for the body | Any |
 | `decreases` | A measure that proves recursion ends | At most one |
+| `modifies` | The parts of `mut` parameters that the function changes. Without it, every part of a `mut` parameter may change. | At most one |
 | `cost` | A proven bound on a resource | Any |
 
 - Repeated clauses all hold. Each `requires` may rely on the `requires`
@@ -915,9 +950,9 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 - No clause is evaluated when the program runs.
 - `Self.Uses` and `Source.Uses` name an associated capability set (see
   [Associated capability sets](#associated-capability-sets)).
-- Every clause but `uses` can end with `when` and a condition, and each
-  capability in `uses` with `unless` and a condition (see
-  [Conditions](#conditions)).
+- Every clause but `uses` and `modifies` can end with `when` and a
+  condition, and each capability in `uses` with `unless` and a condition
+  (see [Conditions](#conditions)).
 
 ### Conditions
 
@@ -985,7 +1020,7 @@ condition holds for the instantiations that meet it.
 #### Conditions on values
 
 ```truss
-public fn Option[Value].expect(own self, message: StringSlice) -> Value
+public fn Option[Value].expect(own self, message: String) -> Value
   uses Panic unless self is Some(_)
   ensures self is Some(held) && identical(result, held)
 ```
@@ -1013,6 +1048,71 @@ public fn Option[Value].expect(own self, message: StringSlice) -> Value
   the value reaches is chosen when the program runs. A capability's method,
   a written function type, and a `when` condition take no condition on
   values.
+
+### Changed parts
+
+```truss
+type Reader(text: String, position: UInt64, lines: UInt64)
+  invariant position <= text.length()
+
+fn Reader.skip_spaces(mut self)
+  modifies self.position
+  ensures old(self.position) <= self.position
+{
+  while self.position < self.text.length() && self.text.byte(self.position) == 32
+    invariant old(self.position) <= self.position
+  {
+    self.position += 1
+  }
+}
+
+fn Reader.start_word(mut self) -> UInt64
+  modifies self.position
+  ensures self.lines == old(self.lines)
+{
+  mut self.skip_spaces()
+  self.position
+}
+```
+
+- **`modifies` names the parts of `mut` parameters that a function
+  changes.** A part is a `mut` parameter or `self` followed by one or more
+  field names, such as `self.position` or `cursor.region.stop`. The fields
+  are those of record types: one element of a collection and a field of a
+  variant are not fixed parts, so the clause names the field that holds
+  them.
+- **A part followed by `[..]` is the elements of a `List` or a `String`,**
+  as in `modifies items[..]` or `modifies self.rows[..]`. The function
+  assigns and mutates elements and keeps the length, so a caller's proof
+  keeps `items.length()`, and the caller can pass a range, as in
+  `sort(mut items[..middle])` ([Views](#views)). A function that changes the
+  length names the part without `[..]`.
+- **Every other part of a parameter that the clause names keeps its
+  value.** `start_word` ensures that `lines` is unchanged although
+  `skip_spaces` states nothing of it: a caller's proof keeps what it knew of
+  every part that the callee does not name.
+- **A `mut` parameter that the clause does not name may change in every
+  part,** as every `mut` parameter of a function without `modifies` may.
+- **The body changes only the parts named.** An assignment changes its
+  target. A `mut` argument, a `mut` binding, a `mut` loop variable, and a
+  part lent `mut` change their place, and a call of a function with
+  `modifies` changes the parts that it names of its arguments. A change
+  outside the clause is an error, since the proofs of the callers take
+  every other part to keep its value.
+- **A part that the clause names and the body never changes is a
+  warning,** since the proofs of the callers do not learn that the part
+  keeps its value. Where no part of a parameter that the clause names
+  changes, the parameter need not be `mut`. A trait's method is not
+  checked, since its clause bounds what every implementation changes, and
+  neither is a body with a `todo`.
+- A caller that cannot see the fields of a parameter's type, because the
+  type is opaque in another package, takes every part of the argument as
+  changed.
+- **An `impl`'s method changes only the parts that its trait's method names
+  for each parameter.** Its own `modifies` can name fewer, and without one
+  it has the trait's.
+- A function type has no `modifies`, so a call through a function value
+  changes every part of its `mut` arguments.
 
 ### Termination
 
@@ -1147,7 +1247,7 @@ bound       = "O" "(" expression ")" | ( "<=" | "==" ) expression ;
 ```
 
 ```truss
-public fn load_configs(paths: Slice[Path]) -> Result[List[Config], ConfigError]
+public fn load_configs(paths: List[Path]) -> Result[List[Config], ConfigError]
   uses FileRead
   cost calls(FileRead.read) == paths.length()
   cost time O(paths.length())
@@ -1237,7 +1337,7 @@ is one number for the function: it cannot depend on the arguments of a call.
   is only bounded above.
 
 ```truss
-fn Slice[Element: Equal].contains(self, item: Element) -> Bool
+fn List[Element: Equal].contains(self, item: Element) -> Bool
   cost time O(self.length() * time(Element.equal))
   cost allocations <= self.length() * allocations(Element.equal)
 ```
@@ -1256,7 +1356,8 @@ fn List[Element].push(mut self, item: own Element)
 - A `cost potential` is an integer expression over a type's fields that never
   goes below zero. A value's potential is its type's potential plus its
   parts' potentials, and belongs to that value alone; `copy()` pays for the
-  new one.
+  new one. A view holds no potential: the potential of the elements that it
+  views belongs to their owner, so a `List[view String]` holds only its own.
 - `cost amortized time O(f)` promises that the actual cost, plus the change
   in the potential of the values the function mutates or returns, is within
   `O(f)`. `amortized` works with every resource that takes an `O(...)` bound.
@@ -1298,7 +1399,7 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log))
 
 ```truss
 public fn for_each[Item](
-  items: Slice[Item],
+  items: List[Item],
   visit: (fn(Item) uses generic Granted),
 )
   uses generic Granted
@@ -1352,7 +1453,7 @@ A capability parameter passes on the capabilities a callback uses,
 type Card(rank: UInt8, suit: UInt8)
 
 fn pick[Item: Copyable](
-  items: Slice[Item],
+  items: List[Item],
   choose: (fn(count: UInt64) -> UInt64 uses generic Granted requires count > 0 ensures result < count),
 ) -> Item
   uses generic Granted
@@ -1361,7 +1462,7 @@ fn pick[Item: Copyable](
   items[choose(items.length())].copy()
 }
 
-fn deal(deck: Slice[Card]) -> Card
+fn deal(deck: List[Card]) -> Card
   uses Random
   requires deck.length() > 0
 {
@@ -1445,7 +1546,7 @@ type, and the terms `time(visit)`, `allocations(visit)`,
   that breaks it loses only the conclusion:
 
   ```truss
-  fn Slice[Element].max_by(
+  fn List[Element].max_by(
     self,
     compare: (fn(Element, Element) -> Ordering uses generic Granted),
   ) lends Option[Element]
@@ -1464,10 +1565,11 @@ fn List[Element].with_capacity(capacity: UInt64) -> List[Element]
 
 fn List[Element].push(mut self, item: own Element)
 
-fn Slice[Element: Ordered].sort(mut self)
+fn List[Element: Ordered].sort(mut self)
+  modifies self[..]
   cost time O(self.length() * log(self.length()) * time(Element.compare))
 
-fn Slice[Element].zip[Other](self, other: Slice[Other]) -> Zipped[Element, Other]
+fn List[Element].zip[Other](self, other: List[Other]) -> Zipped[Element, Other]
 ```
 
 - A method is a function declared as `fn Type.name`. One whose first
@@ -1485,7 +1587,7 @@ fn Slice[Element].zip[Other](self, other: Slice[Other]) -> Zipped[Element, Other
 ### Overloads by receiver mode
 
 ```truss
-fn Slice[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
+fn List[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
 fn List[Element].filter(own self, keep: fn(Element) -> Bool) -> List[Element]
 ```
 
@@ -1532,10 +1634,10 @@ mut grid.cell(position).visit()
   tested.
 
   ```truss
-  fn tally(counts: mut Map[String, UInt64], word: StringSlice) {
+  fn tally(counts: mut Map[String, UInt64], word: String) {
     match counts.get(word) {
-      Some(count) => counts[word.to_string()] = count.saturating_add(1)
-      None => counts[word.to_string()] = 1
+      Some(count) => counts[word.copy()] = count.saturating_add(1)
+      None => counts[word.copy()] = 1
     }
   }
   ```
@@ -1543,8 +1645,8 @@ mut grid.cell(position).visit()
 - **For that long, the receiver is lent whole:** the statement makes no other
   use of a receiver lent `mut`, and does not mutate one lent read-only. A
   receiver that is a view lends its original too, so `names[..].first()`
-  lends `names`. Two indexes or slices of one `List`, `Slice`, or `Array` can
-  be lent together when the prover shows that they do not overlap.
+  lends `names`. Two elements or ranges of one `List` or `Array` can be lent
+  together when the prover shows that they do not overlap.
 - The `mut` on the receiver selects the overload that lends `mut`, and the
   part is then mutated with no keyword of its own.
 - **A lent part is not the caller's to keep.** It is not moved, returned,
@@ -1566,7 +1668,7 @@ mut grid.cell(position).visit()
 The lent value may be a constructor applied to places:
 
 ```truss
-fn Slice[Element].get(self, index: UInt64) lends Option[Element] {
+fn List[Element].get(self, index: UInt64) lends Option[Element] {
   if index < self.length() {
     Some(self[index])
   } else {
@@ -1698,7 +1800,7 @@ loop_clause = ( "invariant" expression | "decreases" expression { "," expression
 ```
 
 ```truss
-fn summarize(scores: Slice[Int64]) -> Result[Summary, SummaryError] {
+fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
   let count = scores.length()
   var best = 0
   for score in scores {
@@ -1952,13 +2054,12 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 - **A `for` loop over a collection visits its elements by position.**
   `for item in items` evaluates `items.count()` once, and each iteration is
   lent `items.element(position)`, for each position from zero up to the
-  count. An iteration over a `List`, a `Slice`, or an `Array` is lent the
-  element place `items[position]` instead, and calls no `element`.
-- `List`, `Slice`, and `Array` implement `Iterable`, and `List` and `Array`
-  implement `IterableMut` for generic code. `Slice` does not: a slice
-  implements no trait with a `mut self` method ([Views](#views)). A `mut`
-  loop over a `Slice` is lent its element places, so it needs no
-  `IterableMut`.
+  count. An iteration over a `List` or an `Array` is lent the element place
+  `items[position]` instead, and calls no `element`.
+- `List` and `Array` implement `Iterable` and `IterableMut` for generic
+  code. A `mut` loop over a range, as in `for item in mut items[1..]`, is
+  lent the range's element places. A view is read-only, so no `mut` loop
+  goes over one ([Views](#views)).
 - A `mut` loop mutates elements but does not add or remove them: each
   iteration leaves the collection's `count` as it was, as
   `IterableMut.element` promises.
@@ -1979,6 +2080,12 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 - A `while` whose condition is the literal `true`, and that no `break`
   exits, has type `Never`.
 - `invariant` holds at the start of every iteration and when the loop ends.
+- **A loop's proof keeps every part that its body does not change.** The
+  body changes the places that it assigns, passes `mut`, and lends `mut`,
+  and the parts that its callees' `modifies` clauses name. At the start of
+  an iteration, the proof knows of a changed part only what the invariants
+  state: a loop that assigns `reader.position` keeps what the proof knew of
+  `reader.lines`.
 - `decreases` names an integer measure that every iteration makes smaller
   and that never goes below zero. It holds in every function, including
   one that uses `RunForever`. A `while` compares its measure before each
@@ -2005,8 +2112,8 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   values of the iterations before. The clauses cannot name the element. A
   local named `visited` shadows the word.
 - In a loop that reads a collection, `visited[i]` is the collection's
-  element at position `i`: `items[i]` of a `List`, a `Slice`, or an
-  `Array`, and otherwise the value of the collection's `element` at
+  element at position `i`: `items[i]` of a `List` or an `Array`, and
+  otherwise the value of the collection's `element` at
   position `i`, which meets that method's `ensures`.
 - Where a cursor's `model()` is a `Sequence` of the cursor's `Element`, as a
   `ListCursor`'s is, the model is the values that the cursor has yet to
@@ -2028,7 +2135,7 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   `visited` or a range's index:
 
   ```truss
-  fn sum_all(rows: Slice[List[Int64]]) -> Int64
+  fn sum_all(rows: List[List[Int64]]) -> Int64
     cost time O(rows.length() + rows.model().sum(fn(cells) { cells.length() }))
   {
     var total = 0
@@ -2128,18 +2235,20 @@ let pending: Stack[Int64] = [1, 2, 3]
 | Indexing | Meaning |
 |---|---|
 | `items[i]` | Element `i`, which is proven in bounds |
-| `items[1..4]` | The range of elements 1 to 3, a `Slice`, whose bounds are proven |
+| `items[1..4]` | The range of elements 1 to 3, a `List`, whose bounds are proven |
 | `items.model()[1..4]` | In a specification, the `Sequence` of positions 1 to 3 of a `Sequence`, whose bounds are proven |
 | `ports[name]` | The value for `name`, which is proven present |
 | `items[i] = value` | Replaces element `i` |
 | `ports[own name] = 8080` | Inserts or replaces the value for `name` |
 
-- **An element of a `List`, a `Slice`, or an `Array` is a place,** as a
-  field of a record is. `items[i]` names the element at position `i`, and
-  `items[1..4]` names the range of positions 1 to 3, whose value is a
-  `Slice`. Neither calls a method. So `let first = names[0]` binds a view of
-  the element, `names[0].count += 1` mutates it in place, and
-  `mut names[1..]` passes the range `mut`.
+- **An element of a `List` or an `Array` is a place,** as a field of a
+  record is. `items[i]` names the element at position `i`, and
+  `items[1..4]` names the range of positions 1 to 3, a place whose type is a
+  `List` of the element type. A range of a `String` is not written: `part`
+  and `substring` give one. Neither an element nor a range calls a method.
+  So `let first = names[0]` binds a view of the element,
+  `names[0].count += 1` mutates it in place, and `mut names[1..]` passes the
+  range `mut` ([Views](#views)).
 - A range of a `Sequence` is a value, not a place. Its bounds are `Integer`s,
   and its elements are the `Sequence`'s from the first bound up to the second.
 - An index and the bounds of a range are evaluated before the element or
@@ -2148,13 +2257,11 @@ let pending: Stack[Int64] = [1, 2, 3]
   bounds even where nothing reads it, as in `let _ = items[2]`.
 - Any other type supports `[]` by implementing the prelude trait `Index`
   (see [Associated types](#associated-types)), which lends an element
-  read-only. `List`, `Slice`, and `Array` implement it for generic code.
+  read-only. `List` and `Array` implement it for generic code.
 - Such a type whose elements are mutated in place also implements
   `IndexMut`, whose `at(mut self, key)` lends an element `mut`.
   `entries[key].name = text`, `entries[key] += 1`, and `mut entries[key]`
-  need it. `List` and `Array` implement it for generic code. `Slice` does
-  not: a slice implements no trait with a `mut self` method
-  ([Views](#views)).
+  need it. `List` and `Array` implement it for generic code.
 - `collection[key] = value` calls `assign` when the type implements
   `IndexAssign`. The collection must accept the key, by its `accepts_key`:
   a `Map` accepts every key and inserts a missing one. For a type that
@@ -2330,7 +2437,7 @@ operation fails. Running out of memory and overflowing the stack are the
 exceptions.
 
 No allocation holds more than `core.maximum_length` elements, which is
-`Int64.maximum`, so the `length` of a `String` or a `StringSlice` ensures
+`Int64.maximum`, so the `length` of a `String` ensures
 `result <= core.maximum_length`. A length plus one, or the sum of two
 lengths, therefore cannot overflow `UInt64`.
 
@@ -2459,7 +2566,7 @@ A program starts at the `main` of its package's root module, the files in the
 directory of its manifest:
 
 ```truss
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Console, FileRead
 {
   match Config.parse(arguments) {
@@ -2479,7 +2586,7 @@ and nothing else. The program ends when `main` returns or panics.
 ## Parallelism
 
 ```truss
-fn total_score(players: Slice[Player]) -> Int64
+fn total_score(players: List[Player]) -> Int64
   cost time O(players.length())
 {
   let halves = players.split_at(players.length() / 2)
@@ -2547,8 +2654,8 @@ advances.
 
 - An iteration that reads its element is lent it for the whole loop, from
   any collection.
-- **Only a `List`, a `Slice`, or an `Array` lends its elements `mut` to such
-  a loop.** Its elements at different positions are different places.
+- **Only a `List` or an `Array` lends its elements `mut` to such a
+  loop.** Its elements at different positions are different places.
   Another collection's `element` could lend one place to two iterations: a
   data race.
 - **A `concurrent for` over a cursor pulls values that are not views.** The
@@ -2573,21 +2680,20 @@ other than `Panic` and `RunForever`. An implementation provided without
   the literal is copied, and a copy of a non-empty literal counts as one
   allocation. The literal text of a [tagged template](#tagged-templates) is
   a constant without a name by the same rules.
-- A string literal without `${...}` where a `StringSlice` is expected is a
-  `StringSlice` of the constant's bytes.
-- `StringSlice` is the view of a `String`.
-- A `String` and a `StringSlice` hold well-formed UTF-8: each character is
-  the shortest encoding of a Unicode scalar value, so no overlong form, no
-  surrogate, and no value above U+10FFFF appears. `standard.text.utf8`
-  defines the property as `utf8.is_valid`. The invariant
-  `utf8.is_valid(self.model())` is proven in the standard package, and other
-  packages read its consequences from contracts: `is_boundary` holds at
-  offset 0, at the end, and after a byte below 128, and the searches return
-  boundaries.
+- A string literal without `${...}` where a `view String` is expected is a
+  view of the constant's bytes, which outlives every function.
+- A `String` holds well-formed UTF-8, and so does a view of one: each
+  character is the shortest encoding of a Unicode scalar value, so no
+  overlong form, no surrogate, and no value above U+10FFFF appears.
+  `standard.text.utf8` defines the property as `utf8.is_valid`. The
+  invariant of `String` states it over the bytes that the string stores. It
+  is proven in the standard package, and other packages read its
+  consequences from contracts: `is_boundary` holds at offset 0, at the end,
+  and after a byte below 128, and the searches return boundaries.
 - An offset into text counts bytes. A boundary is the end of the text or an
-  offset whose byte starts a character, and a slice starts and ends at
-  boundaries. `substring`, `split_at`, `insert`, `remove_range`, and
-  `truncate` panic at an offset that is not a boundary.
+  offset whose byte starts a character, and a view of part of a string
+  starts and ends at boundaries. `substring`, `split_at`, `insert`,
+  `remove_range`, and `truncate` panic at an offset that is not a boundary.
 - Bytes become text through `String.from_utf8`, which fails with the offset
   of the first ill-formed sequence; through `String.from_utf8_lossy`, which
   replaces each maximal subpart of an ill-formed sequence with U+FFFD; or
@@ -2612,6 +2718,11 @@ let pattern = Regex"[a-z]+@${domain}"
   and its method `from_template` takes a `Template[Part]`, which holds the
   literal text as `text.Literal` values, which only the compiler makes, and
   the converted values.
+- An interpolated value of a type other than `Part` is converted with the
+  `Part`'s impl of `From` for that type. A place of a `List` or a `String`
+  that is not passed `own` is converted from a view of it where `Part`
+  implements `From` for the view, as `Regex"^${name}"` converts from
+  `view String`: the place is read, not moved.
 - A tag's `is_valid_template` states the rules for valid literal text, and
   `from_template` requires it.
 - The literal text of a template is a `List[text.Literal]` constant without
@@ -2629,7 +2740,7 @@ let pattern = Regex"[a-z]+@${domain}"
 impl FromTemplate for Regex {
   type Part = RegexPart
 
-  fn is_valid_template(literals: Slice[text.Literal]) -> Bool {
+  fn is_valid_template(literals: List[text.Literal]) -> Bool {
     todo
   }
 
@@ -2868,14 +2979,13 @@ type Priority =
   the packages the calling package's manifest lists. No trait is imported.
 - A call finds only the methods and traits that its module can see
   ([Visibility](#visibility)). A method it cannot see is not a candidate, so
-  a trait's method or the view's method of that name and mode is found
-  instead.
-- A `String` has the methods of `StringSlice` too, and a `List` and an
-  `Array` those of `Slice`, in each mode of `self` that its own methods and
-  its traits' methods do not take. The receiver becomes a view of itself, so
-  `name.trim()` and `String.trim(name)` are `StringSlice.trim(name)`. A
-  method as a value is named through the view: `StringSlice.trim`. In the
-  rules below, the methods a type has from its view count as its own.
+  a trait's method of that name and mode is found instead.
+- A view has the methods of the type that it views that take `self`
+  read-only. An `Array` has the methods of the `List` of its elements too,
+  in each mode of `self` that its own methods and its traits' methods do
+  not take: the receiver is the range of all its elements, so
+  `values.contains(1)` is `List.contains(values[..], item: 1)`. In the rules
+  below, the methods an `Array` has from `List` count as its own.
 - A method written in full, as in `String.trim(name)`, takes `self` as its
   first parameter, so the receiver is its first argument and has no label.
 - Two of those traits giving one name is an error at a call with a dot,
@@ -2946,7 +3056,7 @@ proof Ordered.transitive for Box[Item: Ordered] {
 ```
 
 ```truss
-theorem sorted_between(items: Slice[Int64], first: UInt64, second: UInt64)
+theorem sorted_between(items: List[Int64], first: UInt64, second: UInt64)
   requires items.is_sorted()
   requires first <= second
   requires second < items.length()
@@ -2958,7 +3068,7 @@ theorem sorted_between(items: Slice[Int64], first: UInt64, second: UInt64)
   }
 }
 
-theorem sorted_up_to(items: Slice[Int64], last: UInt64)
+theorem sorted_up_to(items: List[Int64], last: UInt64)
   requires items.is_sorted()
   requires last < items.length()
   ensures forall i in 0..last + 1 => items[i] <= items[last]
@@ -3003,6 +3113,47 @@ theorem sorted_up_to(items: Slice[Int64], last: UInt64)
 - A clause applies only where every name that it mentions is visible.
 - A function with a `requires` is defined only where it holds.
 
+### Circular proofs
+
+A proof assumes the contract of each function that its definition calls and
+the invariant of each value that the definition uses. A proof that assumes a
+fact whose own proof assumes it back proves nothing: a false postcondition
+can be proven that way.
+
+- The proof of a definition depends on these definitions, and on the
+  definitions that their proofs depend on:
+
+  | The definition has | Its proof depends on |
+  |---|---|
+  | A call or a read of a constant, in its body or in its contract | The callee or the constant, and the code that the call supplies |
+  | A contract that its trait declares, for a method of an `impl` | Each function that the trait's contract calls, as the `impl` resolves the call |
+  | A value of a type of its own package: a parameter, a result, a local, or, for a type, a field | The type |
+  | A value of a generic type | Each function that the invariant or the `potential` of the type calls at those type arguments, and the same for the types of its fields. Where a field's type is a generic type that holds the field, with other type arguments, every method of the `impl`s that those type arguments supply to its bounds |
+  | An invariant or a `potential`, for a type | Each function that the clause calls and each constant it reads |
+
+- A cycle of these dependencies is an error unless calls alone form it. A
+  cycle of calls is a recursion, which a measure shows to end (see
+  [Termination](#termination)). The error is reported where the cycle leaves
+  a specification:
+
+  | Where the cycle closes | Reported at |
+  |---|---|
+  | An invariant or a `potential` calls into the cycle | The call in the clause |
+  | A contract calls into the cycle, and no invariant does | The call in the contract |
+  | A contract that a method takes from its trait calls into the cycle, and the method does not restate that call | The method |
+  | The invariant of a generic type, or of the type of one of its fields, calls into the cycle at one instantiation only | The value of that type |
+
+  `fn clamp(n: UInt64) -> UInt64 requires clamp(n) >= 0` is an error at the
+  call in its `requires`. A recursive function's `ensures` may call the
+  function, since its body's calls already form that cycle.
+
+- A fact that relates two functions is not a clause of one where the
+  contract of the other calls back. `Set.count` cannot ensure that every
+  member is `self.element(position)` for some position, because
+  `Set.element` requires `position < self.count()`. A theorem states the
+  fact, as `set.every_member_is_an_element` does, and a proof that needs it
+  calls the theorem.
+
 ### Writing specifications
 
 A *specification* is a `requires`, `ensures`, `decreases`, or `cost` clause,
@@ -3034,7 +3185,7 @@ an invariant, a law, or a proof.
   on the bound name being in its range, and uses no capabilities.
 - A quantifier over a collection ranges over its elements at the positions
   below its `count()`, in code and in specifications alike: the element
-  places of a `List`, a `Slice`, or an `Array`, and the values that any
+  places of a `List` or an `Array`, and the values that any
   other collection's `element` lends. A pattern that does not match a value
   leaves that value out.
 - A quantifier over a type and `==>` appear only in specifications and in
@@ -3169,8 +3320,7 @@ beside the package's manifest are its root module, `weather`.
 The prelude is in scope in every file, and all its names are
 `UpperCamelCase`:
 
-- the built-in types, `Option` and `Result`, and `List`, `Slice`, `Map`, and
-  `Set`
+- the built-in types, `Option` and `Result`, and `List`, `Map`, and `Set`
 - the core traits, such as `Equal`, `Ordered`, `From`, `TryFrom`, `Default`,
   `Copyable`, `Plain`, `Storable`, `Index`, `IndexMut`, `IndexAssign`,
   `Iterable`, `IterableMut`, `Cursor`, `FiniteCursor`, `IntoCursor`,

@@ -14,7 +14,7 @@ the types, the capabilities, the contract, and the cost of a function, and the
 compiler proves that the body meets them:
 
 ```truss
-public fn binary_search(sorted: Slice[Int64], target: Int64) -> Option[UInt64]
+public fn binary_search(sorted: List[Int64], target: Int64) -> Option[UInt64]
   requires is_sorted(sorted)
   ensures match result {
     Some(index) => sorted[index] == target
@@ -274,11 +274,12 @@ call a helper while the list is unsorted.
 
 | Rule | Reason |
 |---|---|
-| An invariant belongs to the whole type, never to one variant. | It can state a fact about the whole value, such as a tree being balanced, and a clause after the last variant is unambiguous. A condition on one variant is a `match` in the invariant, or a field whose type carries the condition. |
+| An invariant belongs to the whole type, never to one variant. | It can state a fact about the whole value, such as a bound that holds in every variant, and a clause after the last variant is unambiguous. A condition on one variant is a `match` in the invariant, or a field whose type carries the condition. |
+| An invariant cannot call a function whose proof depends on its type. | A contract is proven for arguments that meet their invariants, so a function that uses a value of the type assumes the invariant, and an invariant that reads its contract is a circular proof. With `invariant self.value() <= 10` and `ensures result <= 10` on `value`, `Counter(count: 500)` proved: the check of the new value assumed the postcondition, which was proven only of a value that already met the invariant. The cycle needs no `self`: `invariant through(count) >= 0` is circular when `through` builds a `Counter`, since a false postcondition of a method that `through` calls then proves from the invariant. |
+| An invariant cannot call a function on a part of the same type either, such as `rest[0].head()`. | Some such invariants are sound by induction on the value, and some are not: where `head` reaches a function that builds a larger value around its argument, a false postcondition of `head` proved. Telling the two apart needs every way back to the invariant to be on a part, which [Termination](#termination) asks of a recursive call and the prover compares only for calls. Until it compares the same for an invariant, the condition is stated over the part's fields, with a pattern. |
 | An invariant clause that calls a definition private to its type's module is opaque in other modules. | The clause can only be proven where its definition is visible, so other modules gain nothing from the definition, and each obligation that holds a value of the type would carry it: `Map`'s index invariant added about 1 MB of axioms to every obligation of `Set`, `json`, and `toml`, and some ran out of steps. A module that builds the value from its fields cannot prove the clause, so no module can make a value that breaks it. |
 | A type with an invariant can still expose its fields. | An invariant protects facts about the contents of a value. `opaque` does a different job: it controls where a value is constructed and hides the representation ([Visibility](#visibility)). |
 | A step of an update suspends only its own type's invariant. | The step exists to pass through states that break that invariant. The invariants of its fields' types are not its to break, so it assumes them and meets them when it returns. Without them, a step would prove at each call that passes a field a fact that no step changes, such as a `String` field holding UTF-8. |
-| An invariant's call of a function with `self` needs no invariant of `self`. | The invariant states it, so requiring it would make every such invariant unprovable. The function's contract still assumes the invariant, and the invariant cannot prove that contract: inside the function's own proof, the call is not its result, and a cycle through other functions is a recursion, which the termination check rejects. |
 | Other packages neither assume nor prove an opaque type's invariant. | They cannot build a value of the type, so they cannot break the invariant, and assuming it would put its clauses on every value in each of their obligations. The UTF-8 invariant of `String` made a counterexample with a `String` in scope come back unknown, and pushed a map literal of 100 string keys past the step limit. What other packages rely on is stated by the contracts of the type's public functions, as `is_boundary` states that offset 0 and the offset after a byte below 128 are boundaries. |
 
 ## Values and ownership
@@ -351,7 +352,7 @@ Rules: [Views](SPECIFICATION.md#views).
 
 A view is a read-only reference to a value that another variable owns.
 While a view is live, its original cannot be mutated or moved. This prevents
-a dangling view: a `push` may reallocate the list that a slice views.
+a dangling view: a `push` may reallocate the list that a range views.
 
 Three decisions let views exist without lifetimes.
 
@@ -375,14 +376,15 @@ rule excludes `Plain` arguments, such as indexes, so that case is rare.
 
 | Rule | Reason |
 |---|---|
-| Whether a type is a view is derived from its fields, and a record that holds a view is a view. | Nothing is declared, and a view cannot escape inside a record. |
+| Whether a type is a view is derived from its fields and its type arguments, and a record that holds a view is a view. | A view cannot escape inside a record or a collection, and only the part that is a view is declared. |
 | Generic code that keeps a value requires `Storable`. | A type parameter may stand for a view, and the bound stops generic code from storing one. |
 | `mut` access is never stored. | It lasts for one call, one iteration, or one `provide mut` block, so the ownership check tracks no mutable reference from one statement to the next. |
-| A slice's elements are written only through a `mut Slice` parameter or a range of a mutable place, and a slice held in a variable, a field, or an element is read-only. | Write access then always names the place it writes, so the ownership check compares the written place with every other argument and view, and the prover writes the callee's changes back to that place. Write access held in a variable would let `var target = items[1..5]` overwrite elements that `items[0..4]`, passed beside it, still views. |
-| A `mut Slice` parameter cannot be assigned, and a slice is passed `mut` only to a `mut Slice` parameter. | A callee that assigned the slice another one would leave the caller's elements unchanged while the caller read the callee's contract as a write to them, and would carry write access to elements lent read-only. A slice's length is then fixed for the call, so the prover knows it with no clause, and the slice is passed by value. |
-| A slice implements no trait with a `mut self` method, so `Slice` has no `IndexMut`. | Generic code can copy a value of its type parameter, and a copy of a slice views the same elements, so a `mut self` method called on the copy would write through a read-only view. |
-| A view is passed as its owning type to a read-only parameter whose declared type is a type parameter or an associated type. | Generic code cannot name the view of its type parameter, so `Map.get`, which takes `key: Key`, would make a lookup in a `Map[String, Int64]` allocate a `String`. A callee cannot mutate, move, drop, or store a read-only parameter, so it cannot tell a view from an owned value. |
-| A read-only parameter is declared as `Slice` or `StringSlice`, never as `List` or `String`. | A read-only `List` parameter takes only a `List`, so a caller that holds a slice copies it into a new list for the call: an allocation that the signature alone forces. If the parameter took a view instead, `List` and `Slice` would accept the same arguments, and every signature would choose between two spellings for no reason. A `mut` or `own` `List` parameter takes no view, since it grows or keeps the list. |
+| A view is a mode of `List` and `String`, written `view T`, and not a second type. | A second type doubles every signature's choices and every method: `List` and its view each need `contains`, and a caller that holds one copies to call a function that takes the other. One type with one set of methods leaves a single question, whether a value owns its elements, and only a field, a type argument, a result, and a kept parameter answer it in writing. |
+| A view is read-only, and elements are written through a range of a mutable place, as in `sort(mut items[1..])`. | Write access then always names the place it writes, so the ownership check compares the written place with every other argument and view, and the prover writes the callee's changes back to that place. Write access held in a variable would let `var target = items[1..5]` overwrite elements that `items[0..4]`, passed beside it, still views. |
+| A range is passed `mut` only to a parameter that its function declares `modifies items[..]`. | A range has no capacity of its own, so a `push` through it would write over the elements that follow it. The clause states that the callee keeps the length, which the body check enforces and the caller's proof uses, so one function serves a whole list and a range of one. |
+| A read-only argument is compared with its parameter's type without `view`, so a `List[view String]` passes to a `List[String]` parameter and a `view String` looks up a `Map[String, Int64]`. | A view has the layout of the type that it views, and a callee cannot mutate, move, drop, or store a read-only parameter, so it cannot tell a view from an owned value. Without the rule a lookup would allocate a `String`, and a function over a list of texts would be written twice. |
+| A parameter declared `T` is lent for the call, and one declared `view T` may be stored. | Most functions only read their arguments, so the plain type is the short spelling and promises the caller that nothing stays borrowed. A function that keeps a view says so in its signature, where the caller's ownership check reads it: the argument then stays borrowed while the stored view is live. |
+| A view implements a trait through an `impl` that the compiler derives: it forwards each method that the viewed type's `impl` writes, and inherits the rest with the view as `Self`. The derived `impl` must be acceptable as any `impl` is. | Stated as a condition of its own, the rule is a second list of what an `impl` must meet, and an entry that the list lacks is a hole: it once lacked the traits that a trait requires. Stated as an `impl`, it has no list. A forwarded method is compiled for an owner, so the call's own typing keeps a view from an `own` or `mut` parameter, where the method would drop or write elements that the view borrows. An inherited method knows `Self` only through the trait and the traits that it requires, so compiled for `Self = view T` it copies and drops views and writes no element. `Ordered` is the case that matters: its `impl` writes `compare`, and `max`, `min`, and `clamp` are inherited, so a view is a key of a `Map` and an element that `sort` orders. |
 
 ### Lending methods
 
@@ -392,7 +394,7 @@ Rules: [Lending methods](SPECIFICATION.md#lending-methods),
 A method cannot return `mut` access to a part of `self`, because `mut`
 access is never stored, and `scores[i] += 1` needs that access. A lending
 method lends the part to the caller instead, for the rest of the caller's
-statement. Indexing a type other than a `List`, a `Slice`, or an `Array` is
+statement. Indexing a type other than a `List` or an `Array` is
 a lending method of the prelude trait `Index`, so a user's collection gets
 the syntax of a `List`.
 
@@ -417,7 +419,7 @@ mutated. Such a type takes the new value in an ordinary method, as
 | A method may lend a value that it computes, and a mutation of that value is not written back. | Writing back would be code after the lend. |
 | A method lends a part of its first parameter, or a whole value that it made, and never a part inside a value it owns. | Nothing of the method then has to outlive its call except the part, which the caller holds. So the method can be compiled as a function and call itself. Swift's accessors lend such a part by keeping the accessor's frame alive. |
 | A lending call lends its whole receiver. | The method was proven on the assumption that nothing else uses `self` while the part is lent. |
-| An element or a range of a `List`, a `Slice`, or an `Array` is a place, as a field is, and calls no method. | A lending call lends its whole receiver, so `mut items[0]` passed beside `items[1]` would conflict, and the ownership check and the prover would not see which element a call wrote. As places, elements are parts of the sequence: disjoint parts pass side by side, and a write changes one element of the prover's model. |
+| An element or a range of a `List` or an `Array` is a place, as a field is, and calls no method. | A lending call lends its whole receiver, so `mut items[0]` passed beside `items[1]` would conflict, and the ownership check and the prover would not see which element a call wrote. As places, elements are parts of the sequence: disjoint parts pass side by side, and a write changes one element of the prover's model. |
 
 ### Loops
 
@@ -431,7 +433,7 @@ it needs rules for the code that runs when the loop exits early. That is
 the coroutine that lending methods avoid.
 
 In a loop by position, the collection's code runs only inside `count` and
-`element`. A loop over a `List`, a `Slice`, or an `Array` calls no
+`element`. A loop over a `List` or an `Array` calls no
 `element`: each iteration is lent the element place `items[position]`. The
 ownership check, the prover, and code generation therefore treat the loop as
 a loop over a range of positions, and it compiles to a plain loop. The
@@ -449,7 +451,7 @@ positions. [Cursors](#cursors) cover both cases.
 |---|---|
 | A `for` loop calls `count`, `element`, and `cursor` through `Iterable`, `IterableMut`, and `IntoCursor`, never a method found by its name. | A method found by its name cannot be named in a bound, so generic code could not loop over a type parameter, and a type with such methods would have loops but not `Iterable`'s `map`, `filter`, or `fold`. The trait also states what every loop relies on: `element` requires a position below `count`, and a `mut` element leaves `count` as it was. |
 | Lending elements to read and to mutate are separate traits, `Iterable` and `IterableMut`. | A collection that packs its elements, such as a `BitSet`, has no place to lend `mut`. |
-| Consuming a collection is a trait of its own, `IntoCursor`, whose `type Cursor: Cursor` is the cursor's type. | A view such as a `Slice` or a map's `Keys` is iterable but owns no elements to give up, and a `Heap` gives up its elements in order but has no positions. |
+| Consuming a collection is a trait of its own, `IntoCursor`, whose `type Cursor: Cursor` is the cursor's type. | A view such as a `view List` or a map's `Keys` is iterable but owns no elements to give up, and a `Heap` gives up its elements in order but has no positions. |
 
 ### Cursors
 
@@ -764,11 +766,11 @@ A method can be overloaded on the mode of `self`, and on nothing else. One
 `iter`, `iter_mut`, and `into_iter`.
 
 **An overload set has one author.** The overloads of a name come only from
-the type's own methods, from the methods of its view, from the methods that
-an `impl` in the type's package writes, and from a trait together with the
-traits it requires. A type and its view are defined in one package. If
-overloads were collected from every visible `impl`, a package added to a
-build could capture an existing call.
+the type's own methods, from the methods that an `Array` has from `List`,
+from the methods that an `impl` in the type's package writes, and from a
+trait together with the traits it requires. `Array` and `List` are defined
+in one package. If overloads were collected from every visible `impl`, a
+package added to a build could capture an existing call.
 
 **There is no overloading by parameter type.** It would cost three things:
 
@@ -981,6 +983,8 @@ proves the operation, and its release build checks nothing.
 | Code that uses `Panic unless C` proves its integer operations where `C` holds. | A function that declares `Panic` for one `expect` would otherwise lose the compile-time check of every other operation. The condition keeps the check for the instantiations that never panic. |
 | A lambda whose capabilities are inferred takes `Panic` for an integer operation where the code it is written in has `Panic`. | A lambda passed to `map` would otherwise have to prove what the code around it need not. A lambda passed as a function type without `Panic` still proves its operations, since its caller relies on that type. |
 | Indexing, slicing, and `unreachable` are proven in code that has `Panic` too. | Indexing and slicing state their bounds as a `requires`, which every caller proves. `unreachable` claims that the point is not reached, and a crash there would contradict the claim. Code that panics on purpose calls `Panic.crash`, which its signature shows. |
+| A release build compiles a proven operation on a signed integer as C arithmetic whose overflow is undefined, and a `wrapping_` method as unsigned arithmetic. | The C compiler then has the fact that the prover proved: it folds `value + 1 > value`, and it counts the iterations of a loop whose signed counter steps by more than one. Under `-fwrapv` both kinds of operation wrapped, so the C compiler could assume nothing about either. |
+| A proven operation on an unsigned integer, and a proven index, tell the C compiler nothing. | C has no unsigned arithmetic whose overflow is undefined, so the fact can only be an assumption: `if (overflowed) __builtin_unreachable()`. Clang 21 turns that into an addition that does not wrap, and then vectorizes a loop over `values[index * 2]` that it otherwise does not. Apple clang 17 keeps the overflow check's intrinsic instead and stops vectorizing a loop that it vectorizes without the assumption. An assumption therefore waits for a test of what the C compiler does with one. |
 
 **A panic cannot be caught.** Code that caught a panic could hold a value
 whose invariant was broken partway through an update. A program that must
@@ -1172,6 +1176,8 @@ Rules: [Strings](SPECIFICATION.md#strings).
 | Strings have no concatenation operator. | `+` stays numeric, and each allocation is written as an interpolation or a call (*nothing hidden*). |
 | Adjacent literals do not join. | A missing comma in `["a" "b", "c"]` would silently merge two elements. |
 | A `String` holds well-formed UTF-8. | A check of text then reads the characters that every later reader decodes. Without it, an overlong encoding of `/` passes a check for `/` and decodes to `/` afterwards, and a slice can split a character. |
+| The invariant of `String` is stated over the bytes it stores: `utf8.is_valid(intrinsic.storage_model(storage))`. | `String.model` takes a `String`, so its proof assumes the invariant, and an invariant that called it would be proven from itself ([Circular proofs](SPECIFICATION.md#circular-proofs)). A view of a `String` is a `String`, so the one invariant holds of both. |
+| Viewing storage as a `String` proves the invariant where the view is built. | `String.part` views a range of a string's bytes as a `String`, and no constructor builds that value. Checked only where it is passed or returned, a view stored in a record would never be checked. |
 | The model of text is its bytes, and an offset counts bytes. | A slice at an offset costs O(1), and a proof about stored bytes needs no translation. An offset that counts characters costs a scan for each access. |
 | Bytes become text only through validation, at run time or in a proof. | `from_utf8` and `from_utf8_lossy` check each byte. `from_valid_utf8` requires `utf8.is_valid` of the bytes, so the prover checks them, and the conversion costs nothing at run time. |
 | A lossy conversion replaces each maximal subpart of an ill-formed sequence with one U+FFFD. | Unicode recommends this practice, and the WHATWG decoder follows it, so the same bytes give the same text in a browser and in Truss. Bytes from the operating system, such as a file name, convert the same way. |
@@ -1294,10 +1300,10 @@ Rules: [Method lookup](SPECIFICATION.md#method-lookup).
 |---|---|
 | A trait method needs no import. | A forgotten import is a common error in the languages that need one. |
 | A method call finds only the traits of the standard library, of the calling package, and of the packages that its manifest lists. | An edit deep in the dependency graph cannot break a distant call. |
-| A call skips a method that its module cannot see before it chooses an overload, and reports a hidden method only when it finds nothing it can see. | A private or `internal` method is a detail of its module or package, so adding, renaming, or removing one changes no call outside it. Every other name is looked up the same way. The cost is that one call can reach different methods in different modules: if `String` had a private `trim`, `name.trim()` would call it in its module and `StringSlice.trim` elsewhere. Both are written in one package. |
+| A call skips a method that its module cannot see before it chooses an overload, and reports a hidden method only when it finds nothing it can see. | A private or `internal` method is a detail of its module or package, so adding, renaming, or removing one changes no call outside it. Every other name is looked up the same way. The cost is that one call can reach different methods in different modules: if a type had a private `trim` and a trait's `trim` of the same mode, `name.trim()` would call the private one in its module and the trait's elsewhere. |
 | Two candidates for one name are an error, never a silent choice. | In Rust a type's own method wins over a trait's, so adding a method can silently change an existing call. In Truss an upgrade can break a call only with an error that names both candidates. A release that only adds names is still compatible, because otherwise no type could ever gain a method. |
-| A `String` has the methods of `StringSlice`, and a `List` and an `Array` those of `Slice`. | `self` is a parameter, and an argument of the owned type converts to its view. Without the rule, every method of a view needs a forwarding method on the owned type, whose contract is stated and proven a second time, and a view's method that has none cannot be called on the owned value. |
-| A type's own method hides its view's method of the same name and mode. | The owned type can do better where it owns the storage: `String.to_bytes(own self)` hands over its buffer, and `StringSlice.to_bytes(self)` copies. Both are written in one package, so no other package can change which one a call reaches. |
+| An `Array` has the methods of the `List` of its elements. | `self` is a parameter, and an `Array` converts to the range of all its elements. Without the rule, every method of a `List` needs a forwarding method on `Array`, whose contract is stated and proven a second time. |
+| An `Array`'s own method hides the `List` method of the same name and mode. | The array can do better where its length is a constant. Both are written in one package, so no other package can change which one a call reaches. |
 
 ### Dispatch
 
@@ -1382,12 +1388,31 @@ the start.
 
 Rules: [Bodies and contracts in proofs](SPECIFICATION.md#bodies-and-contracts-in-proofs).
 
+**A cycle of proofs is one fact of the dependency graph.** The proof of a
+definition depends on its callees, on the functions its contract calls, on
+the functions that a contract taken from its trait calls, on the types
+whose values it uses, and, for a type, on the functions its invariant
+calls. Each is an edge that the definition's own pass lists, and a
+cycle is a strongly connected component of those edges, as a recursion is of
+calls. A check that searched other definitions for the cycle would read
+their bodies, and would be recomputed by every edit to one. The rule is in
+[Circular proofs](SPECIFICATION.md#circular-proofs).
+
+| Rule | Reason |
+|---|---|
+| A contract cannot call a function whose proof depends on the contract, outside a recursion. | The proof of a clause assumes the contract of each call in it. With `ensures result == n` and `ensures clamp(n) <= 3` on `clamp`, the second clause proved from itself, and `clamp(500) <= 3` held for every caller. A recursion is different: its body's calls form the cycle, and a measure shows that it ends. |
+| Two contracts cannot call each other's functions, even where both clauses are true. | `Set.count` ensured that every member is `self.element(position)` for some position, and `Set.element` requires `position < self.count()`. With the same two references, `element ensures result <= 3` and `count ensures forall position in 0..result => self.element(position) <= 3` proved of an `element` that returns 500: each proof assumed the other's clause. Accepting the true pair needs the dependencies of each clause, not of each contract. Until the graph holds those, a fact that relates two functions is a theorem that neither contract calls, such as `set.every_member_is_an_element`, and a proof that quantifies over a set's members calls it. |
+| The proof of an `impl`'s method depends on the functions that its trait's contract calls. | The method's proof assumes the `requires` that the trait declares, whether or not the `impl` restates it. With `requires self.limit() >= 0` on a trait's `measure`, and `ensures self.measure() <= 3` on an `impl`'s `limit`, a false `ensures result <= 3` of `measure` proved, and no clause written in the `impl` showed the way back. |
+| A value of a generic type cannot be used where the type's invariant, at those type arguments, calls a function whose proof depends on the user. | `Box[Item: Measured]` with `invariant item.measure() >= 0` names no `impl`, so its own proof sees no cycle. The cycle exists at `Box[Marker]`, where `Marker.measure` calls a function that takes a `Box[Marker]`, and is reported at that value. The dependency is on the functions that the invariant calls, not on every method of the `impl`: `Cursor.skip` returns a `Skip[Self]`, whose invariant calls no method of the cursor. |
+| The dependencies of a generic type's value follow its fields, and enter each type once on a chain of fields. | A value meets the invariants of its fields, so `Shelf[Marker]` with a field of type `Box[Marker]` depends on what the invariant of `Box` calls. A type that holds itself with other type arguments has a new instance at every step, and `Nested[Element]` with a field of type `Nested[List[Element]]` has no last one. At a second instance of a type on one chain, the dependency is every method that the instance's type arguments supply to its bounds, which is the dependency of a call to generic code. |
+| A cycle through an invariant is reported at the invariant alone. | Every function on the cycle whose contract calls another is on it too, and reporting each would hide the one clause to change. |
+
 **A caller's proof reads the contract of its callee, never its body.** A
 function whose body is its definition, such as `is_sorted`, states the body
 in its `ensures`:
 
 ```truss
-fn is_sorted(items: Slice[Int64]) -> Bool
+fn is_sorted(items: List[Int64]) -> Bool
   ensures result == (forall index in 1..items.length() => items[index - 1] <= items[index])
 ```
 
@@ -1400,6 +1425,9 @@ only, to state the definition.
 |---|---|
 | A method of a trait or of an `impl` is known by its contract too. | An `impl` states what it adds to the trait's contract in its own `ensures`: `Int64.compare` ensures the order of the integers. An edit to a provided body then changes no fact that callers know. An edit to an `impl`'s body re-proves that method and the `impl`'s laws alone. |
 | A clause applies only where every name it mentions is visible. | An `ensures` that reads the fields of an opaque type is a fact inside the type's package and no fact elsewhere, so `opaque` hides the representation from proofs too. |
+| A function names the parts of its `mut` parameters that it changes in `modifies`, and the compiler does not infer them. | Callers know a callee by its signature. A frame inferred from the body would make an edit to the body re-prove the callers, and a compatible release of a dependency could break their proofs. The compiler computes the body's changes to check the clause, and offers the part that the clause misses as the fix. |
+| `modifies` names the parts that change, not the parts that are kept. | A field added to a type is then kept by every function with a clause, and the check reports a body that changes it. A list of kept parts would let the new field change at every call. Boogie's and Dafny's `modifies` and ACSL's `assigns` name what changes for the same reason. |
+| `modifies` belongs to a function, not to a type: no rule says that a field of a type never changes. | Generic code could not keep such a rule. `fn replace[T](target: mut T, value: own T)` replaces a whole value without knowing its type, and a rule checked at each instantiation would end the modular proof of generic code. |
 | A public `requires` or `cost` names only public definitions, and an `ensures` may name a private function. | The proofs of callers in other packages read a `requires` and a `cost`, and a clause applies only where every name it mentions is visible. The `ensures` lets callers inside the package know a result in terms of private helpers. |
 | A constant is known by its value, which an evaluation gives where the value calls a function. | The declaration of the constant asks for the evaluation, as a tagged template asks for its check, so the place that makes a proof depend on a callee's body is written. A proof that used an evaluated value trusts the compiled code, and the tools report that. |
 | A fact that the solver cannot derive is requested with `assert ... by evaluation`, which runs the condition when the code is checked. | A proof needs facts about data that code computes, such as "this table is sorted", and no contract can state every one in advance. The condition is closed, so it has one value, and the compiler computes that value by running the code that the program would run. Lean's `native_decide` is the precedent. The alternative is to evaluate every call on constants without being asked, and then a patch release of a dependency that changes a result within its contract could break a proof at a site that names no evaluation. |
@@ -1586,7 +1614,7 @@ clause can promise. This is why a key is `Ordered` as well as `Hash`.
 
 | Convention | Reason |
 |---|---|
-| A method that needs no ownership of the storage is declared once, on the view type. | A `String`, a `List`, and an `Array` have the methods of their views ([Method lookup](#method-lookup)), so `mut names.sort()` works without `names[..]`, and a second declaration on the owning type would only forward. The owning type declares a method of that name where it uses its storage: `List.reverse` keeps the list's capacity. |
+| A method is declared once, on `List` or `String`, with `self` read-only where it needs no ownership of the storage. | A view has the read-only methods of the type that it views, and an `Array` has the methods of `List` ([Method lookup](#method-lookup)), so no second declaration forwards to the first. A method that changes elements and keeps the length declares `modifies self[..]`, so it takes a range too: `mut names[1..].sort()`. |
 | A method that every integer type has, or both float types have, is declared once, in a sealed trait. | Generic code over the trait can call the method, and the method's contract in the trait holds for every type. A method declared on each type is a separate function per type, which generic code cannot call. |
 | `FloatingPoint` is sealed: only `Float32` and `Float64` implement it. | The trait describes their IEEE 754 formats, which its `Bits` and methods such as `is_nan` expose. In generic code over the trait, `is_nan` and the `ieee_` comparisons then mean what IEEE 754 defines, for every instantiation. |
 | A capability declares only primitive operations. | A narrowing implementation or a fake has few methods to write. |
@@ -1639,6 +1667,31 @@ Rules: [The registry](PACKAGES.md#the-registry).
 | A package is published as its source. | The code that a reviewer reads in the registry is the code that compiles. |
 | The registry keeps an append-only public log of the hash of every version, as Go's checksum database does. | The registry cannot give two users different code under one version. |
 | The registry signs the proofs and test results that it computed for a release. | Proving a whole dependency tree on a machine that starts with nothing, such as an agent's new container, is the cost that GOALS.md sets out to remove. Each signed result is a function of its key, so a registry that signed a false result is caught by anyone who recomputes it. |
+
+## Target CPUs
+
+**An x86-64 program is built for the x86-64-v3 level:** AVX2, FMA, BMI1,
+BMI2, LZCNT, MOVBE, F16C, and the features of the levels below. A project's
+manifest can name another level, from `"v1"`, the baseline, to `"v4"`. An
+ARM64 program is built for the C compiler's default: ARMv8.0 on Linux, and
+Apple silicon on macOS.
+
+| Option | Consequence |
+|---|---|
+| The x86-64 baseline, which Go and Rust build for | `fused_multiply_add`, `floor`, `ceiling`, `truncate`, and `round_to_even` are each a call into the C library, and `count_ones` is a sequence of about 20 instructions. The standard library's float functions are written with them ([Floats](#floats)), so they run at the level of the build. A C program calls a C library that selects its `sin` for the CPU when the program loads. |
+| x86-64-v2 | The rounding functions and `count_ones` are one instruction each. `fused_multiply_add` is still a call, and `leading_zeros` still branches on zero. |
+| x86-64-v3 | Each of them is one instruction, and a vectorized loop uses 256-bit registers. The program does not run on Intel's CPUs before Haswell (2013), on AMD's before Excavator (2015), on Atom-class cores before Gracemont (2021), or under an emulator or a virtual machine that provides no AVX. |
+| The CPU of the machine that builds | The program then depends on where it was built. A build is not reproducible, and an object in a cache that another machine restores can hold instructions that the machine lacks. |
+
+| Rule | Reason |
+|---|---|
+| The level changes no result. | Two float operations are fused only where the code calls `fused_multiply_add`, and the C compiler may not reorder float arithmetic. A cached test result holds at every level (*determinism*). |
+| A development build has the level of a release build. | At a lower level a test would run the C library's `fma` and rounding functions, and the released program the CPU's instructions. |
+| A program checks the CPU for each feature it was built for before `main` runs, and exits with status 126 after naming one that is missing. | Without the check the program is killed by an illegal instruction signal, at whichever instruction the CPU lacks first, and neither the signal nor its address names the feature. Go's programs make the same check when they are built for a level above the baseline. |
+| The message names the highest level that the machine has. | The fix is then one line of the manifest, which an agent can write without knowing the CPU. |
+| The level is the project's, written in its manifest. | A program has one level, so a dependency cannot choose it, and a project deploys to machines that its manifest can record. An environment variable would be set again on every machine that builds. |
+| A manifest names a level, never a CPU or one feature. | The four levels are every value, so the check covers each one in full. A feature outside the levels would need a row of its own in the check, and a CPU's name is known only to the C compilers released after the CPU. |
+| ARM64 keeps the C compiler's default. | Raising the level on Linux gives the atomic instructions of ARMv8.1, and excludes the Cortex-A72 of the Raspberry Pi 4. |
 
 ## Omitted features
 
