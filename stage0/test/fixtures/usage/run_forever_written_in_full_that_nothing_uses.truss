@@ -1,0 +1,7 @@
+use standard.capabilities
+
+fn f(values: List[UInt64]) -> UInt64
+  uses capabilities.Panic, capabilities.RunForever
+{
+  values.length() + 1
+}

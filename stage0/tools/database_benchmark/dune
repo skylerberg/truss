@@ -1,6 +1,7 @@
 (executable
  (name database_benchmark)
  (libraries
+  catalog
   cache
   database
   diagnostic

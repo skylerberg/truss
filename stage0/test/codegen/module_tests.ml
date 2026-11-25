@@ -1,6 +1,5 @@
 let root = Harness.make_workspace_path "stage0/test/codegen/modules"
 let list_entries directory = List.sort compare (Array.to_list (Sys.readdir directory))
-let share_index, share_count = Option.value Harness.share ~default:(0, 1)
 
 let files =
   List.concat_map
@@ -12,7 +11,7 @@ let files =
           else None)
         (list_entries (Filename.concat root topic)))
     (list_entries root)
-  |> List.filteri (fun position _ -> position mod share_count = share_index)
+  |> List.filter (fun (topic, name) -> Harness.is_in_share (topic ^ "." ^ name))
   |> List.map (fun (topic, name) ->
       let file_path : Path.file =
         { module_ = { Codegen_support.example with modules = [ topic; name ] }; name }
@@ -51,7 +50,7 @@ let () =
       in
       match Backend.run_tests backend ~time_limit_ms:10000 tests with
       | exception Compiler_bug.Bug bug -> fail_unbuilt (Compiler_bug.to_string bug)
-      | Error message -> fail_unbuilt message
+      | Error failure -> fail_unbuilt (Codegen_support.describe_failure failure)
       | Ok records ->
           List.iter2
             (fun path (record : Backend.Test_report.record) ->

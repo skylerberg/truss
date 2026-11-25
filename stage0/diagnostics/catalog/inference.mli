@@ -23,6 +23,7 @@ type unmet_bound =
 type mismatch =
   | Expected of { expected : shown; actual : shown; copy : view_copy option }
   | Loop_element of { element : shown; annotated : shown }
+  | Lambda_parameter_type of { passed : shown; annotated : shown }
   | Mismatched_integers of { left : Types.ty; right : Types.ty; widening : widening option }
   | Unsatisfied_bound of {
       of_type : Types.ty option;
@@ -48,6 +49,7 @@ type formula_construct =
   | Parallel_block
 
 type owner = Variant_name of string | Type_named of Types.ty
+type recipient = Named_parameter of string | Function_value
 type counted_callee = Fields_of of owner | Method_besides_self | Plain_function
 
 type bare_owner =
@@ -76,7 +78,6 @@ type empty_literal = Empty_list | Empty_map
 type integer_operator = Bitwise | Shift | Complement
 type joined_piece = Fragment of Core.origin | Interpolated of Core.origin
 type specification_call = Theorem_call | Mentions of Types.ty | Specification_function_call
-type lambda_remedy = Bracket_arguments of { declared_on : Path.t; is_type : bool } | Typed_let
 type specification_subject = Binding_subject of Core.origin | Value_subject
 
 type undetermined =
@@ -84,6 +85,7 @@ type undetermined =
   | Generic_argument of { parameter : string; is_type : bool; declared_on : Path.t }
   | List_element
   | Map_entries
+  | Lambda_parameter
 
 type t =
   | Mismatch of { at : Core.origin; mismatch : mismatch; decision : decision option }
@@ -148,7 +150,7 @@ type t =
   | Repeated_argument of { at : Core.origin; name : string; is_pattern : bool }
   | Not_an_integer of { at : Core.origin; subject : integer_subject; excluded : shown }
   | No_method of { at : Core.origin; owner : method_owner; name : string; candidates : string list }
-  | Counted_not_a_capability of { at : Core.origin; written : string }
+  | Counted_not_a_capability of { at : Core.origin; written : Core.origin Description.range }
   | Counted_not_a_function of { at : Core.origin; name : string; type_ : Types.ty }
   | Counted_neither of { at : Core.origin; name : string }
   | Cost_of_other_metric of {
@@ -179,7 +181,7 @@ type t =
   | Runs_in_formula of { at : Core.origin; construct : formula_construct }
   | Self_outside_method of { at : Core.origin }
   | Self_type_as_value of { at : Core.origin }
-  | Quantifier_over_type_in_code of { at : Core.origin }
+  | Quantifier_over_type_in_code of { at : Core.origin; quantifier : Language.Quantifier.t }
   | Static_method_as_value of { at : Core.origin; name : string }
   | Method_with_type_arguments_as_value of { at : Core.origin }
   | String_indexed of { at : Core.origin }
@@ -261,12 +263,18 @@ type t =
       keyword : Language.Mode.t;
     }
   | Not_assignable_place of { at : Core.origin }
-  | Mode_on_read_argument of { at : Core.origin; inner : Core.origin; parameter : string }
-  | Missing_mut_argument of { at : Core.origin; parameter : string }
-  | Lent_read_only_argument of { at : Core.origin; parameter : string }
-  | Temporary_passed_mut of { at : Core.origin; parameter : string }
+  | Mode_on_read_argument of { at : Core.origin; inner : Core.origin; recipient : recipient }
+  | Missing_mut_argument of { at : Core.origin; recipient : recipient }
+  | Lent_read_only_argument of { at : Core.origin; recipient : recipient }
+  | Temporary_passed_mut of { at : Core.origin; recipient : recipient }
   | Redundant_own of { at : Core.origin; inner : Core.origin; type_ : Types.ty }
-  | Mut_for_own of { at : Core.origin; parameter : string }
+  | Mut_for_own of { at : Core.origin; recipient : recipient }
+  | Lambda_parameter_mode of {
+      at : Core.origin;
+      type_expression : Core.origin;
+      passed : Language.Mode.t;
+      annotated : Language.Mode.t;
+    }
   | Type_parameter_as_value of { at : Core.origin; name : string }
   | Theorem_as_value of { at : Core.origin; name : string }
   | Type_as_value of { at : Core.origin; name : string }
@@ -284,12 +292,11 @@ type t =
   | Type_argument_count of { at : Core.origin; expected : int; given : int }
   | Type_for_value_argument of { at : Core.origin }
   | Value_for_type_argument of { at : Core.origin }
-  | Specification_call_in_code of { at : Core.origin; name : string; call : specification_call }
+  | Specification_call_in_code of { at : Core.origin; callee : Path.t; call : specification_call }
   | Not_an_integer_operand of { at : Core.origin; operator : integer_operator; excluded : shown }
   | Shift_amount_not_unsigned of { at : Core.origin; excluded : shown }
   | Try_error_mismatch of { at : Core.origin; output_error : Types.ty; error : Types.ty }
   | Try_misused of { at : Core.origin }
-  | Implies_in_code of { at : Core.origin }
   | String_addition of { at : Core.origin; join : (joined_piece * joined_piece) option }
   | Alternative_type_mismatch of {
       at : Core.origin;
@@ -322,7 +329,7 @@ type t =
       reorder : string list option;
     }
   | Unmatched_fields of { at : Core.origin; missing : string list }
-  | Not_structural of { at : Core.origin; type_ : Types.ty; constant : string }
+  | Not_structural of { at : Core.origin; type_ : Types.ty }
   | Not_a_constant of { at : Core.origin }
   | Literal_does_not_fit of {
       at : Core.origin;
@@ -344,17 +351,16 @@ type t =
   | Undetermined of { at : Core.origin; undetermined : undetermined }
   | Types_undetermined of { at : Core.origin }
   | Trait_arguments_undetermined of { at : Core.origin; trait : Path.t }
-  | Lambda_needs_type of { at : Core.origin; remedy : lambda_remedy }
   | Range_not_integer of { at : Core.origin; owner : range_owner; element : Types.ty }
   | Unused_value of { at : Core.origin; type_ : Types.ty }
   | Let_else_falls_through of { at : Core.origin }
   | Not_iterable_loop of { at : Core.origin; mode : Language.Mode.t; is_view : bool; type_ : shown }
   | Cursor_not_cursor of { at : Core.origin; type_ : Types.ty; cursor : Types.ty }
   | Not_displayable of { at : Core.origin; type_ : Types.ty }
-  | Template_part_conversion of {
+  | Interpolation_not_convertible of {
       at : Core.origin;
-      part_type : Types.ty;
-      part : Types.ty;
+      interpolated_type : Types.ty;
+      interpolation_type : Types.ty;
       tag_type : Types.ty;
     }
   | Not_a_tag of { at : Core.origin; tag_type : Types.ty }

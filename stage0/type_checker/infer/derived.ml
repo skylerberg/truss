@@ -130,8 +130,9 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 Interface.Impls.find_evidence lookups.interface ~list_bounds of_type reference
               with
               | Some (Evidence evidence) -> evidence
-              | Some Built_in | Some (Accepted _) | None ->
-                  raise_bug "`%s` is derived for a type with a field that has none"
+              | Some (Accepted _) -> raise_bug "a field of an error type, which no build reaches"
+              | Some Built_in | None ->
+                  raise_bug "`%s` is derived for a type with a field that does not have it"
                     (Path.show reference.trait)
             in
             node type_

@@ -96,8 +96,8 @@ module Scope : sig
     | Found_module of { module_ : Path.module_; imported : Path.module_ option }
     | Restricted_module
     | Ambiguous_module of Path.module_ * Path.module_
-    | No_module of string
-    | No_package of string
+    | No_module
+    | No_package
 
   val lookup_module :
     lookups ->

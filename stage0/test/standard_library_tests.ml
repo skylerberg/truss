@@ -8,16 +8,7 @@ let library =
        (List.map (fun ((file : Path.file), _) -> file.module_) Standard_library.files))
 
 let solver =
-  let cache = Workspace.open_cache () in
-  match
-    Solver.find
-      ~cache:
-        {
-          find = (fun key -> Cache.find_result cache ~kind:Solver_answer ~key);
-          add = (fun key value -> Cache.add_result cache ~kind:Solver_answer ~key value);
-        }
-      ()
-  with
+  match Solver.find () with
   | Ok solver -> solver
   | Error message ->
       prerr_endline message;
@@ -73,5 +64,4 @@ let () =
               ignore (Core_lint.check_file database file);
               Mir_lint.check_file database file)
             (list_clean files)))
-    library;
-  run_timed "collecting the cache" Workspace.For_testing.collect_cache
+    library

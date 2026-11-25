@@ -1,0 +1,13 @@
+fn f(
+  count: UInt64,
+  size: UInt64,
+  apply: (fn((fn() -> UInt64 cost time O(1))) -> UInt64 cost time O(1)),
+) -> UInt64
+  decreases count
+  cost time O(size)
+{
+  if count == 0 {
+    return 0
+  }
+  apply(fn() { f(count - 1, 0, apply) })
+}

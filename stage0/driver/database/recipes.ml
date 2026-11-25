@@ -554,7 +554,7 @@ let find_growing_cycles database rows =
 let item_kind = Kind.rank_target (Entity Item)
 
 let item_stages : Kind.stage list =
-  [ Lower; Key_tests; Evaluate; Render Development; Render Release ]
+  [ Lower; Key_tests; Evaluate; Run_test; Render Development; Render Release ]
 
 let item_graph : Store.item_graph =
   {
@@ -714,7 +714,25 @@ type answered_unit = {
   notes : note list;
   answers : Solver.answer list;
   refutations : Solver.answer list;
+  solver_runs : Store.solver_run list;
 }
+
+let hash_solver_input = Blake3.derive_key ~context:"truss 2026-11-25 solver input"
+
+let list_distinct_solver_runs (solved : Solver.solved list) =
+  let listed = Hashtbl.create 16 in
+  List.concat_map
+    (fun (solved : Solver.solved) ->
+      List.filter_map
+        (fun (run : Solver.run) : Store.solver_run option ->
+          let input_hash = hash_solver_input run.input in
+          if Hashtbl.mem listed input_hash then None
+          else begin
+            Hashtbl.replace listed input_hash ();
+            Some { input_hash; output = run.output }
+          end)
+        solved.runs)
+    solved
 
 let split_by_counts counts values =
   let remaining = ref values in
@@ -747,40 +765,61 @@ let solve_units (database : Tracker.t) solver (rows : Store.definition list) =
         | Ok (None, _) | Error _ -> [])
       posed
   in
+  let outputs = Hashtbl.create 64 in
+  List.iter
+    (fun (row : Store.definition) ->
+      List.iter
+        (fun (run : Store.solver_run) -> Hashtbl.replace outputs run.input_hash run.output)
+        (Store.list_solver_runs database.store ~definition:row.id))
+    rows;
+  let find_output input = Hashtbl.find_opt outputs (hash_solver_input input) in
   let solve_each requests =
-    split_by_counts (List.map List.length requests) (Solver.solve_all solver (List.concat requests))
+    split_by_counts (List.map List.length requests)
+      (Solver.solve_all ~find_output solver (List.concat requests))
   in
-  let answers = solve_each (list_of_posed Prover.list_requests) in
-  let refutations =
+  let list_answers = List.map (fun (solved : Solver.solved) -> solved.answer) in
+  let solved_requests = solve_each (list_of_posed Prover.list_requests) in
+  let solved_refutations =
     solve_each
       (List.map2
-         (fun (_, unit) answers ->
+         (fun (_, unit) solved ->
            match unit with
-           | Ok (Some { posed; _ }, _) -> Prover.list_refutation_requests posed answers
+           | Ok (Some { posed; _ }, _) ->
+               Prover.list_refutation_requests posed (list_answers solved)
            | Ok (None, _) | Error _ -> [])
-         posed answers)
+         posed solved_requests)
   in
   let answered = Hashtbl.create (List.length rows) in
   List.iter2
-    (fun (id, unit) (answers, refutations) ->
+    (fun (id, unit) (requests, refutations) ->
       Hashtbl.replace answered id
-        (Result.map (fun (unit, notes) -> { unit; notes; answers; refutations }) unit))
+        (Result.map
+           (fun (unit, notes) ->
+             {
+               unit;
+               notes;
+               answers = list_answers requests;
+               refutations = list_answers refutations;
+               solver_runs = list_distinct_solver_runs (requests @ refutations);
+             })
+           unit))
     posed
-    (List.combine answers refutations);
+    (List.combine solved_requests solved_refutations);
   answered
 
 let run_decide (database : Tracker.t) answered (row : Store.definition) =
-  let states, has_unfinished_run =
+  let states, has_unfinished_run, solver_runs =
     Tracker.record database Decide row.id (fun recorder ->
         match Hashtbl.find answered row.id with
         | Error raised -> raise raised
-        | Ok { unit; notes; answers; refutations } -> (
+        | Ok { unit; notes; answers; refutations; solver_runs } -> (
             List.iter (fun (marker, target, id, name) -> recorder.note marker target id name) notes;
             match unit with
             | Some { posed; has_unfinished_run } ->
-                (Prover.list_states posed ~answers ~refutations, has_unfinished_run)
-            | None -> ([], false)))
+                (Prover.list_states posed ~answers ~refutations, has_unfinished_run, solver_runs)
+            | None -> ([], false, [])))
   in
+  Store.replace_solver_runs database.store ~definition:row.id solver_runs;
   Tracker.report Decide row.id
     ~is_changed:
       (Store.replace_verdicts database.store ~definition:row.id
@@ -965,6 +1004,16 @@ let record_evaluation (database : Tracker.t) item (result : Lowering.evaluation)
   ignore (Tracker.write database Facts.evaluation ~id (Some (Value result)));
   ignore (Store.unmark_stale database.store ~stage:(Kind.rank_stage Evaluate) ~id)
 
+let record_test_run (database : Tracker.t) item (pass : Lowering.test_pass option) =
+  let id = Ids.of_item item in
+  match pass with
+  | None -> Tracker.forget database Run_test id
+  | Some pass ->
+      Tracker.record database Run_test id (fun recorder ->
+          recorder.note Reads (Fact Test_key) id "");
+      ignore (Tracker.write database Facts.test_run ~id (Some (Value pass)));
+      ignore (Store.unmark_stale database.store ~stage:(Kind.rank_stage Run_test) ~id)
+
 let run_render profile (database : Tracker.t) id =
   let item = read_item database id in
   let outcome =
@@ -1147,7 +1196,8 @@ let rec forget_definition (database : Tracker.t) (row : Store.definition) =
   if is_proven_definition row then begin
     Tracker.forget database Decide row.id;
     Store.replace_holes database.store ~definition:row.id [];
-    ignore (Store.replace_verdicts database.store ~definition:row.id [])
+    ignore (Store.replace_verdicts database.store ~definition:row.id []);
+    Store.replace_solver_runs database.store ~definition:row.id []
   end;
   collect_items database claimed;
   if is_impl row then begin
@@ -1375,7 +1425,7 @@ let list_definition_facts () =
 
 let locate_entity (stage : Kind.stage) : Store.unit_entity =
   match stage with
-  | Lower | Key_tests | Evaluate | Render _ -> Item_unit
+  | Lower | Key_tests | Evaluate | Run_test | Render _ -> Item_unit
   | Parse | Check_imports -> File_unit
   | Declare -> Module_unit
   | Resolve_grant | Check_dependency -> Dependency_unit
@@ -1528,6 +1578,8 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
   | Evaluate ->
       Compiler_bug.raise_bug ~stage:"Database"
         "an evaluation is recorded by the command that runs it"
+  | Run_test ->
+      Compiler_bug.raise_bug ~stage:"Database" "a test run is recorded by the command that runs it"
   | Decide -> Compiler_bug.raise_bug ~stage:"Database" "Decide is drained with a solver"
   | Resolve | Read_trait_header | Evaluate_constant | Elaborate_header | Elaborate
   | Derive_interface | Check_signature | Check_body | Build_body_mir | Build_contract_mir

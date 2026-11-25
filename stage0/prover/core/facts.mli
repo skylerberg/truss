@@ -3,7 +3,7 @@ val make_variable : ?numbers:int list -> string -> 'a Logic.Symbol.t
 type unsupported = {
   location : Obligation.location;
   construct : Catalog.Prover.construct;
-  foreign_definition : string option;
+  foreign_definition : Path.t option;
 }
 
 exception Unsupported of unsupported
@@ -28,13 +28,14 @@ val assume : State.context -> State.frame -> Logic.term -> unit
 val add_requires :
   State.context -> State.frame -> Catalog.Prover.required list -> Catalog.Prover.fix list
 
-val show_truss_value : State.context -> Logic.term -> string option
+val find_value_code : State.context -> Logic.term -> Catalog.Code.t option
 val remove_panic_condition : Types.capability_set -> Types.capability_set
 val find_counter_condition : State.context -> Costs.counter -> Types.condition
 
 val oblige :
   ?cited:Resolve.Names.key * Core.origin ->
   ?fixes:Catalog.Prover.fix list ->
+  ?can_be_required:bool ->
   ?holds_when:Types.condition ->
   State.context ->
   State.frame ->

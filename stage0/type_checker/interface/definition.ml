@@ -15,7 +15,14 @@ let make_builtin_shape (builtin : Language.Builtin_type.t) : Types.type_interfac
         })
       (Resolve.Names.list_builtin_generics builtin)
   in
-  { type_generics; shape = Builtin_type builtin; opaque = true; is_tuple = false; derives = [] }
+  {
+    type_generics;
+    shape = Builtin_type builtin;
+    opaque = true;
+    is_tuple = false;
+    derives = [];
+    declares_potential = false;
+  }
 
 let find_type_interface lookups (path : Path.t) =
   match Well_known.find_builtin_type path with

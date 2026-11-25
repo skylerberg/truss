@@ -2,6 +2,32 @@ let make ?(fixes = []) code location message : Nodes.description =
   { code = Patterns code; severity = Error; location; message; notes = []; fixes }
 
 let unreachable = "Earlier arms already match everything this arm matches, so it is never reached."
+let is_any (field : Patterns.field_witness) = field.witness = Any
+
+let rec show_witness : Patterns.witness -> string = function
+  | Any -> "_"
+  | Boolean value -> if value then "true" else "false"
+  | Integers { low; high } ->
+      if Z.equal low high then Z.to_string low
+      else Printf.sprintf "%s..=%s" (Z.to_string low) (Z.to_string high)
+  | Variant { variant; fields = [] } -> variant
+  | Record [] -> "()"
+  | Variant { variant; fields = [ { witness = Any; _ } ] } -> variant ^ "(_)"
+  | Variant { variant; fields } when List.for_all is_any fields -> variant ^ "(..)"
+  | Record fields when List.for_all is_any fields -> "_"
+  | Variant { variant; fields = [ only ] } ->
+      Printf.sprintf "%s(%s)" variant (show_witness only.witness)
+  | Record [ only ] -> Printf.sprintf "(%s)" (show_witness only.witness)
+  | Variant { variant; fields } -> Printf.sprintf "%s(%s)" variant (show_fields fields)
+  | Record fields -> Printf.sprintf "(%s)" (show_fields fields)
+
+and show_fields fields =
+  String.concat ", "
+    (List.map
+       (fun (field : Patterns.field_witness) -> field.field ^ ": " ^ show_witness field.witness)
+       fields)
+
+let show_row row = String.concat ", " (List.map show_witness row)
 
 let describe : Patterns.t -> Nodes.description = function
   | Shadowing_arm { arm; name; constant; bindings } ->
@@ -60,7 +86,7 @@ let describe : Patterns.t -> Nodes.description = function
                     [
                       Build.add_lines_after last_arm
                         (List.map
-                           (fun witness -> [ Description.Text (witness ^ " => todo") ])
+                           (fun row -> [ Description.Text (show_row row ^ " => todo") ])
                            (witness :: other_witnesses));
                     ];
                 };
@@ -68,7 +94,8 @@ let describe : Patterns.t -> Nodes.description = function
           | None -> [])
         [
           Text
-            (Printf.sprintf "This `match` does not cover every case: `%s` is not covered%s." witness
+            (Printf.sprintf "This `match` does not cover every case: `%s` is not covered%s."
+               (show_row witness)
                (match (other_witnesses, may_have_more) with
                | [], _ -> ""
                | _, true -> ", nor others"
@@ -82,5 +109,5 @@ let describe : Patterns.t -> Nodes.description = function
             (Printf.sprintf
                "This pattern can fail: it does not match `%s`. Use `match`, an `is` test, or `let \
                 ... else`."
-               witness);
+               (show_witness witness));
         ]

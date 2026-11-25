@@ -119,7 +119,9 @@ let read_root context frame run (root : Mir.root) =
       | Core_local Self -> (
           match frame.self with
           | Some self -> self
-          | None -> Facts.raise_bug "`%s` reads `self` outside a method" frame.source.name)
+          | None ->
+              Facts.raise_bug "`%s` reads `self` outside a method"
+                (Resolve.Names.show_key frame.source.key))
       | key -> (
           (if frame.makes_obligations && not context.reading_callback then
              match key with
@@ -131,7 +133,8 @@ let read_root context frame run (root : Mir.root) =
           match Locals.find_opt key frame.locals with
           | Some term -> term
           | None ->
-              Facts.raise_bug "`%s` reads %s before the prover binds it" frame.source.name
+              Facts.raise_bug "`%s` reads %s before the prover binds it"
+                (Resolve.Names.show_key frame.source.key)
                 (describe_local run.infos.(local).kind)))
 
 let rec read_resolved context frame run (place : Mir.place) =
@@ -257,8 +260,53 @@ let write_resolved context frame run (place : Mir.place) new_value =
       | key ->
           Facts.bind frame key (Facts.substitute_type context frame run.infos.(local).type_) whole)
 
-let write_place context frame run (place : Mir.place) new_value =
-  match resolve_aliases frame run place with
+let compute_enclosing_potential_change context ~(before : State.frame) ~(after : State.frame) run
+    (place : Mir.place) =
+  let measure_declared (at : State.frame) prefix =
+    let ty = compute_place_type context at run prefix in
+    if Amounts.has_declared_potential context ty then
+      Amounts.compute_declared_potential context at ty
+        (read_resolved context { at with makes_obligations = false } run prefix)
+    else Costs.zero
+  in
+  snd
+    (List.fold_left
+       (fun (prefix, total) (projection : Mir.projection) ->
+         let base = { place with Mir.projections = prefix } in
+         ( prefix @ [ projection ],
+           match projection with
+           | Field _ | Variant_field _ ->
+               Costs.plus total
+                 (Costs.minus (measure_declared after base) (measure_declared before base))
+           | Element _ | Range _ -> total ))
+       ([], Costs.zero) place.Mir.projections)
+
+let spend_enclosing_potential_change context ~before ~after run alternatives =
+  let parts =
+    List.filter
+      (fun (_, (place : Mir.place)) ->
+        place.projections <> [] && match place.root with Local _ -> true | _ -> false)
+      alternatives
+  in
+  if
+    parts = []
+    || not (List.exists (fun (counter : Costs.counter) -> counter.amortized) context.State.counters)
+  then after
+  else
+    let change =
+      lazy
+        (List.fold_left
+           (fun total (condition, place) ->
+             Costs.plus total
+               (Amounts.make_conditional_amount condition
+                  (compute_enclosing_potential_change context ~before ~after run place)))
+           Costs.zero parts)
+    in
+    Operations.spend context after (fun (counter : Costs.counter) ->
+        if counter.amortized then Lazy.force change else Costs.zero)
+
+let write_alternatives context frame run alternatives new_value =
+  match alternatives with
   | [ (_, place) ] -> write_resolved context frame run place new_value
   | alternatives ->
       List.fold_left
@@ -281,6 +329,11 @@ let write_place context frame run (place : Mir.place) new_value =
                         (Logic.ite condition after before)
                   | _ -> written)))
         frame alternatives
+
+let write_place context frame run (place : Mir.place) new_value =
+  let alternatives = resolve_aliases frame run place in
+  spend_enclosing_potential_change context ~before:frame run alternatives
+    ~after:(write_alternatives context frame run alternatives new_value)
 
 let compute_changes ?(also = []) context run (frame : State.frame) (blocks : Mir.block list) =
   let is_bound : Locals.local -> bool = function
@@ -320,6 +373,40 @@ let compute_changes ?(also = []) context run (frame : State.frame) (blocks : Mir
              && Types.is_field_path_prefix other.fields part.fields)
            parts))
     parts
+
+let find_declared_root_type context frame run root =
+  match
+    Seq.find_map
+      (fun (local, (info : Mir.local_info)) ->
+        if Locals.make_key run.infos local = root then Some info.type_ else None)
+      (Array.to_seqi run.infos)
+  with
+  | Some ty -> Facts.substitute_declared_type context frame ty
+  | None -> Facts.raise_bug "a changed local that the run does not declare"
+
+let forget_changes context run (frame : State.frame) (changed : State.changed_part list) =
+  let roots =
+    List.map
+      (fun root -> (root, find_declared_root_type context frame run root))
+      (List.sort_uniq compare (List.map (fun (part : State.changed_part) -> part.root) changed))
+  in
+  let measure (at : State.frame) =
+    List.fold_left
+      (fun total (root, ty) ->
+        match
+          match root with
+          | Locals.Core_local Self -> at.self
+          | root -> Locals.find_opt root at.locals
+        with
+        | Some term -> Costs.plus total (Amounts.compute_potential context at ty term)
+        | None -> total)
+      Costs.zero roots
+  in
+  let forgotten = Loops.havoc context frame changed in
+  Operations.spend context forgotten (fun (counter : Costs.counter) ->
+      if counter.amortized then
+        Costs.minus (Costs.at_least_zero (measure forgotten)) (measure frame)
+      else Costs.zero)
 
 let read_operand context frame run (operand : Mir.operand) =
   match operand with
@@ -602,10 +689,9 @@ let lend_part context (frame : State.frame) origin (mode : Language.Mode.t) ~han
         part_postconditions;
       Lambdas.check_valid context frame location part_type handed ~deep:true ~moment:Part_lent;
       let frame, part_after =
-        if mode = Language.Mode.Mut && lends then (
+        if mode = Language.Mode.Mut && lends then
           let part_after = Facts.arrive context frame "lent" part_type in
-          context.lent_back <- (part_type, handed, part_after) :: context.lent_back;
-          (write_back frame part_after, part_after))
+          (write_back frame part_after, part_after)
         else (frame, handed)
       in
       Some
@@ -637,14 +723,16 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
         Logic.Is
           (Facts.make_constructor_symbol ty (Some variant), read_place context frame run place) )
   | Copy copied_operand ->
-      let ty = compute_operand_type context frame copied_operand in
+      let declared =
+        Facts.substitute_declared_type context frame (Mir.extract_operand_type copied_operand)
+      in
       let term = translate_operand copied_operand in
       let literal =
         match copied_operand with
         | Borrow { place = { root = Literal { value; _ }; projections = [] }; _ } -> Some value
         | _ -> None
       in
-      (Values.copy_value ?literal context frame ty term, term)
+      (Values.copy_value ?literal context frame ~declared term, term)
   | Convert { conversion = Widen; value; converts_function_expression } ->
       Operations.check_widened location ~is_written:converts_function_expression
         (compute_operand_type context frame value)
@@ -699,25 +787,31 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Specification Result -> (
       match frame.result with
       | Some result -> (frame, result)
-      | None -> Facts.raise_bug "`%s` reads `result` outside an `ensures`" frame.source.name)
+      | None ->
+          Facts.raise_bug "`%s` reads `result` outside an `ensures`"
+            (Resolve.Names.show_key frame.source.key))
   | Specification (Entry local) -> (
       match Locals.make_key run.infos local with
       | Core_local Self -> (
           match frame.old_self with
           | Some self -> (frame, self)
-          | None -> Facts.raise_bug "`%s` reads `old(self)` outside a method" frame.source.name)
+          | None ->
+              Facts.raise_bug "`%s` reads `old(self)` outside a method"
+                (Resolve.Names.show_key frame.source.key))
       | key -> (
           match Locals.find_opt key frame.old_locals with
           | Some term -> (frame, term)
           | None ->
               Facts.raise_bug "`%s` reads the entry value of %s, which the prover did not bind"
-                frame.source.name
+                (Resolve.Names.show_key frame.source.key)
                 (describe_local run.infos.(local).kind)))
   | Specification Yielded -> (
       match (frame.yielded, frame.yielded_so_far) with
       | Some yielded, _ -> (frame, yielded)
       | None, Some yielded_so_far when Facts.is_home context frame.source -> (frame, yielded_so_far)
-      | _ -> Facts.raise_bug "`%s` reads `yielded` outside a lending method" frame.source.name)
+      | _ ->
+          Facts.raise_bug "`%s` reads `yielded` outside a lending method"
+            (Resolve.Names.show_key frame.source.key))
   | Specification (Identical (first, second)) ->
       let first_value = translate_operand first and second_value = translate_operand second in
       Values.assume_extensional context frame
@@ -922,15 +1016,31 @@ and read_statement context frame run (statement : Mir.statement) =
         term;
       Some frame
   | Provide { target; provided; body; _ } ->
+      let provider_potential =
+        lazy
+          (List.fold_left
+             (fun total (implementation : Mir.provided) ->
+               Costs.plus total
+                 (Amounts.compute_potential context frame
+                    (Facts.substitute_type context frame implementation.type_)
+                    (read_operand context
+                       { frame with makes_obligations = false }
+                       run implementation.value)))
+             Costs.zero provided)
+      in
       let refresh frame =
-        List.fold_left
-          (fun frame place ->
-            let root = { (expand_place frame run place) with Mir.projections = [] } in
-            refresh_place context frame
-              (compute_place_type context frame run root)
-              (make_passed_place context run root))
-          frame
-          (Mir.list_mut_provided_places provided)
+        Operations.spend context
+          (List.fold_left
+             (fun frame place ->
+               let root = { (expand_place frame run place) with Mir.projections = [] } in
+               refresh_place context frame
+                 (compute_place_type context frame run root)
+                 (make_passed_place context run root))
+             frame
+             (Mir.list_mut_provided_places provided))
+          (fun (counter : Costs.counter) ->
+            if counter.amortized || counter.counting <> Units then Costs.zero
+            else Lazy.force provider_potential)
       in
       let read =
         read_providing context run provided ~refresh (fun () -> read_block context frame run body)
@@ -1012,7 +1122,7 @@ and read_statement context frame run (statement : Mir.statement) =
           (List.mapi (fun index branch -> (index, branch)) branches)
       in
       let forget_other_branches (index, (exited : State.frame)) =
-        Loops.havoc context exited
+        forget_changes context run exited
           (compute_changes context run exited
              (List.filteri (fun other _ -> other <> index) branches))
       in

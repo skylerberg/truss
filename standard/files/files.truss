@@ -1085,7 +1085,7 @@ fn parse_class(pattern: String, from: UInt64) -> Result[ParsedClass, GlobError]
 }
 
 impl FromTemplate for Glob {
-  type Part = Never
+  type Interpolation = Never
 
   fn is_valid_template(literals: List[text.Literal]) -> Bool
     ensures result ==> literals.length() == 1

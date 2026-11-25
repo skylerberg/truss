@@ -12,22 +12,6 @@ let ignore_all =
 let locate_origin : Core.origin -> Syntax.id = function
   | Written node | Desugared { construct = node; _ } -> node
 
-let describe_call (origin : Core.origin) ?callee ~quote () =
-  let call =
-    match callee with Some callee -> Printf.sprintf "call to `%s`" callee | None -> "call"
-  in
-  match origin with
-  | Written _ -> "this " ^ call
-  | Desugared { desugaring; _ } ->
-      let maker =
-        match desugaring with
-        | For_loop -> "this `for` loop"
-        | Quantifier -> "this quantifier"
-        | Derived -> Printf.sprintf "the derived `%s`" (quote ())
-        | Rewrite | Try -> Printf.sprintf "`%s`" (quote ())
-      in
-      Printf.sprintf "the %s that %s makes" call maker
-
 let compute_place_type : Core.place -> Types.ty = function
   | Local { type_; _ }
   | Constant { type_; _ }

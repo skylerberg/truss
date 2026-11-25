@@ -52,14 +52,10 @@ let fetch registry ~into name version ~hash =
     let files = Content.list_all_files (make_version_directory registry name version) in
     if files = [] then
       Error
-        (Printf.sprintf "the registry at %s has no `%s` %s" registry.root (Path.show_package name)
-           (Version.show version))
+        (Project_catalog.Problem.Missing_from_registry { registry = registry.root; name; version })
     else if Content.hash files <> hash then
-      Error
-        (Printf.sprintf
-           "the files the registry at %s holds as `%s` %s do not have the hash the lock file names"
-           registry.root (Path.show_package name) (Version.show version))
+      Error (Changed_in_registry { registry = registry.root; name; version })
     else begin
       File_system.write_directory_atomically target files;
-      if Sys.file_exists target then Ok target else Error (Printf.sprintf "cannot write %s" target)
+      if Sys.file_exists target then Ok target else Error (Unwritable { directory = target })
     end

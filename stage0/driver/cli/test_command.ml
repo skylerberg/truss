@@ -199,16 +199,18 @@ let handle_progress progress ~build_ended (event : Backend.progress) =
 let run_tests ?rerun ?report_progress database snapshot packages tests =
   if tests = [] then []
   else
+    let backend =
+      Workspace_backend.create snapshot
+        (Workspace_backend.require_lowered_lookups database packages)
+        Development
+    in
     match
-      Backend.run_tests ?rerun ?report_progress
-        (Workspace_backend.create snapshot
-           (Workspace_backend.require_lowered_lookups database packages)
-           Development)
+      Backend.run_tests ?rerun ?report_progress backend
         ~time_limit_ms:(Workspace.time_limit_ms snapshot)
         (List.map (fun test -> test.path) tests)
     with
     | Ok records -> records
-    | Error message -> Outcome.raise_cannot_run "%s" message
+    | Error failure -> Outcome.raise_cannot_run "%s" (Backend.describe_failure backend failure)
 
 let run ~paths ~match_ ~timings:show_timings ~rerun =
   let json = Output.json () in

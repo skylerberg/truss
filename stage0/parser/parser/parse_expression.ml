@@ -427,13 +427,12 @@ and parse_clause cursor : Syntax.clause =
   { kind; condition; id = Cursor.allocate_id_from cursor start }
 
 and parse_cost cursor =
-  let amortized =
+  let amortized_word =
     match (Contextual_keyword.of_token (Cursor.peek_kind cursor), Cursor.peek_ahead cursor 1) with
-    | Some Amortized, Lower _ ->
-        Cursor.advance cursor;
-        true
-    | _ -> false
+    | Some Amortized, Lower _ -> Some (Cursor.take cursor)
+    | _ -> None
   in
+  let amortized = Option.is_some amortized_word in
   if Contextual_keyword.of_token (Cursor.peek_kind cursor) = Some Potential then begin
     Cursor.report cursor (Cursor.peek cursor).span Misplaced_potential;
     raise Cursor.Failed
@@ -460,6 +459,10 @@ and parse_cost cursor =
              ~expected:Cost_bound);
         Big_o (parse_parenthesized_expression cursor)
   in
+  (match (amortized_word, resource, bound) with
+  | Some word, (Calls _ | Metric _), (At_most _ | Exactly _) | Some word, Calls _, Big_o _ ->
+      Cursor.report cursor word.span Amortized_bound
+  | Some _, Metric _, Big_o _ | None, _, _ -> ());
   { amortized; resource; bound }
 
 and parse_call_target cursor =
@@ -1039,26 +1042,30 @@ and parse_lambda cursor =
   let start = Cursor.index cursor in
   Cursor.advance cursor;
   if not (Cursor.is_punctuation cursor (Open Paren)) then Cursor.fail cursor Open_paren_in_lambda;
-  let parse_parameter cursor =
+  let parse_parameter cursor : Syntax.lambda_parameter =
     let pattern = Parse_pattern.parse_pattern cursor in
-    if Cursor.is_punctuation cursor Colon then begin
-      let from = Cursor.compute_previous_stop cursor in
-      Cursor.advance cursor;
-      ignore (Atoms.parse_mode cursor);
-      ignore (parse_type_expression cursor);
-      Habits.report_lambda_annotation cursor ~from ~stop:(Cursor.compute_previous_stop cursor)
-    end;
-    pattern
+    let annotation : Syntax.parameter_annotation option =
+      if Cursor.accept_punctuation cursor Colon then
+        let annotation_start = Cursor.index cursor in
+        let mode = Atoms.parse_mode cursor in
+        let type_ = parse_type_expression cursor in
+        Some { mode; type_; id = Cursor.allocate_id_from cursor annotation_start }
+      else None
+    in
+    { pattern; annotation }
   in
   let parameters =
     Cursor.parse_bracketed cursor ~parse_item:parse_parameter ~recover:(fun span ->
-        { kind = Pattern_error; id = Cursor.allocate_id cursor span })
+        {
+          pattern = { kind = Pattern_error; id = Cursor.allocate_id cursor span };
+          annotation = None;
+        })
   in
   if Cursor.is_punctuation cursor Arrow then begin
     let from = Cursor.compute_previous_stop cursor in
     Cursor.advance cursor;
     ignore (parse_type_expression cursor);
-    Habits.report_lambda_annotation cursor ~from ~stop:(Cursor.compute_previous_stop cursor)
+    Habits.report_lambda_result_type cursor ~from ~stop:(Cursor.compute_previous_stop cursor)
   end;
   Atoms.make_expression_node cursor start (Lambda { parameters; body = parse_body cursor })
 
@@ -1334,7 +1341,13 @@ and parse_loop_clauses cursor =
     | Keyword Cost ->
         let keyword = Cursor.take cursor in
         let cost = parse_cost cursor in
-        if cost.amortized then Cursor.report cursor keyword.span Amortized_loop_cost;
+        if
+          cost.amortized
+          &&
+          match (cost.resource, cost.bound) with
+          | Metric _, Big_o _ -> true
+          | (Metric _ | Calls _), (Big_o _ | At_most _ | Exactly _) -> false
+        then Cursor.report cursor keyword.span Amortized_loop_cost;
         gather
           (({
               kind = Loop_cost cost;

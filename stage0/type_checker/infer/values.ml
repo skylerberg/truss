@@ -24,14 +24,54 @@ let find_all options =
     (fun option all -> Option.bind option (fun each -> Option.map (List.cons each) all))
     options (Some [])
 
+let check_parameter_annotation (state : State.state) ~mode ~input
+    ((annotation : Syntax.parameter_annotation), annotated_mode, annotated) =
+  if annotated_mode <> mode then
+    State.report state
+      (Lambda_parameter_mode
+         {
+           at = Written annotation.id;
+           type_expression = Written annotation.type_.id;
+           passed = mode;
+           annotated = annotated_mode;
+         });
+  if not (State.unify state input annotated) then
+    ignore
+      (Failures.add_mismatch_diagnostic state (Written annotation.type_.id)
+         ~sides:[ (input, annotated) ]
+         (Lambda_parameter_type
+            { passed = State.make_shown state input; annotated = State.make_shown state annotated }))
+
+let require_decided_parameter (state : State.state) (parameter : Syntax.lambda_parameter) input =
+  let list_undecided () =
+    List.filter
+      (function
+        | Unify.Unknown_type index -> Option.is_none (Unify.find_domain state.unifier index)
+        | Unknown_value _ -> true)
+      (Unify.list_unknowns state.unifier input)
+  in
+  List.iter
+    (function Unify.Unknown_type index -> Solver.solve_head state index | Unknown_value _ -> ())
+    (list_undecided ());
+  match (list_undecided (), parameter.pattern.kind) with
+  | [], _ | _, Pattern_error -> ()
+  | undecided, _ ->
+      let reported =
+        State.add_diagnostic state
+          (Undetermined { at = Written parameter.pattern.id; undetermined = Lambda_parameter })
+      in
+      List.iter (fun unknown -> Unify.poison state.unifier unknown reported) undecided
+
 let rec check_string_literal state env ?expected (value : Syntax.expression)
     (literal : Syntax.string_literal) =
-  let parts =
-    List.map (fun (part, _) -> (part, Hooks.check_expression state env part)) literal.rest
+  let interpolations =
+    List.map
+      (fun (interpolated, _) -> (interpolated, Hooks.check_expression state env interpolated))
+      literal.rest
   in
   match literal.tag with
   | None ->
-      if parts <> [] then
+      if interpolations <> [] then
         State.check_when_final state (fun () ->
             let display = Types.make_trait_reference ~arguments:[] (Well_known.make_path Display) in
             Option.iter
@@ -39,19 +79,20 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                 State.elaborate state value.id (Template (Interpolated { displays })))
               (find_all
                  (List.map
-                    (fun ((part : Syntax.expression), part_type) ->
-                      let part_type = State.finalize_type state part_type in
-                      match State.find_evidence state part_type display with
+                    (fun ((interpolated : Syntax.expression), interpolated_type) ->
+                      let interpolated_type = State.finalize_type state interpolated_type in
+                      match State.find_evidence state interpolated_type display with
                       | Some _ ->
                           Some
-                            (Tables.make_method_call display Display_display ~self_type:part_type
-                               ~result:Types.unit
-                               [ (part, Read) ])
+                            (Tables.make_method_call display Display_display
+                               ~self_type:interpolated_type ~result:Types.unit
+                               [ (interpolated, Read) ])
                       | None ->
                           State.report state
-                            (Not_displayable { at = Written part.id; type_ = part_type });
+                            (Not_displayable
+                               { at = Written interpolated.id; type_ = interpolated_type });
                           None)
-                    parts)));
+                    interpolations)));
       Types.string_type
   | Some tag -> (
       match State.find_target state tag.last with
@@ -63,7 +104,9 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                 arguments = Instantiation.instantiate_type state ~written:tag.last.id tag_path;
               }
           in
-          List.iter (fun (part, _) -> Modes.note_owned_value state env part) parts;
+          List.iter
+            (fun (interpolated, _) -> Modes.note_owned_value state env interpolated)
+            interpolations;
           (match expected with
           | Some expected -> ignore (State.unify state tag_type expected)
           | None -> ());
@@ -78,18 +121,18 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                     Tables.make_method_call template_trait From_template_from_template
                       ~self_type:tag_type ~result:tag_type []
                   in
-                  let part =
-                    Solver.resolve_associated_type state tag_type template_trait From_template_part
-                      ~at:(Written literal.id)
+                  let interpolation_type =
+                    Solver.resolve_associated_type state tag_type template_trait
+                      From_template_interpolation ~at:(Written literal.id)
                   in
                   Option.iter
-                    (fun part_conversions ->
+                    (fun conversions ->
                       State.elaborate state value.id
-                        (Template (Tagged { from_template; part; part_conversions })))
+                        (Template (Tagged { from_template; interpolation_type; conversions })))
                     (find_all
                        (List.map
-                          (fun ((part_expression : Syntax.expression), part_type) ->
-                            let part_type = State.finalize_type state part_type in
+                          (fun ((interpolated : Syntax.expression), interpolated_type) ->
+                            let interpolated_type = State.finalize_type state interpolated_type in
                             let make_from source =
                               Types.make_trait_reference ~arguments:[ Types.Type source ]
                                 (Well_known.make_path From)
@@ -97,47 +140,48 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                             let convert_from from =
                               Some
                                 (Some
-                                   (Tables.make_method_call from From_from ~self_type:part
-                                      ~result:part
-                                      [ (part_expression, Own) ]))
+                                   (Tables.make_method_call from From_from
+                                      ~self_type:interpolation_type ~result:interpolation_type
+                                      [ (interpolated, Own) ]))
                             in
-                            let view = Types.make_view part_type in
+                            let view = Types.make_view interpolated_type in
                             if
-                              Types.is_viewable part_type
+                              Types.is_viewable interpolated_type
                               && Places.is_borrowed state.State.resolved state.State.tables
-                                   part_expression
-                              && Option.is_some (State.find_evidence state part (make_from view))
+                                   interpolated
+                              && Option.is_some
+                                   (State.find_evidence state interpolation_type (make_from view))
                             then begin
                               let rec strip_parentheses (written : Syntax.expression) =
                                 match written.kind with
                                 | Parenthesized inner -> strip_parentheses inner
                                 | _ -> written
                               in
-                              let place = strip_parentheses part_expression in
+                              let place = strip_parentheses interpolated in
                               state.places_without_keyword <-
                                 List.filter
                                   (fun (noted, _) -> noted <> place.id)
                                   state.places_without_keyword;
-                              Conversions.convert state env ~expression:part_expression
-                                (Written part_expression.id) ~actual:part_type ~expected:view;
+                              Conversions.convert state env ~expression:interpolated
+                                (Written interpolated.id) ~actual:interpolated_type ~expected:view;
                               convert_from (make_from view)
                             end
-                            else if Types.equal part_type part then Some None
+                            else if Types.equal interpolated_type interpolation_type then Some None
                             else
-                              let from = make_from part_type in
-                              match State.find_evidence state part from with
+                              let from = make_from interpolated_type in
+                              match State.find_evidence state interpolation_type from with
                               | Some _ -> convert_from from
                               | None ->
                                   State.report state
-                                    (Template_part_conversion
+                                    (Interpolation_not_convertible
                                        {
-                                         at = Written part_expression.id;
-                                         part_type;
-                                         part;
+                                         at = Written interpolated.id;
+                                         interpolated_type;
+                                         interpolation_type;
                                          tag_type;
                                        });
                                   None)
-                          parts))
+                          interpolations))
               | None ->
                   if not (Types.is_error tag_type) then
                     State.report state (Not_a_tag { at = Written literal.id; tag_type }));
@@ -223,32 +267,57 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
         map from_entries From_entries_from_entries;
       map
 
-and check_lambda (state : State.state) env ?expected (value : Syntax.expression) parameters body =
+and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
+    (parameters : Syntax.lambda_parameter list) body =
   let locals_read_before = state.locals_read in
   state.lambdas <- value.id :: state.lambdas;
-  let expected = Option.map (Conversions.read_expected_head state) expected in
+  let annotations =
+    List.map
+      (fun (parameter : Syntax.lambda_parameter) ->
+        Option.map
+          (fun (annotation : Syntax.parameter_annotation) ->
+            ( annotation,
+              Interface.Elaborator.elaborate_mode annotation.mode,
+              Interface.Elaborator.elaborate_type (State.read_context state) annotation.type_ ))
+          parameter.annotation)
+      parameters
+  in
+  let list_annotated_inputs ~make_unannotated =
+    List.map
+      (function
+        | Some (_, mode, annotated) -> (mode, annotated)
+        | None -> (Language.Mode.Read, make_unannotated ()))
+      annotations
+  in
   let make_untyped unknown =
-    List.iter
-      (fun written ->
-        Pattern_typing.check_pattern state env written unknown ~mode:Language.Mode.Read)
-      parameters;
+    List.iter2
+      (fun (parameter : Syntax.lambda_parameter) (mode, type_) ->
+        Pattern_typing.check_pattern state env parameter.pattern type_ ~mode)
+      parameters
+      (list_annotated_inputs ~make_unannotated:(fun () -> unknown));
     ignore (Statements.check_block_value state env body);
     unknown
   in
+  let check_as (function_type : Types.function_type) =
+    List.iter2
+      (fun ((parameter : Syntax.lambda_parameter), annotation) (mode, input) ->
+        Option.iter (check_parameter_annotation state ~mode ~input) annotation;
+        require_decided_parameter state parameter input;
+        Pattern_typing.check_parameter_pattern state env parameter.pattern input ~mode)
+      (List.combine parameters annotations)
+      function_type.inputs;
+    let output = function_type.output in
+    let lambda_env = { env with output = Some (Returns output) } in
+    let body_type = Statements.check_block_value state lambda_env ~expected:output body in
+    Conversions.convert state lambda_env ?expression:(find_block_value body) (Written body.id)
+      ~actual:body_type ~expected:output;
+    Types.Function function_type
+  in
   let result =
-    match expected with
+    match Option.map (Conversions.read_expected_head state) expected with
     | Some (Types.Function function_type)
       when List.length function_type.inputs = List.length parameters ->
-        List.iter2
-          (fun written (mode, input) ->
-            Pattern_typing.check_parameter_pattern state env written input ~mode)
-          parameters function_type.inputs;
-        let output = function_type.output in
-        let lambda_env = { env with output = Some (Returns output) } in
-        let body_type = Statements.check_block_value state lambda_env ~expected:output body in
-        Conversions.convert state lambda_env ?expression:(find_block_value body) (Written body.id)
-          ~actual:body_type ~expected:output;
-        Types.Function function_type
+        check_as function_type
     | Some (Types.Function function_type) ->
         make_untyped
           (State.make_error_type state
@@ -261,19 +330,15 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
                 }))
     | Some ((Types.Error _ | Types.Hole) as unknown) -> make_untyped unknown
     | _ ->
-        let remedy : Catalog.Inference.lambda_remedy =
-          match Option.bind expected (State.find_variable_origin state) with
-          | Some (Generic_argument { declared_on; parameter; _ }) ->
-              Bracket_arguments
-                {
-                  declared_on;
-                  is_type =
-                    (match parameter.kind with Type_generic _ -> true | Value_generic -> false);
-                }
-          | Some (List_literal _ | Map_literal _) | None -> Typed_let
-        in
-        make_untyped
-          (State.make_error_type state (Lambda_needs_type { at = Written value.id; remedy }))
+        check_as
+          {
+            inputs =
+              list_annotated_inputs ~make_unannotated:(fun () ->
+                  Unify.make_fresh_type state.unifier);
+            output = Unify.make_fresh_type state.unifier;
+            uses = Unify.make_fresh_capability_variable state.unifier;
+            costs = [];
+          }
   in
   state.lambdas <- List.tl state.lambdas;
   let rec list_newer acc list =

@@ -1,0 +1,9 @@
+fn races(meter: mut Meter, credit: UInt32, stop: Bool)
+  uses Tasks
+  cost amortized allocations O(1)
+{
+  concurrent {
+    if stop { return }
+    if stop { meter.credit = credit }
+  }
+}

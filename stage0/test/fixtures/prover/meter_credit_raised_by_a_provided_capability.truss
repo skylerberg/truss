@@ -1,0 +1,22 @@
+capability Store {
+  fn store(credit: UInt32)
+    cost time O(1)
+}
+
+impl Store for Meter {
+  fn store(mut self, credit: UInt32)
+    cost time O(1)
+  {
+    self.credit = credit
+  }
+}
+
+fn stored_then_spent(credit: UInt32)
+  cost amortized time O(1)
+{
+  var meter = Meter(credit: 0)
+  provide mut meter {
+    Store.store(credit)
+  }
+  mut meter.spend()
+}

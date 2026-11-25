@@ -284,6 +284,7 @@ impl Cursor for ListCursor[Element] {
     ensures forall i in 0..self.model().length() =>
       identical(self.model()[i], old(self.model())[i + 1])
     cost time O(1)
+    cost amortized time O(1)
     cost allocations == 0
   {
     mut self.reversed.pop()
@@ -618,6 +619,10 @@ public fn List[Element].append(mut self, other: own List[Element])
     invariant capacity >= old(self.model()).length() + count
   {
     intrinsic.storage_push(mut self.storage, value: intrinsic.storage_pop(mut rest.storage))
+  }
+  proof {
+    assert forall i in 0..self.model().length() =>
+      identical(self.model()[i], old(self.model()).concatenate(other.model())[i])
   }
 }
 

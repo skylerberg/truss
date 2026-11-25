@@ -45,7 +45,7 @@ val report_short_declaration : Cursor.t -> target:Syntax.expression -> operator:
 val pipe_operator :
   Cursor.t -> value:Syntax.expression -> operator:Token.t -> callee:Syntax.expression -> unit
 
-val report_lambda_annotation : Cursor.t -> from:int -> stop:int -> unit
+val report_lambda_result_type : Cursor.t -> from:int -> stop:int -> unit
 
 val report_impl_parameters :
   Cursor.t -> opening:Token.t -> closing:Token.t -> has_bounds:bool -> unit

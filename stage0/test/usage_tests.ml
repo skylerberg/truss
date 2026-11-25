@@ -162,6 +162,9 @@ let () =
       expect_removed Fixtures.Usage.run_forever_that_nothing_uses
         ( "fn f(values: List[UInt64]) -> UInt64\n  uses RunForever\n{",
           "fn f(values: List[UInt64]) -> UInt64 {" ));
+  Harness.test "a RunForever written with its module's name is reported" (fun () ->
+      expect_removed Fixtures.Usage.run_forever_written_in_full_that_nothing_uses
+        ("capabilities.Panic, capabilities.RunForever", "capabilities.Panic"));
   Harness.test "removing a RunForever listed after another capability keeps that capability"
     (fun () ->
       expect_removed Fixtures.Usage.run_forever_listed_after_another_capability

@@ -157,19 +157,25 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
         | None, None -> Types.Error Catalog.reported_elsewhere
       in
       Types.Named { path = Well_known.make_path Range; arguments = [ Types.Type element ] }
-  | Quantified { binder; body; _ } ->
-      (match binder with
-      | Binder_in (written, collection) ->
-          let element = Values.check_collection_element state env ~quantifier:value collection in
-          Pattern_typing.check_pattern state env written element ~mode:Language.Mode.Read
-      | Binder_type (bound, written) ->
-          if not env.specification then
-            State.report state (Quantifier_over_type_in_code { at = Written value.id });
-          State.declare state bound
-            (Interface.Elaborator.elaborate_type (State.read_context state) written)
-            ~binding:Let ~mode:Language.Mode.Read);
+  | Quantified { quantifier; binder; body } ->
+      let type_ =
+        match binder with
+        | Binder_in (written, collection) ->
+            let element = Values.check_collection_element state env ~quantifier:value collection in
+            Pattern_typing.check_pattern state env written element ~mode:Language.Mode.Read;
+            Types.bool
+        | Binder_type (bound, written) ->
+            State.declare state bound
+              (Interface.Elaborator.elaborate_type (State.read_context state) written)
+              ~binding:Let ~mode:Language.Mode.Read;
+            if env.specification then Types.bool
+            else
+              Types.Error
+                (State.report_specification_only state
+                   (Quantifier_over_type_in_code { at = Written value.id; quantifier }))
+      in
       check state { env with in_quantifier = true } body Types.bool;
-      Types.bool
+      type_
   | Echo inner ->
       let type_ = check_expression state env ?expected inner in
       type_

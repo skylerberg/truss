@@ -116,12 +116,14 @@ let describe : Resolve.t -> Nodes.description = function
                name."
               written (Path.show_module module_) written member))
   | No_module { name; written; path_start } ->
-      let missing = Printf.sprintf "No module `%s` is imported or exists." written in
       make Unknown_module (Build.at name)
-        (say
-           (match path_start with
-           | Some module_ -> missing ^ " " ^ describe_path_start module_
-           | None -> missing))
+        (say "No module `"
+        @ [ Build.quote_over written ]
+        @ say "` is imported or exists."
+        @
+        match path_start with
+        | Some module_ -> say (" " ^ describe_path_start module_)
+        | None -> [])
   | Not_a_generic_parameter { base; written; member; associated } ->
       make Not_a_generic_parameter (Build.at base)
         (say
@@ -176,7 +178,8 @@ let describe : Resolve.t -> Nodes.description = function
            (Printf.sprintf
               "Another branch of this `%s` block already binds `%s`, and a name cannot shadow \
                another. Choose another name."
-              block written))
+              (match block with Parallel_block -> "parallel" | Concurrent_block -> "concurrent")
+              written))
   | Prelude_definition { name; written } ->
       make Shadowed_name (Build.at name)
         (say

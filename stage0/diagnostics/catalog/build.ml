@@ -51,18 +51,32 @@ let write_hidden path (visibility : Language.Visibility.t) =
     | Public | Public_opaque ->
         Compiler_bug.raise_bug ~stage:"Catalog" "%s is public, so it is not hidden" (Path.show path))
 
-let describe_call (origin : Core.origin) =
+let rec show_callee (path : Path.t) =
+  match path with
+  | Top { name; _ } -> name
+  | Method { owner = Impl { for_type; _ } | Derived { type_ = for_type; _ }; name; _ }
+  | Method { owner = for_type; name; _ }
+  | Member_constant { owner = for_type; name } ->
+      show_callee for_type ^ "." ^ name
+  | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> Path.show path
+
+let name_call callee =
+  match callee with
+  | Some callee -> Printf.sprintf "call to `%s`" (show_callee callee)
+  | None -> "call"
+
+let describe_call ?callee (origin : Core.origin) =
+  let call = name_call callee in
   match origin with
-  | Written _ -> [ Description.Text "this call" ]
-  | Desugared { desugaring; _ } -> (
-      match desugaring with
-      | For_loop -> [ Text "the call that this `for` loop makes" ]
-      | Quantifier -> [ Text "the call that this quantifier makes" ]
-      | Derived -> [ Text "the call that the derived `"; quote origin; Text "` makes" ]
-      | Rewrite | Try -> [ Text "the call that `"; quote origin; Text "` makes" ])
+  | Written _ -> [ Description.Text ("this " ^ call) ]
+  | Desugared { desugaring; _ } ->
+      let maker =
+        match desugaring with
+        | For_loop -> [ Description.Text "this `for` loop" ]
+        | Quantifier -> [ Text "this quantifier" ]
+        | Derived -> [ Text "the derived `"; quote origin; Text "`" ]
+        | Rewrite | Try -> [ Text "`"; quote origin; Text "`" ]
+      in
+      (Description.Text ("the " ^ call ^ " that ") :: maker) @ [ Text " makes" ]
 
 let show_field_path parameter fields = String.concat "." (parameter :: fields)
-
-let show_function_name : Path.t -> string = function
-  | Top { name; _ } | Method { name; _ } -> name
-  | path -> Path.show path

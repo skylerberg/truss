@@ -1,0 +1,7 @@
+public fn is_small(value: UInt64) -> Bool {
+  value < 10
+}
+
+public trait Chooses {
+  fn choose(self, count: UInt64, pick: (fn(limit: UInt64) -> UInt64 ensures is_small(result))) -> UInt64
+}

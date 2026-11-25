@@ -1,0 +1,16 @@
+fn drop_last(list: mut List[Int64])
+  cost time O(1)
+{
+  let _ = mut list.pop()
+}
+
+fn f(count: UInt64) -> List[Int64]
+  cost amortized time O(count)
+{
+  var kept: List[Int64] = []
+  for _ in 0..count {
+    mut kept.push(0)
+    drop_last(mut kept)
+  }
+  kept
+}

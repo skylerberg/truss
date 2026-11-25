@@ -21,7 +21,7 @@ let () =
           Codegen_support.expect_string
             ~expected:(String.concat "" (List.init 5 (Printf.sprintf "test %d passed\n")))
             (Codegen_support.render_records records)
-      | Error message -> failwith message)
+      | Error failure -> failwith (Codegen_support.describe_failure failure))
 
 let () =
   Codegen_support.test "on threads, references to one shared value are copied and dropped"

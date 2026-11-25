@@ -71,8 +71,8 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `truss.opam` matches `dune-project`, rejects comments, runs every test
   suite, and proves the standard library, on every pull request and every
   push to `main`. It must stay fast: it installs nothing in an ordinary run,
-  restores dune's cache, the solver's answers, and compiled objects from
-  `main`, and gives the longest suites runners of their own.
+  restores dune's cache and compiled objects from `main`, and gives the
+  longest suites runners of their own.
 
 ### Libraries
 
@@ -215,7 +215,7 @@ Every stage of stage0 is tested the same way:
   `modules/library/` tests one module of the standard library and is named
   after it. The other directories, such as `modules/feature/` and
   `modules/owning/`, test the code generated for a construct. `module_tests`
-  divides the modules into the shares that `TRUSS_TEST_SHARE` names, builds
+  divides the modules by name into the shares that `TRUSS_TEST_SHARE` names, builds
   the tests of every module in its share into one program, and runs it. The
   `runtest` alias runs two shares in parallel. A new test therefore adds
   its code to one build and starts no build of its own. A test of a panic
@@ -246,3 +246,6 @@ Every stage of stage0 is tested the same way:
   and `TRUSS_TEST_SHARE` run it without the tests before it. The harness
   restores the environment after each test, so a test sets or unsets the
   variables it needs and does not restore them itself.
+- **A test keeps its share.** `TRUSS_TEST_SHARE=index/count` runs the tests
+  whose names hash to `index`, so adding or removing a test moves no other
+  test to another share.

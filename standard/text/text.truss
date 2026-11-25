@@ -8,16 +8,16 @@ public opaque type String(storage: intrinsic.Storage[UInt8])
   derives Copyable
 
 public trait FromTemplate {
-  type Part
+  type Interpolation
   fn is_valid_template(literals: List[Literal]) -> Bool
-  fn from_template(template: Template[Self.Part]) -> Self
+  fn from_template(template: Template[Self.Interpolation]) -> Self
     requires Self.is_valid_template(template.literals)
 }
 
 public opaque type Literal(text: view String)
   derives Plain
 
-public type Template[Part](literals: List[Literal], parts: List[Part])
+public type Template[Interpolation](literals: List[Literal], interpolations: List[Interpolation])
 
 impl Model for String {
   type Value = Sequence[UInt8]
@@ -607,6 +607,7 @@ impl From[Character] for String {
 public fn String.to_bytes(own self) -> List[UInt8]
   ensures result.length() == self.length()
   cost time O(1)
+  cost amortized time O(1)
   cost allocations == 0
 {
   List(storage: own self.storage)

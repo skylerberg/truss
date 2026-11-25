@@ -147,7 +147,7 @@ type associated =
   | Cursor_element
   | Into_cursor_cursor_type
   | Model_value
-  | From_template_part
+  | From_template_interpolation
   | From_elements_element
   | From_entries_key
   | From_entries_value
@@ -166,7 +166,7 @@ type field =
   | Range_stop
   | Range_inclusive
   | Template_literals
-  | Template_parts
+  | Template_interpolations
   | Entry_key
   | Entry_value
   | Option_some_value
