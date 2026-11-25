@@ -626,13 +626,28 @@ let copy_value ?literal (context : State.context) frame ty term =
        && not (try Amounts.has_potential context ty with Facts.Unsupported _ -> true)
   then frame
   else
-    let declare_copy_cost metric =
+    let declare_copy_cost_of metric copied =
       Amounts.declare_method_cost context frame metric
         (Well_known.make_method_path Copyable_copy)
-        ~trait_arguments:[] ty
+        ~trait_arguments:[] copied
+    in
+    let declare_copy_cost metric = declare_copy_cost_of metric ty in
+    let compute_elements_cost metric =
+      Option.map
+        (fun ({ element; model_of; _ } : State.buffer) ->
+          let per_element =
+            if
+              Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.bounds element
+            then Costs.least_amount (Metric metric)
+            else declare_copy_cost_of metric element
+          in
+          Logic.multiply (Models.make_sequence_length context element (model_of term)) per_element)
+        (Amounts.find_buffer context ty)
     in
     Operations.spend context frame (fun (counter : Costs.counter) ->
         match (literal, counter.resource, counter.counting) with
+        | None, Metric Time, Units when Option.is_some (compute_elements_cost Time) ->
+            Costs.plus (Option.get (compute_elements_cost Time)) (Logic.int 1)
         | _, Metric Time, Units ->
             let time = match literal with Some _ -> Costs.zero | None -> declare_copy_cost Time in
             let copy_potential =
@@ -648,6 +663,9 @@ let copy_value ?literal (context : State.context) frame ty term =
         | Some (Elements _), Metric Allocated_bytes, (At_most | Exactly) ->
             Operations.declare_unknown_amount context frame counter
         | Some _, Calls _, _ -> Costs.zero
+        | None, Metric Allocations, _ when Option.is_some (compute_elements_cost Allocations) ->
+            Amounts.compute_amount_within context frame counter
+              (Costs.plus (Option.get (compute_elements_cost Allocations)) (Logic.int 1))
         | None, Metric ((Allocations | Allocated_bytes) as metric), _ ->
             Amounts.compute_amount_within context frame counter (declare_copy_cost metric)
         | _, Metric Time, (At_most | Exactly) | None, Calls _, _ ->
