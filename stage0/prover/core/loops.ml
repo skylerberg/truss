@@ -102,7 +102,7 @@ let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause lis
             match clause with
             | Cost cost
               when Amounts.is_same_resource cost ~locals:frame.locals counter
-                   && Lambdas.classify_counting cost = counter.counting ->
+                   && Validity.classify_counting cost = counter.counting ->
                 Some cost
             | _ -> None)
           clauses
@@ -960,8 +960,8 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       let cursor = cursor_access.read head in
       let recursive_callee = Facts.find_recursive_callee context head location next.callee in
       let after, pulled =
-        Calls.call_contract ~recursive_callee ~lent_final:None context head pulling next path
-          contract
+        Calls.call_contract ~recursive_callee ~lent_final:None context head pulling next
+          (Named path) contract
           [
             {
               position = 0;

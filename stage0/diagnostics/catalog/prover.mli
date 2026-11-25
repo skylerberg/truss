@@ -1,6 +1,7 @@
 type quoted = { key : Path.key; origin : Core.origin }
 type location = Node of Core.origin | Whole_definition
-type call = { at : location; callee : Path.t option }
+type through = Through_parameter of string | Passed_for of string
+type call = { at : location; callee : Path.t option; through : through option }
 type counting = Upper_bound | Exact
 type moment = On_entry | After_iteration | Where_left
 
@@ -89,15 +90,7 @@ type promise =
       declared : Types.trait_reference;
     }
 
-type callback_reason = Used_as_unpromising_value | Passed_for_unpromising_parameter
-
-type unpromised =
-  | Nothing_promises
-  | Type_may_not_promise of string
-  | Type_promises_nothing of string
-  | Ensures_may_not_promise of Path.t
-
-type panic_ruler = Function_clause | Parameter_type
+type panic_ruler = Function_clause | Parameter_type of string
 
 type passed_function =
   | Passed_function of Path.t
@@ -129,12 +122,8 @@ type obligation =
   | Preserved_invariant of { type_ : Types.ty; value : value }
   | Derived_default_invariant
   | Loop_invariant of { clause : quoted; moment : moment }
-  | Lambda_promise of { promise : quoted }
   | Lambda_cost of { counting : counting; type_ : Types.ty }
   | Lambda_call_above_bound of { metric : Language.Metric.t }
-  | Callback_precondition of { clause : quoted; call : call; name : string }
-  | Callback_panic_condition of { clause : quoted; call : call; name : string }
-  | Parameter_contract of { path : Path.t; clause : quoted }
   | Loop_cost_clause of { clause : quoted; moment : moment }
   | Iteration_above_inferred_bound
   | Unbounded_iteration_cost of unbounded
@@ -166,9 +155,8 @@ type obligation =
     }
   | Negative_potential of { type_ : Types.ty }
   | May_alias of { first : quoted; second : quoted }
-  | Callback_requirement of { name : string; reason : callback_reason; clause : quoted }
-  | Callback_promise of { promise : quoted; unpromised : unpromised }
-  | Callback_may_panic of { condition : quoted list; passed : passed_function }
+  | Callback_requirement of { name : string; clause : quoted }
+  | Callback_promise of { promise : quoted; passed : passed_function }
   | Callback_cost of { clause : quoted; passed : passed_function }
   | Duplicate_key of { key : quoted option }
   | Value_contract of { path : Path.t; type_ : Types.ty; clause : quoted }
@@ -199,7 +187,7 @@ type construct =
   | Compiler_restated_method of { trait : Types.trait_reference; declared_by : Path.t }
   | Literal_of of Types.ty
   | Unreadable_function_value
-  | Lending_callback_ensures
+  | Lending_lambda_with_promises
   | String_pattern_on of Types.ty
   | Specification_function
 

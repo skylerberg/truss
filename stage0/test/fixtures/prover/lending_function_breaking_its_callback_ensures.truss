@@ -1,0 +1,23 @@
+type Pair(left: Int64, right: Int64)
+
+fn read_through(pair: Pair, choose: (fn(held: Pair) lends Int64 ensures result == held.left)) -> Int64
+  ensures result == pair.left
+{
+  choose(pair)
+}
+
+fn left_of(held: Pair) lends Int64
+  ensures result == held.left
+{
+  held.left
+}
+
+fn right_of(held: Pair) lends Int64
+  ensures result == held.right
+{
+  held.right
+}
+
+fn read_both(pair: Pair) -> Int64 {
+  read_through(pair, left_of).saturating_add(read_through(pair, right_of))
+}

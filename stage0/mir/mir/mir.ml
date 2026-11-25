@@ -76,100 +76,65 @@ let make_parameter ({ local; mode; type_; _ } : Core.parameter) : parameter = { 
 let of_conditional_clause ~parameters ({ holds_when; clause } : Core.expression Core.conditional) =
   { (Builder.of_clause ~parameters clause) with holds_when }
 
-let make_callback_contract ~entry_locals inputs (function_type : Types.function_type)
+let rec of_contract ~(parameters : Core.parameter list) ~(clause_parameters : Core.parameter list)
     (contract : Core.contract) : contract =
-  let of_formula = Builder.of_specification ~entry_locals:(entry_locals @ inputs) in
-  let of_requirement value =
-    { clause = of_formula value; is_executable = false; names = Builder.list_names value }
-  in
+  let of_clause = Builder.of_clause ~parameters:clause_parameters in
   {
-    parameters =
-      List.map2 (fun local (mode, type_) -> { local; mode; type_ }) inputs function_type.inputs;
-    panics_unless = List.map of_requirement contract.panics_unless;
+    parameters = List.map make_parameter parameters;
+    panics_unless =
+      List.map
+        (fun value ->
+          { clause = of_clause value; is_executable = false; names = Builder.list_names value })
+        contract.panics_unless;
     requires =
       List.map
-        (fun ({ clause; _ } : Core.condition Core.conditional) -> of_requirement clause.value)
+        (fun ({ holds_when; clause = written } : Core.condition Core.conditional) ->
+          {
+            clause = { (of_clause ~is_executable:written.executable written.value) with holds_when };
+            is_executable = written.executable;
+            names = Builder.list_names written.value;
+          })
         contract.requires;
-    ensures =
-      List.map
-        (fun ({ clause; _ } : Core.expression Core.conditional) -> of_formula clause)
-        contract.ensures;
-    decreases = [];
+    ensures = List.map (of_conditional_clause ~parameters:clause_parameters) contract.ensures;
+    decreases = List.map (of_conditional_clause ~parameters:clause_parameters) contract.decreases;
     costs =
       List.map
-        (fun ({ clause = { origin; amortized; resource; bound }; _ } : Core.cost Core.conditional) :
-             cost ->
+        (fun ({ holds_when; clause = { origin; amortized; resource; bound } } :
+               Core.cost Core.conditional) ->
           let bound : bound =
             match bound with
-            | Order_of amount -> Order_of (of_formula amount)
-            | At_most amount -> At_most (of_formula amount)
-            | Exactly amount -> Exactly (of_formula amount)
+            | Order_of amount -> Order_of (of_clause amount)
+            | At_most amount -> At_most (of_clause amount)
+            | Exactly amount -> Exactly (of_clause amount)
           in
-          { origin; amortized; resource; bound; holds_when = [] })
+          { origin; amortized; resource; bound; holds_when })
         contract.costs;
-    callbacks = [];
+    callbacks =
+      List.concat
+        (List.mapi
+           (fun position (parameter : Core.parameter) ->
+             match (parameter.callback_contract, parameter.type_) with
+             | Some { inputs; contract }, Types.Function function_type
+               when List.length inputs = List.length function_type.inputs ->
+                 let inputs =
+                   List.map2
+                     (fun local (mode, type_) : Core.parameter ->
+                       { local; mode; type_; default = None; callback_contract = None })
+                     inputs function_type.inputs
+                 in
+                 [
+                   ( position,
+                     of_contract ~parameters:inputs ~clause_parameters:(clause_parameters @ inputs)
+                       contract );
+                 ]
+             | _ -> [])
+           parameters);
   }
 
 let find_contract (definition : Core.definition) =
   match definition with
   | Function { parameters; contract; _ } ->
-      Some
-        {
-          parameters = List.map make_parameter parameters;
-          panics_unless =
-            List.map
-              (fun value ->
-                {
-                  clause = Builder.of_clause ~parameters value;
-                  is_executable = false;
-                  names = Builder.list_names value;
-                })
-              contract.panics_unless;
-          requires =
-            List.map
-              (fun ({ holds_when; clause = written } : Core.condition Core.conditional) ->
-                {
-                  clause =
-                    {
-                      (Builder.of_clause ~is_executable:written.executable ~parameters written.value)
-                      with
-                      holds_when;
-                    };
-                  is_executable = written.executable;
-                  names = Builder.list_names written.value;
-                })
-              contract.requires;
-          ensures = List.map (of_conditional_clause ~parameters) contract.ensures;
-          decreases = List.map (of_conditional_clause ~parameters) contract.decreases;
-          costs =
-            List.map
-              (fun ({ holds_when; clause = { origin; amortized; resource; bound } } :
-                     Core.cost Core.conditional) ->
-                let bound : bound =
-                  match bound with
-                  | Order_of amount -> Order_of (Builder.of_clause ~parameters amount)
-                  | At_most amount -> At_most (Builder.of_clause ~parameters amount)
-                  | Exactly amount -> Exactly (Builder.of_clause ~parameters amount)
-                in
-                { origin; amortized; resource; bound; holds_when })
-              contract.costs;
-          callbacks =
-            (let entry_locals =
-               List.map (fun (parameter : Core.parameter) -> parameter.local) parameters
-             in
-             List.concat
-               (List.mapi
-                  (fun position (parameter : Core.parameter) ->
-                    match (parameter.callback_contract, parameter.type_) with
-                    | Some { inputs; contract }, Types.Function function_type
-                      when List.length inputs = List.length function_type.inputs ->
-                        [
-                          ( position,
-                            make_callback_contract ~entry_locals inputs function_type contract );
-                        ]
-                    | _ -> [])
-                  parameters));
-        }
+      Some (of_contract ~parameters ~clause_parameters:parameters contract)
   | Test _ ->
       Some
         {

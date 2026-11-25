@@ -1,0 +1,28 @@
+type Counter(count: UInt64)
+
+fn Counter.increment(mut self) {
+  self.count = self.count.saturating_add(1)
+}
+
+type Pair(left: Counter, right: Counter)
+
+fn bump(pair: mut Pair, choose: (fn(held: mut Pair) lends mut Counter ensures held.left.count == final(result).count)) {
+  mut choose(mut pair).increment()
+}
+
+fn left_of(held: mut Pair) lends mut Counter
+  ensures held.left.count == final(result).count
+{
+  mut held.left
+}
+
+fn right_of(held: mut Pair) lends mut Counter
+  ensures held.right.count == final(result).count
+{
+  mut held.right
+}
+
+fn bump_both(pair: mut Pair) {
+  bump(mut pair, left_of)
+  bump(mut pair, right_of)
+}

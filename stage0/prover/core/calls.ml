@@ -171,9 +171,115 @@ let add_restated_clauses (context : State.context) ~self_type ~bind trait name r
            ~self_type trait name receiver);
   }
 
-let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
-    path (contract : State.contract) (values : State.passed list) ~recursive_callee ~lent_final
-    ~substitution_of ~type_arguments =
+let make_callback_cost (context : State.context) frame (metric : Language.Metric.t) (ty : Types.ty)
+    term =
+  let stated_by_type =
+    match ty with
+    | Types.Function { costs; _ } -> Costs.find_stated_operand costs metric
+    | _ -> None
+  in
+  match stated_by_type with
+  | Some stated -> stated
+  | None ->
+      let sort = Facts.declare_sort context ty in
+      let symbol = Logic.Symbol.Callback_cost { metric; sort } in
+      Facts.declare context (Logic.Function (symbol, [ sort ], Logic.Int));
+      let cost = Logic.Apply (symbol, [ term ]) in
+      let least = Costs.least_amount (Metric metric) in
+      Facts.add_frame_fact context frame (Logic.less_equal least cost);
+      let state_value value =
+        Facts.add_frame_fact context frame (Logic.equal cost (Costs.larger least value))
+      in
+      (match term with
+      | Logic.Symbol (Function_value { callee; _ }) ->
+          Option.iter state_value
+            (Option.bind (Contracts.read_signature context callee)
+               (fun (signature : Types.signature) ->
+                 Costs.find_stated_operand signature.costs metric))
+      | _ -> ());
+      (match List.assoc_opt (term, metric) context.lambda_costs with
+      | Some (bound, showing) ->
+          context.lambda_costs <- List.remove_assoc (term, metric) context.lambda_costs;
+          context.obligations <- List.rev_append showing context.obligations;
+          state_value bound
+      | None -> ());
+      cost
+
+let compute_function_value_amount context frame ~location ~callback
+    (function_type : Types.function_type) callee_term ~values (counter : Costs.counter) =
+  let make_counted amount = Costs.make_counted_charge counter amount in
+  let compute_call_amount metric =
+    let make_cost () =
+      make_callback_cost context frame metric (Types.Function function_type) callee_term
+    in
+    let make_plain amount = { Costs.amount; counted = No_potential } in
+    match
+      ( counter.amortized,
+        Costs.list_stated_bounds function_type.costs metric ~amortized:true,
+        counter.counting )
+    with
+    | true, Order_of :: _, Units -> { Costs.amount = Logic.int 1; counted = Potential_change }
+    | _ -> (
+        match
+          (Costs.list_stated_bounds function_type.costs metric ~amortized:false, counter.counting)
+        with
+        | Order_of :: _, Units -> make_plain (Logic.int 1)
+        | Exactly_cost amount :: _, (At_most | Exactly) -> make_plain (Logic.Integer amount)
+        | _, (Units | At_most) ->
+            make_plain (Amounts.compute_amount_within context frame counter (make_cost ()))
+        | _, Exactly ->
+            let cost = make_cost () in
+            if cost <> Costs.zero then
+              Facts.oblige
+                ~holds_when:(Facts.find_counter_condition context counter)
+                context frame location
+                (Upper_bound_in_exact_cost
+                   { metric; call = { at = location; callee = None; through = None } })
+                (Logic.equal cost Costs.zero);
+            make_plain cost)
+  in
+  let (inside : State.frame), (clauses : State.clauses) = callback in
+  let is_stated_by_callback =
+    List.exists
+      (fun (cost : Mir.cost) -> Amounts.is_same_resource cost ~locals:inside.locals counter)
+      clauses.costs
+  in
+  match (counter.resource, is_stated_by_callback) with
+  | _ when counter.counting = Units && Amounts.passes_lambda_assuming_recursive_costs context values
+    ->
+      make_counted (Operations.declare_unknown_amount context frame counter)
+  | _, true ->
+      Amounts.compute_callee_amount context frame ~is_recursive:false ~clauses:[ clauses ]
+        ~bind_frame:(fun _ -> inside)
+        ~uses:function_type.uses ~values ~counts_provider_potential:false counter
+  | Metric metric, false -> compute_call_amount metric
+  | Calls (Through term), false ->
+      make_counted
+        (if Amounts.lambda_captures_target context callee_term term then
+           Operations.declare_unknown_amount context frame counter
+         else
+           Amounts.make_conditional_amount
+             (Amounts.make_may_be_target context frame callee_term (Types.Function function_type)
+                term)
+             (Logic.int 1))
+  | Calls (Capability capability | Capability_method (capability, _)), false ->
+      make_counted
+        (Amounts.compute_capability_amount context frame ~uses:function_type.uses capability counter
+           ~direct:(fun () -> Operations.declare_unknown_amount context frame counter))
+
+type called =
+  | Named of Path.t
+  | Through of {
+      name : string option;
+      function_type : Types.function_type;
+      term : Logic.term;
+      enclosing : State.frame;
+    }
+
+let call_contract ?passed_for context (frame : State.frame) (site : Invocation.site)
+    (invocation : Invocation.t) (called : called) (contract : State.contract)
+    (values : State.passed list) ~recursive_callee ~lent_final ~substitution_of ~type_arguments =
+  let named_path = match called with Named path -> Some path | Through _ -> None in
   let substitution_of (clauses : State.clauses) =
     Types.combine_substitutions (substitution_of clauses) clauses.bindings
   in
@@ -218,6 +324,17 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   in
   let caller = frame.source in
   let location = Facts.locate context frame.source site.origin in
+  let call : Catalog.Prover.call =
+    {
+      at = location;
+      callee = named_path;
+      through =
+        (match (passed_for, called) with
+        | Some through, _ -> Some through
+        | None, Through { name = Some name; _ } -> Some (Through_parameter name)
+        | None, (Named _ | Through { name = None; _ }) -> None);
+    }
+  in
   let find_argument_at index =
     List.find_map
       (fun (passed : State.passed) -> if passed.position = index then Some passed.term else None)
@@ -238,10 +355,15 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
               Locals.add (Core_local local) parameter.type_ types,
               self )
         | _, None -> (locals, types, self))
-      (Locals.empty, Locals.empty, None)
+      (match called with
+      | Named _ -> (Locals.empty, Locals.empty, None)
+      | Through { enclosing; _ } -> (enclosing.old_locals, enclosing.types, None))
       bindings
   in
-  let self_of self = Option.map fst self
+  let self_of self =
+    match (called, self) with
+    | Through { enclosing; _ }, None -> enclosing.old_self
+    | (Named _ | Through _), _ -> Option.map fst self
   and find_self_type clauses self =
     Option.map (fun (_, ty) -> Types.substitute_erased (substitution_of clauses) ty) self
   in
@@ -255,7 +377,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       old_locals = locals;
       self = self_of self;
       old_self = self_of self;
-      self_type = find_self_type clauses self;
+      self_type =
+        (match called with
+        | Through { enclosing; _ } -> enclosing.self_type
+        | Named _ -> find_self_type clauses self);
       result = None;
       makes_obligations = false;
       substitution = substitution_of clauses;
@@ -280,11 +405,11 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           List.map (fun (parameter, _, _, _) -> Facts.read_parameter_name parameter) pairs
         in
         Facts.oblige context frame location
-          (Recursion_not_on_part { call = { at = location; callee = Some path }; compared })
+          (Recursion_not_on_part { call; compared })
           (Amounts.compare_lexicographically before after)
     | ([], _ | _, []) when context.terminates ->
         Facts.oblige context frame location
-          (Recursion_may_not_end { call = { at = location; callee = Some path }; is_self_call })
+          (Recursion_may_not_end { call; is_self_call })
           (Logic.Boolean false)
     | (_ :: _ as measures), (_ :: _ as callee_measures) ->
         let current_frame =
@@ -312,7 +437,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         Facts.oblige context frame location
           (Measure_may_not_decrease
              {
-               call = { at = location; callee = None };
+               call = { at = location; callee = None; through = None };
                measures =
                  List.map
                    (fun (measure : Mir.formula) -> Facts.quote caller measure.origin)
@@ -337,23 +462,21 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           ?holds_when:(find_clause_condition precondition_clauses clause.holds_when)
           context frame location
           (Precondition_may_fail
-             {
-               clause = Facts.quote precondition_clauses.callee clause.origin;
-               call = { at = location; callee = Some path };
-             })
+             { clause = Facts.quote precondition_clauses.callee clause.origin; call })
           term;
         term)
       precondition_clauses.requires
   in
   let required =
-    if List.exists (Path.equal path) context.reading_requires then Logic.Boolean true
-    else begin
-      let reading_requires = context.reading_requires in
-      context.reading_requires <- path :: reading_requires;
-      Fun.protect
-        ~finally:(fun () -> context.reading_requires <- reading_requires)
-        (fun () -> Logic.conjunction (read_required ()))
-    end
+    match named_path with
+    | Some path when List.exists (Path.equal path) context.reading_requires -> Logic.Boolean true
+    | Some path ->
+        let reading_requires = context.reading_requires in
+        context.reading_requires <- path :: reading_requires;
+        Fun.protect
+          ~finally:(fun () -> context.reading_requires <- reading_requires)
+          (fun () -> Logic.conjunction (read_required ()))
+    | None -> Logic.conjunction (read_required ())
   in
   if not (context.panics || Types.has_capability (Built_in Panic) invocation.uses) then begin
     let clauses = contract.callee_clauses in
@@ -368,10 +491,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         let cited = Some (clauses.callee.key, requirement.clause.origin) in
         Facts.oblige ?cited ~fixes context frame location
           (Precondition_may_panic
-             {
-               clause = Facts.quote clauses.callee requirement.clause.origin;
-               call = { at = location; callee = Some path };
-             })
+             { clause = Facts.quote clauses.callee requirement.clause.origin; call })
           term)
       clauses.panics_unless
   end;
@@ -387,7 +507,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let after =
     havoc_mut context frame values
       ~is_update_step:(calls_update_step context invocation)
-      ~list_modified:(Contracts.list_modified_parts context path)
+      ~list_modified:
+        (match called with
+        | Named path -> Contracts.list_modified_parts context path
+        | Through { function_type; _ } -> Types.list_modified_parts function_type.modifies)
   in
   let in_quantifier = is_logic_call && frame.binders <> [] in
   let state term =
@@ -413,74 +536,84 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let definition = ref None in
   let is_limited_call = ref false in
   let result =
-    if is_logic_call && List.length callee_arguments = List.length callee_bindings then begin
-      let function_symbol = Logic.Symbol.Function { callee = path; type_arguments } in
-      let sorts =
-        List.mapi
-          (fun index ((parameter : Mir.parameter), _) ->
-            match List.find_opt (fun (passed : State.passed) -> passed.position = index) values with
-            | Some passed -> Facts.declare_sort context passed.type_
-            | None ->
-                Facts.declare_sort context
-                  (Types.erase_views
-                     ((Interface.Impls.normalize context.lookups.interface
-                         ~list_bounds:context.bounds)
-                        (Types.substitute (substitution_of callee_clauses) parameter.type_))))
-          callee_bindings
-      in
-      let result_sort = Facts.declare_sort context result_type in
-      Facts.declare context (Logic.Function (function_symbol, sorts, result_sort));
-      (match (path, callee_bindings) with
-      | Method { owner = Impl { trait; _ } as impl; name; receiver }, [ (self, _) ]
-        when self.local = Self
-             && Well_known.is_method Model_model (Method { owner = trait.path; name; receiver }) ->
-          Models.rank_model context
-            (Types.erase_views
-               ((Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
-                  (Types.substitute (substitution_of callee_clauses) self.type_)))
-            ~model:result_type ~impl function_symbol
-      | _ -> ());
-      let symbol =
-        if List.mem function_symbol context.axiomatizing then begin
-          is_limited_call := true;
-          let limited = Logic.Symbol.Limited { callee = path; type_arguments } in
-          Facts.declare context (Logic.Function (limited, sorts, result_sort));
-          Facts.run_once context (Limited_link function_symbol) (fun () ->
+    match called with
+    | Named path when is_logic_call && List.length callee_arguments = List.length callee_bindings ->
+        let function_symbol = Logic.Symbol.Function { callee = path; type_arguments } in
+        let sorts =
+          List.mapi
+            (fun index ((parameter : Mir.parameter), _) ->
+              match
+                List.find_opt (fun (passed : State.passed) -> passed.position = index) values
+              with
+              | Some passed -> Facts.declare_sort context passed.type_
+              | None ->
+                  Facts.declare_sort context
+                    (Types.erase_views
+                       ((Interface.Impls.normalize context.lookups.interface
+                           ~list_bounds:context.bounds)
+                          (Types.substitute (substitution_of callee_clauses) parameter.type_))))
+            callee_bindings
+        in
+        let result_sort = Facts.declare_sort context result_type in
+        Facts.declare context (Logic.Function (function_symbol, sorts, result_sort));
+        (match (path, callee_bindings) with
+        | Method { owner = Impl { trait; _ } as impl; name; receiver }, [ (self, _) ]
+          when self.local = Self
+               && Well_known.is_method Model_model (Method { owner = trait.path; name; receiver })
+          ->
+            Models.rank_model context
+              (Types.erase_views
+                 ((Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
+                    (Types.substitute (substitution_of callee_clauses) self.type_)))
+              ~model:result_type ~impl function_symbol
+        | _ -> ());
+        let symbol =
+          if List.mem function_symbol context.axiomatizing then begin
+            is_limited_call := true;
+            let limited = Logic.Symbol.Limited { callee = path; type_arguments } in
+            Facts.declare context (Logic.Function (limited, sorts, result_sort));
+            Facts.run_once context (Limited_link function_symbol) (fun () ->
+                let parameters =
+                  List.mapi
+                    (fun index sort ->
+                      (Logic.Symbol.Variable { label = "linked"; numbers = [ index ] }, sort))
+                    sorts
+                in
+                let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
+                let applied = Logic.Apply (function_symbol, inputs) in
+                Facts.add_fact context
+                  (Logic.forall ~trigger:[ applied ]
+                     (parameters, Logic.equal applied (Logic.Apply (limited, inputs)))));
+            limited
+          end
+          else function_symbol
+        in
+        applied_as := Some (symbol, sorts);
+        let term = Logic.Apply (symbol, callee_arguments) in
+        Facts.assume context after (Facts.make_in_range result_type term);
+        if Facts.find_bounds result_type <> None && is_on_bound_values then
+          Facts.run_once context (In_range symbol) (fun () ->
               let parameters =
                 List.mapi
                   (fun index sort ->
-                    (Logic.Symbol.Variable { label = "linked"; numbers = [ index ] }, sort))
+                    (Logic.Symbol.Variable { label = "ranged"; numbers = [ index ] }, sort))
                   sorts
               in
-              let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
-              let applied = Logic.Apply (function_symbol, inputs) in
               Facts.add_fact context
-                (Logic.forall ~trigger:[ applied ]
-                   (parameters, Logic.equal applied (Logic.Apply (limited, inputs)))));
-          limited
-        end
-        else function_symbol
-      in
-      applied_as := Some (symbol, sorts);
-      let term = Logic.Apply (symbol, callee_arguments) in
-      Facts.assume context after (Facts.make_in_range result_type term);
-      if Facts.find_bounds result_type <> None && is_on_bound_values then
-        Facts.run_once context (In_range symbol) (fun () ->
-            let parameters =
-              List.mapi
-                (fun index sort ->
-                  (Logic.Symbol.Variable { label = "ranged"; numbers = [ index ] }, sort))
-                sorts
-            in
-            Facts.add_fact context
-              (Logic.forall
-                 ( parameters,
-                   Facts.make_in_range result_type
-                     (Logic.Apply (symbol, List.map (fun (name, _) -> Logic.Symbol name) parameters))
-                 )));
-      term
-    end
-    else Facts.arrive context after "result" result_type
+                (Logic.forall
+                   ( parameters,
+                     Facts.make_in_range result_type
+                       (Logic.Apply
+                          (symbol, List.map (fun (name, _) -> Logic.Symbol name) parameters)) )));
+        term
+    | Through { function_type; term; _ } when Lambdas.is_in_the_logic function_type ->
+        let applied =
+          Lambdas.apply_function context function_type term
+            (List.map (fun (passed : State.passed) -> passed.term) values)
+        in
+        Facts.assume context after (Facts.make_in_range result_type applied);
+        applied
+    | Named _ | Through _ -> Facts.arrive context after "result" result_type
   in
   Validity.assume_valid context after result_type result;
   let left_valid =
@@ -510,8 +643,13 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
               (match left_valid with Some (left, _) -> Logic.( ==> ) left valid | None -> valid)
         | None -> ())
     values;
-  if not (List.exists (Path.equal path) context.instantiating) then begin
-    context.instantiating <- path :: context.instantiating;
+  let is_instantiating =
+    match named_path with
+    | Some path -> List.exists (Path.equal path) context.instantiating
+    | None -> false
+  in
+  if not is_instantiating then begin
+    Option.iter (fun path -> context.instantiating <- path :: context.instantiating) named_path;
     let axiom_symbol =
       match !applied_as with
       | Some (symbol, sorts)
@@ -773,7 +911,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     assume_ensures is_about_part;
     check_left ();
     assume_ensures (fun clause -> not (is_about_part clause));
-    context.instantiating <- List.tl context.instantiating
+    if Option.is_some named_path then context.instantiating <- List.tl context.instantiating
   end
   else check_left ();
   (match !applied_as with
@@ -803,9 +941,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let declared_clauses = Contracts.list_declared_clauses contract in
   let method_cost =
     lazy
-      (if Laws.has_method_cost context invocation.callee path then
-         Some (fun metric -> Amounts.compute_method_cost context frame metric invocation.callee)
-       else None)
+      (match named_path with
+      | Some path when Laws.has_method_cost context invocation.callee path ->
+          Some (fun metric -> Amounts.compute_method_cost context frame metric invocation.callee)
+      | Some _ | None -> None)
   in
   let list_metric_costs metric =
     List.concat_map
@@ -819,8 +958,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     | Function _ | Trait_method _ | Indirect () | Intrinsic _ -> false
   in
   let note_amount (counter : Costs.counter) amount =
-    match counter.resource with
-    | Metric metric when Facts.is_home context frame.source ->
+    match (counter.resource, named_path) with
+    | Metric metric, Some path when Facts.is_home context frame.source ->
         context.call_amounts <-
           {
             call = Facts.quote frame.source site.origin;
@@ -834,15 +973,19 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             amount;
           }
           :: context.call_amounts
-    | Metric _ | Calls _ -> ()
+    | (Metric _ | Calls _), _ -> ()
   in
   let after =
     Operations.spend_operation context after ~potential_change:(Some compute_change)
       ~note:note_amount (fun counter ->
-        match (invocation.callee, counter.resource) with
-        | Capability_method _, Calls _ ->
+        match (called, invocation.callee, counter.resource) with
+        | Through { function_type; term; _ }, _, _ ->
+            compute_function_value_amount context after ~location
+              ~callback:(read_entry_frame callee_clauses, callee_clauses)
+              function_type term ~values counter
+        | Named _, Capability_method _, Calls _ ->
             Amounts.compute_step_amount context after invocation values counter
-        | _ ->
+        | Named _, _, _ ->
             Amounts.compute_callee_amount ?method_cost:(Lazy.force method_cost) context after
               ~is_recursive:(Option.is_some recursive_callee) ~clauses:declared_clauses
               ~bind_frame:(fun clauses ->
@@ -855,153 +998,35 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   in
   (after, Option.value !definition ~default:result)
 
-let make_callback_cost (context : State.context) frame (metric : Language.Metric.t) (ty : Types.ty)
-    term =
-  let stated_by_type =
-    match ty with
-    | Types.Function { costs; _ } -> Costs.find_stated_operand costs metric
-    | _ -> None
-  in
-  match stated_by_type with
-  | Some stated -> stated
-  | None ->
-      let sort = Facts.declare_sort context ty in
-      let symbol = Logic.Symbol.Callback_cost { metric; sort } in
-      Facts.declare context (Logic.Function (symbol, [ sort ], Logic.Int));
-      let cost = Logic.Apply (symbol, [ term ]) in
-      let least = Costs.least_amount (Metric metric) in
-      Facts.add_frame_fact context frame (Logic.less_equal least cost);
-      let state_value value =
-        Facts.add_frame_fact context frame (Logic.equal cost (Costs.larger least value))
-      in
-      (match term with
-      | Logic.Symbol (Function_value { callee; _ }) ->
-          Option.iter state_value
-            (Option.bind (Contracts.read_signature context callee)
-               (fun (signature : Types.signature) ->
-                 Costs.find_stated_operand signature.costs metric))
-      | _ -> ());
-      (match List.assoc_opt (term, metric) context.lambda_costs with
-      | Some (bound, showing) ->
-          context.lambda_costs <- List.remove_assoc (term, metric) context.lambda_costs;
-          context.obligations <- List.rev_append showing context.obligations;
-          state_value bound
-      | None -> ());
-      cost
-
-let compute_function_value_amount context frame ~location ~callback
-    (function_type : Types.function_type) callee_term ~values (counter : Costs.counter) =
-  let make_counted amount = Costs.make_counted_charge counter amount in
-  let compute_call_amount metric =
-    let make_cost () =
-      make_callback_cost context frame metric (Types.Function function_type) callee_term
-    in
-    let make_plain amount = { Costs.amount; counted = No_potential } in
-    match
-      ( counter.amortized,
-        Costs.list_stated_bounds function_type.costs metric ~amortized:true,
-        counter.counting )
-    with
-    | true, Order_of :: _, Units -> { Costs.amount = Logic.int 1; counted = Potential_change }
-    | _ -> (
-        match
-          (Costs.list_stated_bounds function_type.costs metric ~amortized:false, counter.counting)
-        with
-        | Order_of :: _, Units -> make_plain (Logic.int 1)
-        | Exactly_cost amount :: _, (At_most | Exactly) -> make_plain (Logic.Integer amount)
-        | _, (Units | At_most) ->
-            make_plain (Amounts.compute_amount_within context frame counter (make_cost ()))
-        | _, Exactly ->
-            let cost = make_cost () in
-            if cost <> Costs.zero then
-              Facts.oblige
-                ~holds_when:(Facts.find_counter_condition context counter)
-                context frame location
-                (Upper_bound_in_exact_cost { metric; call = { at = location; callee = None } })
-                (Logic.equal cost Costs.zero);
-            make_plain cost)
-  in
-  let stated_by_callback =
-    Option.bind callback (fun ((inside : State.frame), (clauses : State.clauses)) ->
-        if
-          List.exists
-            (fun (cost : Mir.cost) -> Amounts.is_same_resource cost ~locals:inside.locals counter)
-            clauses.costs
-        then Some (inside, clauses)
-        else None)
-  in
-  match (counter.resource, stated_by_callback) with
-  | _ when counter.counting = Units && Amounts.passes_lambda_assuming_recursive_costs context values
-    ->
-      make_counted (Operations.declare_unknown_amount context frame counter)
-  | _, Some (inside, clauses) ->
-      Amounts.compute_callee_amount context frame ~is_recursive:false ~clauses:[ clauses ]
-        ~bind_frame:(fun _ -> inside)
-        ~uses:function_type.uses ~values ~counts_provider_potential:false counter
-  | Metric metric, None -> compute_call_amount metric
-  | Calls (Through term), None ->
-      make_counted
-        (if Amounts.lambda_captures_target context callee_term term then
-           Operations.declare_unknown_amount context frame counter
-         else
-           Amounts.make_conditional_amount
-             (Amounts.make_may_be_target context frame callee_term (Types.Function function_type)
-                term)
-             (Logic.int 1))
-  | Calls (Capability capability | Capability_method (capability, _)), None ->
-      make_counted
-        (Amounts.compute_capability_amount context frame ~uses:function_type.uses capability counter
-           ~direct:(fun () -> Operations.declare_unknown_amount context frame counter))
-
-let check_callback_contract context (frame : State.frame) ~location (invocation : Invocation.t)
-    ~name ((inside : State.frame), (clauses : State.clauses)) =
-  let call : Catalog.Prover.call = { at = location; callee = None } in
-  let oblige_each make_obligation =
-    List.iter (fun (requirement : Mir.requirement) ->
-        Facts.oblige context frame location
-          (make_obligation (Facts.quote frame.source requirement.clause.origin))
-          (snd (Validity.read_specification context inside requirement.clause)))
-  in
-  oblige_each
-    (fun clause -> Catalog.Prover.Callback_precondition { clause; call; name })
-    clauses.requires;
-  if not (context.State.panics || Types.has_capability (Built_in Panic) invocation.uses) then
-    oblige_each
-      (fun clause -> Catalog.Prover.Callback_panic_condition { clause; call; name })
-      clauses.panics_unless
-
 type modelled =
   | By_contract of (State.frame * Logic.term)
   | Without_contract of (State.frame * Logic.term) option
 
-let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site)
+let rec apply_call ?leave_lent ?passed_for context (frame : State.frame) (site : Invocation.site)
     (invocation : Invocation.t) ~through (values : State.passed list) =
   let location = Facts.locate context frame.source site.origin in
+  let passed_for = Option.map (fun parameter -> Catalog.Prover.Passed_for parameter) passed_for in
   (match context.panic_condition with
   | Some (condition, ruled_out_by)
     when (not context.panics)
          && Conditions.may_panic_for_every_value context.lookups ~current:context.current
               ~condition:context.condition invocation.uses ->
       Facts.oblige context frame location
-        (Panics_where_ruled_out { call = { at = location; callee = None }; condition; ruled_out_by })
+        (Panics_where_ruled_out
+           {
+             call = { at = location; callee = None; through = passed_for };
+             condition;
+             ruled_out_by;
+           })
         (Logic.Boolean false)
   | Some _ | None -> ());
   List.iter
     (fun (passed : State.passed) ->
-      Validity.reject_lending_callback_ensures context frame ~location invocation passed;
-      match passed.shape with
-      | Named_function { origin; path; _ } -> (
-          match Contracts.find_function_contract context path with
-          | Some contract ->
-              Laws.check_named_callback context frame invocation passed ~origin path contract values
-          | None -> ())
-      | Forwarded local ->
-          Validity.check_forwarded_callback context frame site invocation passed local values
-      | Other ->
-          Validity.check_passed_value context frame ~location invocation passed values;
-          Validity.check_callback_promises context frame ~location invocation passed
-            ~unpromised:Nothing_promises ~assume:Validity.assume_nothing values
-      | Lambda -> ())
+      (match passed.shape with
+      | Named_function { path; _ } ->
+          Laws.relate_named_function context frame invocation passed path
+      | Forwarded _ | Other | Lambda -> ());
+      check_passed_function context frame site invocation passed values)
     values;
   let declared_result_type = Facts.substitute_declared_type context frame site.type_ in
   let result_type = Types.erase_views declared_result_type in
@@ -1013,7 +1038,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         (fun (passed : State.passed) ->
           if not (is_update_step && passed.position = 0) then
             Lambdas.check_valid context frame location passed.type_ passed.term ~deep:true
-              ~moment:(When_passed { at = location; callee = None }))
+              ~moment:(When_passed { at = location; callee = None; through = None }))
         values);
   let havoc_whole_arguments frame =
     havoc_mut context frame values ~is_update_step ~list_modified:(fun _ -> None)
@@ -1053,13 +1078,17 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
          arguments)
       (Types.make_capability_substitution capability_parameters capability_arguments)
   in
-  let recursive_callee = Facts.find_recursive_callee context frame location invocation.callee in
+  let recursive_callee =
+    match passed_for with
+    | Some _ -> None
+    | None -> Facts.find_recursive_callee context frame location invocation.callee
+  in
   let with_contract ?(substitution_of = fun _ -> Types.no_substitution) ?(type_arguments = []) path
       = function
     | Some contract ->
         By_contract
-          (call_contract ~recursive_callee ~lent_final:leave_lent context frame site invocation path
-             contract values ~substitution_of ~type_arguments)
+          (call_contract ?passed_for ~recursive_callee ~lent_final:leave_lent context frame site
+             invocation (Named path) contract values ~substitution_of ~type_arguments)
     | None ->
         let frame =
           havoc_mut context frame values ~is_update_step
@@ -1162,102 +1191,52 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                  (add_restated_clauses context ~self_type ~bind:bind_restated trait.trait name
                     receiver)
                  (Contracts.find_method_contract context trait name receiver evidence)))
-    | Indirect () ->
-        let callback =
-          match through with
-          | Some (_, _, Invocation.Forwarded local) ->
-              Option.bind (Validity.find_own_callback context local) (fun (name, callback) ->
-                  if List.length callback.Mir.parameters = List.length values then
-                    Some
-                      ( name,
-                        ( Validity.make_callback_contract_frame frame
-                            (Validity.list_callback_inputs callback)
-                            (List.map (fun (passed : State.passed) -> passed.term) values),
-                          Validity.make_callback_clauses frame callback ) )
-                  else None)
-          | _ -> None
-        in
-        Option.iter
-          (fun (name, ((_, clauses) as contract)) ->
-            (match through with
-            | Some (Types.Function { output = Lends _; _ }, _, _) when clauses.State.ensures <> []
-              ->
-                Facts.raise_unsupported location Lending_callback_ensures
-            | _ -> ());
-            check_callback_contract context frame ~location invocation ~name contract)
-          callback;
-        let before = frame in
-        let frame =
-          match through with
-          | Some (Types.Function function_type, _, _) ->
-              havoc_mut context frame values ~is_update_step ~list_modified:(fun position ->
-                  Types.list_modified_parts function_type.modifies position)
-          | _ -> havoc_whole_arguments frame
-        in
-        let result =
-          match through with
-          | Some (Types.Function function_type, callee_term, _)
-            when Lambdas.is_in_the_logic function_type ->
-              let term =
-                Lambdas.apply_function context function_type callee_term
-                  (List.map (fun (passed : State.passed) -> passed.term) values)
-              in
-              Facts.assume context frame (Facts.make_in_range result_type term);
-              term
-          | _ -> Facts.arrive context frame "result" result_type
-        in
-        Validity.assume_valid context frame result_type result;
-        let frame =
-          match through with
-          | _ when context.counters = [] -> frame
-          | Some (Types.Function function_type, callee_term, _) ->
-              Operations.spend_operation context frame
-                ~potential_change:
-                  (Some
-                     (fun () ->
-                       Amounts.compute_call_potential_change context ~before ~after:frame values
-                         ~changed:
-                           (List.filter_map
-                              (fun (passed : State.passed) ->
-                                match (passed.mode, passed.passed_place) with
-                                | Language.Mode.Mut, Some place ->
-                                    Some (passed.position, place.read frame)
-                                | _ -> None)
-                              values)
-                         ~result_type:declared_result_type ~result))
-                (compute_function_value_amount context frame ~location
-                   ~callback:(Option.map snd callback) function_type callee_term ~values)
-          | _ -> Operations.spend context frame (Operations.declare_unknown_amount context frame)
-        in
-        (match through with
-        | Some (Types.Function function_type, callee_term, shape)
-          when List.length function_type.inputs = List.length values -> (
-            let entries = List.map (fun (passed : State.passed) -> passed.term) values in
-            let exits =
-              List.map
-                (fun (passed : State.passed) ->
-                  match (passed.mode, passed.passed_place) with
-                  | Language.Mode.Mut, Some place -> place.read frame
-                  | _ -> passed.term)
-                values
+    | Indirect () -> (
+        match through with
+        | Some (Types.Function function_type, callee_term, shape) ->
+            let name =
+              match shape with
+              | Invocation.Forwarded (Declared { name; _ }) -> Some name
+              | Forwarded (Self | Trait_parameter _ | Synthetic _)
+              | Named_function _ | Lambda | Other ->
+                  None
             in
-            Facts.assume context frame
-              (Lambdas.make_callback_ensures context function_type callee_term ~entries ~exits
-                 ~result);
-            match shape with
-            | Invocation.Forwarded local ->
-                Validity.assume_own_callback_ensures context frame local ~entries ~exits ~result
-            | Named_function _ | Lambda | Other -> ())
-        | _ -> ());
-        List.iter
-          (fun (passed : State.passed) ->
-            match (passed.mode, passed.passed_place) with
-            | Language.Mode.Mut, Some place -> (
-                try Validity.assume_valid context frame passed.type_ (place.read frame)
-                with Facts.Unsupported _ -> ())
-            | _ -> ())
-          values;
-        Without_contract (Some (frame, result))
+            let callback =
+              match shape with
+              | Invocation.Forwarded local ->
+                  Option.map snd (Validity.find_own_callback context local)
+              | Named_function _ | Lambda | Other -> None
+            in
+            let after, result =
+              call_contract ?passed_for ~recursive_callee:None ~lent_final:leave_lent context frame
+                site invocation
+                (Through { name; function_type; term = callee_term; enclosing = frame })
+                {
+                  callee_clauses = Validity.make_callback_clauses frame callback;
+                  trait_clauses = None;
+                  restated_clauses = [];
+                  is_logic_function = false;
+                  result_kind =
+                    (match function_type.output with Lends _ -> `Lends | Returns _ -> `Returns);
+                }
+                values
+                ~substitution_of:(fun _ -> frame.substitution)
+                ~type_arguments:[]
+            in
+            if List.length function_type.inputs = List.length values then
+              Facts.assume context after
+                (Lambdas.make_callback_ensures context function_type callee_term
+                   ~entries:(List.map (fun (passed : State.passed) -> passed.term) values)
+                   ~exits:
+                     (List.map
+                        (fun (passed : State.passed) ->
+                          match (passed.mode, passed.passed_place) with
+                          | Language.Mode.Mut, Some place -> place.read after
+                          | _ -> passed.term)
+                        values)
+                   ~result);
+            By_contract (after, result)
+        | Some _ | None -> Facts.raise_bug "a call through a value that is not a function")
     | Capability_method { capability; name } ->
         with_contract
           (Path.make_capability_method capability name)
@@ -1308,3 +1287,177 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
   | Without_contract result ->
       Facts.reject_uncompared_recursion context frame location recursive_callee;
       result
+
+and check_passed_function context (frame : State.frame) (site : Invocation.site)
+    (invocation : Invocation.t) (passed : State.passed) (values : State.passed list) =
+  let origin = Option.value passed.origin ~default:site.origin in
+  let location = Facts.locate context frame.source origin in
+  let known = List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values in
+  let find_callback = Validity.find_callback context frame invocation passed.position known in
+  let is_checked =
+    match passed.shape with
+    | Named_function _ -> true
+    | Forwarded local ->
+        Option.is_some find_callback || Option.is_some (Validity.find_own_callback context local)
+    | Other -> Option.is_some find_callback
+    | Lambda -> false
+  in
+  match Validity.find_parameter_type context frame invocation passed.position with
+  | Some (Types.Function expected) when is_checked ->
+      let arguments = Validity.declare_callback_arguments context frame expected.inputs in
+      let callback = Option.map (fun bind -> bind arguments) find_callback in
+      let cells = List.map ref arguments in
+      let simulated =
+        List.mapi
+          (fun position (((mode : Language.Mode.t), input), cell) : State.passed ->
+            let input = Facts.substitute_type context frame input in
+            {
+              position;
+              mode;
+              shape = Other;
+              origin = None;
+              passed_place =
+                (match mode with
+                | Mut ->
+                    Some
+                      {
+                        read = (fun _ -> !cell);
+                        write =
+                          (fun frame term ->
+                            cell := term;
+                            frame);
+                        note_changed_in_place = ignore;
+                      }
+                | Read | Own -> None);
+              type_ = input;
+              declared_type = input;
+              term = !cell;
+            })
+          (List.combine expected.inputs cells)
+      in
+      let lends = Types.find_lent_mode expected.output in
+      let simulated_invocation, simulated_through =
+        match passed.shape with
+        | Named_function { path; instantiation; _ } ->
+            ( {
+                Invocation.callee = Function { path; instantiation };
+                lends;
+                uses =
+                  (match Contracts.read_signature context path with
+                  | Some signature ->
+                      Types.substitute_capabilities
+                        (Types.make_signature_substitution signature
+                           (Types.substitute_instantiation frame.substitution instantiation))
+                        signature.uses
+                  | None -> expected.uses);
+              },
+              None )
+        | Forwarded _ | Other | Lambda ->
+            ( {
+                Invocation.callee = Indirect ();
+                lends;
+                uses =
+                  (match passed.type_ with
+                  | Types.Function { uses; _ } -> uses
+                  | _ -> expected.uses);
+              },
+              Some (passed.type_, passed.term, passed.shape) )
+      in
+      let simulate ?leave_lent at =
+        apply_call ?leave_lent
+          ~passed_for:(Validity.find_parameter_name context frame invocation passed.position)
+          context at
+          { origin; type_ = Types.extract_result_type expected.output }
+          simulated_invocation ~through:simulated_through simulated
+      in
+      let start_simulation at =
+        List.iter2 (fun cell argument -> cell := argument) cells arguments;
+        simulate at
+      in
+      let make_parts at part_type part =
+        Intrinsics.append_part context at part_type
+          (Intrinsics.make_empty_parts context at part_type)
+          part
+      in
+      let passed_function : Catalog.Prover.passed_function =
+        match passed.shape with
+        | Named_function { path; _ } -> Passed_function path
+        | Forwarded (Declared { name; _ }) -> Passed_parameter name
+        | Forwarded (Self | Trait_parameter _ | Synthetic _) | Other | Lambda -> Passed_value
+      in
+      let saved_counters = context.counters
+      and saved_conditional_counters = context.conditional_counters
+      and saved_panics = context.panics
+      and saved_call_amounts = context.call_amounts in
+      Option.iter
+        (fun (callback : Validity.callback) ->
+          Lambdas.assign_counters context
+            (List.map (fun (counter, _, _) -> (counter, [])) callback.costs))
+        callback;
+      context.panics <-
+        Conditions.may_panic context.lookups ~current:context.current ~condition:context.condition
+          expected.uses;
+      Fun.protect
+        ~finally:(fun () ->
+          context.counters <- saved_counters;
+          context.conditional_counters <- saved_conditional_counters;
+          context.panics <- saved_panics;
+          context.call_amounts <- saved_call_amounts)
+        (fun () ->
+          let at_call =
+            match callback with
+            | Some callback -> Facts.restrict frame (Logic.conjunction callback.requires)
+            | None -> frame
+          in
+          let at =
+            {
+              at_call with
+              spent = List.map (fun counter -> (counter, Costs.zero)) context.counters;
+            }
+          in
+          let ended =
+            match expected.output with
+            | Returns _ ->
+                Option.map
+                  (fun (after, result) -> (after, after, result, None))
+                  (start_simulation at)
+            | Lends ((Read | Own), part_type) ->
+                Option.map
+                  (fun (after, result) ->
+                    (after, after, result, Some (make_parts after part_type result)))
+                  (start_simulation at)
+            | Lends (Mut, part_type) ->
+                Option.bind
+                  (Validity.run_without_costs context (fun () -> start_simulation at))
+                  (fun (started, result) ->
+                    let final = Facts.arrive context started "final" part_type in
+                    Option.map
+                      (fun (after, _) ->
+                        (started, after, result, Some (make_parts after part_type final)))
+                      (simulate ~leave_lent:(fun _ -> final) started))
+          in
+          match (ended, callback) with
+          | Some (started, after, result, yielded), Some callback ->
+              let about_part, others =
+                match expected.output with
+                | Lends _ ->
+                    List.partition
+                      (fun (promise : Validity.promise) -> Amounts.mentions_result promise.clause)
+                      callback.promises
+                | Returns _ -> ([], callback.promises)
+              in
+              Lambdas.oblige_callback_promises context started location about_part
+                ~passed:passed_function ~exits:arguments ~result ~yielded:None;
+              Lambdas.oblige_callback_promises context after location others ~passed:passed_function
+                ~exits:(List.map ( ! ) cells) ~result ~yielded;
+              Lambdas.oblige_callback_costs context after location callback ~passed:passed_function
+          | (Some _ | None), _ -> ());
+      Lambdas.prove_panic_condition context frame callback start_simulation
+  | Some _ | None -> (
+      match passed.shape with
+      | Named_function { path; _ } -> (
+          match Contracts.find_callee_clauses context path with
+          | Some clauses when clauses.requires <> [] ->
+              Facts.raise_unsupported location Unreadable_parameter_type
+          | Some _ | None -> ())
+      | Forwarded _ | Other | Lambda -> ())

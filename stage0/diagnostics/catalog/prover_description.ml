@@ -11,10 +11,14 @@ let capitalize = function
 
 let show_callee = Build.show_callee
 
-let describe_call { Prover.at; callee } =
-  match at with
-  | Whole_definition -> [ Description.Text ("a " ^ Build.name_call callee) ]
-  | Node origin -> Build.describe_call ?callee origin
+let describe_call { Prover.at; callee; through } =
+  match (through, at) with
+  | Some (Through_parameter parameter), Node (Written _) ->
+      [ Description.Text (Printf.sprintf "this call through `%s`" parameter) ]
+  | Some (Through_parameter parameter | Passed_for parameter), _ ->
+      [ Description.Text (Printf.sprintf "a call through `%s`" parameter) ]
+  | None, Whole_definition -> [ Description.Text ("a " ^ Build.name_call callee) ]
+  | None, Node origin -> Build.describe_call ?callee origin
 
 let describe_recursive_call call =
   match call.Prover.at with
@@ -359,8 +363,8 @@ let describe_obligation = function
           Text
             (match ruled_out_by with
             | Function_clause -> "` holds, which the function's `uses Panic unless` rules out."
-            | Parameter_type ->
-                "` holds, which the type of the parameter that this lambda is passed for rules out.");
+            | Parameter_type parameter ->
+                Printf.sprintf "` holds, which the type of `%s` rules out." parameter);
         ]
   | Upper_bound_in_exact_cost { metric; call } ->
       Description.Text
@@ -393,13 +397,6 @@ let describe_obligation = function
         quote_in clause;
         Text (Printf.sprintf "` may not hold %s." (show_moment moment));
       ]
-  | Lambda_promise { promise } ->
-      tick promise
-      @ [
-          Text
-            " may not hold of a result of this lambda, and the type of the parameter it is passed \
-             for promises it.";
-        ]
   | Lambda_cost { counting; type_ } ->
       let difference, verb = describe_difference counting in
       say
@@ -414,23 +411,6 @@ let describe_obligation = function
            | Time -> "takes no more time"
            | Allocations -> "makes no more allocations"
            | Allocated_bytes -> "allocates no more bytes"))
-  | Callback_precondition { clause; call; name } ->
-      tick clause
-      @ (Description.Text " may not hold for " :: describe_call call)
-      @ [ Text (Printf.sprintf " through `%s`." name) ]
-  | Callback_panic_condition { clause; call; name } ->
-      tick clause
-      @ (Description.Text " may not hold for " :: describe_call call)
-      @ [ Text (Printf.sprintf " through `%s`, so the call may panic." name) ]
-  | Parameter_contract { path; clause } ->
-      [
-        Text
-          (Printf.sprintf
-             "`%s` may not accept every argument this parameter's type promises it: its `"
-             (Path.show path));
-        quote_in clause;
-        Text "` may not hold.";
-      ]
   | Loop_cost_clause { clause; moment } ->
       [
         Text "The loop's `";
@@ -529,43 +509,33 @@ let describe_obligation = function
         quote_in second;
         Text "` may reach the same elements, which are used together.";
       ]
-  | Callback_requirement { name; reason; clause } ->
+  | Callback_requirement { name; clause } ->
       [
         Text
-          (Printf.sprintf "`%s` %s, so its `" name
-             (match reason with
-             | Used_as_unpromising_value ->
-                 "is used as a value whose type promises nothing of its arguments"
-             | Passed_for_unpromising_parameter ->
-                 "is passed for a parameter that may not promise its `requires`"));
+          (Printf.sprintf
+             "`%s` is used as a value whose type promises nothing of its arguments, so its `" name);
         quote_in clause;
         Text "` may not hold.";
       ]
-  | Callback_may_panic { condition; passed } ->
-      Description.Text (describe_passed_function passed ^ " may panic where `")
-      :: join " && " (List.map (fun part -> [ quote_in part ]) condition)
-      @ [ Text "` holds, which the parameter it is passed for rules out." ]
   | Callback_cost { clause; passed } ->
       [
         Text (describe_passed_function passed ^ " may spend more than `");
         quote_in clause;
         Text "`, which the parameter it is passed for states.";
       ]
-  | Callback_promise { promise; unpromised } ->
+  | Callback_promise { promise; passed } ->
       [
         Text "This argument's parameter promises `";
         quote_in promise;
         Text
           ("` of each result of the function passed for it, "
           ^
-          match unpromised with
-          | Nothing_promises -> "and nothing promises it of the function passed here."
-          | Type_may_not_promise name ->
-              Printf.sprintf "and the type of `%s` may not promise it." name
-          | Type_promises_nothing name ->
-              Printf.sprintf "and the type of `%s` promises nothing of its results." name
-          | Ensures_may_not_promise path ->
-              Printf.sprintf "and the `ensures` of `%s` may not promise it." (Path.show path));
+          match passed with
+          | Passed_function path ->
+              Printf.sprintf "and the `ensures` of `%s` may not promise it." (Path.show path)
+          | Passed_parameter name -> Printf.sprintf "and the type of `%s` may not promise it." name
+          | Passed_lambda -> "and a result of this lambda may not hold it."
+          | Passed_value -> "and nothing promises it of the function passed here.");
       ]
   | Duplicate_key { key } ->
       [
@@ -592,11 +562,10 @@ let find_code : Prover.obligation -> Diagnostic.Code.prover = function
       Termination
   | Constant_cycle _ -> Constant_cycle
   | Circular_proof _ -> Circular_proof
-  | Precondition_may_fail _ | Intrinsic_requirement _ | Callback_precondition _
-  | Parameter_contract _ | Float_conversion _ | Not_a_scalar_value _ | Impl_precondition _
-  | Impl_panic_condition _ | Callback_requirement _ | Value_contract _ | Callback_may_panic _ ->
+  | Precondition_may_fail _ | Intrinsic_requirement _ | Float_conversion _ | Not_a_scalar_value _
+  | Impl_precondition _ | Impl_panic_condition _ | Callback_requirement _ | Value_contract _ ->
       Requires
-  | Precondition_may_panic _ | Panics_where_ruled_out _ | Callback_panic_condition _ -> Panic
+  | Precondition_may_panic _ | Panics_where_ruled_out _ -> Panic
   | Upper_bound_in_exact_cost _ | Lambda_cost _ | Lambda_call_above_bound _ | Loop_cost_clause _
   | Callback_cost _ | Iteration_above_inferred_bound | Unbounded_iteration_cost _ | Cost_promise _
   | Negative_potential _ ->
@@ -605,8 +574,8 @@ let find_code : Prover.obligation -> Diagnostic.Code.prover = function
   | Invariant_may_fail _ | Preserved_invariant _ | Derived_default_invariant | Loop_invariant _
   | Visited_out_of_order | Element_count_changes ->
       Invariant
-  | Lambda_promise _ | Lent_part_ensures _ | Ensures_at_method_end _ | Ensures_at_return _
-  | Promiser_ensures _ | Restated_contract _ | Callback_promise _ ->
+  | Lent_part_ensures _ | Ensures_at_method_end _ | Ensures_at_return _ | Promiser_ensures _
+  | Restated_contract _ | Callback_promise _ ->
       Ensures
   | Out_of_range _ -> Out_of_range
   | Divisor_may_be_zero _ -> Division
@@ -875,7 +844,7 @@ let show_construct = function
         (Types.show_trait trait) (Path.show declared_by)
   | Literal_of type_ -> Printf.sprintf "a literal of `%s`" (Types.show type_)
   | Unreadable_function_value -> "a function the prover cannot read, used as a value"
-  | Lending_callback_ensures -> "an `ensures` on the type of a parameter that lends"
+  | Lending_lambda_with_promises -> "the `ensures` that a lending lambda must keep"
   | String_pattern_on type_ -> Printf.sprintf "a string pattern on `%s`" (Types.show type_)
   | Specification_function -> "this specification function"
 

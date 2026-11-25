@@ -47,14 +47,9 @@ val assume_valid : State.context -> State.frame -> Types.ty -> Logic.term -> uni
 val declare_callback_arguments :
   State.context -> State.frame -> ('a * Types.ty) list -> Logic.term list
 
-val make_callback_contract_frame : State.frame -> Core.local list -> Logic.term list -> State.frame
 val find_own_callback : State.context -> Core.local -> (string * Mir.contract) option
-val list_callback_inputs : Mir.contract -> Core.local list
-val make_callback_clauses : State.frame -> Mir.contract -> State.clauses
-
-val check_escaping_callback :
-  ?includes_panic_condition:bool -> State.context -> State.frame -> Core.local -> unit
-
+val make_callback_clauses : State.frame -> Mir.contract option -> State.clauses
+val check_escaping_callback : State.context -> State.frame -> Core.local -> unit
 val run_reading_callback : State.context -> (unit -> 'a) -> 'a
 
 val bind_arguments :
@@ -64,140 +59,28 @@ val bind_arguments :
   substitution:Types.substitution ->
   State.frame
 
-val list_callback_facts :
-  State.context ->
-  State.frame ->
-  Invocation.t ->
-  int ->
-  (int * Logic.term) list ->
-  Logic.term list ->
-  Logic.term list
-
 val find_parameter_type : State.context -> State.frame -> Invocation.t -> int -> Types.ty option
+val find_parameter_name : State.context -> State.frame -> Invocation.t -> int -> string
+val classify_counting : Mir.cost -> Costs.counting
 
-val make_callback_ensures_frame :
-  State.frame ->
-  Core.local list ->
-  entries:Logic.term list ->
-  exits:Logic.term list ->
-  result:Logic.term ->
-  State.frame
+type promise = {
+  clause : Mir.formula;
+  quoted : Catalog.Prover.quoted;
+  read : exits:Logic.term list -> result:Logic.term -> yielded:Logic.term option -> Logic.term;
+}
 
-val list_callback_panic_conditions :
+type callback = {
+  parameter : string;
+  requires : Logic.term list;
+  panic_condition : Catalog.Prover.quoted list * Logic.term list;
+  costs : (Costs.counter * Logic.term * Catalog.Prover.quoted) list;
+  promises : promise list;
+}
+
+val find_callback :
   State.context ->
   State.frame ->
   Invocation.t ->
   int ->
   (int * Logic.term) list ->
-  Logic.term list ->
-  (Catalog.Prover.quoted * Logic.term) list
-
-val list_callback_costs :
-  State.context ->
-  State.frame ->
-  Invocation.t ->
-  int ->
-  (int * Logic.term) list ->
-  Logic.term list ->
-  (Costs.counter * Logic.term * Catalog.Prover.quoted) list
-
-val list_callback_promises :
-  State.context ->
-  State.frame ->
-  Invocation.t ->
-  int ->
-  (int * Logic.term) list ->
-  entries:Logic.term list ->
-  exits:Logic.term list ->
-  result:Logic.term ->
-  (Catalog.Prover.quoted * Logic.term) list
-
-val assume_own_callback_ensures :
-  State.context ->
-  State.frame ->
-  Core.local ->
-  entries:Logic.term list ->
-  exits:Logic.term list ->
-  result:Logic.term ->
-  unit
-
-val declare_callback_results :
-  State.context ->
-  State.frame ->
-  Types.function_type ->
-  Logic.term list ->
-  Logic.term list * Logic.term
-
-val check_callback_promises :
-  State.context ->
-  State.frame ->
-  location:Obligation.location ->
-  Invocation.t ->
-  State.passed ->
-  unpromised:Catalog.Prover.unpromised ->
-  assume:
-    (State.frame ->
-    Types.function_type ->
-    entries:Logic.term list ->
-    exits:Logic.term list ->
-    result:Logic.term ->
-    unit) ->
-  State.passed list ->
-  unit
-
-val assume_nothing :
-  State.frame ->
-  Types.function_type ->
-  entries:Logic.term list ->
-  exits:Logic.term list ->
-  result:Logic.term ->
-  unit
-
-type stated_panic =
-  | Never_panics
-  | Panics_unless of (Logic.term list -> Logic.term list)
-  | May_panic
-
-type stated_cost = { counting : Costs.counting; amount : Logic.term }
-
-val find_stated_cost :
-  State.context -> State.frame -> Mir.cost list -> Language.Metric.t -> stated_cost option
-
-val reject_lending_callback_ensures :
-  State.context ->
-  State.frame ->
-  location:Obligation.location ->
-  Invocation.t ->
-  State.passed ->
-  unit
-
-val check_passed_contract :
-  State.context ->
-  State.frame ->
-  location:Obligation.location ->
-  Invocation.t ->
-  State.passed ->
-  State.passed list ->
-  passed_function:Catalog.Prover.passed_function ->
-  stated_panic:stated_panic ->
-  stated_cost:(Logic.term list -> Language.Metric.t -> stated_cost option) ->
-  unit
-
-val check_passed_value :
-  State.context ->
-  State.frame ->
-  location:Obligation.location ->
-  Invocation.t ->
-  State.passed ->
-  State.passed list ->
-  unit
-
-val check_forwarded_callback :
-  State.context ->
-  State.frame ->
-  Invocation.site ->
-  Invocation.t ->
-  State.passed ->
-  Core.local ->
-  State.passed list ->
-  unit
+  (Logic.term list -> callback) option

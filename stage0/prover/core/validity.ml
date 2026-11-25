@@ -309,7 +309,7 @@ let make_callback_contract_frame (frame : State.frame) inputs arguments =
   in
   { frame with locals; self = frame.old_self; makes_obligations = false }
 
-let make_callback_ensures_frame (frame : State.frame) inputs ~entries ~exits ~result =
+let make_callback_ensures_frame (frame : State.frame) inputs ~entries ~exits ~result ~yielded =
   let bind terms =
     List.fold_left2
       (fun locals input term -> Locals.add (Core_local input) term locals)
@@ -321,6 +321,7 @@ let make_callback_ensures_frame (frame : State.frame) inputs ~entries ~exits ~re
     old_locals = bind entries;
     self = frame.old_self;
     result = Some result;
+    yielded;
     makes_obligations = false;
   }
 
@@ -332,53 +333,42 @@ let find_own_callback (context : State.context) local =
 let list_callback_inputs (callback : Mir.contract) =
   List.map (fun (parameter : Mir.parameter) -> parameter.local) callback.parameters
 
-let classify_cost (cost : Mir.cost) : Costs.counting =
+let classify_counting (cost : Mir.cost) : Costs.counting =
   match cost.bound with Order_of _ -> Units | At_most _ -> At_most | Exactly _ -> Exactly
 
-let read_cost_amount context inside (cost : Mir.cost) =
-  match cost.bound with
-  | Order_of amount | At_most amount | Exactly amount ->
-      snd (read_specification context inside amount)
-
-let make_callback_clauses (frame : State.frame) (callback : Mir.contract) : State.clauses =
+let make_callback_clauses (frame : State.frame) (callback : Mir.contract option) : State.clauses =
+  let read clauses = match callback with Some callback -> clauses callback | None -> [] in
   {
     callee = frame.source;
-    parameters = callback.parameters;
-    panics_unless = callback.panics_unless;
-    requires = callback.requires;
-    ensures = callback.ensures;
+    parameters = read (fun callback -> callback.parameters);
+    panics_unless = read (fun callback -> callback.panics_unless);
+    requires = read (fun callback -> callback.requires);
+    ensures = read (fun callback -> callback.ensures);
     decreases = [];
-    costs = callback.costs;
+    costs = read (fun callback -> callback.costs);
     callbacks = [];
     inherited = false;
     bindings = Types.no_substitution;
   }
 
-let check_callback_contract context frame location ~name inputs requires arguments ~promised ~reason
-    =
-  let inside = make_callback_contract_frame frame inputs arguments in
-  List.iter
-    (fun (clause : Mir.formula) ->
-      Facts.oblige context (Facts.restrict frame promised) location
-        (Callback_requirement { name; reason; clause = Facts.quote frame.source clause.origin })
-        (snd (read_specification context inside clause)))
-    requires
-
-let check_escaping_callback ?(includes_panic_condition = true) context frame local =
+let check_escaping_callback context frame local =
   match
     (find_own_callback context local, Facts.find_local_type context frame (Core_local local))
   with
   | Some (name, callback), Some (Types.Function function_type) -> (
-      match
-        Facts.list_clauses
-          (callback.requires @ if includes_panic_condition then callback.panics_unless else [])
-      with
-      | first :: _ as requires ->
-          let arguments = declare_callback_arguments context frame function_type.inputs in
-          check_callback_contract context frame
-            (Facts.locate context frame.source first.origin)
-            ~name (list_callback_inputs callback) requires arguments ~promised:(Logic.Boolean true)
-            ~reason:Used_as_unpromising_value
+      match Facts.list_clauses (callback.requires @ callback.panics_unless) with
+      | first :: _ as clauses ->
+          let inside =
+            make_callback_contract_frame frame (list_callback_inputs callback)
+              (declare_callback_arguments context frame function_type.inputs)
+          in
+          List.iter
+            (fun (clause : Mir.formula) ->
+              Facts.oblige context frame
+                (Facts.locate context frame.source first.origin)
+                (Callback_requirement { name; clause = Facts.quote frame.source clause.origin })
+                (snd (read_specification context inside clause)))
+            clauses
       | [] -> ())
   | _ -> ()
 
@@ -447,103 +437,86 @@ let find_callee_declaration (context : State.context) frame (invocation : Invoca
         (read path)
   | Capability_method _ | Intrinsic _ | Indirect _ -> None
 
-let read_callee_callback (context : State.context) frame (invocation : Invocation.t) position known
-    read =
+let find_callee_callback (context : State.context) frame (invocation : Invocation.t) position known
+    =
+  Option.bind (find_callee_declaration context frame invocation) (fun (path, _, substitution) ->
+      Option.bind (Contracts.find_callee_clauses context path) (fun (clauses : State.clauses) ->
+          Option.map
+            (fun callback ->
+              (clauses.callee, bind_arguments frame clauses ~arguments:known ~substitution, callback))
+            (List.assoc_opt position clauses.callbacks)))
+
+let find_parameter_name (context : State.context) frame (invocation : Invocation.t) index =
   match find_callee_declaration context frame invocation with
-  | Some (path, _, substitution) -> (
-      match Contracts.find_callee_clauses context path with
-      | Some clauses -> (
-          match List.assoc_opt position clauses.callbacks with
-          | Some callback ->
-              read clauses.callee
-                (bind_arguments frame clauses ~arguments:known ~substitution)
-                callback
-          | None -> [])
-      | None -> [])
-  | None -> []
+  | Some (_, (signature : Types.signature), _) -> (
+      match (signature.receiver, index) with
+      | Some _, 0 -> "self"
+      | receiver, _ -> (
+          match
+            List.nth_opt signature.parameters (index - match receiver with Some _ -> 1 | None -> 0)
+          with
+          | Some (parameter : Types.parameter_info) -> parameter.name
+          | None -> Facts.raise_bug "a call passes more arguments than its callee has parameters"))
+  | None -> Facts.raise_bug "a callback contract of a callee without a declaration"
 
-let read_callee_callback_at context frame invocation position known arguments read =
-  read_callee_callback context frame invocation position known
-    (fun callee inside (callback : Mir.contract) ->
-      let inputs = list_callback_inputs callback in
-      if List.length inputs <> List.length arguments then []
-      else read callee (make_callback_contract_frame inside inputs arguments) callback)
+type promise = {
+  clause : Mir.formula;
+  quoted : Catalog.Prover.quoted;
+  read : exits:Logic.term list -> result:Logic.term -> yielded:Logic.term option -> Logic.term;
+}
 
-let list_callback_facts context frame invocation position known arguments =
-  read_callee_callback_at context frame invocation position known arguments
-    (fun _ inside (callback : Mir.contract) ->
-      List.map
-        (fun clause -> snd (read_specification context inside clause))
-        (Facts.list_clauses callback.requires))
+type callback = {
+  parameter : string;
+  requires : Logic.term list;
+  panic_condition : Catalog.Prover.quoted list * Logic.term list;
+  costs : (Costs.counter * Logic.term * Catalog.Prover.quoted) list;
+  promises : promise list;
+}
 
-let list_callback_panic_conditions context frame invocation position known arguments =
-  read_callee_callback_at context frame invocation position known arguments
-    (fun callee inside (callback : Mir.contract) ->
-      List.map
-        (fun (clause : Mir.formula) ->
-          (Facts.quote callee clause.origin, snd (read_specification context inside clause)))
-        (Facts.list_clauses callback.panics_unless))
-
-let list_callback_costs context frame invocation position known arguments =
-  read_callee_callback_at context frame invocation position known arguments
-    (fun callee inside (callback : Mir.contract) ->
-      List.filter_map
-        (fun (cost : Mir.cost) ->
-          match cost.resource with
-          | Metric metric when not cost.amortized ->
-              Some
-                ( {
-                    Costs.resource = Metric metric;
-                    counting = classify_cost cost;
-                    amortized = false;
-                  },
-                  read_cost_amount context inside cost,
-                  Facts.quote callee cost.origin )
-          | Metric _ | Calls _ -> None)
-        callback.costs)
-
-let list_callback_promises context frame invocation position known ~entries ~exits ~result =
-  read_callee_callback context frame invocation position known
-    (fun callee inside (callback : Mir.contract) ->
-      let inputs = list_callback_inputs callback in
-      if List.length inputs <> List.length entries then []
-      else
-        let inside = make_callback_ensures_frame inside inputs ~entries ~exits ~result in
-        List.map
-          (fun (clause : Mir.formula) ->
-            (Facts.quote callee clause.origin, snd (read_specification context inside clause)))
-          callback.ensures)
-
-let assume_own_callback_ensures context frame local ~entries ~exits ~result =
-  match find_own_callback context local with
-  | Some (_, callback) when List.length callback.parameters = List.length entries ->
-      let inside =
-        make_callback_ensures_frame frame (list_callback_inputs callback) ~entries ~exits ~result
-      in
-      List.iter
-        (fun clause -> Facts.assume context frame (snd (read_specification context inside clause)))
-        callback.ensures
-  | _ -> ()
-
-let declare_callback_results context frame (function_type : Types.function_type) entries =
-  let exits =
-    List.map2
-      (fun ((mode : Language.Mode.t), input) entry ->
-        match mode with
-        | Mut ->
-            let input = Facts.substitute_type context frame input in
-            let exit_ = Facts.arrive context frame "changed" input in
-            assume_valid context frame input exit_;
-            exit_
-        | Read | Own -> entry)
-      function_type.inputs entries
-  in
-  let output =
-    Facts.substitute_type context frame (Types.extract_result_type function_type.output)
-  in
-  let result = Facts.arrive context frame "result" output in
-  assume_valid context frame output result;
-  (exits, result)
+let find_callback context frame invocation position known =
+  Option.map
+    (fun (callee, inside, (contract : Mir.contract)) arguments ->
+      let inputs = list_callback_inputs contract in
+      let at_entry = make_callback_contract_frame inside inputs arguments in
+      let read inside clause = snd (read_specification context inside clause) in
+      let quote (clause : Mir.formula) = Facts.quote callee clause.origin in
+      let panics_unless = Facts.list_clauses contract.panics_unless in
+      {
+        parameter = find_parameter_name context frame invocation position;
+        requires = List.map (read at_entry) (Facts.list_clauses contract.requires);
+        panic_condition = (List.map quote panics_unless, List.map (read at_entry) panics_unless);
+        costs =
+          List.filter_map
+            (fun (cost : Mir.cost) ->
+              match (cost.resource, cost.bound) with
+              | Metric metric, (Order_of amount | At_most amount | Exactly amount)
+                when not cost.amortized ->
+                  let counting = classify_counting cost in
+                  let amount = read at_entry amount in
+                  Some
+                    ( { Costs.resource = Metric metric; counting; amortized = false },
+                      (match counting with
+                      | Units -> Costs.bound amount
+                      | At_most | Exactly -> amount),
+                      Facts.quote callee cost.origin )
+              | (Metric _ | Calls _), _ -> None)
+            contract.costs;
+        promises =
+          List.map
+            (fun clause ->
+              {
+                clause;
+                quoted = quote clause;
+                read =
+                  (fun ~exits ~result ~yielded ->
+                    read
+                      (make_callback_ensures_frame inside inputs ~entries:arguments ~exits ~result
+                         ~yielded)
+                      clause);
+              })
+            contract.ensures;
+      })
+    (find_callee_callback context frame invocation position known)
 
 let find_parameter_type (context : State.context) frame (invocation : Invocation.t) index =
   Option.bind (find_callee_declaration context frame invocation)
@@ -553,217 +526,3 @@ let find_parameter_type (context : State.context) frame (invocation : Invocation
         @ List.map (fun (info : Types.parameter_info) -> info.type_) signature.parameters
       in
       Option.map (Types.substitute_erased substitution) (List.nth_opt types index))
-
-let has_callback_promises context frame invocation position =
-  read_callee_callback context frame invocation position [] (fun _ _ (callback : Mir.contract) ->
-      callback.ensures)
-  <> []
-
-let check_callback_promises context frame ~location (invocation : Invocation.t)
-    (passed : State.passed) ~unpromised ~assume values =
-  match find_parameter_type context frame invocation passed.position with
-  | Some (Types.Function expected)
-    when has_callback_promises context frame invocation passed.position ->
-      let entries = declare_callback_arguments context frame expected.inputs in
-      let known = List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values in
-      let exits, result = declare_callback_results context frame expected entries in
-      let at_call =
-        Facts.restrict frame
-          (Logic.conjunction
-             (list_callback_facts context frame invocation passed.position known entries))
-      in
-      assume at_call expected ~entries ~exits ~result;
-      List.iter
-        (fun (quoted, promise) ->
-          Facts.oblige context at_call location
-            (Callback_promise { promise = quoted; unpromised })
-            promise)
-        (list_callback_promises context frame invocation passed.position known ~entries ~exits
-           ~result)
-  | _ -> ()
-
-let assume_nothing _ _ ~entries:_ ~exits:_ ~result:_ = ()
-
-type stated_panic =
-  | Never_panics
-  | Panics_unless of (Logic.term list -> Logic.term list)
-  | May_panic
-
-type stated_cost = { counting : Costs.counting; amount : Logic.term }
-
-let find_stated_cost context inside (costs : Mir.cost list) (metric : Language.Metric.t) =
-  List.find_map
-    (fun (cost : Mir.cost) ->
-      if cost.resource = Metric metric && not cost.amortized then
-        Some { counting = classify_cost cost; amount = read_cost_amount context inside cost }
-      else None)
-    costs
-
-let find_type_cost (ty : Types.ty) (metric : Language.Metric.t) =
-  match ty with
-  | Types.Function { costs; _ } ->
-      List.find_map
-        (fun (cost : Types.cost) ->
-          if cost.resource = Metric metric && not cost.amortized then
-            Some
-              (match cost.bound with
-              | Order_of -> { counting = Costs.Units; amount = Logic.int 1 }
-              | No_more_than limit -> { counting = At_most; amount = Logic.Integer limit }
-              | Exactly_cost limit -> { counting = Exactly; amount = Logic.Integer limit })
-          else None)
-        costs
-  | _ -> None
-
-let keeps_cost (stated : stated_cost option) ~(counting : Costs.counting) ~bound =
-  match (counting, stated) with
-  | _, None -> Logic.Boolean false
-  | Units, Some { counting = Units; amount } ->
-      Logic.less_equal (Costs.units amount) (Costs.bound bound)
-  | Units, Some { counting = At_most | Exactly; amount } ->
-      Logic.less_equal amount (Costs.bound bound)
-  | At_most, Some { counting = At_most | Exactly; amount } -> Logic.less_equal amount bound
-  | Exactly, Some { counting = Exactly; amount } -> Logic.equal amount bound
-  | (At_most | Exactly), Some { counting = Units; _ } | Exactly, Some { counting = At_most; _ } ->
-      Logic.Boolean false
-
-let reject_lending_callback_ensures context frame ~location (invocation : Invocation.t)
-    (passed : State.passed) =
-  match find_parameter_type context frame invocation passed.position with
-  | Some (Types.Function { output = Lends _; _ })
-    when has_callback_promises context frame invocation passed.position ->
-      Facts.raise_unsupported location Lending_callback_ensures
-  | _ -> ()
-
-let check_passed_contract context frame ~location (invocation : Invocation.t)
-    (passed : State.passed) values ~(passed_function : Catalog.Prover.passed_function) ~stated_panic
-    ~stated_cost =
-  match find_parameter_type context frame invocation passed.position with
-  | Some (Types.Function expected) ->
-      let known = List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values in
-      ignore
-        (read_callee_callback context frame invocation passed.position known
-           (fun callee inside (callback : Mir.contract) ->
-             let inputs = list_callback_inputs callback in
-             if List.length inputs = List.length expected.inputs then begin
-               let arguments = declare_callback_arguments context frame expected.inputs in
-               let inside = make_callback_contract_frame inside inputs arguments in
-               let required =
-                 List.map
-                   (fun clause -> snd (read_specification context inside clause))
-                   (Facts.list_clauses callback.requires)
-               in
-               let at_call = Facts.restrict frame (Logic.conjunction required) in
-               (match callback.panics_unless with
-               | [] -> ()
-               | conditions ->
-                   let holds =
-                     List.map
-                       (fun (requirement : Mir.requirement) ->
-                         snd (read_specification context inside requirement.clause))
-                       conditions
-                   in
-                   let goals =
-                     match stated_panic with
-                     | Never_panics -> []
-                     | Panics_unless read -> read arguments
-                     | May_panic -> [ Logic.Boolean false ]
-                   in
-                   List.iter
-                     (Facts.oblige context
-                        (Facts.restrict at_call (Logic.conjunction holds))
-                        location
-                        (Callback_may_panic
-                           {
-                             condition =
-                               List.map
-                                 (fun (requirement : Mir.requirement) ->
-                                   Facts.quote callee requirement.clause.origin)
-                                 conditions;
-                             passed = passed_function;
-                           }))
-                     goals);
-               List.iter
-                 (fun (cost : Mir.cost) ->
-                   match cost.resource with
-                   | Metric metric when not cost.amortized ->
-                       Facts.oblige context at_call location
-                         (Callback_cost
-                            { clause = Facts.quote callee cost.origin; passed = passed_function })
-                         (keeps_cost (stated_cost arguments metric) ~counting:(classify_cost cost)
-                            ~bound:(read_cost_amount context inside cost))
-                   | Metric _ | Calls _ -> ())
-                 callback.costs
-             end;
-             []))
-  | _ -> ()
-
-let find_type_panic (ty : Types.ty) =
-  match ty with
-  | Types.Function { uses; _ } when Types.may_use (Built_in Panic) uses -> May_panic
-  | _ -> Never_panics
-
-let check_passed_value context frame ~location invocation (passed : State.passed) values =
-  check_passed_contract context frame ~location invocation passed values
-    ~passed_function:Passed_value ~stated_panic:(find_type_panic passed.type_)
-    ~stated_cost:(fun _ metric -> find_type_cost passed.type_ metric)
-
-let check_forwarded_callback context frame (site : Invocation.site) (invocation : Invocation.t)
-    (passed : State.passed) local values =
-  (match find_own_callback context local with
-  | Some (name, callback) when callback.requires <> [] -> (
-      let inputs = list_callback_inputs callback in
-      match find_parameter_type context frame invocation passed.position with
-      | Some (Types.Function expected) when List.length expected.inputs = List.length inputs ->
-          let arguments = declare_callback_arguments context frame expected.inputs in
-          let known =
-            List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values
-          in
-          check_callback_contract context frame
-            (Facts.locate context frame.source site.origin)
-            ~name inputs
-            (Facts.list_clauses callback.requires)
-            arguments
-            ~promised:
-              (Logic.conjunction
-                 (list_callback_facts context frame invocation passed.position known arguments))
-            ~reason:Passed_for_unpromising_parameter
-      | _ -> check_escaping_callback ~includes_panic_condition:false context frame local)
-  | _ -> ());
-  let location = Facts.locate context frame.source site.origin in
-  (match find_own_callback context local with
-  | Some (_, callback) ->
-      let read_inside arguments =
-        make_callback_contract_frame frame (list_callback_inputs callback) arguments
-      in
-      check_passed_contract context frame ~location invocation passed values
-        ~passed_function:
-          (match local with
-          | Declared { name; _ } -> Passed_parameter name
-          | Self | Trait_parameter _ | Synthetic _ -> Passed_value)
-        ~stated_panic:
-          (match callback.panics_unless with
-          | [] -> find_type_panic passed.type_
-          | conditions ->
-              Panics_unless
-                (fun arguments ->
-                  List.map
-                    (fun clause -> snd (read_specification context (read_inside arguments) clause))
-                    (Facts.list_clauses conditions)))
-        ~stated_cost:(fun arguments metric ->
-          match find_stated_cost context (read_inside arguments) callback.costs metric with
-          | Some stated -> Some stated
-          | None -> find_type_cost passed.type_ metric)
-  | None -> check_passed_value context frame ~location invocation passed values);
-  match find_own_callback context local with
-  | Some (name, _) ->
-      check_callback_promises context frame ~location invocation passed
-        ~unpromised:(Type_may_not_promise name)
-        ~assume:(fun at_call _ -> assume_own_callback_ensures context at_call local)
-        values
-  | None ->
-      check_callback_promises context frame ~location invocation passed
-        ~unpromised:
-          (match local with
-          | Declared { name; _ } -> Type_promises_nothing name
-          | Self | Trait_parameter _ | Synthetic _ -> Nothing_promises)
-        ~assume:assume_nothing values

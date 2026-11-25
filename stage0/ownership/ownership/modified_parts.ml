@@ -61,6 +61,25 @@ let list_parameter_changes interface (body : Mir.body) =
             interface Types.no_substitution)
        [ body.code ])
 
+let check_changes interface ~package (body : Mir.body) ~modifies ~parameter_type ~framed ~report =
+  let changes = list_parameter_changes interface body in
+  let is_named_by = is_named_by interface ~package ~parameter_type in
+  let reported = ref [] in
+  List.iter
+    (fun (origin, (part : Types.modified)) ->
+      let allowed = Option.value ~default:[] (Types.list_modified_parts modifies part.position) in
+      if
+        List.mem part.position framed
+        && not
+             (List.exists (fun container -> is_named_by container part) allowed
+             || List.mem part !reported)
+      then begin
+        reported := part :: !reported;
+        report origin part
+      end)
+    changes;
+  changes
+
 let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
   let interface = context.lookups.interface in
   match Interface.Impls.read_signature interface key.path with
@@ -90,11 +109,6 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
       | _ :: _ -> (
           let name_parameter position = (Types.read_parameter_at signature position).name in
           let written_entries = find_written_entries (interface.names.read_definition key) in
-          let is_named_by =
-            is_named_by interface ~package ~parameter_type:(fun position ->
-                (Types.read_parameter_at signature position).type_)
-          in
-          let changes = list_parameter_changes interface tree.body in
           let read_written_part (entry : Syntax.expression) =
             Option.bind (Interface.Elaborator.split_part entry) (fun (root, names, is_elements) ->
                 Option.map
@@ -107,20 +121,11 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
                       root ))
                   (Types.find_parameter_position signature root))
           in
-          let reported = ref [] in
-          List.iter
-            (fun (origin, (part : Types.modified)) ->
-              let allowed =
-                Option.value ~default:[]
-                  (Types.list_modified_parts signature.modifies part.position)
-              in
-              if
-                List.mem part.position framed
-                && not
-                     (List.exists (fun container -> is_named_by container part) allowed
-                     || List.mem part !reported)
-              then begin
-                reported := part :: !reported;
+          let changes =
+            check_changes interface ~package tree.body ~modifies:signature.modifies
+              ~parameter_type:(fun position -> (Types.read_parameter_at signature position).type_)
+              ~framed
+              ~report:(fun origin (part : Types.modified) ->
                 let entries = Option.value written_entries ~default:[] in
                 let ranges =
                   List.map
@@ -160,9 +165,8 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
                                  (Core.Written entry.id, Catalog.read_entry_siblings ranges index))
                                rest
                          | [] -> []);
-                     })
-              end)
-            changes;
+                     }))
+          in
           match written_entries with
           | Some entries when not (is_trait_method interface key || has_todo tree) ->
               let is_changed (written : Types.modified) =
@@ -283,33 +287,23 @@ let check_lambdas (context : Context.context) (key : Resolve.Names.key) (tree : 
   List.iter
     (fun (index, (lambda_type : Types.ty)) ->
       match lambda_type with
-      | Function ({ modifies = _ :: _; _ } as function_type) ->
+      | Function ({ modifies = _ :: _ as modifies; _ } as function_type) ->
           let body = tree.lambdas.(index) in
-          let is_named_by =
-            is_named_by interface ~package ~parameter_type:(fun position ->
-                snd (List.nth function_type.inputs position))
-          in
-          let reported = ref [] in
-          List.iter
-            (fun (origin, (part : Types.modified)) ->
-              match Types.list_modified_parts function_type.modifies part.position with
-              | Some allowed
-                when not
-                       (List.exists (fun container -> is_named_by container part) allowed
-                       || List.mem part !reported) ->
-                  reported := part :: !reported;
-                  Context.report context
-                    (Undeclared_lambda_change
-                       {
-                         at = origin;
-                         parameter =
-                           (match body.locals.(List.nth body.parameters part.position).kind with
-                           | Source { local = Declared { name; _ }; _ } -> name
-                           | Source _ | Temporary | Lent _ -> "the input");
-                         part;
-                         type_ = lambda_type;
-                       })
-              | Some _ | None -> ())
-            (list_parameter_changes interface body)
+          ignore
+            (check_changes interface ~package body ~modifies
+               ~parameter_type:(fun position -> snd (List.nth function_type.inputs position))
+               ~framed:(List.map (fun (part : Types.modified) -> part.position) modifies)
+               ~report:(fun origin (part : Types.modified) ->
+                 Context.report context
+                   (Undeclared_lambda_change
+                      {
+                        at = origin;
+                        parameter =
+                          (match body.locals.(List.nth body.parameters part.position).kind with
+                          | Source { local = Declared { name; _ }; _ } -> name
+                          | Source _ | Temporary | Lent _ -> "the input");
+                        part;
+                        type_ = lambda_type;
+                      })))
       | _ -> ())
     (list_lambda_types tree)

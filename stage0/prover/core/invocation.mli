@@ -3,7 +3,7 @@ type callee = unit Core.target
 type t = { callee : callee; lends : Language.Mode.t option; uses : Types.capability_set }
 
 type shape =
-  | Named_function of { origin : Core.origin; path : Path.t }
+  | Named_function of { origin : Core.origin; path : Path.t; instantiation : Types.instantiation }
   | Forwarded of Core.local
   | Lambda
   | Other

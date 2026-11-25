@@ -12,13 +12,5 @@ val bind_law_parameters :
 val assume_laws : State.context -> State.frame -> Types.trait_reference -> Types.ty -> unit
 val has_method_cost : State.context -> Invocation.callee -> Path.t -> bool
 
-val check_named_callback :
-  State.context ->
-  State.frame ->
-  Invocation.t ->
-  State.passed ->
-  origin:Core.origin ->
-  Path.t ->
-  State.contract ->
-  State.passed list ->
-  unit
+val relate_named_function :
+  State.context -> State.frame -> Invocation.t -> State.passed -> Path.t -> unit

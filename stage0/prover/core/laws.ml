@@ -183,59 +183,13 @@ let add_named_relation context frame (expected : Types.function_type) callee_ter
         (Logic.forall ~trigger:[ holds ]
            (parameters, Logic.( ==> ) holds (Logic.conjunction ensures)))
 
-let check_named_callback context (frame : State.frame) (invocation : Invocation.t)
-    (passed : State.passed) ~origin path (contract : State.contract) (values : State.passed list) =
-  let location = Facts.locate context frame.source origin in
-  let callee_clauses = contract.callee_clauses in
-  match Validity.find_parameter_type context frame invocation passed.position with
-  | Some (Types.Function expected) ->
-      let inputs = Validity.declare_callback_arguments context frame expected.inputs in
-      let known = List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values in
-      let promised =
-        Logic.conjunction
-          (Validity.list_callback_facts context frame invocation passed.position known inputs)
-      in
-      let at_call = Facts.restrict frame promised in
-      if List.length callee_clauses.parameters = List.length inputs then (
-        let bind arguments =
-          Validity.bind_arguments frame callee_clauses
-            ~arguments:(List.mapi (fun index input -> (index, input)) arguments)
-            ~substitution:Types.no_substitution
-        in
-        let inside = bind inputs in
-        Validity.check_passed_contract context frame ~location invocation passed values
-          ~passed_function:(Passed_function path)
-          ~stated_panic:
-            (match Contracts.read_signature context path with
-            | Some signature
-              when Types.has_capability (Capability_unless_values (Built_in Panic)) signature.uses
-              ->
-                Panics_unless
-                  (fun arguments ->
-                    List.map
-                      (fun clause ->
-                        snd (Validity.read_specification context (bind arguments) clause))
-                      (Facts.list_clauses callee_clauses.panics_unless))
-            | Some signature when Types.may_use (Built_in Panic) signature.uses -> May_panic
-            | Some _ | None -> Never_panics)
-          ~stated_cost:(fun arguments metric ->
-            Validity.find_stated_cost context (bind arguments) callee_clauses.costs metric);
-        List.iter
-          (fun (requirement : Mir.formula) ->
-            Facts.oblige context at_call location
-              (Parameter_contract
-                 { path; clause = Facts.quote callee_clauses.callee requirement.origin })
-              (snd (Validity.read_specification context inside requirement)))
-          (Facts.list_clauses callee_clauses.requires);
-        if List.length callee_clauses.parameters = List.length expected.inputs then begin
-          add_named_relation context frame expected passed.term callee_clauses;
-          Validity.check_callback_promises context frame ~location invocation passed
-            ~unpromised:(Ensures_may_not_promise path)
-            ~assume:(fun at_call expected ~entries ~exits ~result ->
-              List.iter (Facts.assume context at_call)
-                (read_named_ensures context at_call callee_clauses expected ~entries ~exits ~result))
-            values
-        end)
-  | _ ->
-      if callee_clauses.requires <> [] then
-        Facts.raise_unsupported location Unreadable_parameter_type
+let relate_named_function context (frame : State.frame) (invocation : Invocation.t)
+    (passed : State.passed) path =
+  match
+    ( Validity.find_parameter_type context frame invocation passed.position,
+      Contracts.find_callee_clauses context path )
+  with
+  | Some (Types.Function ({ output = Returns _; _ } as expected)), Some (clauses : State.clauses)
+    when List.length clauses.parameters = List.length expected.inputs ->
+      add_named_relation context frame expected passed.term clauses
+  | _ -> ()

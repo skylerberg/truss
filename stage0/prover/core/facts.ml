@@ -424,7 +424,8 @@ let reject_recursion_through_supplied_code (context : State.context) (frame : St
       (fun owner ->
         reject
           (match supplier with
-          | Call -> Bound_through_call { call = { at = location; callee = None }; owner }
+          | Call ->
+              Bound_through_call { call = { at = location; callee = None; through = None }; owner }
           | Named_function path -> Bound_through_name { path; owner }
           | Provide -> Provided owner))
       (List.sort_uniq Path.compare
@@ -441,7 +442,8 @@ let reject_recursion_through_supplied_code (context : State.context) (frame : St
 let find_recursive_callee (context : State.context) (frame : State.frame) location callee =
   let reject target impl =
     oblige context frame location
-      (Recursion_through_impl { call = { at = location; callee = Some target }; impl })
+      (Recursion_through_impl
+         { call = { at = location; callee = Some target; through = None }; impl })
       (Logic.Boolean false);
     None
   in
@@ -460,7 +462,7 @@ let reject_uncompared_recursion (context : State.context) frame location recursi
     Option.iter
       (fun callee ->
         oblige context frame location
-          (Uncompared_recursion { call = { at = location; callee = Some callee } })
+          (Uncompared_recursion { call = { at = location; callee = Some callee; through = None } })
           (Logic.Boolean false))
       recursive_callee
 

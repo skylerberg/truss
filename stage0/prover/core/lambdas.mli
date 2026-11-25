@@ -18,6 +18,28 @@ val apply_callback_ensures : State.context -> Types.function_type -> Logic.term 
 val make_parameter_symbols :
   State.context -> State.frame -> Types.function_type -> ('a Logic.Symbol.t * Logic.sort) list
 
+val prove_panic_condition :
+  State.context -> State.frame -> Validity.callback option -> (State.frame -> 'a) -> unit
+
+val oblige_callback_promises :
+  State.context ->
+  State.frame ->
+  Obligation.location ->
+  Validity.promise list ->
+  passed:Catalog.Prover.passed_function ->
+  exits:Logic.term list ->
+  result:Logic.term ->
+  yielded:Logic.term option ->
+  unit
+
+val oblige_callback_costs :
+  State.context ->
+  State.frame ->
+  Obligation.location ->
+  Validity.callback ->
+  passed:Catalog.Prover.passed_function ->
+  unit
+
 val check_valid :
   State.context ->
   State.frame ->
@@ -39,8 +61,6 @@ val run_lambda_body :
   type_:Types.ty ->
   (State.frame * Logic.term) option
 
-val classify_counting : Mir.cost -> Costs.counting
-
 val list_loop_counters :
   State.context -> Logic.term Locals.t -> Mir.body -> (Costs.counter * Types.condition) list
 
@@ -52,14 +72,7 @@ val translate_lambda :
   State.frame ->
   site:Invocation.site ->
   State.lambda_code ->
-  list_facts:(Logic.term list -> Logic.term list) ->
-  list_panic_conditions:(Logic.term list -> (Catalog.Prover.quoted * Logic.term) list) ->
-  list_costs:(Logic.term list -> (Costs.counter * Logic.term * Catalog.Prover.quoted) list) ->
-  list_promises:
-    (entries:Logic.term list ->
-    exits:Logic.term list ->
-    result:Logic.term ->
-    (Catalog.Prover.quoted * Logic.term) list) ->
+  find_callback:(Logic.term list -> Validity.callback) option ->
   State.frame * Logic.term
 
 val make_passed_values :

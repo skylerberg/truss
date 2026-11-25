@@ -320,7 +320,11 @@ let rec resolve_type_expression state scope (type_ : Syntax.type_expression) =
         List.fold_left
           (fun scope (input : Syntax.function_input) ->
             Option.fold ~none:scope ~some:(declare_parameter state scope) input.name)
-          scope inputs
+          {
+            scope with
+            is_lending_method = (match result with Some (Lends _) -> true | _ -> false);
+          }
+          inputs
       in
       List.iter (resolve_clause state named) clauses
   | View_type viewed -> resolve_type_expression state scope viewed

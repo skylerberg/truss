@@ -1,0 +1,14 @@
+type Counter(count: UInt64)
+
+fn Counter.increment(mut self) {
+  self.count = self.count.saturating_add(1)
+}
+
+type Two(left: Counter, right: Counter)
+
+fn claim(two: mut Two)
+  ensures two.left.count == 12345
+{
+  let choose: fn(mut Two) lends mut Counter = fn(held) { mut held.left }
+  mut choose(mut two).increment()
+}

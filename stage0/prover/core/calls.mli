@@ -8,12 +8,22 @@ val add_restated_clauses :
   State.contract ->
   State.contract
 
+type called =
+  | Named of Path.t
+  | Through of {
+      name : string option;
+      function_type : Types.function_type;
+      term : Logic.term;
+      enclosing : State.frame;
+    }
+
 val call_contract :
+  ?passed_for:Catalog.Prover.through ->
   State.context ->
   State.frame ->
   Invocation.site ->
   Invocation.t ->
-  Path.t ->
+  called ->
   State.contract ->
   State.passed list ->
   recursive_callee:Path.t option ->
@@ -27,6 +37,7 @@ val make_callback_cost :
 
 val apply_call :
   ?leave_lent:(Logic.term -> Logic.term) ->
+  ?passed_for:string ->
   State.context ->
   State.frame ->
   Invocation.site ->

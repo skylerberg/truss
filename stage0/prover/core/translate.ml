@@ -137,7 +137,7 @@ let list_promises context (source : State.source) locals (costs : Mir.cost list)
       match Contracts.find_resource cost ~locals with
       | None -> Facts.raise_unsupported (Facts.locate context source cost.origin) Calls_target
       | Some resource ->
-          let counting = Lambdas.classify_counting cost in
+          let counting = Validity.classify_counting cost in
           let counter =
             {
               Costs.resource;
@@ -879,7 +879,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
           let after, result =
             Calls.call_contract context entry
               { origin = at; type_ = result_type }
-              invocation method_path contract
+              invocation (Named method_path) contract
               (List.mapi
                  (fun position (parameter : Mir.parameter) : State.passed ->
                    {

@@ -474,7 +474,8 @@ let find_held_callback context run held (value : Mir.rvalue) =
 
 let classify_shape run ?function_ (value : Mir.operand) : Invocation.shape =
   match (function_, find_whole_local value) with
-  | Some (Mir.Function_reference { path; origin }), _ -> Named_function { origin; path }
+  | Some (Mir.Function_reference { path; instantiation; origin }), _ ->
+      Named_function { origin; path; instantiation }
   | (Some (Lambda_expression _) | None), Some local -> (
       match (run.infos.(local).kind, Hashtbl.find_opt run.held_callbacks local) with
       | Source { local = core; _ }, _ | (Temporary | Lent _), Some core -> Forwarded core
@@ -794,10 +795,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Lambda { body; _ } ->
       Lambdas.translate_lambda context frame ~site
         { code = run.lambdas.(body); lambdas = run.lambdas }
-        ~list_facts:(fun _ -> [])
-        ~list_panic_conditions:(fun _ -> [])
-        ~list_costs:(fun _ -> [])
-        ~list_promises:(fun ~entries:_ ~exits:_ ~result:_ -> [])
+        ~find_callback:None
   | Specification Result -> (
       match frame.result with
       | Some result -> (frame, result)
@@ -1554,6 +1552,7 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
                                 .target
                           | _ -> None)
                         (List.rev code.body.code.statements);
+                    through = None;
                   };
               })
         holds;

@@ -451,9 +451,6 @@ let check_valid context frame location ty term ~deep ~moment =
   | Logic.Boolean true -> ()
   | valid -> Facts.oblige context frame location (Invariant_may_fail { type_ = ty; moment }) valid
 
-let classify_counting (cost : Mir.cost) : Costs.counting =
-  match cost.bound with Order_of _ -> Units | At_most _ -> At_most | Exactly _ -> Exactly
-
 let list_loop_counters context locals (body : Mir.body) =
   let counters = ref [] in
   let note (loop : Mir.loop) =
@@ -469,7 +466,11 @@ let list_loop_counters context locals (body : Mir.body) =
                 match Contracts.find_resource cost ~locals with
                 | Some resource ->
                     counters :=
-                      ( { Costs.resource; counting = classify_counting cost; amortized = false },
+                      ( {
+                          Costs.resource;
+                          counting = Validity.classify_counting cost;
+                          amortized = false;
+                        },
                         condition )
                       :: !counters
                 | None -> Facts.raise_unsupported Whole_definition Calls_target))
@@ -533,46 +534,62 @@ let bind_parameters context (inside : State.frame) (written : State.lambda_code)
     { inside with State.locals = remove_temporaries inside.locals }
     written.code.parameters arguments
 
-let prove_panic_condition context (frame : State.frame) (function_type : Types.function_type)
-    (written : State.lambda_code) ~list_facts ~list_panic_conditions =
-  let inside = Facts.restrict frame (Facts.declare_fresh context frame "called" Logic.Bool) in
-  let arguments = arrive_arguments context frame ~inside function_type in
-  match list_panic_conditions arguments with
-  | [] -> ()
-  | conditions ->
-      List.iter (Facts.assume context inside) (list_facts arguments);
-      List.iter (fun (_, condition) -> Facts.assume context inside condition) conditions;
-      let saved_returns = context.State.returns
-      and saved_panics = context.panics
-      and saved_panic_condition = context.panic_condition
-      and saved_can_declare_panic = context.can_declare_panic
-      and saved_counters = context.counters
-      and saved_conditional_counters = context.conditional_counters
-      and saved_terminates = context.terminates in
-      context.returns <- [];
-      context.panics <- false;
-      context.panic_condition <- Some (List.map fst conditions, Parameter_type);
-      context.can_declare_panic <- false;
-      context.counters <- [];
-      context.conditional_counters <- [];
-      context.terminates <- Types.terminates function_type.uses;
-      Fun.protect
-        ~finally:(fun () ->
-          context.returns <- saved_returns;
-          context.panics <- saved_panics;
-          context.panic_condition <- saved_panic_condition;
-          context.can_declare_panic <- saved_can_declare_panic;
-          context.counters <- saved_counters;
-          context.conditional_counters <- saved_conditional_counters;
-          context.terminates <- saved_terminates)
-        (fun () ->
-          run_lending_body context
-            (bind_parameters context { inside with result = None; spent = [] } written arguments)
-            function_type
-            (fun inside -> context.run_body inside ~lambdas:written.lambdas written.code))
+let run_under_panic_condition (context : State.context) ~condition run =
+  let saved_returns = context.returns
+  and saved_panics = context.panics
+  and saved_panic_condition = context.panic_condition
+  and saved_can_declare_panic = context.can_declare_panic
+  and saved_counters = context.counters
+  and saved_conditional_counters = context.conditional_counters in
+  context.returns <- [];
+  context.panics <- false;
+  context.panic_condition <- Some condition;
+  context.can_declare_panic <- false;
+  context.counters <- [];
+  context.conditional_counters <- [];
+  Fun.protect
+    ~finally:(fun () ->
+      context.returns <- saved_returns;
+      context.panics <- saved_panics;
+      context.panic_condition <- saved_panic_condition;
+      context.can_declare_panic <- saved_can_declare_panic;
+      context.counters <- saved_counters;
+      context.conditional_counters <- saved_conditional_counters)
+    run
+
+let prove_panic_condition context (frame : State.frame) (callback : Validity.callback option) run =
+  match callback with
+  | Some { Validity.parameter; requires; panic_condition = condition, (_ :: _ as holds); _ } ->
+      run_under_panic_condition context ~condition:(condition, Parameter_type parameter) (fun () ->
+          ignore (run (Facts.restrict frame (Logic.conjunction (requires @ holds)))))
+  | Some _ | None -> ()
+
+let keeps_limit (exit_ : State.frame) (counter : Costs.counter) limit =
+  let spent = Option.value (List.assoc_opt counter exit_.spent) ~default:Costs.zero in
+  match counter.counting with
+  | Units | At_most -> Logic.less_equal spent limit
+  | Exactly -> Logic.equal spent limit
+
+let oblige_callback_promises context (exit_ : State.frame) location
+    (promises : Validity.promise list) ~passed ~exits ~result ~yielded =
+  List.iter
+    (fun (promise : Validity.promise) ->
+      Facts.oblige context exit_ location
+        (Callback_promise { promise = promise.quoted; passed })
+        (promise.read ~exits ~result ~yielded))
+    promises
+
+let oblige_callback_costs context (exit_ : State.frame) location (callback : Validity.callback)
+    ~passed =
+  List.iter
+    (fun (counter, limit, clause) ->
+      Facts.oblige context exit_ location
+        (Callback_cost { clause; passed })
+        (keeps_limit exit_ counter limit))
+    callback.costs
 
 let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : Invocation.site)
-    (written : State.lambda_code) ~list_facts ~list_panic_conditions ~list_costs ~list_promises =
+    (written : State.lambda_code) ~find_callback =
   let location = Facts.locate context frame.source site.origin in
   let ty = Facts.substitute_type context frame site.type_ in
   let function_type =
@@ -588,8 +605,16 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   and start_facts = List.length context.facts
   and start_declarations = List.length context.declarations in
   let arguments = arrive_arguments context frame ~inside function_type in
-  List.iter (Facts.assume context inside) (list_facts arguments);
-  let promised =
+  let callback = Option.map (fun bind -> bind arguments) find_callback in
+  (match (callback, function_type.output) with
+  | Some { Validity.promises = _ :: _; _ }, Lends _ ->
+      Facts.raise_unsupported location Lending_lambda_with_promises
+  | _ -> ());
+  Option.iter
+    (fun (callback : Validity.callback) ->
+      List.iter (Facts.assume context inside) callback.requires)
+    callback;
+  let type_costs =
     List.filter_map
       (fun (cost : Types.cost) ->
         let counting : Costs.counting =
@@ -605,20 +630,11 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
             in
             Some
               ( counter,
-                (match cost.bound with
+                match cost.bound with
                 | Order_of -> Costs.bound (Logic.int 1)
-                | No_more_than limit | Exactly_cost limit -> Logic.Integer limit),
-                None )
+                | No_more_than limit | Exactly_cost limit -> Logic.Integer limit )
         | Calls _ -> None)
       function_type.costs
-    @ List.map
-        (fun ((counter : Costs.counter), amount, clause) ->
-          ( counter,
-            (match counter.counting with
-            | Units -> Costs.bound amount
-            | At_most | Exactly -> amount),
-            Some clause ))
-        (list_costs arguments)
   in
   let operand_counters =
     List.filter_map
@@ -648,7 +664,10 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
          in
          (counter, if is_conditional then context.condition else []))
        operand_counters
-    @ List.map (fun (counter, _, _) -> (counter, [])) promised
+    @ List.map (fun (counter, _) -> (counter, [])) type_costs
+    @ (match callback with
+      | Some callback -> List.map (fun (counter, _, _) -> (counter, [])) callback.costs
+      | None -> [])
     @ list_loop_counters context inside.locals written.code);
   let inside =
     { inside with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
@@ -700,8 +719,13 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
           @ List.map fst context.returns
         in
         ended :=
-          (match finished with Some (frame, value) -> [ (frame, Some value) ] | None -> [])
-          @ context.returns;
+          List.map
+            (fun (exit_, returned) ->
+              match function_type.output with
+              | Returns _ -> (exit_, returned)
+              | Lends _ -> (exit_, None))
+            ((match finished with Some (frame, value) -> [ (frame, Some value) ] | None -> [])
+            @ context.returns);
         List.iter
           (fun ((exit_ : State.frame), returned) ->
             Option.iter
@@ -739,43 +763,31 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
               | None -> None
             in
             Option.iter
-              (fun result ->
-                List.iter
-                  (fun (quoted, promise) ->
-                    Facts.oblige context exit_ location
-                      (Lambda_promise { promise = quoted })
-                      promise)
-                  (list_promises ~entries:arguments ~exits ~result))
-              result)
+              (fun (callback : Validity.callback) ->
+                Option.iter
+                  (fun result ->
+                    oblige_callback_promises context exit_ location callback.promises
+                      ~passed:Passed_lambda ~exits ~result ~yielded:None)
+                  result;
+                oblige_callback_costs context exit_ location callback ~passed:Passed_lambda)
+              callback;
+            List.iter
+              (fun ((counter : Costs.counter), limit) ->
+                Facts.oblige context exit_ location
+                  (Lambda_cost
+                     {
+                       counting =
+                         (match counter.counting with
+                         | Units | At_most -> Upper_bound
+                         | Exactly -> Exact);
+                       type_ = ty;
+                     })
+                  (keeps_limit exit_ counter limit))
+              type_costs)
           !ended;
         let compute_spent (exit_ : State.frame) counter =
           match List.assoc_opt counter exit_.spent with Some term -> term | None -> Costs.zero
         in
-        List.iter
-          (fun (exit_ : State.frame) ->
-            List.iter
-              (fun ((counter : Costs.counter), limit, clause) ->
-                let spent = compute_spent exit_ counter in
-                let goal =
-                  match counter.counting with
-                  | Units | At_most -> Logic.less_equal spent limit
-                  | Exactly -> Logic.equal spent limit
-                in
-                Facts.oblige context exit_ location
-                  (match clause with
-                  | Some clause -> Callback_cost { clause; passed = Passed_lambda }
-                  | None ->
-                      Lambda_cost
-                        {
-                          counting =
-                            (match counter.counting with
-                            | Units | At_most -> Upper_bound
-                            | Exactly -> Exact);
-                          type_ = ty;
-                        })
-                  goal)
-              promised)
-          exits;
         let facts =
           list_facts_since context facts_mark
           @ List.map (fun (exit_ : State.frame) -> exit_.condition) exits
@@ -824,11 +836,24 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   context.lambda_costs <-
     List.map (fun (metric, pending_cost) -> ((term, metric), pending_cost)) pending
     @ context.lambda_costs;
-  prove_panic_condition context frame function_type written ~list_facts ~list_panic_conditions;
+  (let inside = Facts.restrict frame (Facts.declare_fresh context frame "called" Logic.Bool) in
+   let arguments = arrive_arguments context frame ~inside function_type in
+   prove_panic_condition context inside
+     (Option.map (fun bind -> bind arguments) find_callback)
+     (fun inside ->
+       let saved_terminates = context.State.terminates in
+       context.terminates <- Types.terminates function_type.uses;
+       Fun.protect
+         ~finally:(fun () -> context.terminates <- saved_terminates)
+         (fun () ->
+           run_lending_body context
+             (bind_parameters context { inside with result = None; spent = [] } written arguments)
+             function_type
+             (fun inside -> context.run_body inside ~lambdas:written.lambdas written.code))));
   (frame, term)
 
 let translate_lambda context (frame : State.frame) ~(site : Invocation.site)
-    (written : State.lambda_code) ~list_facts ~list_panic_conditions ~list_costs ~list_promises =
+    (written : State.lambda_code) ~find_callback =
   let find_captured (local : Core.local) =
     match local with Self -> frame.self | local -> Locals.find_opt (Core_local local) frame.locals
   in
@@ -844,12 +869,10 @@ let translate_lambda context (frame : State.frame) ~(site : Invocation.site)
     let _, term =
       read_lambda ~capture_free:true context
         { frame with binders = []; condition = Logic.Boolean true }
-        ~site written ~list_facts ~list_panic_conditions ~list_costs ~list_promises
+        ~site written ~find_callback
     in
     (frame, term)
-  else
-    read_lambda context frame ~site written ~list_facts ~list_panic_conditions ~list_costs
-      ~list_promises
+  else read_lambda context frame ~site written ~find_callback
 
 let make_passed_values context frame (invocation : Invocation.t)
     (arguments : State.call_argument list) =
@@ -866,12 +889,7 @@ let make_passed_values context frame (invocation : Invocation.t)
       | Lambda_argument { position; mode; site; lambda = written } ->
           let _, term =
             translate_lambda context frame ~site written
-              ~list_facts:(Validity.list_callback_facts context frame invocation position known)
-              ~list_panic_conditions:
-                (Validity.list_callback_panic_conditions context frame invocation position known)
-              ~list_costs:(Validity.list_callback_costs context frame invocation position known)
-              ~list_promises:
-                (Validity.list_callback_promises context frame invocation position known)
+              ~find_callback:(Validity.find_callback context frame invocation position known)
           in
           {
             position;

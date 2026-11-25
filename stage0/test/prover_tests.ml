@@ -2230,13 +2230,13 @@ let () =
   Harness.test "a function that panics with no condition is no callback with a panic condition"
     (fun () ->
       expect_not_proven Fixtures.Prover.function_that_panics_passed_for_a_panic_condition
-        "prover.requires");
+        "prover.panic");
   Harness.test "a lambda does not panic where its callback type's condition holds" (fun () ->
       expect_not_proven Fixtures.Prover.lambda_that_panics_where_its_callback_condition_holds
         "prover.overflow");
   Harness.test "a forwarded callback's panic condition implies the callee's" (fun () ->
       expect_not_proven Fixtures.Prover.callback_forwarded_with_a_weaker_panic_condition
-        "prover.requires");
+        "prover.panic");
   Harness.test "a callback's cost may depend on its inputs" (fun () ->
       expect_proven Fixtures.Prover.callback_cost_on_its_input);
   Harness.test "a function passed for a callback keeps the cost its type states on its inputs"
@@ -2245,8 +2245,17 @@ let () =
   Harness.test "a call through a lending callback proves its type's requires" (fun () ->
       expect_not_proven Fixtures.Prover.lending_callback_outside_its_requires "prover.requires"
         ~fixed:("),\n) {", "),\n)\n  requires index < 2\n{"));
-  Harness.test "the prover does not read an ensures on a lending callback's type" (fun () ->
-      expect_not_proven Fixtures.Prover.lending_callback_with_an_ensures "prover.unsupported");
+  Harness.test "the prover does not check a lambda against a lending callback's ensures" (fun () ->
+      expect_not_proven Fixtures.Prover.lambda_passed_for_a_lending_callback_with_an_ensures
+        "prover.unsupported");
+  Harness.test "a lending function's ensures must imply its lending callback type's" (fun () ->
+      expect_not_proven Fixtures.Prover.lending_function_breaking_its_callback_ensures
+        "prover.ensures");
+  Harness.test "a lending function's ensures must imply its callback type's final part" (fun () ->
+      expect_not_proven Fixtures.Prover.lending_function_breaking_its_callback_final
+        "prover.ensures");
+  Harness.test "a call through a lending lambda held in a local knows nothing of its part"
+    (fun () -> expect_not_proven Fixtures.Prover.lending_lambda_held_in_a_local "prover.ensures");
   Harness.test "a named function's ensures must imply its callback type's" (fun () ->
       expect_not_proven Fixtures.Prover.named_function_breaking_its_callback_ensures
         "prover.ensures");
