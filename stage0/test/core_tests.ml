@@ -91,7 +91,9 @@ let make_definition_form text (path : Path.t) =
   in
   match definition with
   | Some (key, core) ->
-      Core_lint.check (Database.make_interface_lookups (Support.make_database packages)) key core;
+      Core_lint.check
+        (Database.make_interface_lookups (Support.make_database packages))
+        (Support.make_source packages) key core;
       core
   | None -> failwith (Printf.sprintf "`%s` has no core form" (Path.show path))
 
@@ -278,8 +280,8 @@ let () =
           let key = declaration.key in
           match
             ( find_core packages key,
-              (Support.make_names packages).read_spans key,
-              (Support.make_names packages).read_text key )
+              (Support.make_source packages).read_spans key,
+              (Support.make_source packages).read_text key )
           with
           | Some form, spans, written ->
               let actual = ref [] in
@@ -393,8 +395,8 @@ let () =
           let key = declaration.key in
           match
             ( find_core packages key,
-              (Support.make_names packages).read_spans key,
-              (Support.make_names packages).read_text key )
+              (Support.make_source packages).read_spans key,
+              (Support.make_source packages).read_text key )
           with
           | ( Some { definition = Function { contract = { costs = [ cost ]; _ }; _ }; _ },
               spans,
@@ -619,7 +621,10 @@ let () =
       in
       match Database.read_checked_body database key with
       | Some { form; _ } ->
-          Core_lint.check (Database.make_interface_lookups database) key form;
+          Core_lint.check
+            (Database.make_interface_lookups database)
+            (Database.make_source_lookups database)
+            key form;
           expect_observed
             [ "intrinsic.shared_update uses [standard.capabilities.Tasks]" ]
             (List.filter_map

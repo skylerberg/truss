@@ -7,25 +7,15 @@ type checking = {
   mutable has_implicit_measure_loop : bool;
 }
 
-let report checking ?(fixes = []) ?(notes = []) code (origin : Core.origin) message =
-  let read_span origin = State.read_span checking.state (Core_walk.locate_origin origin) in
-  checking.state.diagnostics <-
-    Diagnostic.make ~fixes
-      ~notes:(List.map (fun (cited, note) -> (read_span cited, note)) notes)
-      ~code:(Capabilities code) (read_span origin) message
-    :: checking.state.diagnostics
+let report checking diagnostic =
+  ignore (State.record_diagnostic checking.state (Catalog.Capabilities diagnostic))
 
 type function_body = { path : Path.t; implementation : Interface.Impls.implementation option }
 
 type scope_kind =
   | Function_body of function_body
   | Lambda_body of { origin : Core.origin; enclosing_panic : Types.capability option }
-  | Restricted of {
-      description : string;
-      reason : string;
-      enclosing : scope option;
-      is_within_code : bool;
-    }
+  | Restricted of { restriction : Catalog.Capabilities.restriction; enclosing : scope option }
 
 and scope = { allowed : Types.capability_set; provided : Types.capability_set; kind : scope_kind }
 
@@ -41,45 +31,35 @@ let find_implemented_capability scope : Types.capability option =
       Some (Types.make_capability impl.implements.trait)
   | Function_body _ | Lambda_body _ | Restricted _ -> None
 
-let value_reason =
-  "Its meaning must be a value. A function that fails on some inputs says so with `requires` \
-   instead."
+let make_restricted_scope ?enclosing ~allowed restriction =
+  make_scope ~allowed (Restricted { restriction; enclosing })
 
-let make_restricted_scope ?enclosing ?(is_within_code = true) ~allowed ~reason description =
-  make_scope ~allowed (Restricted { description; reason; enclosing; is_within_code })
-
-let make_parallel_scope ~enclosing description =
+let make_parallel_scope ~enclosing restriction =
   make_restricted_scope ~enclosing
     ~allowed:(Types.make_capability_set [ Built_in Panic; Built_in Run_forever ])
-    ~reason:"Parallel calls of one implementation could race." description
+    restriction
 
-let make_no_capabilities_scope description =
-  make_restricted_scope ~allowed:Types.no_capabilities ~reason:value_reason description
+let make_no_capabilities_scope restriction =
+  make_restricted_scope ~allowed:Types.no_capabilities restriction
 
 let make_quantifier_scope ~enclosing =
   make_restricted_scope ~enclosing
     ~allowed:(Types.make_capability_set [ Built_in Run_forever ])
-    ~reason:value_reason "a quantifier's body"
+    Quantifier_body
+
+let find_value_origin (implementation : Core.implementation) =
+  match implementation.value with
+  | Place place -> Core_walk.compute_place_origin place
+  | Value value -> value.origin
 
 let find_enclosing_restriction scope =
   match scope.kind with
   | Restricted { enclosing = Some enclosing; _ } -> Some (enclosing, scope.allowed)
   | Function_body _ | Lambda_body _ | Restricted { enclosing = None; _ } -> None
 
-let show_exceptions (allowed : Types.capability_set) =
-  match
-    List.map
-      (fun capability -> Printf.sprintf "`%s`" (Types.show_capability capability))
-      (Types.list_capabilities allowed)
-  with
-  | [] -> ""
-  | shown -> " except " ^ String.concat " and " shown
-
-let check_grant checking (origin : Core.origin) ~subject package (uses : Types.capability_set) =
+let check_grant checking (origin : Core.origin) granted package (uses : Types.capability_set) =
   List.iter
-    (fun capability ->
-      report checking Not_granted origin
-        (Interface.Grants.describe_missing ~subject ~of_:package capability))
+    (fun capability -> report checking (Not_granted { at = origin; granted; package; capability }))
     (Interface.Grants.list_missing checking.state.lookups.interface ~package:checking.state.package
        ~of_:package uses)
 
@@ -93,9 +73,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.operand C
       if needs_grant path then
         Option.iter
           (fun (signature : Types.signature) ->
-            check_grant checking origin
-              ~subject:(Printf.sprintf "`%s`" (Path.show path))
-              (Path.locate_package path) signature.uses)
+            check_grant checking origin (Function path) (Path.locate_package path) signature.uses)
           (Signatures.read state.signatures state.lookups.interface path)
   | Trait_method { trait; name; receiver; evidence; _ } -> (
       (if needs_grant trait.trait then
@@ -105,7 +83,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.operand C
          with
          | Some method_ ->
              check_grant checking origin
-               ~subject:(Printf.sprintf "`%s.%s`" (Path.show trait.trait) name)
+               (Trait_method { trait = trait.trait; name })
                (Path.locate_package trait.trait)
                (Signatures.read_of_method state.signatures state.lookups.interface
                   ~owner:trait.trait method_)
@@ -118,22 +96,14 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.operand C
               Option.iter
                 (fun (signature : Types.signature) ->
                   check_grant checking origin
-                    ~subject:
-                      (Printf.sprintf "The `impl` of `%s` for `%s`"
-                         (Types.show_trait interface.implements)
-                         (Types.show interface.for_type))
+                    (Implemented_method
+                       { implements = interface.implements; for_type = interface.for_type })
                     (Path.locate_package impl) signature.uses)
                 (Signatures.read state.signatures state.lookups.interface
                    (Method { owner = impl; name; receiver }))
           | Some _ | None -> ())
       | Impl _ | Derived_for_view _ | Bound -> ())
   | Capability_method _ | Intrinsic _ | Indirect _ -> ()
-
-let add_alternative ~sentence_start alternative =
-  match alternative with
-  | Some alternative when sentence_start -> " " ^ String.capitalize_ascii alternative ^ "."
-  | Some alternative -> ", or " ^ alternative
-  | None -> ""
 
 let rec require_available checking scope (origin : Core.origin) ~subject ?alternative
     ?(indirect_call = false) ?restriction (required : Types.capability_set) =
@@ -148,27 +118,27 @@ let rec require_available checking scope (origin : Core.origin) ~subject ?altern
   let report_missing (missing : Types.capability_set) =
     List.iter
       (fun capability ->
-        let shown = Types.show_capability capability in
         match scope.kind with
         | Lambda_body { origin = lambda; _ } ->
-            report checking Lambda_uses lambda
-              ~notes:
-                (if Option.is_some alternative then
-                   [ (origin, Printf.sprintf "%s uses `%s`." subject shown) ]
-                 else [])
-              (Printf.sprintf
-                 "This lambda uses `%s`, which the function type it is passed as does not allow."
-                 shown)
-        | Restricted { description; _ } when capability = Built_in Run_forever ->
-            report checking Not_available origin
-              (Printf.sprintf "%s uses `RunForever`, but %s must terminate.%s" subject description
-                 (add_alternative ~sentence_start:true alternative))
-        | Restricted { description; reason; is_within_code; _ } ->
-            report checking Not_available origin
-              (Printf.sprintf "%s uses `%s`, but %s may use no capability%s%s. %s" subject shown
-                 description (show_exceptions scope.allowed)
-                 (if is_within_code then ", even one that is available outside it" else "")
-                 reason)
+            report checking
+              (Lambda_uses
+                 {
+                   lambda;
+                   capability;
+                   use = (if Option.is_some alternative then Some (origin, subject) else None);
+                 })
+        | Restricted { restriction; _ } when capability = Built_in Run_forever ->
+            report checking (Must_terminate { at = origin; subject; restriction; alternative })
+        | Restricted { restriction; _ } ->
+            report checking
+              (Not_in_restriction
+                 {
+                   at = origin;
+                   subject;
+                   capability;
+                   restriction;
+                   allowed = Types.list_capabilities scope.allowed;
+                 })
         | Function_body { path; _ } ->
             let can_provide =
               match Types.find_base capability with
@@ -180,26 +150,18 @@ let rec require_available checking scope (origin : Core.origin) ~subject ?altern
               | Capability_unless _ | Capability_unless_values _ ->
                   State.raise_bug "a capability's base has a condition"
             in
-            report checking Not_available origin
-              (match
-                 Interface.Impls.find_capability_declaration state.lookups.interface path capability
-               with
-              | Some (Declared_by clause) ->
-                  Printf.sprintf
-                    "%s uses `%s`, which is not available here. Declare it with %s%s%s." subject
-                    shown
-                    (Interface.Impls.show_declaring_clause clause shown)
-                    (if can_provide then ", or `provide` an implementation" else "")
-                    (add_alternative ~sentence_start:false alternative)
-              | Some (Fixed_by_trait { trait; method_name }) ->
-                  Printf.sprintf
-                    "%s uses `%s`, but `%s` can use only the capabilities `%s` declares for it.%s%s"
-                    subject shown method_name (Types.show_trait trait)
-                    (if can_provide then " Provide an implementation with `provide`." else "")
-                    (add_alternative ~sentence_start:true alternative)
-              | None ->
-                  Printf.sprintf "%s uses `%s`, which is not available here.%s" subject shown
-                    (add_alternative ~sentence_start:true alternative)))
+            report checking
+              (Not_available
+                 {
+                   at = origin;
+                   subject;
+                   capability;
+                   declaration =
+                     Interface.Impls.find_capability_declaration state.lookups.interface path
+                       capability;
+                   can_provide;
+                   alternative;
+                 }))
       (Types.list_capabilities missing)
   in
   if required <> Types.no_capabilities then begin
@@ -234,26 +196,16 @@ let compute_required_uses state scope (callee : Core.callee) =
 
 let require_callee_uses checking scope (origin : Core.origin) (callee : Core.callee) =
   check_callee_grants checking origin callee.target;
-  let state = checking.state in
-  require_available checking scope origin
-    ~subject:
-      (String.capitalize_ascii
-         (Core_walk.describe_call origin
-            ~quote:(fun () ->
-              State.quote_span state (State.read_span state (Core_walk.locate_origin origin)))
-            ()))
+  require_available checking scope origin ~subject:(Call origin)
     ~indirect_call:(match callee.target with Indirect _ -> true | _ -> false)
     (compute_required_uses checking.state scope callee)
 
 let require_run_forever_of_unmeasured_loop checking scope (origin : Core.origin) ~alternative =
-  require_available checking scope origin ~subject:"This loop has no measure, so it" ~alternative
+  require_available checking scope origin ~subject:Unmeasured_loop ~alternative
     (Types.make_capability_set [ Built_in Run_forever ])
 
 let require_run_forever_unless checking scope (origin : Core.origin) condition =
-  require_available checking scope origin
-    ~subject:
-      (Printf.sprintf "This loop's measure holds only when %s, so the loop"
-         (Types.show_condition condition))
+  require_available checking scope origin ~subject:(Conditionally_measured_loop condition)
     (Types.make_capability_set
        (Option.to_list (Types.make_unless (Built_in Run_forever) condition)))
 
@@ -288,7 +240,7 @@ let require_panic_of_failing_operation checking scope (origin : Core.origin) =
   | Lambda_body { enclosing_panic = Some panic; _ }
     when Option.is_none (find_available_panic scope)
          && Types.contains_capability_variable scope.allowed ->
-      require_available checking scope origin ~subject:"This operation may fail, so it"
+      require_available checking scope origin ~subject:Failing_operation
         (Types.make_capability_set [ panic ])
   | Function_body _ | Lambda_body _ | Restricted _ -> ()
 
@@ -342,10 +294,10 @@ and check_statement checking scope (statement : Core.statement) =
   match statement.kind with
   | Parallel branches ->
       List.iter
-        (check_statement checking (make_parallel_scope ~enclosing:scope "a `parallel` branch"))
+        (check_statement checking (make_parallel_scope ~enclosing:scope Parallel_branch))
         branches
   | Concurrent branches ->
-      require_available checking scope statement.origin ~subject:"This `concurrent` block"
+      require_available checking scope statement.origin ~subject:Concurrent_block
         (Types.make_capability_set [ tasks ]);
       List.iter (check_statement checking scope) branches
   | For { mode; pattern; iteration; clauses; body } ->
@@ -363,11 +315,9 @@ and check_statement checking scope (statement : Core.statement) =
           in
           require_run_forever_of_unmeasured_loop checking scope statement.origin
             ~alternative:
-              (Printf.sprintf "give the loop a `decreases` clause, or %s"
-                 (match cursor_type with
-                 | Types.Parameter _ | Projection _ ->
-                     Printf.sprintf "bound `%s` by `FiniteCursor`" (Types.show cursor_type)
-                 | _ -> Printf.sprintf "implement `FiniteCursor` for `%s`" (Types.show cursor_type)))
+              (match cursor_type with
+              | Types.Parameter _ | Projection _ -> Add_decreases_or_bound cursor_type
+              | _ -> Add_decreases_or_implement cursor_type)
       | _, Some (_ :: _ as condition) ->
           require_run_forever_unless checking scope statement.origin condition
       | (Integer_range _ | Elements _ | Cursor _), Some [] | (Integer_range _ | Elements _), None ->
@@ -376,10 +326,10 @@ and check_statement checking scope (statement : Core.statement) =
       check_loop_clauses checking clauses;
       check_block checking
         (match mode with
-        | Parallel -> make_parallel_scope ~enclosing:scope "a `parallel for`"
+        | Parallel -> make_parallel_scope ~enclosing:scope Parallel_for
         | Sequential -> scope
         | Concurrent ->
-            require_available checking scope statement.origin ~subject:"This `concurrent for` loop"
+            require_available checking scope statement.origin ~subject:Concurrent_for_loop
               (Types.make_capability_set [ tasks ]);
             scope)
         body
@@ -391,16 +341,14 @@ and check_statement checking scope (statement : Core.statement) =
           require_run_forever_unless checking scope statement.origin measured_when
       | None ->
           require_run_forever_of_unmeasured_loop checking scope statement.origin
-            ~alternative:"give the loop a `decreases` clause");
+            ~alternative:Add_decreases);
       check_expression checking scope condition;
       check_loop_clauses checking clauses;
       check_block checking scope body
-  | Proof body -> check_block checking (make_no_capabilities_scope "a proof") body
+  | Proof body -> check_block checking (make_no_capabilities_scope Proof) body
   | Assert { condition; by = Some Evaluation } ->
       check_expression checking
-        (make_restricted_scope ~is_within_code:false ~allowed:Types.no_capabilities
-           ~reason:"It is evaluated when the code is checked, and a check has no capabilities."
-           "the condition of an assertion `by evaluation`")
+        (make_restricted_scope ~allowed:Types.no_capabilities Evaluated_assertion)
         condition.value
   | Let _ | Evaluate _ | Assign _ | Compound_assign _
   | Assert { by = Some Bit_vector | None; _ }
@@ -412,7 +360,7 @@ and check_loop_clauses checking (clauses : Core.loop_clause Core.conditional lis
     (Core_walk.walk_loop_clause
        {
          Core_walk.ignore_all with
-         expression = check_expression checking (make_no_capabilities_scope "a specification");
+         expression = check_expression checking (make_no_capabilities_scope Specification);
        })
     clauses
 
@@ -429,9 +377,9 @@ and check_provide checking scope implementations body =
           ~package:state.package implementation.type_
       in
       if impls = [] then
-        report checking Not_an_implementation implementation.origin
-          (Printf.sprintf "`%s` implements no capability, so it provides nothing."
-             (Types.show implementation.type_));
+        report checking
+          (Not_an_implementation
+             { implementation = implementation.origin; type_ = implementation.type_ });
       let mutates =
         List.exists
           (fun (_, (interface : Types.impl_interface)) ->
@@ -440,34 +388,20 @@ and check_provide checking scope implementations body =
       in
       let provided_mut = implementation.mode = Mut in
       let is_place = match implementation.value with Place _ -> true | Value _ -> false in
-      let start =
-        (State.read_span checking.state (Core_walk.locate_origin implementation.origin)).start
-      in
       if is_place && mutates && not provided_mut then
-        report checking Provide_mode implementation.origin
-          ~fixes:
-            [
-              Diagnostic.fix "Provide it `mut`."
-                [ Diagnostic.insert (Source.Definition_span.make_zero_width start) "mut " ];
-            ]
-          "This implementation mutates its own state, so the place is provided `mut`."
+        report checking (Provide_missing_mut { implementation = implementation.origin })
       else if provided_mut && not mutates then
-        report checking Provide_mode implementation.origin
-          ~fixes:
-            [
-              Diagnostic.fix "Remove the `mut`."
-                [ Diagnostic.delete (Source.Definition_span.make start (start + 4)) ];
-            ]
-          "This implementation never mutates its own state, so the place is provided without `mut`.";
+        report checking
+          (Provide_needless_mut
+             { implementation = implementation.origin; place = find_value_origin implementation });
       List.iter
         (fun ((provided : Core.provided), (interface : Types.impl_interface)) ->
           check_grant checking implementation.origin
-            ~subject:
-              (Printf.sprintf "The `impl` of `%s` for `%s`" (Path.show provided.capability)
-                 (Types.show interface.for_type))
+            (Provided_implementation
+               { capability = provided.capability; for_type = interface.for_type })
             (Path.locate_package provided.impl)
             interface.impl_uses;
-          require_available checking scope implementation.origin ~subject:"This implementation"
+          require_available checking scope implementation.origin ~subject:Implementation
             interface.impl_uses)
         impls;
       provided :=
@@ -629,15 +563,9 @@ let check_monitor_lock checking ~(read_solved : int -> Types.capability_set) ava
     List.iter
       (fun (implementation : Core.implementation) ->
         if implementation.mode = Mut && not (provides_tasks implementation) then
-          report checking Monitor_needs_tasks implementation.origin
-            (Printf.sprintf
-               "`%s` is provided `mut`, and the body of this `provide` uses `Tasks`, so two tasks \
-                could call its methods at the same time. Its methods are locked through `Tasks`, \
-                but `Tasks` is provided only inside the body: it is not available at this \
-                `provide`, and no implementation in it provides `Tasks`. Without the lock, the two \
-                calls are a data race. Provide the implementation of `Tasks` in this `provide` or \
-                in an enclosing one."
-               (Types.show implementation.type_)))
+          report checking
+            (Monitor_needs_tasks
+               { implementation = implementation.origin; type_ = implementation.type_ }))
       implementations
 
 let check_monitor_callbacks checking implementations =
@@ -668,17 +596,14 @@ let check_monitor_callbacks checking implementations =
                         signature.parameters
                     with
                     | Some parameter ->
-                        report checking Callback_may_deadlock implementation.origin
-                          (Printf.sprintf
-                             "The body of this `provide` can use `Tasks`, so this implementation \
-                              is a monitor: each call of its methods runs to completion before the \
-                              next call starts. `%s.%s` takes `%s`, which can call code that uses \
-                              a capability. Called while the monitor is held, that code could \
-                              enter the monitor of a nested `provide`, and two tasks could \
-                              deadlock. Pass the method the values that it needs instead of a \
-                              callback."
-                             (Path.show_name provided.capability)
-                             method_.method_name parameter.name)
+                        report checking
+                          (Callback_may_deadlock
+                             {
+                               implementation = implementation.origin;
+                               capability = provided.capability;
+                               method_name = method_.method_name;
+                               parameter = parameter.name;
+                             })
                     | None -> ())
                   capability.methods
             | None -> ())
@@ -704,9 +629,7 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
              | _ -> None);
          })
   in
-  let check_specification =
-    check_expression checking (make_no_capabilities_scope "a specification")
-  in
+  let check_specification = check_expression checking (make_no_capabilities_scope Specification) in
   (match form.definition with
   | Function { parameters; contract; _ } ->
       List.iter
@@ -739,7 +662,7 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
       List.iter
         (fun (law : Core.law) ->
           List.iter check_specification law.requires;
-          check_block checking (make_no_capabilities_scope "a law") law.body)
+          check_block checking (make_no_capabilities_scope Law) law.body)
         laws
   | Constant _ | Test _ | Law_proof _ | Empty -> ());
   (match (form.definition, state.definition.kind, elaborated.interface) with
@@ -756,13 +679,10 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
               ~list_bounds:(State.lookup_bounds state) signature.uses))
         body
   | Function { body = Some body; _ }, Theorem _, _ | Law_proof { body = Some body; _ }, _, _ ->
-      check_block checking (make_no_capabilities_scope "a proof") body
+      check_block checking (make_no_capabilities_scope Proof) body
   | Constant (Some value), _, _ ->
       check_expression checking
-        (make_restricted_scope ~is_within_code:false ~allowed:Types.no_capabilities
-           ~reason:
-             "A constant is computed when the program is compiled, and a build has no capabilities."
-           "the value of a constant")
+        (make_restricted_scope ~allowed:Types.no_capabilities Constant_value)
         value
   | _ -> ());
   solve state;

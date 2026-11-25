@@ -94,7 +94,7 @@ type stated = Tables.stated =
   | Method_cost_bound of Logic.symbol
 
 type call_amount = {
-  call : Obligation.piece;
+  call : Catalog.Prover.quoted;
   callee : Path.t;
   states_cost : bool;
   counter : Costs.counter;
@@ -163,7 +163,7 @@ type context = {
   holds_potential : bool Tables.Type_table.t;
   buffers : buffer option Tables.Type_table.t;
   mutable equalities : Logic.term list;
-  mutable path_notes : (string * Logic.term) list;
+  mutable path_notes : (Catalog.Prover.path_note * Logic.term) list;
   mutable entry : Logic.symbol list;
   inherits_precondition : bool;
   mutable holes : (Resolve.Names.key * Obligation.location) list;
@@ -182,7 +182,7 @@ type context = {
   keeps_failures : bool;
   mutable panics : bool;
   mutable can_declare_panic : bool;
-  panic_condition : Obligation.message option;
+  panic_condition : Catalog.Prover.quoted list option;
   mutable obligation_condition : Types.condition;
   mutable skipped_conditions : Types.condition list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;

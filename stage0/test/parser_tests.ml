@@ -331,7 +331,7 @@ let () =
       | _, tokens, [ _; second ] -> (
           match snd (Parser.For_testing.parse_definition tokens second) with
           | [ diagnostic ] ->
-              if diagnostic.span.start <> 23 then Harness.fail "start %d" diagnostic.span.start
+              if diagnostic.at.start <> 23 then Harness.fail "start %d" diagnostic.at.start
           | _ -> Harness.fail "expected one diagnostic")
       | _ -> Harness.fail "expected two pieces");
   Harness.test "moving a broken definition changes nothing in its tree" (fun () ->
@@ -354,8 +354,9 @@ let () =
             ( method_.value,
               String.sub (Source.text source) method_.base (method_.stop - method_.base),
               List.map
-                (fun (diagnostic : Diagnostic.t) ->
-                  (diagnostic.code, diagnostic.span.start - method_.base))
+                (fun (diagnostic : Syntax_catalog.Parsing.t) ->
+                  ( (Syntax_catalog.Parsing_description.describe diagnostic).code,
+                    diagnostic.at.start - method_.base ))
                 diagnostics )
         | _ -> failwith "expected one method"
       in
@@ -367,9 +368,10 @@ let () =
       in
       match Parser.For_testing.parse_example_definition tokens (List.hd pieces) with
       | _, [ diagnostic ] ->
-          if Diagnostic.Code.name diagnostic.code <> "parser.unexpected_token" then
-            Harness.fail "code %s" (Diagnostic.Code.name diagnostic.code);
-          if diagnostic.span.start <> 41 then Harness.fail "start %d" diagnostic.span.start
+          let code = (Syntax_catalog.Parsing_description.describe diagnostic).code in
+          if Diagnostic.Code.name code <> "parser.unexpected_token" then
+            Harness.fail "code %s" (Diagnostic.Code.name code);
+          if diagnostic.at.start <> 41 then Harness.fail "start %d" diagnostic.at.start
       | _, diagnostics -> Harness.fail "%d diagnostics" (List.length diagnostics))
 
 let () =

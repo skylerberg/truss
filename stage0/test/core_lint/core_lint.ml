@@ -345,8 +345,8 @@ let check_semantics context (form : Core.t) =
        })
     form.definition
 
-let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolve.Names.key option)
-    (form : Core.t) =
+let check_form (interface : Interface.Lookups.t) (source_lookups : Resolve.Names.source)
+    ~(path : Path.t) ~(key : Resolve.Names.key option) (form : Core.t) =
   let list_bounds =
     let of_key key =
       Interface.Properties.Bounds.of_known (interface.read_elaborated_interface key).scope.bounds
@@ -362,8 +362,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let at = ref None in
   let name = match key with Some key -> Resolve.Names.show_key key | None -> Path.show path in
   let source =
-    lazy
-      (Option.map (fun key -> (interface.names.read_spans key, interface.names.read_text key)) key)
+    lazy (Option.map (fun key -> (source_lookups.read_spans key, source_lookups.read_text key)) key)
   in
   let quote () =
     match (!at, Lazy.force source) with
@@ -866,8 +865,8 @@ let check_written_origins (interface : Interface.Lookups.t) (key : Resolve.Names
     }
     form.definition
 
-let check interface (key : Resolve.Names.key) form =
-  check_form interface ~path:key.path ~key:(Some key) form;
+let check interface source_lookups (key : Resolve.Names.key) form =
+  check_form interface source_lookups ~path:key.path ~key:(Some key) form;
   check_written_origins interface key form
 
 let check_derived_origins path (form : Core.t) =
@@ -887,8 +886,8 @@ let check_derived_origins path (form : Core.t) =
     }
     form.definition
 
-let check_derived interface path form =
-  check_form interface ~path ~key:None form;
+let check_derived interface source_lookups path form =
+  check_form interface source_lookups ~path ~key:None form;
   check_derived_origins path form
 
 let list_provided_methods interface (impl : Types.impl_interface) =
@@ -916,7 +915,7 @@ let check_derived_impls database interface (type_ : Path.t) =
             let path : Path.t = Method { owner = impl; name; receiver } in
             match Database.For_testing.read_derived_form database path with
             | Some form ->
-                check_derived interface path form;
+                check_derived interface (Database.make_source_lookups database) path form;
                 count + 1
             | None when List.mem name provided -> count
             | None -> Harness.fail "`%s` has no core form for `%s`" (Path.show impl) name
@@ -942,7 +941,7 @@ let check_file database (file : Path.file) =
       let written =
         match Database.read_checked_body database key with
         | Some checked ->
-            check interface key checked.form;
+            check interface (Database.make_source_lookups database) key checked.form;
             1
         | None -> 0
       in

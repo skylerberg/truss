@@ -50,11 +50,6 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
       | _ :: _ -> (
           let name_parameter position = (Types.read_parameter_at signature position).name in
           let written_entries = find_written_entries (interface.names.read_definition key) in
-          let shown_function =
-            match key.path with
-            | Top { name; _ } | Method { name; _ } -> name
-            | path -> Path.show path
-          in
           let find_storage_field (container : Types.modified) =
             match
               Interface.Definition.find_field_path_type interface ~package
@@ -109,41 +104,23 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
                      || List.mem part !reported)
               then begin
                 reported := part :: !reported;
-                let shown = Types.show_modified_part ~root:(name_parameter part.position) part in
-                let is_whole = part.field_path = [] && not part.is_elements in
-                let fixes =
-                  match (is_whole, written_entries) with
-                  | false, Some entries -> (
-                      match List.rev entries with
-                      | last :: _ ->
-                          let stop = (Lazy.force context.spans).(last.id).stop in
-                          [
-                            Diagnostic.fix
-                              (Printf.sprintf "Add `%s` to the `modifies` clause." shown)
-                              [
-                                Diagnostic.insert
-                                  (Source.Definition_span.make stop stop)
-                                  (", " ^ shown);
-                              ];
-                          ]
-                      | [] -> [])
-                  | _ -> []
-                in
-                Context.report context Undeclared_change
-                  (Context.locate_origin context origin)
-                  ~fixes
-                  (Printf.sprintf
-                     "%s changes here, and the `modifies` clause of `%s` does not name it. The \
-                      proofs of its callers take every part of `%s` that the clause does not name \
-                      to keep its value."
-                     (if is_whole then Printf.sprintf "All of `%s`" shown
-                      else Printf.sprintf "`%s`" shown)
-                     shown_function (name_parameter part.position))
+                Context.report context
+                  (Undeclared_change
+                     {
+                       at = origin;
+                       function_ = key.path;
+                       parameter = name_parameter part.position;
+                       part;
+                       last_entry =
+                         Option.bind written_entries (fun entries ->
+                             Option.map
+                               (fun (last : Syntax.expression) -> Core.Written last.id)
+                               (List.nth_opt entries (List.length entries - 1)));
+                     })
               end)
             changes;
           match written_entries with
           | Some entries when not (is_trait_method interface key || has_todo tree) ->
-              let spans = Lazy.force context.spans in
               let is_changed (written : Types.modified) =
                 List.exists
                   (fun (_, (changed : Types.modified)) ->
@@ -175,7 +152,6 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
                     when List.mem written.position framed
                          && List.mem written signature.modifies
                          && not (is_changed written) ->
-                      let shown = Types.show_modified_part ~root written in
                       let has_changed_part =
                         List.exists
                           (function
@@ -184,36 +160,33 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
                             | None -> false)
                           written_parts
                       in
-                      let entry_spans =
-                        List.map (fun (entry : Syntax.expression) -> spans.(entry.id)) entries
+                      let change : Catalog.Usage.part_change =
+                        if has_changed_part then
+                          Named_part_changed
+                            (Catalog.read_entry_siblings
+                               (List.map
+                                  (fun (entry : Syntax.expression) ->
+                                    { Catalog.covering = [ Core.Written entry.id ] })
+                                  entries)
+                               index)
+                        else if
+                          List.exists
+                            (fun (_, (changed : Types.modified)) ->
+                              changed.position = written.position)
+                            changes
+                        then Unnamed_part_changed
+                        else Parameter_unchanged
                       in
                       context.diagnostics <-
-                        Diagnostic.make ~severity:Warning ~code:(Usage Unmodified_part)
-                          ~fixes:
-                            (if has_changed_part then
-                               [
-                                 Diagnostic.fix
-                                   (Printf.sprintf "Remove `%s` from the `modifies` clause." shown)
-                                   [ Diagnostic.delete_list_entry entry_spans index ];
-                               ]
-                             else [])
-                          (List.nth entry_spans index)
-                          (if
-                             has_changed_part
-                             || List.exists
-                                  (fun (_, (changed : Types.modified)) ->
-                                    changed.position = written.position)
-                                  changes
-                           then
-                             Printf.sprintf
-                               "`%s` never changes `%s`, so the proofs of its callers do not learn \
-                                that `%s` keeps its value. Remove it from `modifies`."
-                               shown_function shown shown
-                           else
-                             Printf.sprintf
-                               "`%s` changes no part of `%s` that its `modifies` clause names, nor \
-                                any other: `%s` need not be `mut`."
-                               shown_function root root)
+                        Catalog.Usage
+                          (Unmodified_part
+                             {
+                               entry = Written (List.nth entries index).id;
+                               function_ = key.path;
+                               parameter = root;
+                               part = written;
+                               change;
+                             })
                         :: context.diagnostics
                   | Some _ | None -> ())
                 written_parts
@@ -239,13 +212,7 @@ let check_ranges (context : Context.context) (tree : Mir.t) =
         | { mode = Mut; value = Borrow { place; origin; _ } | Use { place; origin; _ }; _ } -> (
             match List.rev place.projections with
             | Range _ :: _ when not (keeps_length call.callee position) ->
-                Context.report context Resized_range
-                  (Context.locate_origin context origin)
-                  (Printf.sprintf
-                     "This range is passed `mut` to %s, which may change the length of its \
-                      argument, and a range has a fixed length. Pass the whole list, or declare \
-                      that the function changes only elements, with `modifies` and `[..]`."
-                     (Context.describe_call context call.origin))
+                Context.report context (Resized_range { at = origin; call = call.origin })
             | _ -> ())
         | _ -> ())
       call.arguments

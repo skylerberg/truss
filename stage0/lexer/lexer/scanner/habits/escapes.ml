@@ -10,19 +10,16 @@ let scan (cursor : Cursor.t) buffer =
     else None
   in
   let report_escape stop value =
-    let replacement = Printf.sprintf "\\u{%X}" value in
-    Cursor.report cursor ~code:Invalid_escape
+    Cursor.report cursor
       ~fixes:
         [
-          Diagnostic.fix
-            ("Write `" ^ replacement ^ "`")
-            [ Diagnostic.replace (Source.make_span start stop) replacement ];
+          {
+            action = Write_escape value;
+            edits = [ { replaced = Source.make_span start stop; code = Escapes [ value ] } ];
+          };
         ]
       (Source.make_span start stop)
-      (Printf.sprintf
-         "`%s` is not an escape in Truss. A character is written by its code point: `%s`."
-         (String.sub cursor.text start (stop - start))
-         replacement);
+      (Foreign_escape { code_point = value });
     Buffer.add_utf_8_uchar buffer (Uchar.of_int value);
     cursor.position <- stop;
     true
@@ -55,30 +52,39 @@ let scan (cursor : Cursor.t) buffer =
         in
         match close content with
         | Some stop when stop > content ->
-            Cursor.report cursor ~code:Invalid_escape
+            Cursor.report cursor
               ~fixes:
                 [
-                  Diagnostic.fix "Write `${...}`"
-                    [
-                      Diagnostic.replace (Source.make_span start content) "${";
-                      Diagnostic.replace (Source.make_span stop (stop + 1)) "}";
-                    ];
+                  {
+                    action = Write_interpolation;
+                    edits =
+                      [
+                        { replaced = Source.make_span start content; code = Interpolation_opening };
+                        {
+                          replaced = Source.make_span stop (stop + 1);
+                          code = Interpolation_closing;
+                        };
+                      ];
+                  };
                 ]
               (Source.make_span start (stop + 1))
-              "A string interpolates with `${...}`.";
+              Parenthesized_interpolation;
             Buffer.add_substring buffer cursor.text start (stop + 1 - start);
             cursor.position <- stop + 1;
             true
         | _ -> false)
     | '\'' ->
-        Cursor.report cursor ~code:Invalid_escape
+        Cursor.report cursor
           ~fixes:
             [
-              Diagnostic.fix "Write `'`"
-                [ Diagnostic.replace (Source.make_span start (start + 2)) "'" ];
+              {
+                action = Write_apostrophe;
+                edits =
+                  [ { replaced = Source.make_span start (start + 2); code = Apostrophe_mark } ];
+              };
             ]
           (Source.make_span start (start + 2))
-          "`'` needs no escape in a string.";
+          Escaped_apostrophe;
         Buffer.add_char buffer '\'';
         cursor.position <- start + 2;
         true

@@ -606,32 +606,16 @@ type 'span diagnostic = {
 }
 
 type t = Source.span diagnostic
-type in_definition = Source.Definition_span.t diagnostic
-
-let make ?(severity : severity = Error) ?(notes = []) ?(fixes = []) ~code span message =
-  { code; severity; message; span; notes; fixes }
 
 let is_error (diagnostic : _ diagnostic) = diagnostic.severity = Error
 let show_severity : severity -> string = function Error -> "error" | Warning -> "warning"
 
 type reported = Reported
 
-let make_reported (_ : _ diagnostic) = Reported
 let reported_elsewhere = Reported
-let fix title edits = { title; edits }
 let replace span replacement = { span; replacement }
 let insert at replacement = { span = at; replacement }
 let delete span = { span; replacement = "" }
-
-let delete_list_entry (entries : Source.Definition_span.t list) index =
-  match (index, List.nth_opt entries index) with
-  | 0, Some first -> (
-      match List.nth_opt entries 1 with
-      | Some second -> delete (Source.Definition_span.make first.start second.start)
-      | None -> invalid_arg "Diagnostic.delete_list_entry: the only entry of a list")
-  | _, Some entry ->
-      delete (Source.Definition_span.make (List.nth entries (index - 1)).stop entry.stop)
-  | _, None -> invalid_arg "Diagnostic.delete_list_entry: an index past the list"
 
 let find_closest text candidates =
   let limit = max 1 (String.length text / 3) in
@@ -643,11 +627,6 @@ let find_closest text candidates =
   match String.spellcheck ~max_dist:(fun _ -> limit) enumerate_candidates text with
   | closest :: _ -> Some closest
   | [] -> None
-
-let list_spelling_fixes span ~written candidates =
-  match find_closest written candidates with
-  | Some candidate -> [ fix (Printf.sprintf "Write `%s`." candidate) [ replace span candidate ] ]
-  | None -> []
 
 let show_count count singular plural =
   Printf.sprintf "%d %s" count (if count = 1 then singular else plural)
@@ -731,35 +710,6 @@ let list_machine_applicable (diagnostics : t list) =
           clear
       | _ -> false)
     diagnostics
-
-let limit = 200
-
-module Collector = struct
-  type diagnostic = t
-  type nonrec t = diagnostic Dynarray.t
-
-  let create () = Dynarray.create ()
-  let add collector diagnostic = Dynarray.add_last collector diagnostic
-
-  let to_list collector =
-    List.stable_sort
-      (fun (left : diagnostic) (right : diagnostic) -> compare left.span.start right.span.start)
-      (Dynarray.to_list collector)
-end
-
-let select_shown diagnostics =
-  let rec take count last = function
-    | [] -> []
-    | rest when count = limit ->
-        [
-          make
-            ~severity:(if List.exists is_error rest then (Error : severity) else Warning)
-            ~code:Too_many_diagnostics (Source.make_zero_width last)
-            (Printf.sprintf "%d more diagnostics are not shown." (List.length rest));
-        ]
-    | (first : t) :: rest -> first :: take (count + 1) first.span.stop rest
-  in
-  take 0 0 diagnostics
 
 let show_location source offset =
   let line, column = Source.compute_position source offset in
@@ -931,6 +881,9 @@ let to_json_object source diagnostic =
     (encode_json_span source diagnostic.span)
     (String.concat "," notes) (String.concat "," fixes)
 
-module For_testing = struct
-  let limit = limit
+module For_rendering = struct
+  let make ?(severity : severity = Error) ?(notes = []) ?(fixes = []) ~code span message =
+    { code; severity; message; span; notes; fixes }
+
+  let fix title edits = { title; edits }
 end

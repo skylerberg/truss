@@ -132,7 +132,10 @@ let list_signatures snapshot ~database ~upgraded =
        (List.sort_uniq Path.compare
           (List.map (fun (change : Database.change) -> change.changed) changed)));
   let find_text database path =
-    Signatures.find_signature (Database.make_name_lookups database) path
+    Signatures.find_signature
+      (Database.make_name_lookups database)
+      (Database.make_source_lookups database)
+      path
   in
   List.sort
     (fun left right -> Path.compare left.path right.path)

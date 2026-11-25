@@ -136,19 +136,17 @@ end
 val read_signature : Lookups.t -> Path.t -> Types.signature option
 val read_scope : Lookups.t -> Resolve.Names.key -> Environment.known_bounds Environment.scope
 
-type declaring_clause =
+type declaring_clause = Catalog.Capabilities.declaring_clause =
   | Own_uses
   | Impl_uses
   | Associated_capability_set of { name : string; is_defined : bool; is_named : bool }
 
-type capability_declaration =
+type capability_declaration = Catalog.Capabilities.declaration =
   | Declared_by of declaring_clause
   | Fixed_by_trait of { trait : Types.trait_reference; method_name : string }
 
 val find_capability_declaration :
   Lookups.t -> Path.t -> Types.capability -> capability_declaration option
-
-val show_declaring_clause : declaring_clause -> string -> string
 
 val decide_property :
   Properties.property -> Lookups.t -> list_bounds:bounds -> Types.ty -> Properties.decision

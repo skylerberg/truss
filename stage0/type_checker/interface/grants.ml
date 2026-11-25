@@ -15,14 +15,6 @@ let resolve_capability (names : Resolve.Names.lookups) ~package (capability : Gr
       Option.bind (names.split_module module_names) (fun module_ ->
           find_visible_capability module_ name)
 
-let show_as_written : Path.t -> string = function
-  | Top { module_; name } ->
-      Grant.show_capability
-        (Grant.make_capability ~module_names:(Path.list_module_parts module_) name)
-  | path ->
-      Compiler_bug.raise_bug ~stage:"Interface" "the capability %s is not a definition of a module"
-        (Path.show path)
-
 let resolve_grant names ~package capabilities : Environment.grant =
   let resolved =
     List.map
@@ -36,13 +28,6 @@ let resolve_grant names ~package capabilities : Environment.grant =
         (fun (capability, path) -> if path = None then Some capability else None)
         resolved;
   }
-
-let describe_not_a_capability ~dependency capability =
-  Printf.sprintf
-    "`%s`, in the entry for `%s`, names no capability. A grant names a capability of the prelude \
-     by its name, such as `Clock`, and any other by its full path."
-    (Grant.show_capability capability)
-    (Path.show_package dependency)
 
 let needs_grant ~package ~of_ = of_ <> package && of_ <> Path.standard_package
 
@@ -66,13 +51,6 @@ let list_missing (lookups : Lookups.t) ~package ~of_ (uses : Types.capability_se
                Compiler_bug.raise_bug ~stage:"Interface" "a capability's base has a condition")
          (List.map Types.find_base (Types.list_capabilities uses)))
 
-let describe_missing ~subject ~of_ capability =
-  let of_ = Path.show_package of_ in
-  Printf.sprintf
-    "%s uses `%s`, which the manifest does not grant `%s`. To grant it, add \"%s\" to the entry \
-     for `%s` in `truss.toml`."
-    subject (show_as_written capability) of_ (show_as_written capability) of_
-
 let rec list_evidence_uses lookups ~list_bounds (evidence : Impls.solution) =
   match evidence with
   | Evidence (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }) -> (
@@ -95,16 +73,11 @@ let rec list_evidence_uses lookups ~list_bounds (evidence : Impls.solution) =
                (Impls.list_required_bounds interface.impl_generics substitution))
   | _ -> []
 
-let describe_missing_in_impls lookups ~package impls =
+let list_missing_in_impls lookups ~package impls =
   List.concat_map
     (fun (impl, (interface : Types.impl_interface), uses) ->
       let of_ = Path.locate_package impl in
       List.map
-        (describe_missing
-           ~subject:
-             (Printf.sprintf "The `impl` of `%s` for `%s`"
-                (Types.show_trait interface.implements)
-                (Types.show interface.for_type))
-           ~of_)
+        (fun capability -> (interface, of_, capability))
         (list_missing lookups ~package ~of_ uses))
     impls

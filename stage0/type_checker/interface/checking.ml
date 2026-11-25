@@ -3,13 +3,10 @@ type state = {
   key : Resolve.Names.key;
   definition : Syntax.definition;
   elaborated : Environment.elaborated_interface;
-  spans : Source.Definition_span.t array;
-  diagnostics : Diagnostic.in_definition list ref;
+  diagnostics : Catalog.diagnostic list ref;
 }
 
-let report state ?fixes code span message =
-  ignore (Elaborator.record_diagnostic state.diagnostics ?fixes code span message)
-
+let report state diagnostic = ignore (Elaborator.record_diagnostic state.diagnostics diagnostic)
 let list_bounds state = Properties.Bounds.of_known state.elaborated.scope.bounds
 
 let find_evidence state type_ trait =
