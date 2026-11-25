@@ -134,9 +134,7 @@ and is_string state (operand : Syntax.expression) type_ =
 and check_binary state (env : State.env) ?expected (value : Syntax.expression) operator
     (left : Syntax.expression) (right : Syntax.expression) =
   match operator with
-  | Syntax.Connective connective ->
-      if connective = Implies && not env.specification then
-        State.report state (Implies_in_code { at = Written value.id });
+  | Syntax.Connective _ ->
       Hooks.check state env left Types.bool;
       Hooks.check state env right Types.bool;
       Types.bool

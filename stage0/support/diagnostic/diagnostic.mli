@@ -88,7 +88,6 @@ module Code : sig
     | Lambda_annotation
     | Impl_parameters
     | Null_coalescing
-    | Specification_only
     | Misplaced_assert
     | Misplaced_proof
     | Misplaced_loop_exit

@@ -31,17 +31,6 @@ fn enter_proof(context: CheckContext) -> CheckContext {
   context with (is_specification: true, allows_assert: true)
 }
 
-fn may_be_specification(context: CheckContext) -> Bool {
-  context.is_specification || context.is_function_body
-}
-
-fn show_quantifier(quantifier: syntax.Quantifier) -> view String {
-  match quantifier {
-    Forall => "forall"
-    Exists => "exists"
-  }
-}
-
 fn report_at(cursor: mut TokenCursor, code: String, id: UInt64, message: String)
   uses Panic
 {
@@ -61,23 +50,6 @@ fn check_expression(cursor: mut TokenCursor, context: CheckContext, value: synta
   uses Panic, RunForever
 {
   match value.kind {
-    Quantified(quantifier, binder, ..) => if binder is BinderType(..) && !may_be_specification(context) {
-      let word = show_quantifier(quantifier)
-      report_at(
-        mut cursor,
-        code: "parser.specification_only",
-        id: value.id,
-        message: "`${word}` over a whole type cannot run, so it is only for specifications and the bodies of functions for specifications only. Quantify over a range or a collection, as in `${word} i in 0..count => ...`.",
-      )
-    }
-    Binary(operator, operator_id, ..) => if operator == syntax.Binary.Connective(syntax.Connective.Implies) && !may_be_specification(context) {
-      report_at(
-        mut cursor,
-        code: "parser.specification_only",
-        id: operator_id,
-        message: "`==>` is only for specifications and the bodies of functions for specifications only; in code, write `!a || b`.",
-      )
-    }
     Echo(_) => if context.is_specification {
       report_at(mut cursor, code: "parser.echo_in_specification", id: value.id, message: "`echo` is not allowed in specifications, which never run.")
     }

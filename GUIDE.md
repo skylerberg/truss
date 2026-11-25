@@ -4140,8 +4140,8 @@ specification can say more than code can:
   terminates. A function whose `uses` is a capability parameter, such as
   `map`, can be called in one with a pure lambda.
 - A quantifier over a range is also an expression in code, which runs as a
-  loop that stops when it knows the answer. A quantifier over a type, and
-  `==>`, appear only in specifications.
+  loop that stops when it knows the answer. A quantifier over a type appears
+  only in specifications.
 
 ```truss
 fn contains_zero(numbers: List[Int64]) -> Bool
@@ -5160,7 +5160,7 @@ From the tightest binding to the loosest:
 | `..`, `..=` | Ranges, excluding and including the end |
 | `==`, `!=`, `<`, `<=`, `>`, `>=`, `is` | Comparison and pattern test |
 | `&&`, `\|\|` | Logical and and or, which evaluate the right side only when needed and do not mix |
-| `==>` | Implication, in specifications |
+| `==>` | Implication |
 
 - **Precedence is a partial order.** Bitwise operators `&`, `|`, `^`, `<<`,
   and `>>` combine only with themselves, `&&` and `||` do not mix, and

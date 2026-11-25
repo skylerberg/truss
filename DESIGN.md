@@ -1436,7 +1436,7 @@ Rules: [Writing specifications](SPECIFICATION.md#writing-specifications).
 |---|---|
 | A function called in a specification is pure: it uses no capability, not even `Panic` or `RunForever`, except `Panic unless` a condition that the specification proves. | A function that might not return, or might end the program, has no value to reason about, and a definition that is not well founded would make the logic unsound. |
 | A specification is read left to right. | `index < items.length() && items[index] > 0` is well defined. |
-| `==>` exists, and only in specifications. | "If this holds, then that holds" is the commonest form of a specification, and `!a \|\| b` hides it. `==>` binds more loosely than `&&` and `\|\|`, as in Dafny. Code already has `if`. |
+| `==>` exists. | "If this holds, then that holds" is the commonest form of a specification, and `!a \|\| b` hides it. `==>` binds more loosely than `&&` and `\|\|`, as in Dafny. |
 | Integer arithmetic in a specification is exact. | A specification cannot have an overflow bug, and `decreases high - low` can be negative, which is the case that the prover must rule out. |
 | An `Integer` converts implicitly where a built-in integer is expected. | The obligation that the value fits is proven either way. |
 | A function for specifications has no keyword. | Its signature already mentions a type that exists only in specifications. |

@@ -3171,8 +3171,8 @@ an invariant, a law, or a proof.
   places of a `List` or an `Array`, and the values that any
   other collection's `element` lends. A pattern that does not match a value
   leaves that value out.
-- A quantifier over a type and `==>` appear only in specifications and in
-  functions for specifications only.
+- A quantifier over a type appears only in specifications and in functions
+  for specifications only.
 - A quantifier's body runs to the end of the expression.
 - Integer arithmetic in a specification is exact. It is done on `Integer`, a
   prelude type that exists only in specifications, of which every built-in

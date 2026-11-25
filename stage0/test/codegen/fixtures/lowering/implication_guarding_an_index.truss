@@ -1,0 +1,9 @@
+fn starts_positive(items: List[Int64]) -> Bool {
+  items.length() > 0 ==> items[0] > 0
+}
+
+test "implication" {
+  assert starts_positive([])
+  assert starts_positive([1])
+  assert !starts_positive([-1])
+}
