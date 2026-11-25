@@ -18,4 +18,5 @@
   startup
   unix
   zarith
-  types))
+  types
+  catalog))

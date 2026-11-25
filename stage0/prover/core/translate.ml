@@ -187,7 +187,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   let contract =
     match Mir.read_contract lookups.mir path with
     | Some { form; _ } -> form
-    | None -> Facts.raise_bug "`%s` has no MIR of its contract" source.name
+    | None -> Facts.raise_bug "`%s` has no MIR of its contract" (Resolve.Names.show_key source.key)
   in
   let parameters = contract.parameters in
   let signature =
@@ -426,7 +426,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   let mir =
     match Mir.read_code lookups.mir path with
     | Some { form; _ } -> form
-    | None -> Facts.raise_bug "`%s` has a body and no MIR" source.name
+    | None -> Facts.raise_bug "`%s` has a body and no MIR" (Resolve.Names.show_key source.key)
   in
   let promised =
     list_promises context source start.locals contract.costs ~inherited:false
@@ -736,7 +736,9 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
               let proof =
                 match Mir.find_code (lookups.mir.read_body_part proof_source.key) with
                 | Some proof -> proof
-                | None -> Facts.raise_bug "the proof `%s` has no MIR" proof_source.name
+                | None ->
+                    Facts.raise_bug "the proof `%s` has no MIR"
+                      (Resolve.Names.show_key proof_source.key)
               in
               let parameters =
                 List.map
@@ -745,7 +747,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
                     | { kind = Source { local; _ }; type_; _ } -> (local, type_)
                     | { kind = Temporary | Lent _; _ } ->
                         Facts.raise_bug "a parameter of the proof `%s` is a temporary"
-                          proof_source.name)
+                          (Resolve.Names.show_key proof_source.key))
                   proof.body.parameters
               in
               let locals, types =

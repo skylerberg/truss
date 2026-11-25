@@ -10,7 +10,7 @@ type proof =
   | Unsupported of {
       location : Obligation.location;
       construct : Catalog.Prover.construct;
-      foreign : string option;
+      foreign : Path.t option;
     }
   | Not_proven_here
 
@@ -177,101 +177,97 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
   with Facts.Unsupported { location; construct; foreign_definition } ->
     Unsupported { location; construct; foreign = foreign_definition }
 
-let show_float bits =
-  let spell_shortest ~most ~is_same value =
-    let rec spell_digits digits =
-      let text = Printf.sprintf "%.*g" digits value in
-      if digits >= most || is_same (float_of_string text) then text else spell_digits (digits + 1)
-    in
-    spell_digits 1
-  in
-  let text =
-    match String.length bits with
-    | 64 ->
-        let value = Int64.float_of_bits (Int64.of_string ("0b" ^ bits)) in
-        spell_shortest ~most:17 ~is_same:(fun read -> read = value) value
-    | 32 ->
-        let value = Int32.float_of_bits (Int32.of_string ("0b" ^ bits)) in
-        spell_shortest ~most:9
-          ~is_same:(fun read -> Int32.bits_of_float read = Int32.bits_of_float value)
-          value
-    | _ -> "a float"
-  in
-  if text = "nan" || text = "-nan" then "NaN"
-  else if text = "inf" then "infinity"
-  else if text = "-inf" then "-infinity"
-  else if String.contains text '.' then text
-  else
-    match String.split_first ~sep:"e" text with
-    | Some (mantissa, exponent) -> mantissa ^ ".0e" ^ exponent
-    | None -> text ^ ".0"
-
 let is_opaque atom = String.contains atom '!'
 
-let show_truss_value members value =
-  let show_constructor : Logic.symbol -> string = function
-    | Constructor { variant = Some variant; _ } -> variant
-    | Constructor { type_ = Named { path = Top { name; _ }; _ }; variant = None } -> name
-    | Constructor { type_; variant = None } -> Types.show type_
-    | other -> Logic.show_symbol other
+let read_bit_vector atom =
+  let fold_digits ~digit_width digits =
+    String.fold_left
+      (fun value digit ->
+        Int64.logor
+          (Int64.shift_left value digit_width)
+          (Int64.of_int (Char.Ascii.hex_digit_to_int digit)))
+      0L digits
   in
-  let show_field : Logic.symbol -> string = function
-    | Field { field; _ } -> field
-    | other -> Logic.show_symbol other
+  match String.cut_first 2 atom with
+  | "#b", digits when digits <> "" -> (fold_digits ~digit_width:1 digits, String.length digits)
+  | "#x", digits when digits <> "" -> (fold_digits ~digit_width:4 digits, 4 * String.length digits)
+  | _ -> Facts.raise_bug "the model gives `%s` for the bits of a float" atom
+
+let read_float sign exponent fraction : Catalog.Model_value.t =
+  let sign, _ = read_bit_vector sign
+  and exponent, exponent_width = read_bit_vector exponent
+  and fraction, fraction_width = read_bit_vector fraction in
+  let bits =
+    Int64.logor
+      (Int64.shift_left sign (exponent_width + fraction_width))
+      (Int64.logor (Int64.shift_left exponent fraction_width) fraction)
   in
-  let parse_bits atom =
-    match String.cut_first 2 atom with
-    | "#b", digits when digits <> "" -> Some digits
-    | "#x", digits when digits <> "" ->
-        Some
-          (String.concat ""
-             (List.map
-                (fun digit ->
-                  let value = Char.Ascii.hex_digit_to_int digit in
-                  String.init 4 (fun index -> if value land (8 lsr index) <> 0 then '1' else '0'))
-                (List.of_seq (String.to_seq digits))))
-    | _ -> None
+  match 1 + exponent_width + fraction_width with
+  | 64 -> Float { value = Int64.float_of_bits bits; is_single = false }
+  | 32 -> Float { value = Int32.float_of_bits (Int64.to_int32 bits); is_single = true }
+  | width -> Facts.raise_bug "the model gives a float of %d bits" width
+
+let read_special_float special exponent_width : Catalog.Model_value.t =
+  let value =
+    match special with
+    | "+zero" -> 0.0
+    | "-zero" -> -0.0
+    | "+oo" -> Float.infinity
+    | "-oo" -> Float.neg_infinity
+    | "NaN" -> Float.nan
+    | _ -> Facts.raise_bug "the model gives the float `%s`" special
   in
-  let rec show : Solver.sexp -> string = function
-    | List [ Atom "fp"; Atom sign; Atom exponent; Atom fraction ] -> (
-        match (parse_bits sign, parse_bits exponent, parse_bits fraction) with
-        | Some sign, Some exponent, Some fraction -> show_float (sign ^ exponent ^ fraction)
-        | _ -> "a float")
-    | List [ Atom "_"; Atom special; Atom _; Atom _ ] -> (
-        match special with
-        | "+zero" -> "0.0"
-        | "-zero" -> "-0.0"
-        | "+oo" -> "infinity"
-        | "-oo" -> "-infinity"
-        | _ -> "NaN")
-    | Atom atom when is_opaque atom -> "a value the prover knows nothing more about"
-    | Atom atom -> (
-        match List.assoc_opt atom members with
-        | Some (internal, _) -> show_constructor internal
-        | None -> atom)
-    | List [ Atom "-"; Atom number ] -> "-" ^ number
-    | List (Atom head :: arguments) -> (
-        let items = List.map show arguments in
-        match List.assoc_opt head members with
-        | Some (internal, fields) when List.length fields = List.length items ->
-            show_constructor internal ^ "("
-            ^ String.concat ", "
-                (List.map2 (fun selector item -> show_field selector ^ ": " ^ item) fields items)
-            ^ ")"
-        | Some (internal, _) -> show_constructor internal ^ "(" ^ String.concat ", " items ^ ")"
-        | None -> head ^ "(" ^ String.concat ", " items ^ ")")
-    | List (head :: arguments) ->
-        show head ^ "(" ^ String.concat ", " (List.map show arguments) ^ ")"
-    | List [] -> ""
-  in
-  show value
+  Float { value; is_single = exponent_width = "8" }
+
+let make_constructed (constructor : Logic.symbol) fields : Catalog.Model_value.t =
+  match constructor with
+  | Constructor { variant = Some variant; _ } -> Variant_value { variant; fields }
+  | Constructor { type_; variant = None } -> Record_value { type_; fields }
+  | Unit -> Unit_value
+  | other -> Facts.raise_bug "the model constructs a value with %s" (Logic.show_symbol other)
+
+let read_selector : Logic.symbol -> string = function
+  | Field { field; _ } -> field
+  | other -> Facts.raise_bug "the model selects a field with %s" (Logic.show_symbol other)
+
+let find_natural atom =
+  if atom <> "" && String.for_all Char.Ascii.is_digit atom then Some (Z.of_string atom) else None
+
+let rec read_model_value members : Solver.sexp -> Catalog.Model_value.t = function
+  | List [ Atom "fp"; Atom sign; Atom exponent; Atom fraction ] -> read_float sign exponent fraction
+  | List [ Atom "_"; Atom special; Atom exponent_width; Atom _ ] ->
+      read_special_float special exponent_width
+  | Atom atom when is_opaque atom -> Unknown
+  | Atom "true" -> Boolean true
+  | Atom "false" -> Boolean false
+  | Atom atom -> (
+      match (List.assoc_opt atom members, find_natural atom) with
+      | Some (constructor, _), _ -> make_constructed constructor []
+      | None, Some value -> Integer value
+      | None, None -> Facts.raise_bug "the model gives the atom `%s`" atom)
+  | List [ Atom "-"; Atom number ] -> (
+      match find_natural number with
+      | Some value -> Integer (Z.neg value)
+      | None -> Facts.raise_bug "the model negates `%s`" number)
+  | List (Atom head :: arguments) -> (
+      match List.assoc_opt head members with
+      | Some (constructor, selectors) when List.length selectors = List.length arguments ->
+          make_constructed constructor
+            (List.map2
+               (fun selector argument : Catalog.Model_value.field ->
+                 { field = read_selector selector; value = read_model_value members argument })
+               selectors arguments)
+      | Some _ -> Facts.raise_bug "the model gives `%s` the wrong number of fields" head
+      | None -> Facts.raise_bug "the model applies `%s`, which constructs no value" head)
+  | List _ ->
+      Facts.raise_bug "the model gives a value that is neither a constant nor a construction"
 
 let list_counterexample_values members (obligation : Obligation.t) answer_values =
   List.filter_map
     (fun (symbol, name) ->
       match List.assoc_opt symbol answer_values with
       | Some (Solver.Atom atom) when is_opaque atom -> None
-      | Some value -> Some (name, show_truss_value members value)
+      | Some value -> Some (name, read_model_value members value)
       | None -> None)
     (List.rev obligation.values
     @ List.rev_map (fun (term, name) -> (Logic.Symbol.Named_term term, name)) obligation.locals)
@@ -376,11 +372,11 @@ let pose_obligation runs site (obligation : Obligation.t) =
                     query = { posed.query with facts = posed.query.facts @ facts };
                     has_run_result = true;
                   })
-          | Some (Unfinished report | Failed report) ->
+          | Some (Unfinished stop | Failed stop) ->
               let failed : Catalog.Prover.failed_run =
                 match evaluation with
-                | Constant_value path -> Constant_run { path; report }
-                | Assertion _ -> Assertion_run report
+                | Constant_value path -> Constant_run { path; stop }
+                | Assertion _ -> Assertion_run stop
               in
               { posed with failed_runs = posed.failed_runs @ [ failed ] }
           | None -> posed)
@@ -430,8 +426,8 @@ let pose ~runs proof =
           failed_evaluation =
             Option.bind outcome.evaluation (fun (evaluation : Obligation.evaluation) ->
                 match (evaluation, Evaluation_table.find_opt runs evaluation) with
-                | Constant_value path, Some (Failed report) ->
-                    Some (Catalog.Prover.Unevaluated { path; report })
+                | Constant_value path, Some (Failed stop) ->
+                    Some (Catalog.Prover.Unevaluated { path; stop })
                 | Constant_value _, (Some (Evaluated _ | Unfinished _) | None) -> None
                 | Assertion _, _ ->
                     Compiler_bug.raise_bug ~stage:"Prover"

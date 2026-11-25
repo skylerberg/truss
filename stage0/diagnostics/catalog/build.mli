@@ -21,10 +21,11 @@ val list_spelling_fixes :
   Core.origin -> written:string -> string list -> Nodes.node Description.fix list
 
 val write_hidden : Path.t -> Language.Visibility.t -> string
-val describe_call : Core.origin -> Nodes.node Description.piece list
+val show_callee : Path.t -> string
+val name_call : Path.t option -> string
+val describe_call : ?callee:Path.t -> Core.origin -> Nodes.node Description.piece list
 
 val add_lines_after :
   Core.origin -> Nodes.node Description.piece list list -> Nodes.node Description.edit
 
 val show_field_path : string -> string list -> string
-val show_function_name : Path.t -> string

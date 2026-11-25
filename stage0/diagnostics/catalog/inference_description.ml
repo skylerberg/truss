@@ -203,6 +203,10 @@ let show_integer_subject = function
   | Log_argument -> "An argument of `log`"
   | Power_argument -> "An argument of `power`"
 
+let name_recipient = function
+  | Inference.Named_parameter name -> Printf.sprintf "`%s`" name
+  | Function_value -> "The function value"
+
 let show_method_owner = function
   | Inference.Type_owner { type_; _ } -> Types.show type_
   | Named_owner name -> name
@@ -428,8 +432,9 @@ let describe : Inference.t -> Nodes.description = function
            | owner -> Printf.sprintf "`%s` has no method `%s`." (show_method_owner owner) name))
   | Counted_not_a_capability { at = origin; written } ->
       make Not_a_capability (Build.at origin)
-        (say
-           (Printf.sprintf "`calls` counts the calls of a capability, and `%s` is not one." written))
+        (say "`calls` counts the calls of a capability, and `"
+        @ [ Build.quote_over written ]
+        @ say "` is not one.")
   | Counted_not_a_function { at = origin; name; type_ } ->
       make Not_callable (Build.at origin)
         (say
@@ -816,38 +821,39 @@ let describe : Inference.t -> Nodes.description = function
   | Not_assignable_place { at = origin } ->
       make Not_assignable (Build.at origin)
         (say "Only a place, such as a variable, a field, or an element, can be assigned.")
-  | Mode_on_read_argument { at = origin; inner; parameter } ->
+  | Mode_on_read_argument { at = origin; inner; recipient } ->
       make Redundant_mode (Build.at origin)
         ~fixes:[ remove_keyword_fix origin inner ]
         (say
-           (Printf.sprintf "`%s` only reads its argument, so it takes no mode keyword." parameter))
-  | Missing_mut_argument { at = origin; parameter } ->
+           (Printf.sprintf "%s only reads its argument, so it takes no mode keyword."
+              (name_recipient recipient)))
+  | Missing_mut_argument { at = origin; recipient } ->
       make Missing_mode (Build.at origin)
         ~fixes:[ insert_mut_fix origin ]
         (say
-           (Printf.sprintf "`%s` may mutate its argument, so the call site passes it `mut`."
-              parameter))
-  | Lent_read_only_argument { at = origin; parameter } ->
+           (Printf.sprintf "%s may mutate its argument, so the call site passes it `mut`."
+              (name_recipient recipient)))
+  | Lent_read_only_argument { at = origin; recipient } ->
       make Wrong_mode (Build.at origin)
         (say
            (Printf.sprintf
-              "`%s` may mutate its argument, and this part is lent read-only. Pass the place it is \
+              "%s may mutate its argument, and this part is lent read-only. Pass the place it is \
                lent from `mut`, so that it is lent `mut`."
-              parameter))
-  | Temporary_passed_mut { at = origin; parameter } ->
+              (name_recipient recipient)))
+  | Temporary_passed_mut { at = origin; recipient } ->
       make Wrong_mode (Build.at origin)
         (say
-           (Printf.sprintf "`%s` mutates its argument in place, so it must be a place passed `mut`."
-              parameter))
+           (Printf.sprintf "%s mutates its argument in place, so it must be a place passed `mut`."
+              (name_recipient recipient)))
   | Redundant_own { at = origin; inner; type_ } ->
       make Redundant_mode (Build.at origin)
         ~fixes:[ remove_keyword_fix origin inner ]
         (say (Printf.sprintf "`%s` copies implicitly, so it needs no `own`." (Types.show type_)))
-  | Mut_for_own { at = origin; parameter } ->
+  | Mut_for_own { at = origin; recipient } ->
       make Wrong_mode (Build.at origin)
         (say
-           (Printf.sprintf "`%s` takes ownership of its argument, so it is passed `own`, not `mut`."
-              parameter))
+           (Printf.sprintf "%s takes ownership of its argument, so it is passed `own`, not `mut`."
+              (name_recipient recipient)))
   | Type_parameter_as_value { at = origin; name } ->
       make Not_a_value (Build.at origin) (say (Printf.sprintf "`%s` is a type, not a value." name))
   | Theorem_as_value { at = origin; name } ->
@@ -929,7 +935,8 @@ let describe : Inference.t -> Nodes.description = function
   | Value_for_type_argument { at = origin } ->
       make Argument_kind (Build.at origin)
         (say "A `UInt64` value is given where a type argument is expected.")
-  | Specification_call_in_code { at = origin; name; call } ->
+  | Specification_call_in_code { at = origin; callee; call } ->
+      let name = Build.show_callee callee in
       make Specification_only (Build.at origin)
         (say
            (match call with
@@ -1094,7 +1101,7 @@ let describe : Inference.t -> Nodes.description = function
            (Printf.sprintf "This pattern does not match %s. Name %s, or write `..` for the rest."
               (show_names missing)
               (match missing with [ _ ] -> "it" | _ -> "them")))
-  | Not_structural { at = origin; type_; constant } ->
+  | Not_structural { at = origin; type_ } ->
       make Not_structural (Build.at origin)
         (say
            (Printf.sprintf
@@ -1102,8 +1109,10 @@ let describe : Inference.t -> Nodes.description = function
                contents, because the checks that a `match` covers every case and that every arm is \
                reachable compare constants by their contents. `%s` does not have it: its equality \
                is hand-written, or it holds a float, whose `==` treats `-0.0` and `0.0` as equal. \
-               Match with a guard instead, as in `value if value == %s`."
-              (Types.show type_) constant))
+               Match with a guard instead, as in `value if value == "
+              (Types.show type_))
+        @ [ Build.quote origin ]
+        @ say "`.")
   | Not_a_constant { at = origin } ->
       make Unknown_member (Build.at origin) (say "This names no constant.")
   | Literal_does_not_fit { at = origin; number; excluded; low; high } ->

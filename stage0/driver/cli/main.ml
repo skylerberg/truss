@@ -512,7 +512,9 @@ let respond ~report_progress request run =
   { output = Buffer.contents buffer; outcome }
 
 let check_buffers ~root encoding buffers =
-  execute ~doing:("checking the editor's buffers in " ^ root) (fun () ->
+  execute
+    ~doing:(fun () -> "checking the editor's buffers in " ^ root)
+    (fun () ->
       Json.print (Lsp_command.check ~root encoding buffers);
       Outcome.Exit 0)
 
@@ -643,7 +645,9 @@ let parse_command_line arguments =
 let describe_command_line arguments = "running `truss " ^ String.concat " " arguments ^ "`"
 
 let run_project_command arguments =
-  execute ~doing:(describe_command_line arguments) (fun () ->
+  execute
+    ~doing:(fun () -> describe_command_line arguments)
+    (fun () ->
       match parse_command_line arguments with
       | Error status -> Outcome.Exit status
       | Ok (In_project { run; _ }) -> run ()
@@ -658,7 +662,9 @@ let handle ~report_progress request =
       | Command_line arguments -> run_project_command arguments
       | Check_buffers { root; encoding; buffers } -> check_buffers ~root encoding buffers
       | List_package_databases ->
-          execute ~doing:"listing the package databases" (fun () ->
+          execute
+            ~doing:(fun () -> "listing the package databases")
+            (fun () ->
               List.iter Output.print_line (Workspace.list_package_databases ());
               Outcome.Exit 0))
 
@@ -675,7 +681,7 @@ let finish (outcome : Outcome.t) =
 let run_client argv =
   let arguments = List.tl (Arguments.move_leading_options argv) in
   let run_here run =
-    let outcome = execute ~doing:(describe_command_line arguments) run in
+    let outcome = execute ~doing:(fun () -> describe_command_line arguments) run in
     Workspace.flush ();
     outcome
   in
@@ -701,7 +707,9 @@ let run_client argv =
 
 module For_testing = struct
   let run_command_line arguments =
-    execute ~doing:(describe_command_line arguments) (fun () ->
+    execute
+      ~doing:(fun () -> describe_command_line arguments)
+      (fun () ->
         match parse_command_line arguments with
         | Error status -> Outcome.Exit status
         | Ok (In_client run | In_project { run; _ }) -> run ())

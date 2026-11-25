@@ -299,9 +299,6 @@ and reject_specification_call state (env : State.env) (value : Syntax.expression
     (signature : Types.signature) =
   if (not signature.specification_only) || env.specification then None
   else
-    let name =
-      match path with Top { name; _ } | Method { name; _ } -> name | path -> Path.show path
-    in
     let specification_type =
       List.find_map Types.find_specification_only_type
         (Types.extract_result_type signature.output
@@ -314,7 +311,7 @@ and reject_specification_call state (env : State.env) (value : Syntax.expression
             (Specification_call_in_code
                {
                  at = Written value.id;
-                 name;
+                 callee = path;
                  call =
                    (match
                       ( Interface.Definition.find_interface state.lookups.interface path,

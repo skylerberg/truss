@@ -299,4 +299,5 @@ let check (lookups : Lookups.t) key =
   check_unused context definition;
   check_unreachable context definition;
   check_self_comparisons context definition;
-  Option.to_list (Unused_run_forever.find lookups key definition) @ List.rev context.diagnostics
+  Option.to_list (Unused_run_forever.find lookups key definition context.resolved)
+  @ List.rev context.diagnostics

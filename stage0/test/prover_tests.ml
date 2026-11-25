@@ -465,7 +465,7 @@ let () =
               (String.includes
                  ~affix:
                    "The evaluation of `app.main.twice` stopped, so its value is not known: the \
-                    value of app.main.limit depends on itself"
+                    value of `app.main.limit` depends on itself"
                  message)
           then Harness.fail "%s" message
       | diagnostics ->
@@ -3717,7 +3717,7 @@ let () =
         ~fixed:
           ( "fn character(code: UInt32) -> Character {",
             "fn character(code: UInt32) -> Character\n\
-            \  requires (0 <= code && code <= 1114111) && !((55296 <= code && code <= 57343))\n\
+            \  requires (0 <= code && code <= 1114111) && !(55296 <= code && code <= 57343)\n\
              {" ))
 
 let () =

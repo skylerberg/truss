@@ -213,7 +213,7 @@ let run ~names =
   let snapshot, _ = Command_packages.load_current () in
   let set = List.map parse_wanted names in
   match Workspace.plan_lock snapshot ~set ~all:(names = []) with
-  | Error message -> Outcome.raise_cannot_run "%s" message
+  | Error problems -> Outcome.raise_problems problems
   | Ok plan ->
       let lock = lock_changes ~before:plan.before ~after:plan.after in
       if lock = [] then begin

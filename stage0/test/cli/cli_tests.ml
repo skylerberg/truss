@@ -1768,7 +1768,7 @@ let () =
       in
       match outcomes with
       | [ ("reaches", "incomplete", message); ("counts", "passed", _) ]
-        when message = "the type demo.Session is defined as todo\n  at main.truss:1:6" ->
+        when message = "the type `demo.Session` is defined as todo\n  at main.truss:1:6" ->
           ()
       | _ ->
           fail "%s"

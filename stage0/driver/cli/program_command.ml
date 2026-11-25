@@ -18,7 +18,7 @@ let refuse_unshippable snapshot lookups main proofs =
         ( Workspace.locate_file snapshot file,
           line,
           column,
-          (failure :> [ `Todo | `Echo | `Proof_hole ]),
+          Project_catalog.Problem.Reached (match failure with `Todo -> Todo | `Echo -> Echo),
           way ))
       (Backend.list_unshippable lookups ~main)
   in
@@ -32,18 +32,17 @@ let refuse_unshippable snapshot lookups main proofs =
         if Hashtbl.mem refused_positions (file, line, column) then None
         else begin
           Hashtbl.replace refused_positions (file, line, column) ();
-          Some (file, line, column, `Proof_hole, way)
+          Some (file, line, column, Project_catalog.Problem.Unfinished_proof, way)
         end)
       (Proofs.list_holes snapshot proofs ~reached:(Backend.list_reached_definitions lookups main))
   in
   match List.sort compare (in_code @ in_proofs) with
   | [] -> ()
   | refusals ->
-      let show_kind = function `Todo -> "todo" | `Echo -> "echo" | `Proof_hole -> "proof hole" in
-      let describe_refusal = function
-        | `Todo -> "`todo` can be reached from `main`"
-        | `Echo -> "`echo` can be reached from `main`"
-        | `Proof_hole -> "`todo` leaves unfinished a proof that `main` relies on"
+      let show_kind : Project_catalog.Problem.unshippable -> string = function
+        | Reached Todo -> "todo"
+        | Reached Echo -> "echo"
+        | Unfinished_proof -> "proof hole"
       in
       if Output.json () then
         Json.print
@@ -66,10 +65,10 @@ let refuse_unshippable snapshot lookups main proofs =
              ])
       else
         List.iter
-          (fun (file, line, column, failure, way) ->
-            Output.eprintf "%s:%d:%d: %s, so the program cannot be built.\n    %s\n" file line
-              column (describe_refusal failure)
-              (String.concat " -> " (List.map Path.show way)))
+          (fun (path, line, column, unshippable, way) ->
+            Output.eprint_line
+              (Project_catalog.describe
+                 (Unshippable { unshippable; location = { path; line; column }; way })))
           refusals;
       raise (Outcome.Stop 1)
 
@@ -85,7 +84,7 @@ let build_program ?output snapshot packages (profile : Backend.profile) ~is_kept
   let backend = Workspace_backend.create snapshot lookups profile in
   let output = Option.value output ~default:(Backend.make_program_path backend) in
   match Backend.build_program backend ~main ~output ~is_kept with
-  | Error message -> Outcome.raise_cannot_run "%s" message
+  | Error failure -> Outcome.raise_cannot_run "%s" (Backend.describe_failure backend failure)
   | Ok () -> (output, report)
 
 let run ~release ~arguments =

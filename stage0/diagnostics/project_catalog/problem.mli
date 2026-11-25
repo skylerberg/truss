@@ -46,9 +46,15 @@ type lock =
   | Repeated_line of Path.package
   | Missing_header of string
 
+type unavailable =
+  | No_registry of { variable : string }
+  | Missing_from_registry of { registry : string; name : Path.package; version : version }
+  | Changed_in_registry of { registry : string; name : Path.package; version : version }
+  | Unwritable of { directory : string }
+
 type load_failure =
   | Unfetched
-  | Unavailable of string
+  | Unavailable of unavailable
   | Unreadable_manifest of { line : int; problem : manifest }
   | Unreadable_lock of { line : int; problem : lock }
   | Misnamed_manifest of Path.package
@@ -70,6 +76,9 @@ type difference =
   | Unused of Path.package
 
 type project_setting = Time_limit | X86_64_level
+type unfinished = Todo | Echo
+type unshippable = Reached of unfinished | Unfinished_proof
+type located = { path : string; line : int; column : int }
 
 type t =
   | Manifest of manifest
@@ -103,3 +112,12 @@ type t =
       column : int;
       first : string;
     }
+  | Unset_registry of { variable : string }
+  | Unregistered_package of Path.package
+  | Unregistered_version of { name : Path.package; version : version }
+  | Unpublished_dependency of Path.package
+  | Ownerless_name of { name : string }
+  | Major_mismatch of { name : Path.package; major : int; next : Path.package }
+  | Release_not_newer of { name : Path.package; newest : version }
+  | Unfinished_code of { unfinished : unfinished; location : located }
+  | Unshippable of { unshippable : unshippable; location : located; way : Path.t list }
