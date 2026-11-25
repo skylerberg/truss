@@ -110,8 +110,8 @@ let () =
       Codegen_support.expect_output Fixtures.Lowering.tests_reading_an_unfinished_constant
         "test 0 passed\n\
          test 1 incomplete\n\
-         message 84\n\
-         the constant example.table is not computed: todo reached\n\
+         message 76\n\
+         Evaluating `example.table` stopped: todo reached\n\
         \  at example/main.truss:2:3\n");
   Codegen_support.test "a constant whose evaluation uses too much CPU time cannot be built"
     (fun () ->
@@ -122,9 +122,10 @@ let () =
           ~time_limit_ms:2000
           (Codegen_support.list_tests database)
       with
-      | Error message ->
+      | Error failure ->
           Codegen_support.expect_string
-            ~expected:"Evaluating example.spun stopped: it used more than 5 ms of CPU time" message
+            ~expected:"Evaluating `example.spun` stopped: it used more than 5 ms of CPU time"
+            (Codegen_support.describe_failure failure)
       | Ok _ -> Codegen_support.fail "the tests ran")
 
 let () =

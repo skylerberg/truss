@@ -1,7 +1,7 @@
 let run_example_tests database backend =
   match Backend.run_tests backend ~time_limit_ms:2000 (Codegen_support.list_tests database) with
   | Ok records -> records
-  | Error message -> failwith message
+  | Error failure -> failwith (Codegen_support.describe_failure failure)
 
 let () =
   Codegen_support.test "a passing test's pass is recorded, and only a changed test runs again"
@@ -39,7 +39,7 @@ let () =
       let database, backend = Codegen_support.load Fixtures.Program.tests_writing_to_the_console in
       let tests = Codegen_support.list_tests database in
       match Backend.run_tests backend ~time_limit_ms:2000 tests with
-      | Error message -> Codegen_support.fail "%s" message
+      | Error failure -> Codegen_support.fail "%s" (Codegen_support.describe_failure failure)
       | Ok records -> (
           let results_by_name =
             List.map2
@@ -97,7 +97,7 @@ let () =
       with
       | Ok [ { outcome = Passed; _ } ] -> ()
       | Ok records -> Codegen_support.fail "%s" (Codegen_support.render_records records)
-      | Error message -> Codegen_support.fail "%s" message)
+      | Error failure -> Codegen_support.fail "%s" (Codegen_support.describe_failure failure))
 
 let () =
   Codegen_support.test
@@ -716,7 +716,8 @@ let () =
                   Backend.run_tests backend ~time_limit_ms:2000
                     (Codegen_support.list_tests database)
                 with
-                | Error message -> Codegen_support.fail "%s" message
+                | Error failure ->
+                    Codegen_support.fail "%s" (Codegen_support.describe_failure failure)
                 | Ok records ->
                     List.iter
                       (fun (record : Backend.Test_report.record) ->

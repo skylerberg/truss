@@ -92,11 +92,11 @@ val is_trivial : state -> Ground.ty -> bool
 val is_zero_size : state -> Ground.ty -> bool
 val make_site : state -> Source.Definition_span.t -> Lowered.site
 
-type unsupported = { construct : string; at : Lowered.site option }
+type unsupported = { construct : Catalog.Codegen.construct; at : Lowered.site option }
 
 exception Unsupported of unsupported
 
-val raise_unsupported : ?at:Lowered.site -> ('a, unit, string, 'b) format4 -> 'a
+val raise_unsupported : ?at:Lowered.site -> Catalog.Codegen.construct -> 'a
 val require_written : state -> Definitions.written
 val quote_span : state -> Source.Definition_span.t -> string
 val lookup_innermost_scope : state -> scope

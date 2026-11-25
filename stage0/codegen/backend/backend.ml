@@ -4,7 +4,10 @@ let raise_bug format = Compiler_bug.raise_bug ~stage:"Backend" format
 
 module Item_table = Hashtbl.Make (Lowered.Item)
 
-type 'value ran = 'value Lowering.ran = Ran of 'value | Unfinished of string | Stopped of string
+type 'value ran = 'value Lowering.ran =
+  | Ran of 'value
+  | Unfinished of Catalog.Codegen.stop
+  | Stopped of Catalog.Codegen.stop
 
 type t = {
   lookups : Lowering.lowered_lookups;
@@ -24,12 +27,17 @@ let make_positions (lookups : Lowering.lowered_lookups) =
 
 let make_env backend = Lowering.make_env backend.lookups.system backend.lookups.interface
 
-exception Cannot_build of string
+exception Cannot_build of Catalog.Codegen.failure
 
-let describe_stopped_evaluation evaluated report =
-  Printf.sprintf "Evaluating %s stopped: %s" (Lowered.Item.to_string evaluated) report
+let raise_cannot_build failure = raise (Cannot_build failure)
 
-let raise_cannot_build format = Printf.ksprintf (fun message -> raise (Cannot_build message)) format
+let make_evaluated : Lowered.Item.t -> Catalog.Codegen.evaluated = function
+  | Constant path -> Constant path
+  | Assertion { definition; condition } -> Assertion { definition; condition }
+  | item -> raise_bug "%s is not evaluated" (Lowered.Item.to_string item)
+
+let stop_evaluation evaluated stop =
+  Catalog.Codegen.Evaluation_stopped { evaluated = make_evaluated evaluated; stop }
 
 type location = Lowering.Positions.location = { file : Path.file; line : int; column : int }
 
@@ -49,28 +57,26 @@ let resolve_position backend site : Emit_c.position =
   let { file; line; column } = Lowering.Positions.locate_site backend.positions site in
   { file = backend.show_file file; line; column }
 
-let show_location backend ({ file; line; column } : location) =
-  Printf.sprintf "%s:%d:%d" (backend.show_file file) line column
+let describe_failure backend failure =
+  Catalog.Codegen_description.describe_failure ~show_file:backend.show_file failure
 
 let raise_unsupported backend (unsupported : Lowering.unsupported) =
-  let where =
-    match unsupported.at with
-    | None -> ""
-    | Some at -> show_location backend (Lowering.Positions.locate_site backend.positions at) ^ ": "
-  in
-  raise_cannot_build "%sStage0 cannot build this yet: %s." where unsupported.construct
+  raise_cannot_build
+    (Unsupported
+       {
+         construct = unsupported.construct;
+         location = Option.map (Lowering.Positions.locate_site backend.positions) unsupported.at;
+       })
 
-let describe_todo_types backend todo_types =
-  String.concat "\n"
-    (List.map
-       (fun path ->
-         Printf.sprintf "the type %s is defined as todo\n  at %s" (Path.show path)
-           (show_location backend (locate_todo_type backend.lookups backend.positions path)))
-       todo_types)
+let locate_todo_types backend todo_types =
+  List.map
+    (fun path : Catalog.Codegen.todo_type ->
+      { type_ = path; location = locate_todo_type backend.lookups backend.positions path })
+    todo_types
 
 let raise_unbuildable backend : Lowering.unbuildable -> 'never = function
   | Unsupported unsupported -> raise_unsupported backend unsupported
-  | Todo_types todo_types -> raise_cannot_build "%s" (describe_todo_types backend todo_types)
+  | Todo_types todo_types -> raise_cannot_build (Todo_types (locate_todo_types backend todo_types))
 
 let list_todo_types (lookups : Lowering.lowered_lookups) root =
   match lookups.read_test_key root with
@@ -127,8 +133,7 @@ let compile_fragment backend item =
     | Evaluate (evaluator, ty) -> (
         match find_run backend evaluator with
         | Some (Ran encoded) -> Lowering.make_data (make_env backend) item ty encoded
-        | Some (Unfinished report | Stopped report) ->
-            raise_cannot_build "%s" (describe_stopped_evaluation item report)
+        | Some (Unfinished stop | Stopped stop) -> raise_cannot_build (stop_evaluation item stop)
         | None -> raise_bug "%s is compiled before it is evaluated" (Lowered.Item.to_string item))
   in
   if not (Lowered.Item.equal (Emit_c.item compiled) item) then
@@ -150,18 +155,19 @@ let run_test_program ?on_start program ~count on_record =
       ~finally:(fun () -> try Sys.remove program with Sys_error _ -> ())
       (fun () -> Process.run ~input:"" ~on_output:(Test_report.feed reader) program [])
   in
-  if Array.mem false is_reported then
-    raise_cannot_build "The test program ended with status %d before reporting every test:\n%s"
-      status errors
+  if Array.mem false is_reported then raise_cannot_build (Test_program_ended { status; errors })
 
 let make_run (record : Test_report.record) =
-  let message = Option.value record.message ~default:"" in
+  let end_with ending =
+    Catalog.Codegen.Ended { ending; message = Option.value record.message ~default:"" }
+  in
   match record.outcome with
   | Passed -> Ran (Option.value record.output ~default:"")
-  | Incomplete -> Unfinished message
-  | Panicked -> Stopped ("panic: " ^ message)
-  | Failed -> Stopped ("assertion failed: " ^ message)
-  | Timed_out | Crashed -> Stopped message
+  | Incomplete -> Unfinished (end_with Incomplete)
+  | Panicked -> Stopped (end_with Panicked)
+  | Failed -> Stopped (end_with Assertion_failed)
+  | Timed_out -> Stopped (end_with Timed_out)
+  | Crashed -> Stopped (end_with Crashed)
 
 let units_rendered = Atomic.make 0
 
@@ -192,7 +198,7 @@ let rec build ?report_progress ?(tests = false) ?dsym_bundle backend ~roots ~sta
       ~sources ~output
   with
   | Ok () -> ()
-  | Error message -> raise (Cannot_build message)
+  | Error message -> raise_cannot_build (C_compiler_failed message)
 
 and list_linked backend roots =
   let linked = backend.lookups.list_linked backend.profile roots in
@@ -214,8 +220,8 @@ and list_linked backend roots =
               (make_stored_source backend item ~text_hash, sites)
           | Evaluated { item; evaluator } -> (
               match find_run backend evaluator with
-              | Some (Unfinished report | Stopped report) ->
-                  raise_cannot_build "%s" (describe_stopped_evaluation item report)
+              | Some (Unfinished stop | Stopped stop) ->
+                  raise_cannot_build (stop_evaluation item stop)
               | Some (Ran _) | None ->
                   raise_bug "%s is evaluated, and has no unit" (Lowered.Item.to_string item))
           | Unbuildable unbuildable -> raise_unbuildable backend unbuildable)
@@ -238,8 +244,7 @@ and run_evaluators backend evaluators =
     if List.exists (Lowered.Item.equal evaluator) dependents then
       match evaluator with
       | Evaluator (Constant path) ->
-          record_run backend evaluator
-            (Unfinished (Printf.sprintf "the value of %s depends on itself" (Path.show path)))
+          record_run backend evaluator (Unfinished (Depends_on_itself path))
       | _ ->
           raise_bug "%s is evaluated by code that reads its result"
             (Lowered.Item.to_string evaluator)
@@ -248,7 +253,8 @@ and run_evaluators backend evaluators =
       | needed ->
           Item_table.replace dependencies evaluator needed;
           List.iter (note_dependencies (evaluator :: dependents)) needed
-      | exception Cannot_build message -> record_run backend evaluator (Stopped message)
+      | exception Cannot_build failure ->
+          record_run backend evaluator (Stopped (Unbuildable failure))
   in
   List.iter (note_dependencies []) evaluators;
   let find_run_without_a_program evaluator =
@@ -256,9 +262,9 @@ and run_evaluators backend evaluators =
       (fun needed ->
         match find_run backend needed with
         | Some (Ran _) -> None
-        | Some (Unfinished report) -> Some (Unfinished report)
-        | Some (Stopped report) ->
-            Some (Stopped (describe_stopped_evaluation (read_evaluated needed) report))
+        | Some (Unfinished stop) -> Some (Unfinished stop)
+        | Some (Stopped stop) ->
+            Some (Stopped (Unbuildable (stop_evaluation (read_evaluated needed) stop)))
         | None -> raise_bug "%s is needed before it is evaluated" (Lowered.Item.to_string needed))
       (Item_table.find dependencies evaluator)
   in
@@ -306,8 +312,9 @@ and run_evaluators backend evaluators =
 let capture_failure work =
   match work () with
   | result -> Ok result
-  | exception Cannot_build message -> Error message
-  | exception Test_report.Malformed message -> Error message
+  | exception Cannot_build failure -> Error failure
+  | exception Test_report.Malformed message ->
+      Error (Catalog.Codegen.Unreadable_test_report message)
 
 let is_silent_pass (record : Test_report.record) =
   record.outcome = Passed && record.message = None && record.echo = None && record.output = None
@@ -329,10 +336,10 @@ type progress =
   | Started of { test : int }
   | Ended of { test : int; record : Test_report.record }
 
-let make_incomplete_record message =
+let make_incomplete_record backend failure =
   {
     Test_report.outcome = Incomplete;
-    message = Some message;
+    message = Some (describe_failure backend failure);
     echo = None;
     output = None;
     microseconds = 0;
@@ -352,7 +359,7 @@ let find_unfinished backend evaluators =
   List.find_map
     (fun evaluator ->
       match find_run backend evaluator with
-      | Some (Unfinished report) -> Some (read_evaluated evaluator, report)
+      | Some (Unfinished stop) -> Some (read_evaluated evaluator, stop)
       | Some (Ran _ | Stopped _) | None -> None)
     evaluators
 
@@ -374,7 +381,9 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
             ( index,
               root,
               false,
-              Some (make_incomplete_record (describe_todo_types backend todo_types)) )
+              Some
+                (make_incomplete_record backend (Todo_types (locate_todo_types backend todo_types)))
+            )
         | [] ->
             let is_recordable =
               not (Interface.Definition.is_external_test backend.lookups.interface test)
@@ -404,12 +413,8 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
          List.filter
            (fun (index, root, _, _) ->
              match find_unfinished backend (list_needed_evaluators backend [ root ]) with
-             | Some (evaluated, report) ->
-                 end_test index
-                   (make_incomplete_record
-                      (Printf.sprintf "the constant %s is not computed: %s"
-                         (Lowered.Item.to_string evaluated)
-                         report));
+             | Some (evaluated, stop) ->
+                 end_test index (make_incomplete_record backend (stop_evaluation evaluated stop));
                  false
              | None -> true)
            missing
@@ -516,16 +521,7 @@ let make_program_root backend ~main =
   match list_todo_types backend.lookups root with
   | [] -> root
   | todo_types ->
-      raise_cannot_build "%s"
-        (String.concat "\n"
-           (List.map
-              (fun path ->
-                Printf.sprintf
-                  "%s: the type %s is defined as todo, and `main` can reach it, so the program \
-                   cannot be built."
-                  (show_location backend (locate_todo_type backend.lookups backend.positions path))
-                  (Path.show path))
-              todo_types))
+      raise_cannot_build (Todo_types_reached_by_main (locate_todo_types backend todo_types))
 
 let build_program backend ~main ~output ~is_kept =
   capture_failure @@ fun () ->
@@ -552,20 +548,20 @@ let evaluate backend evaluated =
              (function Ok (Lowering.Evaluate (evaluator, _)) -> Some evaluator | _ -> None)
              lowered))
   in
-  let stop item message =
-    backend.lookups.record_evaluation item (Stopped message);
-    Stopped message
+  let stop item failure =
+    backend.lookups.record_evaluation item (Stopped (Unbuildable failure));
+    Stopped (Catalog.Codegen.Unbuildable failure)
   in
   List.map2
-    (fun item (lowered : (Lowering.lowered, string) result) ->
+    (fun item (lowered : (Lowering.lowered, Catalog.Codegen.failure) result) ->
       match (lowered, ran) with
-      | Error message, _ | Ok (Evaluate _), Error message -> stop item message
+      | Error failure, _ | Ok (Evaluate _), Error failure -> stop item failure
       | Ok (Folded (data, _)), _ -> Ran data.value
       | Ok (Evaluate (evaluator, ty)), Ok () -> (
           match find_run backend evaluator with
           | Some (Ran encoded) -> Ran (Lowering.Encoding.decode (make_env backend) ty encoded)
-          | Some (Unfinished report) -> Unfinished report
-          | Some (Stopped report) -> Stopped report
+          | Some (Unfinished stop) -> Unfinished stop
+          | Some (Stopped stop) -> Stopped stop
           | None -> raise_bug "%s is not evaluated" (Lowered.Item.to_string item))
       | Ok (Compiled _), _ -> raise_bug "%s is lowered to code" (Lowered.Item.to_string item))
     evaluated lowered

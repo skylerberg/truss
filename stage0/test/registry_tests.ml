@@ -160,7 +160,7 @@ let () =
           if Filename.basename directory <> hash then Harness.fail "in %s" directory;
           if Registry.Content.hash (Registry.Content.list_all_files directory) <> hash then
             Harness.fail "other files"
-      | Error reason -> Harness.fail "%s" reason);
+      | Error _ -> Harness.fail "the registry gave no files");
   Harness.test "files that do not have the hash asked for are not kept" (fun () ->
       let root = make_scratch_directory "registry" and into = make_scratch_directory "packages" in
       let registry = use_registry_at root in
@@ -177,9 +177,8 @@ let () =
            { Path.owner = Some "acme"; name = "geometry" }
            (1, 0, 0) ~hash
        with
-      | Error reason ->
-          if not (String.includes ~affix:"do not have the hash" reason) then
-            Harness.fail "said %s" reason
+      | Error (Changed_in_registry _) -> ()
+      | Error _ -> Harness.fail "another failure"
       | Ok _ -> Harness.fail "kept");
       if Sys.readdir into <> [||] then Harness.fail "left files behind");
   Harness.test "a version the registry does not hold is not fetched" (fun () ->
@@ -190,7 +189,8 @@ let () =
           { Path.owner = Some "acme"; name = "geometry" }
           (1, 0, 0) ~hash:(String.make 64 'b')
       with
-      | Error _ -> ()
+      | Error (Missing_from_registry _) -> ()
+      | Error _ -> Harness.fail "another failure"
       | Ok _ -> Harness.fail "fetched")
 
 let parse_package text = Option.get (Path.parse_package text)
@@ -222,7 +222,7 @@ let load published name version ~hash =
                 holds = [];
               })
             record )
-  | _ -> Error (Project_catalog.Problem.Unavailable "it is not there")
+  | _ -> Error (Project_catalog.Problem.Unavailable (Unwritable { directory = "it is not there" }))
 
 let make_entry name version =
   { Registry.Lock.name = parse_package name; version; hash = hash_of name version; holds = [] }

@@ -630,7 +630,8 @@ let copy_value ?literal (context : State.context) frame ~(declared : Types.ty) t
         (fun ({ element; model_of; _ } : State.buffer) ->
           let per_element =
             if
-              Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.bounds element
+              Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.bounds
+                (Amounts.find_declared_element (Types.strip_view declared) ~erased:element)
             then Costs.least_amount (Metric metric)
             else declare_copy_cost_of metric element
           in

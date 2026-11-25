@@ -119,7 +119,9 @@ let read_root context frame run (root : Mir.root) =
       | Core_local Self -> (
           match frame.self with
           | Some self -> self
-          | None -> Facts.raise_bug "`%s` reads `self` outside a method" frame.source.name)
+          | None ->
+              Facts.raise_bug "`%s` reads `self` outside a method"
+                (Resolve.Names.show_key frame.source.key))
       | key -> (
           (if frame.makes_obligations && not context.reading_callback then
              match key with
@@ -131,7 +133,8 @@ let read_root context frame run (root : Mir.root) =
           match Locals.find_opt key frame.locals with
           | Some term -> term
           | None ->
-              Facts.raise_bug "`%s` reads %s before the prover binds it" frame.source.name
+              Facts.raise_bug "`%s` reads %s before the prover binds it"
+                (Resolve.Names.show_key frame.source.key)
                 (describe_local run.infos.(local).kind)))
 
 let rec read_resolved context frame run (place : Mir.place) =
@@ -344,7 +347,13 @@ let compute_changes ?(also = []) context run (frame : State.frame) (blocks : Mir
         | Local local ->
             let root = Locals.make_key run.infos local in
             if is_bound root then
-              Some { State.root; fields = Mir.list_leading_fields place.Mir.projections }
+              Some
+                {
+                  State.root;
+                  declared_root_type =
+                    Facts.substitute_declared_type context frame run.infos.(local).type_;
+                  fields = Mir.list_leading_fields place.Mir.projections;
+                }
             else None
         | Constant _ | Literal _ -> None)
       (resolve_aliases frame run place)
@@ -783,25 +792,31 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Specification Result -> (
       match frame.result with
       | Some result -> (frame, result)
-      | None -> Facts.raise_bug "`%s` reads `result` outside an `ensures`" frame.source.name)
+      | None ->
+          Facts.raise_bug "`%s` reads `result` outside an `ensures`"
+            (Resolve.Names.show_key frame.source.key))
   | Specification (Entry local) -> (
       match Locals.make_key run.infos local with
       | Core_local Self -> (
           match frame.old_self with
           | Some self -> (frame, self)
-          | None -> Facts.raise_bug "`%s` reads `old(self)` outside a method" frame.source.name)
+          | None ->
+              Facts.raise_bug "`%s` reads `old(self)` outside a method"
+                (Resolve.Names.show_key frame.source.key))
       | key -> (
           match Locals.find_opt key frame.old_locals with
           | Some term -> (frame, term)
           | None ->
               Facts.raise_bug "`%s` reads the entry value of %s, which the prover did not bind"
-                frame.source.name
+                (Resolve.Names.show_key frame.source.key)
                 (describe_local run.infos.(local).kind)))
   | Specification Yielded -> (
       match (frame.yielded, frame.yielded_so_far) with
       | Some yielded, _ -> (frame, yielded)
       | None, Some yielded_so_far when Facts.is_home context frame.source -> (frame, yielded_so_far)
-      | _ -> Facts.raise_bug "`%s` reads `yielded` outside a lending method" frame.source.name)
+      | _ ->
+          Facts.raise_bug "`%s` reads `yielded` outside a lending method"
+            (Resolve.Names.show_key frame.source.key))
   | Specification (Identical (first, second)) ->
       let first_value = translate_operand first and second_value = translate_operand second in
       Values.assume_extensional context frame

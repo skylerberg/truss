@@ -85,8 +85,8 @@
     return `
       <h2>${drawing.nodes.size} libraries</h2>
       <p>An arrow points from a library to a library it depends on.</p>
-      <p>Hover over a library to highlight its
-      <b class="dependency-key">dependencies</b> and its
+      <p>Hover over a library to highlight its direct
+      <b class="dependency-key">dependencies</b> and its direct
       <b class="dependent-key">dependents</b> and list them here. Click a
       library to open its documentation. Hover over a directory to highlight
       its libraries. Drag to pan and scroll to zoom.</p>
@@ -152,14 +152,14 @@
       return;
     }
     drawing.svg.classList.add("focused");
-    const allDependencies = findReachable(name, dependencies);
-    const allDependents = findReachable(name, dependents);
     drawing.nodes.get(name).classList.add("focus");
-    for (const dependency of allDependencies) drawing.nodes.get(dependency)?.classList.add("dependency");
-    for (const dependent of allDependents) drawing.nodes.get(dependent)?.classList.add("dependent");
+    for (const dependency of libraries.get(name).deps) {
+      drawing.nodes.get(dependency)?.classList.add("dependency");
+    }
+    for (const dependent of dependents.get(name)) drawing.nodes.get(dependent)?.classList.add("dependent");
     for (const { edge, source, target } of drawing.edges) {
-      if (source === name || allDependencies.has(source)) edge.classList.add("dependency");
-      else if (target === name || allDependents.has(target)) edge.classList.add("dependent");
+      if (source === name) edge.classList.add("dependency");
+      else if (target === name) edge.classList.add("dependent");
     }
     panel.innerHTML = renderDetails(name);
   };

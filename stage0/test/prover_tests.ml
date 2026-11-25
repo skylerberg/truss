@@ -465,7 +465,7 @@ let () =
               (String.includes
                  ~affix:
                    "The evaluation of `app.main.twice` stopped, so its value is not known: the \
-                    value of app.main.limit depends on itself"
+                    value of `app.main.limit` depends on itself"
                  message)
           then Harness.fail "%s" message
       | diagnostics ->
@@ -1764,6 +1764,44 @@ let () =
     (fun () -> expect_not_proven Fixtures.Prover.large_constant_loop_of_linear_calls "prover.cost");
   Harness.test "a loop with a constant count of recursive calls counts every call" (fun () ->
       expect_not_proven Fixtures.Prover.two_recursive_calls_in_a_constant_loop "prover.cost");
+  Harness.test "a loop's cost clause around two recursive calls does not make them linear"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.two_recursive_calls_in_a_range_loop_with_a_cost_clause
+        "prover.cost";
+      expect_not_proven Fixtures.Prover.two_recursive_calls_in_a_while_loop_with_a_cost_clause
+        "prover.cost";
+      expect_not_proven Fixtures.Prover.two_recursive_calls_in_a_cursor_loop_with_a_cost_clause
+        "prover.cost");
+  Harness.test "nested loops' cost clauses around two recursive calls do not make them linear"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.two_recursive_calls_in_nested_loops_with_cost_clauses
+        "prover.cost");
+  Harness.test
+    "a loop's cost clause in a lambda around two recursive calls does not make them linear"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.two_recursive_calls_in_a_loop_with_a_cost_clause_in_a_lambda
+        "prover.cost");
+  Harness.test "a loop's cost clause around one recursive call is linear" (fun () ->
+      expect_proven Fixtures.Prover.one_recursive_call_in_a_range_loop_with_a_cost_clause;
+      expect_proven Fixtures.Prover.one_recursive_call_in_a_while_loop_with_a_cost_clause);
+  Harness.test "a loop's cost clause beside a recursive call counts the loop as its clause's order"
+    (fun () -> expect_proven Fixtures.Prover.loop_with_a_cost_clause_beside_a_recursive_call);
+  Harness.test "a callee that runs a lambda with a recursive call twice is not linear" (fun () ->
+      expect_not_proven Fixtures.Prover.recursive_call_in_a_lambda_that_its_callee_runs_twice
+        "prover.cost");
+  Harness.test
+    "a callee that runs a constant-time lambda with a recursive call twice is not constant"
+    (fun () ->
+      expect_not_proven
+        Fixtures.Prover.recursive_call_in_a_constant_time_lambda_that_its_callee_runs_twice
+        "prover.cost");
+  Harness.test "a function value that runs a lambda with a recursive call twice is not constant"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.recursive_call_in_a_lambda_that_a_function_value_runs_twice
+        "prover.cost");
+  Harness.test "two recursive calls in a lambda under an amortized bound are not linear" (fun () ->
+      expect_not_proven Fixtures.Prover.two_recursive_calls_in_a_lambda_under_an_amortized_bound
+        "prover.cost");
   Harness.test "nested loops over ranges are quadratic" (fun () ->
       expect_proven (constant_step ^ Fixtures.Prover.nested_range_loops_of_quadratic_time));
   Harness.test "a loop whose iterations cost their index is quadratic" (fun () ->
@@ -3077,6 +3115,12 @@ let () =
       expect_not_proven Fixtures.Prover.copy_of_a_string_in_constant_time "prover.cost");
   Harness.test "a list of views passed `own` or `mut` holds no potential for its elements"
     (fun () -> expect_proven Fixtures.Prover.list_of_views_passed_on_in_constant_amortized_time);
+  Harness.test "a loop that pushes views is charged no potential for their owners" (fun () ->
+      expect_proven Fixtures.Prover.loops_pushing_views_within_an_amortized_bound);
+  Harness.test "a copy of a list of views costs time in its length, whatever the strings' lengths"
+    (fun () -> expect_proven Fixtures.Prover.copy_of_a_list_of_views_within_its_length);
+  Harness.test "a copy of a list of views does not cost constant time" (fun () ->
+      expect_not_proven Fixtures.Prover.copy_of_a_list_of_views_in_constant_time "prover.cost");
   Harness.test "a view holds no potential, so returning one costs constant amortized time"
     (fun () -> expect_proven Fixtures.Prover.view_returned_in_constant_amortized_time);
   Harness.test "a finite cursor collects through a bound in its remaining count of nexts" (fun () ->
@@ -3760,7 +3804,7 @@ let () =
         ~fixed:
           ( "fn character(code: UInt32) -> Character {",
             "fn character(code: UInt32) -> Character\n\
-            \  requires (0 <= code && code <= 1114111) && !((55296 <= code && code <= 57343))\n\
+            \  requires (0 <= code && code <= 1114111) && !(55296 <= code && code <= 57343)\n\
              {" ))
 
 let () =

@@ -348,12 +348,15 @@ let explain_unbounded_iteration (context : State.context) (head : State.frame)
       explain_changing_cost context head call ~changed ~parts:(list_call_parts call)
   | (Metric _ | Calls _), _, _ -> Unbounded_iteration
 
+let assumes_recursive_costs (context : State.context) (start : loop_start) =
+  context.recursive_costs_assumed > start.recursive_costs_mark
+
 let check_loop_iterations context loop_at (head : State.frame) (start : loop_start) ~iterations
     ~iteration_bounds ~facts ~ends ~breaks =
   let location = Facts.locate context head.source loop_at in
   let frames = ends @ breaks and varies = Facts.mentions_fresh_after context start.fresh_mark in
   let constant_count =
-    if context.recursive_costs_assumed > start.recursive_costs_mark then None
+    if assumes_recursive_costs context start then None
     else
       Option.bind iterations (fun iterations ->
           Option.map (fun count -> (iterations, count)) (find_constant_count iteration_bounds))
@@ -466,8 +469,10 @@ let check_loop_iterations context loop_at (head : State.frame) (start : loop_sta
                 (Logic.Boolean false)))
     start.loop_costs
 
-let exit_loop context ~(clause_at : State.frame) (exit_ : State.frame) costs ~iterations ~most =
+let exit_loop context ~(clause_at : State.frame) (exit_ : State.frame) (start : loop_start)
+    ~iterations ~most =
   let iterations = Option.value iterations ~default:Costs.zero in
+  let assumes_recursive_costs = assumes_recursive_costs context start in
   let spent =
     List.map
       (fun cost ->
@@ -485,6 +490,7 @@ let exit_loop context ~(clause_at : State.frame) (exit_ : State.frame) costs ~it
             in
             let counted =
               match cost.counter.counting with
+              | Units when assumes_recursive_costs -> Costs.bound amount
               | Units -> Costs.units amount
               | At_most -> Amounts.declare_bounded_amount context exit_ amount
               | Exactly -> amount
@@ -517,17 +523,30 @@ let exit_loop context ~(clause_at : State.frame) (exit_ : State.frame) costs ~it
               | Some { spent_at_head; bound } ->
                   Costs.plus bound (Costs.since ~start:spent_at_head at)
               | None -> at )))
-      costs
+      start.loop_costs
   in
-  { exit_ with spent = follow_counterparts costs ~before:exit_ spent }
+  { exit_ with spent = follow_counterparts start.loop_costs ~before:exit_ spent }
+
+let read_declared_part_type context (part : State.changed_part) =
+  List.fold_left
+    (fun declared field ->
+      match
+        Option.bind (Amounts.list_declared_fields context declared) (List.assoc_opt (None, field))
+      with
+      | Some field_type -> field_type
+      | None ->
+          Facts.raise_bug "a loop changes the field `%s`, which `%s` does not declare" field
+            (Types.show declared))
+    part.declared_root_type part.fields
 
 let measure_held_gains context (entry : State.frame) (changed : State.changed_part list) =
   let held =
     List.filter_map
       (fun part ->
         Option.map
-          (fun (ty, _) ->
-            (ty, fun (at : State.frame) -> Option.map snd (find_changed_part context at part)))
+          (fun _ ->
+            ( read_declared_part_type context part,
+              fun (at : State.frame) -> Option.map snd (find_changed_part context at part) ))
           (find_changed_part context entry part))
       changed
   in
@@ -772,14 +791,14 @@ let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context f
   let exit_ =
     exit_loop context ~clause_at:head
       { ended with yielded = Some before }
-      costs ~iterations:(Some iterations)
+      loop ~iterations:(Some iterations)
       ~most:(most @ Costs.list_upper_bounds ~varies ~facts:ended_facts iterations)
   in
   let left =
     List.map
       (fun (exit_frame : State.frame) ->
         let left_at = with_through exit_frame in
-        exit_loop context ~clause_at:left_at left_at costs
+        exit_loop context ~clause_at:left_at left_at loop
           ~iterations:(Some (Costs.plus iterations (Logic.int 1)))
           ~most:
             (most
@@ -1122,13 +1141,13 @@ let run_for_loop context frame (for_loop : for_loop) =
       let exit_ =
         exit_loop context ~clause_at:head
           (Facts.restrict head (Logic.greater_equal iterations count))
-          costs ~iterations:(Some iterations) ~most
+          start ~iterations:(Some iterations) ~most
       in
       let left =
         List.map
           (fun (exit_frame : State.frame) ->
             let left_at = with_through exit_frame in
-            exit_loop context ~clause_at:left_at left_at costs
+            exit_loop context ~clause_at:left_at left_at start
               ~iterations:(Some (Costs.plus iterations (Logic.int 1)))
               ~most)
           breaks
@@ -1219,13 +1238,13 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
         loop.on_failure
           (exit_loop context ~clause_at:head
              (Facts.restrict at_condition (Logic.not_ holds))
-             costs ~iterations ~most))
+             start ~iterations ~most))
   in
   Facts.join_frames context
     (Option.to_list failing
     @ List.map
         (fun (leaving : State.frame) ->
-          exit_loop context ~clause_at:leaving leaving costs
+          exit_loop context ~clause_at:leaving leaving start
             ~iterations:(Option.map (fun count -> Costs.plus count (Logic.int 1)) iterations)
             ~most)
         breaks)

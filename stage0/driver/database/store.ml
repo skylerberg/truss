@@ -342,23 +342,10 @@ let list_edges store schema ~(source : endpoint) =
         markers = Sql.read_integer row 3;
       })
 
-let encode_text value =
-  let buffer = Buffer.create (String.length value + 2) in
-  Buffer.add_char buffer '"';
-  String.iter
-    (fun character ->
-      match character with
-      | '"' -> Buffer.add_string buffer "\\\""
-      | '\\' -> Buffer.add_string buffer "\\\\"
-      | character when Char.code character < 0x20 ->
-          Buffer.add_string buffer (Printf.sprintf "\\u%04x" (Char.code character))
-      | character -> Buffer.add_char buffer character)
-    value;
-  Buffer.add_char buffer '"';
-  Buffer.contents buffer
-
 let encode_integers values = "[" ^ String.concat "," (List.map string_of_int values) ^ "]"
-let encode_texts values = "[" ^ String.concat "," (List.map encode_text values) ^ "]"
+
+let encode_texts values =
+  "[" ^ String.concat "," (List.map Diagnostic.encode_json_string values) ^ "]"
 
 type edge_change = { changed : endpoint; before : int; after : int }
 
@@ -386,7 +373,9 @@ let replace_edges store ~(source : endpoint) edges =
     ^ String.concat ","
         (List.map
            (fun { changed = target; after; _ } ->
-             Printf.sprintf "[%d,%d,%s,%d]" target.kind target.id (encode_text target.name) after)
+             Printf.sprintf "[%d,%d,%s,%d]" target.kind target.id
+               (Diagnostic.encode_json_string target.name)
+               after)
            changes)
     ^ "]"
   in
@@ -967,7 +956,8 @@ let mark_readers_of_targets store ~(targets : endpoint list) ~markers =
           ^ String.concat ","
               (List.map
                  (fun (target : endpoint) ->
-                   Printf.sprintf "[%d,%d,%s]" target.kind target.id (encode_text target.name))
+                   Printf.sprintf "[%d,%d,%s]" target.kind target.id
+                     (Diagnostic.encode_json_string target.name))
                  targets)
           ^ "]");
         Integer markers;
@@ -1155,9 +1145,31 @@ type selection =
   | Of_container of int
   | Of_path of int
 
-let definition_columns =
-  "id, key, package, module, path, ordinal, name, owner, member, kind, visibility, is_generic, \
-   origin, supplied_from, container, file, position, base, stop, text_hash"
+let definition_column_names =
+  [
+    "id";
+    "key";
+    "package";
+    "module";
+    "path";
+    "ordinal";
+    "name";
+    "owner";
+    "member";
+    "kind";
+    "visibility";
+    "is_generic";
+    "origin";
+    "supplied_from";
+    "container";
+    "file";
+    "position";
+    "base";
+    "stop";
+    "text_hash";
+  ]
+
+let definition_columns = String.concat ", " definition_column_names
 
 let read_optional_integer row index =
   if Sql.is_null row index then None else Some (Sql.read_integer row index)
@@ -1209,10 +1221,7 @@ let list_definitions store schema selection =
     arguments read_definition
 
 let qualified_definition_columns =
-  String.concat ", "
-    (List.map
-       (fun column -> "d." ^ String.trim column)
-       (String.split_on_char ',' definition_columns))
+  String.concat ", " (List.map (fun column -> "d." ^ column) definition_column_names)
 
 let find_source_definition store ~(target : endpoint) ~source_kind ~markers ~from_ =
   Sql.find_row store.sql

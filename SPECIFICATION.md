@@ -692,6 +692,26 @@ var longest: view String = words[0]
   annotated binding, an assignment, and a returned value. An `Array` converts
   to the `List` of its elements where a read-only or `mut` `List` or a
   view of one is expected.
+- **A place given where a type parameter is undecided is viewed.** In
+  `let found = Some(names[0])`, nothing but the argument decides the type
+  parameter of `Option`. The argument is a place of a `String`, written
+  without `own`, so the type argument is `view String` and `found` is an
+  `Option[view String]`.
+  - The rule covers an `own` parameter of a generic function, a field of a
+    constructed value, an element of a list literal, and a key or a value of
+    a map literal.
+  - The place is of a `List` or a `String`. It may be a constant or a part
+    that a method lends read-only.
+  - `Some(own name)` moves `name`, and `Some(names[0].copy())` copies the
+    element. Each is an `Option[String]`.
+  - A place is viewed only where a view meets every bound of the type
+    parameter. Given to a `Value: Storable`, the place is an owned value
+    that cannot be moved.
+  - Arguments decide a type parameter in the order written. After
+    `pick("fig".copy(), second: names[0])` has decided `String`, the element
+    is an owned value that cannot be moved. A declared type, as in
+    `let found: Option[String] = Some(names[0])`, decides before any
+    argument.
 - **A view converts to no owned value.** `copy()` makes a `List` or a
   `String` that owns copies of the viewed elements, and a view where an
   owned value is needed is an error with that fix.
@@ -888,6 +908,7 @@ let connection = connect(host, secure: false)?
 ```truss
 let value = parse[Int64](text)?
 let builder = List[String].with_capacity(64)
+let words = List[view String].with_capacity(64)
 ```
 
 Type arguments that cannot be inferred are written in brackets after the
@@ -897,6 +918,7 @@ function's name.
   type, or a trait, and is an index otherwise. After a `.`, it holds type
   arguments when the name is a method of the receiver.
 - The written arguments give the generic parameters in brackets, in order.
+- A type argument that is a view is written `view T`, as in a declared type.
 - A capability parameter takes no type argument, since it is written at its
   uses and not in brackets: `for_each[String](names, visit: greet)` gives
   `Item` alone.
@@ -2367,7 +2389,7 @@ postfix    = primary { "." LOWER_NAME
 brackets   = bracket_item { "," bracket_item } [ "," ]
            | [ additive ] ".." [ additive ]
            | [ additive ] "..=" additive ;
-bracket_item = expression | UPPER_NAME "=" type ;
+bracket_item = expression | UPPER_NAME "=" type | "view" type ;
 
 primary    = INTEGER | FLOAT | STRING | TAGGED_STRING
            | "true" | "false" | "todo" | "unreachable" | "break" | "continue"

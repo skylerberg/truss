@@ -50,7 +50,7 @@ let () =
       in
       match Backend.run_tests backend ~time_limit_ms:10000 tests with
       | exception Compiler_bug.Bug bug -> fail_unbuilt (Compiler_bug.to_string bug)
-      | Error message -> fail_unbuilt message
+      | Error failure -> fail_unbuilt (Codegen_support.describe_failure failure)
       | Ok records ->
           List.iter2
             (fun path (record : Backend.Test_report.record) ->

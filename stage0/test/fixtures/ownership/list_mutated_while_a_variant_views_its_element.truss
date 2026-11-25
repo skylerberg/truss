@@ -1,0 +1,9 @@
+fn longest_after_a_push() -> UInt64 {
+  var names: List[String] = ["apple".copy(), "pear".copy()]
+  let found = Some(names[0])
+  mut names.push("fig".copy())
+  match found {
+    Some(text) => text.length()
+    None => 0
+  }
+}

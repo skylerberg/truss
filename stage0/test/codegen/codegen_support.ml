@@ -253,11 +253,12 @@ let list_tests_in database (module_ : Path.module_) =
     ((Database.make_name_lookups database).list_declarations module_)
 
 let list_tests database = list_tests_in database example
+let describe_failure = Catalog.Codegen_description.describe_failure ~show_file:Path.show_file
 
 let run_example_tests database backend =
   match Backend.run_tests backend ~time_limit_ms:2000 (list_tests database) with
   | Ok records -> render_records records
-  | Error message -> failwith message
+  | Error failure -> failwith (describe_failure failure)
 
 let run_source text =
   let database, backend = load text in
@@ -267,7 +268,8 @@ let expect_output text expected = expect_string ~expected (run_source text)
 
 let build_program backend ~main =
   let output = make_scratch_path "program" in
-  Result.map (fun () -> output) (Backend.build_program backend ~main ~output ~is_kept:false)
+  Result.map_error describe_failure
+    (Result.map (fun () -> output) (Backend.build_program backend ~main ~output ~is_kept:false))
 
 let build_main ?profile text =
   let _, backend = load ?profile text in

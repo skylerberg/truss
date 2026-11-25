@@ -39,5 +39,5 @@ module Model_table = Hashtbl.Make (Structural_key.Make (struct
 end))
 
 module Axiom_clause_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Logic.symbol * string * Core.origin
+  type t = Logic.symbol * Resolve.Names.key * Path.t * Core.origin
 end))

@@ -1,0 +1,7 @@
+fn pick[Value](first: own Value, second: own Value) -> Value {
+  second
+}
+
+fn chosen() -> Int64 {
+  pick[view Int64](1, second: 2)
+}

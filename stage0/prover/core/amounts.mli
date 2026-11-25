@@ -15,6 +15,8 @@ val make_conditional_amount : Logic.term -> Logic.term -> Logic.term
 val compute_amount_within :
   State.context -> State.frame -> Costs.counter -> Logic.term -> Logic.term
 
+val passes_lambda_assuming_recursive_costs : State.context -> State.passed list -> bool
+
 val compute_callee_amount :
   ?method_cost:(Language.Metric.t -> Logic.term) ->
   State.context ->
@@ -87,6 +89,10 @@ val assume_element_potential_change :
   unit
 
 val find_buffer : State.context -> Types.ty -> State.buffer option
+val find_declared_element : Types.ty -> erased:Types.ty -> Types.ty
+
+val list_declared_fields :
+  State.context -> Types.ty -> ((string option * string) * Types.ty) list option
 
 val declare_method_cost :
   State.context ->

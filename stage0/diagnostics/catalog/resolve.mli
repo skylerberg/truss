@@ -11,6 +11,7 @@ type binding =
   | Prelude_name
 
 type associated = Associated_type | Associated_capability_set
+type branching_block = Parallel_block | Concurrent_block
 
 type t =
   | Unknown of {
@@ -43,7 +44,11 @@ type t =
       module_ : Path.module_;
       member : string;
     }
-  | No_module of { name : Core.origin; written : string; path_start : Path.module_ option }
+  | No_module of {
+      name : Core.origin;
+      written : Core.origin Description.range;
+      path_start : Path.module_ option;
+    }
   | Not_a_generic_parameter of {
       base : Core.origin;
       written : string;
@@ -55,7 +60,7 @@ type t =
   | Not_generic of { value : Core.origin; function_ : string }
   | Not_a_place of { written : Core.origin; inner : Core.origin }
   | Shadowed of { name : Core.origin; written : string; existing : binding }
-  | Shadowed_in_branch of { branch : Core.origin; block : string; written : string }
+  | Shadowed_in_branch of { branch : Core.origin; block : branching_block; written : string }
   | Prelude_definition of { name : Core.origin; written : string }
   | Alternative_bindings of { alternative : Core.origin; first : string list; this : string list }
   | Unconstrained_capability_parameter of { name : Core.origin; written : string }

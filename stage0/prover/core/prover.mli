@@ -6,7 +6,7 @@ type proof =
   | Unsupported of {
       location : Obligation.location;
       construct : Catalog.Prover.construct;
-      foreign : string option;
+      foreign : Path.t option;
     }
   | Not_proven_here
 

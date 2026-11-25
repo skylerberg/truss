@@ -9,7 +9,6 @@ module Elaborator : sig
   val find_self_type : t -> Types.ty option
   val list_diagnostics : t -> Catalog.diagnostic list
   val list_named_types : t -> (Syntax.id * Types.ty) list
-  val show_path : Syntax.path -> string
   val split_part : Syntax.expression -> (string * Syntax.name list * bool) option
   val elaborate_type : t -> Syntax.type_expression -> Types.ty
   val elaborate_mode : Syntax.mode option -> Language.Mode.t
