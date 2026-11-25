@@ -781,7 +781,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let compute_change () =
     List.fold_left
       (fun total (passed : State.passed) ->
-        let ty = passed.type_ in
+        let ty = passed.declared_type in
         match passed.mode with
         | Language.Mode.Mut -> (
             match List.assoc_opt passed.position changed with
