@@ -196,14 +196,10 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
     resolved =
   let field_types = Types.list_field_types interface in
   let list_derived_bounds trait =
-    Properties.Bounds.append (Checking.list_bounds state)
-      (Properties.Bounds.close state.lookups (fun parameter ->
-           if
-             List.exists
-               (fun (generic : Types.generic) -> generic.generic = parameter)
-               interface.type_generics
-           then [ { Types.trait; trait_arguments = []; associated = [] } ]
-           else []))
+    Properties.Bounds.close state.Checking.lookups
+      (Types.list_bounds
+         (Impls.derived_generics interface.type_generics
+            { Types.trait; trait_arguments = []; associated = [] }))
   in
   List.iter
     (fun ((clause : Syntax.type_clause), (written : Syntax.path_type), trait) ->
