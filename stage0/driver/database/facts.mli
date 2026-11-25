@@ -29,5 +29,6 @@ val proof : Prover.proof Tracker.fact
 val lowered : (Lowering.lowered, Lowering.unbuildable) result Tracker.fact
 val test_key : (string, Lowering.unbuildable) result Tracker.fact
 val evaluation : Lowering.evaluation Tracker.fact
+val test_run : Lowering.test_pass Tracker.fact
 val rank_profile : Profile.t -> int
 val unit : Profile.t -> string Tracker.fact

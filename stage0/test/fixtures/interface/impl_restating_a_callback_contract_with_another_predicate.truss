@@ -1,0 +1,13 @@
+use app.choosing
+
+fn is_small(value: UInt64) -> Bool {
+  true
+}
+
+type Lenient()
+
+impl choosing.Chooses for Lenient {
+  fn choose(self, count: UInt64, pick: (fn(limit: UInt64) -> UInt64 ensures is_small(result))) -> UInt64 {
+    pick(count)
+  }
+}

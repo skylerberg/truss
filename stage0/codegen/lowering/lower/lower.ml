@@ -1,4 +1,7 @@
-type unsupported = Lowering.unsupported = { construct : string; at : Lowered.site option }
+type unsupported = Lowering.unsupported = {
+  construct : Catalog.Codegen.construct;
+  at : Lowered.site option;
+}
 
 exception Unsupported = Lowering.Unsupported
 

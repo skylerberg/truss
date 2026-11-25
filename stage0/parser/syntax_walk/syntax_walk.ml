@@ -106,7 +106,15 @@ let visit_expression_parts ~on_expression ~on_statement (value : Syntax.expressi
           on_expression key;
           on_expression value)
         entries
-  | Lambda { body; _ } -> visit_block body
+  | Lambda { parameters; body } ->
+      List.iter
+        (fun (parameter : Syntax.lambda_parameter) ->
+          Option.iter
+            (fun (annotation : Syntax.parameter_annotation) ->
+              visit_type_expression on_expression annotation.type_)
+            parameter.annotation)
+        parameters;
+      visit_block body
   | If { condition; then_; else_ } -> (
       on_expression condition;
       visit_block then_;
@@ -398,7 +406,13 @@ let walk_names ~on_name (definition : Syntax.definition) =
             walk_type type_);
         walk_expression body
     | Lambda { parameters; body } ->
-        List.iter walk_pattern parameters;
+        List.iter
+          (fun ({ pattern; annotation } : Syntax.lambda_parameter) ->
+            walk_pattern pattern;
+            Option.iter
+              (fun (annotation : Syntax.parameter_annotation) -> walk_type annotation.type_)
+              annotation)
+          parameters;
         walk_block body
     | Match { scrutinees; arms } ->
         List.iter walk_expression scrutinees;

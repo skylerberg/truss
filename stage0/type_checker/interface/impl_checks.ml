@@ -1,28 +1,3 @@
-let show_generic (generic : Types.generic) =
-  match generic.kind with
-  | Type_generic [] -> generic.generic.name
-  | Type_generic bounds ->
-      generic.generic.name ^ ": " ^ String.concat " + " (List.map Types.show_trait bounds)
-  | Value_generic -> generic.generic.name ^ ": UInt64"
-
-let show_signature (signature : Types.signature) =
-  Printf.sprintf "%s(%s)%s"
-    (match signature.generics with
-    | [] -> ""
-    | generics -> "[" ^ String.concat ", " (List.map show_generic generics) ^ "]")
-    (String.concat ", "
-       ((match signature.receiver with
-          | Some (mode, _) -> [ Language.Mode.show_prefix mode ^ "self" ]
-          | None -> [])
-       @ List.map
-           (fun (parameter : Types.parameter_info) ->
-             Printf.sprintf "%s: %s%s%s" parameter.name
-               (Language.Mode.show_prefix parameter.mode)
-               (Types.show parameter.type_)
-               (if parameter.has_default then " = ..." else ""))
-           signature.parameters))
-    (Types.show_output signature.output)
-
 let has_default (signature : Types.signature) =
   List.exists (fun (parameter : Types.parameter_info) -> parameter.has_default) signature.parameters
 
@@ -70,7 +45,6 @@ let signatures_agree (expected : Types.signature) (written : Types.signature) =
 
 type conformance = {
   implementation : Impls.implementation;
-  shown_trait : string;
   list_impl_bounds : Impls.bounds;
   missing_associated : string list;
 }
@@ -89,9 +63,7 @@ let compiler_implements (impl : Types.impl_interface) =
   || Well_known.is Plain impl.implements.trait
   || Well_known.is Storable impl.implements.trait
 
-let find_conformance lookups ~list_bounds (impl : Types.impl_interface)
-    (trait_path : Syntax.path_type) =
-  let shown_trait = Elaborator.show_path trait_path.path in
+let find_conformance lookups ~list_bounds (impl : Types.impl_interface) =
   if
     Option.is_some (Well_known.find_builtin_capability impl.implements.trait)
     || compiler_implements impl
@@ -101,7 +73,6 @@ let find_conformance lookups ~list_bounds (impl : Types.impl_interface)
       (fun (implementation : Impls.implementation) ->
         {
           implementation;
-          shown_trait;
           list_impl_bounds = Impls.Conformance.list_impl_bounds lookups impl ~list_bounds;
           missing_associated =
             List.filter_map
@@ -122,12 +93,11 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
            { at = Written trait_path.id; capability = builtin_capability })
   | None when compiler_implements impl ->
       Checking.report state
-        (Implements_built_in
-           { at = Written trait_path.id; trait = Elaborator.show_path trait_path.path })
+        (Implements_built_in { at = Written trait_path.id; trait = impl.implements.trait })
   | None -> (
-      match find_conformance lookups ~list_bounds:(Checking.list_bounds state) impl trait_path with
+      match find_conformance lookups ~list_bounds:(Checking.list_bounds state) impl with
       | None -> ()
-      | Some { implementation; shown_trait; list_impl_bounds; missing_associated } ->
+      | Some { implementation; list_impl_bounds; missing_associated } ->
           let trait = implementation.trait in
           let at : Core.origin = Written trait_path.id in
           let check_evidence_grants evidence =
@@ -150,7 +120,8 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
           in
           List.iter
             (fun name ->
-              Checking.report state (Missing_associated_type { at; name; trait = shown_trait }))
+              Checking.report state
+                (Missing_associated_type { at; name; trait = impl.implements.trait }))
             missing_associated;
           let written_methods =
             List.filter_map
@@ -176,19 +147,24 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
                            at = Written trait_path.id;
                            name = method_.method_name;
                            signature =
-                             show_signature
-                               (Impls.Conformance.normalize_signature_in_impl lookups
-                                  ~list_bounds:(Checking.list_bounds state) implementation
-                                  (Definition.read_method_signature lookups
-                                     ~owner:impl.implements.trait method_));
-                           trait = shown_trait;
+                             Impls.Conformance.normalize_signature_in_impl lookups
+                               ~list_bounds:(Checking.list_bounds state) implementation
+                               (Definition.read_method_signature lookups
+                                  ~owner:impl.implements.trait method_);
+                           trait = impl.implements.trait;
                          })
               | Bounds_associated_type { name; chosen; bound } -> (
                   match Impls.find_evidence lookups ~list_bounds:list_impl_bounds chosen bound with
                   | None ->
                       Checking.report state
                         (Associated_bound_unmet
-                           { at = Written trait_path.id; trait = shown_trait; name; bound; chosen })
+                           {
+                             at = Written trait_path.id;
+                             trait = impl.implements.trait;
+                             name;
+                             bound;
+                             chosen;
+                           })
                   | Some evidence -> check_evidence_grants evidence)
               | Requires required -> (
                   match
@@ -199,7 +175,7 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
                         (Missing_required_impl
                            {
                              at = Written trait_path.id;
-                             trait = shown_trait;
+                             trait = impl.implements.trait;
                              required;
                              for_type = impl.for_type;
                            })
@@ -221,7 +197,7 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
                          (Extra_associated
                             {
                               at = Written name.id;
-                              trait = shown_trait;
+                              trait = impl.implements.trait;
                               name = name.text;
                               associated = Associated_type;
                             });
@@ -232,7 +208,7 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
                          (Extra_associated
                             {
                               at = Written name.id;
-                              trait = shown_trait;
+                              trait = impl.implements.trait;
                               name = name.text;
                               associated = Associated_capability_set;
                             })
@@ -266,25 +242,42 @@ let list_callback_contracts (definition : Syntax.definition) =
       | Named_parameter _ | Self_parameter _ | Parameter_error -> None)
     parameters
 
-let check_callback_contracts (state : Checking.state) (name : Syntax.name) ~shown_trait declaration
-    =
+let list_named_definitions (resolved : Resolve.resolved) clauses =
+  let targets = ref [] in
+  let rec visit (expression : Syntax.expression) =
+    (match expression.kind with
+    | Name name | Member (_, name) -> (
+        match resolved.names.(name.id) with
+        | Some ((Definition _ | Variant _ | Module _) as target) -> targets := target :: !targets
+        | _ -> ())
+    | _ -> ());
+    Syntax_walk.visit_children visit expression
+  in
+  List.iter (Syntax_walk.visit_clause visit) clauses;
+  List.rev !targets
+
+let check_callback_contracts (state : Checking.state) (name : Syntax.name) ~trait declaration =
   match state.lookups.names.find_key declaration with
   | None -> ()
   | Some key ->
       let written = list_callback_contracts state.definition in
+      let declared_resolution = state.lookups.read_resolved Interface key
+      and written_resolution = state.lookups.read_resolved Interface state.key in
       List.iter
         (fun (parameter, (clauses : Syntax.clause list)) ->
           let written_clauses = Option.value ~default:[] (List.assoc_opt parameter written) in
           if
             List.map Syntax_print.show_clause clauses
             <> List.map Syntax_print.show_clause written_clauses
+            || list_named_definitions declared_resolution clauses
+               <> list_named_definitions written_resolution written_clauses
           then
             Checking.report state
               (Callback_contract_mismatch
                  {
                    at = Written name.id;
                    name = name.text;
-                   trait = shown_trait;
+                   trait;
                    parameter;
                    declaration = key;
                    clauses =
@@ -295,11 +288,11 @@ let check_callback_contracts (state : Checking.state) (name : Syntax.name) ~show
         (list_callback_contracts (state.lookups.names.read_definition key))
 
 let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : Path.receiver)
-    (written : Types.signature) (impl : Types.impl_interface) (trait_path : Syntax.path_type) =
+    (written : Types.signature) (impl : Types.impl_interface) =
   let list_bounds = Checking.list_bounds state in
-  match find_conformance state.lookups ~list_bounds impl trait_path with
+  match find_conformance state.lookups ~list_bounds impl with
   | None -> ()
-  | Some { implementation; shown_trait; _ } -> (
+  | Some { implementation; _ } -> (
       let trait = implementation.trait in
       match Impls.find_implemented_method state.lookups state.key.path with
       | None -> (
@@ -314,14 +307,15 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                 (Restated_without_own
                    {
                      at = Written name.id;
-                     trait = shown_trait;
+                     trait = impl.implements.trait;
                      declared_by = restated.declared_by;
                      name = name.text;
                      for_type = impl.for_type;
                    })
           | None ->
               Checking.report state
-                (Undeclared_method { at = Written name.id; trait = shown_trait; name = name.text }))
+                (Undeclared_method
+                   { at = Written name.id; trait = impl.implements.trait; name = name.text }))
       | Some implemented -> (
           if trait.is_capability && not (receiver = Instance Read || receiver = Instance Mut) then
             Checking.report state (Capability_method_receiver { at = Written name.id })
@@ -332,7 +326,8 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                     implemented.declared)
           then
             Checking.report state
-              (Overridden_default { at = Written name.id; trait = shown_trait; name = name.text })
+              (Overridden_default
+                 { at = Written name.id; trait = impl.implements.trait; name = name.text })
           else
             let normalize_capabilities =
               Impls.Conformance.normalize_capabilities_in_impl state.lookups ~list_bounds impl
@@ -351,8 +346,8 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                    {
                      at = Written name.id;
                      name = name.text;
-                     signature = show_signature expected;
-                     trait = shown_trait;
+                     signature = expected;
+                     trait = impl.implements.trait;
                    })
             else
               let allowed =
@@ -370,14 +365,14 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                      Uses_beyond_impl { at = Written name.id; name = name.text }
                    else
                      Uses_beyond_trait
-                       { at = Written name.id; name = name.text; trait = shown_trait })
+                       { at = Written name.id; name = name.text; trait = impl.implements.trait })
               else if
                 (not trait.is_capability)
                 && panics_beyond_value_condition ~allowed (normalize_capabilities written.uses)
               then
                 Checking.report state
                   (Panic_beyond_condition
-                     { at = Written name.id; name = name.text; trait = shown_trait })
+                     { at = Written name.id; name = name.text; trait = impl.implements.trait })
               else
                 match find_unallowed_part ~expected ~written with
                 | Some part ->
@@ -388,6 +383,8 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                            name = name.text;
                            parameter = (Types.read_parameter_at written part.position).name;
                            part;
-                           trait = shown_trait;
+                           trait = impl.implements.trait;
                          })
-                | None -> check_callback_contracts state name ~shown_trait implemented.declaration))
+                | None ->
+                    check_callback_contracts state name ~trait:impl.implements.trait
+                      implemented.declaration))

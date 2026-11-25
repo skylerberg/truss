@@ -35,7 +35,14 @@ let rec check_expression cursor context (value : Syntax.expression) =
   | Break | Continue -> check_loop_exit cursor context value
   | _ -> ());
   match value.kind with
-  | Lambda { body; _ } ->
+  | Lambda { parameters; body } ->
+      List.iter
+        (fun (parameter : Syntax.lambda_parameter) ->
+          Option.iter
+            (fun (annotation : Syntax.parameter_annotation) ->
+              check_types cursor context annotation.type_)
+            parameter.annotation)
+        parameters;
       let enclosing_loop =
         match context.enclosing_loop with No_loop -> No_loop | _ -> Across_lambda
       in

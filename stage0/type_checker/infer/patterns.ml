@@ -6,7 +6,8 @@ type constructor =
   | Boolean of bool
   | Interval of Z.t * Z.t
   | Text of string
-  | Opaque of string
+  | Opaque_constant of Path.t
+  | Opaque_range of { start : Core.range_bound; stop : Core.range_bound; is_inclusive : bool }
 
 type space = Wild | Constructed of constructor * space list | Alternatives of space list
 
@@ -90,13 +91,6 @@ let list_constructors context type_ : (constructor * Types.ty list) list option 
       | Some { shape = Builtin_type _ | Todo_type; _ } | None -> None)
   | _ -> None
 
-let show_range_bound : Core.range_bound -> string = function
-  | Integer_bound value -> Z.to_string value
-  | Constant_bound path -> Path.show path
-
-let show_range start stop ~inclusive =
-  show_range_bound start ^ (if inclusive then "..=" else "..") ^ show_range_bound stop
-
 let rec build_space ?replace context (written : Core.pattern) : space =
   match written.kind with
   | Wildcard | Bind _ -> Wild
@@ -106,7 +100,7 @@ let rec build_space ?replace context (written : Core.pattern) : space =
       | Some low, Some high ->
           let high = if inclusive then high else Z.pred high in
           if Z.gt low high then Alternatives [] else Constructed (Interval (low, high), [])
-      | _ -> Constructed (Opaque (show_range start stop ~inclusive), []))
+      | _ -> Constructed (Opaque_range { start; stop; is_inclusive = inclusive }, []))
   | Variant { variant; fields } ->
       build_constructed_space ?replace context written.type_ (Variant variant) fields
   | Record fields -> build_constructed_space ?replace context written.type_ Record fields
@@ -124,7 +118,7 @@ and evaluate_pattern_constant context (value : Core.pattern_constant) : space =
   | Named_constant path ->
       Option.value
         (evaluate_named_constant context path)
-        ~default:(Constructed (Opaque (Path.show path), []))
+        ~default:(Constructed (Opaque_constant path, []))
 
 and evaluate_named_constant ?(seen = []) context path : space option =
   if List.exists (Path.equal path) seen then None
@@ -316,45 +310,28 @@ let rec is_useful context (types : Types.ty list) (rows : row list) (row : row) 
           | _ -> is_useful context rest_types (build_default_matrix rows) rest))
   | _ -> false
 
-let rec show context type_ (pattern : space) =
+let rec build_witness context type_ (pattern : space) : Catalog.Patterns.witness =
   match pattern with
-  | Wild | Alternatives [] -> "_"
-  | Alternatives (first :: _) -> show context type_ first
-  | Constructed (Boolean value, _) -> if value then "true" else "false"
-  | Constructed (Interval (low, high), _) when compute_integer_range type_ = Some (low, high) -> "_"
-  | Constructed (Interval (low, high), _) ->
-      if Z.equal low high then Z.to_string low
-      else Printf.sprintf "%s..=%s" (Z.to_string low) (Z.to_string high)
-  | Constructed (Text text, _) -> Printf.sprintf "%S" text
-  | Constructed (Opaque shown, _) -> shown
-  | Constructed (constructor, arguments) -> (
-      let fields = read_constructor_fields context type_ constructor in
-      let shown =
+  | Wild | Alternatives [] -> Any
+  | Alternatives (first :: _) -> build_witness context type_ first
+  | Constructed (Boolean value, _) -> Boolean value
+  | Constructed (Interval (low, high), _) when compute_integer_range type_ = Some (low, high) -> Any
+  | Constructed (Interval (low, high), _) -> Integers { low; high }
+  | Constructed ((Text _ | Opaque_constant _ | Opaque_range _), _) ->
+      raise_bug "a witness holds a constructor that no type's signature lists"
+  | Constructed (((Variant _ | Record) as constructor), arguments) -> (
+      let declared = read_constructor_fields context type_ constructor in
+      let fields =
         List.map2
-          (fun (field : Types.field) argument -> show context field.field_type argument)
-          fields
-          (if List.length arguments = List.length fields then arguments
-           else List.map (fun _ -> Wild) fields)
+          (fun (field : Types.field) argument : Catalog.Patterns.field_witness ->
+            { field = field.field_name; witness = build_witness context field.field_type argument })
+          declared
+          (if List.length arguments = List.length declared then arguments
+           else List.map (fun _ -> Wild) declared)
       in
-      let prefix = match constructor with Variant name -> name | _ -> "" in
-      let is_wild = List.for_all (fun shown -> shown = "_") shown in
-      match (constructor, fields, shown) with
-      | Variant name, [], _ -> name
-      | _, [], _ -> "()"
-      | Variant name, [ _ ], [ "_" ] -> Printf.sprintf "%s(_)" name
-      | Variant name, _, _ when is_wild -> Printf.sprintf "%s(..)" name
-      | _, _, _ when is_wild -> "_"
-      | _, [ _ ], [ only ] -> Printf.sprintf "%s(%s)" prefix only
-      | _ ->
-          Printf.sprintf "%s(%s)" prefix
-            (String.concat ", "
-               (List.map2
-                  (fun (field : Types.field) shown ->
-                    if shown = "_" then field.field_name ^ ": _"
-                    else field.field_name ^ ": " ^ shown)
-                  fields shown)))
+      match constructor with Variant variant -> Variant { variant; fields } | _ -> Record fields)
 
-let show_row context types row = String.concat ", " (List.map2 (show context) types row)
+let build_row context types row = List.map2 (build_witness context) types row
 
 let read_operand_type : Core.operand -> Types.ty = function
   | Place core_place -> Core_walk.compute_place_type core_place
@@ -540,8 +517,8 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
                match_ = node.origin;
                last_arm =
                  Option.map (fun (last : Core.arm) -> last.origin) (List.nth_opt (List.rev arms) 0);
-               witness = show_row context types first;
-               other_witnesses = List.map (show_row context types) others;
+               witness = build_row context types first;
+               other_witnesses = List.map (build_row context types) others;
                may_have_more = List.length all >= witness_limit;
              })
   end
@@ -552,7 +529,10 @@ let check_irrefutable context (written : Core.pattern) =
     | Some witness ->
         report context
           (Refutable
-             { pattern = written.origin; witness = show context written.type_ (List.hd witness) })
+             {
+               pattern = written.origin;
+               witness = build_witness context written.type_ (List.hd witness);
+             })
     | None -> ()
 
 let check_definition context (definition : Core.definition) =

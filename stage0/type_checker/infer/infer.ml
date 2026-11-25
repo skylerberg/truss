@@ -26,7 +26,9 @@ type checked = Body.checked = {
 }
 
 let check lookups (key : Resolve.Names.key) ~checks_body =
-  Compiler_bug.run_while_doing ~stage:"Infer" (Resolve.Names.show_key key) (fun () ->
+  Compiler_bug.run_while_doing ~stage:"Infer"
+    (fun () -> Resolve.Names.show_key key)
+    (fun () ->
       try
         Result.bind (Body.check lookups key ~checks_body) (fun (checked : checked) ->
             match Patterns.check lookups key checked.form with

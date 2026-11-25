@@ -168,7 +168,7 @@ type construct =
   | Elements_of of Types.ty
   | Sequence_elements
   | Function_value_costs
-  | Intrinsic_at_parameter of { operation : string; parameter : Types.ty }
+  | Intrinsic_at_parameter of { operation : Intrinsic.operation; parameter : Types.ty }
   | Negation_of of Types.ty
   | Shift_of of Types.ty
   | Range_of of Types.ty
@@ -189,7 +189,9 @@ type construct =
   | String_pattern_on of Types.ty
   | Specification_function
 
-type failed_run = Constant_run of { path : Path.t; report : string } | Assertion_run of string
+type failed_run =
+  | Constant_run of { path : Path.t; stop : Codegen.stop }
+  | Assertion_run of Codegen.stop
 
 type path_note =
   | Arm_taken of Core.origin list
@@ -202,18 +204,18 @@ type unknown = Out_of_steps | Incomplete of string
 type failure =
   | Refuted
   | Counterexample of {
-      values : (string * string) list;
+      values : (string * Model_value.t) list;
       path : path_note list;
       failed_runs : failed_run list;
     }
   | Undecided of { unknown : unknown; has_untriggered_fact : bool; failed_runs : failed_run list }
 
 type required =
-  | Code of string
+  | Clause of Code.t
   | Substituted_clause of {
       clause : quoted;
-      replacements : (Core.origin * string) list;
-      type_names : (string * string) list;
+      replacements : (Core.origin * Code.t) list;
+      type_names : (string * Types.ty) list;
     }
 
 type panic_place =
@@ -225,7 +227,7 @@ type fix =
   | Add_requires of {
       body : Core.origin;
       required : required list;
-      premise : string option;
+      premise : Code.t option;
       condition : Types.condition;
     }
   | Add_panic of panic_place
@@ -243,5 +245,5 @@ type t =
       fixes : fix list;
       cited : quoted option;
     }
-  | Unreadable of { location : location; construct : construct; foreign : string option }
-  | Unevaluated of { path : Path.t; report : string }
+  | Unreadable of { location : location; construct : construct; foreign : Path.t option }
+  | Unevaluated of { path : Path.t; stop : Codegen.stop }

@@ -1,0 +1,8 @@
+fn make[Value](build: fn(Value) -> Value) -> Option[Value] {
+  None
+}
+
+fn f() -> Bool {
+  let made = make(fn(count: Int64) { count.saturating_add(count) })
+  made.is_some()
+}

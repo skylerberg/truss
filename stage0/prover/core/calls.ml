@@ -8,15 +8,21 @@ let lookup_argument_at_index (values : State.passed list) index =
   | None -> Logic.Boolean false
 
 let list_type_names substitution =
-  let shown =
-    List.map
-      (fun ((parameter : Types.parameter), ty) -> (parameter.name, Types.show ty))
+  let named =
+    List.fold_left
+      (fun named ((parameter : Types.parameter), ty) ->
+        if
+          List.exists
+            (fun (other, other_type) -> other = parameter.name && Types.equal other_type ty)
+            named
+        then named
+        else named @ [ (parameter.name, ty) ])
+      []
       (Types.list_type_arguments substitution)
-    |> List.sort_uniq compare
   in
   List.filter
-    (fun (name, _) -> List.length (List.filter (fun (other, _) -> other = name) shown) = 1)
-    shown
+    (fun (name, _) -> List.length (List.filter (fun (other, _) -> other = name) named) = 1)
+    named
 
 let list_required_fixes (context : State.context) (frame : State.frame) (clauses : State.clauses)
     (requirement : Mir.requirement) term (values : State.passed list) ~type_names =
@@ -28,16 +34,6 @@ let list_required_fixes (context : State.context) (frame : State.frame) (clauses
     | Logic.Symbol.Constant _ | Evaluated (Constant_value _) | Literal _ -> true
     | _ -> false
   in
-  let is_simple text =
-    String.for_all
-      (fun character ->
-        character = '_' || character = '.'
-        || Char.code character >= 128
-        || (character >= 'a' && character <= 'z')
-        || (character >= 'A' && character <= 'Z')
-        || (character >= '0' && character <= '9'))
-      text
-  in
   let list_written () =
     List.filter_map
       (fun (index, (parameter : Mir.parameter)) ->
@@ -45,8 +41,8 @@ let list_required_fixes (context : State.context) (frame : State.frame) (clauses
           (List.find_opt (fun (passed : State.passed) -> passed.position = index) values)
           (fun (passed : State.passed) ->
             Option.map
-              (fun text -> (parameter.local, if is_simple text then text else "(" ^ text ^ ")"))
-              (Facts.show_truss_value context passed.term)))
+              (fun code -> (parameter.local, code))
+              (Facts.find_value_code context passed.term)))
       (List.mapi (fun index parameter -> (index, parameter)) clauses.parameters)
   in
   if
@@ -59,7 +55,7 @@ let list_required_fixes (context : State.context) (frame : State.frame) (clauses
     let replacements =
       List.map
         (fun (local, origin) ->
-          Option.map (fun text -> (origin, text)) (List.assoc_opt local written))
+          Option.map (fun code -> (origin, code)) (List.assoc_opt local written))
         requirement.names
     in
     if List.for_all Option.is_some replacements then
@@ -661,7 +657,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                     List.iter
                       (fun ((clause : Mir.formula), _) ->
                         Tables.Axiom_clause_table.replace context.axiom_clauses
-                          (symbol, clauses.callee.name, clause.origin)
+                          (symbol, clauses.callee.key, clauses.callee.definition, clause.origin)
                           ())
                       ensures)
                   readable_clauses;
@@ -708,7 +704,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       match axiom_symbol with
       | Some (symbol, _) ->
           Tables.Axiom_clause_table.mem context.axiom_clauses
-            (symbol, clauses.callee.name, clause.origin)
+            (symbol, clauses.callee.key, clauses.callee.definition, clause.origin)
       | None -> false
     in
     let assume_ensures is_kept =
@@ -898,7 +894,7 @@ let make_callback_cost (context : State.context) frame (metric : Language.Metric
       cost
 
 let compute_function_value_amount context frame ~location (function_type : Types.function_type)
-    callee_term (counter : Costs.counter) =
+    callee_term ~values (counter : Costs.counter) =
   let make_counted amount = Costs.make_counted_charge counter amount in
   let compute_call_amount metric =
     let make_cost () =
@@ -930,6 +926,9 @@ let compute_function_value_amount context frame ~location (function_type : Types
             make_plain cost)
   in
   match counter.resource with
+  | _ when counter.counting = Units && Amounts.passes_lambda_assuming_recursive_costs context values
+    ->
+      make_counted (Operations.declare_unknown_amount context frame counter)
   | Metric metric -> compute_call_amount metric
   | Calls (Through term) ->
       make_counted
@@ -1170,7 +1169,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                                 | _ -> None)
                               values)
                          ~result_type:declared_result_type ~result))
-                (compute_function_value_amount context frame ~location function_type callee_term)
+                (compute_function_value_amount context frame ~location function_type callee_term
+                   ~values)
           | _ -> Operations.spend context frame (Operations.declare_unknown_amount context frame)
         in
         (match through with

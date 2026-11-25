@@ -20,7 +20,7 @@ let fail (state : State.state) (goal : State.goal) failure =
   in
   List.iter (fun (_, output) -> ignore (State.unify state output (Types.Error report))) goal.outputs;
   List.iter
-    (fun (root, _) -> Unify.poison state.unifier root report)
+    (fun (root, _) -> Unify.poison state.unifier (Unknown_type root) report)
     (List.concat_map
        (function
          | Types.Type type_ -> Failures.list_class_pairs state (type_, type_) | Types.Value _ -> [])
@@ -549,11 +549,7 @@ let report_unsolved (state : State.state) (frame : State.frame) =
           List.exists (fun unknown -> List.mem unknown unsolved) (list_goal_unknowns state goal))
         state.goals
     in
-    List.iter
-      (function
-        | Unify.Unknown_type index -> Unify.poison state.unifier index report
-        | Unknown_value _ -> ())
-      unsolved;
+    List.iter (fun unknown -> Unify.poison state.unifier unknown report) unsolved;
     solve_all state;
     state.goals <- List.filter (fun goal -> not (List.memq goal reported_goals)) state.goals
   end

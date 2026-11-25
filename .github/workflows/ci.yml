@@ -159,28 +159,11 @@ jobs:
 
       - uses: ./.github/actions/z3
 
-      - uses: actions/cache/restore@v6.1.0
-        with:
-          path: ~/.cache/truss-proofs
-          key: proofs-share-${{ matrix.share }}-${{ github.sha }}
-          restore-keys: |
-            proofs-share-${{ matrix.share }}-
-            proofs-
-
       - name: Prove a share of the standard library
-        env:
-          TRUSS_CACHE: /home/runner/.cache/truss-proofs
-          TRUSS_CACHE_SIZE: 104857600
         run: |
           opam exec -- dune build ./stage0/test/standard_library_tests.exe
           cd _build/default/stage0/test
           "$GITHUB_WORKSPACE/.github/scripts/test-shares.sh" ${{ matrix.share }} ${{ strategy.job-total }} ./standard_library_tests.exe
-
-      - if: github.event_name == 'push'
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: ~/.cache/truss-proofs
-          key: proofs-share-${{ matrix.share }}-${{ github.sha }}
 
   thread-sanitizer:
     runs-on: ubuntu-latest

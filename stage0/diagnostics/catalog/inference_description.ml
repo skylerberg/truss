@@ -116,6 +116,11 @@ let describe_mismatch :
         Printf.sprintf "Each element of this loop is %s, not %s." (show_shown element)
           (show_shown annotated),
         [] )
+  | Lambda_parameter_type { passed; annotated } ->
+      ( Mismatch,
+        Printf.sprintf "This lambda's function type gives this parameter %s, not %s."
+          (show_shown passed) (show_shown annotated),
+        [] )
   | Mismatched_integers { left; right; widening } ->
       ( Mismatched_integers,
         Printf.sprintf
@@ -183,6 +188,14 @@ let describe_undetermined at = function
         Build.quote at;
         Text "`. Bind the map with a typed `let`, such as `let ages: Map[String, UInt8] = [:]`.";
       ]
+  | Lambda_parameter ->
+      [
+        Text "The type of `";
+        Build.quote at;
+        Text "` cannot be inferred from where this lambda is used. Declare `";
+        Build.quote at;
+        Text "` with a type.";
+      ]
 
 let show_construct = function
   | Inference.Unreachable_expression -> "`unreachable`"
@@ -202,6 +215,10 @@ let show_integer_subject = function
   | Cost_bound -> "A cost bound"
   | Log_argument -> "An argument of `log`"
   | Power_argument -> "An argument of `power`"
+
+let name_recipient = function
+  | Inference.Named_parameter name -> Printf.sprintf "`%s`" name
+  | Function_value -> "The function value"
 
 let show_method_owner = function
   | Inference.Type_owner { type_; _ } -> Types.show type_
@@ -428,8 +445,9 @@ let describe : Inference.t -> Nodes.description = function
            | owner -> Printf.sprintf "`%s` has no method `%s`." (show_method_owner owner) name))
   | Counted_not_a_capability { at = origin; written } ->
       make Not_a_capability (Build.at origin)
-        (say
-           (Printf.sprintf "`calls` counts the calls of a capability, and `%s` is not one." written))
+        (say "`calls` counts the calls of a capability, and `"
+        @ [ Build.quote_over written ]
+        @ say "` is not one.")
   | Counted_not_a_function { at = origin; name; type_ } ->
       make Not_callable (Build.at origin)
         (say
@@ -820,38 +838,61 @@ let describe : Inference.t -> Nodes.description = function
   | Not_assignable_place { at = origin } ->
       make Not_assignable (Build.at origin)
         (say "Only a place, such as a variable, a field, or an element, can be assigned.")
-  | Mode_on_read_argument { at = origin; inner; parameter } ->
+  | Mode_on_read_argument { at = origin; inner; recipient } ->
       make Redundant_mode (Build.at origin)
         ~fixes:[ remove_keyword_fix origin inner ]
         (say
-           (Printf.sprintf "`%s` only reads its argument, so it takes no mode keyword." parameter))
-  | Missing_mut_argument { at = origin; parameter } ->
+           (Printf.sprintf "%s only reads its argument, so it takes no mode keyword."
+              (name_recipient recipient)))
+  | Missing_mut_argument { at = origin; recipient } ->
       make Missing_mode (Build.at origin)
         ~fixes:[ insert_mut_fix origin ]
         (say
-           (Printf.sprintf "`%s` may mutate its argument, so the call site passes it `mut`."
-              parameter))
-  | Lent_read_only_argument { at = origin; parameter } ->
+           (Printf.sprintf "%s may mutate its argument, so the call site passes it `mut`."
+              (name_recipient recipient)))
+  | Lent_read_only_argument { at = origin; recipient } ->
       make Wrong_mode (Build.at origin)
         (say
            (Printf.sprintf
-              "`%s` may mutate its argument, and this part is lent read-only. Pass the place it is \
+              "%s may mutate its argument, and this part is lent read-only. Pass the place it is \
                lent from `mut`, so that it is lent `mut`."
-              parameter))
-  | Temporary_passed_mut { at = origin; parameter } ->
+              (name_recipient recipient)))
+  | Temporary_passed_mut { at = origin; recipient } ->
       make Wrong_mode (Build.at origin)
         (say
-           (Printf.sprintf "`%s` mutates its argument in place, so it must be a place passed `mut`."
-              parameter))
+           (Printf.sprintf "%s mutates its argument in place, so it must be a place passed `mut`."
+              (name_recipient recipient)))
   | Redundant_own { at = origin; inner; type_ } ->
       make Redundant_mode (Build.at origin)
         ~fixes:[ remove_keyword_fix origin inner ]
         (say (Printf.sprintf "`%s` copies implicitly, so it needs no `own`." (Types.show type_)))
-  | Mut_for_own { at = origin; parameter } ->
+  | Mut_for_own { at = origin; recipient } ->
       make Wrong_mode (Build.at origin)
         (say
-           (Printf.sprintf "`%s` takes ownership of its argument, so it is passed `own`, not `mut`."
-              parameter))
+           (Printf.sprintf "%s takes ownership of its argument, so it is passed `own`, not `mut`."
+              (name_recipient recipient)))
+  | Lambda_parameter_mode { at = origin; type_expression; passed; annotated } ->
+      let show_passing : Language.Mode.t -> string = function
+        | Read -> "read-only"
+        | Mut -> "`mut`"
+        | Own -> "`own`"
+      in
+      make Wrong_mode (Build.at origin)
+        ~fixes:
+          [
+            fix
+              (match passed with
+              | Read -> "Remove the mode."
+              | Mut -> "Annotate it `mut`."
+              | Own -> "Annotate it `own`.")
+              [
+                Build.replace origin
+                  [ Text (Language.Mode.show_prefix passed); Build.quote type_expression ];
+              ];
+          ]
+        (say
+           (Printf.sprintf "This lambda's function type passes this parameter %s, not %s."
+              (show_passing passed) (show_passing annotated)))
   | Type_parameter_as_value { at = origin; name } ->
       make Not_a_value (Build.at origin) (say (Printf.sprintf "`%s` is a type, not a value." name))
   | Theorem_as_value { at = origin; name } ->
@@ -933,7 +974,8 @@ let describe : Inference.t -> Nodes.description = function
   | Value_for_type_argument { at = origin } ->
       make Argument_kind (Build.at origin)
         (say "A `UInt64` value is given where a type argument is expected.")
-  | Specification_call_in_code { at = origin; name; call } ->
+  | Specification_call_in_code { at = origin; callee; call } ->
+      let name = Build.show_callee callee in
       make Specification_only (Build.at origin)
         (say
            (match call with
@@ -1093,7 +1135,7 @@ let describe : Inference.t -> Nodes.description = function
            (Printf.sprintf "This pattern does not match %s. Name %s, or write `..` for the rest."
               (show_names missing)
               (match missing with [ _ ] -> "it" | _ -> "them")))
-  | Not_structural { at = origin; type_; constant } ->
+  | Not_structural { at = origin; type_ } ->
       make Not_structural (Build.at origin)
         (say
            (Printf.sprintf
@@ -1101,8 +1143,10 @@ let describe : Inference.t -> Nodes.description = function
                contents, because the checks that a `match` covers every case and that every arm is \
                reachable compare constants by their contents. `%s` does not have it: its equality \
                is hand-written, or it holds a float, whose `==` treats `-0.0` and `0.0` as equal. \
-               Match with a guard instead, as in `value if value == %s`."
-              (Types.show type_) constant))
+               Match with a guard instead, as in `value if value == "
+              (Types.show type_))
+        @ [ Build.quote origin ]
+        @ say "`.")
   | Not_a_constant { at = origin } ->
       make Unknown_member (Build.at origin) (say "This names no constant.")
   | Literal_does_not_fit { at = origin; number; excluded; low; high } ->
@@ -1152,16 +1196,6 @@ let describe : Inference.t -> Nodes.description = function
               "This call does not determine the arguments of `%s`. Write the call in full with \
                them."
               (show_trait_name trait)))
-  | Lambda_needs_type { at = origin; remedy } ->
-      make Lambda_needs_type (Build.at origin)
-        (say
-           ("A lambda's parameter types come from where it is used, and nothing here gives them. "
-           ^
-           match remedy with
-           | Bracket_arguments { declared_on; is_type } -> write_bracket_remedy declared_on ~is_type
-           | Typed_let ->
-               "Bind it with a typed `let`, such as `let double: fn(Int64) -> Int64 = fn(x) { x * \
-                2 }`."))
   | Range_not_integer { at = origin; owner; element } ->
       make Not_iterable (Build.at origin)
         (say

@@ -51,7 +51,7 @@ let check_widened location ~is_written actual expected =
       Facts.raise_unsupported location Function_value_costs
   | _ -> ()
 
-let find_parameter_spelling (context : State.context) (frame : State.frame) term =
+let find_parameter_code (context : State.context) (frame : State.frame) term =
   if
     Facts.is_home context frame.source
     && (not (Logic.has_quantifier term))
@@ -59,19 +59,26 @@ let find_parameter_spelling (context : State.context) (frame : State.frame) term
     match Logic.list_free_constants term with
     | _ :: _ as names -> List.for_all (fun name -> List.mem name context.entry) names
     | [] -> false
-  then Facts.show_truss_value context term
+  then Facts.find_value_code context term
   else None
 
-let find_integer_limits ty =
-  if Types.is_builtin Character ty then None
-  else Option.map (fun (low, high) -> (Types.show ty, low, high)) (Facts.find_bounds ty)
+let find_integer_limits ty = if Types.is_builtin Character ty then None else Facts.find_bounds ty
+let make_limit ty limit = Catalog.Code.Limit { type_ = ty; limit }
+let make_comparison left comparison right = Catalog.Code.Compared { left; comparison; right }
 
 let make_range_fix context frame ty term =
-  match (find_integer_limits ty, find_parameter_spelling context frame term) with
-  | Some (name, low, _), Some text ->
-      let least = if Z.sign low = 0 then "0" else name ^ ".minimum" in
+  match (find_integer_limits ty, find_parameter_code context frame term) with
+  | Some (low, _), Some value ->
+      let least = if Z.sign low = 0 then Catalog.Code.Integer Z.zero else make_limit ty Minimum in
       Facts.add_requires context frame
-        [ Code (Printf.sprintf "%s <= %s && %s <= %s.maximum" least text text name) ]
+        [
+          Clause
+            (All
+               [
+                 make_comparison least Less_equal value;
+                 make_comparison value Less_equal (make_limit ty Maximum);
+               ]);
+        ]
   | _ -> []
 
 let convert_from_integer context frame (site : Invocation.site) term =
@@ -238,62 +245,74 @@ let declare_opaque_operation context frame ty operation arguments =
 let make_overflow_fix context frame ty (operation : Intrinsic.scalar) left right exact =
   match find_integer_limits ty with
   | None -> []
-  | Some (name, low, high) -> (
+  | Some (low, high) -> (
       let is_unsigned = Z.sign low = 0 in
       let bound_on_left =
-        match (right, find_parameter_spelling context frame left) with
-        | Logic.Integer limit, Some text -> (
-            let magnitude = Z.to_string (Z.abs limit) in
-            let spell_clause relation bound spelled =
+        match (right, find_parameter_code context frame left) with
+        | Logic.Integer amount, Some value -> (
+            let magnitude = Catalog.Code.Integer (Z.abs amount) in
+            let bound_by comparison bound written =
               if Z.leq low bound && Z.leq bound high then
-                Some (Printf.sprintf "%s %s %s" text relation spelled)
+                Some (make_comparison value comparison written)
               else None
             in
             match operation with
-            | Add when Z.sign limit > 0 ->
-                spell_clause "<=" (Z.sub high limit) (name ^ ".maximum - " ^ magnitude)
-            | Add when Z.sign limit < 0 ->
-                spell_clause ">=" (Z.sub low limit) (name ^ ".minimum + " ^ magnitude)
-            | Subtract when Z.sign limit > 0 && is_unsigned -> spell_clause ">=" limit magnitude
-            | Subtract when Z.sign limit > 0 ->
-                spell_clause ">=" (Z.add low limit) (name ^ ".minimum + " ^ magnitude)
-            | Subtract when Z.sign limit < 0 ->
-                spell_clause "<=" (Z.add high limit) (name ^ ".maximum - " ^ magnitude)
-            | Multiply when Z.sign limit > 0 && is_unsigned ->
-                spell_clause "<=" (Z.div high limit) (name ^ ".maximum / " ^ magnitude)
+            | Add when Z.sign amount > 0 ->
+                bound_by Less_equal (Z.sub high amount)
+                  (Difference (make_limit ty Maximum, magnitude))
+            | Add when Z.sign amount < 0 ->
+                bound_by Greater_equal (Z.sub low amount) (Sum [ make_limit ty Minimum; magnitude ])
+            | Subtract when Z.sign amount > 0 && is_unsigned ->
+                bound_by Greater_equal amount magnitude
+            | Subtract when Z.sign amount > 0 ->
+                bound_by Greater_equal (Z.add low amount) (Sum [ make_limit ty Minimum; magnitude ])
+            | Subtract when Z.sign amount < 0 ->
+                bound_by Less_equal (Z.add high amount)
+                  (Difference (make_limit ty Maximum, magnitude))
+            | Multiply when Z.sign amount > 0 && is_unsigned ->
+                bound_by Less_equal (Z.div high amount)
+                  (Quotient (make_limit ty Maximum, magnitude))
             | _ -> None)
         | _ -> None
       in
       match (bound_on_left, operation) with
-      | Some required, _ -> Facts.add_requires context frame [ Code required ]
+      | Some required, _ -> Facts.add_requires context frame [ Clause required ]
       | None, (Add | Multiply) when is_unsigned -> (
-          match find_parameter_spelling context frame exact with
-          | Some text ->
+          match find_parameter_code context frame exact with
+          | Some value ->
               Facts.add_requires context frame
-                [ Code (Printf.sprintf "%s <= %s.maximum" text name) ]
+                [ Clause (make_comparison value Less_equal (make_limit ty Maximum)) ]
           | None -> [])
       | None, Subtract when is_unsigned -> []
       | None, _ -> make_range_fix context frame ty exact)
 
 let make_division_overflow_fix context frame ty left right =
-  match (find_integer_limits ty, find_parameter_spelling context frame left) with
-  | Some (name, _, _), Some dividend -> (
-      let dividend_not_minimum = Printf.sprintf "%s != %s.minimum" dividend name in
+  match (find_integer_limits ty, find_parameter_code context frame left) with
+  | Some _, Some dividend -> (
+      let dividend_not_minimum = make_comparison dividend Not_equal (make_limit ty Minimum) in
       match right with
       | Logic.Integer divisor when Z.equal divisor Z.minus_one ->
-          Facts.add_requires context frame [ Code dividend_not_minimum ]
+          Facts.add_requires context frame [ Clause dividend_not_minimum ]
       | _ -> (
-          match find_parameter_spelling context frame right with
+          match find_parameter_code context frame right with
           | Some divisor ->
               Facts.add_requires context frame
-                [ Code (Printf.sprintf "%s || %s != -1" dividend_not_minimum divisor) ]
+                [
+                  Clause
+                    (Any
+                       [
+                         dividend_not_minimum;
+                         make_comparison divisor Not_equal (Integer Z.minus_one);
+                       ]);
+                ]
           | None -> []))
   | _ -> []
 
 let make_negation_fix context frame ty inner =
-  match (find_integer_limits ty, find_parameter_spelling context frame inner) with
-  | Some (name, _, _), Some text ->
-      Facts.add_requires context frame [ Code (Printf.sprintf "%s != %s.minimum" text name) ]
+  match (find_integer_limits ty, find_parameter_code context frame inner) with
+  | Some _, Some value ->
+      Facts.add_requires context frame
+        [ Clause (make_comparison value Not_equal (make_limit ty Minimum)) ]
   | _ -> []
 
 let translate_arithmetic context (frame : State.frame) (site : Invocation.site) ty
@@ -312,8 +331,10 @@ let translate_arithmetic context (frame : State.frame) (site : Invocation.site) 
   if is_division then
     Facts.oblige
       ~fixes:
-        (match find_parameter_spelling context frame right with
-        | Some text -> Facts.add_requires context frame [ Code (text ^ " != 0") ]
+        (match find_parameter_code context frame right with
+        | Some divisor ->
+            Facts.add_requires context frame
+              [ Clause (make_comparison divisor Not_equal (Integer Z.zero)) ]
         | None -> [])
       context frame location
       (Divisor_may_be_zero { at = Facts.quote source site.origin })
@@ -433,8 +454,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
   (match List.find_opt (function Types.Parameter _ | Projection _ -> true | _ -> false) types with
   | Some parameter ->
       Facts.raise_unsupported location
-        (Intrinsic_at_parameter
-           { operation = Intrinsic.show_operation (Scalar operation); parameter })
+        (Intrinsic_at_parameter { operation = Scalar operation; parameter })
   | None -> ());
   let find_argument index = Option.join (List.nth_opt arguments index) in
   let is_float = match types with ty :: _ -> Facts.find_float_format ty <> None | [] -> false in
@@ -481,9 +501,10 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
             | Some amount ->
                 ( Facts.locate context frame.source amount,
                   (Facts.quote source amount, true),
-                  match find_parameter_spelling context frame right with
-                  | Some text ->
-                      Facts.add_requires context frame [ Code (Printf.sprintf "%s < %d" text bits) ]
+                  match find_parameter_code context frame right with
+                  | Some amount ->
+                      Facts.add_requires context frame
+                        [ Clause (make_comparison amount Less (Integer (Z.of_int bits))) ]
                   | None -> [] )
             | None -> (location, (Facts.quote source site.origin, false), [])
           in

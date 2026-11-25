@@ -222,8 +222,9 @@ let compute_test_keys snapshot database =
           | Ok _ -> ()
           | Error (Unsupported unsupported) ->
               failwith
-                (Printf.sprintf "%s has no key: %s is not supported" (Path.show test)
-                   unsupported.construct)
+                (Printf.sprintf "%s has no key: %s" (Path.show test)
+                   (Catalog.Codegen_description.describe_failure ~show_file:Path.show_file
+                      (Unsupported { construct = unsupported.construct; location = None })))
           | Error (Todo_types _) ->
               failwith
                 (Printf.sprintf "%s has no key: it reaches a type defined as todo" (Path.show test)))

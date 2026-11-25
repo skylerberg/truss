@@ -738,6 +738,12 @@ let () =
         ~message:"This call uses `RunForever`, but a specification must terminate.")
 
 let () =
+  Harness.test "a lambda typed by its annotations uses what its body uses" (fun () ->
+      expect_not_available Fixtures.Capabilities.annotated_lambda_printing_called_without_console
+        ~message:
+          "This call uses `Console`, which is not available here. Declare it with `uses Console`, \
+           or `provide` an implementation.";
+      expect_fine Fixtures.Capabilities.annotated_lambda_printing_called_with_console);
   Harness.test "a lambda that loops without a measure uses RunForever" (fun () ->
       expect_one_diagnostic
         Fixtures.Capabilities.lambda_looping_without_a_measure_bound_as_using_no_capability

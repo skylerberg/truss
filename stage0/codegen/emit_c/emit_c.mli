@@ -4,7 +4,6 @@ type failure = C_runtime.failure = Echo | Todo
 module Ir_builder = Ir_builder
 
 val make_symbol : Lowered.Item.t -> string
-val version : int
 
 type fragment = Fragment.t
 

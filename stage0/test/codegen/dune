@@ -4,6 +4,7 @@
  (modules codegen_support fixtures)
  (libraries
   harness
+  catalog
   core_lint
   compiler_bug
   zarith

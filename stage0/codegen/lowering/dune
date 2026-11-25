@@ -28,6 +28,7 @@
   types
   syntax
   core
+  catalog
   core_walk
   mir
   convention))

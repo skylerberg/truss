@@ -161,7 +161,7 @@ type problem =
   | Power_operator
   | Short_declaration of { name : Source.span option }
   | Pipe_operator of { call : pipe option }
-  | Lambda_annotation
+  | Lambda_result_type
   | Impl_parameters of { parameters : Source.span option }
   | Null_coalescing of {
       written : string;

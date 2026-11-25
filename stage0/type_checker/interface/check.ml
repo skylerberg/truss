@@ -125,7 +125,7 @@ let check_real_implementations (state : Checking.state) (resolved : Resolve.reso
                     (No_real_implementation
                        {
                          at = Written capability.id;
-                         written = Elaborator.show_path written.path;
+                         written = Catalog.cover_path written.path;
                          recipient;
                        })
               | None -> ())
@@ -203,7 +203,7 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
   in
   List.iter
     (fun ((clause : Syntax.type_clause), (written : Syntax.path_type), trait) ->
-      let shown = Elaborator.show_path written.path in
+      let shown = Catalog.cover_path written.path in
       if
         not
           (Resolve.Names.is_derivable trait || Well_known.is Copyable trait
@@ -351,7 +351,7 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
   with
   | None -> ()
   | Some restated ->
-      let declared_by = Path.show restated.declared_by in
+      let declared_by = restated.declared_by in
       let original =
         Definition.read_method_signature state.lookups ~owner:restated.declared_by
           { method_name = name.text; method_receiver = receiver; provided = false }
@@ -397,7 +397,7 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
           | None ->
               Compiler_bug.raise_bug ~stage:"Interface"
                 "`%s` restates a method of `%s`, which it does not require" (Path.show trait_path)
-                declared_by
+                (Path.show declared_by)
         in
         let expected =
           name_signature_declaring_traits state.lookups
@@ -416,13 +416,7 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
         then
           Checking.report state
             (Restated_signature
-               {
-                 at = Written name.id;
-                 name = name.text;
-                 declared_by;
-                 signature = Impl_checks.show_signature expected;
-                 uses = Types.list_capabilities expected.uses;
-               })
+               { at = Written name.id; name = name.text; declared_by; signature = expected })
 
 let check_defaults_without_body (state : Checking.state) (signature : Syntax.signature) =
   let name = Resolve.Names.extract_signature_name signature in
@@ -571,10 +565,10 @@ let check (state : Checking.state) =
             check_restated state signature ~has_body written ~trait_path:container.path trait;
             check_private_in_public state ~visibility (list_signature_paths written)
               (Written name.id)
-        | { kind = Impl { trait_; _ }; _ }, Impl_interface impl ->
+        | { kind = Impl _; _ }, Impl_interface impl ->
             Impl_checks.check_impl_method state name
               (Resolve.Names.classify_receiver signature.parameters)
-              written impl trait_
+              written impl
         | _ -> ())
     | Some _, _, _ -> ()
     | None, Function { signature; _ }, Function_interface elaborated ->
@@ -611,14 +605,14 @@ let check (state : Checking.state) =
           | Some _ -> ())
     | None, Type_definition { name; body; clauses; _ }, Type_interface interface ->
         (match body with
-        | Fields fields -> check_duplicates state "field" (list_field_names fields)
+        | Fields fields -> check_duplicates state Field_member (list_field_names fields)
         | Variants variants ->
-            check_duplicates state "variant"
+            check_duplicates state Variant_member
               (List.map (fun (variant : Syntax.variant) -> variant.name) variants);
             List.iter
               (fun (variant : Syntax.variant) ->
                 Option.iter
-                  (fun fields -> check_duplicates state "field" (list_field_names fields))
+                  (fun fields -> check_duplicates state Field_member (list_field_names fields))
                   variant.fields)
               variants
         | Type_todo -> ());
