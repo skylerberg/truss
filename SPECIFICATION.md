@@ -3093,8 +3093,9 @@ can be proven that way.
   | The definition has | Its proof depends on |
   |---|---|
   | A call or a read of a constant, in its body or in its contract | The callee or the constant, and the code that the call supplies |
+  | A contract that its trait declares, for a method of an `impl` | Each function that the trait's contract calls, as the `impl` resolves the call |
   | A value of a type of its own package: a parameter, a result, a local, or, for a type, a field | The type |
-  | A value of a generic type, with a type argument for a type parameter that has a bound | Every method of the type argument's `impl` of the bound |
+  | A value of a generic type | Each function that the invariant or the `potential` of the type calls at those type arguments, and the same for the types of its fields. Where a field's type is a generic type that holds the field, with other type arguments, every method of the `impl`s that those type arguments supply to its bounds |
   | An invariant or a `potential`, for a type | Each function that the clause calls and each constant it reads |
 
 - A cycle of these dependencies is an error unless calls alone form it. A
@@ -3106,11 +3107,19 @@ can be proven that way.
   |---|---|
   | An invariant or a `potential` calls into the cycle | The call in the clause |
   | A contract calls into the cycle, and no invariant does | The call in the contract |
-  | A generic type's bound supplies code of the cycle, and no invariant calls into it | The value of that type |
+  | A contract that a method takes from its trait calls into the cycle, and the method does not restate that call | The method |
+  | The invariant of a generic type, or of the type of one of its fields, calls into the cycle at one instantiation only | The value of that type |
 
   `fn clamp(n: UInt64) -> UInt64 requires clamp(n) >= 0` is an error at the
   call in its `requires`. A recursive function's `ensures` may call the
   function, since its body's calls already form that cycle.
+
+- A fact that relates two functions is not a clause of one where the
+  contract of the other calls back. `Set.count` cannot ensure that every
+  member is `self.element(position)` for some position, because
+  `Set.element` requires `position < self.count()`. A theorem states the
+  fact, as `set.every_member_is_an_element` does, and a proof that needs it
+  calls the theorem.
 
 ### Writing specifications
 

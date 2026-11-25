@@ -635,6 +635,11 @@ let is_in_proof_cycle (context : State.context) path =
   List.exists (Path.equal path) (context.lookups.list_proof_group context.node)
   && not (is_in_recursion_group context path)
 
+let has_proof_cycle (context : State.context) =
+  List.exists
+    (fun member -> not (is_in_recursion_group context member))
+    (context.lookups.list_proof_group context.node)
+
 let list_circular_dependencies context ~describe dependencies =
   List.filter_map
     (fun (dependency : Mir.Call_edges.dependency) ->
@@ -643,24 +648,35 @@ let list_circular_dependencies context ~describe dependencies =
       else None)
     dependencies
 
-let list_circular_type_uses (context : State.context) (frame : State.frame) lookups =
+let list_circular_instance_uses (context : State.context) (frame : State.frame) lookups =
+  let reported = ref [] in
   List.filter_map
-    (fun (supplied : Mir.Call_edges.supplied_to_type) ->
-      Option.map
-        (fun code ->
-          {
-            location =
-              (match supplied.used.origin with
-              | Some origin -> locate context frame.source origin
-              | None -> Whole_definition);
-            shows =
-              Printf.sprintf
-                "A value of type `%s` is used here. The invariant of that type can call `%s`, \
-                 whose proof depends on `%s`, so the invariant would be proven from itself."
-                (Types.show supplied.used.type_) (show_callee code) (show_callee context.node);
-          })
-        (List.find_opt (is_in_proof_cycle context) supplied.code))
-    (Mir.Call_edges.list_code_supplied_to_types lookups context.node)
+    (fun (instance : Mir.Call_edges.instance_use) ->
+      match List.find_opt (is_in_proof_cycle context) instance.dependencies with
+      | Some dependency when not (List.exists (Path.equal dependency) !reported) ->
+          reported := dependency :: !reported;
+          Some
+            {
+              location =
+                (match instance.used.origin with
+                | Some origin -> locate context frame.source origin
+                | None -> Whole_definition);
+              shows =
+                (if Path.equal dependency context.node then
+                   Printf.sprintf
+                     "A value of type `%s` is used here, and the invariant of that type or of a \
+                      part of it depends on `%s`, so the invariant would be proven from itself."
+                     (Types.show instance.used.type_) (show_callee dependency)
+                 else
+                   Printf.sprintf
+                     "A value of type `%s` is used here. The invariant of that type or of a part \
+                      of it depends on `%s`, whose proof depends on `%s`, so the invariant would \
+                      be proven from itself."
+                     (Types.show instance.used.type_) (show_callee dependency)
+                     (show_callee context.node));
+            }
+      | Some _ | None -> None)
+    (Mir.Call_edges.list_instance_uses lookups context.node)
 
 let list_circular_clauses (context : State.context) frame ~type_name =
   let lookups : Mir.Call_edges.lookups =
@@ -670,13 +686,15 @@ let list_circular_clauses (context : State.context) frame ~type_name =
     Printf.sprintf "%s, whose proof depends on the %s of `%s`, so the %s would be %s from itself."
       (describe_dependency dependency) clause type_name clause verb
   in
-  list_circular_dependencies context
-    ~describe:(describe ~clause:"invariant" ~verb:"proven")
-    (Mir.Call_edges.list_invariant_dependencies lookups context.node)
-  @ list_circular_dependencies context
-      ~describe:(describe ~clause:"potential" ~verb:"defined")
-      (Mir.Call_edges.list_potential_dependencies lookups context.node)
-  @ list_circular_type_uses context frame lookups
+  if has_proof_cycle context then
+    list_circular_dependencies context
+      ~describe:(describe ~clause:"invariant" ~verb:"proven")
+      (Mir.Call_edges.list_invariant_dependencies lookups context.node)
+    @ list_circular_dependencies context
+        ~describe:(describe ~clause:"potential" ~verb:"defined")
+        (Mir.Call_edges.list_potential_dependencies lookups context.node)
+    @ list_circular_instance_uses context frame lookups
+  else []
 
 let has_circular_clause lookups group member =
   List.exists
@@ -685,28 +703,48 @@ let has_circular_clause lookups group member =
     @ Mir.Call_edges.list_potential_dependencies lookups member)
 
 let list_circular_contracts (context : State.context) frame =
-  let lookups : Mir.Call_edges.lookups =
-    { interface = context.lookups.interface; mir = context.lookups.mir }
-  in
-  let describe (dependency : Mir.Call_edges.dependency) =
-    if Path.equal dependency.path context.node then
-      Printf.sprintf "%s in its own contract, so the contract would be proven from itself."
-        (describe_dependency dependency)
-    else
+  if not (has_proof_cycle context) then []
+  else
+    let lookups : Mir.Call_edges.lookups =
+      { interface = context.lookups.interface; mir = context.lookups.mir }
+    in
+    let describe (dependency : Mir.Call_edges.dependency) =
+      if Path.equal dependency.path context.node then
+        Printf.sprintf "%s in its own contract, so the contract would be proven from itself."
+          (describe_dependency dependency)
+      else
+        Printf.sprintf
+          "%s, whose proof depends on the contract of `%s`, so the contract would be proven from \
+           itself."
+          (describe_dependency dependency) (show_callee context.node)
+    in
+    let describe_inherited (dependency : Mir.Call_edges.dependency) =
       Printf.sprintf
-        "%s, whose proof depends on the contract of `%s`, so the contract would be proven from \
-         itself."
-        (describe_dependency dependency) (show_callee context.node)
-  in
-  match
-    list_circular_dependencies context ~describe
-      (Mir.Call_edges.list_contract_dependencies lookups context.node)
-    @ list_circular_type_uses context frame lookups
-  with
-  | [] -> []
-  | circular ->
-      let group = context.lookups.list_proof_group context.node in
-      if List.exists (has_circular_clause lookups group) group then [] else circular
+        "The contract that this method takes from its trait %s `%s`, whose proof depends on the \
+         contract of `%s`, so the contract would be proven from itself."
+        (match dependency.kind with Read -> "reads" | Direct_call | Supplied _ -> "calls")
+        (name_dependency dependency) (show_callee context.node)
+    in
+    let written = Mir.Call_edges.list_contract_dependencies lookups context.node in
+    let is_written (inherited : Mir.Call_edges.dependency) =
+      List.exists
+        (fun (dependency : Mir.Call_edges.dependency) -> Path.equal dependency.path inherited.path)
+        written
+    in
+    match
+      list_circular_dependencies context ~describe written
+      @ List.map
+          (fun (circular : circular_proof) -> { circular with location = Whole_definition })
+          (list_circular_dependencies context ~describe:describe_inherited
+             (List.filter
+                (fun inherited -> not (is_written inherited))
+                (Mir.Call_edges.list_inherited_contract_dependencies lookups context.node)))
+      @ list_circular_instance_uses context frame lookups
+    with
+    | [] -> []
+    | circular ->
+        let group = context.lookups.list_proof_group context.node in
+        if List.exists (has_circular_clause lookups group) group then [] else circular
 
 let reject_circular_proof context frame (circular : circular_proof) =
   oblige context frame Circular_proof circular.location [ Text circular.shows ]

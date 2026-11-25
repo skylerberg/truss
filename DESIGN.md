@@ -1382,8 +1382,9 @@ Rules: [Bodies and contracts in proofs](SPECIFICATION.md#bodies-and-contracts-in
 
 **A cycle of proofs is one fact of the dependency graph.** The proof of a
 definition depends on its callees, on the functions its contract calls, on
-the types whose values it uses, and, for a type, on the functions its
-invariant calls. Each is an edge that the definition's own pass lists, and a
+the functions that a contract taken from its trait calls, on the types
+whose values it uses, and, for a type, on the functions its invariant
+calls. Each is an edge that the definition's own pass lists, and a
 cycle is a strongly connected component of those edges, as a recursion is of
 calls. A check that searched other definitions for the cycle would read
 their bodies, and would be recomputed by every edit to one. The rule is in
@@ -1392,7 +1393,10 @@ their bodies, and would be recomputed by every edit to one. The rule is in
 | Rule | Reason |
 |---|---|
 | A contract cannot call a function whose proof depends on the contract, outside a recursion. | The proof of a clause assumes the contract of each call in it. With `ensures result == n` and `ensures clamp(n) <= 3` on `clamp`, the second clause proved from itself, and `clamp(500) <= 3` held for every caller. A recursion is different: its body's calls form the cycle, and a measure shows that it ends. |
-| A value of a generic type cannot be used where its bound's code depends on the user. | `Box[Item: Measured]` with `invariant item.measure() >= 0` names no `impl`, so its own proof sees no cycle. The cycle exists at `Box[Marker]`, where `Marker.measure` calls a function that takes a `Box[Marker]`, and is reported at that value. |
+| Two contracts cannot call each other's functions, even where both clauses are true. | `Set.count` ensured that every member is `self.element(position)` for some position, and `Set.element` requires `position < self.count()`. With the same two references, `element ensures result <= 3` and `count ensures forall position in 0..result => self.element(position) <= 3` proved of an `element` that returns 500: each proof assumed the other's clause. Accepting the true pair needs the dependencies of each clause, not of each contract. Until the graph holds those, a fact that relates two functions is a theorem that neither contract calls, such as `set.every_member_is_an_element`, and a proof that quantifies over a set's members calls it. |
+| The proof of an `impl`'s method depends on the functions that its trait's contract calls. | The method's proof assumes the `requires` that the trait declares, whether or not the `impl` restates it. With `requires self.limit() >= 0` on a trait's `measure`, and `ensures self.measure() <= 3` on an `impl`'s `limit`, a false `ensures result <= 3` of `measure` proved, and no clause written in the `impl` showed the way back. |
+| A value of a generic type cannot be used where the type's invariant, at those type arguments, calls a function whose proof depends on the user. | `Box[Item: Measured]` with `invariant item.measure() >= 0` names no `impl`, so its own proof sees no cycle. The cycle exists at `Box[Marker]`, where `Marker.measure` calls a function that takes a `Box[Marker]`, and is reported at that value. The dependency is on the functions that the invariant calls, not on every method of the `impl`: `Cursor.skip` returns a `Skip[Self]`, whose invariant calls no method of the cursor. |
+| The dependencies of a generic type's value follow its fields, and enter each type once on a chain of fields. | A value meets the invariants of its fields, so `Shelf[Marker]` with a field of type `Box[Marker]` depends on what the invariant of `Box` calls. A type that holds itself with other type arguments has a new instance at every step, and `Nested[Element]` with a field of type `Nested[List[Element]]` has no last one. At a second instance of a type on one chain, the dependency is every method that the instance's type arguments supply to its bounds, which is the dependency of a call to generic code. |
 | A cycle through an invariant is reported at the invariant alone. | Every function on the cycle whose contract calls another is on it too, and reporting each would hide the one clause to change. |
 
 **A caller's proof reads the contract of its callee, never its body.** A

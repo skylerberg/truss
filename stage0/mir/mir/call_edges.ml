@@ -394,21 +394,35 @@ let list_contract_dependencies (lookups : lookups) path =
     (list_formula_dependencies lookups (find_instance lookups path))
     (Option.fold ~none:[] ~some:list_contract_formulas (find_contract lookups path))
 
-let list_clause_dependencies (lookups : lookups) type_ ~list_clauses =
+let list_inherited_contract_dependencies (lookups : lookups) path =
+  match Interface.Impls.find_implemented_method lookups.interface path with
+  | Some implemented ->
+      List.concat_map
+        (list_formula_dependencies lookups implemented.implementation.substitution)
+        (Option.fold ~none:[] ~some:list_contract_formulas
+           (find_contract lookups implemented.declaration))
+  | None -> []
+
+let list_invariant_clauses (lookups : lookups) type_ =
   match Parts.read_type_clauses lookups.mir type_ with
   | Some { form = clauses; _ } ->
-      List.concat_map
-        (list_formula_dependencies lookups Types.no_substitution)
-        (list_clauses clauses)
+      List.map (fun (requirement : Tree.requirement) -> requirement.clause) clauses.invariants
+  | None -> []
+
+let list_potential_clauses (lookups : lookups) type_ =
+  match Parts.read_type_clauses lookups.mir type_ with
+  | Some { form = clauses; _ } -> Option.to_list clauses.potential
   | None -> []
 
 let list_invariant_dependencies lookups type_ =
-  list_clause_dependencies lookups type_ ~list_clauses:(fun (clauses : Tree.type_clauses) ->
-      List.map (fun (requirement : Tree.requirement) -> requirement.clause) clauses.invariants)
+  List.concat_map
+    (list_formula_dependencies lookups Types.no_substitution)
+    (list_invariant_clauses lookups type_)
 
 let list_potential_dependencies lookups type_ =
-  list_clause_dependencies lookups type_ ~list_clauses:(fun (clauses : Tree.type_clauses) ->
-      Option.to_list clauses.potential)
+  List.concat_map
+    (list_formula_dependencies lookups Types.no_substitution)
+    (list_potential_clauses lookups type_)
 
 let list_field_types (interface : Interface.Lookups.t) path =
   match Interface.Definition.find_type_interface interface path with
@@ -442,21 +456,27 @@ end))
 
 type type_use = { type_ : Types.ty; origin : Core.origin option }
 
+let iter_type_parts visit type_ =
+  ignore
+    (Types.exists
+       (fun part ->
+         visit part;
+         false)
+       type_)
+
 let list_type_uses (lookups : lookups) path =
   let instance = find_instance lookups path in
   let uses = Type_table.create 16 in
   let ordered = ref [] in
   let note origin type_ =
-    ignore
-      (Types.exists
-         (fun part ->
-           (match part with
-           | Types.Named _ when not (Type_table.mem uses part) ->
-               Type_table.replace uses part ();
-               ordered := { type_ = part; origin } :: !ordered
-           | _ -> ());
-           false)
-         (substitute_type lookups.interface instance type_))
+    iter_type_parts
+      (fun part ->
+        match part with
+        | Types.Named _ when not (Type_table.mem uses part) ->
+            Type_table.replace uses part ();
+            ordered := { type_ = part; origin } :: !ordered
+        | _ -> ())
+      (substitute_type lookups.interface instance type_)
   in
   let note_local (info : Tree.local_info) = note (Some info.origin) info.type_ in
   let contract = find_contract lookups path in
@@ -473,24 +493,45 @@ let list_type_uses (lookups : lookups) path =
   List.iter (note None) (list_signature_types lookups path);
   List.rev !ordered
 
-let list_code_supplied_to_type (interface : Interface.Lookups.t) (type_ : Types.ty) =
-  match type_ with
-  | Named { path; arguments = _ :: _ as arguments } -> (
-      match Interface.Definition.find_type_interface interface path with
-      | Some { type_generics; _ } ->
-          list_code_supplied_to_generics interface type_generics
-            (bind_generics Types.no_substitution type_generics arguments)
-      | None -> [])
-  | _ -> []
+let list_instance_dependencies (lookups : lookups) (instance : Types.ty) =
+  let entered = Type_table.create 8 in
+  let rec list_from ~enclosing (type_ : Types.ty) =
+    match type_ with
+    | Named { path; arguments = _ :: _ as arguments } when not (Type_table.mem entered type_) -> (
+        Type_table.replace entered type_ ();
+        match Interface.Definition.find_type_interface lookups.interface path with
+        | Some { type_generics; _ } ->
+            let substitution = bind_generics Types.no_substitution type_generics arguments in
+            if List.exists (Path.equal path) enclosing then
+              list_code_supplied_to_generics lookups.interface type_generics substitution
+            else
+              list_paths
+                (List.concat_map
+                   (list_formula_dependencies lookups substitution)
+                   (list_invariant_clauses lookups path @ list_potential_clauses lookups path))
+              @ List.concat_map
+                  (fun field_type ->
+                    let dependencies = ref [] in
+                    iter_type_parts
+                      (fun part ->
+                        dependencies :=
+                          list_from ~enclosing:(path :: enclosing) part @ !dependencies)
+                      (substitute_type lookups.interface substitution field_type);
+                    !dependencies)
+                  (list_field_types lookups.interface path)
+        | None -> [])
+    | _ -> []
+  in
+  list_from ~enclosing:[] instance
 
-type supplied_to_type = { used : type_use; code : Path.t list }
+type instance_use = { used : type_use; dependencies : Path.t list }
 
-let list_code_supplied_to_types (lookups : lookups) path =
+let list_instance_uses (lookups : lookups) path =
   List.filter_map
     (fun (used : type_use) ->
-      match list_code_supplied_to_type lookups.interface used.type_ with
+      match list_instance_dependencies lookups used.type_ with
       | [] -> None
-      | code -> Some { used; code })
+      | dependencies -> Some { used; dependencies })
     (list_type_uses lookups path)
 
 let has_fields (interface : Interface.Lookups.t) path =
@@ -510,9 +551,10 @@ let list_assumed_paths (lookups : lookups) path =
   in
   List.sort_uniq Path.compare
     (list_paths (list_contract_dependencies lookups path)
+    @ list_paths (list_inherited_contract_dependencies lookups path)
     @ list_paths (list_invariant_dependencies lookups path)
     @ list_paths (list_potential_dependencies lookups path)
     @ List.filter_map is_type_of_package (list_type_uses lookups path)
     @ List.concat_map
-        (fun (supplied : supplied_to_type) -> supplied.code)
-        (list_code_supplied_to_types lookups path))
+        (fun (instance : instance_use) -> instance.dependencies)
+        (list_instance_uses lookups path))
