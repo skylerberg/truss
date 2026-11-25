@@ -754,7 +754,10 @@ order they have in a definition, and the parentheses mark where they end.
 
 | Rule | Reason |
 |---|---|
-| A bound in a function type is an integer literal. | Type checking compares a function value's clauses with its expected type's without the prover, and two literals compare as numbers. A bound that named a value would need a proof at each comparison, and a field's type or a type argument has no value in scope to name. |
+| A function type has the clauses and the result of a signature, except `decreases`. | A function passes as a value wherever its signature fits, so a function type can say what a signature says. Each restriction a function type had of its own was one more rule for the checker and one more thing a callback could not promise. |
+| A bound in a function type is an integer literal, except in the type of a parameter. | Type checking compares a function value's clauses with its expected type's without the prover, and two literals compare as numbers. A bound that named a value would need a proof at each comparison, and a field's type or a type argument has no value in scope to name. A parameter's bound is a callback contract, which the prover checks at each call instead. |
+| `modifies` and `lends` are part of a function type. | Both name positions and modes, not values, so two types compare without the prover, and a stored function value keeps what its calls change and lend. |
+| A lending method is a value. | A lend lasts for the caller's statement whether the callee is named or passed, so a call through a value that lends follows the rules of a call of the method. Without it, a function that changes a part its caller chooses takes a copy and writes it back. |
 
 ### Callback contracts
 
@@ -762,7 +765,8 @@ Rules: [Callback contracts](SPECIFICATION.md#callback-contracts).
 
 | Rule | Reason |
 |---|---|
-| A `requires` or an `ensures` in a function type appears only on the type of a definition's parameter. | Type checking compares function types without the prover, so no type that values are stored in or compared by carries a clause that would need a proof. |
+| A `requires`, an `ensures`, a `Panic unless` condition, and a bound that is not an integer literal appear in a function type only on the type of a definition's parameter. | Type checking compares function types without the prover, so no type that values are stored in or compared by carries a clause that would need a proof. |
+| A lambda passed for a parameter whose type states `Panic unless` a condition is proven twice. | The definition calls it without `Panic` where the condition holds, so the lambda must not panic there, and its other obligations hold where the condition fails too. A function's own `Panic unless` is proven the same way. |
 | A callee names the postcondition of the function passed as `visit.ensures(...)`, a relation. | A callback that reads `Random` returns different results for one argument. Two occurrences of `transform(value)` in a formula are equal, so a contract that called the callback would promise what it does not keep. The relation holds of each call alone, so the prover still models no capability's state between calls ([What proofs do not model](#what-proofs-do-not-model)). |
 | Every term of a callback contract takes its value from the function passed by one rule: a lambda's body, a named function's contract, or the caller's own term. | `time(visit)`, `allocations(visit)`, and `visit.ensures` come from the same three places. One rule covers every term, so a new term needs no rule of its own. |
 | An `impl`'s method states the callback contracts of its trait's method, clause for clause. | A call through the trait proves its callback contracts of the function passed, and the method's body assumes its own. Contracts that differed would let the body assume what no caller proved. |

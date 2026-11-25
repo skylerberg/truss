@@ -8,6 +8,7 @@ val check_integer :
 
 val check_measures : State.state -> State.env -> Syntax.expression list -> unit
 val check_cost : State.state -> State.env -> Syntax.cost -> unit
+val check_cost_bound : State.state -> State.env -> Syntax.cost -> unit
 val check_time_terminates : State.state -> Syntax.clause -> uses:Types.capability_set -> unit
 
 val check_under_condition :

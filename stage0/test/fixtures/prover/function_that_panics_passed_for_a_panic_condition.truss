@@ -1,0 +1,15 @@
+fn first_or_zero(count: UInt64, pick: (fn(index: UInt64) -> Int64 uses Panic unless index < count))
+  -> Int64
+{
+  if count > 0 { pick(0) } else { 0 }
+}
+
+fn always_panics(index: UInt64) -> Int64
+  uses Panic
+{
+  Panic.crash("no")
+}
+
+fn passes_it() -> Int64 {
+  first_or_zero(3, always_panics)
+}

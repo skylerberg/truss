@@ -266,7 +266,7 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
           (fun (_, input) ->
             step_inside (if Types.terminates function_.uses then Function_input else Indirect) input)
           inputs;
-        step_inside Indirect output
+        step_inside Indirect (Types.extract_result_type output)
     | Types.Named { path; arguments } -> (
         match Well_known.find_builtin_type path with
         | Some Array -> List.iter (step_inside In_place) (list_type_arguments arguments)

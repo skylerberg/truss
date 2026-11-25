@@ -348,11 +348,11 @@ fn recover_function_input(cursor: mut TokenCursor, span: source.Span) -> syntax.
   )
 }
 
-fn has_unless(clause: syntax.Clause) -> Bool {
+fn has_bound_condition(clause: syntax.Clause) -> Bool {
   match clause.kind {
     Uses(capabilities) => {
       for capability_use in capabilities {
-        if capability_use.unless_bounds.is_some() || !capability_use.unless_values.is_empty() {
+        if capability_use.unless_bounds.is_some() {
           return true
         }
       }
@@ -360,6 +360,32 @@ fn has_unless(clause: syntax.Clause) -> Bool {
     }
     _ => false
   }
+}
+
+fn is_literal_bound(bound: syntax.Bound) -> Bool {
+  match bound {
+    BigO(value) | AtMost(value) | Exactly(value) => value.kind is Integer(_)
+  }
+}
+
+fn is_callback_contract_clause(clause: syntax.Clause) -> Bool {
+  match clause.kind {
+    Requires(_) | Ensures(_) => true
+    Uses(capabilities) => {
+      for capability_use in capabilities {
+        if !capability_use.unless_values.is_empty() {
+          return true
+        }
+      }
+      false
+    }
+    Cost(clause: cost_clause) => !is_literal_bound(cost_clause.bound)
+    _ => false
+  }
+}
+
+fn can_mention_inputs(clause: syntax.Clause) -> Bool {
+  clause.kind is Modifies(_) || is_callback_contract_clause(clause)
 }
 
 fn parse_function_type(cursor: mut TokenCursor, with_clauses: Bool) -> Result[syntax.FunctionType, Failure]
@@ -371,30 +397,25 @@ fn parse_function_type(cursor: mut TokenCursor, with_clauses: Bool) -> Result[sy
     return Err(fail(mut cursor, expected: "`(` after `fn` in a function type"))
   }
   let inputs = parse_bracketed(mut cursor, parse_item: parse_function_input, recover: recover_function_input)
-  let output = if accept_punctuation(mut cursor, punctuation: token.Punctuation.Arrow) {
-    Some(parse_type_expression(mut cursor)?)
-  } else {
-    None
-  }
+  let output = parse_output(mut cursor)?
   var clauses: List[syntax.Clause] = []
   if with_clauses {
     while true {
       let kind = cursor.peek_kind()
       if kind == token.Kind.Keyword(token.Keyword.Uses) || kind == token.Kind.Keyword(token.Keyword.Cost)
         || kind == token.Kind.Keyword(token.Keyword.Requires) || kind == token.Kind.Keyword(token.Keyword.Ensures)
+        || kind == token.Kind.Keyword(token.Keyword.Modifies)
       {
         mut clauses.push(parse_clause(mut cursor)?)
       } else if kind == token.Kind.Keyword(token.Keyword.Decreases) {
-        return Err(fail(mut cursor, "`uses`, `cost`, `requires`, or `ensures`; a function type has no `decreases`"))
-      } else if kind == token.Kind.Keyword(token.Keyword.Modifies) {
-        return Err(fail(mut cursor, "`uses`, `cost`, `requires`, or `ensures`; a function type has no `modifies`"))
+        return Err(fail(mut cursor, "`uses`, `cost`, `requires`, `ensures`, or `modifies`; a function type has no `decreases`"))
       } else {
         break
       }
     }
   }
   for clause in clauses {
-    if clause.condition.is_some() || has_unless(clause) {
+    if clause.condition.is_some() || has_bound_condition(clause) {
       let span = cursor.make_file_span(cursor.read_span(clause.id))
       report(
         mut cursor,
@@ -404,26 +425,10 @@ fn parse_function_type(cursor: mut TokenCursor, with_clauses: Bool) -> Result[sy
       )
     }
   }
+  var has_clause_on_inputs = false
   for clause in clauses {
-    if clause.kind is Cost(clause: cost_clause) {
-      let non_literal_id = match cost_clause.bound {
-        BigO(value) | AtMost(value) | Exactly(value) => if value.kind is Integer(_) { None } else { Some(value.id) }
-      }
-      if non_literal_id is Some(amount_id) {
-        let amount_span = cursor.read_file_span(amount_id)
-        report(
-          mut cursor,
-          "parser.function_type_cost_bound",
-          amount_span,
-          "An `O(...)`, `<=`, or `==` bound in a function type is an integer literal, as in `O(1)` or `<= 2`, since the type holds a number and not an expression. State a bound that depends on a value in the enclosing function's own `cost` clause, which names the callback's cost as `time(visit)`.",
-        )
-      }
-    }
-  }
-  var has_callback_contract = false
-  for clause in clauses {
-    if clause.kind is Requires(_) || clause.kind is Ensures(_) {
-      has_callback_contract = true
+    if can_mention_inputs(clause) {
+      has_clause_on_inputs = true
     }
   }
   var every_named = true
@@ -436,13 +441,13 @@ fn parse_function_type(cursor: mut TokenCursor, with_clauses: Bool) -> Result[sy
     }
   }
   let span = cursor.lookup_token(start).span
-  if has_callback_contract {
+  if has_clause_on_inputs {
     if !every_named {
       report(
         mut cursor,
         "parser.function_type_names",
         span,
-        "A function type with `requires` or `ensures` names every input, as in `fn(index: UInt64)`, so that its clauses can mention them.",
+        "A function type with `requires`, `ensures`, `modifies`, a `Panic unless` condition, or a cost bound that is not an integer literal names every input, as in `fn(index: UInt64)`, so that its clauses can mention them.",
       )
     }
   } else if some_named {
@@ -450,7 +455,7 @@ fn parse_function_type(cursor: mut TokenCursor, with_clauses: Bool) -> Result[sy
       mut cursor,
       "parser.function_type_names",
       span,
-      "A function type names its inputs only when a `requires` or an `ensures` mentions them; remove the names, since calls through a function value pass arguments by position.",
+      "A function type names its inputs only when a clause can mention them; remove the names, since calls through a function value pass arguments by position.",
     )
   }
   Ok(syntax.FunctionType(own inputs, own output, own clauses))

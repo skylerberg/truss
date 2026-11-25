@@ -306,11 +306,15 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
         Pattern_typing.check_parameter_pattern state env parameter.pattern input ~mode)
       (List.combine parameters annotations)
       function_type.inputs;
-    let output = function_type.output in
-    let lambda_env = { env with output = Some (Returns output) } in
-    let body_type = Statements.check_block_value state lambda_env ~expected:output body in
-    Conversions.convert state lambda_env ?expression:(find_block_value body) (Written body.id)
-      ~actual:body_type ~expected:output;
+    let lambda_env = { env with output = Some function_type.output } in
+    (match function_type.output with
+    | Returns output ->
+        let body_type = Statements.check_block_value state lambda_env ~expected:output body in
+        Conversions.convert state lambda_env ?expression:(find_block_value body) (Written body.id)
+          ~actual:body_type ~expected:output
+    | Lends (_, part) ->
+        Option.iter (State.mark_lent_tails state) (find_block_value body);
+        ignore (Statements.check_block_value state lambda_env ~expected:part body));
     Types.Function function_type
   in
   let result =
@@ -335,9 +339,10 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
             inputs =
               list_annotated_inputs ~make_unannotated:(fun () ->
                   Unify.make_fresh_type state.unifier);
-            output = Unify.make_fresh_type state.unifier;
+            output = Returns (Unify.make_fresh_type state.unifier);
             uses = Unify.make_fresh_capability_variable state.unifier;
             costs = [];
+            modifies = [];
           }
   in
   state.lambdas <- List.tl state.lambdas;

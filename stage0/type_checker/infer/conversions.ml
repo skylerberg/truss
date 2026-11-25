@@ -66,11 +66,17 @@ let convert_scalar_or_function (state : State.state) (env : State.env)
       in
       let proven =
         Types.costs_imply ~provided:actual_function.costs ~required:wanted_function.costs
+        && Types.are_changes_within ~allowed:wanted_function.modifies actual_function.modifies
       in
       if
         Unify.unify state.unifier wanted
           (Types.Function
-             { actual_function with uses = wanted_function.uses; costs = wanted_function.costs })
+             {
+               actual_function with
+               uses = wanted_function.uses;
+               costs = wanted_function.costs;
+               modifies = wanted_function.modifies;
+             })
         && (unlisted = Types.no_capabilities || unknown)
         && proven
       then begin

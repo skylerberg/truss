@@ -259,48 +259,59 @@ let () =
             \  todo\n\
              }\n" );
         ]);
-  Harness.test "a modifies clause names fields of records in mut parameters" (fun () ->
+  Harness.test
+    "a modifies clause names fields of records in mut parameters, in a signature or a function type"
+    (fun () ->
       let scanner =
         "let limit: UInt64 = 4\n\
          type Region(stop: UInt64)\n\
          type Scanner(position: UInt64, region: Region, last: Option[UInt64], tokens: List[UInt64])\n"
       in
-      expect_no_diagnostics
+      let declarations =
         [
-          ( "app.main",
-            scanner
-            ^ "fn f(scanner: mut Scanner)\n\
-              \  modifies scanner.position, scanner.region.stop, scanner.tokens[..]\n\
-               { todo }\n" );
-        ];
-      let declare parts =
-        scanner ^ "fn f(scanner: mut Scanner, count: UInt64)\n  modifies " ^ parts ^ "\n{ todo }\n"
+          (fun parts ->
+            scanner ^ "fn f(scanner: mut Scanner, count: UInt64)\n  modifies " ^ parts
+            ^ "\n{ todo }\n");
+          (fun parts ->
+            scanner ^ "fn f(step: (fn(scanner: mut Scanner, count: UInt64) modifies " ^ parts
+            ^ ")) { todo }\n");
+          (fun parts ->
+            scanner ^ "type Holder(step: (fn(scanner: mut Scanner, count: UInt64) modifies " ^ parts
+            ^ "))\n");
+        ]
       in
       List.iter
-        (fun (parts, code, says, fixed_parts) ->
+        (fun declare ->
+          expect_no_diagnostics
+            [ ("app.main", declare "scanner.position, scanner.region.stop, scanner.tokens[..]") ])
+        declarations;
+      List.iter
+        (fun ((parts, code, says, fixed_parts), declare) ->
           expect_one_diagnostic (declare parts) code ~says
             ?fixed:(Option.map (fun fixed_parts -> (parts, fixed_parts)) fixed_parts))
-        [
-          ("scanner.region[0]", "types.not_a_field_path", "One element or a narrower range", None);
-          ("scanner.position[..]", "types.not_a_field_path", "has no elements", None);
-          ("limit.bits", "types.not_a_field_path", "`limit` is not a parameter", None);
-          ("count.bits", "types.read_only_part", "`count` is not `mut`", None);
-          ("scanner", "types.not_a_field_path", "`scanner` is a whole parameter", None);
-          ( "scanner.position, scanner.position",
-            "types.repeated_part",
-            "`scanner.position` twice",
-            Some "scanner.position" );
-          ( "scanner.region.stop, scanner.region",
-            "types.repeated_part",
-            "`scanner.region.stop` is a part of `scanner.region`",
-            Some "scanner.region" );
-          ( "scanner.postion",
-            "types.unknown_member",
-            "`Scanner` has no field `postion`.",
-            Some "scanner.position" );
-          ("scanner.position.bits", "types.not_a_field_path", "which has no fields to name", None);
-          ("scanner.last.value", "types.not_a_field_path", "belong to its variants", None);
-        ]);
+        (List.concat_map
+           (fun case -> List.map (fun declare -> (case, declare)) declarations)
+           [
+             ("scanner.region[0]", "types.not_a_field_path", "One element or a narrower range", None);
+             ("scanner.position[..]", "types.not_a_field_path", "has no elements", None);
+             ("limit.bits", "types.not_a_field_path", "`limit` is not a parameter", None);
+             ("count.bits", "types.read_only_part", "`count` is not `mut`", None);
+             ("scanner", "types.not_a_field_path", "`scanner` is a whole parameter", None);
+             ( "scanner.position, scanner.position",
+               "types.repeated_part",
+               "`scanner.position` twice",
+               Some "scanner.position" );
+             ( "scanner.region.stop, scanner.region",
+               "types.repeated_part",
+               "`scanner.region.stop` is a part of `scanner.region`",
+               Some "scanner.region" );
+             ( "scanner.postion",
+               "types.unknown_member",
+               "`Scanner` has no field `postion`.",
+               Some "scanner.position" );
+             ("scanner.position.bits", "types.not_a_field_path", "which has no fields to name", None);
+             ("scanner.last.value", "types.not_a_field_path", "belong to its variants", None);
+           ]));
   Harness.test "an impl's method changes only the parts that its trait's method names" (fun () ->
       let recorder =
         "type Journal(entries: List[UInt64], total: UInt64)\n\
@@ -1251,15 +1262,11 @@ let () =
       ( "a cost bound that is not a literal in an impl's associated type",
         "the impl",
         Fixtures.Interface.impl_associated_type_with_a_cost_bound_that_is_not_a_literal,
-        "parser.function_type_cost_bound" );
+        "parser.misplaced_callback_contract" );
       ( "a named input of a function type in an impl's associated type",
         "the impl",
         Fixtures.Interface.impl_associated_type_naming_a_function_type_input,
         "parser.function_type_names" );
-      ( "a cost bound that is not a literal in a law's parameter",
-        "the trait",
-        Fixtures.Interface.trait_law_parameter_with_a_cost_bound_that_is_not_a_literal,
-        "parser.function_type_cost_bound" );
       ( "a named input of a function type in a law's parameter",
         "the trait",
         Fixtures.Interface.trait_law_parameter_naming_a_function_type_input,

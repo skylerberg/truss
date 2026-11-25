@@ -487,16 +487,40 @@ let () =
   Harness.test "a function type's cost bounds are integer literals" (fun () ->
       expect_type "(fn(Item) cost time O(1) cost allocations <= 2 cost allocated_bytes == 0)"
         "(fn (Item) (cost time (O 1)) (cost allocations (<= 2)) (cost allocated_bytes (== 0)))");
-  Harness.test "a function type's cost bound that is not an integer literal is rejected" (fun () ->
-      Parse_support.expect_error
-        "fn f(change: (fn(UInt64) -> UInt64 cost time O(time(String.no_such_member)))) {}"
-        ~code:Function_type_cost_bound ~at:"time(String";
-      Parse_support.expect_error "fn f(count: UInt64, visit: (fn() cost allocations <= count)) {}"
-        ~code:Function_type_cost_bound ~at:"count))";
+  Harness.test "a parameter's function type takes a cost bound on its inputs" (fun () ->
+      Parse_support.expect_definition "fn f(visit: (fn(count: UInt64) cost time O(count))) {}"
+        "(fn f ((visit: (fn (count: UInt64) (cost time (O count))))) (block))");
+  Harness.test
+    "a cost bound that is no integer literal on a function type that is not a parameter's"
+    (fun () ->
       Parse_support.expect_error "type T(visit: (fn() cost time O(\"steps\")))"
-        ~code:Function_type_cost_bound ~at:"\"steps\"";
+        ~code:Misplaced_callback_contract ~at:"\"steps\"";
       Parse_support.expect_error "fn f(visits: List[(fn() cost allocations == 1 + 1)]) {}"
-        ~code:Function_type_cost_bound ~at:"1 + 1");
+        ~code:Misplaced_callback_contract ~at:"1 + 1");
+  Harness.test "a function type lends a part of its first input" (fun () ->
+      expect_type "fn(mut Grid, Position) lends mut Cell" "(fn (mut Grid Position) lends mut Cell)");
+  Harness.test "a function type names the parts its modifies changes" (fun () ->
+      Parse_support.expect_definition
+        "fn f(skip: (fn(reader: mut Reader) modifies reader.position)) {}"
+        "(fn f ((skip: (fn (reader: mut Reader) (modifies (. reader position))))) (block))");
+  Harness.test "modifies in a function type needs every input named" (fun () ->
+      Parse_support.expect_error "fn f(skip: (fn(mut Reader) modifies position)) {}"
+        ~code:Function_type_names ~at:"fn(mut");
+  Harness.test "a parameter's function type takes a panic condition on its inputs" (fun () ->
+      Parse_support.expect_definition
+        "fn f(read: (fn(index: UInt64) uses Panic unless index < 3)) {}"
+        "(fn f ((read: (fn (index: UInt64) (uses (unless Panic (< index 3)))))) (block))");
+  Harness.test "a law's parameter takes no callback contract, which nothing would check" (fun () ->
+      Parse_support.expect_error
+        "trait Picker {\n\
+        \  law total(choose: (fn(count: UInt64) -> UInt64 requires count > 0)) {\n\
+        \    true\n\
+        \  }\n\
+         }"
+        ~code:Misplaced_callback_contract ~at:"requires");
+  Harness.test "a panic condition on a function type that is not a parameter's" (fun () ->
+      Parse_support.expect_error "type T(read: (fn(index: UInt64) uses Panic unless index < 3))"
+        ~code:Misplaced_callback_contract ~at:"index < 3");
   Harness.test "parentheses around a function type need clauses" (fun () ->
       Parse_support.expect_error "fn f(value: (fn(Item))) {}" ~code:Unexpected_token ~at:"(fn");
   Harness.test "a function type's requires names its inputs" (fun () ->

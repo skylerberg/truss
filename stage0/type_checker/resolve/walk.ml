@@ -308,11 +308,14 @@ let rec resolve_type_expression state scope (type_ : Syntax.type_expression) =
   | Self_type _ -> ()
   | Associated (base, member) ->
       resolve_associated_base state scope base member Catalog.Resolve.Associated_type
-  | Function_type { inputs; output; clauses } ->
+  | Function_type { inputs; result; clauses } ->
       List.iter
         (fun (input : Syntax.function_input) -> resolve_type_expression state scope input.type_)
         inputs;
-      Option.iter (resolve_type_expression state scope) output;
+      Option.iter
+        (function
+          | Syntax.Returns type_ | Lends (_, type_) -> resolve_type_expression state scope type_)
+        result;
       let named =
         List.fold_left
           (fun scope (input : Syntax.function_input) ->
@@ -568,6 +571,10 @@ and check_place state (written : Syntax.expression) (inner : Syntax.expression) 
     | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _)
     | With (base, _) -> (
         match classify_head base with `Place _ -> `Place true | other -> other)
+    | Call ({ kind = Name callee; _ }, { value = first; _ } :: _)
+      when match find_target state callee with Some (Local _) -> true | _ -> false -> (
+        let first = match first.kind with Mode (_, inner) -> inner | _ -> first in
+        match classify_head first with `Place _ -> `Place true | other -> other)
     | Try base -> (
         match classify_head base with `Place false -> `Not_a_place value | other -> other)
     | Self_value -> `Place false
@@ -904,11 +911,14 @@ let rec list_generic_capabilities (type_ : Syntax.type_expression) : Syntax.name
               list_generic_capabilities argument
           | Count _ | Count_name _ -> [])
         path.arguments
-  | Function_type { inputs; output; clauses } ->
+  | Function_type { inputs; result; clauses } ->
       List.concat_map
         (fun (input : Syntax.function_input) -> list_generic_capabilities input.type_)
         inputs
-      @ Option.fold ~none:[] ~some:list_generic_capabilities output
+      @ Option.fold ~none:[]
+          ~some:(function
+            | Syntax.Returns type_ | Lends (_, type_) -> list_generic_capabilities type_)
+          result
       @ list_used_generic_capabilities clauses
   | View_type viewed -> list_generic_capabilities viewed
   | Self_type _ | Associated _ | Type_error -> []

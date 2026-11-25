@@ -84,7 +84,7 @@ and kind =
       parameters : pattern list;
       captures : capture list;
       body : block;
-      result : Types.ty;
+      result : Types.result;
     }
   | Construct of { variant : string option; fields : (string * operand option) list }
   | Collection_literal of { elements : expression list; construction : construction }
@@ -195,6 +195,14 @@ and pattern_kind =
   | Equal_to of { value : pattern_constant; equal : callee }
   | Alternatives of pattern list
 
+type contract = {
+  panics_unless : expression list;
+  requires : condition conditional list;
+  ensures : expression conditional list;
+  decreases : expression conditional list;
+  costs : cost conditional list;
+}
+
 type parameter = {
   local : local;
   mode : Language.Mode.t;
@@ -203,19 +211,7 @@ type parameter = {
   callback_contract : callback_contract option;
 }
 
-and callback_contract = {
-  inputs : local list;
-  requires : expression list;
-  ensures : expression list;
-}
-
-type contract = {
-  panics_unless : expression list;
-  requires : condition conditional list;
-  ensures : expression conditional list;
-  decreases : expression conditional list;
-  costs : cost conditional list;
-}
+and callback_contract = { inputs : local list; contract : contract }
 
 type law = {
   name : string;

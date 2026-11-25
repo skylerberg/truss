@@ -1,0 +1,24 @@
+fn first_or_zero(count: UInt64, pick: (fn(index: UInt64) -> Int64 uses Panic unless index < count))
+  -> Int64
+{
+  if count > 0 { pick(0) } else { 0 }
+}
+
+fn first(count: UInt64, pick: (fn(index: UInt64) -> Int64 uses Panic unless index < count)) -> Int64
+  uses Panic unless count > 0
+{
+  if count == 0 { Panic.crash("empty") } else { pick(0) }
+}
+
+fn read_at(items: List[Int64], index: UInt64) -> Int64
+  uses Panic unless index < items.length()
+{
+  if index < items.length() { items[index] } else { Panic.crash("out of range") }
+}
+
+test "a callee without Panic calls a callback whose type states where it panics" {
+  let items = [4, 5]
+  assert first_or_zero(items.length(), fn(index) { read_at(items, index) }) == 4
+  assert first_or_zero(0, fn(index) { read_at(items, index) }) == 0
+  assert first(items.length(), fn(index) { read_at(items, index) }) == 4
+}

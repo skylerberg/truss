@@ -371,7 +371,8 @@ let emit_call builder (call : Mir.call) origin =
     emit builder (Arguments { borrowed_arguments; view_arguments; is_yielded = false }) origin;
   let can_store_in target (other : Mir.operand) =
     match find_operand_type other with
-    | Some (Types.Function { output; _ }) when not (Context.is_view builder.context output) ->
+    | Some (Types.Function { output; _ })
+      when not (Context.is_view builder.context (Types.extract_result_type output)) ->
         Context.holds_function builder.context target
     | _ -> true
   in

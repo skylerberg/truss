@@ -1,0 +1,11 @@
+type Counter(count: UInt64)
+
+fn Counter.increment(mut self) {
+  self.count = self.count.saturating_add(1)
+}
+
+type Pair(left: Counter, right: Counter)
+
+fn promised(pair: mut Pair, choose: (fn(held: mut Pair) lends mut Counter ensures result.count < 10)) {
+  mut choose(mut pair).increment()
+}

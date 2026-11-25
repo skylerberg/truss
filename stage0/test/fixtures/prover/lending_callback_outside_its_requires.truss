@@ -1,0 +1,15 @@
+type Counter(count: UInt64)
+
+fn Counter.increment(mut self) {
+  self.count = self.count.saturating_add(1)
+}
+
+type Pair(left: Counter, right: Counter)
+
+fn bump_at(
+  pair: mut Pair,
+  index: UInt64,
+  choose: (fn(held: mut Pair, at: UInt64) lends mut Counter requires at < 2),
+) {
+  mut choose(mut pair, index).increment()
+}

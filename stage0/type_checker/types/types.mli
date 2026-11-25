@@ -1,4 +1,5 @@
 type parameter = { owner : Path.t; name : string }
+type modified = { position : int; field_path : string list; is_elements : bool }
 
 type ty =
   | Named of { path : Path.t; arguments : argument list }
@@ -27,9 +28,10 @@ and trait_reference = {
 
 and function_type = {
   inputs : (Language.Mode.t * ty) list;
-  output : ty;
+  output : result;
   uses : capability_set;
   costs : cost list;
+  modifies : modified list;
 }
 
 and result = Returns of ty | Lends of Language.Mode.t * ty
@@ -154,6 +156,7 @@ type evidence =
 
 val substitute_evidence : substitution -> evidence -> evidence
 val extract_result_type : result -> ty
+val map_result : (ty -> ty) -> result -> result
 val find_lent_mode : result -> Language.Mode.t option
 val map_argument : (ty -> ty) -> argument -> argument
 val map_trait : (ty -> ty) -> trait_reference -> trait_reference
@@ -195,8 +198,6 @@ type parameter_info = { name : string; mode : Language.Mode.t; type_ : ty; has_d
 val list_capture_free_parameters : parameter_info list -> string list
 val mentions_specification_only_type : parameter_info list -> result -> bool
 
-type modified = { position : int; field_path : string list; is_elements : bool }
-
 type signature = {
   generics : generic list;
   capability_parameters : parameter list;
@@ -214,8 +215,9 @@ type signature = {
 val is_field_path_prefix : string list -> string list -> bool
 val find_parameter_position : signature -> string -> int option
 val read_parameter_at : signature -> int -> parameter_info
-val list_modified_parts : signature -> int -> modified list option
+val list_modified_parts : modified list -> int -> modified list option
 val is_part_within : container:modified -> modified -> bool
+val are_changes_within : allowed:modified list -> modified list -> bool
 val show_modified_part : root:string -> modified -> string
 
 type instantiation = {
@@ -234,7 +236,7 @@ val substitute_signature : substitution -> signature -> signature
 val add_impl_generics_and_uses :
   impl_generics:generic list -> impl_uses:capability_set -> signature -> signature
 
-val make_function_type : signature -> function_type option
+val make_function_type : signature -> function_type
 
 type field = { field_name : string; field_type : ty; field_has_default : bool }
 type variant = { variant_name : string; fields : field list option; indirect : bool }

@@ -889,8 +889,8 @@ let make_callback_cost (context : State.context) frame (metric : Language.Metric
       | None -> ());
       cost
 
-let compute_function_value_amount context frame ~location (function_type : Types.function_type)
-    callee_term ~values (counter : Costs.counter) =
+let compute_function_value_amount context frame ~location ~callback
+    (function_type : Types.function_type) callee_term ~values (counter : Costs.counter) =
   let make_counted amount = Costs.make_counted_charge counter amount in
   let compute_call_amount metric =
     let make_cost () =
@@ -921,12 +921,25 @@ let compute_function_value_amount context frame ~location (function_type : Types
                 (Logic.equal cost Costs.zero);
             make_plain cost)
   in
-  match counter.resource with
+  let stated_by_callback =
+    Option.bind callback (fun ((inside : State.frame), (clauses : State.clauses)) ->
+        if
+          List.exists
+            (fun (cost : Mir.cost) -> Amounts.is_same_resource cost ~locals:inside.locals counter)
+            clauses.costs
+        then Some (inside, clauses)
+        else None)
+  in
+  match (counter.resource, stated_by_callback) with
   | _ when counter.counting = Units && Amounts.passes_lambda_assuming_recursive_costs context values
     ->
       make_counted (Operations.declare_unknown_amount context frame counter)
-  | Metric metric -> compute_call_amount metric
-  | Calls (Through term) ->
+  | _, Some (inside, clauses) ->
+      Amounts.compute_callee_amount context frame ~is_recursive:false ~clauses:[ clauses ]
+        ~bind_frame:(fun _ -> inside)
+        ~uses:function_type.uses ~values ~counts_provider_potential:false counter
+  | Metric metric, None -> compute_call_amount metric
+  | Calls (Through term), None ->
       make_counted
         (if Amounts.lambda_captures_target context callee_term term then
            Operations.declare_unknown_amount context frame counter
@@ -935,10 +948,27 @@ let compute_function_value_amount context frame ~location (function_type : Types
              (Amounts.make_may_be_target context frame callee_term (Types.Function function_type)
                 term)
              (Logic.int 1))
-  | Calls (Capability capability | Capability_method (capability, _)) ->
+  | Calls (Capability capability | Capability_method (capability, _)), None ->
       make_counted
         (Amounts.compute_capability_amount context frame ~uses:function_type.uses capability counter
            ~direct:(fun () -> Operations.declare_unknown_amount context frame counter))
+
+let check_callback_contract context (frame : State.frame) ~location (invocation : Invocation.t)
+    ~name ((inside : State.frame), (clauses : State.clauses)) =
+  let call : Catalog.Prover.call = { at = location; callee = None } in
+  let oblige_each make_obligation =
+    List.iter (fun (requirement : Mir.requirement) ->
+        Facts.oblige context frame location
+          (make_obligation (Facts.quote frame.source requirement.clause.origin))
+          (snd (Validity.read_specification context inside requirement.clause)))
+  in
+  oblige_each
+    (fun clause -> Catalog.Prover.Callback_precondition { clause; call; name })
+    clauses.requires;
+  if not (context.State.panics || Types.has_capability (Built_in Panic) invocation.uses) then
+    oblige_each
+      (fun clause -> Catalog.Prover.Callback_panic_condition { clause; call; name })
+      clauses.panics_unless
 
 type modelled =
   | By_contract of (State.frame * Logic.term)
@@ -948,16 +978,17 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     (invocation : Invocation.t) ~through (values : State.passed list) =
   let location = Facts.locate context frame.source site.origin in
   (match context.panic_condition with
-  | Some condition
+  | Some (condition, ruled_out_by)
     when (not context.panics)
          && Conditions.may_panic_for_every_value context.lookups ~current:context.current
               ~condition:context.condition invocation.uses ->
       Facts.oblige context frame location
-        (Panics_where_ruled_out { call = { at = location; callee = None }; condition })
+        (Panics_where_ruled_out { call = { at = location; callee = None }; condition; ruled_out_by })
         (Logic.Boolean false)
   | Some _ | None -> ());
   List.iter
     (fun (passed : State.passed) ->
+      Validity.reject_lending_callback_ensures context frame ~location invocation passed;
       match passed.shape with
       | Named_function { origin; path; _ } -> (
           match Contracts.find_function_contract context path with
@@ -967,6 +998,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
       | Forwarded local ->
           Validity.check_forwarded_callback context frame site invocation passed local values
       | Other ->
+          Validity.check_passed_value context frame ~location invocation passed values;
           Validity.check_callback_promises context frame ~location invocation passed
             ~unpromised:Nothing_promises ~assume:Validity.assume_nothing values
       | Lambda -> ())
@@ -1131,9 +1163,37 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                     receiver)
                  (Contracts.find_method_contract context trait name receiver evidence)))
     | Indirect () ->
-        Laws.check_callback_requires context frame site through values;
+        let callback =
+          match through with
+          | Some (_, _, Invocation.Forwarded local) ->
+              Option.bind (Validity.find_own_callback context local) (fun (name, callback) ->
+                  if List.length callback.Mir.parameters = List.length values then
+                    Some
+                      ( name,
+                        ( Validity.make_callback_contract_frame frame
+                            (Validity.list_callback_inputs callback)
+                            (List.map (fun (passed : State.passed) -> passed.term) values),
+                          Validity.make_callback_clauses frame callback ) )
+                  else None)
+          | _ -> None
+        in
+        Option.iter
+          (fun (name, ((_, clauses) as contract)) ->
+            (match through with
+            | Some (Types.Function { output = Lends _; _ }, _, _) when clauses.State.ensures <> []
+              ->
+                Facts.raise_unsupported location Lending_callback_ensures
+            | _ -> ());
+            check_callback_contract context frame ~location invocation ~name contract)
+          callback;
         let before = frame in
-        let frame = havoc_whole_arguments frame in
+        let frame =
+          match through with
+          | Some (Types.Function function_type, _, _) ->
+              havoc_mut context frame values ~is_update_step ~list_modified:(fun position ->
+                  Types.list_modified_parts function_type.modifies position)
+          | _ -> havoc_whole_arguments frame
+        in
         let result =
           match through with
           | Some (Types.Function function_type, callee_term, _)
@@ -1165,8 +1225,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                                 | _ -> None)
                               values)
                          ~result_type:declared_result_type ~result))
-                (compute_function_value_amount context frame ~location function_type callee_term
-                   ~values)
+                (compute_function_value_amount context frame ~location
+                   ~callback:(Option.map snd callback) function_type callee_term ~values)
           | _ -> Operations.spend context frame (Operations.declare_unknown_amount context frame)
         in
         (match through with

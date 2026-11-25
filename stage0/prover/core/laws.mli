@@ -1,11 +1,3 @@
-val check_callback_requires :
-  State.context ->
-  State.frame ->
-  Invocation.site ->
-  ('a * 'b * Invocation.shape) option ->
-  State.passed list ->
-  unit
-
 val list_laws : State.context -> Path.t -> (State.source * Mir.law) list
 val list_law_parameter_types : substitution:Types.substitution -> Mir.law -> Types.ty list
 

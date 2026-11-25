@@ -149,10 +149,10 @@ let judge : Diagnostic.Code.t -> verdict = function
   | Parser
       ( Use_after_definition | Let_else_brace | Nesting_too_deep | Misplaced_opaque
       | Misplaced_tuple | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause
-      | Loop_cost_bound | Amortized_bound | Function_type_cost_bound | Function_type_names
-      | Misplaced_callback_contract | Misplaced_function_type | Misplaced_associated_type
-      | Misplaced_constraint | Misplaced_assert | Misplaced_proof | Misplaced_loop_exit
-      | Exits_parallel | Echo_in_specification | Reserved_specification_name )
+      | Loop_cost_bound | Amortized_bound | Function_type_names | Misplaced_callback_contract
+      | Misplaced_function_type | Misplaced_associated_type | Misplaced_constraint
+      | Misplaced_assert | Misplaced_proof | Misplaced_loop_exit | Exits_parallel
+      | Echo_in_specification | Reserved_specification_name )
   | Lexer _ | Resolve _ | Package _ | Prover _ | Capabilities _ | Ownership _ | Usage _ | Patterns _
   | Types _ | Too_many_diagnostics ->
       Grammar_accepts

@@ -8,7 +8,7 @@ type clauses = {
   ensures : Mir.formula list;
   decreases : Mir.formula list;
   costs : Mir.cost list;
-  callbacks : (int * Mir.callback) list;
+  callbacks : (int * Mir.contract) list;
   inherited : bool;
   bindings : Types.substitution;
 }
@@ -120,7 +120,7 @@ type context = {
   current : Path.t;
   node : Path.t;
   mutable terminates : bool;
-  mutable callbacks : (Core.local * string * Mir.callback) list;
+  mutable callbacks : (Core.local * string * Mir.contract) list;
   measures : Mir.formula list;
   mutable declarations : Logic.declaration list;
   declared : Logic.sort list Tables.Symbol_table.t;
@@ -185,7 +185,7 @@ type context = {
   keeps_failures : bool;
   mutable panics : bool;
   mutable can_declare_panic : bool;
-  panic_condition : Catalog.Prover.quoted list option;
+  mutable panic_condition : (Catalog.Prover.quoted list * Catalog.Prover.panic_ruler) option;
   mutable obligation_condition : Types.condition;
   mutable skipped_conditions : Types.condition list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;

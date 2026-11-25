@@ -59,7 +59,6 @@ module Code : sig
     | Cost_word
     | Loop_cost_bound
     | Amortized_bound
-    | Function_type_cost_bound
     | Function_type_names
     | Misplaced_callback_contract
     | Misplaced_condition

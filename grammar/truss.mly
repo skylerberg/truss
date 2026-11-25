@@ -243,8 +243,7 @@ type_argument:
   | UPPER EQ type_expression { () }
 
 function_type:
-  | FN LPAREN comma_list(function_type_parameter) RPAREN { () }
-  | FN LPAREN comma_list(function_type_parameter) RPAREN ARROW type_expression { () }
+  | FN LPAREN comma_list(function_type_parameter) RPAREN result_opt { () }
 
 function_type_parameter:
   | type_expression { () }
@@ -253,10 +252,11 @@ function_type_parameter:
   | LOWER COLON mode_opt type_expression { () }
 
 function_type_clause:
-  | USES capability_list { () }
+  | USES separated_nonempty_list(COMMA, capability_use) { () }
   | COST cost { () }
   | REQUIRES expression { () }
   | ENSURES expression { () }
+  | MODIFIES separated_nonempty_list(COMMA, expression) { () }
 
 generics_opt:
   | { () }

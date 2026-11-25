@@ -4,7 +4,13 @@ type ty =
   | Never
 
 and argument = Type of ty | Value of Z.t
-and function_type = { parameters : (Language.Mode.t * ty) list; result : ty; uses : Path.t list }
+
+and function_type = {
+  parameters : (Language.Mode.t * ty) list;
+  result : ty;
+  lends : Language.Mode.t option;
+  uses : Path.t list;
+}
 
 type instantiation = {
   type_arguments : argument list;
@@ -53,9 +59,11 @@ let rec to_string = function
           function_type.parameters
       in
       let result =
-        match function_type.result with
-        | Named { path; arguments = [] } when Well_known.find_builtin_type path = Some Unit -> ""
-        | ty -> " -> " ^ to_string ty
+        match (function_type.lends, function_type.result) with
+        | Some mode, ty -> " lends " ^ Language.Mode.show_prefix mode ^ to_string ty
+        | None, Named { path; arguments = [] } when Well_known.find_builtin_type path = Some Unit ->
+            ""
+        | None, ty -> " -> " ^ to_string ty
       in
       let text = "fn(" ^ String.concat ", " parameters ^ ")" ^ result in
       if function_type.uses = [] then text

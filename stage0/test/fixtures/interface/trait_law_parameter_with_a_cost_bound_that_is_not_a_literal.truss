@@ -1,9 +1,0 @@
-trait Holder {
-  type Element: Equal
-
-  law reflexive(value: (fn() cost time O(1 + 1))) {
-    true
-  }
-}
-
-fn mistyped(value: Option[Int64, Int64]) {}

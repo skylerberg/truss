@@ -128,7 +128,7 @@ let instantiate context (target : Core.operand Core.target) =
       | None -> None)
   | Indirect function_value -> (
       match read_operand_type function_value with
-      | Function { inputs; output; _ } -> Some (List.map snd inputs, Types.Returns output)
+      | Function { inputs; output; _ } -> Some (List.map snd inputs, output)
       | _ -> None)
 
 let check_call_types context (node : Core.expression) (call : Core.call) =
@@ -448,7 +448,7 @@ let check_form (interface : Interface.Lookups.t) (source_lookups : Resolve.Names
     | Function { inputs; output; uses; _ } ->
         List.iter (fun (_, input) -> check_type subject input) inputs;
         check_capabilities subject uses;
-        check_type subject output
+        check_type subject (Types.extract_result_type output)
     | Never | Integer -> ()
     | Variable _ | Hole | Error _ ->
         report "%s has the type `%s`, which is not fully inferred" subject (Types.show ty)
@@ -676,7 +676,7 @@ let check_form (interface : Interface.Lookups.t) (source_lookups : Resolve.Names
              | Value_parameter named -> check_parameter "a value" named
              | Method_cost { method_; _ } -> check_target method_
              | Lambda { result; captures; _ } ->
-                 check_type "a lambda's result" result;
+                 check_type "a lambda's result" (Types.extract_result_type result);
                  List.iter
                    (fun ({ local; type_ } : Core.capture) ->
                      check_place (Local { local; type_; origin = node.origin }))

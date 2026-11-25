@@ -1,28 +1,3 @@
-let check_callback_requires context frame (site : Invocation.site) through
-    (values : State.passed list) =
-  match through with
-  | Some (_, _, Invocation.Forwarded local) -> (
-      match Validity.find_own_callback context local with
-      | Some (name, { inputs; requires; _ }) when List.length inputs = List.length values ->
-          let inside =
-            Validity.make_callback_contract_frame frame inputs
-              (List.map (fun (passed : State.passed) -> passed.term) values)
-          in
-          List.iter
-            (fun (clause : Mir.formula) ->
-              Facts.oblige context frame
-                (Facts.locate context frame.source site.origin)
-                (Callback_precondition
-                   {
-                     clause = Facts.quote frame.source clause.origin;
-                     call = { at = Facts.locate context frame.source site.origin; callee = None };
-                     name;
-                   })
-                (snd (Validity.read_specification context inside clause)))
-            requires
-      | _ -> ())
-  | _ -> ()
-
 let list_laws (context : State.context) trait =
   match context.lookups.interface.names.find_key trait with
   | Some key ->
@@ -172,7 +147,7 @@ let add_named_relation context frame (expected : Types.function_type) callee_ter
         match mode with Mut -> Some (variable "named.changed" index input) | Read | Own -> None)
       expected.inputs
   in
-  let returned = variable "named.result" 0 expected.output in
+  let returned = variable "named.result" 0 (Lambdas.read_output expected) in
   let entries = List.map (fun (name, _) -> Logic.Symbol name) inputs in
   let exits =
     List.map2
@@ -222,11 +197,29 @@ let check_named_callback context (frame : State.frame) (invocation : Invocation.
       in
       let at_call = Facts.restrict frame promised in
       if List.length callee_clauses.parameters = List.length inputs then (
-        let inside =
+        let bind arguments =
           Validity.bind_arguments frame callee_clauses
-            ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
+            ~arguments:(List.mapi (fun index input -> (index, input)) arguments)
             ~substitution:Types.no_substitution
         in
+        let inside = bind inputs in
+        Validity.check_passed_contract context frame ~location invocation passed values
+          ~passed_function:(Passed_function path)
+          ~stated_panic:
+            (match Contracts.read_signature context path with
+            | Some signature
+              when Types.has_capability (Capability_unless_values (Built_in Panic)) signature.uses
+              ->
+                Panics_unless
+                  (fun arguments ->
+                    List.map
+                      (fun clause ->
+                        snd (Validity.read_specification context (bind arguments) clause))
+                      (Facts.list_clauses callee_clauses.panics_unless))
+            | Some signature when Types.may_use (Built_in Panic) signature.uses -> May_panic
+            | Some _ | None -> Never_panics)
+          ~stated_cost:(fun arguments metric ->
+            Validity.find_stated_cost context (bind arguments) callee_clauses.costs metric);
         List.iter
           (fun (requirement : Mir.formula) ->
             Facts.oblige context at_call location

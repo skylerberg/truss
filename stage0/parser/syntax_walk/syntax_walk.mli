@@ -27,3 +27,7 @@ val visit_definition :
   unit
 
 val collect_names : Source.Definition_span.t array -> Syntax.definition -> Syntax.name list
+val is_literal_bound : Syntax.bound -> bool
+val is_callback_contract_clause : Syntax.clause -> bool
+val can_mention_inputs : Syntax.clause -> bool
+val has_callback_contract : Syntax.function_type -> bool

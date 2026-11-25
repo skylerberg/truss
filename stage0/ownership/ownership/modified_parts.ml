@@ -21,6 +21,46 @@ let is_trait_method (interface : Interface.Lookups.t) key =
       match (interface.names.read_definition container).kind with Trait _ -> true | _ -> false)
   | None -> false
 
+let find_storage_field interface ~package parameter_type (container : Types.modified) =
+  match
+    Interface.Definition.find_field_path_type interface ~package parameter_type container.field_path
+  with
+  | Ok (Named { path; arguments }) -> (
+      match
+        Option.bind (Interface.Definition.find_type_interface interface path) (fun type_interface ->
+            Types.instantiate_fields type_interface arguments)
+      with
+      | Some [ field ] when Types.is_builtin Storage field.field_type -> Some field.field_name
+      | _ -> None)
+  | Ok _ | Error _ -> None
+
+let is_named_by interface ~package ~parameter_type (container : Types.modified)
+    (part : Types.modified) =
+  Types.is_part_within ~container part
+  || container.is_elements && part.is_elements
+     &&
+     match find_storage_field interface ~package (parameter_type container.position) container with
+     | Some storage -> part.field_path = container.field_path @ [ storage ]
+     | None -> false
+
+let list_parameter_changes interface (body : Mir.body) =
+  List.filter_map
+    (fun (changed : Mir.changed) ->
+      match changed.place.root with
+      | Local local ->
+          Option.map
+            (fun position ->
+              let field_path, is_elements = Mir.classify_changed_part changed in
+              (changed.origin, { Types.position; field_path; is_elements }))
+            (List.find_index (Int.equal local) body.parameters)
+      | Constant _ | Literal _ -> None)
+    (Mir.list_changed_places
+       ~list_modified:
+         (Mir.list_callee_modified_parts
+            ~read_signature:(Interface.Impls.read_signature interface)
+            interface Types.no_substitution)
+       [ body.code ])
+
 let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
   let interface = context.lookups.interface in
   match Interface.Impls.read_signature interface key.path with
@@ -50,47 +90,11 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
       | _ :: _ -> (
           let name_parameter position = (Types.read_parameter_at signature position).name in
           let written_entries = find_written_entries (interface.names.read_definition key) in
-          let find_storage_field (container : Types.modified) =
-            match
-              Interface.Definition.find_field_path_type interface ~package
-                (Types.read_parameter_at signature container.position).type_ container.field_path
-            with
-            | Ok (Named { path; arguments }) -> (
-                match
-                  Option.bind (Interface.Definition.find_type_interface interface path)
-                    (fun type_interface -> Types.instantiate_fields type_interface arguments)
-                with
-                | Some [ field ] when Types.is_builtin Storage field.field_type ->
-                    Some field.field_name
-                | _ -> None)
-            | Ok _ | Error _ -> None
+          let is_named_by =
+            is_named_by interface ~package ~parameter_type:(fun position ->
+                (Types.read_parameter_at signature position).type_)
           in
-          let is_named_by (container : Types.modified) (part : Types.modified) =
-            Types.is_part_within ~container part
-            || container.is_elements && part.is_elements
-               &&
-               match find_storage_field container with
-               | Some storage -> part.field_path = container.field_path @ [ storage ]
-               | None -> false
-          in
-          let changes =
-            List.filter_map
-              (fun (changed : Mir.changed) ->
-                match changed.place.root with
-                | Local local ->
-                    Option.map
-                      (fun position ->
-                        let field_path, is_elements = Mir.classify_changed_part changed in
-                        (changed.origin, { Types.position; field_path; is_elements }))
-                      (List.find_index (Int.equal local) tree.body.parameters)
-                | Constant _ | Literal _ -> None)
-              (Mir.list_changed_places
-                 ~list_modified:
-                   (Mir.list_callee_modified_parts
-                      ~read_signature:(Interface.Impls.read_signature interface)
-                      interface Types.no_substitution)
-                 [ tree.body.code ])
-          in
+          let changes = list_parameter_changes interface tree.body in
           let read_written_part (entry : Syntax.expression) =
             Option.bind (Interface.Elaborator.split_part entry) (fun (root, names, is_elements) ->
                 Option.map
@@ -107,7 +111,8 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
           List.iter
             (fun (origin, (part : Types.modified)) ->
               let allowed =
-                Option.value ~default:[] (Types.list_modified_parts signature part.position)
+                Option.value ~default:[]
+                  (Types.list_modified_parts signature.modifies part.position)
               in
               if
                 List.mem part.position framed
@@ -247,3 +252,64 @@ let check_ranges (context : Context.context) (tree : Mir.t) =
       | Basic (Call { call; _ } | Lend { call; _ }) -> check_call call
       | _ -> ())
     tree
+
+let rec iter_statements visit (block : Mir.block) =
+  List.iter
+    (fun (statement : Mir.statement) ->
+      visit statement;
+      List.iter (iter_statements visit) (Mir.list_nested_blocks statement))
+    block.statements
+
+let list_lambda_types (tree : Mir.t) =
+  let lambda_types = ref [] in
+  List.iter
+    (fun ({ locals; code; _ } : Mir.body) ->
+      iter_statements
+        (fun (statement : Mir.statement) ->
+          match statement.kind with
+          | Basic
+              (Assign
+                 { target = { root = Local local; projections = [] }; value = Lambda { body; _ } })
+            ->
+              lambda_types := (body, (Array.get locals local).type_) :: !lambda_types
+          | _ -> ())
+        code)
+    (tree.body :: Array.to_list tree.lambdas);
+  !lambda_types
+
+let check_lambdas (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
+  let interface = context.lookups.interface in
+  let package = Path.locate_package key.path in
+  List.iter
+    (fun (index, (lambda_type : Types.ty)) ->
+      match lambda_type with
+      | Function ({ modifies = _ :: _; _ } as function_type) ->
+          let body = tree.lambdas.(index) in
+          let is_named_by =
+            is_named_by interface ~package ~parameter_type:(fun position ->
+                snd (List.nth function_type.inputs position))
+          in
+          let reported = ref [] in
+          List.iter
+            (fun (origin, (part : Types.modified)) ->
+              match Types.list_modified_parts function_type.modifies part.position with
+              | Some allowed
+                when not
+                       (List.exists (fun container -> is_named_by container part) allowed
+                       || List.mem part !reported) ->
+                  reported := part :: !reported;
+                  Context.report context
+                    (Undeclared_lambda_change
+                       {
+                         at = origin;
+                         parameter =
+                           (match body.locals.(List.nth body.parameters part.position).kind with
+                           | Source { local = Declared { name; _ }; _ } -> name
+                           | Source _ | Temporary | Lent _ -> "the input");
+                         part;
+                         type_ = lambda_type;
+                       })
+              | Some _ | None -> ())
+            (list_parameter_changes interface body)
+      | _ -> ())
+    (list_lambda_types tree)

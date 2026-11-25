@@ -62,7 +62,8 @@ let check_disjoint (context : Context.context) first second ~on_overlap =
       context.must_be_disjoint <- (min first second, max first second) :: context.must_be_disjoint
   | Disjoint -> ()
 
-let check_body context (actions : Actions.t) moves =
+let check_body context ~(receiver : Core.local option) ~(other_parameters : Core.local list)
+    (actions : Actions.t) moves =
   let states = Dataflow.forward context actions in
   let is_live_after = Moves.compute_live_after moves actions.body in
   let mir_local = Context.Local_table.create 16 in
@@ -348,15 +349,12 @@ let check_body context (actions : Actions.t) moves =
                 part.steps <> [] && Context.classify_binding_mode context part.root = Own)
               parts
           in
-          let receiver =
-            match List.rev context.parameters with first :: _ -> Some first | [] -> None
-          in
           let other_parameter =
             List.find_map
               (fun (part : Place.t) ->
                 match part.root with
                 | Local local
-                  when (local = Self || List.mem local context.parameters)
+                  when (local = Self || List.mem local other_parameters)
                        && Some local <> receiver
                        && Context.classify_binding_mode context part.root <> Own ->
                     Some part.root
@@ -439,9 +437,21 @@ let check_body context (actions : Actions.t) moves =
     actions.fork_join_loops
 
 let check context ~read_moves ~returns_to_caller (mir : Mir.Graph.t) =
-  let check_one body ~returns_to_caller =
+  let check_one (body : Mir.Graph.body) ~returns_to_caller =
     let moves = read_moves body in
-    check_body context (Actions.of_body context moves body ~returns_to_caller) moves
+    let parameters =
+      List.map
+        (fun local ->
+          match body.locals.(local).kind with
+          | Source { local = core; _ } -> Some core
+          | Temporary | Lent _ -> None)
+        body.parameters
+    in
+    check_body context
+      ~receiver:(Option.join (List.nth_opt parameters 0))
+      ~other_parameters:(List.filter_map Fun.id (List.drop 1 parameters))
+      (Actions.of_body context moves body ~returns_to_caller)
+      moves
   in
   check_one mir.body ~returns_to_caller;
   Array.iter (check_one ~returns_to_caller:false) mir.lambdas

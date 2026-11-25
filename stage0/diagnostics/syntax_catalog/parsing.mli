@@ -123,6 +123,8 @@ type problem =
   | Loop_exit_from_parallel_branch of loop_exit
   | Misplaced_callback_requires
   | Misplaced_callback_ensures
+  | Misplaced_callback_panic_condition
+  | Misplaced_callback_cost
   | Misplaced_proof
   | Misplaced_assert
   | Parameter_named_result
@@ -198,7 +200,6 @@ type problem =
   | Statement_at_top_level
   | Empty_type_arguments
   | Function_type_condition
-  | Function_type_cost_bound
   | Function_type_needs_names
   | Function_type_extra_names
   | Parenthesized_type

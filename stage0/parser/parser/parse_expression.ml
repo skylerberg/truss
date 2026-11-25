@@ -200,16 +200,14 @@ and parse_function_type cursor ~clauses:with_clauses =
           type_ = { kind = Type_error; id = Cursor.allocate_id cursor span };
         })
   in
-  let output =
-    if Cursor.accept_punctuation cursor Arrow then Some (parse_type_expression cursor) else None
-  in
+  let result = parse_result cursor in
   let clauses =
     if with_clauses then
       let rec gather clauses =
         match Cursor.peek_kind cursor with
-        | Keyword (Uses | Cost | Requires | Ensures) -> gather (parse_clause cursor :: clauses)
+        | Keyword (Uses | Cost | Requires | Ensures | Modifies) ->
+            gather (parse_clause cursor :: clauses)
         | Keyword Decreases -> Cursor.fail cursor (Function_type_clause Token.Decreases)
-        | Keyword Modifies -> Cursor.fail cursor (Function_type_clause Token.Modifies)
         | _ -> List.rev clauses
       in
       gather []
@@ -217,43 +215,38 @@ and parse_function_type cursor ~clauses:with_clauses =
   in
   List.iter
     (fun (clause : Syntax.clause) ->
-      let has_unless =
+      let has_bound_condition =
         match clause.kind with
         | Uses uses ->
-            List.exists
-              (fun (use : Syntax.capability_use) ->
-                Option.is_some use.unless || use.unless_values <> [])
-              uses
+            List.exists (fun (use : Syntax.capability_use) -> Option.is_some use.unless) uses
         | Requires _ | Ensures _ | Decreases _ | Modifies _ | Cost _ | Clause_error -> false
       in
-      if Option.is_some clause.condition || has_unless then
+      if Option.is_some clause.condition || has_bound_condition then
         Cursor.report cursor
           (Cursor.read_span cursor clause.id |> Cursor.make_file_span cursor)
           Function_type_condition)
     clauses;
-  List.iter
-    (fun (clause : Syntax.clause) ->
-      match clause.kind with
-      | Cost { bound = Big_o amount | At_most amount | Exactly amount; _ } -> (
-          match amount.kind with
-          | Integer _ -> ()
-          | _ ->
-              Cursor.report cursor (Cursor.read_file_span cursor amount.id) Function_type_cost_bound
-          )
-      | Requires _ | Ensures _ | Decreases _ | Modifies _ | Uses _ | Clause_error -> ())
-    clauses;
   let is_named (input : Syntax.function_input) = Option.is_some input.name in
-  let has_callback_contract =
-    List.exists (fun (clause : Syntax.clause) ->
-        match clause.kind with Requires _ | Ensures _ -> true | _ -> false)
-  in
   let span = (Cursor.lookup_token cursor start).span in
-  if has_callback_contract clauses then
+  if List.exists Syntax_walk.can_mention_inputs clauses then
     begin if not (List.for_all is_named inputs) then
       Cursor.report cursor span Function_type_needs_names
     end
   else if List.exists is_named inputs then Cursor.report cursor span Function_type_extra_names;
-  { inputs; output; clauses }
+  { inputs; result; clauses }
+
+and parse_result cursor =
+  if Cursor.accept_punctuation cursor Arrow then
+    Some (Syntax.Returns (parse_type_expression cursor))
+  else if Cursor.accept_keyword cursor Lends then begin
+    let own = Cursor.peek cursor in
+    let mode = Atoms.parse_mode cursor in
+    if mode = Some Own then
+      Cursor.report cursor own.span
+        (Lends_own { removed = Source.make_span own.span.start (Cursor.peek cursor).span.start });
+    Some (Lends (mode, parse_type_expression cursor))
+  end
+  else None
 
 and parse_parenthesized_function_type cursor =
   let start = Cursor.index cursor in

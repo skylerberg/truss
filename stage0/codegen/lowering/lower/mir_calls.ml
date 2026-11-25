@@ -85,6 +85,7 @@ let lower_shared_update state ~shared ~input ~change ~destination ~site =
     | None -> Lowering.allocate_temporary state result_ty
   in
   Targets.lower_indirect_call state ~function_type ~value:change ~site:(Some site)
+    ~has_panic_condition:false
     [ Lowered.make_deref_place typed; input ]
     result;
   Emit_c.Ir_builder.emit state.builder

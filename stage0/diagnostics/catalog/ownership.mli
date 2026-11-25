@@ -104,6 +104,12 @@ type t =
   | Not_reinitialized_at_scope_end of { moved : Core.origin; place : place }
   | Not_reinitialized_in_branch of { moved : Core.origin; place : place }
   | Resized_range of { at : Core.origin; call : Core.origin }
+  | Undeclared_lambda_change of {
+      at : Core.origin;
+      parameter : string;
+      part : Types.modified;
+      type_ : Types.ty;
+    }
   | Undeclared_change of {
       at : Core.origin;
       function_ : Path.t;

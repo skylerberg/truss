@@ -402,7 +402,7 @@ let list_path_edges (lookups : lookups) path =
        (fun code -> list_paths (list_dependencies lookups (find_instance lookups path) code))
        (Option.to_list (find_code lookups path)))
 
-let list_contract_formulas (contract : Tree.contract) =
+let rec list_contract_formulas (contract : Tree.contract) =
   let list_clauses requirements =
     List.map (fun (requirement : Tree.requirement) -> requirement.clause) requirements
   in
@@ -412,9 +412,7 @@ let list_contract_formulas (contract : Tree.contract) =
       (fun (cost : Tree.cost) ->
         match cost.bound with Order_of amount | At_most amount | Exactly amount -> amount)
       contract.costs
-  @ List.concat_map
-      (fun (_, (callback : Tree.callback)) -> callback.requires @ callback.ensures)
-      contract.callbacks
+  @ List.concat_map (fun (_, callback) -> list_contract_formulas callback) contract.callbacks
 
 let find_contract (lookups : lookups) path =
   Option.map (fun (read : _ Parts.sourced) -> read.form) (Parts.read_contract lookups.mir path)

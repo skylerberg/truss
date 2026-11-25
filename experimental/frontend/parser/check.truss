@@ -130,33 +130,66 @@ fn check_placement(cursor: mut TokenCursor, written: syntax.TypeExpression, is_t
     FunctionType(function_type) => {
       if !is_top {
         for clause in function_type.clauses {
-          if clause.kind is Requires(_) {
-            report_at(
-              mut cursor,
-              code: "parser.misplaced_callback_contract",
-              id: clause.id,
-              message: "A function type has a `requires` only as the type of a parameter, where it constrains the arguments the callee passes its callback.",
-            )
-          } else if clause.kind is Ensures(_) {
-            report_at(
-              mut cursor,
-              code: "parser.misplaced_callback_contract",
-              id: clause.id,
-              message: "A function type has an `ensures` only as the type of a parameter, where it constrains the results the callback returns to the callee.",
-            )
-          }
+          check_callback_clause_placement(mut cursor, clause)
         }
       }
       for input in function_type.inputs {
         check_placement(mut cursor, written: input.annotation, is_top: false)
       }
       if function_type.output is Some(output) {
-        check_placement(mut cursor, written: output, is_top: false)
+        match output {
+          Returns(annotation) | Lends(annotation, ..) => check_placement(mut cursor, written: annotation, is_top: false)
+        }
       }
     }
     PathType(path_type) => check_path_placement(mut cursor, path_type)
     ViewType(viewed) => check_placement(mut cursor, written: viewed, is_top: false)
     SelfType(_) | Associated(..) | TypeError => {}
+  }
+}
+
+fn check_callback_clause_placement(cursor: mut TokenCursor, clause: syntax.Clause)
+  uses Panic
+{
+  match clause.kind {
+    Requires(_) => report_at(
+      mut cursor,
+      code: "parser.misplaced_callback_contract",
+      id: clause.id,
+      message: "A function type has a `requires` only as the type of a function's parameter, where it constrains the arguments the callee passes its callback.",
+    )
+    Ensures(_) => report_at(
+      mut cursor,
+      code: "parser.misplaced_callback_contract",
+      id: clause.id,
+      message: "A function type has an `ensures` only as the type of a function's parameter, where it constrains the results the callback returns to the callee.",
+    )
+    Uses(capabilities) => {
+      for capability_use in capabilities {
+        if capability_use.unless_values.first() is Some(first) {
+          report_at(
+            mut cursor,
+            code: "parser.misplaced_callback_contract",
+            id: first.id,
+            message: "A function type has `uses Panic unless` a condition only as the type of a function's parameter, where the callee proves the condition at each call it makes or uses `Panic` itself.",
+          )
+        }
+      }
+    }
+    Cost(clause: cost_clause) => {
+      if !is_literal_bound(cost_clause.bound) {
+        let amount_id = match cost_clause.bound {
+          BigO(value) | AtMost(value) | Exactly(value) => value.id
+        }
+        report_at(
+          mut cursor,
+          code: "parser.misplaced_callback_contract",
+          id: amount_id,
+          message: "A function type's cost bound is an integer literal, as in `O(1)` or `<= 2`, except as the type of a function's parameter: elsewhere the type holds a number and not an expression.",
+        )
+      }
+    }
+    _ => {}
   }
 }
 
@@ -230,7 +263,12 @@ fn check_statement(cursor: mut TokenCursor, context: CheckContext, statement: sy
   }
 }
 
-fn check_parameters(cursor: mut TokenCursor, parameters: List[syntax.Parameter], is_lending: Bool = false)
+fn check_parameters(
+  cursor: mut TokenCursor,
+  parameters: List[syntax.Parameter],
+  is_lending: Bool = false,
+  takes_callback_contracts: Bool = true,
+)
   uses Panic, RunForever
 {
   for parameter in parameters {
@@ -251,7 +289,7 @@ fn check_parameters(cursor: mut TokenCursor, parameters: List[syntax.Parameter],
           message: "A parameter of a lending method cannot be named `final`: in the method's `ensures`, `final(result)` is the part as the caller left it.",
         )
       }
-      check_types(mut cursor, context: plain_context(), written: annotation, is_parameter: true)
+      check_types(mut cursor, context: plain_context(), written: annotation, is_parameter: takes_callback_contracts)
       if default is Some(value) {
         check_expression(mut cursor, context: plain_context(), value: value)
       }
@@ -428,7 +466,7 @@ fn check_definition(cursor: mut TokenCursor, definition: syntax.Definition)
       check_generic_parameters(mut cursor, generics)
       for member in members {
         if member.kind is Law(definition: law_definition) {
-          check_parameters(mut cursor, parameters: law_definition.parameters)
+          check_parameters(mut cursor, parameters: law_definition.parameters, takes_callback_contracts: false)
           for premise in law_definition.premises {
             check_expression(mut cursor, context: enter_specification(plain_context()), value: premise)
           }

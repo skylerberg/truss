@@ -2,6 +2,7 @@ val apply_function :
   State.context -> Types.function_type -> Logic.term -> Logic.term list -> Logic.term
 
 val is_in_the_logic : Types.function_type -> bool
+val read_output : Types.function_type -> Types.ty
 
 val make_callback_ensures :
   State.context ->
@@ -52,6 +53,8 @@ val translate_lambda :
   site:Invocation.site ->
   State.lambda_code ->
   list_facts:(Logic.term list -> Logic.term list) ->
+  list_panic_conditions:(Logic.term list -> (Catalog.Prover.quoted * Logic.term) list) ->
+  list_costs:(Logic.term list -> (Costs.counter * Logic.term * Catalog.Prover.quoted) list) ->
   list_promises:
     (entries:Logic.term list ->
     exits:Logic.term list ->

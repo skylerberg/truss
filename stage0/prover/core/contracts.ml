@@ -137,7 +137,7 @@ let read_signature context path = Lazy.force (find_callee context path).known_si
 
 let list_modified_parts context path position =
   Option.bind (read_signature context path) (fun signature ->
-      Types.list_modified_parts signature position)
+      Types.list_modified_parts signature.modifies position)
 
 let find_callee_clauses context path =
   Option.bind (Lazy.force (find_callee context path).known_clauses) snd

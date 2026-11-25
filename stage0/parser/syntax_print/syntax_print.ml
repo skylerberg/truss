@@ -78,7 +78,7 @@ and show_type_argument = function
   | Count_name name -> name.text
   | Constraint (name, type_) -> name.text ^ " = " ^ show_type_expression type_
 
-and show_function_type { inputs; output; clauses } =
+and show_function_type { inputs; result; clauses } =
   make_form "fn"
     ([
        make_form ""
@@ -89,8 +89,13 @@ and show_function_type { inputs; output; clauses } =
               ^ show_type_expression input.type_)
             inputs);
      ]
-    @ [ show_optional (fun output -> "-> " ^ show_type_expression output) output ]
+    @ [ show_result result ]
     @ list show_clause clauses)
+
+and show_result = function
+  | Some (Returns type_) -> "-> " ^ show_type_expression type_
+  | Some (Lends (written, type_)) -> "lends " ^ show_moded written type_
+  | None -> ""
 
 and show_moded written type_ =
   (match written with Some written -> show_mode written ^ " " | None -> "")
@@ -395,10 +400,7 @@ let show_signature (signature : Syntax.signature) =
   [
     show_definition_name signature.name ^ show_generics signature.generics;
     make_form "" (list show_parameter signature.parameters);
-    (match signature.result with
-    | Some (Returns type_) -> "-> " ^ show_type_expression type_
-    | Some (Lends (written, type_)) -> "lends " ^ show_moded written type_
-    | None -> "");
+    show_result signature.result;
   ]
   @ list show_clause signature.clauses
 

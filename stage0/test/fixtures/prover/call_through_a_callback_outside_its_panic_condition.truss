@@ -1,0 +1,5 @@
+fn past_the_end(count: UInt64, pick: (fn(index: UInt64) -> Int64 uses Panic unless index < count))
+  -> Int64
+{
+  pick(count)
+}

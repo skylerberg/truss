@@ -4,7 +4,13 @@ type ty =
   | Never
 
 and argument = Type of ty | Value of Z.t
-and function_type = { parameters : (Language.Mode.t * ty) list; result : ty; uses : Path.t list }
+
+and function_type = {
+  parameters : (Language.Mode.t * ty) list;
+  result : ty;
+  lends : Language.Mode.t option;
+  uses : Path.t list;
+}
 
 type instantiation = {
   type_arguments : argument list;

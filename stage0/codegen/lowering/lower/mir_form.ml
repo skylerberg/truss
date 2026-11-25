@@ -376,14 +376,14 @@ and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lower
       Targets.lower_nested_function state ~function_type
         ~output:
           (match types_ty with
-          | Some (Types.Function function_type) -> Some (Types.Returns function_type.output)
+          | Some (Types.Function function_type) -> Some function_type.output
           | _ -> None)
         ~captures:
           (List.map
              (fun (capture : Mir.capture) ->
                (Mir_places.lower_place state capture.place, Lowering.ground state capture.type_))
              captures)
-        ~body:(fun inner ~captures:capture_places parameter_places ->
+        ~body:(fun inner ~captures:capture_places ~lending parameter_places ->
           inner.frame <-
             {
               inner.frame with
@@ -392,8 +392,11 @@ and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lower
                   (Mir_places.make_body_frame inner
                      ~owner:(Lowering.lookup_innermost_scope inner)
                      ~passed:(List.map (fun (_, mode, _) -> mode) parameter_places)
-                     ~lambdas lambda);
+                     ?lending ~lambdas lambda);
             };
+          Option.iter
+            (fun (lending : Lowering.lending) -> inner.lend_record <- Some lending.record)
+            lending;
           List.iter2 (Mir_places.bind_local inner) lambda.captures capture_places;
           Mir_lends.make_owned_locals inner;
           List.iter2
@@ -509,6 +512,7 @@ and lower_call_into state (call : Mir.call) destination ~origin =
       let value = Mir_places.lower_operand_place state function_value in
       Targets.lower_indirect_call state ~function_type ~value
         ~site:(Some (Mir_places.locate_site state origin))
+        ~has_panic_condition:(Definitions.has_panic_condition call.callee.uses)
         (List.map
            (fun argument ->
              let _, _, place = Mir_calls.lower_argument_place state argument in
@@ -593,12 +597,7 @@ and lend ?(forwards = 0) state part (call : Mir.call) ~origin =
               ~default:(Constant (Site (Mir_places.locate_site state origin)));
           ]
       in
-      let compute_lent_place (output : Types.result) substitution emit_call =
-        let mode, part_ty =
-          match output with
-          | Lends (mode, ty) -> (mode, Monomorphic.ground state.context.monomorphic substitution ty)
-          | Returns _ -> Definitions.raise_bug "a lending call of a method that does not lend"
-        in
+      let compute_lent_place (mode : Language.Mode.t) part_ty emit_call =
         Mir_lends.emit_mark state Lend_begin lent;
         if Lowering.is_zero_size state part_ty then begin
           emit_call ~lending:(list_lent_operands part_ty) (Mir_places.make_discard_place state);
@@ -623,7 +622,13 @@ and lend ?(forwards = 0) state part (call : Mir.call) ~origin =
             let arguments =
               Mir_calls.evaluate_arguments state signature substitution call.arguments
             in
-            compute_lent_place signature.output substitution (fun ~lending destination ->
+            let mode, part_ty =
+              match signature.output with
+              | Lends (mode, ty) ->
+                  (mode, Monomorphic.ground state.context.monomorphic substitution ty)
+              | Returns _ -> Definitions.raise_bug "a lending call of a method that does not lend"
+            in
+            compute_lent_place mode part_ty (fun ~lending destination ->
                 Targets.lower_item_call state
                   (Lowered.Item.make_code path instantiation)
                   ~signature ~substitution ~arguments ~lending ~destination
@@ -631,8 +636,30 @@ and lend ?(forwards = 0) state part (call : Mir.call) ~origin =
                   ())
         | Capability_method { capability; name } ->
             Targets.raise_lending_capability_method capability name
-        | Indirect _ ->
-            Definitions.raise_bug "a lending call of a function value, whose type cannot lend"
+        | Indirect function_value ->
+            let function_type =
+              match Mir_places.compute_operand_type state function_value with
+              | Function function_type -> function_type
+              | callee_ty -> Definitions.raise_bug "a call of %s" (Ground.to_string callee_ty)
+            in
+            let value = Mir_places.lower_operand_place state function_value in
+            let places =
+              List.map
+                (fun argument ->
+                  let _, _, place = Mir_calls.lower_argument_place state argument in
+                  place)
+                call.arguments
+            in
+            let mode =
+              match function_type.lends with
+              | Some mode -> mode
+              | None -> Definitions.raise_bug "a lending call of a function value that returns"
+            in
+            compute_lent_place mode function_type.result (fun ~lending destination ->
+                Targets.lower_indirect_call state ~function_type ~value
+                  ~site:(Some (Mir_places.locate_site state origin))
+                  ~has_panic_condition:(Definitions.has_panic_condition call.callee.uses)
+                  ~lending places destination)
         | Intrinsic _ -> Definitions.raise_bug "a lending call of an intrinsic that lends no part"
       in
       Mir_lends.emit_mark state Lend_called lent;

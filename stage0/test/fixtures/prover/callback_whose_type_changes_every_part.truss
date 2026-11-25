@@ -1,0 +1,8 @@
+type Reader(text: String, position: UInt64, lines: UInt64)
+
+fn step_keeping_lines(reader: mut Reader, step: fn(mut Reader)) -> UInt64
+  ensures result == old(reader.lines)
+{
+  step(mut reader)
+  reader.lines
+}

@@ -1,0 +1,21 @@
+fn first_or_zero(count: UInt64, pick: (fn(index: UInt64) -> Int64 uses Panic unless index < count))
+  -> Int64
+{
+  if count > 0 { pick(0) } else { 0 }
+}
+
+fn read_at(items: List[Int64], index: UInt64) -> Int64
+  uses Panic unless index < items.length()
+{
+  if index < items.length() { items[index] } else { Panic.crash("out of range") }
+}
+
+fn through_a_named_function(items: List[Int64]) -> Int64 {
+  first_or_zero(items.length(), fn(index) { read_at(items, index) })
+}
+
+fn through_a_lambda(items: List[Int64]) -> Int64 {
+  first_or_zero(items.length(), fn(index) {
+    if index < items.length() { items[index] } else { Panic.crash("out of range") }
+  })
+}

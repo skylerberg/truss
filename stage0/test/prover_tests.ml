@@ -2217,6 +2217,36 @@ let () =
       expect_proven Fixtures.Prover.index_chosen_by_a_callback);
   Harness.test "a lambda must meet its callback type's ensures" (fun () ->
       expect_not_proven Fixtures.Prover.lambda_breaking_its_callback_ensures "prover.ensures");
+  Harness.test "a call through a callback keeps every part its type's modifies does not name"
+    (fun () -> expect_proven Fixtures.Prover.callback_changing_only_the_parts_its_type_names);
+  Harness.test "a call through a callback whose type has no modifies changes every part" (fun () ->
+      expect_not_proven Fixtures.Prover.callback_whose_type_changes_every_part "prover.ensures");
+  Harness.test "a call through a callback proves its type's panic condition" (fun () ->
+      expect_not_proven Fixtures.Prover.call_through_a_callback_outside_its_panic_condition
+        "prover.panic"
+        ~fixed:("  -> Int64\n{", "  -> Int64\n  uses Panic\n{"));
+  Harness.test "a callback's panic condition lets a callee without Panic call it" (fun () ->
+      expect_proven Fixtures.Prover.call_through_a_callback_inside_its_panic_condition);
+  Harness.test "a function that panics with no condition is no callback with a panic condition"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.function_that_panics_passed_for_a_panic_condition
+        "prover.requires");
+  Harness.test "a lambda does not panic where its callback type's condition holds" (fun () ->
+      expect_not_proven Fixtures.Prover.lambda_that_panics_where_its_callback_condition_holds
+        "prover.overflow");
+  Harness.test "a forwarded callback's panic condition implies the callee's" (fun () ->
+      expect_not_proven Fixtures.Prover.callback_forwarded_with_a_weaker_panic_condition
+        "prover.requires");
+  Harness.test "a callback's cost may depend on its inputs" (fun () ->
+      expect_proven Fixtures.Prover.callback_cost_on_its_input);
+  Harness.test "a function passed for a callback keeps the cost its type states on its inputs"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.function_above_a_callback_cost_on_its_input "prover.cost");
+  Harness.test "a call through a lending callback proves its type's requires" (fun () ->
+      expect_not_proven Fixtures.Prover.lending_callback_outside_its_requires "prover.requires"
+        ~fixed:("),\n) {", "),\n)\n  requires index < 2\n{"));
+  Harness.test "the prover does not read an ensures on a lending callback's type" (fun () ->
+      expect_not_proven Fixtures.Prover.lending_callback_with_an_ensures "prover.unsupported");
   Harness.test "a named function's ensures must imply its callback type's" (fun () ->
       expect_not_proven Fixtures.Prover.named_function_breaking_its_callback_ensures
         "prover.ensures");

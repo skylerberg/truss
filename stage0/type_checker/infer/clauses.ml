@@ -86,13 +86,16 @@ let check_cost_operand state (cost : Syntax.cost) (operand : Interface.Elaborato
   | Exactly _ -> State.report state (Upper_bound_in_exact_bound { at; operand = described })
   | Big_o _ | At_most _ -> ()
 
-let check_cost state env (cost : Syntax.cost) =
-  check_resource state cost.resource;
+let check_cost_bound state env (cost : Syntax.cost) =
   match cost.bound with
   | Big_o bound | At_most bound | Exactly bound ->
       List.iter (check_cost_operand state cost)
         (Interface.Elaborator.list_cost_operands (State.read_context state) bound);
       check_integer state env bound ~subject:Cost_bound
+
+let check_cost state env (cost : Syntax.cost) =
+  check_resource state cost.resource;
+  check_cost_bound state env cost
 
 let check_time_terminates state (clause : Syntax.clause) ~uses =
   match Types.find_unless (Built_in Run_forever) uses with

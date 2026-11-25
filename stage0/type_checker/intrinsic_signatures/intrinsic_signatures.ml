@@ -85,9 +85,10 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
     Types.Function
       {
         inputs = [ (Read, work_item) ];
-        output = Types.unit;
+        output = Types.Returns Types.unit;
         uses = Types.make_capability_set [ Built_in Run_forever ];
         costs = [];
+        modifies = [];
       }
   in
   let with_storage ?(mode = Language.Mode.Read) ?(output = Types.Returns Types.unit) rest =
@@ -236,9 +237,10 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
           let change : Types.function_type =
             {
               inputs = [ (Mut, value); (Own, make_parameter_type "Input") ];
-              output = make_parameter_type "Result";
+              output = Returns (make_parameter_type "Result");
               uses = Types.make_capability_set [ Built_in Run_forever ];
               costs = [];
+              modifies = [];
             }
           in
           {

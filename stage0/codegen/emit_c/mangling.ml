@@ -74,13 +74,16 @@ let mangle_mode : Language.Mode.t -> string = function
 let rec mangle_ty (ty : Ground.ty) =
   match ty with
   | Named { path; arguments } -> mangle_path path ^ mangle_arguments arguments
-  | Function { parameters; result; uses } ->
+  | Function { parameters; result; lends; uses } ->
       render_marker "Fn"
       ^ String.concat ""
           (List.map
              (fun (mode, ty) -> mangle_mode mode ^ mangle_ty ty ^ render_marker "And")
              parameters)
-      ^ render_marker "Returns" ^ mangle_ty result
+      ^ (match lends with
+        | Some mode -> render_marker "Lends" ^ mangle_mode mode
+        | None -> render_marker "Returns")
+      ^ mangle_ty result
       ^ (match uses with
         | [] -> ""
         | uses ->

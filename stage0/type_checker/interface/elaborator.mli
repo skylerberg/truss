@@ -1,6 +1,12 @@
 type t
 
-val create : Lookups.t -> Resolve.resolved -> Environment.known_bounds Environment.scope -> t
+val create :
+  Lookups.t ->
+  Resolve.resolved ->
+  Environment.known_bounds Environment.scope ->
+  package:Path.package ->
+  t
+
 val list_known_bounds : t -> Properties.Bounds.t
 val find_self_type : t -> Types.ty option
 val list_diagnostics : t -> Catalog.diagnostic list
@@ -8,6 +14,16 @@ val list_named_types : t -> (Syntax.id * Types.ty) list
 val record_diagnostic : Catalog.diagnostic list ref -> Catalog.Typing.t -> Catalog.reported
 val list_trait_closure : Lookups.t -> Path.t -> Path.t list
 val split_part : Syntax.expression -> (string * Syntax.name list * bool) option
+
+val check_modified_parts :
+  Lookups.t ->
+  package:Path.package ->
+  report:(Catalog.Typing.t -> unit) ->
+  parameters:(string option * Types.ty) list ->
+  Types.modified list ->
+  Syntax.clause list ->
+  unit
+
 val find_bounded_type : t -> Syntax.expression -> Types.ty option
 
 type bound_method = {

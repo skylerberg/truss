@@ -483,6 +483,17 @@ let describe : Ownership.t -> Nodes.description = function
                the whole list, or declare that the function changes only elements, with `modifies` \
                and `[..]`.";
           ])
+  | Undeclared_lambda_change { at = origin; parameter; part; type_ } ->
+      make Undeclared_change (Build.at origin)
+        [
+          Text
+            (Printf.sprintf
+               "`%s` changes here, and the `modifies` clause of this lambda's type, `%s`, does not \
+                name it. The code that calls the lambda takes every part of `%s` that the clause \
+                does not name to keep its value."
+               (Types.show_modified_part ~root:parameter part)
+               (Types.show type_) parameter);
+        ]
   | Undeclared_change
       { at = origin; function_; parameter; part; last_entry; replaced_entry; removed_entries } ->
       let shown = Types.show_modified_part ~root:parameter part in
