@@ -278,21 +278,14 @@ type method_code =
 let locate_method lookups (evidence : Types.evidence) ~name ~receiver =
   match evidence with
   | Impl { impl; substitution } -> Some (Method_of_impl { impl; substitution })
-  | Derived_for_view { viewed; substitution } ->
-      let is_inherited =
-        match Definition.find_impl_interface lookups viewed with
-        | Some viewed_impl -> (
-            match Definition.find_trait_interface lookups viewed_impl.implements.trait with
-            | Some trait -> (
-                match Definition.find_method_of_trait trait ~name ~receiver with
-                | Some declared -> inherits_method trait viewed_impl declared
-                | None -> false)
-            | None -> false)
-        | None -> false
-      in
-      Some
-        (if is_inherited then Declaration_for_view
-         else Method_of_impl { impl = viewed; substitution })
+  | Derived_for_view { viewed; substitution } -> (
+      let viewed_impl = Definition.read_impl_interface lookups viewed in
+      let trait = Definition.read_trait_interface lookups viewed_impl.implements.trait in
+      match Definition.find_method_of_trait trait ~name ~receiver with
+      | Some declared when inherits_method trait viewed_impl declared -> Some Declaration_for_view
+      | Some _ -> Some (Method_of_impl { impl = viewed; substitution })
+      | None ->
+          raise_bug "`%s` declares no method `%s`" (Path.show viewed_impl.implements.trait) name)
   | Bound -> None
 
 type obligation =

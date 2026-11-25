@@ -46,33 +46,22 @@ let make_impl_method trait_interface impl_interface impl (declared : Types.trait
           ~default:declared.method_receiver;
     }
 
-let list_impl_methods (interface : Interface.Lookups.t) impl =
-  let impl_interface = Interface.Definition.read_impl_interface interface impl in
-  let trait_interface =
-    Interface.Definition.read_trait_interface interface impl_interface.implements.trait
-  in
-  List.map (make_impl_method trait_interface impl_interface impl) trait_interface.methods
-
-let list_methods_of_evidence (interface : Interface.Lookups.t) (evidence : Types.evidence) =
-  match evidence with
-  | Impl { impl; _ } -> list_impl_methods interface impl
-  | Derived_for_view { viewed; _ } ->
-      let viewed_impl = Interface.Definition.read_impl_interface interface viewed in
-      let trait = viewed_impl.implements.trait in
-      let trait_interface = Interface.Definition.read_trait_interface interface trait in
-      List.map
-        (fun (declared : Types.trait_method) ->
-          match
-            Interface.Impls.locate_method interface evidence ~name:declared.method_name
-              ~receiver:declared.method_receiver
-          with
-          | Some Declaration_for_view ->
+let list_methods_of_evidence (interface : Interface.Lookups.t) ~trait (evidence : Types.evidence) =
+  let trait_interface = Interface.Definition.read_trait_interface interface trait in
+  List.filter_map
+    (fun (declared : Types.trait_method) ->
+      Option.map
+        (function
+          | Interface.Impls.Declaration_for_view ->
               Path.Method
                 { owner = trait; name = declared.method_name; receiver = declared.method_receiver }
-          | Some (Method_of_impl _) | None ->
-              make_impl_method trait_interface viewed_impl viewed declared)
-        trait_interface.methods
-  | Bound -> []
+          | Method_of_impl { impl; _ } ->
+              make_impl_method trait_interface
+                (Interface.Definition.read_impl_interface interface impl)
+                impl declared)
+        (Interface.Impls.locate_method interface evidence ~name:declared.method_name
+           ~receiver:declared.method_receiver))
+    trait_interface.methods
 
 let is_self_of_enclosing_trait (type_ : Types.ty) =
   match type_ with
@@ -90,7 +79,7 @@ let rec list_code_of_impl_for interface ((type_ : Types.ty), (bound : Types.trai
         with
         | (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }) as
           evidence ->
-            list_methods_of_evidence interface evidence
+            list_methods_of_evidence interface ~trait:required.trait evidence
             @ List.concat_map (list_code_of_impl_for interface)
                 (Interface.Impls.list_required_bounds
                    (Interface.Definition.read_impl_interface interface impl).impl_generics
@@ -247,7 +236,9 @@ let list_statement_edges interface instance (statement : Tree.statement) =
         (List.concat_map
            (fun (implementation : Tree.provided) ->
              List.concat_map
-               (fun (provided : Core.provided) -> list_impl_methods interface provided.impl)
+               (fun (provided : Core.provided) ->
+                 list_methods_of_evidence interface ~trait:provided.capability
+                   (Impl { impl = provided.impl; substitution = provided.arguments }))
                implementation.provides)
            provided)
   | Basic
