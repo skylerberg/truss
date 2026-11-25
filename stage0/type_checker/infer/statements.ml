@@ -166,17 +166,6 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
         (check_loop_clause state
            { env with loop_element = Option.map (State.resolve state) !loop_element })
         clauses;
-      State.check_when_final state (fun () ->
-          match state.tables.elaborations.(written.id) with
-          | Some (Loop (Integer_range _ | Elements _)) ->
-              List.iter
-                (fun (clause : Syntax.loop_clause) ->
-                  match clause.kind with
-                  | Loop_decreases _ ->
-                      State.report state (Measure_of_a_loop_that_ends { at = Written clause.id })
-                  | Invariant _ | Loop_cost _ -> ())
-                clauses
-          | _ -> ());
       check_loop_body state env body
   | While { condition = test; clauses; body } ->
       State.reject_in_formula state env (Written written.id) While_statement;

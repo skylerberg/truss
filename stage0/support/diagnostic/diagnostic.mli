@@ -158,7 +158,6 @@ module Code : sig
     | Wrong_receiver
     | Not_indexable
     | Not_iterable
-    | Misplaced_measure
     | Implements_built_in
     | Not_derivable
     | Not_a_type

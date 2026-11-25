@@ -256,28 +256,11 @@ let find_comparison_operator : Logic.operator -> Language.Comparison.t option = 
   | Equal -> Some Equal
   | _ -> None
 
-let is_valid_by_arithmetic (term : Logic.term) =
-  match term with
-  | Operation (operator, [ left; right ]) -> (
-      match (find_comparison_operator operator, Logic.linearize (Logic.minus left right)) with
-      | Some comparison, (sums, difference)
-        when List.for_all (fun (_, coefficient) -> Z.equal coefficient Z.zero) sums -> (
-          let sign = Z.sign difference in
-          match comparison with
-          | Equal -> sign = 0
-          | Not_equal -> sign <> 0
-          | Less -> sign < 0
-          | Less_equal -> sign <= 0
-          | Greater -> sign > 0
-          | Greater_equal -> sign >= 0)
-      | _ -> false)
-  | _ -> false
-
 let find_goal_code context term =
   let rec find_goal (term : Logic.term) : Catalog.Code.t option =
     match term with
     | Operation (And, parts) -> (
-        match List.filter (fun part -> not (is_valid_by_arithmetic part)) parts with
+        match List.filter (fun part -> not (Logic.is_valid part)) parts with
         | [] -> None
         | [ part ] -> find_goal part
         | parts ->
@@ -323,7 +306,7 @@ let add_requires (context : State.context) (frame : State.frame) required : Cata
   match find_signature context with
   | Some (signature, body) when not context.inherits_precondition ->
       let place : Catalog.Prover.clause_place =
-        match context.requires_being_read with
+        match context.requires_clause_being_read with
         | Some origin -> Before_clause (Written (read_requires_clause signature origin).id)
         | None -> Before_body (Written body.id)
       in

@@ -1237,11 +1237,6 @@ let describe : Inference.t -> Nodes.description = function
                Printf.sprintf
                  "A `for` loop cannot consume %s: it implements neither `IntoCursor` nor `Cursor`."
                  (show_shown type_)))
-  | Measure_of_a_loop_that_ends { at = origin } ->
-      make Misplaced_measure (Build.at origin)
-        (say
-           "A loop over a range or over a collection's elements ends without a measure. Delete the \
-            `decreases`.")
   | Cursor_not_cursor { at = origin; type_; cursor } ->
       make Not_iterable (Build.at origin)
         (say

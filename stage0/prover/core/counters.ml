@@ -194,8 +194,8 @@ let check_promise_amounts context (start : State.frame) promises ~output =
                   result)
                 output
             in
-            Conditions.with_obligation_condition context promise.clause.holds_when (fun () ->
-                ignore (Validity.read_specification context { start with result } amount)))
+            Validity.check_defined context { start with result }
+              ~holds_when:promise.clause.holds_when amount)
     promises
 
 let check_promise ?restated (context : State.context) (frame : State.frame) promise

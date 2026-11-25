@@ -107,7 +107,7 @@ and path_note = Catalog.Prover.path_note =
   | Condition_holds of {
       condition : Core.origin;
       holds : bool;
-      local_value : (string * bool) option;
+      tested_local : (Core.local * bool) option;
     }
   | Else_runs of Core.origin
   | Returns_early of Core.origin

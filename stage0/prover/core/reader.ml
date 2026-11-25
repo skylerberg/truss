@@ -605,7 +605,14 @@ let bind_parts context (frame : State.frame) run =
 
 let note_path (context : State.context) (frame : State.frame) (note : Mir.path_note) =
   if frame.makes_obligations && Facts.is_home context frame.source then
-    context.path_notes <- (note, frame.condition) :: context.path_notes
+    let tested =
+      match note with
+      | Condition_holds { tested_local = Some (local, value); _ } ->
+          Option.map (fun term -> (term, value)) (Locals.find_opt (Core_local local) frame.locals)
+      | Condition_holds { tested_local = None; _ } | Arm_taken _ | Else_runs _ | Returns_early _ ->
+          None
+    in
+    context.path_notes <- { note; reached = frame.condition; tested } :: context.path_notes
 
 let refresh_place context frame ty (place : State.passed_place) =
   let fresh_value = Facts.arrive context frame "changed" ty in

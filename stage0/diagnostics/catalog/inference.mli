@@ -355,7 +355,6 @@ type t =
   | Unused_value of { at : Core.origin; type_ : Types.ty }
   | Let_else_falls_through of { at : Core.origin }
   | Not_iterable_loop of { at : Core.origin; mode : Language.Mode.t; is_view : bool; type_ : shown }
-  | Measure_of_a_loop_that_ends of { at : Core.origin }
   | Cursor_not_cursor of { at : Core.origin; type_ : Types.ty; cursor : Types.ty }
   | Not_displayable of { at : Core.origin; type_ : Types.ty }
   | Interpolation_not_convertible of {

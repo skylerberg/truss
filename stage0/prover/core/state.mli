@@ -154,7 +154,7 @@ type context = {
   mutable returns : (frame * Logic.term option) list;
   mutable enclosing_provides : Mir.provided list list;
   mutable instantiating : Path.t list;
-  mutable reading_requires : Path.t list;
+  mutable callees_whose_requires_are_read : Path.t list;
   mutable axiomatizing : Logic.symbol list;
   axiom_clauses : unit Tables.Axiom_clause_table.t;
   mutable open_axioms : open_axiom list;
@@ -171,7 +171,7 @@ type context = {
   lambda_definitions : Logic.term Tables.Symbol_table.t;
   models : (Logic.term -> Logic.term) option Tables.Model_table.t;
   mutable equalities : Logic.term list;
-  mutable path_notes : (Catalog.Prover.path_note * Logic.term) list;
+  mutable path_notes : Obligation.noted_path list;
   mutable entry : Logic.symbol list;
   inherits_precondition : bool;
   mutable holes : (Resolve.Names.key * Obligation.location) list;
@@ -191,7 +191,7 @@ type context = {
   mutable can_declare_panic : bool;
   panic_condition : Catalog.Prover.quoted list option;
   mutable obligation_condition : Types.condition;
-  mutable requires_being_read : Core.origin option;
+  mutable requires_clause_being_read : Core.origin option;
   mutable skipped_conditions : Types.condition list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;
   read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;

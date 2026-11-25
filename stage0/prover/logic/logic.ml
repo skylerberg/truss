@@ -536,26 +536,31 @@ let find_constant_difference left right =
   if List.for_all (fun (_, coefficient) -> Z.equal coefficient Z.zero) atoms then Some constant
   else None
 
-let has_difference_sign left right ~fails =
-  match find_constant_difference left right with
-  | Some difference -> fails (Z.sign difference)
-  | None -> false
+let decide_comparison_of_constant_difference = function
+  | Operation (operator, [ left; right ]) -> (
+      let holds_at_sign =
+        match operator with
+        | Less -> Some (fun sign -> sign < 0)
+        | Less_equal -> Some (fun sign -> sign <= 0)
+        | Greater -> Some (fun sign -> sign > 0)
+        | Greater_equal -> Some (fun sign -> sign >= 0)
+        | Equal -> Some (fun sign -> sign = 0)
+        | _ -> None
+      in
+      match (holds_at_sign, find_constant_difference left right) with
+      | Some holds_at_sign, Some difference -> Some (holds_at_sign (Z.sign difference))
+      | _ -> None)
+  | _ -> None
 
 let rec is_refuted = function
   | Boolean value -> not value
-  | Operation (Less, [ left; right ]) ->
-      has_difference_sign left right ~fails:(fun sign -> sign >= 0)
-  | Operation (Less_equal, [ left; right ]) ->
-      has_difference_sign left right ~fails:(fun sign -> sign > 0)
-  | Operation (Greater, [ left; right ]) ->
-      has_difference_sign left right ~fails:(fun sign -> sign <= 0)
-  | Operation (Greater_equal, [ left; right ]) ->
-      has_difference_sign left right ~fails:(fun sign -> sign < 0)
-  | Operation (Equal, [ left; right ]) ->
-      has_difference_sign left right ~fails:(fun sign -> sign <> 0)
   | Operation (And, parts) -> List.exists is_refuted parts
   | Operation (Or, parts) -> List.for_all is_refuted parts
-  | _ -> false
+  | term -> decide_comparison_of_constant_difference term = Some false
+
+let is_valid = function
+  | Boolean value -> value
+  | term -> decide_comparison_of_constant_difference term = Some true
 
 let rec mentions symbols = function
   | Symbol name -> List.mem name symbols

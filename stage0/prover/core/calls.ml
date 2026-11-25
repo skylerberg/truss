@@ -346,12 +346,12 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       precondition_clauses.requires
   in
   let required =
-    if List.exists (Path.equal path) context.reading_requires then Logic.Boolean true
+    if List.exists (Path.equal path) context.callees_whose_requires_are_read then Logic.Boolean true
     else begin
-      let reading_requires = context.reading_requires in
-      context.reading_requires <- path :: reading_requires;
+      let outer = context.callees_whose_requires_are_read in
+      context.callees_whose_requires_are_read <- path :: outer;
       Fun.protect
-        ~finally:(fun () -> context.reading_requires <- reading_requires)
+        ~finally:(fun () -> context.callees_whose_requires_are_read <- outer)
         (fun () -> Logic.conjunction (read_required ()))
     end
   in

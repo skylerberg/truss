@@ -607,6 +607,12 @@ let () =
         "prover.termination");
   Harness.test "a loop's measure must be well defined" (fun () ->
       expect_not_proven Fixtures.Prover.loop_measure_reading_an_element "prover.out_of_bounds");
+  Harness.test "a loop's cost clause is defined after each iteration" (fun () ->
+      expect_not_proven Fixtures.Prover.loop_cost_clause_dividing_by_a_local_that_the_body_zeroes
+        "prover.division");
+  Harness.test "a measure on a loop over a range or a list is compared at each iteration" (fun () ->
+      expect_proven Fixtures.Prover.measures_of_loops_over_a_range_and_a_list;
+      expect_not_proven Fixtures.Prover.range_loop_measure_that_stays_the_same "prover.termination");
   Harness.test "an impl of FiniteCursor whose next does not decrease remaining is rejected"
     (fun () ->
       expect_not_proven Fixtures.Prover.finite_cursor_whose_next_does_not_decrease_remaining

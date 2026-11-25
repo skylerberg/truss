@@ -1,0 +1,9 @@
+fn f(count: UInt64) -> UInt64 {
+  var total: UInt64 = 0
+  for index in 0..count
+    decreases 5
+  {
+    total = index
+  }
+  total
+}

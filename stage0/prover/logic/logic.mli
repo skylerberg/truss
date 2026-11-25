@@ -157,6 +157,7 @@ val truncated_remainder : term -> term -> term
 val integer_of_bits : is_signed:bool -> width:int -> term -> term
 val mentions : symbol list -> term -> bool
 val is_refuted : term -> bool
+val is_valid : term -> bool
 val list_free_constants : term -> symbol list
 val has_quantifier : term -> bool
 val remove_quantified_facts : query -> query

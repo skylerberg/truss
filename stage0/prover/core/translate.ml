@@ -12,7 +12,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       can_declare_panic;
       panic_condition;
       obligation_condition = [];
-      requires_being_read = None;
+      requires_clause_being_read = None;
       skipped_conditions = [];
       run_body = (fun frame ~lambdas body -> Reader.read_body context frame ~lambdas body);
       read_formula =
@@ -45,7 +45,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       returns = [];
       enclosing_provides = [];
       instantiating = [];
-      reading_requires = [];
+      callees_whose_requires_are_read = [];
       axiomatizing = [];
       open_axioms = [];
       axioms_of = Tables.Symbol_table.create 16;
@@ -114,10 +114,10 @@ let is_capability_implementation (lookups : Lookups.t) (path : Path.t) =
   | _ -> false
 
 let read_requires (context : State.context) frame (requirement : Mir.formula) =
-  let outer = context.requires_being_read in
-  context.requires_being_read <- Some requirement.origin;
+  let outer = context.requires_clause_being_read in
+  context.requires_clause_being_read <- Some requirement.origin;
   Fun.protect
-    ~finally:(fun () -> context.requires_being_read <- outer)
+    ~finally:(fun () -> context.requires_clause_being_read <- outer)
     (fun () ->
       Conditions.with_obligation_condition context requirement.holds_when (fun () ->
           Validity.read_specification context frame requirement))
@@ -435,8 +435,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   Counters.check_promise_amounts context start promised ~output;
   List.iter
     (fun (measure : Mir.formula) ->
-      Conditions.with_obligation_condition context measure.holds_when (fun () ->
-          ignore (Validity.read_specification context start measure)))
+      Validity.check_defined context start ~holds_when:measure.holds_when measure)
     measures;
   Reader.read_body context start ~lambdas:mir.lambdas mir.body;
   let returns = List.rev context.returns in

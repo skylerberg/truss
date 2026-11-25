@@ -16,6 +16,12 @@ type run =
 
 type location = Catalog.Prover.location = Node of Core.origin | Whole_definition
 
+type noted_path = {
+  note : Catalog.Prover.path_note;
+  reached : Logic.term;
+  tested : (Logic.term * bool) option;
+}
+
 type t = {
   obligation : Catalog.Prover.obligation;
   instance : Catalog.Prover.instance;
@@ -25,7 +31,7 @@ type t = {
   query : Logic.query;
   values : (Logic.symbol * string) list;
   locals : (Logic.term * string) list;
-  path_notes : (Catalog.Prover.path_note * Logic.term) list;
+  path_notes : noted_path list;
   has_untriggered_written_fact : bool;
   is_rejection : bool;
 }

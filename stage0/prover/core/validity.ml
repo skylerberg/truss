@@ -76,6 +76,10 @@ let run_as_specification (context : State.context) read =
 let read_specification (context : State.context) frame (formula : Mir.formula) =
   run_as_specification context (fun () -> context.read_formula frame formula ~arguments:[])
 
+let check_defined context frame ~holds_when (formula : Mir.formula) =
+  Conditions.with_obligation_condition context holds_when (fun () ->
+      ignore (read_specification context frame formula))
+
 let select_field context ty variant field term =
   match (term, Facts.find_constructors context ty) with
   | Logic.Apply (name, arguments), Some shape when name = Facts.make_constructor_symbol ty variant
