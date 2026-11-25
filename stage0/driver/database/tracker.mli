@@ -35,7 +35,7 @@ val record_group :
 val mark_stale : t -> Kind.stage -> int -> unit
 val mark_readers : t -> Kind.target -> int -> string -> unit
 val mark_readers_of_all : t -> (Kind.target * int * string) list -> unit
-val call_graph : Store.call_graph
+val proof_graph : Store.proof_graph
 val mark_position_holders : t -> Kind.target -> int -> string -> unit
 
 type 'value outcome = Value of 'value | Failed | Blocked

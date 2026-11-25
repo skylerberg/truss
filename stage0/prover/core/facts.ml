@@ -496,6 +496,19 @@ let is_evaluated_constant (context : State.context) path code =
        (Types.find_specification_only_type
           (Interface.Definition.read_constant_type context.lookups.interface path))
 
+let make_catalog_dependency (dependency : Mir.Call_edges.dependency) : Catalog.Prover.dependency =
+  {
+    kind = (match dependency.kind with Read -> Reads | Direct_call -> Calls | Supplied _ -> Uses);
+    path = dependency.path;
+    omitted =
+      Option.map
+        (fun (omitted : Mir.Call_edges.omitted) : Catalog.Prover.omitted ->
+          match omitted with
+          | Field field -> Omitted_field field
+          | Argument parameter -> Omitted_argument parameter)
+        dependency.omitted;
+  }
+
 let reject_constant_cycle (context : State.context) (frame : State.frame) (code : Mir.t) =
   if context.lookups.list_recursion_group context.node <> [] then
     List.iter
@@ -503,29 +516,108 @@ let reject_constant_cycle (context : State.context) (frame : State.frame) (code 
         if is_in_recursion_group context dependency.path then
           oblige context frame (Node dependency.origin)
             (Constant_cycle
-               {
-                 cyclic = context.node;
-                 dependency =
-                   {
-                     kind =
-                       (match dependency.kind with
-                       | Read -> Reads
-                       | Direct_call -> Calls
-                       | Supplied _ -> Uses);
-                     path = dependency.path;
-                     omitted =
-                       Option.map
-                         (fun (omitted : Mir.Call_edges.omitted) : Catalog.Prover.omitted ->
-                           match omitted with
-                           | Field field -> Omitted_field field
-                           | Argument parameter -> Omitted_argument parameter)
-                         dependency.omitted;
-                   };
-               })
+               { cyclic = context.node; dependency = make_catalog_dependency dependency })
             (Logic.Boolean false))
       (Mir.Call_edges.list_dependencies
          { interface = context.lookups.interface; mir = context.lookups.mir }
          Types.no_substitution code)
+
+type circular_proof = { location : Obligation.location; proof : Catalog.Prover.circular_proof }
+
+let is_in_proof_cycle (context : State.context) path =
+  List.exists (Path.equal path) (context.lookups.list_proof_group context.node)
+  && not (is_in_recursion_group context path)
+
+let has_proof_cycle (context : State.context) =
+  List.exists
+    (fun member -> not (is_in_recursion_group context member))
+    (context.lookups.list_proof_group context.node)
+
+let list_circular_dependencies context ~make_proof dependencies =
+  List.filter_map
+    (fun (dependency : Mir.Call_edges.dependency) ->
+      if is_in_proof_cycle context dependency.path then
+        Some
+          {
+            location = Obligation.Node dependency.origin;
+            proof = make_proof (make_catalog_dependency dependency);
+          }
+      else None)
+    dependencies
+
+let list_circular_instance_uses (context : State.context) (frame : State.frame) lookups =
+  let reported = ref [] in
+  List.filter_map
+    (fun (instance : Mir.Call_edges.instance_use) ->
+      match List.find_opt (is_in_proof_cycle context) instance.dependencies with
+      | Some dependency when not (List.exists (Path.equal dependency) !reported) ->
+          reported := dependency :: !reported;
+          Some
+            {
+              location =
+                (match instance.used.origin with
+                | Some origin -> locate context frame.source origin
+                | None -> Whole_definition);
+              proof =
+                Circular_instance { type_ = instance.used.type_; dependency; cyclic = context.node };
+            }
+      | Some _ | None -> None)
+    (Mir.Call_edges.list_instance_uses lookups context.node)
+
+let list_circular_clauses (context : State.context) frame ~type_ =
+  let lookups : Mir.Call_edges.lookups =
+    { interface = context.lookups.interface; mir = context.lookups.mir }
+  in
+  let make_proof clause dependency : Catalog.Prover.circular_proof =
+    Circular_clause { clause; type_; dependency }
+  in
+  if has_proof_cycle context then
+    list_circular_dependencies context ~make_proof:(make_proof Invariant_clause)
+      (Mir.Call_edges.list_invariant_dependencies lookups context.node)
+    @ list_circular_dependencies context ~make_proof:(make_proof Potential_clause)
+        (Mir.Call_edges.list_potential_dependencies lookups context.node)
+    @ list_circular_instance_uses context frame lookups
+  else []
+
+let has_circular_clause lookups group member =
+  List.exists
+    (fun (dependency : Mir.Call_edges.dependency) -> List.exists (Path.equal dependency.path) group)
+    (Mir.Call_edges.list_invariant_dependencies lookups member
+    @ Mir.Call_edges.list_potential_dependencies lookups member)
+
+let list_circular_contracts (context : State.context) frame =
+  if not (has_proof_cycle context) then []
+  else
+    let lookups : Mir.Call_edges.lookups =
+      { interface = context.lookups.interface; mir = context.lookups.mir }
+    in
+    let written = Mir.Call_edges.list_contract_dependencies lookups context.node in
+    let is_written (inherited : Mir.Call_edges.dependency) =
+      List.exists
+        (fun (dependency : Mir.Call_edges.dependency) -> Path.equal dependency.path inherited.path)
+        written
+    in
+    match
+      list_circular_dependencies context
+        ~make_proof:(fun dependency -> Circular_contract { cyclic = context.node; dependency })
+        written
+      @ List.map
+          (fun (circular : circular_proof) -> { circular with location = Whole_definition })
+          (list_circular_dependencies context
+             ~make_proof:(fun dependency ->
+               Circular_inherited_contract { cyclic = context.node; dependency })
+             (List.filter
+                (fun inherited -> not (is_written inherited))
+                (Mir.Call_edges.list_inherited_contract_dependencies lookups context.node)))
+      @ list_circular_instance_uses context frame lookups
+    with
+    | [] -> []
+    | circular ->
+        let group = context.lookups.list_proof_group context.node in
+        if List.exists (has_circular_clause lookups group) group then [] else circular
+
+let reject_circular_proof context frame (circular : circular_proof) =
+  oblige context frame circular.location (Circular_proof circular.proof) (Logic.Boolean false)
 
 let quote (source : State.source) origin : Catalog.Prover.quoted = { key = source.key; origin }
 
@@ -803,6 +895,93 @@ let name_path_condition context (frame : State.frame) condition =
       add_frame_fact context frame (Logic.equal path condition);
       path
 
+let find_shared_potential_summands
+    (values : (Logic.term * (Logic.term * Logic.term) list * Logic.term) list) =
+  let joined_terms = List.concat_map (fun (_, renamings, _) -> List.map snd renamings) values in
+  let linear =
+    List.map (fun (on, renamings, amount) -> (on, renamings, Costs.linearize amount)) values
+  in
+  let find_coefficient sums atom = Option.value (List.assoc_opt atom sums) ~default:Z.zero in
+  let joined_atoms =
+    List.fold_left
+      (fun atoms (_, _, (sums, _)) ->
+        List.fold_left
+          (fun atoms (atom, _) ->
+            if
+              is_potential atom
+              && List.exists (fun joined -> Costs.mentions_part ~part:joined atom) joined_terms
+              && not (List.mem atom atoms)
+            then atoms @ [ atom ]
+            else atoms)
+          atoms sums)
+      [] linear
+  in
+  let align linear atom =
+    match
+      List.find_map
+        (fun (_, _, (sums, _)) ->
+          let coefficient = find_coefficient sums atom in
+          if Z.equal coefficient Z.zero then None else Some coefficient)
+        linear
+    with
+    | None -> linear
+    | Some target ->
+        List.map
+          (fun (on, renamings, (sums, constant)) ->
+            let difference = Z.sub target (find_coefficient sums atom) in
+            if Z.equal difference Z.zero then (on, renamings, (sums, constant))
+            else
+              let on_path =
+                List.fold_left
+                  (fun atom (incoming, joined) -> Logic.replace ~from:joined ~into:incoming atom)
+                  atom renamings
+              in
+              ( on,
+                renamings,
+                Costs.linearize
+                  (Costs.plus
+                     (Costs.combine (sums, constant))
+                     (Costs.times (Logic.Integer difference) (Costs.minus atom on_path))) ))
+          linear
+  in
+  let is_misaligned atom =
+    match linear with
+    | (_, _, (first_sums, _)) :: rest ->
+        let coefficient = find_coefficient first_sums atom in
+        List.exists
+          (fun (_, _, (sums, _)) -> not (Z.equal (find_coefficient sums atom) coefficient))
+          rest
+    | [] -> false
+  in
+  match List.filter is_misaligned joined_atoms with
+  | [] -> None
+  | misaligned ->
+      let aligned = List.fold_left align linear misaligned in
+      let shared =
+        match aligned with
+        | (_, _, (first_sums, _)) :: rest ->
+            List.filter
+              (fun (atom, coefficient) ->
+                is_potential atom
+                && List.for_all
+                     (fun (_, _, (sums, _)) ->
+                       match List.assoc_opt atom sums with
+                       | Some other -> Z.equal other coefficient
+                       | None -> false)
+                     rest)
+              first_sums
+        | [] -> []
+      in
+      Some
+        ( Costs.combine (shared, Z.zero),
+          List.map
+            (fun (on, _, (sums, constant)) ->
+              ( on,
+                Costs.combine
+                  (List.filter (fun (atom, _) -> not (List.mem_assoc atom shared)) sums, constant)
+              ))
+            aligned )
+
 let merge context ?value_type ~condition
     (paths : (Logic.term * State.frame * Logic.term option) list) =
   let first = match paths with (_, first, _) :: _ -> first | [] -> raise_bug "no paths meet" in
@@ -892,22 +1071,19 @@ let merge context ?value_type ~condition
     | Some ty, Some values -> Some (define "self" (declare_sort context ty) values)
     | _ -> first.self
   in
-  let rename_into_joined (frame : State.frame) amount =
-    let renamed =
+  let list_renamings (frame : State.frame) =
+    let renamings =
       Locals.fold
-        (fun id joined renamed ->
+        (fun id joined renamings ->
           match Locals.find_opt id frame.locals with
           | Some incoming when incoming != joined && incoming <> joined ->
-              (incoming, joined) :: renamed
-          | _ -> renamed)
+              (incoming, joined) :: renamings
+          | _ -> renamings)
         locals []
     in
-    let renamed =
-      match (frame.self, self) with
-      | Some incoming, Some joined when incoming <> joined -> (incoming, joined) :: renamed
-      | _ -> renamed
-    in
-    List.fold_left (fun amount (from, into) -> Logic.replace ~from ~into amount) amount renamed
+    match (frame.self, self) with
+    | Some incoming, Some joined when incoming <> joined -> (incoming, joined) :: renamings
+    | _ -> renamings
   in
   let spent =
     List.map
@@ -915,31 +1091,47 @@ let merge context ?value_type ~condition
         let values =
           List.map
             (fun (on, (frame : State.frame), _) ->
+              let renamings = list_renamings frame in
               ( on,
-                rename_into_joined frame
+                renamings,
+                List.fold_left
+                  (fun amount (from, into) -> Logic.replace ~from ~into amount)
                   (match List.assoc_opt key frame.spent with
                   | Some spent_term -> spent_term
-                  | None -> term) ))
+                  | None -> term)
+                  renamings ))
             paths
         in
+        let choose_amount values =
+          match List.rev values with
+          | (_, last) :: earlier ->
+              List.fold_left
+                (fun otherwise (on, value) -> Logic.ite on value otherwise)
+                last earlier
+          | [] -> term
+        in
+        let name_amount choice =
+          if Logic.mentions first.bound choice || mentions_potential choice then choice
+          else
+            let symbol = declare_fresh context first "spent" Logic.Int in
+            add_frame_fact context first (Logic.equal symbol choice);
+            symbol
+        in
         match values with
-        | (_, first_value) :: rest
-          when List.for_all (fun (_, other) -> other == first_value || other = first_value) rest ->
+        | (_, _, first_value) :: rest
+          when List.for_all (fun (_, _, other) -> other == first_value || other = first_value) rest
+          ->
             (key, first_value)
-        | _ ->
-            let choice =
-              match List.rev values with
-              | (_, last) :: earlier ->
-                  List.fold_left
-                    (fun otherwise (on, value) -> Logic.ite on value otherwise)
-                    last earlier
-              | [] -> term
-            in
-            if Logic.mentions first.bound choice || mentions_potential choice then (key, choice)
-            else
-              let symbol = declare_fresh context first "spent" Logic.Int in
-              add_frame_fact context first (Logic.equal symbol choice);
-              (key, symbol))
+        | _ -> (
+            match find_shared_potential_summands values with
+            | None ->
+                ( key,
+                  name_amount (choose_amount (List.map (fun (on, _, value) -> (on, value)) values))
+                )
+            | Some (shared, (_, first_rest) :: others)
+              when List.for_all (fun (_, other) -> other = first_rest) others ->
+                (key, Costs.plus shared first_rest)
+            | Some (shared, rests) -> (key, Costs.plus shared (name_amount (choose_amount rests)))))
       first.spent
   in
   let value =

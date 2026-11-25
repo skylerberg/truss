@@ -119,10 +119,10 @@ fn expand(function: cryptography.HashFunction, secret: List[UInt8], information:
     decreases 255 - counter
   {
     var input = previous.copy()
-    mut input.append_slice(information)
+    mut input.append_items(information)
     mut input.push(counter)
     previous = keyed_hash(function, key: secret, message: input)
-    mut output.append_slice(previous)
+    mut output.append_items(previous)
     counter += 1
   }
   mut output.truncate(length)
@@ -141,17 +141,17 @@ fn push_u24(bytes: mut List[UInt8], value: UInt64) {
 
 fn push_vector8(bytes: mut List[UInt8], content: List[UInt8]) {
   mut bytes.push(intrinsic.convert(content.length() & 255))
-  mut bytes.append_slice(content)
+  mut bytes.append_items(content)
 }
 
 fn push_vector16(bytes: mut List[UInt8], content: List[UInt8]) {
   push_u16(mut bytes, value: content.length())
-  mut bytes.append_slice(content)
+  mut bytes.append_items(content)
 }
 
 fn push_vector24(bytes: mut List[UInt8], content: List[UInt8]) {
   push_u24(mut bytes, value: content.length())
-  mut bytes.append_slice(content)
+  mut bytes.append_items(content)
 }
 
 fn expand_label(
@@ -382,7 +382,7 @@ fn write_record[Stream: streams.Duplex](wire: mut Wire[Stream], content_type: UI
       mut bytes.push(3)
       mut bytes.push(if content_type == 22 { 1 } else { 3 })
       push_u16(mut bytes, value: content.length())
-      mut bytes.append_slice(content)
+      mut bytes.append_items(content)
     }
   }
   system(wire.stream.send_all(bytes))
@@ -420,7 +420,7 @@ fn write_message[Stream: streams.Duplex](wire: mut Wire[Stream], kind: UInt8, bo
 {
   var message: List[UInt8] = [kind]
   push_vector24(mut message, content: body)
-  mut wire.transcript.append_slice(message)
+  mut wire.transcript.append_items(message)
   write_record(mut wire, content_type: 22, content: message)
 }
 
@@ -580,7 +580,7 @@ fn alpn_extension(protocols: List[String]) -> List[UInt8] {
 
 fn client_hello(random: List[UInt8], session: List[UInt8], server_name: String, protocols: List[String], shares: List[Share], cookie: List[UInt8]) -> List[UInt8] {
   var body: List[UInt8] = [3, 3]
-  mut body.append_slice(random)
+  mut body.append_items(random)
   push_vector8(mut body, content: session)
   var suites: List[UInt8] = []
   push_u16(mut suites, value: 4865)
@@ -735,9 +735,9 @@ fn scheme_algorithm(scheme: UInt64) -> Option[x509.SignatureAlgorithm] {
 
 fn signed_content(context: String, digest: List[UInt8]) -> List[UInt8] {
   var content: List[UInt8] = List.filled(32, count: 64)
-  mut content.append_slice(context.bytes())
+  mut content.append_items(context.bytes())
   mut content.push(0)
-  mut content.append_slice(digest)
+  mut content.append_items(digest)
   content
 }
 
@@ -926,7 +926,7 @@ public fn connect[Stream: streams.Duplex](stream: own Stream, host: String, conf
     let function = hello.suite.hash()
     let retry = map.exchange(mut wire.transcript, value: [])
     var transcript = retry_transcript(function, first_hello: retry)
-    mut transcript.append_slice(reply.raw)
+    mut transcript.append_items(reply.raw)
     wire.transcript = own transcript
     let selected = match find_extension(hello.extensions, kind: 51) {
       Some(content) => u16_at(content, at: 0)
@@ -985,7 +985,7 @@ public fn connect[Stream: streams.Duplex](stream: own Stream, host: String, conf
     None => return Err(protocol_error("a key share for a group that was not offered"))
   }
   let shared = agree(own share, peer: server_share.content)?
-  mut wire.transcript.append_slice(reply.raw)
+  mut wire.transcript.append_items(reply.raw)
   require_record_boundary(wire)?
   let handshake = key_schedule(function, shared: shared)
   let client_handshake = derive_secret(function, secret: handshake, label: "c hs traffic", transcript: wire.transcript)
@@ -1019,7 +1019,7 @@ public fn connect[Stream: streams.Duplex](stream: own Stream, host: String, conf
     }
     None => {}
   }
-  mut wire.transcript.append_slice(encrypted.raw)
+  mut wire.transcript.append_items(encrypted.raw)
 
   var message = read_message(mut wire)?
   var request_context: Option[List[UInt8]] = None
@@ -1029,7 +1029,7 @@ public fn connect[Stream: streams.Duplex](stream: own Stream, host: String, conf
     let length: UInt64 = intrinsic.convert(decoded(mut request_decoder.uint8())?)
     request_context = Some(decoded(mut request_decoder.bytes(length))?.to_list())
     requested_schemes = read_extensions(mut request_decoder)?
-    mut wire.transcript.append_slice(message.raw)
+    mut wire.transcript.append_items(message.raw)
     message = read_message(mut wire)?
   }
   if message.kind != 11 {
@@ -1045,19 +1045,19 @@ public fn connect[Stream: streams.Duplex](stream: own Stream, host: String, conf
       Err(error) => return Err(Error.Certificate(error: error))
     }
   }
-  mut wire.transcript.append_slice(message.raw)
+  mut wire.transcript.append_items(message.raw)
 
   let verify = expect_message(mut wire, kind: 15)?
   let transcript_digest = function.digest(wire.transcript)
   check_certificate_verify(verify, chain: chain, label: "TLS 1.3, server CertificateVerify", digest: transcript_digest)?
-  mut wire.transcript.append_slice(verify.raw)
+  mut wire.transcript.append_items(verify.raw)
 
   let finished = expect_message(mut wire, kind: 20)?
   let expected = finished_data(function, base: server_handshake, transcript: wire.transcript)
   if !cryptography.constant_time_equal(finished.body, second: expected) {
     return Err(Error.Alert(description: 51))
   }
-  mut wire.transcript.append_slice(finished.raw)
+  mut wire.transcript.append_items(finished.raw)
   require_record_boundary(wire)?
   let master = master_secret(function, handshake: handshake)
   let client_application = derive_secret(function, secret: master, label: "c ap traffic", transcript: wire.transcript)
@@ -1314,7 +1314,7 @@ fn choose_protocol(server: List[String], extensions: List[Extension]) -> Result[
 
 fn server_hello(random: List[UInt8], session: List[UInt8], suite: Suite, share: Extension) -> List[UInt8] {
   var body: List[UInt8] = [3, 3]
-  mut body.append_slice(random)
+  mut body.append_items(random)
   push_vector8(mut body, content: session)
   push_u16(mut body, value: intrinsic.convert(suite.code()))
   mut body.push(0)
@@ -1384,7 +1384,7 @@ public fn accept[Stream: streams.Duplex](stream: own Stream, config: ServerConfi
   let response = respond(client_share.kind, peer: client_share.content)?
   let public_key = response.public_key.copy()
   let shared = response.shared.copy()
-  mut wire.transcript.append_slice(message.raw)
+  mut wire.transcript.append_items(message.raw)
   require_record_boundary(wire)?
   let random = random_bytes(32)
   let reply = server_hello(random, session: hello.session, suite: suite, share: Extension(kind: client_share.kind, content: own public_key))
@@ -1441,7 +1441,7 @@ public fn accept[Stream: streams.Duplex](stream: own Stream, config: ServerConfi
   if requests_certificate {
     let presented = expect_message(mut wire, kind: 11)?
     peer = parse_certificates(presented.body)?
-    mut wire.transcript.append_slice(presented.raw)
+    mut wire.transcript.append_items(presented.raw)
     if peer.is_empty() {
       if config.client_certificates == ClientCertificates.Required {
         return Err(Error.Alert(description: 116))
@@ -1454,7 +1454,7 @@ public fn accept[Stream: streams.Duplex](stream: own Stream, config: ServerConfi
       let client_verify = expect_message(mut wire, kind: 15)?
       let client_digest = function.digest(wire.transcript)
       check_certificate_verify(client_verify, chain: peer, label: "TLS 1.3, client CertificateVerify", digest: client_digest)?
-      mut wire.transcript.append_slice(client_verify.raw)
+      mut wire.transcript.append_items(client_verify.raw)
     }
   }
 

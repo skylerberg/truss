@@ -249,6 +249,120 @@ let () =
   Harness.test "a call in a constant's value meets its callee's requires" (fun () ->
       expect_not_proven Fixtures.Prover.constant_calling_outside_a_requires "prover.requires")
 
+let () =
+  let expect_circular = Support.expect_one_diagnostic ~check in
+  let expect_circular_at_each text ~says =
+    let diagnostics = list_diagnostics text in
+    if
+      List.length diagnostics <> List.length says
+      || not
+           (List.for_all2
+              (fun (diagnostic : Diagnostic.t) affix ->
+                Diagnostic.Code.name diagnostic.code = "prover.circular_proof"
+                && String.includes ~affix diagnostic.message)
+              diagnostics says)
+    then
+      Harness.fail "found [%s]"
+        (String.concat "; "
+           (List.map
+              (fun (diagnostic : Diagnostic.t) ->
+                Diagnostic.Code.name diagnostic.code ^ ": " ^ diagnostic.message)
+              diagnostics))
+  in
+  Harness.test "an invariant that calls a method of its type is an error" (fun () ->
+      expect_circular Fixtures.Prover.invariant_calling_a_method_of_its_type "prover.circular_proof"
+        ~says:
+          "This calls `Counter.value`, whose proof depends on the invariant of `Counter`, so the \
+           invariant would be proven from itself."
+        ~at:("self.value()", 1));
+  Harness.test "an invariant that calls a function that builds a value of its type is an error"
+    (fun () ->
+      expect_circular Fixtures.Prover.invariant_calling_a_function_that_builds_its_type
+        "prover.circular_proof"
+        ~says:"This calls `through`, whose proof depends on the invariant of `Counter`"
+        ~at:("through(count)", 1));
+  Harness.test "an invariant that reaches a user of its type through a call is an error" (fun () ->
+      expect_circular Fixtures.Prover.invariant_calling_a_function_that_reaches_a_user_of_its_type
+        "prover.circular_proof"
+        ~says:"This calls `bound`, whose proof depends on the invariant of `Counter`"
+        ~at:("bound()", 1));
+  Harness.test "an invariant that reaches a user of its type through a contract is an error"
+    (fun () ->
+      expect_circular
+        Fixtures.Prover.invariant_calling_a_function_whose_contract_calls_a_user_of_its_type
+        "prover.circular_proof"
+        ~says:"This calls `stated`, whose proof depends on the invariant of `Counter`"
+        ~at:("stated(count)", 1));
+  Harness.test "invariants of two types that build each other are an error at each type" (fun () ->
+      expect_circular_at_each Fixtures.Prover.invariants_of_two_types_that_build_each_other
+        ~says:
+          [
+            "This calls `Gauge.read`, whose proof depends on the invariant of `Counter`";
+            "This calls `Counter.value`, whose proof depends on the invariant of `Gauge`";
+          ]);
+  Harness.test "an invariant that calls a method of an element of its own type is an error"
+    (fun () ->
+      expect_circular Fixtures.Prover.invariant_calling_a_method_of_an_element_of_its_type
+        "prover.circular_proof" ~says:"This calls `Chain.head`" ~at:("rest[0].head()", 1));
+  Harness.test "an invariant may call a function of a field's type" (fun () ->
+      expect_proven Fixtures.Prover.invariant_calling_a_function_of_a_field);
+  Harness.test "a requires that calls its own function is an error, and its caller is read"
+    (fun () ->
+      expect_circular Fixtures.Prover.requires_calling_its_own_function "prover.circular_proof"
+        ~says:"This calls `clamp` in its own contract, so the contract would be proven from itself."
+        ~at:("clamp(n)", 1));
+  Harness.test "an ensures that calls its own function is an error" (fun () ->
+      expect_circular Fixtures.Prover.ensures_calling_its_own_function "prover.circular_proof"
+        ~says:"This calls `clamp` in its own contract" ~at:("clamp(n)", 1));
+  Harness.test "contracts of two functions that call each other are an error at each" (fun () ->
+      expect_circular_at_each Fixtures.Prover.contracts_of_two_functions_that_call_each_other
+        ~says:
+          [
+            "This calls `second`, whose proof depends on the contract of `first`";
+            "This calls `first`, whose proof depends on the contract of `second`";
+          ]);
+  Harness.test
+    "a contract that a method takes from its trait is an error where it calls a method whose \
+     contract calls back" (fun () ->
+      expect_circular_at_each
+        Fixtures.Prover.contract_from_a_trait_calling_a_method_whose_contract_calls_back
+        ~says:
+          [
+            "This calls `Marker.measure`, whose proof depends on the contract of `Marker.limit`";
+            "The contract that this method takes from its trait calls `Marker.limit`, whose proof \
+             depends on the contract of `Marker.measure`, so the contract would be proven from \
+             itself.";
+          ]);
+  Harness.test "a recursive function's ensures may call the function" (fun () ->
+      expect_proven Fixtures.Prover.recursive_function_whose_ensures_calls_itself);
+  Harness.test
+    "a generic type's invariant that calls an impl is an error where the impl uses the type"
+    (fun () ->
+      expect_circular_at_each
+        Fixtures.Prover.invariant_of_a_generic_type_calling_the_impl_that_uses_it
+        ~says:
+          [
+            "A value of type `Box[Marker]` is used here, and the invariant of that type or of a \
+             part of it depends on `Marker.measure`, so the invariant would be proven from itself.";
+            "The invariant of that type or of a part of it depends on `Marker.measure`, whose \
+             proof depends on `held`";
+          ]);
+  Harness.test
+    "a generic type that holds itself with its type arguments swapped depends on the impls of both \
+     arguments" (fun () ->
+      expect_circular_at_each Fixtures.Prover.generic_type_holding_itself_with_swapped_arguments
+        ~says:
+          [
+            "A value of type `Alternating[Marker, Ruler]` is used here, and the invariant of that \
+             type or of a part of it depends on `Marker.measure`";
+            "A value of type `Alternating[Ruler, Marker]` is used here. The invariant of that type \
+             or of a part of it depends on `Marker.measure`, whose proof depends on `held`";
+          ]);
+  Harness.test
+    "a method of an impl may use a generic type whose invariant calls another method of the impl"
+    (fun () ->
+      expect_proven Fixtures.Prover.generic_type_whose_invariant_calls_another_method_of_the_impl)
+
 let list_evaluated_definitions text =
   let database = Support.make_database (Support.setup [ ("app.main", text) ]) in
   List.map
@@ -1426,8 +1540,9 @@ let () =
       expect_proven Fixtures.Prover.specification_quantifier_with_a_refutable_pattern);
   Harness.test "a quantifier over a range value reads the range's `count` and `element`" (fun () ->
       expect_proven Fixtures.Prover.quantifier_over_a_range_value);
-  Harness.test "a quantifier in a body over a set reaches every member of the set" (fun () ->
-      expect_proven Fixtures.Prover.quantifier_over_set_members_in_a_body)
+  Harness.test
+    "a quantifier in a body over a set reaches every member once the theorem that relates them is \
+     called" (fun () -> expect_proven Fixtures.Prover.quantifier_over_set_members_in_a_body)
 
 let () =
   Harness.test "a postcondition of a view's method holds of the `String` it was called on"
@@ -2297,13 +2412,12 @@ let () =
           (fun (diagnostic : Diagnostic.t) -> String.includes ~affix:"Give" diagnostic.message)
           diagnostics
       then Harness.fail "a message asks for a change to another package");
-  Harness.test "a loop that pushes on one path names the push and the list it changes" (fun () ->
-      expect_a_message_saying
-        ~says:
-          "The amortized cost of `kept.push(value)` depends on the potential of `kept`, which this \
-           loop changes, so the prover cannot bound the cost of an iteration by the values the \
-           loop does not mutate. Give the loop a `cost` clause."
-        (list_diagnostics Fixtures.Prover.loop_pushing_in_one_branch));
+  Harness.test "a loop that pushes on one path is amortized linear" (fun () ->
+      expect_proven Fixtures.Prover.loop_pushing_in_one_branch);
+  Harness.test "a loop that pushes on one path onto a fresh list is linear" (fun () ->
+      expect_proven Fixtures.Prover.loop_pushing_in_one_branch_within_a_plain_bound);
+  Harness.test "a loop that pushes on one path onto a `mut` parameter is amortized linear"
+    (fun () -> expect_proven Fixtures.Prover.loop_pushing_onto_a_parameter_in_one_branch);
   Harness.test "a loop that pushes on one path is counted by its cost clause" (fun () ->
       expect_proven Fixtures.Prover.loop_pushing_in_one_branch_with_a_cost_clause)
 
@@ -2648,6 +2762,8 @@ let () =
 let () =
   Harness.test "a string's characters collect into a list in time linear in its length" (fun () ->
       expect_proven Fixtures.Prover.characters_collected_in_linear_time);
+  Harness.test "a list of views passed `own` or `mut` holds no potential for its elements"
+    (fun () -> expect_proven Fixtures.Prover.list_of_views_passed_on_in_constant_amortized_time);
   Harness.test "a view holds no potential, so returning one costs constant amortized time"
     (fun () -> expect_proven Fixtures.Prover.view_returned_in_constant_amortized_time);
   Harness.test "a finite cursor collects through a bound in its remaining count of nexts" (fun () ->

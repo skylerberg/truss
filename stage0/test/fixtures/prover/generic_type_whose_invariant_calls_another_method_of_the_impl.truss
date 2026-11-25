@@ -1,0 +1,30 @@
+trait Measured {
+  fn measure(self) -> UInt64
+
+  fn boxed(self) -> UInt64
+}
+
+type Box[Item: Measured](item: Item)
+  invariant item.measure() >= 0
+
+type Marker(count: UInt64)
+
+impl Measured for Marker {
+  fn measure(self) -> UInt64
+    ensures result == self.count
+  {
+    self.count
+  }
+
+  fn boxed(self) -> UInt64
+    ensures result == self.count
+  {
+    read(Box(item: self))
+  }
+}
+
+fn read(box: Box[Marker]) -> UInt64
+  ensures result == box.item.count
+{
+  box.item.count
+}

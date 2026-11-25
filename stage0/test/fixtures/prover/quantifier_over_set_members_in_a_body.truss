@@ -1,5 +1,10 @@
+use standard.set
+
 fn has_zero(numbers: Set[Int64]) -> Bool
   ensures result == (exists member: Int64 => numbers.model().contains(member) && member == 0)
 {
+  proof {
+    set.every_member_is_an_element(numbers)
+  }
   exists number in numbers => number == 0
 }

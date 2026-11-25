@@ -95,20 +95,44 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                        (List.map
                           (fun ((interpolated : Syntax.expression), interpolated_type) ->
                             let interpolated_type = State.finalize_type state interpolated_type in
-                            if Types.equal interpolated_type interpolation_type then Some None
-                            else
-                              let from =
-                                Types.make_trait_reference
-                                  ~arguments:[ Types.Type interpolated_type ]
-                                  (Well_known.make_path From)
+                            let make_from source =
+                              Types.make_trait_reference ~arguments:[ Types.Type source ]
+                                (Well_known.make_path From)
+                            in
+                            let convert_from from =
+                              Some
+                                (Some
+                                   (Tables.make_method_call from From_from
+                                      ~self_type:interpolation_type ~result:interpolation_type
+                                      [ (interpolated, Own) ]))
+                            in
+                            let view = Types.make_view interpolated_type in
+                            if
+                              Types.is_viewable interpolated_type
+                              && Places.is_borrowed state.State.resolved state.State.tables
+                                   interpolated
+                              && Option.is_some
+                                   (State.find_evidence state interpolation_type (make_from view))
+                            then begin
+                              let rec strip_parentheses (written : Syntax.expression) =
+                                match written.kind with
+                                | Parenthesized inner -> strip_parentheses inner
+                                | _ -> written
                               in
+                              let place = strip_parentheses interpolated in
+                              state.places_without_keyword <-
+                                List.filter
+                                  (fun (noted, _) -> noted <> place.id)
+                                  state.places_without_keyword;
+                              Conversions.convert state env ~expression:interpolated
+                                (Written interpolated.id) ~actual:interpolated_type ~expected:view;
+                              convert_from (make_from view)
+                            end
+                            else if Types.equal interpolated_type interpolation_type then Some None
+                            else
+                              let from = make_from interpolated_type in
                               match State.find_evidence state interpolation_type from with
-                              | Some _ ->
-                                  Some
-                                    (Some
-                                       (Tables.make_method_call from From_from
-                                          ~self_type:interpolation_type ~result:interpolation_type
-                                          [ (interpolated, Own) ]))
+                              | Some _ -> convert_from from
                               | None ->
                                   State.report state
                                     (Interpolation_not_convertible

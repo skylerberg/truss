@@ -3,6 +3,8 @@ val iter_code : (Tree.statement -> unit) -> Tree.t -> unit
 val iter_formula : (Tree.statement -> unit) -> Tree.formula -> unit
 val iter_places : (Core.origin -> Tree.place -> unit) -> Tree.t -> unit
 val iter_formula_places : (Core.origin -> Tree.place -> unit) -> Tree.formula -> unit
+val iter_locals : (Tree.local_info -> unit) -> Tree.t -> unit
+val iter_formula_locals : (Tree.local_info -> unit) -> Tree.formula -> unit
 val list_evaluated_asserts : Tree.t -> (int * Tree.t) list
 val list_leading_fields : Tree.projection list -> string list
 val list_mut_provided_places : Tree.provided list -> Tree.place list

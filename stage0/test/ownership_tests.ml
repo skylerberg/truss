@@ -964,6 +964,15 @@ let () =
 
 let () =
   let make = Fixtures.Ownership.make in
+  Harness.test
+    "a borrowed string in a tagged template is taken as a view where the interpolation type \
+     converts from one" (fun () ->
+      expect_fine Fixtures.Ownership.template_interpolation_taken_as_a_view);
+  Harness.test
+    "a borrowed string in a tagged template is moved where the interpolation type converts only \
+     from an owned string" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.template_interpolation_that_needs_an_owned_string
+        "ownership.not_owned");
   Harness.test "a `let` can bind a range of a temporary list" (fun () ->
       expect_fine Fixtures.Ownership.let_of_a_range_of_a_temporary);
   Harness.test "a `let` can bind an element of a temporary list" (fun () ->

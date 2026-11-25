@@ -175,7 +175,7 @@ test "a match of the whole text, a search from an offset, and escaped text" {
 }
 
 test "a template puts each value in as text to match, and a pattern in as a pattern" {
-  let name: view String = "a.b"
+  let name = "a.b"
   let address = regex.Regex"^${name}@example\\.com\u{24}"
   assert address.is_match("a.b@example.com") && !address.is_match("aXb@example.com")
   let repeated = regex.Regex"${"ab"}+!"

@@ -412,7 +412,7 @@ public fn Body.read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[
   }
   let count = if self.pending.length() < limit { self.pending.length() } else { limit }
   let unread = self.pending.bytes()
-  mut buffer.append_slice(unread[..count])
+  mut buffer.append_items(unread[..count])
   mut self.pending.skip(count)
   Ok(count)
 }
@@ -1127,7 +1127,7 @@ fn has_body(status: Status) -> Bool {
 }
 
 fn push_text(bytes: mut List[UInt8], text: String) {
-  mut bytes.append_slice(text.bytes())
+  mut bytes.append_items(text.bytes())
 }
 
 type Written(is_chunked: Bool, is_closing: Bool)
@@ -1257,14 +1257,14 @@ fn write_one[Stream: streams.Duplex](
           if !bytes.is_empty() {
             push_text(mut framed, text: bytes.length().format(radix: 16))
             push_text(mut framed, text: "\r\n")
-            mut framed.append_slice(bytes)
+            mut framed.append_items(bytes)
             push_text(mut framed, text: "\r\n")
           }
           if is_end {
             push_text(mut framed, text: "0\r\n\r\n")
           }
         } else {
-          mut framed.append_slice(bytes)
+          mut framed.append_items(bytes)
         }
         let is_sent = framed.is_empty() || connection.send_all(framed) is Ok(_)
         can_continue = can_continue && is_sent
@@ -2524,7 +2524,7 @@ fn start_plain(link: own Link, method: Method, url: url.Url, headers: Headers, b
     _ => None
   }
   var request = request_head(method, url: url, headers: headers, body_length: body.length(), forwarding: forwarding)
-  mut request.append_slice(body)
+  mut request.append_items(body)
   var opened = own link
   let opening = match mut opened {
     Plain(connection, inbox, ..) => {
@@ -3127,7 +3127,7 @@ public fn WebSocketReader.receive(mut self) -> Result[Option[Message], Error]
             self.fragment_opcode = 0
             if self.is_fragment_compressed {
               self.is_fragment_compressed = false
-              mut bytes.append_slice([0, 0, 255, 255][..])
+              mut bytes.append_items([0, 0, 255, 255][..])
               bytes = match compression.inflate_flushed(bytes, limit: self.limit) {
                 Ok(plain) => own plain
                 Err(TooLarge(_)) => return Err(fail_socket(mut self, code: websocket.message_too_big, reason: "a message larger than the limit"))

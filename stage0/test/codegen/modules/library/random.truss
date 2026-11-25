@@ -51,7 +51,7 @@ test "a unit float is at least zero and below one" {
   assert !mut generator.chance(0.0)
 }
 
-test "a buffer is filled and a slice is shuffled from the generator's numbers" {
+test "a buffer is filled and a range is shuffled from the generator's numbers" {
   var generator = random.Generator.seeded(3)
   var buffer: List[UInt8] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   mut generator.fill(mut buffer)

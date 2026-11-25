@@ -44,7 +44,7 @@ public fn Match.length(self) -> UInt64
   self.end - self.start
 }
 
-public fn Match.slice(self, text: String) -> view String
+public fn Match.value(self, text: String) -> view String
   uses Panic unless self.end <= text.length() && text.is_boundary(self.start) && text.is_boundary(self.end)
   ensures result.length() == self.length()
   cost time O(1)

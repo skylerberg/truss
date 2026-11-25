@@ -45,6 +45,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       enclosing_provides = [];
       lent_back = [];
       instantiating = [];
+      reading_requires = [];
       axiomatizing = [];
       open_axioms = [];
       axioms_of = Tables.Symbol_table.create 16;
@@ -584,7 +585,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                 | local ->
                     ( Locals.find_opt (Core_local local) start.locals,
                       Locals.find_opt (Core_local local) frame.locals,
-                      Facts.find_local_type context frame (Core_local local) )
+                      Some (Facts.substitute_declared_type context frame parameter.type_) )
               in
               match (parameter.mode, entry, ty) with
               | (Language.Mode.Mut | Language.Mode.Own), Some entry, Some ty ->
@@ -647,43 +648,60 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
     returns;
   (make_outcome context, context.skipped_conditions)
 
+let find_circular_contract (lookups : Lookups.t) (source : State.source) ~path =
+  let context =
+    make_context lookups ~home:source.key ~current:path ~terminates:false ~measures:[]
+      ~inherits_precondition:false
+  in
+  let start = make_empty_frame source in
+  match Facts.list_circular_contracts context start with
+  | [] -> None
+  | circular ->
+      List.iter (Facts.reject_circular_proof context start) circular;
+      Some (make_outcome context)
+
 let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_substitution)
     (lookups : Lookups.t) (source : State.source) ~path =
-  let run ?(assumes_panic_condition = false) condition =
-    translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_condition lookups source
-      ~path
-  in
-  let base, skipped = run [] in
-  let has_panic_condition =
-    match Interface.Impls.read_signature lookups.interface path with
-    | Some signature ->
-        Types.has_capability (Capability_unless_values (Built_in Panic)) signature.uses
-    | None -> false
-  in
-  let find_capability_condition capability =
-    match Interface.Impls.read_signature lookups.interface path with
-    | Some signature when not (Types.has_capability capability signature.uses) ->
-        Option.to_list
-          (Types.find_unless capability (Types.substitute_capabilities substitution signature.uses))
-    | Some _ | None -> []
-  in
-  let outcomes =
-    (base :: (if has_panic_condition then [ fst (run ~assumes_panic_condition:true []) ] else []))
-    @ List.map
-        (fun condition -> fst (run condition))
-        (List.sort_uniq compare
-           (find_capability_condition (Built_in Run_forever)
-           @ find_capability_condition (Built_in Panic)
-           @ skipped))
-  in
-  {
-    Obligation.obligations =
-      List.concat_map (fun (outcome : Obligation.outcome) -> outcome.obligations) outcomes;
-    holes =
-      List.sort_uniq compare
-        (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
-    evaluation = None;
-  }
+  match find_circular_contract lookups source ~path with
+  | Some outcome -> outcome
+  | None ->
+      let run ?(assumes_panic_condition = false) condition =
+        translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_condition lookups
+          source ~path
+      in
+      let base, skipped = run [] in
+      let has_panic_condition =
+        match Interface.Impls.read_signature lookups.interface path with
+        | Some signature ->
+            Types.has_capability (Capability_unless_values (Built_in Panic)) signature.uses
+        | None -> false
+      in
+      let find_capability_condition capability =
+        match Interface.Impls.read_signature lookups.interface path with
+        | Some signature when not (Types.has_capability capability signature.uses) ->
+            Option.to_list
+              (Types.find_unless capability
+                 (Types.substitute_capabilities substitution signature.uses))
+        | Some _ | None -> []
+      in
+      let outcomes =
+        base
+        :: (if has_panic_condition then [ fst (run ~assumes_panic_condition:true []) ] else [])
+        @ List.map
+            (fun condition -> fst (run condition))
+            (List.sort_uniq compare
+               (find_capability_condition (Built_in Run_forever)
+               @ find_capability_condition (Built_in Panic)
+               @ skipped))
+      in
+      {
+        Obligation.obligations =
+          List.concat_map (fun (outcome : Obligation.outcome) -> outcome.obligations) outcomes;
+        holes =
+          List.sort_uniq compare
+            (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
+        evaluation = None;
+      }
 
 let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~proofs ~at
     =
@@ -906,6 +924,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
                              }
                        | Read | Own -> None);
                      type_ = Types.substitute_erased subtrait_substitution parameter.type_;
+                     declared_type = Types.substitute subtrait_substitution parameter.type_;
                      term = read_place parameter entry;
                    })
                  clauses.parameters)
@@ -944,7 +963,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
                 ~compute_change:(fun () ->
                   List.fold_left
                     (fun total (parameter : Mir.parameter) ->
-                      let ty = Types.substitute_erased subtrait_substitution parameter.type_ in
+                      let ty = Types.substitute subtrait_substitution parameter.type_ in
                       let before =
                         Amounts.compute_potential context after ty (read_place parameter entry)
                       in
@@ -1003,7 +1022,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
       ~inherits_precondition:false
   in
   (match Mir.read_type_clauses lookups.mir path with
-  | Some { form = { invariants; potential }; _ } ->
+  | Some { form = { invariants; potential }; _ } -> (
       let ty =
         match Interface.Definition.find_interface lookups.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
@@ -1020,23 +1039,27 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
                    ~type_:(Facts.substitute_type context start default.type_)))
             defaults
       | Some { form = Parameter_defaults _; _ } | None -> ());
-      let value_ = Facts.arrive context start "value" ty in
-      Facts.assume context start
-        (Validity.make_validity context start ~assuming:true ~includes_invariants:false ty value_);
-      let at_value = { start with self = Some value_; old_self = Some value_ } in
-      List.iter
-        (fun (invariant : Mir.requirement) ->
-          let after, holds = Validity.read_specification context at_value invariant.clause in
-          Facts.assume context after holds)
-        invariants;
-      Option.iter
-        (fun (written : Mir.formula) ->
-          let _, potential_term = Validity.read_specification context at_value written in
-          Facts.oblige context at_value
-            (Facts.locate context at_value.source written.origin)
-            (Negative_potential { type_ = ty })
-            (Logic.less_equal (Logic.int 0) potential_term))
-        potential
+      match Facts.list_circular_clauses context start ~type_:ty with
+      | _ :: _ as circular -> List.iter (Facts.reject_circular_proof context start) circular
+      | [] ->
+          let value_ = Facts.arrive context start "value" ty in
+          Facts.assume context start
+            (Validity.make_validity context start ~assuming:true ~includes_invariants:false ty
+               value_);
+          let at_value = { start with self = Some value_; old_self = Some value_ } in
+          List.iter
+            (fun (invariant : Mir.requirement) ->
+              let after, holds = Validity.read_specification context at_value invariant.clause in
+              Facts.assume context after holds)
+            invariants;
+          Option.iter
+            (fun (written : Mir.formula) ->
+              let _, potential_term = Validity.read_specification context at_value written in
+              Facts.oblige context at_value
+                (Facts.locate context at_value.source written.origin)
+                (Negative_potential { type_ = ty })
+                (Logic.less_equal (Logic.int 0) potential_term))
+            potential)
   | None -> ());
   make_outcome context
 

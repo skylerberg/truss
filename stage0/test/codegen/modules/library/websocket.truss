@@ -108,7 +108,7 @@ fn conversation() -> List[String]
       let declined = raw_exchange("${upgrade}Sec-WebSocket-Extensions: permessage-deflate; bogus\r\n\r\n")
       mut seen.push("${offered.contains("Sec-WebSocket-Extensions: permessage-deflate; server_no_context_takeover; client_no_context_takeover\r\n")} ${declined.contains("Sec-WebSocket-Extensions")}")
       var compressed = "${upgrade}Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n".bytes().to_list()
-      mut compressed.append_slice([193, 135, 0, 0, 0, 0, 242, 72, 205, 201, 201, 7, 0][..])
+      mut compressed.append_items([193, 135, 0, 0, 0, 0, 242, 72, 205, 201, 201, 7, 0][..])
       mut seen.push("${raw_session(compressed, expected: "HELLO").contains("HELLO")}")
       let handshake = raw_exchange("GET /chat HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n")
       mut seen.push("${handshake.starts_with("HTTP/1.1 101 Switching Protocols")} ${handshake.contains("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")}")
