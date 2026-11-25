@@ -3267,8 +3267,19 @@ let () =
       goal = Logic.Operation (operator, [ Logic.Symbol symbol; Logic.Symbol symbol ]);
     }
   in
+  let started = ref [] in
   let find_solver () =
-    match Solver.find () with Ok solver -> solver | Error message -> Harness.fail "%s" message
+    match Solver.find () with
+    | Ok solver ->
+        started := solver :: !started;
+        solver
+    | Error message -> Harness.fail "%s" message
+  in
+  let test name body =
+    Harness.test name (fun () ->
+        Fun.protect body ~finally:(fun () ->
+            List.iter Solver.stop !started;
+            started := []))
   in
   let solve_one ?find_output solver request =
     List.hd (Solver.solve_all ?find_output solver [ request ])
@@ -3278,15 +3289,14 @@ let () =
       (fun (run : Solver.run) -> if run.input = input then Some run.output else None)
       solved.runs
   in
-  Harness.test "a stored run is read by its input, and Z3 is not run" (fun () ->
+  test "a stored run is read by its input, and Z3 is not run" (fun () ->
       let request = Solver.make_request (make_self_comparison Logic.Greater_equal) in
       let solver = find_solver () in
       let find_output input = if input = Solver.show_input request then Some "unsat\n" else None in
       if (solve_one ~find_output solver request).answer <> Solver.Proven then
         Harness.fail "expected the stored answer";
       if Solver.For_testing.count_queries_run solver <> 0 then Harness.fail "ran Z3");
-  Harness.test "each run that answers a request is reported with its input and Z3's output"
-    (fun () ->
+  test "each run that answers a request is reported with its input and Z3's output" (fun () ->
       let request = Solver.make_request (make_self_comparison Logic.Less_equal) in
       let solver = find_solver () in
       match (solve_one solver request).runs with
@@ -3295,12 +3305,73 @@ let () =
           if not (String.starts_with ~prefix:"unsat" output) then
             Harness.fail "reported the output %S" output
       | runs -> Harness.fail "reported %d runs" (List.length runs));
-  Harness.test "requests with the same input are answered by one run" (fun () ->
+  test "requests with the same input are answered by one run" (fun () ->
       let request = Solver.make_request (make_self_comparison Logic.Less) in
       let solver = find_solver () in
       ignore (Solver.solve_all solver [ request; request ]);
       if Solver.For_testing.count_queries_run solver <> 1 then
         Harness.fail "ran %d queries" (Solver.For_testing.count_queries_run solver));
+  test "one Z3 process answers every query that a solver runs in turn" (fun () ->
+      let directory = Harness.make_scratch_directory "z3" in
+      let launches = Filename.concat directory "launches" in
+      Harness.write_files directory
+        [ ("z3", Printf.sprintf "#!/bin/sh\necho launched >> %s\nexec z3 \"$@\"\n" launches) ];
+      Unix.chmod (Filename.concat directory "z3") 0o755;
+      Unix.putenv "TRUSS_Z3" (Filename.concat directory "z3");
+      let solver = find_solver () in
+      List.iter
+        (fun operator ->
+          ignore (solve_one solver (Solver.make_request (make_self_comparison operator))))
+        [ Logic.Less; Logic.Less_equal; Logic.Greater ];
+      match String.split_on_char '\n' (String.trim (File_system.read launches)) with
+      | [ _ ] -> ()
+      | launched -> Harness.fail "launched Z3 %d times" (List.length launched));
+  test "a query's declarations are forgotten before the next query" (fun () ->
+      let flag = Logic.Symbol.Variable { label = "flag"; numbers = [] } in
+      let excluded_middle =
+        {
+          Logic.declarations = [ Logic.Constant (flag, Logic.Bool) ];
+          facts = [];
+          goal = Logic.Operation (Or, [ Logic.Symbol flag; Logic.not_ (Logic.Symbol flag) ]);
+        }
+      in
+      let solver = find_solver () in
+      let answers =
+        List.map
+          (fun query -> (solve_one solver (Solver.make_request query)).answer)
+          [ make_self_comparison Logic.Less_equal; excluded_middle ]
+      in
+      if answers <> [ Solver.Proven; Solver.Proven ] then
+        Harness.fail "a constant of another sort under the same name was not proven");
+  test "Z3 is asked for values only of a query that it answers with `sat`" (fun () ->
+      let request =
+        Solver.make_request
+          ~symbols:[ Logic.Symbol.Variable { label = "compared"; numbers = [] } ]
+          (make_self_comparison Logic.Less_equal)
+      in
+      match (solve_one (find_solver ()) request).runs with
+      | [ { output; _ } ] ->
+          if String.includes ~affix:"error" output then Harness.fail "reported the output %S" output
+      | runs -> Harness.fail "reported %d runs" (List.length runs));
+  test "a requested term of a datatype that the query does not mention costs no other value"
+    (fun () ->
+      let compared = Logic.Symbol.Variable { label = "compared"; numbers = [] } in
+      let unmentioned =
+        Types.Named { path = Support.make_top_path "app.main" "Flag"; arguments = [] }
+      in
+      let constructor = Logic.Symbol.Constructor { type_ = unmentioned; variant = None } in
+      let query = make_self_comparison Logic.Less in
+      let request =
+        Solver.make_request ~symbols:[ compared ]
+          ~terms:[ (Logic.Symbol.Reached 0, Logic.Apply (constructor, [])) ]
+          {
+            query with
+            declarations = Logic.Datatype (unmentioned, [ (constructor, []) ]) :: query.declarations;
+          }
+      in
+      match (solve_one (find_solver ()) request).answer with
+      | Counterexample [ (symbol, _) ] when symbol = compared -> ()
+      | _ -> Harness.fail "expected a counterexample with the value of `compared`");
   let find_obligation_query text code =
     let packages = Support.setup [ ("app.main", text) ] in
     let key = List.hd (Support.list_declarations packages (Support.parse_module "app.main")) in
@@ -3316,11 +3387,10 @@ let () =
           obligations
     | Unsupported _ | Not_proven_here -> None
   in
-  Harness.test "an unknown answer without an uninterpreted sort is not searched further" (fun () ->
-      match (find_obligation_query Fixtures.Prover.sum_of_two_cubes Ensures, Solver.find ()) with
+  test "an unknown answer without an uninterpreted sort is not searched further" (fun () ->
+      match (find_obligation_query Fixtures.Prover.sum_of_two_cubes Ensures, find_solver ()) with
       | None, _ -> Harness.fail "no obligation of the `ensures`"
-      | _, Error message -> Harness.fail "%s" message
-      | Some query, Ok solver ->
+      | Some query, solver ->
           if (solve_one solver (Solver.make_request query)).answer <> Unknown Out_of_steps then
             Harness.fail "expected an unknown answer from the step limit";
           if Solver.For_testing.count_queries_run solver <> 1 then
@@ -3337,16 +3407,13 @@ let () =
              (Logic.int 3));
     }
   in
-  Harness.test "an unknown answer before the step limit carries Z3's reason" (fun () ->
+  test "an unknown answer before the step limit carries Z3's reason" (fun () ->
       let query = power_of_itself_is_three in
-      match Solver.find () with
-      | Error message -> Harness.fail "%s" message
-      | Ok solver -> (
-          match (solve_one solver (Solver.make_request query)).answer with
-          | Unknown (Incomplete reason) ->
-              if not (String.includes ~affix:"incomplete (theory arithmetic)" reason) then
-                Harness.fail "reason %S" reason
-          | _ -> Harness.fail "expected an unknown answer with Z3's reason"));
+      match (solve_one (find_solver ()) (Solver.make_request query)).answer with
+      | Unknown (Incomplete reason) ->
+          if not (String.includes ~affix:"incomplete (theory arithmetic)" reason) then
+            Harness.fail "reason %S" reason
+      | _ -> Harness.fail "expected an unknown answer with Z3's reason");
   let expect_answered_from_runs request =
     let first = find_solver () and second = find_solver () in
     let solved = solve_one first request in
@@ -3355,11 +3422,11 @@ let () =
     if Solver.For_testing.count_queries_run second <> 0 then Harness.fail "ran Z3 again";
     solved.answer
   in
-  Harness.test "an unknown answer's reason is read back from its stored runs" (fun () ->
+  test "an unknown answer's reason is read back from its stored runs" (fun () ->
       match expect_answered_from_runs (Solver.make_request power_of_itself_is_three) with
       | Unknown (Incomplete _) -> ()
       | _ -> Harness.fail "expected an unknown answer with Z3's reason");
-  Harness.test "a counterexample's values are read back from its stored runs" (fun () ->
+  test "a counterexample's values are read back from its stored runs" (fun () ->
       match
         expect_answered_from_runs
           (Solver.make_request
@@ -3369,8 +3436,7 @@ let () =
       with
       | Counterexample (_ :: _ :: _) -> ()
       | _ -> Harness.fail "expected a counterexample with both values");
-  Harness.test "an obligation that the solver stops on before the step limit names Z3's reason"
-    (fun () ->
+  test "an obligation that the solver stops on before the step limit names Z3's reason" (fun () ->
       let solver =
         Solver.For_testing.make ~run_z3:(fun _ ->
             "unknown\n(:reason-unknown \"(incomplete quantifiers)\")\n(:rlimit 1)\n")
@@ -3389,7 +3455,7 @@ let () =
                  diagnostic.message)
           then Harness.fail "message %S" diagnostic.message
       | diagnostics -> Harness.fail "%d diagnostics" (List.length diagnostics));
-  Harness.test "deciding an edited body runs Z3 only for the queries that changed" (fun () ->
+  test "deciding an edited body runs Z3 only for the queries that changed" (fun () ->
       let file = Support.parse_file "app.main" in
       let database =
         Support.make_database
@@ -3407,14 +3473,13 @@ let () =
       if after_the_edit <> 1 then
         Harness.fail "ran %d queries after the edit, and %d from nothing" after_the_edit
           from_nothing);
-  Harness.test "a function defined by a quantified formula reaches the solver as a definition"
-    (fun () ->
+  test "a function defined by a quantified formula reaches the solver as a definition" (fun () ->
       match find_obligation_query Fixtures.Prover.increment_of_a_word_count Overflow with
       | None -> Harness.fail "no obligation of the addition"
       | Some query ->
           let text = Logic.show_query query in
           if not (String.includes ~affix:"(define-fun " text) then Harness.fail "query %s" text);
-  Harness.test "a query's text names nothing by its Truss name" (fun () ->
+  test "a query's text names nothing by its Truss name" (fun () ->
       let packages = Support.setup [ ("app.main", Fixtures.Prover.addition_that_can_overflow) ] in
       let key = List.hd (Support.list_declarations packages (Support.parse_module "app.main")) in
       match
@@ -3424,7 +3489,7 @@ let () =
           let text = Logic.show_query obligation.query in
           if String.includes ~affix:"count" text then Harness.fail "the text names `count`: %s" text
       | _ -> Harness.fail "expected one obligation");
-  Harness.test "renaming a function and its parameter gives the same query" (fun () ->
+  test "renaming a function and its parameter gives the same query" (fun () ->
       let key_of text =
         let packages = Support.setup [ ("app.main", text) ] in
         let key = List.hd (Support.list_declarations packages (Support.parse_module "app.main")) in

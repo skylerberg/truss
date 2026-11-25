@@ -132,6 +132,15 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `Amounts` | The amount that a call or an operation spends |
   | `Loop_costs` | The cost rules of a loop |
 
+- **The solver keeps Z3 running.** `Solver` starts one `z3 -in` process for
+  each domain that solves, gives each query to an idle process, and sends
+  `(reset)` after the answer, so a query costs no launch. A process that was
+  reset answers as a new process does, in the same number of steps. Z3
+  linked into the compiler does not: its contexts share state within one
+  process, so a query solved beside another takes a different number of
+  steps, and the step limit then decides differently from one run to the
+  next.
+
 ### Documents
 
 Each document has one job, and a fact is stated in one of them:

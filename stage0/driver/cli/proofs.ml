@@ -24,7 +24,10 @@ let check database snapshot packages scope =
     decided =
       lazy
         (evaluate database snapshot packages proofs;
-         Database.decide proofs (lazy (make_solver ())));
+         let solver = lazy (make_solver ()) in
+         Fun.protect
+           ~finally:(fun () -> if Lazy.is_val solver then Solver.stop (Lazy.force solver))
+           (fun () -> Database.decide proofs solver));
   }
 
 let list_diagnostics checked file =
