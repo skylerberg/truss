@@ -187,6 +187,7 @@ type context = {
   mutable can_declare_panic : bool;
   panic_condition : Catalog.Prover.quoted list option;
   mutable obligation_condition : Types.condition;
+  mutable requires_being_read : Core.origin option;
   mutable skipped_conditions : Types.condition list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;
   read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;

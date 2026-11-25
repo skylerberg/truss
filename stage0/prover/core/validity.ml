@@ -64,10 +64,13 @@ let run_without_costs : 'a. _ -> (unit -> 'a) -> 'a =
   Fun.protect ~finally:(fun () -> context.counters <- saved) read
 
 let run_as_specification (context : State.context) read =
-  let panics = context.panics in
+  let panics = context.panics and can_declare_panic = context.can_declare_panic in
   context.panics <- false;
+  context.can_declare_panic <- false;
   Fun.protect
-    ~finally:(fun () -> context.panics <- panics)
+    ~finally:(fun () ->
+      context.panics <- panics;
+      context.can_declare_panic <- can_declare_panic)
     (fun () -> run_without_costs context read)
 
 let read_specification (context : State.context) frame (formula : Mir.formula) =

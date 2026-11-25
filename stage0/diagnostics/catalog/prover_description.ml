@@ -783,7 +783,7 @@ let describe_required = function
         }
 
 let describe_fix = function
-  | Prover.Add_requires { body; required; premise; condition } ->
+  | Prover.Add_requires { before; required; premise; condition } ->
       let required = List.map describe_required required in
       let required =
         match condition with
@@ -798,7 +798,7 @@ let describe_fix = function
       in
       {
         Description.title = (Description.Text "Add `requires " :: required) @ [ Text "`" ];
-        edits = [ Add_line_before (Nodes.Node body, Text "requires " :: required) ];
+        edits = [ Add_line_before (Nodes.Node before, Text "requires " :: required) ];
       }
   | Add_panic place ->
       {

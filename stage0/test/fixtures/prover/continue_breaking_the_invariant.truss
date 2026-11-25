@@ -1,0 +1,12 @@
+fn f(count: UInt64) -> UInt64 {
+  var index: UInt64 = 0
+  var total: UInt64 = 0
+  while index < count
+    invariant total == index
+  {
+    index += 1
+    if index == 3 { continue }
+    total += 1
+  }
+  total
+}

@@ -281,14 +281,30 @@ let find_goal_code context term =
   then find_goal term
   else None
 
+let read_requires_clause (signature : Syntax.signature) (origin : Core.origin) =
+  let expression = match origin with Written id | Desugared { construct = id; _ } -> id in
+  match
+    List.find_opt
+      (fun (clause : Syntax.clause) ->
+        match clause.kind with Requires written -> written.id = expression | _ -> false)
+      signature.clauses
+  with
+  | Some clause -> clause
+  | None -> raise_bug "a `requires` is read that the signature does not write"
+
 let add_requires (context : State.context) (frame : State.frame) required : Catalog.Prover.fix list
     =
   match find_signature context with
-  | Some (_, body) when not context.inherits_precondition ->
+  | Some (signature, body) when not context.inherits_precondition ->
+      let before =
+        match context.requires_being_read with
+        | Some origin -> (read_requires_clause signature origin).id
+        | None -> body.id
+      in
       [
         Add_requires
           {
-            body = Written body.id;
+            before = Written before;
             required;
             premise =
               (match frame.condition with

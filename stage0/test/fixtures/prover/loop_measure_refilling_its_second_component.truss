@@ -1,0 +1,23 @@
+fn refill() -> UInt64
+  ensures result <= 8
+{
+  8
+}
+
+fn f(start: UInt64) -> UInt64 {
+  var outer = start
+  var inner = refill()
+  var steps: UInt64 = 0
+  while outer != 0 || inner != 0
+    decreases outer, inner
+  {
+    if inner > 0 {
+      inner -= 1
+    } else {
+      outer -= 1
+      inner = refill()
+    }
+    steps = steps.saturating_add(1)
+  }
+  steps
+}

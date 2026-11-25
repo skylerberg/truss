@@ -1,0 +1,9 @@
+fn f(start: Int64) -> Int64 {
+  var count = start
+  while count != 0 && count != Int64.minimum
+    decreases count
+  {
+    count -= 1
+  }
+  count
+}

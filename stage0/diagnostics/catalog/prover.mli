@@ -225,7 +225,7 @@ type panic_place =
 
 type fix =
   | Add_requires of {
-      body : Core.origin;
+      before : Core.origin;
       required : required list;
       premise : Code.t option;
       condition : Types.condition;

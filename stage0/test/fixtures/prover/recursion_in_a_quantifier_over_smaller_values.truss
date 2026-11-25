@@ -1,0 +1,5 @@
+fn reaches(n: UInt64) -> Bool
+  decreases n
+{
+  n == 0 || forall m in 0..n => reaches(m)
+}

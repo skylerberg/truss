@@ -1,0 +1,19 @@
+impl Measured for Box {
+  fn measure(self) -> Int64
+    ensures result >= 10
+  {
+    10
+  }
+}
+
+fn through_the_type(box: Box) -> Int64
+  ensures result >= 10
+{
+  box.measure()
+}
+
+fn through_a_bound[Shape: Measured](shape: Shape) -> Int64
+  ensures result >= 10
+{
+  shape.measure()
+}

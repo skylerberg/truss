@@ -1,0 +1,9 @@
+fn f(items: List[Int64], count: UInt32) -> UInt32 {
+  var index: UInt32 = 0
+  while index < count
+    decreases count - index, items[0]
+  {
+    index += 1
+  }
+  index
+}

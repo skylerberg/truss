@@ -1,0 +1,19 @@
+fn f(count: UInt64) -> UInt64 {
+  var total: UInt64 = 0
+  for index in 0..count
+    decreases count - index
+  {
+    total = index
+  }
+  total
+}
+
+fn g(items: List[Int64]) -> Int64 {
+  var last: Int64 = 0
+  for item in items
+    decreases items.length() - visited.length()
+  {
+    last = item
+  }
+  last
+}

@@ -12,6 +12,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       can_declare_panic;
       panic_condition;
       obligation_condition = [];
+      requires_being_read = None;
       skipped_conditions = [];
       run_body = (fun frame ~lambdas body -> Reader.read_body context frame ~lambdas body);
       read_formula =
@@ -196,6 +197,15 @@ let keep_promise ?restated context (frame : State.frame) (promise : promise) ~(a
              { counting; promiser = find_promiser context.lookups promise.written_in; clause }
        | None -> Own_promise { counting; clause }))
     goal
+
+let read_requires (context : State.context) frame (requirement : Mir.formula) =
+  let outer = context.requires_being_read in
+  context.requires_being_read <- Some requirement.origin;
+  Fun.protect
+    ~finally:(fun () -> context.requires_being_read <- outer)
+    (fun () ->
+      Conditions.with_obligation_condition context requirement.holds_when (fun () ->
+          Validity.read_specification context frame requirement))
 
 let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_condition
     (lookups : Lookups.t) (source : State.source) ~path =
@@ -496,10 +506,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   let start =
     List.fold_left
       (fun frame (requirement : Mir.formula) ->
-        let frame, term =
-          Conditions.with_obligation_condition context requirement.holds_when (fun () ->
-              Validity.read_specification context frame requirement)
-        in
+        let frame, term = read_requires context frame requirement in
         Facts.assume context frame term;
         frame)
       start declared_requires
@@ -523,6 +530,11 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
             Conditions.with_obligation_condition context promise.clause.holds_when (fun () ->
                 ignore (Validity.read_specification context { start with result } amount)))
     promised;
+  List.iter
+    (fun (measure : Mir.formula) ->
+      Conditions.with_obligation_condition context measure.holds_when (fun () ->
+          ignore (Validity.read_specification context start measure)))
+    measures;
   Reader.read_body context start ~lambdas:mir.lambdas mir.body;
   let returns = List.rev context.returns in
   let mut_parameters =

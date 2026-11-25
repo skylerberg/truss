@@ -1,0 +1,9 @@
+fn f(items: List[Int64]) -> Int64 {
+  var last: Int64 = 0
+  for item in items
+    decreases 5
+  {
+    last = item
+  }
+  last
+}

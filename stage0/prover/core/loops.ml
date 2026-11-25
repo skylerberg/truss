@@ -637,6 +637,23 @@ let assume_invariants context frame clauses =
 let find_measures (clauses : Mir.loop_clause list) =
   List.find_map (function Mir.Decreases measures -> Some measures | _ -> None) clauses
 
+let check_measures_defined context head clauses =
+  Option.iter
+    (List.iter (fun (measure : Mir.formula) ->
+         Conditions.with_obligation_condition context measure.holds_when (fun () ->
+             ignore (Validity.read_specification context head measure))))
+    (find_measures clauses)
+
+let read_measures context (at : State.frame) measures =
+  List.map
+    (fun measure ->
+      snd (Validity.read_specification context { at with makes_obligations = false } measure))
+    measures
+
+let oblige_measures_decrease context location ~before ~after (end_ : State.frame) =
+  Facts.oblige context end_ location Loop_measure_may_not_decrease
+    (Amounts.compare_lexicographically before after)
+
 let enter_loop ?holds context frame ~entry clauses ~changed =
   let holds = Option.value holds ~default:changed in
   let costs =
@@ -738,6 +755,7 @@ let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context f
     enter_loop_head context { head with yielded = Some before } costs ~iterations:(Some iterations)
   in
   assume_invariants context head clauses;
+  check_measures_defined context head clauses;
   let ended_mark = List.length context.facts in
   let received = receive head before in
   let through = received.through in
@@ -898,12 +916,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   let measures = find_measures clauses in
   if context.terminates && measures = None then
     Facts.raise_bug "a loop over a cursor has no measure in a body that terminates";
-  let find_measured (at : State.frame) =
-    Option.map
-      (List.map (fun measure ->
-           snd (Validity.read_specification context { at with makes_obligations = false } measure)))
-      measures
-  in
+  let find_measured (at : State.frame) = Option.map (read_measures context at) measures in
   let entry_measure = match find_measured frame with Some [ entry ] -> Some entry | _ -> None in
   let next_costs =
     List.concat_map
@@ -928,17 +941,16 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     ~changed:(for_loop.compute_changed_in frame)
     ~holds ~most:(Option.to_list entry_measure)
     ~prove_iteration:(fun ~head ~ends ->
-      match find_measured head with
-      | Some before ->
+      Option.iter
+        (fun measures ->
+          let before = read_measures context head measures in
           List.iter
-            (fun (end_ : State.frame) ->
-              match find_measured end_ with
-              | Some after ->
-                  Facts.oblige context end_ location Loop_measure_may_not_decrease
-                    (Amounts.compare_lexicographically before after)
-              | None -> ())
-            ends
-      | None -> ())
+            (fun end_ ->
+              oblige_measures_decrease context location ~before
+                ~after:(read_measures context end_ measures)
+                end_)
+            ends)
+        measures)
     ~start:(fun head ->
       let before = declare_some_parts context head element_type in
       (match (entry_measure, find_measured head) with
@@ -1065,6 +1077,7 @@ let run_for_loop context frame (for_loop : for_loop) =
           costs ~iterations:(Some iterations)
       in
       assume_invariants context head clauses;
+      check_measures_defined context head clauses;
       let find_kept_count (at : State.frame) =
         Option.map (fun count_of -> Logic.equal (count_of at) high) for_loop.invariant_count
       in
@@ -1087,6 +1100,19 @@ let run_for_loop context frame (for_loop : for_loop) =
       in
       end_iterations context frame for_loop.for_at clauses start ~head ~inside
         ~iterations:(Some iterations) ~iteration_bounds:[ count ] ~ends ~breaks ~with_through;
+      Option.iter
+        (fun measures ->
+          let before = read_measures context head measures in
+          List.iter
+            (fun end_ ->
+              let end_ = with_through end_ in
+              oblige_measures_decrease context
+                (Facts.locate context frame.source for_loop.for_at)
+                ~before
+                ~after:(read_measures context end_ measures)
+                end_)
+            ends)
+        (find_measures clauses);
       List.iter
         (fun (end_ : State.frame) ->
           Option.iter
@@ -1126,6 +1152,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
   let iterations = compute_iterations_so_far context head costs in
   let head = enter_loop_head context head costs ~iterations in
   assume_invariants context head clauses;
+  check_measures_defined context head clauses;
   let tested = loop.test head in
   let entered =
     Option.map
@@ -1140,11 +1167,10 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
     match entered with Some entered -> entered | None -> Facts.restrict head (Logic.Boolean false)
   in
   let measure_terms (at : State.frame) =
-    let at = { at with makes_obligations = false } in
-    let read measure = snd (Validity.read_specification context at measure) in
     match (find_measures clauses, loop.measure_operands) with
-    | Some measures, _ -> Some (List.map read measures)
+    | Some measures, _ -> Some (read_measures context at measures)
     | None, Some (comparison, read_operands) when context.terminates -> (
+        let at = { at with makes_obligations = false } in
         let left, right = Validity.run_without_costs context (fun () -> read_operands at) in
         let distance from into = Logic.subtract into from in
         let through distance = Logic.add distance (Logic.int 1) in
@@ -1183,9 +1209,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
       check_invariants context end_ clauses ~moment:After_iteration;
       check_preserved_validity context end_ location start.preserved;
       match (start_measures, measure_terms end_) with
-      | Some before, Some after ->
-          Facts.oblige context end_ location Loop_measure_may_not_decrease
-            (Amounts.compare_lexicographically before after)
+      | Some before, Some after -> oblige_measures_decrease context location ~before ~after end_
       | _ -> ())
     ends;
   let failing =

@@ -1,0 +1,10 @@
+type Counter(left: UInt64)
+
+fn Counter.drain(mut self)
+  decreases self.left
+{
+  if self.left != 0 {
+    self.left -= 1
+    mut self.drain()
+  }
+}
