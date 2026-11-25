@@ -44,14 +44,15 @@ let check_parameter_annotation (state : State.state) ~mode ~input
 
 let require_decided_parameter (state : State.state) (parameter : Syntax.lambda_parameter) input =
   let list_undecided () =
-    List.filter_map
+    List.filter
       (function
-        | Unify.Unknown_type index when Option.is_none (Unify.find_domain state.unifier index) ->
-            Some index
-        | Unknown_type _ | Unknown_value _ -> None)
+        | Unify.Unknown_type index -> Option.is_none (Unify.find_domain state.unifier index)
+        | Unknown_value _ -> true)
       (Unify.list_unknowns state.unifier input)
   in
-  List.iter (fun index -> Solver.solve_head state index) (list_undecided ());
+  List.iter
+    (function Unify.Unknown_type index -> Solver.solve_head state index | Unknown_value _ -> ())
+    (list_undecided ());
   match (list_undecided (), parameter.pattern.kind) with
   | [], _ | _, Pattern_error -> ()
   | undecided, _ ->
@@ -59,7 +60,7 @@ let require_decided_parameter (state : State.state) (parameter : Syntax.lambda_p
         State.add_diagnostic state
           (Undetermined { at = Written parameter.pattern.id; undetermined = Lambda_parameter })
       in
-      List.iter (fun index -> Unify.poison state.unifier index reported) undecided
+      List.iter (fun unknown -> Unify.poison state.unifier unknown reported) undecided
 
 let rec check_string_literal state env ?expected (value : Syntax.expression)
     (literal : Syntax.string_literal) =

@@ -17,7 +17,7 @@ let report_decided_in_specification (state : State.state) at root =
     State.add_diagnostic state
       (Decided_in_specification { at; local = Option.map (fun local -> Core.Written local) local })
   in
-  Unify.poison state.unifier root report;
+  Unify.poison state.unifier (Unknown_type root) report;
   report
 
 let rec list_class_pairs (state : State.state) (side, wanted) =
@@ -106,7 +106,7 @@ let find_log_report (state : State.state) at mismatch (root, wanted) =
                  Some { name = Written name; decided = decided_type; site; decided_at; declares };
              })
       in
-      Unify.poison state.unifier root report;
+      Unify.poison state.unifier (Unknown_type root) report;
       Some report
   | Some (State.Literal _ | State.Local _ | State.Origin _) | None -> None
 

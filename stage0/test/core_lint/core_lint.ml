@@ -457,6 +457,7 @@ let check_form (interface : Interface.Lookups.t) (source_lookups : Resolve.Names
     | Types.Value (Value_parameter named) -> check_parameter subject named
     | Types.Value (Known _) -> ()
     | Types.Value (Value_variable _) -> report "%s contains a value inference variable" subject
+    | Types.Value (Value_error _) -> report "%s contains a value with an error" subject
   and check_trait subject (reference : Types.trait_reference) =
     List.iter (check_argument subject) reference.trait_arguments;
     List.iter (fun (_, inner) -> check_type subject inner) reference.associated

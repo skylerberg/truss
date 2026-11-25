@@ -483,10 +483,9 @@ let () =
       expect_one_diagnostic
         Fixtures.Infer.invariant_adds_vectors_whose_argument_a_later_statement_decides
         "types.decided_in_specification" ~says:"A specification cannot decide the type of `first`.");
-  Harness.test "a proof in a lambda's body does not decide the length of the lambda's parameter"
-    (fun () ->
-      expect_one_diagnostic Fixtures.Infer.proof_in_a_lambda_compares_the_length_of_its_parameter
-        "types.decided_in_specification" ~says:"A specification cannot decide the type of `bytes`.");
+  Harness.test "a lambda's body does not decide the length of the lambda's parameter" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.lambda_body_compares_the_length_of_its_parameter
+        "types.cannot_infer" ~at:("bytes", 1) ~says:"Declare `bytes` with a type.");
   Harness.test "a method that two traits declare is the one whose impl's conditions hold" (fun () ->
       let text = Fixtures.Infer.method_declared_by_two_traits_with_conditional_impls in
       expect_fine text;
