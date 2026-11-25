@@ -1,0 +1,13 @@
+fn f(items: List[Int64], target: Int64) -> Bool
+  requires items.length() > 2 && items[2] == target
+  ensures exists i in 0..items.length() => items[i] == target
+{
+  true
+}
+
+fn g(items: List[Int64], target: Int64) -> Bool
+  requires exists i in 0..items.length() => items[i] == target
+  ensures exists item in items => item == target
+{
+  true
+}

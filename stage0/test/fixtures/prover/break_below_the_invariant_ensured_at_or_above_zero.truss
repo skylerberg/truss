@@ -1,0 +1,14 @@
+fn f(start: Int64) -> Int64
+  requires start >= 0
+  ensures result >= 0
+{
+  var index = start
+  while true
+    invariant index >= 0
+    decreases index
+  {
+    index -= 1
+    if index < 0 { break }
+  }
+  index
+}

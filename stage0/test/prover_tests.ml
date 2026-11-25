@@ -120,6 +120,9 @@ let () =
       expect_not_proven Fixtures.Prover.quotient_ensured_rounded_down "prover.ensures");
   Harness.test "a remainder has the sign of its left operand" (fun () ->
       expect_proven Fixtures.Prover.remainder_of_negative_seven);
+  Harness.test "a specification divides `Integer`s toward zero, as code divides integers" (fun () ->
+      expect_proven Fixtures.Prover.specification_division_toward_zero;
+      expect_not_proven Fixtures.Prover.specification_division_rounded_down "prover.ensures");
   Harness.test "a shift amount must be less than the width" (fun () ->
       expect_not_proven Fixtures.Prover.shift_by_an_unbounded_amount "prover.shift"
         ~fixed:
@@ -568,6 +571,48 @@ let () =
       expect_not_proven
         Fixtures.Prover.while_loop_toward_the_bound_of_the_comparison_that_begins_its_condition
         "prover.termination");
+  Harness.test "a loop invariant must hold on entry to the loop" (fun () ->
+      expect_not_proven ~says:"may not hold on entry to the loop"
+        Fixtures.Prover.invariant_broken_on_entry "prover.invariant"
+        ~fixed:
+          ("fn f(limit: Int64) -> Int64 {", "fn f(limit: Int64) -> Int64\n  requires 0 <= limit\n{");
+      expect_not_proven ~says:"may not hold on entry to the loop"
+        Fixtures.Prover.range_loop_invariant_broken_on_entry "prover.invariant";
+      expect_not_proven ~says:"may not hold on entry to the loop"
+        Fixtures.Prover.list_loop_invariant_broken_on_entry "prover.invariant");
+  Harness.test "a loop invariant must be well defined at every iteration, not only on entry"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.invariant_reading_past_the_last_element
+        "prover.out_of_bounds");
+  Harness.test "a loop that a `break` leaves knows the facts of its path, not its invariant"
+    (fun () ->
+      expect_proven Fixtures.Prover.break_below_the_invariant;
+      expect_not_proven Fixtures.Prover.break_below_the_invariant_ensured_at_or_above_zero
+        "prover.ensures");
+  Harness.test "an iteration that a `continue` ends must decrease the loop's measure" (fun () ->
+      expect_not_proven Fixtures.Prover.continue_before_the_step "prover.termination");
+  Harness.test "an iteration that a `continue` ends must keep the loop's invariant" (fun () ->
+      expect_proven Fixtures.Prover.continue_after_the_step;
+      expect_not_proven Fixtures.Prover.continue_breaking_the_invariant "prover.invariant";
+      expect_not_proven Fixtures.Prover.continue_breaking_the_invariant_of_a_list_loop
+        "prover.invariant");
+  Harness.test "`old` in a loop invariant is the value on entry to the function, not to the loop"
+    (fun () ->
+      expect_proven Fixtures.Prover.old_in_an_invariant_after_a_change;
+      expect_not_proven ~says:"may not hold on entry to the loop"
+        Fixtures.Prover.old_in_an_invariant_read_as_the_loop_entry "prover.invariant");
+  Harness.test "a loop's measures are compared lexicographically" (fun () ->
+      expect_proven Fixtures.Prover.loop_measure_refilling_its_second_component;
+      expect_not_proven Fixtures.Prover.loop_measure_whose_first_component_grows
+        "prover.termination");
+  Harness.test "a loop's measure must be well defined" (fun () ->
+      expect_not_proven Fixtures.Prover.loop_measure_reading_an_element "prover.out_of_bounds");
+  Harness.test "a loop's cost clause is defined after each iteration" (fun () ->
+      expect_not_proven Fixtures.Prover.loop_cost_clause_dividing_by_a_local_that_the_body_zeroes
+        "prover.division");
+  Harness.test "a measure on a loop over a range or a list is compared at each iteration" (fun () ->
+      expect_proven Fixtures.Prover.measures_of_loops_over_a_range_and_a_list;
+      expect_not_proven Fixtures.Prover.range_loop_measure_that_stays_the_same "prover.termination");
   Harness.test "an impl of FiniteCursor whose next does not decrease remaining is rejected"
     (fun () ->
       expect_not_proven Fixtures.Prover.finite_cursor_whose_next_does_not_decrease_remaining
@@ -705,6 +750,31 @@ let () =
         "prover.termination");
   Harness.test "recursion without a measure is not checked where the function may run forever"
     (fun () -> expect_proven Fixtures.Prover.recursion_without_a_measure_where_it_may_run_forever);
+  Harness.test "a function's measures are compared lexicographically" (fun () ->
+      expect_proven Fixtures.Prover.ackermann;
+      expect_not_proven Fixtures.Prover.measure_whose_second_component_grows "prover.termination");
+  Harness.test "a measure must be bounded below by zero" (fun () ->
+      expect_proven Fixtures.Prover.recursion_and_loop_on_a_measure_kept_at_zero;
+      expect_codes Fixtures.Prover.recursion_on_a_measure_below_zero [ "prover.termination" ];
+      expect_not_proven Fixtures.Prover.loop_measure_below_zero "prover.termination");
+  Harness.test "a requires fix leaves out a comparison that holds for every value" (fun () ->
+      expect_not_proven Fixtures.Prover.recursion_on_a_measure_below_zero "prover.termination"
+        ~fixed:("  decreases steps\n{", "  decreases steps\n  requires 0 <= steps\n{"));
+  Harness.test "a recursive call in a quantifier's body decreases within the quantifier's range"
+    (fun () ->
+      expect_proven Fixtures.Prover.recursion_in_a_quantifier_over_smaller_values;
+      expect_not_proven Fixtures.Prover.recursion_in_a_quantifier_reaching_its_own_value
+        "prover.termination");
+  Harness.test "a recursive call decreases from the measure on entry, before `self` changes"
+    (fun () ->
+      expect_proven Fixtures.Prover.counter_drained_through_mut_self;
+      expect_not_proven Fixtures.Prover.counter_refilled_through_mut_self "prover.termination");
+  Harness.test "a function's measure must be well defined" (fun () ->
+      expect_proven Fixtures.Prover.measure_dividing_by_a_required_divisor;
+      expect_not_proven Fixtures.Prover.measure_dividing_by_a_parameter "prover.division"
+        ~fixed:
+          ( "  decreases count, 100 / divisor\n{",
+            "  decreases count, 100 / divisor\n  requires divisor != 0\n{" ));
   Harness.test "a contract that calls its own function applies the function's limited copy"
     (fun () ->
       let packages =
@@ -738,6 +808,11 @@ let () =
       | codes -> Harness.fail "codes %s" (String.concat ", " codes));
   Harness.test "mutual recursion that decreases" (fun () ->
       expect_proven Fixtures.Prover.even_and_odd_with_measures);
+  Harness.test "functions in a cycle compare the common prefix of their measures lexicographically"
+    (fun () ->
+      expect_proven Fixtures.Prover.cycle_with_measures_of_two_lengths;
+      expect_not_proven Fixtures.Prover.cycle_with_measures_tied_on_their_common_prefix
+        "prover.termination");
   Harness.test "an impl that reaches itself through a generic function cannot be shown to end"
     (fun () ->
       expect_codes Fixtures.Prover.check_reaching_itself_through_a_generic [ "prover.termination" ])
@@ -958,6 +1033,18 @@ let () =
       expect_proven Fixtures.Prover.squares_grow);
   Harness.test "a quantifier over a range" (fun () ->
       expect_not_proven Fixtures.Prover.quantifier_over_an_inclusive_range "prover.ensures");
+  Harness.test "an `exists` is proven by an element that meets it" (fun () ->
+      expect_proven Fixtures.Prover.exists_from_a_witness;
+      expect_not_proven Fixtures.Prover.exists_without_a_witness "prover.ensures");
+  Harness.test "an `exists` does not prove a `forall`" (fun () ->
+      expect_not_proven Fixtures.Prover.exists_read_as_forall "prover.ensures");
+  Harness.test "an `Integer` passed for a `UInt64` must fit, given the operands of `&&` before it"
+    (fun () ->
+      expect_proven Fixtures.Prover.integer_guarded_before_it_is_passed_as_a_uint64;
+      expect_codes Fixtures.Prover.integer_passed_where_a_uint64_is_expected
+        [ "prover.out_of_range"; "prover.out_of_range" ]);
+  Harness.test "a callee's ensures is not known where its requires fails" (fun () ->
+      expect_not_proven Fixtures.Prover.ensures_of_a_callee_outside_its_requires "prover.ensures");
   Harness.test "an assert in a test is a fact, not an obligation" (fun () ->
       expect_proven Fixtures.Prover.test_asserting_a_false_equality);
   Harness.test "an assert in a theorem is an obligation" (fun () ->
@@ -978,6 +1065,43 @@ let () =
       let actual = read_message (shape ^ Fixtures.Prover.circle_radius_plus_one) in
       if not (String.includes ~affix:"`shape` is Circle(radius: 9223372036854775807)" actual) then
         Harness.fail "message %S" actual);
+  Harness.test "a counterexample shows a record by its fields, and a Bool by its value" (fun () ->
+      let record = read_message (point ^ Fixtures.Prover.increment_of_a_point_coordinate)
+      and flag = read_message Fixtures.Prover.increment_under_a_flag in
+      if not (String.includes ~affix:"`point` is Point(x: 9223372036854775807, y: 3)" record) then
+        Harness.fail "message %S" record;
+      if not (String.includes ~affix:"`flag` is true" flag) then Harness.fail "message %S" flag);
+  Harness.test "a counterexample's path leaves out an if on a Bool local whose value it shows"
+    (fun () ->
+      List.iter
+        (fun (fixture, shown) ->
+          let actual = read_message fixture in
+          if
+            (not (String.includes ~affix:shown actual))
+            || String.includes ~affix:"On that path" actual
+          then Harness.fail "message %S" actual)
+        [
+          (Fixtures.Prover.increment_under_a_flag, "`flag` is true");
+          (Fixtures.Prover.increment_unless_a_flag, "`flag` is false");
+        ]);
+  Harness.test "a requires fix states a negated comparison as the opposite comparison" (fun () ->
+      expect_not_proven
+        (point ^ Fixtures.Prover.point_kept_off_a_corner)
+        "prover.ensures"
+        ~fixed:
+          ( "  ensures point.x != 5 || point.y != 6\n{",
+            "  ensures point.x != 5 || point.y != 6\n  requires point.x != 5 || point.y != 6\n{" );
+      expect_not_proven Fixtures.Prover.increment_unless_a_flag "prover.overflow"
+        ~fixed:
+          ( "fn f(flag: Bool, count: UInt8) -> UInt8 {",
+            "fn f(flag: Bool, count: UInt8) -> UInt8\n\
+            \  requires (!flag) ==> (count <= UInt8.maximum - 1)\n\
+             {" )
+        ~alternatives:
+          [
+            ( "fn f(flag: Bool, count: UInt8) -> UInt8 {",
+              "fn f(flag: Bool, count: UInt8) -> UInt8\n  uses Panic\n{" );
+          ]);
   Harness.test "a requires can match on a parameter" (fun () ->
       expect_proven (shape ^ Fixtures.Prover.requires_matching_a_shape));
   Harness.test "with replaces one field and keeps the others" (fun () ->
@@ -1024,7 +1148,11 @@ let () =
   Harness.test "an impl's requires may not be stronger than its trait's" (fun () ->
       expect_not_proven
         (measured ^ Fixtures.Prover.box_measure_with_a_stronger_requires)
-        "prover.requires")
+        "prover.requires");
+  Harness.test "a call through a bound knows its trait's ensures, not an impl's stronger one"
+    (fun () ->
+      let text = measured ^ Fixtures.Prover.box_measure_ensured_at_least_ten in
+      expect_not_proven text "prover.ensures" ~at:("result >= 10", 3))
 
 let each_index = Fixtures.Prover.each_index
 
@@ -1092,7 +1220,7 @@ let () =
         ~fixed:
           ( "ensures result >= self.first && result >= self.second\n{\n  self.first",
             "ensures result >= self.first && result >= self.second\n\
-            \  requires self.first >= self.first && self.first >= self.second\n\
+            \  requires self.first >= self.second\n\
              {\n\
             \  self.first" ));
   Harness.test "a loop over a user's collection gets the facts of its `count` and its `element`"
@@ -1667,7 +1795,7 @@ let () =
              {\n\
             \  exchange(mut items[first], second: mut items[second])",
             "requires first < items.length() && second < items.length()\n\
-            \  requires !(first == second)\n\
+            \  requires first != second\n\
              {\n\
             \  exchange(mut items[first], second: mut items[second])" ));
   Harness.test "two different elements can be lent together" (fun () ->
@@ -1703,7 +1831,7 @@ let () =
         ~fixed:
           ( "requires first < items.length() && second < items.length()\n{\n  parallel {",
             "requires first < items.length() && second < items.length()\n\
-            \  requires !(first == second)\n\
+            \  requires first != second\n\
              {\n\
             \  parallel {" ))
 
@@ -1715,7 +1843,7 @@ let () =
         ~fixed:
           ( "ensures result == self.value\n{\n  if self.present {",
             "ensures result == self.value\n\
-            \  requires (!(self.present)) ==> (self.other == self.value)\n\
+            \  requires (!self.present) ==> (self.other == self.value)\n\
              {\n\
             \  if self.present {" ))
 
@@ -2986,7 +3114,10 @@ let () =
 let () =
   Harness.test "a counterexample says which way each if on its path goes" (fun () ->
       let actual = read_message Fixtures.Prover.step_up_or_down in
-      if not (String.includes ~affix:"On that path, `up` is true, `count > 100` is true." actual)
+      if
+        not
+          (String.includes ~affix:"`up` is true" actual
+          && String.includes ~affix:"On that path, `count > 100` is true." actual)
       then Harness.fail "message %S" actual);
   Harness.test "a counterexample says which arm of a match its path takes" (fun () ->
       let actual = read_message Fixtures.Prover.bump_of_an_option in
@@ -3204,6 +3335,22 @@ let () =
         "prover.division");
   Harness.test "a type's invariant is well defined given the ones before it" (fun () ->
       expect_proven Fixtures.Prover.ratio_invariants);
+  Harness.test "a requires is well defined given the requires before it, not those after" (fun () ->
+      expect_proven Fixtures.Prover.requires_dividing_after_its_guard;
+      expect_not_proven Fixtures.Prover.requires_dividing_before_its_guard "prover.division"
+        ~fixed:
+          ( "  requires 100 / divisor > 1\n  requires divisor != 0",
+            "  requires divisor != 0\n  requires 100 / divisor > 1\n  requires divisor != 0" ));
+  Harness.test "the right operand of `&&`, `||`, and `==>` in a requires relies on the left"
+    (fun () ->
+      expect_proven Fixtures.Prover.requires_reading_left_to_right;
+      expect_not_proven Fixtures.Prover.requires_reading_an_element_before_its_bound
+        "prover.out_of_bounds");
+  Harness.test "an ensures must be well defined where the function returns" (fun () ->
+      expect_not_proven Fixtures.Prover.ensures_dividing_by_a_parameter "prover.division"
+        ~fixed:
+          ( "  ensures result == 100 / divisor\n{",
+            "  ensures result == 100 / divisor\n  requires divisor != 0\n{" ));
   Harness.test "a cost clause's bound must be well defined" (fun () ->
       let actual = list_codes Fixtures.Prover.cost_bound_reading_an_element in
       if not (List.mem "prover.out_of_bounds" actual) then

@@ -273,11 +273,23 @@ let list_counterexample_values members (obligation : Obligation.t) answer_values
     @ List.rev_map (fun (term, name) -> (Logic.Symbol.Named_term term, name)) obligation.locals)
 
 let list_path_notes (obligation : Obligation.t) answer_values =
+  let is_shown_with_its_value (term, value) =
+    let shown_as =
+      match term with
+      | Logic.Symbol symbol when List.mem_assoc symbol obligation.values -> Some symbol
+      | _ when List.mem_assoc term obligation.locals -> Some (Logic.Symbol.Named_term term)
+      | _ -> None
+    in
+    Option.bind shown_as (fun symbol -> List.assoc_opt symbol answer_values)
+    = Some (Solver.Atom (string_of_bool value))
+  in
   List.filter_map Fun.id
     (List.mapi
-       (fun index (note, _) ->
+       (fun index (noted : Obligation.noted_path) ->
          match List.assoc_opt (Logic.Symbol.Reached index) answer_values with
-         | Some (Solver.Atom "true") -> Some note
+         | Some (Solver.Atom "true")
+           when not (Option.fold ~none:false ~some:is_shown_with_its_value noted.tested) ->
+             Some noted.note
          | _ -> None)
        obligation.path_notes)
 
@@ -389,7 +401,8 @@ let make_request ({ obligation; query; _ } : posed_obligation) =
     List.map (fun (term, _) -> (Logic.Symbol.Named_term term, term)) obligation.locals
     @ List.concat
         (List.mapi
-           (fun index (_, reached) -> [ (Logic.Symbol.Reached index, reached) ])
+           (fun index (noted : Obligation.noted_path) ->
+             [ (Logic.Symbol.Reached index, noted.reached) ])
            obligation.path_notes)
   in
   Solver.make_request ~symbols:(List.map fst obligation.values) ~terms query

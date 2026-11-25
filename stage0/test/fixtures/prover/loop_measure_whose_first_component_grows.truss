@@ -1,0 +1,10 @@
+fn f(start: UInt64) -> UInt64 {
+  var outer = start
+  var inner: UInt64 = 8
+  while outer < 100 && inner != 0
+    decreases inner, outer
+  {
+    outer += 1
+  }
+  outer
+}

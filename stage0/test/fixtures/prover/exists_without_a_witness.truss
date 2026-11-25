@@ -1,0 +1,6 @@
+fn f(items: List[Int64], target: Int64) -> Bool
+  requires items.length() > 2
+  ensures exists i in 0..items.length() => items[i] == target
+{
+  true
+}

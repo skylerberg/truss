@@ -1,0 +1,10 @@
+fn f(items: List[Int64]) -> UInt64 {
+  var positive: UInt64 = 0
+  for item in items
+    invariant positive == visited.length()
+  {
+    if item <= 0 { continue }
+    positive += 1
+  }
+  positive
+}

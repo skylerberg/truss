@@ -203,17 +203,16 @@ let make_panic_fix (context : State.context) : Catalog.Prover.fix list =
   match find_signature context with
   | Some (signature, body) when not context.inherits_precondition ->
       [
-        Add_panic
-          (match
-             ( List.find_opt
-                 (fun (clause : Syntax.clause) ->
-                   match clause.kind with Uses _ -> true | _ -> false)
-                 signature.clauses,
-               signature.clauses )
-           with
-          | Some uses, _ -> After_uses (Written uses.id)
-          | None, first :: _ -> Before_clause (Written first.id)
-          | None, [] -> Before_body (Written body.id));
+        (match
+           ( List.find_opt
+               (fun (clause : Syntax.clause) ->
+                 match clause.kind with Uses _ -> true | _ -> false)
+               signature.clauses,
+             signature.clauses )
+         with
+        | Some uses, _ -> Add_panic_to_uses (Written uses.id)
+        | None, first :: _ -> Add_panic (Before_clause (Written first.id))
+        | None, [] -> Add_panic (Before_body (Written body.id)));
       ]
   | Some _ | None -> []
 
@@ -249,27 +248,37 @@ let rec find_value_code context : Logic.term -> Catalog.Code.t option = function
 
 and find_value_codes context parts = collect_codes (List.map (find_value_code context) parts)
 
+let find_comparison_operator : Logic.operator -> Language.Comparison.t option = function
+  | Less -> Some Less
+  | Less_equal -> Some Less_equal
+  | Greater -> Some Greater
+  | Greater_equal -> Some Greater_equal
+  | Equal -> Some Equal
+  | _ -> None
+
 let find_goal_code context term =
-  let rec find_goal : Logic.term -> Catalog.Code.t option = function
-    | Logic.Operation (Less, [ left; right ]) -> find_comparison left Language.Comparison.Less right
-    | Logic.Operation (Less_equal, [ left; right ]) ->
-        find_comparison left Language.Comparison.Less_equal right
-    | Logic.Operation (Greater, [ left; right ]) ->
-        find_comparison left Language.Comparison.Greater right
-    | Logic.Operation (Greater_equal, [ left; right ]) ->
-        find_comparison left Language.Comparison.Greater_equal right
-    | Logic.Operation (Equal, [ left; right ]) ->
-        find_comparison left Language.Comparison.Equal right
-    | Logic.Operation (And, parts) ->
-        Option.map (fun parts -> Catalog.Code.All parts) (collect_codes (List.map find_goal parts))
-    | Logic.Operation (Or, parts) ->
+  let rec find_goal (term : Logic.term) : Catalog.Code.t option =
+    match term with
+    | Operation (And, parts) -> (
+        match List.filter (fun part -> not (Logic.is_valid part)) parts with
+        | [] -> None
+        | [ part ] -> find_goal part
+        | parts ->
+            Option.map
+              (fun parts -> Catalog.Code.All parts)
+              (collect_codes (List.map find_goal parts)))
+    | Operation (Or, parts) ->
         Option.map (fun parts -> Catalog.Code.Any parts) (collect_codes (List.map find_goal parts))
-    | Logic.Operation (Not, [ inner ]) ->
+    | Operation (Not, [ inner ]) ->
         Option.map (fun inner -> Catalog.Code.Not inner) (find_goal inner)
-    | Logic.Operation (Implies, [ premise; conclusion ]) -> (
+    | Operation (Implies, [ premise; conclusion ]) -> (
         match (find_goal premise, find_goal conclusion) with
         | Some premise, Some conclusion -> Some (Implies { premise; conclusion })
         | _ -> None)
+    | Operation (operator, [ left; right ]) -> (
+        match find_comparison_operator operator with
+        | Some comparison -> find_comparison left comparison right
+        | None -> find_value_code context term)
     | term -> find_value_code context term
   and find_comparison left comparison right =
     match (find_value_code context left, find_value_code context right) with
@@ -281,14 +290,30 @@ let find_goal_code context term =
   then find_goal term
   else None
 
+let read_requires_clause (signature : Syntax.signature) (origin : Core.origin) =
+  let expression = match origin with Written id | Desugared { construct = id; _ } -> id in
+  match
+    List.find_opt
+      (fun (clause : Syntax.clause) ->
+        match clause.kind with Requires written -> written.id = expression | _ -> false)
+      signature.clauses
+  with
+  | Some clause -> clause
+  | None -> raise_bug "a `requires` is read that the signature does not write"
+
 let add_requires (context : State.context) (frame : State.frame) required : Catalog.Prover.fix list
     =
   match find_signature context with
-  | Some (_, body) when not context.inherits_precondition ->
+  | Some (signature, body) when not context.inherits_precondition ->
+      let place : Catalog.Prover.clause_place =
+        match context.requires_clause_being_read with
+        | Some origin -> Before_clause (Written (read_requires_clause signature origin).id)
+        | None -> Before_body (Written body.id)
+      in
       [
         Add_requires
           {
-            body = Written body.id;
+            place;
             required;
             premise =
               (match frame.condition with

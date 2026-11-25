@@ -1,0 +1,5 @@
+fn f(items: List[Int64]) -> Int64
+  requires items[0] > 0 && items.length() > 0
+{
+  0
+}

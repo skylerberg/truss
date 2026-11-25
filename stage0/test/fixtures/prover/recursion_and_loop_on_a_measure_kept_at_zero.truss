@@ -1,0 +1,16 @@
+fn f(steps: Int64) -> Int64
+  decreases steps
+{
+  if steps <= 0 { return 0 }
+  f(steps - 1)
+}
+
+fn g(start: Int64) -> Int64 {
+  var count = start
+  while count > 0
+    decreases count
+  {
+    count -= 1
+  }
+  count
+}

@@ -140,17 +140,23 @@ let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause lis
       { counter; entry; rule; measure_gained; holds_when })
     context.cost.counters
 
-let make_clause_bound context (at : State.frame) (counter : Costs.counter) (cost : Mir.cost) ~since
-    =
-  let amount =
-    match cost.bound with
-    | Order_of amount | At_most amount | Exactly amount ->
-        snd (Validity.read_specification context { at with makes_obligations = false } amount)
-  in
+let read_amount context (at : State.frame) (cost : Mir.cost) =
+  match cost.bound with
+  | Order_of amount | At_most amount | Exactly amount ->
+      snd (Validity.read_specification context at amount)
+
+let make_clause_bound (counter : Costs.counter) ~since ~amount =
   match counter.counting with
   | Units -> Logic.less_equal since (Costs.bound amount)
   | Exactly -> Logic.equal since amount
   | At_most -> Logic.less_equal since amount
+
+let oblige_clause context (frame : State.frame) cost (written : Mir.cost) ~moment ~since =
+  let amount = read_amount context frame written in
+  Facts.oblige context frame
+    (Facts.locate context frame.source written.origin)
+    (Loop_cost_clause { clause = Facts.quote frame.source written.origin; moment })
+    (make_clause_bound cost.counter ~since ~amount)
 
 let make_count_bound ~(counter : Costs.counter) ~at ~bound =
   if counter.counting = Exactly then Logic.equal at bound else Logic.less_equal at bound
@@ -161,14 +167,7 @@ let check_entry context frame costs =
       Conditions.with_obligation_condition context cost.holds_when @@ fun () ->
       match cost.rule with
       | Clause_bound { written; _ } ->
-          (match written.bound with
-          | Order_of amount | At_most amount | Exactly amount ->
-              ignore (Validity.read_specification context frame amount));
-          Facts.oblige context frame
-            (Facts.locate context frame.source written.origin)
-            (Loop_cost_clause
-               { clause = Facts.quote frame.source written.origin; moment = On_entry })
-            (make_clause_bound context frame cost.counter written ~since:Costs.zero)
+          oblige_clause context frame cost written ~moment:On_entry ~since:Costs.zero
       | Per_iteration _ -> ())
     costs
 
@@ -214,11 +213,12 @@ let enter_head context head loop ~iterations =
       let at_head = Counters.lookup_spent head cost.counter in
       match cost.rule with
       | Clause_bound { written; gained_at_head; _ } ->
-          Facts.assume context head
-            (make_clause_bound context head cost.counter written
-               ~since:
-                 (Logic.plus (Logic.minus at_head cost.entry)
-                    (Option.value gained_at_head ~default:Costs.zero)))
+          let since =
+            Logic.plus (Logic.minus at_head cost.entry)
+              (Option.value gained_at_head ~default:Costs.zero)
+          in
+          let amount = read_amount context { head with makes_obligations = false } written in
+          Facts.assume context head (make_clause_bound cost.counter ~since ~amount)
       | Per_iteration { rules; _ } ->
           List.iter
             (fun (gain, per) ->
@@ -370,15 +370,11 @@ let check_iterations context loop_at (head : State.frame) loop ~iterations ~iter
             clause.gained_at_head;
           List.iter
             (fun (frame, moment) ->
-              Facts.oblige context frame
-                (Facts.locate context frame.source clause.written.origin)
-                (Loop_cost_clause
-                   { clause = Facts.quote frame.source clause.written.origin; moment })
-                (make_clause_bound context frame cost.counter clause.written
-                   ~since:
-                     (Logic.plus
-                        (Logic.minus (Counters.lookup_spent frame cost.counter) cost.entry)
-                        (cost.measure_gained clause.gain frame))))
+              oblige_clause context frame cost clause.written ~moment
+                ~since:
+                  (Logic.plus
+                     (Logic.minus (Counters.lookup_spent frame cost.counter) cost.entry)
+                     (cost.measure_gained clause.gain frame)))
             (List.map (fun exit_frame -> (exit_frame, Catalog.Prover.After_iteration)) ends
             @ List.map (fun exit_frame -> (exit_frame, Catalog.Prover.Where_left)) breaks)
       | Per_iteration per_iteration -> (
@@ -459,14 +455,7 @@ let leave context ~(clause_at : State.frame) (exit_ : State.frame) loop ~iterati
         let at = Counters.lookup_spent exit_ cost.counter in
         match cost.rule with
         | Clause_bound { written; gain; _ } ->
-            let amount =
-              match written.bound with
-              | Order_of amount | At_most amount | Exactly amount ->
-                  snd
-                    (Validity.read_specification context
-                       { clause_at with makes_obligations = false }
-                       amount)
-            in
+            let amount = read_amount context { clause_at with makes_obligations = false } written in
             let counted =
               match cost.counter.counting with
               | Units when assumes_recursive_costs -> Costs.bound amount

@@ -1,0 +1,12 @@
+fn f(items: List[Int64]) -> UInt64
+  requires items.length() > 0
+{
+  var index: UInt64 = 0
+  while index < items.length()
+    invariant index <= items.length()
+    invariant items[index] == items[index]
+  {
+    index += 1
+  }
+  index
+}

@@ -1,0 +1,9 @@
+fn f(limit: Int64) -> Int64 {
+  var index: Int64 = 0
+  while index < limit
+    invariant index <= limit
+  {
+    index += 1
+  }
+  index
+}

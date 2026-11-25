@@ -1,0 +1,4 @@
+theorem rounded_down()
+  ensures -7 / 2 == -4
+{
+}
