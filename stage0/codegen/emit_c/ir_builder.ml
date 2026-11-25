@@ -568,7 +568,9 @@ let render_local_declarations builder (emission : Emission.t) ~locals ~parameter
              (match (ty, (Dynarray.get builder.locals local).is_zeroed) with
              | Lend, false -> declare_and_initialize "_init"
              | Lend_mark, false -> declare_and_initialize "_init_mark"
-             | _, false -> declare ""
+             | ( (Value _ | Pointer _ | Raw _ | Environment _ | Evidence _ | Capabilities _ | Trace),
+                 false ) ->
+                 declare ""
              | Value ty, true when C_types.is_struct emission.types ty -> declare " = {0}"
              | (Value _ | Pointer _ | Raw _), true -> declare " = 0"
              | (Environment _ | Evidence _ | Capabilities _ | Trace | Lend | Lend_mark), true ->
