@@ -85,12 +85,12 @@ test "ML-KEM-768 matches a second seed, and keys are checked when read" uses Run
   let shared = sealed.shared.expose()
   assert hex_of(shared[..]) == "afcf18dfd6b710a09b5cf591d0eb8229d83aa10904934a3ca60a52da5ff36b96"
   assert cryptography.EncapsulationKey.from_bytes(public_key.bytes()) == Some(public_key.copy())
-  var out_of_range = public_key.bytes().to_list()
+  var out_of_range = public_key.bytes().copy()
   out_of_range[0] = 255
   out_of_range[1] = 255
   assert cryptography.EncapsulationKey.from_bytes(out_of_range) is None
   assert cryptography.DecapsulationKey.from_bytes(key.bytes()) is Some(_)
-  var wrong_hash = key.bytes().to_list()
+  var wrong_hash = key.bytes().copy()
   wrong_hash[2340] = wrong_hash[2340] ^ 1
   assert cryptography.DecapsulationKey.from_bytes(wrong_hash) is None
 }

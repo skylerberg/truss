@@ -36,7 +36,7 @@ impl Display for Error {
 }
 
 fn protocol_error(message: String) -> Error {
-  Error.Protocol(message: message.to_string())
+  Error.Protocol(message: message.copy())
 }
 
 fn system[Value](outcome: own Result[Value, SystemError]) -> Result[Value, Error] {
@@ -94,15 +94,15 @@ fn keyed_hash(function: cryptography.HashFunction, key: List[UInt8], message: Li
   match function {
     Sha384 => {
       let code = cryptography.hmac_sha384(key, message: message)
-      code[..].to_list()
+      code[..].copy()
     }
     Sha512 => {
       let code = cryptography.hmac_sha512(key, message: message)
-      code[..].to_list()
+      code[..].copy()
     }
     Sha256 => {
       let code = cryptography.hmac_sha256(key, message: message)
-      code[..].to_list()
+      code[..].copy()
     }
   }
 }
@@ -221,7 +221,7 @@ fn array_of_32(bytes: List[UInt8]) -> Array[UInt8, 32] {
 }
 
 fn seal_record(keys: mut Keys, content_type: UInt8, content: List[UInt8]) -> List[UInt8] {
-  var inner = content.to_list()
+  var inner = content.copy()
   mut inner.push(content_type)
   var header: List[UInt8] = [23, 3, 3]
   push_u16(mut header, value: inner.length() + 16)
@@ -402,7 +402,7 @@ fn read_message[Stream: streams.Duplex](wire: mut Wire[Stream]) -> Result[Messag
       if wire.buffered.length() - 4 >= length {
         let raw = mut wire.buffered.take(4 + length)
         let kind = raw[0]
-        let body = raw[4..].to_list()
+        let body = raw[4..].copy()
         return Ok(Message(kind: kind, body: own body, raw: own raw))
       }
     }
@@ -460,7 +460,7 @@ type Share(
 
 fn x25519_public(key: cryptography.AgreementKey) -> List[UInt8] {
   let point = key.public_key()
-  point.bytes[..].to_list()
+  point.bytes[..].copy()
 }
 
 fn new_share(group: UInt64) -> Share
@@ -475,7 +475,7 @@ fn new_share(group: UInt64) -> Share
   if group == hybrid_group {
     let kem = cryptography.DecapsulationKey.generate()
     let encapsulation = kem.encapsulation_key()
-    var public_key = encapsulation.bytes().to_list()
+    var public_key = encapsulation.bytes().copy()
     mut public_key.append(x25519_public(key))
     return Share(group: group, private_x25519: Some(own key), private_p256: None, private_kem: Some(own kem), public_key: own public_key)
   }
@@ -490,7 +490,7 @@ fn x25519_secret(key: own cryptography.AgreementKey, peer: List[UInt8]) -> Resul
   match own key.agree(cryptography.AgreementPublicKey(bytes: array_of_32(peer))) {
     Some(secret) => {
       let exposed = secret.expose()
-      Ok(exposed[..].to_list())
+      Ok(exposed[..].copy())
     }
     None => Err(protocol_error("an X25519 key share of low order"))
   }
@@ -526,7 +526,7 @@ fn agree(share: own Share, peer: List[UInt8]) -> Result[List[UInt8], Error]
     Some(secret) => secret.expose()
     None => return Err(protocol_error("no key for the group"))
   }
-  var shared = kem_secret[..].to_list()
+  var shared = kem_secret[..].copy()
   mut shared.append(x25519_secret(own key, peer: peer[1088..1120])?)
   Ok(own shared)
 }
@@ -554,7 +554,7 @@ fn respond(group: UInt64, peer: List[UInt8]) -> Result[Response, Error]
   var public_key = sealed.ciphertext.copy()
   mut public_key.append(x25519_public(key))
   let kem_secret = sealed.shared.expose()
-  var shared = kem_secret[..].to_list()
+  var shared = kem_secret[..].copy()
   mut shared.append(x25519_secret(own key, peer: peer[1184..1216])?)
   Ok(Response(public_key: own public_key, shared: own shared))
 }
@@ -653,7 +653,7 @@ fn read_extensions(decoder: mut binary.Decoder) -> Result[List[Extension], Error
   while !inner.is_at_end() {
     let kind: UInt64 = intrinsic.convert(decoded(mut inner.uint16())?)
     let size: UInt64 = intrinsic.convert(decoded(mut inner.uint16())?)
-    let content = decoded(mut inner.bytes(size))?.to_list()
+    let content = decoded(mut inner.bytes(size))?.copy()
     for known in extensions {
       if known.kind == kind {
         return Err(protocol_error("an extension sent twice"))
@@ -682,7 +682,7 @@ fn parse_server_hello(body: List[UInt8], session: List[UInt8]) -> Result[ServerH
   if decoded(mut decoder.uint16())? != 771 {
     return Err(protocol_error("a ServerHello with the wrong legacy version"))
   }
-  let random = decoded(mut decoder.bytes(32))?.to_list()
+  let random = decoded(mut decoder.bytes(32))?.copy()
   let echoed_length: UInt64 = intrinsic.convert(decoded(mut decoder.uint8())?)
   let echoed = decoded(mut decoder.bytes(echoed_length))?
   if echoed != session {
@@ -888,7 +888,7 @@ fn key_share_of(content: List[UInt8]) -> Option[Extension] {
   if content.length() < 4 || content.length() - 4 != length {
     return None
   }
-  Some(Extension(kind: group, content: content[4..].to_list()))
+  Some(Extension(kind: group, content: content[4..].copy()))
 }
 
 fn traffic(suite: Suite, secret: List[UInt8]) -> Option[Keys] {
@@ -946,7 +946,7 @@ public fn connect[Stream: streams.Duplex](stream: own Stream, host: String, conf
       return Err(protocol_error("a HelloRetryRequest for a group that cannot be used"))
     }
     let cookie = match find_extension(hello.extensions, kind: 44) {
-      Some(content) => if content.length() >= 2 { content[2..].to_list() } else { [] }
+      Some(content) => if content.length() >= 2 { content[2..].copy() } else { [] }
       None => []
     }
     shares = [new_share(group)]
@@ -1002,7 +1002,7 @@ public fn connect[Stream: streams.Duplex](stream: own Stream, host: String, conf
       if content.length() < 3 || intrinsic.convert[UInt8, UInt64](content[2]) != content.length() - 3 {
         return Err(protocol_error("a malformed application protocol"))
       }
-      let name = match String.from_utf8(content[3..].to_list()) {
+      let name = match String.from_utf8(content[3..].copy()) {
         Ok(name) => own name
         Err(_) => return Err(protocol_error("an application protocol that is not UTF-8"))
       }
@@ -1027,7 +1027,7 @@ public fn connect[Stream: streams.Duplex](stream: own Stream, host: String, conf
   if message.kind == 13 {
     var request_decoder = binary.Decoder.new(message.body)
     let length: UInt64 = intrinsic.convert(decoded(mut request_decoder.uint8())?)
-    request_context = Some(decoded(mut request_decoder.bytes(length))?.to_list())
+    request_context = Some(decoded(mut request_decoder.bytes(length))?.copy())
     requested_schemes = read_extensions(mut request_decoder)?
     mut wire.transcript.append_slice(message.raw)
     message = read_message(mut wire)?
@@ -1108,11 +1108,11 @@ fn parse_client_hello(body: List[UInt8]) -> Result[ClientHello, Error]
 {
   var decoder = binary.Decoder.new(body)
   let _ = decoded(mut decoder.uint16())?
-  let random = decoded(mut decoder.bytes(32))?.to_list()
+  let random = decoded(mut decoder.bytes(32))?.copy()
   let session_length: UInt64 = intrinsic.convert(decoded(mut decoder.uint8())?)
-  let session = decoded(mut decoder.bytes(session_length))?.to_list()
+  let session = decoded(mut decoder.bytes(session_length))?.copy()
   let suites_length: UInt64 = intrinsic.convert(decoded(mut decoder.uint16())?)
-  let suites = decoded(mut decoder.bytes(suites_length))?.to_list()
+  let suites = decoded(mut decoder.bytes(suites_length))?.copy()
   let compression_length: UInt64 = intrinsic.convert(decoded(mut decoder.uint8())?)
   let _ = decoded(mut decoder.bytes(compression_length))?
   let extensions = read_extensions(mut decoder)?
@@ -1169,7 +1169,7 @@ fn offered_share(extensions: List[Extension]) -> Option[Extension] {
     let rank: UInt64 = if group == hybrid_group { 3 } else if group == x25519_group { 2 } else if group == p256_group { 1 } else { 0 }
     if rank > best_rank {
       best_rank = rank
-      best = Some(Extension(kind: group, content: content[at + 4..at + 4 + length].to_list()))
+      best = Some(Extension(kind: group, content: content[at + 4..at + 4 + length].copy()))
     }
     at += 4 + length
   }
@@ -1283,7 +1283,7 @@ fn sign(key: x509.PrivateKey, content: List[UInt8]) -> List[UInt8]
     Rsa(signing) => signing.sign_pss(cryptography.HashFunction.Sha256, message: content)
     Ed25519(signing) => {
       let signature = signing.sign(content)
-      signature.bytes[..].to_list()
+      signature.bytes[..].copy()
     }
   }
 }

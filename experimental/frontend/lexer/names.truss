@@ -96,7 +96,7 @@ fn capitalize(part: String) -> String
   if is_lower(first) {
     "${uppercase_byte(first)}${part.substring(1, to: part.length())}"
   } else {
-    part.to_string()
+    part.copy()
   }
 }
 
@@ -119,11 +119,11 @@ fn correct_case(name: String) -> String
 {
   let parts = split_name(name)
   let Some(first) = parts.get(0) else {
-    return name.to_string()
+    return name.copy()
   }
   if is_upper(first.byte(0)) {
     if !name.contains("_") {
-      name.to_string()
+      name.copy()
     } else if !has_lower(name) {
       parts.join("_").to_ascii_lowercase()
     } else {

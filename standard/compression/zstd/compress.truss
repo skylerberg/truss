@@ -491,7 +491,7 @@ fn tree_lengths(counts: List[UInt64]) -> List[UInt32] {
 }
 
 fn limited_lengths(counts: List[UInt64]) -> List[UInt32] {
-  var scaled = counts.to_list()
+  var scaled = counts.copy()
   var rounds: UInt64 = 0
   while rounds < 64
     decreases 64 - rounds

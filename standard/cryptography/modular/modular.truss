@@ -194,13 +194,13 @@ internal fn Field.square(self, value: List[UInt64]) -> List[UInt64] {
 }
 
 internal fn Field.add(self, first: List[UInt64], second: List[UInt64]) -> List[UInt64] {
-  var sum = first.to_list()
+  var sum = first.copy()
   let carry = add_in_place(mut sum, amount: second)
   reduce_once(self, value: own sum, carry: carry)
 }
 
 internal fn Field.subtract(self, first: List[UInt64], second: List[UInt64]) -> List[UInt64] {
-  var difference = first.to_list()
+  var difference = first.copy()
   let borrow = subtract_in_place(mut difference, amount: second)
   var wrapped = difference.copy()
   let _ = add_in_place(mut wrapped, amount: self.modulus)
@@ -276,7 +276,7 @@ fn swap_values(first: mut List[UInt64], second: mut List[UInt64], bit: Bool) {
 
 internal fn Field.power_secret(self, base: List[UInt64], exponent: List[UInt8]) -> List[UInt64] {
   var low = self.one.copy()
-  var high = base.to_list()
+  var high = base.copy()
   for byte in exponent {
     var bit: UInt8 = 8
     while bit > 0

@@ -93,7 +93,7 @@ fn sent() -> List[String]
         html: Some("<p>Hello Grace</p>"),
         cc: [mail.Address(email: "alan@example.test", name: Some("Zoë"))],
         bcc: [mail.Address(email: "hidden@example.test")],
-        attachments: [mail.Attachment(filename: "notes.txt", content_type: "text/plain", bytes: "plain notes".bytes().to_list())],
+        attachments: [mail.Attachment(filename: "notes.txt", content_type: "text/plain", bytes: "plain notes".bytes().copy())],
       )
       outcome = match mail.send(message, options: mail.SmtpOptions(
         host: "localhost",

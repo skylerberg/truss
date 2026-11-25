@@ -35,7 +35,7 @@ impl Display for Error {
 }
 
 fn malformed(message: String) -> Error {
-  Error.Malformed(message: message.to_string())
+  Error.Malformed(message: message.copy())
 }
 
 fn system[Value](outcome: own Result[Value, SystemError]) -> Result[Value, Error] {
@@ -91,7 +91,7 @@ fn check_address(address: Address) -> Result[Unit, Error] {
 
 fn encoded_word(text: String) -> String {
   if is_ascii(text) {
-    return text.to_string()
+    return text.copy()
   }
   "=?UTF-8?B?${base64.encode(text.bytes())}?="
 }
@@ -234,7 +234,7 @@ fn boundary() -> String
 
 fn domain_of(email: String) -> String {
   match email.find_last("@") {
-    Some(at) => email.split_at(at).second.strip_prefix("@").unwrap_or("localhost").to_string()
+    Some(at) => email.split_at(at).second.strip_prefix("@").unwrap_or("localhost").copy()
     None => "localhost"
   }
 }
@@ -385,7 +385,7 @@ fn read_reply[Stream: streams.Duplex](stream: Stream, inbox: mut streams.ByteQue
       Err(_) => return Err(malformed("a reply without a code"))
     }
     let is_last = line.length() == 3 || line.bytes()[3] != 45
-    mut lines.push(if line.length() > 4 { line.part(4, to: line.length()).to_string() } else { "" })
+    mut lines.push(if line.length() > 4 { line.part(4, to: line.length()).copy() } else { "" })
     if is_last {
       return Ok(Reply(code: code, lines: own lines))
     }

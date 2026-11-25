@@ -42,7 +42,7 @@ impl Display for Error {
 }
 
 fn malformed(message: String) -> Error {
-  Error.Malformed(message: message.to_string())
+  Error.Malformed(message: message.copy())
 }
 
 public type Algorithm = Hs256 | Hs384 | Hs512 | Rs256 | Rs384 | Rs512 | Ps256 | Ps384 | Ps512 | Es256 | Es384 | EdDsa
@@ -90,15 +90,15 @@ fn mac(function: cryptography.HashFunction, key: List[UInt8], message: List[UInt
   match function {
     Sha384 => {
       let code = cryptography.hmac_sha384(key, message: message)
-      code[..].to_list()
+      code[..].copy()
     }
     Sha512 => {
       let code = cryptography.hmac_sha512(key, message: message)
-      code[..].to_list()
+      code[..].copy()
     }
     Sha256 => {
       let code = cryptography.hmac_sha256(key, message: message)
-      code[..].to_list()
+      code[..].copy()
     }
   }
 }
@@ -136,7 +136,7 @@ fn sign_with(key: jwk.Key, algorithm: Algorithm, input: List[UInt8]) -> Result[L
         return Err(Error.NoKey)
       }
       let signature = private_key.sign(input)
-      Ok(signature.bytes[..].to_list())
+      Ok(signature.bytes[..].copy())
     }
     _ => Err(Error.NoKey)
   }
@@ -192,7 +192,7 @@ public fn sign[Item: serialization.Serialize](
   uses Random, Panic, RunForever
 {
   var header: Map[String, json.Value] = [:]
-  mut header.insert("alg", value: json.Value.String(value: algorithm.name().to_string()))
+  mut header.insert("alg", value: json.Value.String(value: algorithm.name().copy()))
   mut header.insert("typ", value: json.Value.String(value: "JWT"))
   match key.id {
     Some(id) => mut header.insert("kid", value: json.Value.String(value: id.copy()))
@@ -245,7 +245,7 @@ fn decoded_json(text: String) -> Result[json.Value, Error] {
 fn text_member(value: json.Value, name: String) -> Option[String] {
   match value.get(name) {
     Some(member) => match member.as_text() {
-      Some(text) => Some(text.to_string())
+      Some(text) => Some(text.copy())
       None => None
     }
     None => None
@@ -343,7 +343,7 @@ public fn verify(token: String, keys: List[jwk.Key], rules: Validation) -> Resul
     Ok(bytes) => own bytes
     Err(_) => return Err(malformed("a signature that is not base64url"))
   }
-  var input = parts[0].to_string()
+  var input = parts[0].copy()
   mut input.push(".")
   mut input.push(parts[1])
   check_signature(keys, key_id: key_id, algorithm: algorithm, input: input.bytes(), signature: signature)?

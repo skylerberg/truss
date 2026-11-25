@@ -191,7 +191,7 @@ fn encoded(codes: List[UInt32]) -> String
 public fn normalize(text: String, form: Form = Form.Composed) -> String
 {
   if is_below(text, limit: first_changed_code(form)) {
-    return text.to_string()
+    return text.copy()
   }
   let compatible = is_compatibility(form)
   var codes: List[UInt32] = []

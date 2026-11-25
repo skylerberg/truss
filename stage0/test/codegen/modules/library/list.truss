@@ -255,9 +255,9 @@ test "a list is displayed with brackets and commas" {
   assert "${part}" == "[4, 5]"
 }
 
-test "to_list copies a slice, and filter copies the elements that pass" {
+test "copy copies a range, and filter copies the elements that pass" {
   let items: List[Int64] = [1, 2, 3, 4, 5, 6]
-  let tail = items[2..].to_list()
+  let tail = items[2..].copy()
   assert tail == [3, 4, 5, 6]
   let even = items.filter(fn(item) { item % 2 == 0 })
   assert even == [2, 4, 6]
@@ -267,7 +267,7 @@ test "to_list copies a slice, and filter copies the elements that pass" {
   let short = words.filter(fn(word) { word.length() == 2 })
   assert short.length() == 2
   assert short[1] == "c3"
-  let copies = words.to_list()
+  let copies = words.copy()
   assert copies.length() == 3
   assert copies[1] == "bb2"
 }

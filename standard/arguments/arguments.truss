@@ -78,7 +78,7 @@ impl Display for Error {
 }
 
 public fn Parser.new(name: String, about: String = "") -> Parser {
-  Parser(name: name.to_string(), about: about.to_string(), parameters: [], commands: [])
+  Parser(name: name.copy(), about: about.copy(), parameters: [], commands: [])
 }
 
 let no_values: List[String] = []
@@ -91,9 +91,9 @@ fn Parser.with_parameter(own self, parameter: own Parameter) -> Parser {
 
 public fn Parser.flag(own self, name: String, help: String, short: Option[Character] = None) -> Parser {
   own self.with_parameter(Parameter(
-    name: name.to_string(),
+    name: name.copy(),
     short: short,
-    help: help.to_string(),
+    help: help.copy(),
     kind: Kind.Flag,
     required: false,
     repeated: false,
@@ -111,9 +111,9 @@ public fn Parser.option(
   repeated: Bool = false,
 ) -> Parser {
   own self.with_parameter(Parameter(
-    name: name.to_string(),
+    name: name.copy(),
     short: short,
-    help: help.to_string(),
+    help: help.copy(),
     kind: Kind.Option,
     required: required,
     repeated: repeated,
@@ -123,9 +123,9 @@ public fn Parser.option(
 
 public fn Parser.positional(own self, name: String, help: String, required: Bool = true) -> Parser {
   own self.with_parameter(Parameter(
-    name: name.to_string(),
+    name: name.copy(),
     short: None,
-    help: help.to_string(),
+    help: help.copy(),
     kind: Kind.Positional,
     required: required,
     repeated: false,
@@ -135,9 +135,9 @@ public fn Parser.positional(own self, name: String, help: String, required: Bool
 
 public fn Parser.rest(own self, name: String, help: String) -> Parser {
   own self.with_parameter(Parameter(
-    name: name.to_string(),
+    name: name.copy(),
     short: None,
-    help: help.to_string(),
+    help: help.copy(),
     kind: Kind.Rest,
     required: false,
     repeated: true,
@@ -247,19 +247,19 @@ fn add_value(parsed: mut Parsed, name: String, value: String, repeated: Bool)
 {
   let position = parsed.index_of(name)
   if position == parsed.options.length() {
-    mut parsed.options.push(NamedValues(name: name.to_string(), values: [value.to_string()]))
+    mut parsed.options.push(NamedValues(name: name.copy(), values: [value.copy()]))
   } else {
     if !repeated {
       mut parsed.options[position].values.clear()
     }
-    mut parsed.options[position].values.push(value.to_string())
+    mut parsed.options[position].values.push(value.copy())
   }
 }
 
 fn set_flag(parsed: mut Parsed, name: String)
 {
   if !parsed.flag(name) {
-    mut parsed.switches.push(name.to_string())
+    mut parsed.switches.push(name.copy())
   }
 }
 
@@ -282,7 +282,7 @@ fn Parser.take_option_value(
     return Ok(next)
   }
   if next == arguments.length() {
-    return Err(Error.MissingValue(name: name.to_string()))
+    return Err(Error.MissingValue(name: name.copy()))
   }
   add_value(mut parsed, name: name, value: arguments[next], repeated: repeated)
   Ok(next + 1)
@@ -312,7 +312,7 @@ fn Parser.parse_long_option(
   }
   if self.parameters[position].kind == Kind.Flag {
     if attached is Some(value) {
-      return Err(Error.UnexpectedArgument(value: value.to_string()))
+      return Err(Error.UnexpectedArgument(value: value.copy()))
     }
     set_flag(mut parsed, name: name)
     return Ok(next)
@@ -380,12 +380,12 @@ fn Parser.finalize(self, parsed: own Parsed, positional_count: UInt64) -> Result
       if self.parameters[index].default is Some(text) {
         add_value(mut finished, name: name, value: text, repeated: false)
       } else if self.parameters[index].required {
-        return Err(Error.MissingRequired(name: name.to_string()))
+        return Err(Error.MissingRequired(name: name.copy()))
       }
     }
     if kind == Kind.Positional {
       if seen >= positional_count && self.parameters[index].required {
-        return Err(Error.MissingRequired(name: name.to_string()))
+        return Err(Error.MissingRequired(name: name.copy()))
       }
       seen += 1
     }
@@ -427,14 +427,14 @@ public fn Parser.parse(self, arguments: List[String]) -> Result[Parsed, Error]
         )
         positional_count += 1
       } else if self.commands.length() == 0 {
-        return Err(Error.UnexpectedArgument(value: argument.to_string()))
+        return Err(Error.UnexpectedArgument(value: argument.copy()))
       } else {
         let command = self.find_command(argument)
         if command == self.commands.length() {
-          return Err(Error.UnknownCommand(name: argument.to_string()))
+          return Err(Error.UnknownCommand(name: argument.copy()))
         }
         let inner = self.commands[command].parse(arguments[index..])?
-        parsed.command_name = Some(argument.to_string())
+        parsed.command_name = Some(argument.copy())
         mut parsed.command.push(own inner)
         index = arguments.length()
       }
@@ -659,7 +659,7 @@ public fn Parsed.value_as[Target: text.Parse](self, name: String) -> Result[Opti
   match self.value(name) {
     Some(text) => match Target.parse(text) {
       Ok(parsed) => Ok(Some(own parsed))
-      Err(_) => Err(Error.InvalidValue(name: name.to_string(), value: text.to_string()))
+      Err(_) => Err(Error.InvalidValue(name: name.copy(), value: text.copy()))
     }
     None => Ok(None)
   }

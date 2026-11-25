@@ -649,8 +649,8 @@ fn intern_name(scanner: mut Scanner, start: UInt64, stop: UInt64) -> UInt64
     return interned_index
   }
   let index = scanner.tables.names.length()
-  mut scanner.tables.names.push(scanner.text(start, stop).to_string())
-  mut scanner.name_indices.insert(scanner.text(start, stop).to_string(), value: index)
+  mut scanner.tables.names.push(scanner.text(start, stop).copy())
+  mut scanner.name_indices.insert(scanner.text(start, stop).copy(), value: index)
   mut scanner.name_checks.push(check_name(scanner.text(start, stop)))
   index
 }
@@ -715,7 +715,7 @@ fn lex_name(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> ItemScan
     _ => false
   }
   if is_tag {
-    let tag = token.Tag(name: scanner.text(start, stop).to_string(), span: source.make_span(start, stop))
+    let tag = token.Tag(name: scanner.text(start, stop).copy(), span: source.make_span(start, stop))
     return open_string(mut scanner, tag: Some(own tag), nesting: nesting, inline: inline, origin: StringOrigin.PlainString(start))
   }
   match lex_after_name(mut scanner, inline, nesting, start, name: kind) {

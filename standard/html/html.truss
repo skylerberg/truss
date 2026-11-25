@@ -78,7 +78,7 @@ public opaque type Part(content: Content)
 
 impl From[view String] for Part {
   fn from(value: own view String) -> Part {
-    Part(content: Content.Text(text: value.to_string()))
+    Part(content: Content.Text(text: value.copy()))
   }
 }
 

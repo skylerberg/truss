@@ -79,8 +79,8 @@ fn make_name(cursor: mut TokenCursor, written: token.Token) -> syntax.Name
     _ => Panic.crash("Parser: a name is made from a token that is not a name")
   }
   let text = match written.kind {
-    Keyword(_) => "ensures".to_string()
-    _ => cursor.name(written.kind).to_string()
+    Keyword(_) => "ensures".copy()
+    _ => cursor.name(written.kind).copy()
   }
   syntax.Name(own text, case, id: allocate_token_id(mut cursor, span: written.span))
 }
@@ -306,7 +306,7 @@ fn expect_contextual(
   let name = cursor.name(current.kind)
   let words = match own suggested {
     Some(list) => list
-    None => accepted.to_list()
+    None => accepted.copy()
   }
   var spelled: List[String] = []
   for word in words {

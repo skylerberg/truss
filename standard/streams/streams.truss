@@ -291,7 +291,7 @@ public fn ByteQueue.take(mut self, count: UInt64) -> List[UInt8]
   if count > self.length() {
     Panic.crash("the queue holds fewer bytes")
   }
-  let taken = self.storage[self.start..self.start + count].to_list()
+  let taken = self.storage[self.start..self.start + count].copy()
   self.start += count
   taken
 }
@@ -306,7 +306,7 @@ public fn ByteQueue.take_all(mut self) -> List[UInt8]
   if self.start == 0 {
     return map.exchange(mut self.storage, value: [])
   }
-  let taken = self.storage[self.start..].to_list()
+  let taken = self.storage[self.start..].copy()
   self.start = self.storage.length()
   taken
 }

@@ -44,7 +44,7 @@ fn noise(count: UInt64) -> List[UInt8] {
 
 fn input_of(name: String) -> List[UInt8] {
   if name == "short" {
-    "Hello, zstd and Brotli!".bytes().to_list()
+    "Hello, zstd and Brotli!".bytes().copy()
   } else if name == "text_3000" {
     words(3000)
   } else if name == "text_300000" {
@@ -679,7 +679,7 @@ test "frames that the reference zstd compressed decompress to their input" {
 }
 
 test "compress's output decompresses to its input" {
-  let inputs: List[List[UInt8]] = [[], "a".bytes().to_list(), words(3000), noise(1000), List.filled(7, count: 200000), words(140000)]
+  let inputs: List[List[UInt8]] = [[], "a".bytes().copy(), words(3000), noise(1000), List.filled(7, count: 200000), words(140000)]
   for input in inputs {
     assert zstd.decompress(zstd.compress(input)) == Ok(input.copy())
   }

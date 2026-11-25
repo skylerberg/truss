@@ -39,7 +39,7 @@ public fn Form.entries(self) -> view List[url.Parameter] {
 }
 
 public fn Form.add(mut self, name: String, value: String) {
-  mut self.fields.push(url.Parameter(name: name.to_string(), value: value.to_string()))
+  mut self.fields.push(url.Parameter(name: name.copy(), value: value.copy()))
 }
 
 public fn Form.encode(self) -> String {
@@ -77,9 +77,9 @@ fn parameter_of(value: String, name: String) -> Option[String] {
         if part.part(0, to: at).trim().to_ascii_lowercase() == name.to_ascii_lowercase() {
           let raw = part.part(at + 1, to: part.length()).trim()
           if raw.length() >= 2 && raw.starts_with("\"") && raw.ends_with("\"") {
-            return Some(raw.part(1, to: raw.length() - 1).to_string())
+            return Some(raw.part(1, to: raw.length() - 1).copy())
           }
-          return Some(raw.to_string())
+          return Some(raw.copy())
         }
       }
       None => {}
@@ -252,7 +252,7 @@ public fn Multipart.next_part(mut self) -> Result[Option[Part], Error]
   }
   let filename = parameter_of(disposition, name: "filename")
   let content_type = match headers.get("Content-Type") {
-    Some(value) => Some(value.to_string())
+    Some(value) => Some(value.copy())
     None => None
   }
   self.section = Section.Body

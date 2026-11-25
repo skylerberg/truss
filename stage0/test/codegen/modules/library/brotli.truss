@@ -44,7 +44,7 @@ fn noise(count: UInt64) -> List[UInt8] {
 
 fn input_of(name: String) -> List[UInt8] {
   if name == "short" {
-    "Hello, zstd and Brotli!".bytes().to_list()
+    "Hello, zstd and Brotli!".bytes().copy()
   } else if name == "text_3000" {
     words(3000)
   } else if name == "text_300000" {

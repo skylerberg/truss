@@ -21,7 +21,7 @@ internal let invalid_data: UInt16 = 1007
 internal let message_too_big: UInt16 = 1009
 
 internal fn accept_key(key: String) -> String {
-  var input = key.to_string()
+  var input = key.copy()
   mut input.push("258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
   let digest = cryptography.sha1(input.bytes())
   base64.encode(digest[..])
@@ -42,7 +42,7 @@ internal type Parsed =
   | Invalid(code: UInt16, reason: String)
 
 fn invalid(code: UInt16, reason: String) -> Parsed {
-  Parsed.Invalid(code: code, reason: reason.to_string())
+  Parsed.Invalid(code: code, reason: reason.copy())
 }
 
 internal fn parse(bytes: List[UInt8], is_server: Bool, limit: UInt64, is_deflate: Bool = false) -> Parsed {
@@ -184,7 +184,7 @@ fn parameters_of(extension: String) -> List[Parameter] {
       Some(at) => {
         let raw = item.part(at + 1, to: item.length()).trim()
         let value = if raw.length() >= 2 && raw.starts_with("\"") && raw.ends_with("\"") { raw.part(1, to: raw.length() - 1) } else { raw }
-        mut parameters.push(Parameter(name: item.part(0, to: at).trim().to_ascii_lowercase(), value: Some(value.to_string())))
+        mut parameters.push(Parameter(name: item.part(0, to: at).trim().to_ascii_lowercase(), value: Some(value.copy())))
       }
       None => mut parameters.push(Parameter(name: item.to_ascii_lowercase(), value: None))
     }

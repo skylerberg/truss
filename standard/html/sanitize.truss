@@ -314,7 +314,7 @@ fn read_tag(bytes: List[UInt8], at: UInt64) -> Option[Tag]
         {
           index += 1
         }
-        value = bytes[value_start..index].to_list()
+        value = bytes[value_start..index].copy()
         if index < bytes.length() {
           index += 1
         }
@@ -326,7 +326,7 @@ fn read_tag(bytes: List[UInt8], at: UInt64) -> Option[Tag]
         {
           index += 1
         }
-        value = bytes[value_start..index].to_list()
+        value = bytes[value_start..index].copy()
       }
     }
     mut attributes.push(Attribute(name: own attribute_name, value: own value))
@@ -368,7 +368,7 @@ fn find_from(bytes: List[UInt8], start: UInt64, pattern: List[UInt8]) -> Option[
 fn skip_dropped(bytes: List[UInt8], start: UInt64, name: String) -> UInt64
   ensures result <= bytes.length()
 {
-  let closing = "</${name}".bytes().to_list()
+  let closing = "</${name}".bytes().copy()
   match find_from(bytes, start: start, pattern: closing) {
     Some(found) => {
       var index = found + closing.length()

@@ -68,14 +68,14 @@ fn submit() -> List[String]
       var headers = http.Headers.new()
       mut headers.add("Content-Type", value: "application/x-www-form-urlencoded")
       let encoded = form.encode()
-      match http.send(http.Method.Post, url: url.Url"http://localhost:8091/form", headers: headers, body: encoded.bytes().to_list()) {
+      match http.send(http.Method.Post, url: url.Url"http://localhost:8091/form", headers: headers, body: encoded.bytes().copy()) {
         Ok(response) => mut seen.push(response.text_body().unwrap_or(""))
         Err(error) => mut seen.push("failed: ${error}")
       }
       var fields = http.Form.new()
       mut fields.add("title", value: "notes ✓")
       let large: List[UInt8] = List.filled(120, count: 100000)
-      let tricky = "\r\n--truss-not-the-boundary\r\n--".bytes().to_list()
+      let tricky = "\r\n--truss-not-the-boundary\r\n--".bytes().copy()
       let files: List[http.FilePart] = [
         http.FilePart(name: "document", filename: "a \"quoted\" name.txt", content_type: "text/plain", bytes: own large),
         http.FilePart(name: "tricky", filename: "tricky.bin", content_type: "application/octet-stream", bytes: own tricky),

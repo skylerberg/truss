@@ -70,7 +70,7 @@ fn read_value(bytes: List[UInt8], at: UInt64, depth: UInt64) -> Result[core.Pair
     return Err(Error(offset: at))
   }
   let header = read_header(bytes, at: at)?
-  let content = bytes[header.start..header.end].to_list()
+  let content = bytes[header.start..header.end].copy()
   let tag = header.tag
   let value = if tag == 1 {
     if content.length() != 1 || (content[0] != 0 && content[0] != 255) {
@@ -86,7 +86,7 @@ fn read_value(bytes: List[UInt8], at: UInt64, depth: UInt64) -> Result[core.Pair
     if content.is_empty() || content[0] > 7 {
       return Err(Error(offset: at))
     }
-    Value.BitString(unused_bits: content[0], bytes: content[1..].to_list())
+    Value.BitString(unused_bits: content[0], bytes: content[1..].copy())
   } else if tag == 4 {
     Value.OctetString(bytes: own content)
   } else if tag == 5 {

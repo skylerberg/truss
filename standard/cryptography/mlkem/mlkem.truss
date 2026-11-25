@@ -227,7 +227,7 @@ fn decompressed(coefficients: Array[UInt64, 256], bits: UInt64) -> Array[UInt64,
 fn sample_ntt(rho: List[UInt8], column: UInt8, row: UInt8) -> Array[UInt64, 256]
   uses RunForever
 {
-  var seed = rho.to_list()
+  var seed = rho.copy()
   mut seed.push(column)
   mut seed.push(row)
   var sponge = keccak.absorb(168, message: seed, suffix: 31)
@@ -262,7 +262,7 @@ fn sample_ntt(rho: List[UInt8], column: UInt8, row: UInt8) -> Array[UInt64, 256]
 }
 
 fn sample_noise(seed: List[UInt8], nonce: UInt8) -> Array[UInt64, 256] {
-  var input = seed.to_list()
+  var input = seed.copy()
   mut input.push(nonce)
   let bytes = keccak.hash(136, message: input, suffix: 31, count: 128)
   var coefficients: Array[UInt64, 256] = Array.filled(0)
@@ -305,7 +305,7 @@ internal type KeyPair(encapsulation: List[UInt8], decapsulation: List[UInt8])
 fn generate_pke(seed: List[UInt8]) -> KeyPair
   uses RunForever
 {
-  var input = seed.to_list()
+  var input = seed.copy()
   mut input.push(3)
   let expanded = split_512(input)
   if expanded.length() != 64 {
@@ -420,14 +420,14 @@ internal type Encapsulated(shared: List[UInt8], ciphertext: List[UInt8])
 internal fn encapsulate(encapsulation: List[UInt8], message: List[UInt8]) -> Encapsulated
   uses RunForever
 {
-  var input = message.to_list()
+  var input = message.copy()
   mut input.append(hash_256(encapsulation))
   let expanded = split_512(input)
   if expanded.length() != 64 {
     return Encapsulated(shared: [], ciphertext: [])
   }
   let ciphertext = encrypt(encapsulation, message: message, randomness: expanded[32..64])
-  Encapsulated(shared: expanded[0..32].to_list(), ciphertext: own ciphertext)
+  Encapsulated(shared: expanded[0..32].copy(), ciphertext: own ciphertext)
 }
 
 internal fn decapsulate(decapsulation: List[UInt8], ciphertext: List[UInt8]) -> List[UInt8]
@@ -443,7 +443,7 @@ internal fn decapsulate(decapsulation: List[UInt8], ciphertext: List[UInt8]) -> 
   if expanded.length() != 64 {
     return []
   }
-  var rejection_input = decapsulation[2368..2400].to_list()
+  var rejection_input = decapsulation[2368..2400].copy()
   mut rejection_input.append_slice(ciphertext)
   let rejected = keccak.hash(136, message: rejection_input, suffix: 31, count: 32)
   let again = encrypt(decapsulation[1152..2336], message: message, randomness: expanded[32..64])

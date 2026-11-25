@@ -4261,11 +4261,11 @@ fn digest_for(curve: Curve, message: List[UInt8]) -> List[UInt8] {
   match curve {
     P256 => {
       let digest = sha256(message)
-      digest[..].to_list()
+      digest[..].copy()
     }
     P384 => {
       let digest = sha384(message)
-      digest[..].to_list()
+      digest[..].copy()
     }
   }
 }
@@ -4274,11 +4274,11 @@ fn keyed_hash(curve: Curve, key: List[UInt8], message: List[UInt8]) -> List[UInt
   match curve {
     P256 => {
       let code = hmac_sha256(key, message: message)
-      code[..].to_list()
+      code[..].copy()
     }
     P384 => {
       let code = hmac_sha384(key, message: message)
-      code[..].to_list()
+      code[..].copy()
     }
   }
 }
@@ -4342,7 +4342,7 @@ public fn EcdsaVerifyingKey.from_sec1(curve: Curve, bytes: List[UInt8]) -> Optio
   if elliptic_curve.decode(bytes) is None {
     return None
   }
-  Some(EcdsaVerifyingKey(curve: curve, point: bytes.to_list()))
+  Some(EcdsaVerifyingKey(curve: curve, point: bytes.copy()))
 }
 
 public fn EcdsaVerifyingKey.curve(self) -> Curve {
@@ -4437,7 +4437,7 @@ public fn EcdsaSigningKey.from_scalar(curve: Curve, bytes: List[UInt8]) -> Optio
   {
     return None
   }
-  Some(EcdsaSigningKey(curve: curve, scalar: bytes.to_list()))
+  Some(EcdsaSigningKey(curve: curve, scalar: bytes.copy()))
 }
 
 public fn EcdsaSigningKey.expose_scalar(self) -> view List[UInt8] {
@@ -4496,7 +4496,7 @@ public fn EcdhKey.from_scalar(curve: Curve, bytes: List[UInt8]) -> Option[EcdhKe
   uses Panic
 {
   match EcdsaSigningKey.from_scalar(curve, bytes: bytes) {
-    Some(_) => Some(EcdhKey(curve: curve, scalar: bytes.to_list()))
+    Some(_) => Some(EcdhKey(curve: curve, scalar: bytes.copy()))
     None => None
   }
 }
@@ -4533,15 +4533,15 @@ public fn HashFunction.digest(self, message: List[UInt8]) -> List[UInt8] {
   match self {
     Sha256 => {
       let digest = sha256(message)
-      digest[..].to_list()
+      digest[..].copy()
     }
     Sha384 => {
       let digest = sha384(message)
-      digest[..].to_list()
+      digest[..].copy()
     }
     Sha512 => {
       let digest = sha512(message)
-      digest[..].to_list()
+      digest[..].copy()
     }
   }
 }
@@ -4572,7 +4572,7 @@ fn mask_generation(function: HashFunction, seed: List[UInt8], length: UInt64) ->
   while mask.length() < length && counter < 65536
     decreases 65536 - counter
   {
-    var input = seed.to_list()
+    var input = seed.copy()
     mut input.push(intrinsic.convert(counter >> 24))
     mut input.push(intrinsic.convert((counter >> 16) & 255))
     mut input.push(intrinsic.convert((counter >> 8) & 255))
@@ -4595,7 +4595,7 @@ fn trimmed(bytes: List[UInt8]) -> List[UInt8] {
   {
     start += 1
   }
-  bytes[start..].to_list()
+  bytes[start..].copy()
 }
 
 public fn RsaPublicKey.new(modulus: List[UInt8], exponent: List[UInt8]) -> Option[RsaPublicKey] {
@@ -4755,7 +4755,7 @@ public fn RsaPrivateKey.new(
     second_exponent: trimmed(second_exponent),
     coefficient: trimmed(coefficient),
   )
-  var message = public_key.modulus().to_list()
+  var message = public_key.modulus().copy()
   if message.length() > 0 {
     message[0] = 0
   }
@@ -4818,7 +4818,7 @@ fn signed_or_crash(key: RsaPrivateKey, encoded: List[UInt8]) -> List[UInt8]
   uses Panic
 {
   let signed = private_operation(key, value: encoded).expect("a key that RsaPrivateKey.new accepted signs")
-  if public_operation(key.public_key, signature: signed) != Some(encoded.to_list()) {
+  if public_operation(key.public_key, signature: signed) != Some(encoded.copy()) {
     Panic.crash("an RSA signature did not verify, so the computation was faulty")
   }
   signed
@@ -4900,7 +4900,7 @@ public fn DecapsulationKey.from_bytes(bytes: List[UInt8]) -> Option[Decapsulatio
   if bytes.length() == mlkem.decapsulation_key_length && mlkem.is_valid_decapsulation_key(bytes)
     && mlkem.is_valid_encapsulation_key(bytes[1152..2336])
   {
-    Some(DecapsulationKey(bytes: bytes.to_list()))
+    Some(DecapsulationKey(bytes: bytes.copy()))
   } else {
     None
   }
@@ -4913,7 +4913,7 @@ public fn DecapsulationKey.bytes(self) -> view List[UInt8] {
 public fn DecapsulationKey.encapsulation_key(self) -> EncapsulationKey {
   let stop = if self.bytes.length() >= 2336 { 2336 } else { self.bytes.length() }
   let start = if stop >= 1152 { 1152 } else { stop }
-  EncapsulationKey(bytes: self.bytes[start..stop].to_list())
+  EncapsulationKey(bytes: self.bytes[start..stop].copy())
 }
 
 public fn DecapsulationKey.decapsulate(self, ciphertext: List[UInt8]) -> Option[SecretKey]
@@ -4930,7 +4930,7 @@ public fn DecapsulationKey.decapsulate(self, ciphertext: List[UInt8]) -> Option[
 }
 
 public fn EncapsulationKey.from_bytes(bytes: List[UInt8]) -> Option[EncapsulationKey] {
-  if mlkem.is_valid_encapsulation_key(bytes) { Some(EncapsulationKey(bytes: bytes.to_list())) } else { None }
+  if mlkem.is_valid_encapsulation_key(bytes) { Some(EncapsulationKey(bytes: bytes.copy())) } else { None }
 }
 
 public fn EncapsulationKey.bytes(self) -> view List[UInt8] {

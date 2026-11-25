@@ -147,7 +147,7 @@ test "a handler whose HTTP/1.1 client disconnects is cancelled" uses Panic, RunF
 
 fn frame(kind: UInt8, flags: UInt8, stream: UInt8, payload: List[UInt8]) -> List[UInt8] {
   var bytes: List[UInt8] = [0, 0, UInt8.try_from_integer(payload.length()).unwrap_or(0), kind, flags, 0, 0, 0, stream]
-  mut bytes.append(payload.to_list())
+  mut bytes.append(payload.copy())
   bytes
 }
 
@@ -162,7 +162,7 @@ fn reset_over_http_two() -> Int64
     })
     {
       var connection = network.connect("localhost", port: 8103).expect("the server accepts")
-      var opening: List[UInt8] = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".bytes().to_list()
+      var opening: List[UInt8] = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".bytes().copy()
       mut opening.append(frame(4, flags: 0, stream: 0, payload: []))
       let block: List[UInt8] = [130, 134, 65, 1, 120, 132]
       mut opening.append(frame(1, flags: 5, stream: 1, payload: block))

@@ -26,7 +26,7 @@ impl Display for Error {
 }
 
 fn malformed[Value](message: String) -> Result[Value, Error] {
-  Err(Error.Malformed(message: message.to_string()))
+  Err(Error.Malformed(message: message.copy()))
 }
 
 let frame_magic: UInt32 = 0xFD2FB528
@@ -152,7 +152,7 @@ fn backward_of(bytes: List[UInt8]) -> Result[Backward, Error] {
   }
   let marker: UInt64 = intrinsic.convert(highest_bit(intrinsic.convert(last)))
   let whole = bytes.length() - 1
-  Ok(Backward(bytes: bytes.to_list(), remaining: whole.saturating_multiply(8).saturating_add(marker), overrun: 0))
+  Ok(Backward(bytes: bytes.copy(), remaining: whole.saturating_multiply(8).saturating_add(marker), overrun: 0))
 }
 
 fn Backward.peek(self, count: UInt32) -> UInt32
@@ -283,7 +283,7 @@ type Counts(values: List[Int16], log: UInt32, consumed: UInt64)
 
 fn read_counts(bytes: List[UInt8], maximum_symbol: UInt64, maximum_log: UInt32) -> Result[Counts, Error]
   requires maximum_log <= 9 && maximum_symbol <= 255 {
-  var reader = Forward(bytes: bytes.to_list(), bit: 0)
+  var reader = Forward(bytes: bytes.copy(), bit: 0)
   let log = (mut reader.read(4) & 15) + 5
   if log > maximum_log {
     return malformed("an FSE accuracy above its maximum")
@@ -542,7 +542,7 @@ fn decode_literals(block: List[UInt8], state: mut FrameState) -> Result[Literals
       if size > block.length() - header {
         return malformed("raw literals past the block")
       }
-      return Ok(Literals(bytes: block[header..header + size].to_list(), consumed: header + size))
+      return Ok(Literals(bytes: block[header..header + size].copy(), consumed: header + size))
     }
     if header >= block.length() {
       return malformed("RLE literals without their byte")

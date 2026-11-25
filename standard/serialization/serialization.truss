@@ -391,7 +391,7 @@ public type Names = AsWritten | CamelCase
 
 public fn Names.apply(self, name: String) -> String {
   match self {
-    AsWritten => name.to_string()
+    AsWritten => name.copy()
     CamelCase => {
       var text = String.with_capacity(name.length())
       var upper = false
@@ -440,7 +440,7 @@ public fn TreeWriter[Node: Tree].finish(own self) -> Result[Node, Error] {
 
 fn fail_writing[Node: Tree](writer: mut TreeWriter[Node], message: String) {
   if writer.failure is None {
-    writer.failure = Some(message.to_string())
+    writer.failure = Some(message.copy())
   }
 }
 
@@ -542,7 +542,7 @@ impl Serializer for TreeWriter[Node: Tree] {
   }
 
   fn text(mut self, value: String) {
-    put(mut self, node: Node.from_text(value.to_string()))
+    put(mut self, node: Node.from_text(value.copy()))
   }
 
   fn begin_list(mut self, length: UInt64) {
@@ -576,7 +576,7 @@ impl Serializer for TreeWriter[Node: Tree] {
   }
 
   fn key(mut self, key: String) {
-    name_next(mut self, name: key.to_string())
+    name_next(mut self, name: key.copy())
   }
 
   fn end_map(mut self) {
@@ -586,10 +586,10 @@ impl Serializer for TreeWriter[Node: Tree] {
 
   fn begin_variant(mut self, name: String, length: UInt64) {
     if length == 0 {
-      put(mut self, node: Node.from_text(name.to_string()))
+      put(mut self, node: Node.from_text(name.copy()))
       mut self.open.push(Open.UnitVariant)
     } else {
-      mut self.variants.push(name.to_string())
+      mut self.variants.push(name.copy())
       open_members(mut self, open: Open.Variant)
     }
   }
@@ -950,6 +950,6 @@ impl Deserializer for TreeReader[Node: Tree] {
         mut path.push(segment)
       }
     }
-    Error(path: own path, message: message.to_string())
+    Error(path: own path, message: message.copy())
   }
 }

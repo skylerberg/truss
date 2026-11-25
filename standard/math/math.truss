@@ -637,10 +637,10 @@ fn divide_magnitudes(dividend: List[UInt64], divisor: List[UInt64]) -> DigitDivi
   let divisor_digits = to_digits(divisor)
   let dividend_digits = to_digits(dividend)
   if dividend_digits.length() < divisor_digits.length() || divisor_digits.length() == 0 {
-    return DigitDivision(quotient: [], remainder: dividend.to_list())
+    return DigitDivision(quotient: [], remainder: dividend.copy())
   }
   if divisor_digits.length() == 1 {
-    var quotient = dividend.to_list()
+    var quotient = dividend.copy()
     var rest: List[UInt64] = []
     if divisor_digits[0] != 0 {
       let remainder = divide_small(mut quotient, divisor: divisor_digits[0])

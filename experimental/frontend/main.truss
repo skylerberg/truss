@@ -213,7 +213,7 @@ fn measure(path: String, text: String, rounds: UInt64) -> Timing
   var best_lexing: Int64 = Int64.maximum
   for _ in 0..rounds {
     let before = Clock.monotonic()
-    let result = lexer.lex(source.Source.create(path, text: text.to_string()))
+    let result = lexer.lex(source.Source.create(path, text: text.copy()))
     let elapsed = (Clock.monotonic() - before).total_nanoseconds()
     if result.lexed.stop < result.lexed.first {
       Panic.crash("a token range runs backward")
@@ -222,7 +222,7 @@ fn measure(path: String, text: String, rounds: UInt64) -> Timing
       best_lexing = elapsed
     }
   }
-  let lexed = lexer.lex(source.Source.create(path, text: text.to_string()))
+  let lexed = lexer.lex(source.Source.create(path, text: text.copy()))
   var best_parsing: Int64 = Int64.maximum
   for _ in 0..rounds {
     let tables = lexed.lexed.tables.copy()

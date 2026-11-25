@@ -58,7 +58,7 @@ impl Display for EncodeError {
 type Failure(message: String, offset: UInt64)
 
 fn failure_at(message: String, offset: UInt64) -> Failure {
-  Failure(message: message.to_string(), offset: offset)
+  Failure(message: message.copy(), offset: offset)
 }
 
 fn with_position(text: String, failure: Failure) -> ParseError
@@ -704,7 +704,7 @@ fn Document.child(self, parent: UInt64, key: String) -> Option[UInt64] {
 fn add_child(document: mut Document, parent: UInt64, key: String, kind: Kind, value: own Option[Value], header: Bool, dotted: Bool) -> UInt64 {
   let index = add_node(mut document, kind: kind, value: own value, header: header, dotted: dotted)
   if parent < document.children.length() {
-    let _ = mut document.children[parent].replace(key.to_string(), value: index)
+    let _ = mut document.children[parent].replace(key.copy(), value: index)
   }
   index
 }
@@ -1288,7 +1288,7 @@ public fn to_text(table: Map[String, Value]) -> String
   var path: List[String] = []
   write_table(mut text, table: table, path: mut path)
   if text.length() > 0 && text.starts_with("\n") {
-    text.part(1, to: text.length()).to_string()
+    text.part(1, to: text.length()).copy()
   } else {
     text
   }
