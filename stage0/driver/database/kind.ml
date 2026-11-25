@@ -110,6 +110,7 @@ type fact =
   | Generated_mir
   | Callees
   | Recursion_group
+  | Proof_group
   | Usage_check
   | Ownership
   | Dependency_use
@@ -144,6 +145,7 @@ let facts =
     Generated_mir;
     Callees;
     Recursion_group;
+    Proof_group;
     Usage_check;
     Ownership;
     Dependency_use;
@@ -292,6 +294,7 @@ let show_fact = function
   | Generated_mir -> "generated MIR"
   | Callees -> "call edges"
   | Recursion_group -> "recursion group"
+  | Proof_group -> "proof group"
   | Usage_check -> "usage check"
   | Ownership -> "ownership check"
   | Dependency_use -> "package check"
@@ -330,8 +333,8 @@ let is_signature = function
   | Type_facts | Signature_check | Checked_interface | Contract | Contract_mir ->
       true
   | Resolved _ | Grant | Body_form | Body_tables | Run_forever | Ownership_modes | Body_mir
-  | Generated_mir | Callees | Recursion_group | Usage_check | Ownership | Dependency_use | Proof
-  | Lowered | Test_key | Evaluation | Unit _ ->
+  | Generated_mir | Callees | Recursion_group | Proof_group | Usage_check | Ownership
+  | Dependency_use | Proof | Lowered | Test_key | Evaluation | Unit _ ->
       false
 
 let list_read_targets = function
@@ -340,14 +343,14 @@ let list_read_targets = function
   | ( Resolved _ | Grant | Trait_header | Constant_value | Header | Elaboration | Derived_interface
     | Type_facts | Checked_interface | Contract | Body_form | Body_tables | Run_forever
     | Ownership_modes | Body_mir | Contract_mir | Generated_mir | Callees | Recursion_group
-    | Usage_check | Ownership | Dependency_use | Proof | Lowered | Test_key | Evaluation | Unit _ )
-    as fact ->
+    | Proof_group | Usage_check | Ownership | Dependency_use | Proof | Lowered | Test_key
+    | Evaluation | Unit _ ) as fact ->
       [ fact ]
 
 let lookups_of_definition = [ Imports; Declaration; Tree; Text; Place; Container; Contained ]
 let facts_of_definition = facts
 
-type marker = Reads | References | Calls | Instantiates | Grows | Claims
+type marker = Reads | References | Calls | Assumes | Instantiates | Grows | Claims
 
 let rank_marker = function
   | Reads -> 1
@@ -356,6 +359,7 @@ let rank_marker = function
   | Instantiates -> 8
   | Grows -> 16
   | Claims -> 32
+  | Assumes -> 64
 
 let encode_markers markers =
   List.fold_left (fun encoded marker -> encoded lor rank_marker marker) 0 markers

@@ -64,11 +64,11 @@ let mark_position_holders tracker target id name =
 let import_kind = Kind.rank_target (Entity Import)
 let definition_kind = Kind.rank_target (Entity Definition)
 
-let call_graph : Store.call_graph =
+let proof_graph : Store.proof_graph =
   {
     unit_kind = Kind.rank_stage List_calls;
     node_kind = definition_kind;
-    calls = Kind.encode_markers [ Calls ];
+    markers = Kind.encode_markers [ Calls; Assumes ];
   }
 
 let package_kind = Kind.rank_target (Entity Package)
@@ -114,11 +114,11 @@ let follow_edge_changes tracker (stage : Kind.stage) id changes =
     begin if
       List.exists
         (fun (change : Store.edge_change) ->
-          change.changed.kind = definition_kind && differs change Calls)
+          change.changed.kind = definition_kind && (differs change Calls || differs change Assumes))
         changes
     then begin
       mark_stale tracker Group_recursion id;
-      Store.mark_group_stale tracker.store ~stage:(Kind.rank_stage Group_recursion) ~path:id
+      Store.mark_groups_stale tracker.store ~stage:(Kind.rank_stage Group_recursion) ~path:id
     end
     end
 

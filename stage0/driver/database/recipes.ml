@@ -408,9 +408,9 @@ let run_list_calls database (row : Store.definition) =
   run_fact database List_calls Facts.call_node row ~id:row.path (fun recorder ->
       let lookups = Lookups.make_call_edges database recorder in
       let callees = Mir.Call_edges.list_path_edges lookups path in
-      List.iter
-        (fun callee -> recorder.note Calls (Entity Definition) (Ids.of_path callee) "")
-        callees;
+      let note marker target = recorder.note marker (Entity Definition) (Ids.of_path target) "" in
+      List.iter (note Calls) callees;
+      List.iter (note Assumes) (Mir.Call_edges.list_assumed_paths lookups path);
       (Value callees, []))
 
 module Integer_node = struct
@@ -433,44 +433,56 @@ let group_recursion (database : Tracker.t) ~is_node (rows : Store.definition lis
           rows
       in
       if seeds <> [] then begin
-        let nodes = Store.list_cycle_nodes database.store Tracker.call_graph ~seeds in
-        let successors = Hashtbl.create 64 in
-        List.iter
-          (fun (source, target) -> Hashtbl.add successors source target)
-          (Store.list_call_pairs database.store Tracker.call_graph ~nodes);
-        let members_of = Hashtbl.create 64 in
-        List.iter
-          (fun component ->
-            match component with
-            | [ single ] ->
-                if List.mem single (Hashtbl.find_all successors single) then
-                  Hashtbl.replace members_of single component
-            | members -> List.iter (fun member -> Hashtbl.replace members_of member members) members)
-          (Strongly_connected.list_components
-             (module Integer_node)
-             ~list_successors:(Hashtbl.find_all successors) nodes);
+        let nodes = Store.list_cycle_nodes database.store Tracker.proof_graph ~seeds in
+        let edges = Store.list_proof_edges database.store Tracker.proof_graph ~nodes in
+        let group ~follows =
+          let successors = Hashtbl.create 64 in
+          List.iter
+            (fun (edge : Store.proof_edge) ->
+              if follows edge.markers then Hashtbl.add successors edge.source edge.target)
+            edges;
+          let members_of = Hashtbl.create 64 in
+          List.iter
+            (fun component ->
+              match component with
+              | [ single ] ->
+                  if List.mem single (Hashtbl.find_all successors single) then
+                    Hashtbl.replace members_of single component
+              | members ->
+                  List.iter (fun member -> Hashtbl.replace members_of member members) members)
+            (Strongly_connected.list_components
+               (module Integer_node)
+               ~list_successors:(Hashtbl.find_all successors) nodes);
+          members_of
+        in
+        let recursion_groups = group ~follows:(fun markers -> Kind.has_marker markers Calls)
+        and proof_groups = group ~follows:(fun _ -> true) in
         let paths = Hashtbl.create 64 in
         List.iter
           (fun (id, key) -> Hashtbl.replace paths id (Declarations.decode_key key).path)
           (Store.list_keys_of_paths database.store
              ~paths:
                (List.sort_uniq Int.compare
-                  (Hashtbl.fold (fun _ members ids -> members @ ids) members_of [])));
+                  (Hashtbl.fold (fun _ members ids -> members @ ids) proof_groups [])));
         let targets =
           List.sort_uniq Int.compare
             (seeds @ List.filter (fun node -> is_node ~package:package_name node) nodes)
         in
         Tracker.report_computed Group_recursion targets;
+        let write fact groups node =
+          ignore
+            (Tracker.write database fact ~id:node
+               (Option.map
+                  (fun members : Path.t list Tracker.outcome ->
+                    Value
+                      (List.sort Path.compare (List.filter_map (Hashtbl.find_opt paths) members)))
+                  (Hashtbl.find_opt groups node)))
+        in
         List.iter
           (fun node ->
             ignore (Store.unmark_stale database.store ~stage:rank ~id:node);
-            ignore
-              (Tracker.write database Facts.recursion_group ~id:node
-                 (Option.map
-                    (fun members : Path.t list Tracker.outcome ->
-                      Value
-                        (List.sort Path.compare (List.filter_map (Hashtbl.find_opt paths) members)))
-                    (Hashtbl.find_opt members_of node))))
+            write Facts.recursion_group recursion_groups node;
+            write Facts.proof_group proof_groups node)
           targets
       end)
     (Store.list_project database.store)
