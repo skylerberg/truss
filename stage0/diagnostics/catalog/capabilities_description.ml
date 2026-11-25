@@ -46,13 +46,9 @@ let describe_restriction = function
   | Specification -> ("a specification", value_reason, true)
   | Law -> ("a law", value_reason, true)
   | Quantifier_body -> ("a quantifier's body", value_reason, true)
-  | Evaluated_assertion ->
-      ( "the condition of an assertion `by evaluation`",
+  | Constant_expression ->
+      ( "a constant expression",
         "It is evaluated when the code is checked, and a check has no capabilities.",
-        false )
-  | Constant_value ->
-      ( "the value of a constant",
-        "A constant is computed when the program is compiled, and a build has no capabilities.",
         false )
 
 let show_exceptions = function

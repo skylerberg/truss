@@ -1,0 +1,9 @@
+fn half(value: Int64) -> Int64
+  requires value > 0
+{
+  value / 2
+}
+
+fn split(part: Int64 = half(0)) -> Int64 {
+  part
+}

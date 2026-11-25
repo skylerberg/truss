@@ -7,7 +7,17 @@ fn double(value: Int64) -> Int64 {
   value.saturating_add(value)
 }
 
+fn make_handler() -> Handler {
+  Handler(name: "double", run: double)
+}
+
+fn find_nothing() -> Option[files.File] {
+  None
+}
+
 let doubler: fn(Int64) -> Int64 = double
+let made: Handler = make_handler()
+let found: Option[files.File] = find_nothing()
+let counter: tasks.Cell[Int64] = tasks.Cell.new(0)
 let handlers: List[Handler] = []
 let unopened: Option[files.File] = Option.None
-let counter: tasks.Cell[Int64] = tasks.Cell.new(0)

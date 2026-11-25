@@ -127,10 +127,35 @@ let find_real_implementation (lookups : Lookups.t) capability =
         (Path.show capability) (List.length impls)
         (String.concat ", " (List.map Path.show impls))
 
-let find_constant_type lookups (path : Path.t) =
-  match find_interface lookups path with
-  | Some (Constant_interface constant) -> Some constant.constant_type
+let find_default_type lookups ~owner ~variant ~name =
+  let find_field fields =
+    Option.map
+      (fun (field : Types.field) -> field.field_type)
+      (List.find_opt (fun (field : Types.field) -> field.field_name = name) fields)
+  in
+  match (find_interface lookups owner, variant) with
+  | Some (Function_interface signature), None ->
+      Option.map
+        (fun (parameter : Types.parameter_info) -> parameter.type_)
+        (List.find_opt
+           (fun (parameter : Types.parameter_info) -> parameter.name = name)
+           signature.parameters)
+  | Some (Type_interface { shape = Record fields; _ }), None -> find_field fields
+  | Some (Type_interface { shape = Sum variants; _ }), Some variant -> (
+      match
+        List.find_opt (fun (declared : Types.variant) -> declared.variant_name = variant) variants
+      with
+      | Some { fields = Some fields; _ } -> find_field fields
+      | Some { fields = None; _ } | None -> None)
   | _ -> None
+
+let find_constant_type lookups (path : Path.t) =
+  match path with
+  | Default { owner; variant; name } -> find_default_type lookups ~owner ~variant ~name
+  | _ -> (
+      match find_interface lookups path with
+      | Some (Constant_interface constant) -> Some constant.constant_type
+      | _ -> None)
 
 let read_constant_type lookups path =
   match find_constant_type lookups path with

@@ -154,13 +154,14 @@ and check_type_argument state (value : Syntax.expression) : Types.argument =
   | _, Some { target = Value_parameter parameter; _ } -> Types.Value (Value_parameter parameter)
   | _, Some { target = Definition (Constant, path); name; _ } -> (
       match Interface.Constants.evaluate_count state.lookups.interface path with
-      | Ok value -> Types.Value (Known value)
-      | Error error ->
+      | Count value -> Types.Value (Known value)
+      | Invalid_count error ->
           Types.Type
             (Types.Error
                (State.record_diagnostic state
                   (Catalog.Typing
-                     (Count_error { at = Written value.id; written = name.text; error })))))
+                     (Count_error { at = Written value.id; written = name.text; error }))))
+      | Unevaluated_count -> Types.Type (Types.Error Catalog.reported_elsewhere))
   | _ -> (
       match find_static state value with
       | Some (Static_type type_) -> Types.Type type_

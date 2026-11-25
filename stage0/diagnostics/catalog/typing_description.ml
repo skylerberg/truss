@@ -114,17 +114,25 @@ let describe : Typing.t -> Nodes.description = function
   | Arguments_to_parameter { at = origin; written } ->
       make Arity (Build.at origin)
         (say (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." written))
-  | Count_error { at = origin; written; error } ->
-      make Arity (Build.at origin)
+  | Count_error { at = origin; written; error = Not_uint64 } ->
+      make Mismatch (Build.at origin)
         (say
-           (match error with
-           | Not_uint64 ->
-               Printf.sprintf "`%s` in a type argument must be a constant of type `UInt64`." written
-           | Uncomputable ->
-               Printf.sprintf
-                 "The value of `%s` cannot be computed: a constant used in a type cannot refer to \
-                  itself, and is made of literals, arithmetic, and other such constants."
-                 written))
+           (Printf.sprintf "`%s` in a type argument must be a constant of type `UInt64`." written))
+  | Count_error { at = origin; written; error = Computed_from_itself } ->
+      make Cyclic_count (Build.at origin)
+        (say
+           (Printf.sprintf
+              "`%s` is computed from a constant whose value depends on itself, so its value is not \
+               known."
+              written))
+  | Count_error { at = origin; written; error = Computed_by_call } ->
+      make Count_calls_function (Build.at origin)
+        (say
+           (Printf.sprintf
+              "The value of `%s` calls a function. A type is decided before any code is checked, \
+               so a constant that a type names calls no function. Write the count as literals, \
+               operators, and other such constants."
+              written))
   | Trait_as_type { at = origin; written } ->
       make Not_a_type (Build.at origin)
         (say

@@ -4,7 +4,7 @@ type recursion =
   | Evidence of { type_ : Types.ty; trait : Types.trait_reference }
   | Capability_set of Types.capability
 
-type count_error = Not_uint64 | Uncomputable
+type count_error = Not_uint64 | Computed_by_call | Computed_from_itself
 type associated = Associated_type | Associated_capability_set
 type kind_mismatch = Value_for_type | Type_for_value
 

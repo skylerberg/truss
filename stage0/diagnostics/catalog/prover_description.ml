@@ -16,7 +16,7 @@ let rec show_callee (path : Path.t) =
   | Method { owner = for_type; name; _ }
   | Member_constant { owner = for_type; name } ->
       show_callee for_type ^ "." ^ name
-  | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> Path.show path
+  | Default _ | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> Path.show path
 
 let describe_call { Prover.at; callee } =
   let call =

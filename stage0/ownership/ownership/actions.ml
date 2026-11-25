@@ -143,7 +143,7 @@ let track_place builder (place : Mir.place) : Place.t option =
   let place = resolve_alias builder place in
   let base =
     match place.root with
-    | Constant path -> Some { Place.root = Constant path; steps = [] }
+    | Constant { path; _ } -> Some { Place.root = Constant path; steps = [] }
     | Literal _ -> None
     | Local local -> (
         match (find_core_local builder local, Hashtbl.find_opt builder.held local) with
@@ -438,13 +438,13 @@ let compute_rvalue_held builder (value : Mir.rvalue) : held =
       | Some copied, _ -> copied
       | None, _ -> make_value [])
   | Operand operand -> make_value (list_operand_views builder operand)
-  | Operation _ | Compare _ | Is_variant _ | Function_value _ | Value_parameter _
-  | Parameter_default _ | Specification _ ->
+  | Operation _ | Compare _ | Is_variant _ | Function_value _ | Value_parameter _ | Specification _
+    ->
       make_value []
   | Not operand | Convert { value = operand; _ } | Copy operand ->
       make_value (list_operand_views builder operand)
   | Construct { fields; _ } ->
-      let supplied = List.filter_map snd fields in
+      let supplied = List.map snd fields in
       Value
         {
           views = List.concat_map (list_given_views builder) supplied;
@@ -703,8 +703,7 @@ let emit_terminator builder ~returns_to_caller (basic : Mir.Graph.basic_block) =
   | Yield { mode; part; _ } ->
       let rec list_leaves : Mir.yielded -> Mir.operand list = function
         | Part operand -> [ operand ]
-        | Built { fields; _ } ->
-            List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:list_leaves field) fields
+        | Built { fields; _ } -> List.concat_map (fun (_, field) -> list_leaves field) fields
       in
       read_uses builder
         ~skip:(fun (use : Moves.use) ->

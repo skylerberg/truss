@@ -1,7 +1,7 @@
 val resolved : Resolve.section -> Resolve.resolved Tracker.fact
 val grant : Interface.Environment.grant Tracker.fact
 val trait_header : Resolve.trait_header Tracker.fact
-val constant_value : Z.t option Tracker.fact
+val constant_value : Interface.Constants.outcome Tracker.fact
 val header : Interface.Environment.header Tracker.fact
 val elaborated : Interface.Environment.elaborated_interface Tracker.fact
 val interface : Interface.Environment.interface Tracker.view

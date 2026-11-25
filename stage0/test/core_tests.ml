@@ -465,7 +465,7 @@ let () =
           List.map
             (fun ((parameter : Types.parameter), argument) ->
               parameter.name ^ " = " ^ Types.show_argument argument)
-            (Types.For_testing.list_arguments substitution) )
+            (Types.list_arguments substitution) )
     | None -> failwith "no core form"
   in
   let list_observed name =
@@ -493,8 +493,8 @@ let () =
             (Method { owner; name = "not_equal"; receiver = Instance Read }) )
       with
       | Some (_, derived), Some (_, inherited)
-        when Types.For_testing.list_arguments derived = []
-             && List.length (Types.For_testing.list_arguments inherited) = 1 ->
+        when Types.list_arguments derived = [] && List.length (Types.list_arguments inherited) = 1
+        ->
           ()
       | _ ->
           Harness.fail

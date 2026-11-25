@@ -263,9 +263,10 @@ and run_evaluators backend evaluators =
   let rec note_dependencies dependents evaluator =
     if List.exists (Lowered.Item.equal evaluator) dependents then
       match evaluator with
-      | Evaluator (Constant path) ->
+      | Evaluator (Constant _ as constant) ->
           record_run backend evaluator
-            (Unfinished (Printf.sprintf "the value of %s depends on itself" (Path.show path)))
+            (Unfinished
+               (Printf.sprintf "the value of %s depends on itself" (Lowered.Item.to_string constant)))
       | _ ->
           raise_bug "%s is evaluated by code that reads its result"
             (Lowered.Item.to_string evaluator)
@@ -490,11 +491,9 @@ let list_reached_definitions lookups root =
     (List.filter_map
        (fun (_, way) ->
          match List.rev way with
-         | ( Lowered.Item.Code { path; _ }
-           | Constant path
-           | Generated (Program_main path | Test_main path) )
+         | ((Lowered.Item.Code _ | Constant _ | Generated (Program_main _ | Test_main _)) as item)
            :: _ ->
-             Some path
+             Lowered.Item.find_definition item
          | _ -> None)
        (trace_root lookups root))
 
@@ -506,8 +505,11 @@ let list_unshippable (lookups : Lowering.lowered_lookups) ~main =
       List.fold_left
         (fun acc (item : Lowered.Item.t) ->
           match item with
-          | Code { path; _ } | Constant path -> (
-              match acc with last :: _ when Path.equal last path -> acc | _ -> path :: acc)
+          | (Code _ | Constant _) as code -> (
+              match (Lowered.Item.find_definition code, acc) with
+              | Some path, last :: _ when Path.equal last path -> acc
+              | Some path, _ -> path :: acc
+              | None, _ -> acc)
           | _ -> acc)
         [ main ] keys
       |> List.rev
@@ -621,7 +623,7 @@ let create ?(show_file = Path.show_file) ?results ?(evaluation_cpu_time_limit_ms
 
 module For_testing = struct
   let is_folded backend path =
-    match read_lowered backend (Lowered.Item.Constant path) with
+    match read_lowered backend (Lowered.Item.make_constant path) with
     | Folded _ -> true
     | Evaluate _ -> false
     | Compiled _ -> raise_bug "%s is not a constant" (Path.show path)

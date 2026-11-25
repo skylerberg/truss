@@ -36,14 +36,14 @@ val translate_global_value :
   is_argument:bool ->
   Logic.term
 
-val evaluate_constant : State.context -> State.frame -> Path.t -> Logic.term
+val evaluate_constant : State.context -> State.frame -> Path.t -> Types.substitution -> Logic.term
 
 val apply_construct :
   State.context ->
   State.frame ->
   Invocation.site ->
   string option ->
-  (string * Logic.term option) list ->
+  (string * Logic.term) list ->
   State.frame * Logic.term
 
 val make_text_match :

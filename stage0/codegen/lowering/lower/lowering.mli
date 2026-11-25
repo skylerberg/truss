@@ -42,7 +42,6 @@ and mir_frame = {
   flags : (Moves.path * Lowered.place) list;
   mutable move_state : Moves.state;
   mutable move_state_at_return : Moves.state option;
-  applied_defaults : (Mir.local, applied_default) Hashtbl.t;
   lending : lending option;
   called_parts : Mir.local list;
   lent_calls : (Mir.local, lent_call) Hashtbl.t;
@@ -52,8 +51,6 @@ and mir_frame = {
   after_lend : bool array;
   mutable block : Mir.Graph.block;
 }
-
-and applied_default = { default_frame : frame; is_applied : Lowered.place }
 
 type task = { id : Mir.task; group : Lowered.place; end_block : Lowered.block; scope_depth : int }
 

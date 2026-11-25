@@ -281,6 +281,14 @@ let () =
     (fun () ->
       expect_not_proven Fixtures.Prover.constant_read_by_the_impl_it_supplies
         "prover.constant_cycle" ~says:"This uses `Coin.weight`, whose code depends on");
+  Harness.test "a call in a default meets its callee's requires where the default is declared"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.default_calling_outside_a_requires "prover.requires"
+        ~at:("half(0)", 1));
+  Harness.test "a default whose value calls the function that reads it is an error" (fun () ->
+      match list_codes Fixtures.Prover.function_reading_a_default_that_calls_it with
+      | [ "prover.constant_cycle" ] -> ()
+      | found -> Harness.fail "found [%s]" (String.concat "; " found));
   Harness.test "a call in a constant's value meets its callee's requires" (fun () ->
       expect_not_proven Fixtures.Prover.constant_calling_outside_a_requires "prover.requires")
 
@@ -584,11 +592,13 @@ let () =
       expect_proven Fixtures.Prover.default_of_a_trait_method_read_through_a_bound;
       expect_not_proven Fixtures.Prover.default_of_a_trait_method_ensured_as_another_value
         "prover.ensures");
-  Harness.test "a caller spends the allocations of a default that it applies" (fun () ->
-      expect_proven Fixtures.Prover.allocations_of_a_default_that_the_caller_applies;
+  Harness.test "a read-only parameter views its default, which allocates nothing" (fun () ->
+      expect_proven Fixtures.Prover.allocations_of_a_default_that_the_caller_applies);
+  Harness.test "a caller spends the allocations of copying a default for an own parameter"
+    (fun () ->
       expect_not_proven Fixtures.Prover.allocations_of_a_default_left_out_of_the_callers_cost
         "prover.cost");
-  Harness.test "a construction spends the allocations of a field default that it applies" (fun () ->
+  Harness.test "a construction spends the allocations of copying a field default" (fun () ->
       expect_proven Fixtures.Prover.allocations_of_a_field_default_that_the_construct_applies;
       expect_not_proven
         Fixtures.Prover.allocations_of_a_field_default_left_out_of_the_constructs_cost "prover.cost");

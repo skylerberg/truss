@@ -26,7 +26,6 @@ let list_nested_blocks (statement : Tree.statement) : Tree.block list =
             value =
               ( Operand _ | Operation _ | Compare _ | Not _ | Construct _ | Array _ | Is_variant _
               | Convert _ | Copy _ | Function_value _ | Lambda _ | Value_parameter _
-              | Parameter_default _
               | Specification
                   (Result | Entry _ | Yielded | Identical _ | Applied _ | Method_cost _ | Map _) );
             _;
@@ -64,8 +63,7 @@ let visit_call visit (call : Tree.call) =
 
 let rec visit_yielded visit : Tree.yielded -> unit = function
   | Part part -> visit_operand visit part
-  | Built { fields; _ } ->
-      List.iter (fun (_, field) -> Option.iter (visit_yielded visit) field) fields
+  | Built { fields; _ } -> List.iter (fun (_, field) -> visit_yielded visit field) fields
 
 let visit_rvalue visit origin (rvalue : Tree.rvalue) =
   let visit_operand = visit_operand visit in
@@ -75,7 +73,7 @@ let visit_rvalue visit origin (rvalue : Tree.rvalue) =
   | Compare { left; right; _ } | Specification (Identical (left, right)) ->
       visit_operand left;
       visit_operand right
-  | Construct { fields; _ } -> List.iter (fun (_, field) -> Option.iter visit_operand field) fields
+  | Construct { fields; _ } -> List.iter (fun (_, field) -> visit_operand field) fields
   | Is_variant { place; _ } -> visit_place visit origin place
   | Lambda { captures; _ } ->
       List.iter (fun (capture : Tree.capture) -> visit_place visit origin capture.place) captures
@@ -90,7 +88,7 @@ let visit_rvalue visit origin (rvalue : Tree.rvalue) =
   | Specification (Quantified { range = Over_range { start; stop; _ }; _ }) ->
       visit_operand start;
       visit_operand stop
-  | Function_value _ | Value_parameter _ | Parameter_default _
+  | Function_value _ | Value_parameter _
   | Specification (Result | Entry _ | Yielded | Quantified { range = Over_type _; _ }) ->
       ()
 
@@ -255,8 +253,7 @@ let list_changed_places ~list_modified (blocks : Tree.block list) =
   let rec note_lent origin : Tree.yielded -> unit = function
     | Part (Borrow { place; _ }) -> note origin place
     | Part _ -> ()
-    | Built { fields; _ } ->
-        List.iter (fun (_, field) -> Option.iter (note_lent origin) field) fields
+    | Built { fields; _ } -> List.iter (fun (_, field) -> note_lent origin field) fields
   in
   let note_local origin local = note origin { Tree.root = Local local; projections = [] } in
   let rec visit (block : Tree.block) =

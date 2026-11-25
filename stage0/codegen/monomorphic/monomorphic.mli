@@ -11,6 +11,7 @@ val ground_argument : context -> Types.substitution -> Types.argument -> Ground.
 val list_capabilities : context -> Types.substitution -> Types.capability_set -> Path.t list
 val convert_capability_arguments : Ground.instantiation -> (string * Types.capability_set) list
 val make_substitution : Types.generic list -> Ground.argument list -> Types.substitution
+val make_parameter_substitution : (Types.parameter * Ground.argument) list -> Types.substitution
 val make_signature_substitution : Types.signature -> Ground.instantiation -> Types.substitution
 
 val make_declaration_substitution :

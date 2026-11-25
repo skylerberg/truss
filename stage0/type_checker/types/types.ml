@@ -315,6 +315,7 @@ let bind_argument parameter argument substitution =
   { substitution with arguments = (parameter, argument) :: substitution.arguments }
 
 let find_argument parameter substitution = List.assoc_opt parameter substitution.arguments
+let list_arguments substitution = substitution.arguments
 
 let list_type_arguments substitution =
   List.filter_map
@@ -983,7 +984,3 @@ let find_specification_sequence_element (sequence : ty) =
   match sequence with
   | Named { path; arguments = [ Type element ] } when Well_known.is Sequence path -> Some element
   | _ -> None
-
-module For_testing = struct
-  let list_arguments substitution = substitution.arguments
-end

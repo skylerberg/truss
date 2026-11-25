@@ -7,7 +7,7 @@ module Symbol = struct
     | Function of { callee : Path.t; type_arguments : Types.argument list }
     | Limited of { callee : Path.t; type_arguments : Types.argument list }
     | Function_value of { callee : Path.t; type_arguments : Types.argument list }
-    | Constant of Path.t
+    | Constant of { path : Path.t; type_arguments : Types.argument list }
     | Evaluated of evaluation
     | Generic_value of { owner : Path.t; name : string }
     | Literal of { type_ : Types.ty; value : Language.Literal.t }
@@ -226,7 +226,8 @@ let rec show_symbol : symbol -> string = function
       "limited." ^ Path.show callee ^ show_type_arguments type_arguments
   | Function_value { callee; type_arguments } ->
       "named." ^ Path.show callee ^ show_type_arguments type_arguments
-  | Constant path -> "constant." ^ Path.show path
+  | Constant { path; type_arguments } ->
+      "constant." ^ Path.show path ^ show_type_arguments type_arguments
   | Generic_value { owner; name } -> Printf.sprintf "generic.%s.%s" (Path.show owner) name
   | Literal { type_; value } ->
       let rec show_literal : Language.Literal.t -> string = function

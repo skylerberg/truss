@@ -1,0 +1,7 @@
+fn measure(base: UInt64 = total()) -> UInt64 {
+  base
+}
+
+fn total() -> UInt64 {
+  measure()
+}

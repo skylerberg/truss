@@ -1,4 +1,8 @@
-let size: UInt64 = 3 << 0
+fn three() -> UInt64 {
+  3
+}
+
+let size: UInt64 = three()
 
 fn width[count: UInt64]() -> UInt64 {
   count

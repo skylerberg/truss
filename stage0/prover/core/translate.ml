@@ -87,7 +87,7 @@ let make_outcome (context : State.context) =
   {
     Obligation.obligations = List.rev context.obligations;
     holes = List.rev context.holes;
-    evaluation = None;
+    evaluated_constants = [];
   }
 
 let make_empty_frame source =
@@ -119,6 +119,39 @@ type promise = {
   written_in : State.source;
   inherited : bool;
 }
+
+let is_generic_owner (context : State.context) (owner : Path.t) =
+  let interface = context.lookups.interface in
+  match Interface.Definition.find_interface interface owner with
+  | Some (Type_interface type_interface) -> type_interface.type_generics <> []
+  | _ -> (
+      (match owner with
+        | Method { owner = container; _ } -> (
+            match Interface.Definition.find_interface interface container with
+            | Some (Trait_interface _) -> true
+            | _ -> false)
+        | _ -> false)
+      ||
+      match Interface.Impls.read_signature interface owner with
+      | Some signature -> signature.generics <> [] || signature.capability_parameters <> []
+      | None -> true)
+
+let prove_defaults (context : State.context) frame owner =
+  let is_generic = is_generic_owner context owner in
+  List.filter_map
+    (fun (default : Mir.code Mir.default) ->
+      let path = Path.Default { owner; variant = default.variant; name = default.name } in
+      ignore
+        (Amounts.run_code context frame default.value.tree
+           ~type_:
+             (Facts.substitute_type context frame
+                (Interface.Definition.read_constant_type context.lookups.interface path)));
+      if (not is_generic) && Facts.is_evaluated_constant context path default.value.tree then
+        Some path
+      else None)
+    (match Mir.read_defaults context.lookups.mir owner with
+    | Some { form = defaults; _ } -> defaults
+    | None -> [])
 
 let list_promises context (source : State.source) locals (costs : Mir.cost list) ~inherited =
   List.filter_map
@@ -700,7 +733,7 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
         holes =
           List.sort_uniq compare
             (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
-        evaluation = None;
+        evaluated_constants = [];
       }
 
 let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~proofs ~at
@@ -1021,47 +1054,55 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
     make_context lookups ~home ~current:path ~terminates:false ~measures:[]
       ~inherits_precondition:false
   in
-  (match Mir.read_type_clauses lookups.mir path with
-  | Some { form = { invariants; potential }; _ } -> (
-      let ty =
-        match Interface.Definition.find_interface lookups.interface path with
-        | Some (Interface.Environment.Type_interface interface) ->
-            Types.Named { path; arguments = Types.list_generic_arguments interface.type_generics }
-        | _ -> Facts.raise_bug "%s is not a type" (Path.show path)
-      in
-      let start = { (make_empty_frame source) with self_type = Some ty } in
-      (match Mir.read_defaults lookups.mir path with
-      | Some { form = Field_defaults defaults; _ } ->
-          List.iter
-            (fun (default : Mir.t Mir.field_default) ->
-              ignore
-                (Amounts.run_code context start default.value
-                   ~type_:(Facts.substitute_type context start default.type_)))
-            defaults
-      | Some { form = Parameter_defaults _; _ } | None -> ());
-      match Facts.list_circular_clauses context start ~type_:ty with
-      | _ :: _ as circular -> List.iter (Facts.reject_circular_proof context start) circular
-      | [] ->
-          let value_ = Facts.arrive context start "value" ty in
-          Facts.assume context start
-            (Validity.make_validity context start ~assuming:true ~includes_invariants:false ty
-               value_);
-          let at_value = { start with self = Some value_; old_self = Some value_ } in
-          List.iter
-            (fun (invariant : Mir.requirement) ->
-              let after, holds = Validity.read_specification context at_value invariant.clause in
-              Facts.assume context after holds)
-            invariants;
-          Option.iter
-            (fun (written : Mir.formula) ->
-              let _, potential_term = Validity.read_specification context at_value written in
-              Facts.oblige context at_value
-                (Facts.locate context at_value.source written.origin)
-                (Negative_potential { type_ = ty })
-                (Logic.less_equal (Logic.int 0) potential_term))
-            potential)
-  | None -> ());
-  make_outcome context
+  let evaluated_constants =
+    match Mir.read_type_clauses lookups.mir path with
+    | Some { form = { invariants; potential }; _ } ->
+        let ty =
+          match Interface.Definition.find_interface lookups.interface path with
+          | Some (Interface.Environment.Type_interface interface) ->
+              Types.Named { path; arguments = Types.list_generic_arguments interface.type_generics }
+          | _ -> Facts.raise_bug "%s is not a type" (Path.show path)
+        in
+        let start = { (make_empty_frame source) with self_type = Some ty } in
+        let evaluated_constants = prove_defaults context start path in
+        (match Facts.list_circular_clauses context start ~type_:ty with
+        | _ :: _ as circular -> List.iter (Facts.reject_circular_proof context start) circular
+        | [] ->
+            let value_ = Facts.arrive context start "value" ty in
+            Facts.assume context start
+              (Validity.make_validity context start ~assuming:true ~includes_invariants:false ty
+                 value_);
+            let at_value = { start with self = Some value_; old_self = Some value_ } in
+            List.iter
+              (fun (invariant : Mir.requirement) ->
+                let after, holds = Validity.read_specification context at_value invariant.clause in
+                Facts.assume context after holds)
+              invariants;
+            Option.iter
+              (fun (written : Mir.formula) ->
+                let _, potential_term = Validity.read_specification context at_value written in
+                Facts.oblige context at_value
+                  (Facts.locate context at_value.source written.origin)
+                  (Negative_potential { type_ = ty })
+                  (Logic.less_equal (Logic.int 0) potential_term))
+              potential);
+        evaluated_constants
+    | None -> []
+  in
+  { (make_outcome context) with evaluated_constants }
+
+let translate_defaults (lookups : Lookups.t) (source : State.source) ~path =
+  let context =
+    make_context lookups ~home:source.key ~current:path ~terminates:false ~measures:[]
+      ~inherits_precondition:false
+  in
+  let frame = make_empty_frame source in
+  Option.iter
+    (fun ({ form = code; _ } : Mir.t Mir.sourced) ->
+      Facts.reject_constant_cycle context frame ~is_constant:false code)
+    (Mir.read_code lookups.mir path);
+  let evaluated_constants = prove_defaults context frame path in
+  { (make_outcome context) with evaluated_constants }
 
 let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
   let home = source.key in
@@ -1072,15 +1113,14 @@ let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
   match Mir.read_initializer lookups.mir path with
   | Some { form = code; _ } ->
       let frame = make_empty_frame source in
-      Facts.reject_constant_cycle context frame code;
+      Facts.reject_constant_cycle context frame ~is_constant:true code;
       ignore
         (Amounts.run_code context frame code
            ~type_:(Interface.Definition.read_constant_type context.lookups.interface path));
       {
         (make_outcome context) with
-        evaluation =
-          (if Facts.is_evaluated_constant context path code then Some (Constant_value path)
-           else None);
+        evaluated_constants =
+          (if Facts.is_evaluated_constant context path code then [ path ] else []);
       }
   | None -> Facts.raise_bug "the constant `%s` has no MIR" (Path.show path)
 

@@ -76,6 +76,15 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             { patterns = [ pattern ]; guard = None; body; origin }
           in
           let self_type = interface.for_type in
+          let build_field_default ~variant (field : Types.field) =
+            match self_type with
+            | Named { path; arguments } ->
+                ( field.field_name,
+                  Operands.build_default ~make:node Own
+                    (Operands.make_field_default lookups.interface ~origin ~type_:path
+                       ~type_arguments:arguments ~variant field) )
+            | _ -> raise_bug "`%s` derives a default for a type that has no name" (Path.show type_)
+          in
           let list_bounds =
             Interface.Properties.Bounds.close lookups.interface
               (Types.list_bounds interface.impl_generics)
@@ -454,14 +463,11 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                              List.map
                                (fun (field : Types.field) ->
                                  ( field.field_name,
-                                   Some
-                                     (Core.Value
-                                        (make_method_call Default_default field.field_type []
-                                           field.field_type)) ))
+                                   Core.Value
+                                     (make_method_call Default_default field.field_type []
+                                        field.field_type) ))
                                given
-                             @ List.map
-                                 (fun (field : Types.field) -> (field.field_name, None))
-                                 defaulted);
+                             @ List.map (build_field_default ~variant:None) defaulted);
                         }))
             | Serialize_serialize ->
                 let sink, sink_type =
@@ -572,16 +578,15 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                                    fields =
                                                      [
                                                        ( Well_known.show_field Result_err_error,
-                                                         Some
-                                                           (Core.Value
-                                                              (node error_type
-                                                                 (Use
-                                                                    (Local
-                                                                       {
-                                                                         local = error;
-                                                                         type_ = error_type;
-                                                                         origin;
-                                                                       })))) );
+                                                         Core.Value
+                                                           (node error_type
+                                                              (Use
+                                                                 (Local
+                                                                    {
+                                                                      local = error;
+                                                                      type_ = error_type;
+                                                                      origin;
+                                                                    }))) );
                                                      ];
                                                  }))))));
                            ];
@@ -663,7 +668,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                     fields =
                                       [
                                         ( Well_known.show_field Result_err_error,
-                                          Some (Operands.build Own error) );
+                                          Operands.build Own error );
                                       ];
                                   }))))
                   in
@@ -732,14 +737,11 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                              List.map
                                (fun (field : Types.field) ->
                                  ( field.field_name,
-                                   Some
-                                     (Core.Value
-                                        (use_local field
-                                           (List.assoc field.field_name read_required))) ))
+                                   Core.Value
+                                     (use_local field (List.assoc field.field_name read_required))
+                                 ))
                                required
-                             @ List.map
-                                 (fun (field : Types.field) -> (field.field_name, None))
-                                 defaulted;
+                             @ List.map (build_field_default ~variant) defaulted;
                          })
                   in
                   let bound =
@@ -808,7 +810,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                              List.map
                                (fun (field, bound_local) ->
                                  ( field.Types.field_name,
-                                   Some (Core.Value (field_value (field, bound_local))) ))
+                                   Core.Value (field_value (field, bound_local)) ))
                                bound;
                          })
                   in
@@ -835,8 +837,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                 fields =
                                   [
                                     ( Well_known.show_field Result_ok_value,
-                                      Some (Operands.build Own (node self_type (Use built_place)))
-                                    );
+                                      Operands.build Own (node self_type (Use built_place)) );
                                   ];
                               }));
                   }
@@ -900,31 +901,29 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                       fields =
                                         [
                                           ( Well_known.show_field Result_err_error,
-                                            Some
-                                              (Core.Value
-                                                 (node error_type
-                                                    (Call
-                                                       (Callee_uses.make_call signatures
-                                                          lookups.interface ~list_bounds
-                                                          ~callee:
-                                                            (Function
-                                                               {
-                                                                 path =
-                                                                   Well_known.make_path
-                                                                     Unknown_variant;
-                                                                 instantiation =
-                                                                   {
-                                                                     Types.no_instantiation with
-                                                                     type_arguments =
-                                                                       [ Types.Type source_type ];
-                                                                   };
-                                                               })
-                                                          ~arguments:
-                                                            [
-                                                              make_source_argument Read;
-                                                              read name_place;
-                                                            ]
-                                                          ~lends:None)))) );
+                                            Core.Value
+                                              (node error_type
+                                                 (Call
+                                                    (Callee_uses.make_call signatures
+                                                       lookups.interface ~list_bounds
+                                                       ~callee:
+                                                         (Function
+                                                            {
+                                                              path =
+                                                                Well_known.make_path Unknown_variant;
+                                                              instantiation =
+                                                                {
+                                                                  Types.no_instantiation with
+                                                                  type_arguments =
+                                                                    [ Types.Type source_type ];
+                                                                };
+                                                            })
+                                                       ~arguments:
+                                                         [
+                                                           make_source_argument Read;
+                                                           read name_place;
+                                                         ]
+                                                       ~lends:None))) );
                                         ];
                                     }))))
                     in

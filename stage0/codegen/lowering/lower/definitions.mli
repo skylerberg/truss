@@ -27,9 +27,6 @@ type code = {
 val make_unwritten_code :
   definition:Path.t -> substitution:Types.substitution -> result:Types.result -> code
 
-val make_default_code :
-  context -> code -> source:Resolve.Names.key -> substitution:Types.substitution -> code
-
 val read_written : context -> Resolve.Names.key -> written
 val bind : Types.generic list -> Ground.argument list -> Types.substitution
 val read_impl_interface : context -> Path.t -> Types.impl_interface

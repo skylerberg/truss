@@ -28,4 +28,5 @@ val translate_restated_clauses :
 
 val translate_type : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome
 val translate_constant : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome
+val translate_defaults : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome
 val translate_theorem : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome

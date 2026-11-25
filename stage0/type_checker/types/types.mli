@@ -125,6 +125,7 @@ val is_empty_substitution : substitution -> bool
 val combine_substitutions : substitution -> substitution -> substitution
 val bind_argument : parameter -> argument -> substitution -> substitution
 val find_argument : parameter -> substitution -> argument option
+val list_arguments : substitution -> (parameter * argument) list
 val list_type_arguments : substitution -> (parameter * ty) list
 val substitute : substitution -> ty -> ty
 val substitute_argument : substitution -> argument -> argument
@@ -295,7 +296,3 @@ val string_type : ty
 val find_sequence_element : ty -> ty option
 val find_list_of_array : ty -> ty option
 val find_specification_sequence_element : ty -> ty option
-
-module For_testing : sig
-  val list_arguments : substitution -> (parameter * argument) list
-end

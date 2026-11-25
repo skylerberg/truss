@@ -121,25 +121,28 @@ let fold_literal state ty (constant : Mir.constant) =
   | Boolean boolean -> make_static_bool boolean
   | Unit -> None
 
-let enter_evaluated (context : Definitions.context) ~item ~(source : Resolve.Names.key) =
+let enter_evaluated (context : Definitions.context) ~item ~(source : Resolve.Names.key)
+    ~substitution =
   Lowering.enter_item context ~item
     {
-      (Definitions.make_unwritten_code ~definition:source.path ~substitution:Types.no_substitution
+      (Definitions.make_unwritten_code ~definition:source.path ~substitution
          ~result:(Returns Types.unit))
       with
       written = Some (Definitions.read_written context source);
     }
 
 let make_evaluated_state (context : Definitions.context) (evaluated : Lowered.Item.t) =
-  let source, mir, ty =
+  let source, mir, ty, substitution =
     match evaluated with
-    | Constant path -> (
+    | Constant { path; arguments } -> (
+        let substitution = Monomorphic.make_parameter_substitution arguments in
         match Mir.read_initializer_graph context.lookups.mir path with
         | Some { source; form = mir } ->
             ( source,
               mir,
-              Monomorphic.ground context.monomorphic Types.no_substitution
-                (Interface.Definition.read_constant_type context.lookups.interface path) )
+              Monomorphic.ground context.monomorphic substitution
+                (Interface.Definition.read_constant_type context.lookups.interface path),
+              substitution )
         | None -> Definitions.raise_bug "%s is not a constant" (Path.show path))
     | Assertion { definition; condition } -> (
         match
@@ -149,18 +152,19 @@ let make_evaluated_state (context : Definitions.context) (evaluated : Lowered.It
         with
         | Some { source; form = code } -> (
             match List.assoc_opt condition (Mir.list_evaluated_asserts code) with
-            | Some asserted -> (source, Mir.expand asserted, Ground.make_builtin Bool)
+            | Some asserted ->
+                (source, Mir.expand asserted, Ground.make_builtin Bool, Types.no_substitution)
             | None ->
                 Definitions.raise_bug "%s has no assertion by evaluation at %d"
                   (Path.show definition) condition)
         | None -> Definitions.raise_bug "%s has no code" (Path.show definition))
     | item -> Definitions.raise_bug "%s is not evaluated" (Lowered.Item.to_string item)
   in
-  (enter_evaluated context ~item:(Evaluator evaluated) ~source, mir, ty)
+  (enter_evaluated context ~item:(Evaluator evaluated) ~source ~substitution, mir, ty)
 
 let rec fold_evaluated context ~visiting (evaluated : Lowered.Item.t) =
   let state, mir, ty = make_evaluated_state context evaluated in
-  let visiting = match evaluated with Constant path -> path :: visiting | _ -> visiting in
+  let visiting = match evaluated with Constant _ -> evaluated :: visiting | _ -> visiting in
   (ty, fold_body ~visiting ~depth:call_depth ~steps:(ref step_limit) state mir [])
 
 and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
@@ -179,9 +183,10 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
     let* whole =
       match place.root with
       | Local local -> Hashtbl.find_opt locals local
-      | Constant path ->
-          if List.exists (Path.equal path) visiting then None
-          else snd (fold_evaluated state.context ~visiting (Constant path))
+      | Constant { path; substitution } ->
+          let item = Targets.make_constant_item state path substitution in
+          if List.exists (Lowered.Item.equal item) visiting then None
+          else snd (fold_evaluated state.context ~visiting item)
       | Literal { value; type_ } ->
           Some
             (Targets.make_static_literal state.context.monomorphic (Lowering.ground state type_)
@@ -214,7 +219,6 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
           collect_all
             (List.map
                (fun (name, field) ->
-                 let* field = field in
                  let* value = fold_operand field in
                  Some (name, value))
                fields)
@@ -225,16 +229,6 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
     | Array elements ->
         let* elements = collect_all (List.map fold_operand elements) in
         Some (Lowered.Static_array elements)
-    | Parameter_default { definition; position; substitution } ->
-        let default =
-          Mir.read_parameter_default_graph state.context.lookups.mir ~definition ~position
-        in
-        fold_body ~visiting ~depth ~steps
-          (Lowering.enter state.context ~builder:state.builder
-             (Lowering.make_frame
-                (Definitions.make_default_code state.context state.frame.code ~source:default.source
-                   ~substitution)))
-          default.form []
     | Operation _ | Is_variant _ | Convert _ | Function_value _ | Lambda _ | Value_parameter _
     | Specification _ ->
         None

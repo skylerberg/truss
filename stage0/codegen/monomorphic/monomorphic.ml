@@ -88,6 +88,12 @@ let make_substitution (generics : Types.generic list) arguments =
       (List.length arguments);
   Types.make_substitution generics (List.map convert_argument arguments)
 
+let make_parameter_substitution arguments =
+  List.fold_left
+    (fun substitution (parameter, argument) ->
+      Types.bind_argument parameter (convert_argument argument) substitution)
+    Types.no_substitution (List.rev arguments)
+
 let convert_capability_arguments (instantiation : Ground.instantiation) =
   List.map (fun (name, set) -> (name, convert_capabilities set)) instantiation.capability_arguments
 

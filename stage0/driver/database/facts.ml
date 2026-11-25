@@ -38,15 +38,8 @@ let grant : Interface.Environment.grant Tracker.fact =
 let trait_header : Resolve.trait_header Tracker.fact =
   make_marshaled ~stage:Read_trait_header ~table:"trait_header" ~id_column:"definition" Trait_header
 
-let constant_value : Z.t option Tracker.fact =
-  Tracker.make_fact ~stage:Evaluate_constant ~table:"constant_value" ~id_column:"path" ~fixed:[]
-    ~groups:[ (Constant_value, [ "value" ]) ]
-    ~encode:(fun value : Store.cell list ->
-      [ (match value with Some value -> Text (Z.to_string value) | None -> Null) ])
-    ~decode:(fun cells ->
-      match cells.(0) with
-      | Text digits -> Some (Z.of_string digits)
-      | Blob _ | Integer _ | Null -> None)
+let constant_value : Interface.Constants.outcome Tracker.fact =
+  make_marshaled ~stage:Evaluate_constant ~table:"constant_value" ~id_column:"path" Constant_value
 
 let header : Interface.Environment.header Tracker.fact =
   make_marshaled ~stage:Elaborate_header ~table:"header" ~id_column:"definition" Header

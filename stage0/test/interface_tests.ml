@@ -12,7 +12,7 @@ let () =
   Harness.test "a constant of type UInt64 is a type argument in a signature" (fun () ->
       expect_no_diagnostics [ ("app.main", Fixtures.Interface.array_sized_by_a_uint64_constant) ]);
   Harness.test "a constant of another type is not a type argument in a signature" (fun () ->
-      expect_one_diagnostic Fixtures.Interface.array_sized_by_an_int64_constant "types.arity"
+      expect_one_diagnostic Fixtures.Interface.array_sized_by_an_int64_constant "types.mismatch"
         ~says:"`size` in a type argument must be a constant of type `UInt64`.");
   Harness.test "a function's signature is elaborated" (fun () ->
       let packages =
@@ -1091,17 +1091,18 @@ let () =
         ~at:("Missing", 1));
   Harness.test "a type argument must be of its parameter's kind" (fun () ->
       expect_one_diagnostic "fn f(items: List[3]) {}\n" "types.argument_kind");
-  Harness.test "a constant in a type argument must have a value" (fun () ->
+  Harness.test "a count that names constants that read each other is an error at the count"
+    (fun () ->
       let packages =
         Support.setup [ ("app.main", Fixtures.Interface.array_length_from_circular_constants) ]
       in
-      if
-        not
-          (List.mem "types.arity"
-             (Support.list_codes
-                (Database.For_testing.list_diagnostics [ Interface ]
-                   (Support.make_database packages) (Support.parse_file "app.main"))))
-      then Harness.fail "accepted");
+      match
+        Support.list_codes
+          (Database.For_testing.list_diagnostics [ Interface ] (Support.make_database packages)
+             (Support.parse_file "app.main"))
+      with
+      | [ "types.cyclic_count" ] -> ()
+      | found -> Harness.fail "found [%s]" (String.concat "; " found));
   Harness.test "nothing can implement Copyable" (fun () ->
       expect_one_diagnostic Fixtures.Interface.copyable_impl "types.implements_built_in");
   Harness.test "a public constant cannot have a private type" (fun () ->

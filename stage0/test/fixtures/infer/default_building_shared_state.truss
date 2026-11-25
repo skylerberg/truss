@@ -1,0 +1,3 @@
+use standard.tasks
+
+fn count(cell: tasks.Cell[Int64] = tasks.Cell.new(0)) {}

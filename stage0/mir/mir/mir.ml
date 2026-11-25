@@ -44,27 +44,24 @@ let make_body_part ?interface (form : Core.t) : body_part =
       | Some tree -> Body (make_code tree)
       | None -> No_code)
 
-let find_defaults (definition : Core.definition) =
+let list_defaults (definition : Core.definition) : code default list =
   match definition with
   | Function { parameters; _ } ->
-      Some
-        (Parameter_defaults
-           (List.concat
-              (List.mapi
-                 (fun position (parameter : Core.parameter) ->
-                   match parameter.default with
-                   | Some default -> [ (position, Builder.of_default default) ]
-                   | None -> [])
-                 parameters)))
+      List.filter_map
+        (fun (parameter : Core.parameter) ->
+          match (parameter.default, Core_walk.find_local_name parameter.local) with
+          | Some default, Some name ->
+              Some { variant = None; name; value = make_code (Builder.of_expression default) }
+          | Some _, None ->
+              Compiler_bug.raise_bug ~stage:"MIR" "a parameter with a default has no name"
+          | None, _ -> None)
+        parameters
   | Type { defaults; _ } ->
-      Some
-        (Field_defaults
-           (List.map
-              (fun (variant, field, (default : Core.expression)) ->
-                { variant; field; type_ = default.type_; value = Builder.of_expression default })
-              defaults))
-  | Test _ | Law_proof _ -> Some (Parameter_defaults [])
-  | Trait _ | Constant _ | Empty -> None
+      List.map
+        (fun (variant, name, default) ->
+          { variant; name; value = make_code (Builder.of_expression default) })
+        defaults
+  | Test _ | Law_proof _ | Trait _ | Constant _ | Empty -> []
 
 let find_local_name = Core_walk.find_local_name
 let make_parameter ({ local; mode; type_; _ } : Core.parameter) : parameter = { local; mode; type_ }
@@ -204,23 +201,10 @@ let find_type_clauses ~find_type_interface path (definition : Core.definition) =
         (find_type_interface path)
   | Function _ | Trait _ | Constant _ | Test _ | Law_proof _ | Empty -> None
 
-let expand_defaults = function
-  | Parameter_defaults defaults ->
-      Parameter_defaults
-        (List.map (fun (position, default) -> (position, Expansion.expand default)) defaults)
-  | Field_defaults defaults ->
-      Field_defaults
-        (List.map
-           (fun (default : t field_default) ->
-             { default with value = Expansion.expand default.value })
-           defaults)
-
 let make_contract_part ~find_type_interface path (form : Core.t) : contract_part =
-  let defaults = find_defaults form.definition in
   {
     contract = find_contract form.definition;
-    defaults;
-    default_graphs = Option.map expand_defaults defaults;
+    defaults = list_defaults form.definition;
     laws = list_laws form.definition;
     type_clauses = find_type_clauses ~find_type_interface path form.definition;
   }

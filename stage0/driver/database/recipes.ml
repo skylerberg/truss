@@ -619,7 +619,7 @@ let read_host_system () =
         "code is lowered on a host that Stage0 does not build for"
 
 let make_evaluation_root : Prover.Obligation.evaluation -> Lowered.Item.t = function
-  | Constant_value path -> Constant path
+  | Constant_value path -> Lowered.Item.make_constant path
   | Assertion { definition; condition } -> Assertion { definition; condition }
 
 let run_prove (database : Tracker.t) (row : Store.definition) =
@@ -1173,7 +1173,7 @@ let run_supply (database : Tracker.t) (impl : Store.definition) =
     match key.path with
     | Impl { trait; _ } -> Some trait.path
     | Derived { trait; _ } -> Some trait
-    | Top _ | Method _ | Member_constant _ | Test _ | Law_proof _ | Unresolved _ -> None
+    | Top _ | Method _ | Member_constant _ | Default _ | Test _ | Law_proof _ | Unresolved _ -> None
   in
   let supplied =
     Tracker.record database Supply impl.id (fun recorder ->

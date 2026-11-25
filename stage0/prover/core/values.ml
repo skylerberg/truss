@@ -398,14 +398,20 @@ let translate_global_value (context : State.context) frame (site : Invocation.si
         (Facts.locate context frame.source site.origin)
         Unreadable_function_value
 
-let evaluate_constant (context : State.context) frame path =
+let find_constant_owner (path : Path.t) =
+  match path with Default { owner; _ } -> owner | _ -> path
+
+let evaluate_constant (context : State.context) frame path substitution =
   match
-    (Contracts.find_source context.lookups path, Mir.read_initializer context.lookups.mir path)
+    ( Contracts.find_source context.lookups (find_constant_owner path),
+      Mir.read_initializer context.lookups.mir path )
   with
   | Some (constant_source, _, _), Some { form = code; _ } ->
+      let substitution = Types.substitute_substitution frame.State.substitution substitution in
       let symbol : Logic.symbol =
-        if Facts.is_evaluated_constant context path code then Evaluated (Constant_value path)
-        else Constant path
+        if Types.is_empty_substitution substitution && Facts.is_evaluated_constant context path code
+        then Evaluated (Constant_value path)
+        else Constant { path; type_arguments = List.map snd (Types.list_arguments substitution) }
       in
       let empty =
         {
@@ -418,10 +424,14 @@ let evaluate_constant (context : State.context) frame path =
           condition = Logic.Boolean true;
           bound = [];
           binders = [];
+          substitution;
         }
       in
       Facts.run_once context (Value_of symbol) (fun () ->
-          let ty = Interface.Definition.read_constant_type context.lookups.interface path in
+          let ty =
+            Facts.substitute_type context empty
+              (Interface.Definition.read_constant_type context.lookups.interface path)
+          in
           Facts.declare context (Logic.Constant (symbol, Facts.declare_sort context ty));
           let _, defined_value =
             Validity.run_without_costs context (fun () ->
@@ -430,29 +440,6 @@ let evaluate_constant (context : State.context) frame path =
           Facts.add_fact context (Logic.equal (Logic.Symbol symbol) defined_value));
       Logic.Symbol symbol
   | _ -> Facts.raise_bug "the constant %s has no initializer" (Path.show path)
-
-let evaluate_field_default context frame ty variant field =
-  match (ty, Validity.find_type_source context ty) with
-  | Types.Named { path; _ }, Some source -> (
-      match Mir.read_defaults context.lookups.mir path with
-      | Some { form = Field_defaults defaults; _ } -> (
-          match
-            List.find_opt
-              (fun (default : Mir.t Mir.field_default) ->
-                default.variant = variant && default.field = field)
-              defaults
-          with
-          | Some default ->
-              let inside = Validity.make_type_frame context frame source ty ~self:None in
-              let evaluated, value =
-                Amounts.run_code context inside default.value
-                  ~type_:(Facts.substitute_type context inside default.type_)
-              in
-              ({ frame with spent = evaluated.spent }, value)
-          | None -> Facts.raise_bug "the field %s of %s has no default" field (Types.show ty))
-      | Some { form = Parameter_defaults _; _ } | None ->
-          Facts.raise_bug "a type with no MIR of its defaults")
-  | _ -> Facts.raise_bug "a default of %s, which has no source" (Types.show ty)
 
 let check_built context frame (site : Invocation.site) ty term =
   Lambdas.check_valid context frame
@@ -483,23 +470,13 @@ let construct_amount context frame (ty : Types.ty) variant (counter : Costs.coun
   | Metric Time | Calls _ -> Costs.zero
 
 let apply_construct context frame (site : Invocation.site) variant
-    (fields : (string * Logic.term option) list) =
+    (field_terms : (string * Logic.term) list) =
   let ty = Facts.substitute_type context frame site.type_ in
   if Types.equal ty Types.unit then begin
     ignore (Facts.declare_sort context Types.unit);
     (frame, Logic.Apply (Logic.Symbol.Unit, []))
   end
   else
-    let frame, field_terms =
-      List.fold_left
-        (fun (frame, field_terms) (field, written) ->
-          match written with
-          | Some term -> (frame, field_terms @ [ (field, term) ])
-          | None ->
-              let frame, value = evaluate_field_default context frame ty variant field in
-              (frame, field_terms @ [ (field, value) ]))
-        (frame, []) fields
-    in
     let frame = Operations.spend context frame (construct_amount context frame ty variant) in
     match Facts.find_constructors context ty with
     | Some shape ->

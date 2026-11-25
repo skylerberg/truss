@@ -1,4 +1,8 @@
-let low: Int64 = 3 << 0
+fn three() -> Int64 {
+  3
+}
+
+let low: Int64 = three()
 
 fn f(n: Int64) -> Int64 {
   match n {

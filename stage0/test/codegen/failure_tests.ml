@@ -89,7 +89,10 @@ let () =
         {
           root =
             Static
-              { item = Constant (Codegen_support.definition "words"); ty = Codegen_support.text };
+              {
+                item = Lowered.Item.make_constant (Codegen_support.definition "words");
+                ty = Codegen_support.text;
+              };
           projections = [];
         }
       in

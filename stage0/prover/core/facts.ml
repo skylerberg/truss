@@ -497,28 +497,40 @@ let is_evaluated_constant (context : State.context) path code =
        (Types.find_specification_only_type
           (Interface.Definition.read_constant_type context.lookups.interface path))
 
-let make_catalog_dependency (dependency : Mir.Call_edges.dependency) : Catalog.Prover.dependency =
+let make_catalog_dependency (context : State.context) (dependency : Mir.Call_edges.dependency) :
+    Catalog.Prover.dependency =
   {
     kind = (match dependency.kind with Read -> Reads | Direct_call -> Calls | Supplied _ -> Uses);
     path = dependency.path;
     omitted =
       Option.map
-        (fun (omitted : Mir.Call_edges.omitted) : Catalog.Prover.omitted ->
-          match omitted with
-          | Field field -> Omitted_field field
-          | Argument parameter -> Omitted_argument parameter)
-        dependency.omitted;
+        (fun (default : Path.t) : Catalog.Prover.omitted ->
+          match default with
+          | Default { owner; variant = None; name }
+            when Option.is_none
+                   (Interface.Definition.find_type_interface context.lookups.interface owner) ->
+              Omitted_argument name
+          | _ -> Omitted_field (Path.show_name default))
+        dependency.default;
   }
 
-let reject_constant_cycle (context : State.context) (frame : State.frame) (code : Mir.t) =
+let reject_constant_cycle (context : State.context) (frame : State.frame) ~is_constant
+    (code : Mir.t) =
   if context.lookups.list_recursion_group context.node <> [] then
     List.iter
       (fun (dependency : Mir.Call_edges.dependency) ->
-        if is_in_recursion_group context dependency.path then
-          oblige context frame (Node dependency.origin)
-            (Constant_cycle
-               { cyclic = context.node; dependency = make_catalog_dependency dependency })
-            (Logic.Boolean false))
+        match (is_in_recursion_group context dependency.path, is_constant, dependency.default) with
+        | true, true, _ ->
+            oblige context frame (Node dependency.origin)
+              (Constant_cycle
+                 { cyclic = context.node; dependency = make_catalog_dependency context dependency })
+              (Logic.Boolean false)
+        | true, false, Some default ->
+            oblige context frame (Node dependency.origin)
+              (Constant_cycle
+                 { cyclic = default; dependency = make_catalog_dependency context dependency })
+              (Logic.Boolean false)
+        | true, false, None | false, _, _ -> ())
       (Mir.Call_edges.list_dependencies
          { interface = context.lookups.interface; mir = context.lookups.mir }
          Types.no_substitution code)
@@ -541,7 +553,7 @@ let list_circular_dependencies context ~make_proof dependencies =
         Some
           {
             location = Obligation.Node dependency.origin;
-            proof = make_proof (make_catalog_dependency dependency);
+            proof = make_proof (make_catalog_dependency context dependency);
           }
       else None)
     dependencies

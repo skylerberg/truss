@@ -108,8 +108,8 @@ let find_implemented_method lookups (path : Path.t) =
   match path with
   | Method { owner = (Impl _ | Derived _) as owner; name; receiver } ->
       Option.bind (find_implementation lookups owner) (find_method_implemented_by ~name ~receiver)
-  | Top _ | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _
-    ->
+  | Top _ | Method _ | Member_constant _ | Default _ | Impl _ | Derived _ | Test _ | Law_proof _
+  | Unresolved _ ->
       None
 
 let is_open_value = function
@@ -791,8 +791,8 @@ and read_signature lookups (path : Path.t) =
             | Some declared -> List.sort_uniq compare (signature.costs @ declared.costs)
             | None -> signature.costs);
         }
-  | Top _ | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _
-    ->
+  | Top _ | Method _ | Member_constant _ | Default _ | Impl _ | Derived _ | Test _ | Law_proof _
+  | Unresolved _ ->
       Definition.find_declared_signature lookups path
 
 module Conformance = struct
@@ -843,8 +843,8 @@ let read_scope (lookups : Lookups.t) (key : Resolve.Names.key) :
                     | Some { kind = Value_generic; _ } | None -> known ))
                 scope.bounds;
           })
-  | Top _ | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _
-    ->
+  | Top _ | Method _ | Member_constant _ | Default _ | Impl _ | Derived _ | Test _ | Law_proof _
+  | Unresolved _ ->
       scope
 
 type declaring_clause = Catalog.Capabilities.declaring_clause =
@@ -910,7 +910,7 @@ let find_capability_declaration lookups (path : Path.t) (capability : Types.capa
                    })
           | None -> Fixed_by_trait { trait = impl.implements; method_name = name })
   | Top _ | Method _ | Test _ -> Some (Declared_by Own_uses)
-  | Member_constant _ | Impl _ | Derived _ | Law_proof _ | Unresolved _ ->
+  | Member_constant _ | Default _ | Impl _ | Derived _ | Law_proof _ | Unresolved _ ->
       raise_bug "%s declares no capabilities" (Path.show path)
 
 let decide_property property lookups ~list_bounds type_ =

@@ -50,7 +50,7 @@ val find_recursive_callee :
   State.context -> State.frame -> Obligation.location -> 'operand Core.target -> Path.t option
 
 val is_evaluated_constant : State.context -> Path.t -> Mir.t -> bool
-val reject_constant_cycle : State.context -> State.frame -> Mir.t -> unit
+val reject_constant_cycle : State.context -> State.frame -> is_constant:bool -> Mir.t -> unit
 
 type circular_proof
 

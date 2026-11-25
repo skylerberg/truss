@@ -295,9 +295,7 @@ let build_variant_value form (value : Syntax.expression) type_path variant : Cor
                             List.map
                               (fun ((field : Types.field), local) ->
                                 ( field.field_name,
-                                  Some
-                                    (Core.Value (make_local_use form ~origin field.field_type local))
-                                ))
+                                  Core.Value (make_local_use form ~origin field.field_type local) ))
                               fields;
                         }));
             };
@@ -313,7 +311,12 @@ let build_self_local env ~origin : Core.place =
 
 let build_constant_place form ~origin (path : Path.t) : Core.place =
   Constant
-    { path; type_ = Interface.Definition.read_constant_type form.lookups.interface path; origin }
+    {
+      path;
+      substitution = Types.no_substitution;
+      type_ = Interface.Definition.read_constant_type form.lookups.interface path;
+      origin;
+    }
 
 let build_record fields : Core.kind =
   Construct
@@ -321,7 +324,7 @@ let build_record fields : Core.kind =
       variant = None;
       fields =
         List.map
-          (fun (field, value) -> (Well_known.show_field field, Some (Operands.build Own value)))
+          (fun (field, value) -> (Well_known.show_field field, Operands.build Own value))
           fields;
     }
 
@@ -983,10 +986,21 @@ and build_default_argument form ~construct (callee : Core.operand Core.target) ~
   | Some { definition; signature; substitution } ->
       let receivers = if Option.is_some signature.receiver then 1 else 0 in
       let parameter = List.nth signature.parameters (position - receivers) in
-      Operands.build_argument parameter.mode
-        (make_synthetic_expression form ~origin:(make_rewrite_origin construct)
-           (normalize form (Types.substitute substitution parameter.type_))
-           (Parameter_default { definition; position; substitution }))
+      let origin = make_rewrite_origin construct in
+      {
+        mode = parameter.mode;
+        value =
+          Operands.build_default
+            ~make:(make_synthetic_expression form ~origin)
+            parameter.mode
+            (Constant
+               {
+                 path = Default { owner = definition; variant = None; name = parameter.name };
+                 substitution;
+                 type_ = normalize form (Types.substitute substitution parameter.type_);
+                 origin;
+               });
+      }
   | None -> raise_bug "an omitted argument of a callee that declares no default"
 
 and build_arguments form env ~construct ~callee (call : Tables.call) : Core.argument list =
@@ -1056,13 +1070,22 @@ and build_call_kind ?function_value form env (value : Syntax.expression) (record
         List.map
           (fun (argument : Tables.argument) ->
             ( (List.nth declared argument.core_argument_index).field_name,
-              Some (Operands.build argument.mode (build_expression form env argument.expression)) ))
+              Operands.build argument.mode (build_expression form env argument.expression) ))
           recorded.arguments
       in
+      let origin = make_rewrite_origin value.id in
       let defaulted =
         List.filter_map
           (fun (field : Types.field) ->
-            if List.mem_assoc field.field_name written then None else Some (field.field_name, None))
+            if List.mem_assoc field.field_name written then None
+            else
+              Some
+                ( field.field_name,
+                  Operands.build_default
+                    ~make:(make_synthetic_expression form ~origin)
+                    Own
+                    (Operands.make_field_default form.lookups.interface ~origin ~type_
+                       ~type_arguments ~variant field) ))
           declared
       in
       Construct { variant; fields = written @ defaulted }
@@ -1408,7 +1431,7 @@ and build_try form env (value : Syntax.expression) (inner : Syntax.expression) ~
                                    fields =
                                      List.map2
                                        (fun (field : Types.field) (_, field_value) ->
-                                         (field.field_name, Some (Operands.build Own field_value)))
+                                         (field.field_name, Operands.build Own field_value))
                                        (Option.value ~default:[] returned_failure.fields)
                                        failure_fields;
                                  })))));

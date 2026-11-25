@@ -80,7 +80,9 @@ let () =
     (fun () ->
       let results = make_results () in
       let database, _ = Codegen_support.load Fixtures.Lowering.constant_computed_by_a_long_loop in
-      let spun = Lowered.Item.Constant (Top { module_ = Codegen_support.example; name = "spun" }) in
+      let spun =
+        Lowered.Item.make_constant (Top { module_ = Codegen_support.example; name = "spun" })
+      in
       let compile ?evaluation_cpu_time_limit_ms profile =
         ignore
           (Backend.For_testing.compile_fragment
@@ -94,7 +96,9 @@ let () =
   Codegen_support.test
     "a command reads the result that an earlier command recorded, and builds no program" (fun () ->
       let database, _ = Codegen_support.load Fixtures.Lowering.constant_computed_by_a_long_loop in
-      let spun = Lowered.Item.Constant (Top { module_ = Codegen_support.example; name = "spun" }) in
+      let spun =
+        Lowered.Item.make_constant (Top { module_ = Codegen_support.example; name = "spun" })
+      in
       let compile () =
         ignore (Backend.For_testing.compile_fragment (Codegen_support.make_backend database) spun)
       in

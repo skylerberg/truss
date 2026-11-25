@@ -1,5 +1,3 @@
-let raise_bug format = Compiler_bug.raise_bug ~stage:"Infer" format
-
 type constructor =
   | Variant of string
   | Record
@@ -126,42 +124,20 @@ and evaluate_pattern_constant context (value : Core.pattern_constant) : space =
         (evaluate_named_constant context path)
         ~default:(Constructed (Opaque (Path.show path), []))
 
-and evaluate_named_constant ?(seen = []) context path : space option =
-  if List.exists (Path.equal path) seen then None
-  else
-    match context.lookups.interface.names.find_key path with
-    | None -> raise_bug "the constant `%s` in a pattern has no declaration" (Path.show path)
-    | Some key -> (
-        match
-          ( (context.lookups.read_contract key).definition,
-            context.lookups.interface.find_constant_value path )
-        with
-        | Constant (Some _), Some folded -> Some (Constructed (Interval (folded, folded), []))
-        | Constant (Some value), None -> evaluate_constant_expression context (path :: seen) value
-        | _ -> raise_bug "the contract of the constant `%s` holds no value" (Path.show path))
+and evaluate_named_constant context path : space option =
+  match context.lookups.interface.find_constant_value path with
+  | Known value -> Some (build_value_space value)
+  | Calls_function | Depends_on_itself | Unevaluated -> None
 
-and evaluate_constant_expression context seen (value : Core.expression) : space option =
-  match value.kind with
-  | Use (Constant { path; _ }) -> evaluate_named_constant ~seen context path
-  | Construct { variant; fields } ->
-      let parts =
-        List.map
-          (fun (_, (field : Core.operand option)) ->
-            match field with
-            | Some (Value field) -> evaluate_constant_expression context seen field
-            | Some (Place _) | None -> None)
-          fields
-      in
-      if List.for_all Option.is_some parts then
-        Some
-          (Constructed
-             ( (match variant with Some name -> Variant name | None -> Record),
-               List.map Option.get parts ))
-      else None
-  | Boolean value -> Some (Constructed (Boolean value, []))
-  | Integer value -> Some (Constructed (Interval (value, value), []))
-  | Literal (Text text) -> Some (Constructed (Text text, []))
-  | _ -> None
+and build_value_space (value : Interface.Constants.value) : space =
+  match value with
+  | Integer value -> Constructed (Interval (value, value), [])
+  | Boolean value -> Constructed (Boolean value, [])
+  | Text text -> Constructed (Text text, [])
+  | Constructed { variant; fields; _ } ->
+      Constructed
+        ( (match variant with Some name -> Variant name | None -> Record),
+          List.map (fun (_, field) -> build_value_space field) fields )
 
 and evaluate_range_bound context (bound : Core.range_bound) : Z.t option =
   match bound with
@@ -468,9 +444,33 @@ let find_shadowing context types covering_arms unreachable_row =
 
 let witness_limit = 8
 
+let rec names_unevaluated_constant context (written : Core.pattern) =
+  let is_unevaluated path =
+    match context.lookups.interface.find_constant_value path with
+    | Unevaluated | Depends_on_itself -> true
+    | Known _ | Calls_function -> false
+  in
+  match written.kind with
+  | Literal (Named_constant path) | Equal_to { value = Named_constant path; _ } ->
+      is_unevaluated path
+  | Range { start; stop; _ } ->
+      List.exists
+        (function Core.Constant_bound path -> is_unevaluated path | Integer_bound _ -> false)
+        [ start; stop ]
+  | Variant { fields; _ } | Record fields ->
+      List.exists (fun (_, inner) -> names_unevaluated_constant context inner) fields
+  | Alternatives alternatives -> List.exists (names_unevaluated_constant context) alternatives
+  | Wildcard | Bind _ | Literal _ | Equal_to _ -> false
+
 let check_match context (node : Core.expression) scrutinees (arms : Core.arm list) =
   let types = List.map read_operand_type scrutinees in
-  if not (List.exists (has_error context) types) then begin
+  if
+    not
+      (List.exists (has_error context) types
+      || List.exists
+           (fun (arm : Core.arm) -> List.exists (names_unevaluated_constant context) arm.patterns)
+           arms)
+  then begin
     let rows = ref [] in
     let covering_arms = ref [] in
     List.iter

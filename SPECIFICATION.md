@@ -759,10 +759,6 @@ var longest: view String = words[0]
   long as `middle` can be used. A `let` keeps no other temporary, such as
   the argument in `let first = first_word(make_text())`. A view cannot be
   used after the temporary or the local that it views is dropped.
-- **A default's temporaries are dropped at the end of the statement that
-  makes the call,** as the temporaries of a written argument are. So a
-  read-only parameter can have an owned default: in
-  `names: List[String] = ["ab", "cde"]` the list lasts for the call.
 
 ## Constants
 
@@ -779,32 +775,44 @@ public let greeting_length: UInt64 = "hello".length()
 public let word: Regex = Regex"[a-z]+"
 ```
 
-- A *constant expression* is made of literals, arithmetic on numbers, other
-  constants, and the records, variants, collection literals, and strings
-  built from those. It calls no function except the `from_elements` or
-  `from_entries` of a collection literal.
-- The value of a constant is a constant expression whose parts may also be
-  calls: a call of a function or a method, an operator or an index of any
-  type, a tagged template, an interpolated string, and a quantifier over a
-  range or a collection. Other code, such as an `if`, a `match`, or a
-  lambda, goes in a function that the value calls.
-- The value uses no capability, so each call in it terminates and cannot
-  panic. Each call meets its callee's `requires`.
-- The value is evaluated when the code is checked, and the program holds
-  the result as data. An evaluation that uses more than 10 seconds of CPU
-  time is an error.
+- A *constant expression* is made of literals, other constants, calls of
+  functions and methods, operators and indexes of any type, tagged
+  templates, interpolated strings, quantifiers over a range or a
+  collection, and the records, variants, and collection literals built from
+  those. It names no variable and no parameter. Other code, such as an
+  `if`, a `match`, or a lambda, goes in a function that the expression
+  calls.
+- The value of a constant, a default (see [Calls and
+  arguments](#calls-and-arguments)), and the condition of an assertion by
+  evaluation (see [Statements and blocks](#statements-and-blocks)) are
+  constant expressions.
+- A constant expression uses no capability, so each call in it terminates
+  and cannot panic. Each call meets its callee's `requires`.
+- A constant expression is evaluated once, when the code is checked, and
+  the program holds the result as data. An evaluation that uses more than
+  10 seconds of CPU time is an error.
 - A proof that reads a constant knows its value. Where the value calls a
   function, the proof knows the result of the evaluation as far as it sees
   the type: a number, a `Bool`, a `Character`, and each field of a record or
   a variant whose fields are visible to it. It knows a collection, and a type
   whose fields it does not see, by the contracts of the calls.
-- A constant's type is not a function type, and holds no function value,
-  no handle, and no state that tasks share.
+- A constant's value is data. Each value that it stores, the whole value
+  and each field and element of it, is a literal, another constant, or a
+  record or a variant built from such values, or it has a type that holds no
+  function, no handle, and no state that tasks share. A value that a call or
+  an operator builds also has a type that names no type parameter. A
+  collection literal holds its elements, which are values that it stores,
+  and the fields of its own type, which are judged with their type
+  parameters. So `shutdown: Option[Shutdown] = None` and
+  `items: List[Item] = []` are data, and `tasks.Cell.new(0)` is not: every
+  use of the constant would share one mutable cell.
 - A constant's value does not depend on itself: through another constant,
   through the default of a field that a record or variant in it leaves out,
   or through the code that it calls.
-- A constant that a type names, as in `Array[UInt8, digest_size]`, has a
-  constant expression as its value.
+- A constant that a type names, as in `Array[UInt8, digest_size]`, calls no
+  function: a type is decided before any code is checked, and the compiler
+  computes such a value from its text. `let digest_size: UInt64 = 1 << 5` is
+  one, and `let digest_size: UInt64 = "digest".length()` is not.
 - Reading a constant or taking a view of it allocates nothing.
 
 ## Functions
@@ -868,11 +876,15 @@ let connection = connect(host, secure: false)?
    twice.
 4. Arguments are evaluated in the order written.
 
-- A default is a constant expression that refers to no other parameter. An
-  argument for a parameter with a default can be left out, and the call then
-  passes the default's value. A function, a method of a type, a capability's
-  method, and a trait's method that has a body can declare a default (see
-  [Traits and laws](#traits-and-laws)).
+- A default is a constant expression (see [Constants](#constants)). An
+  argument for a parameter with a default can be left out, and the call
+  then passes the default's value: a read-only parameter views it, and a
+  `mut` or `own` parameter, like a field, receives a copy. The copy exists
+  even where the type is not `Copyable`, because the value is data: it
+  holds no handle. A default that names a type parameter of its function
+  or type is evaluated once for each instantiation. A function, a method
+  of a type, a capability's method, and a trait's method that has a body
+  can declare a default (see [Traits and laws](#traits-and-laws)).
 - Building a record or a variant takes labeled arguments in any order,
   evaluated in the order written. A bare name that matches a field's name
   passes that variable to that field, optionally after a mode keyword. Only
@@ -1265,8 +1277,9 @@ public fn load_configs(paths: List[Path]) -> Result[List[Config], ConfigError]
 - `O(f)` means that the cost is at most `c * f + d` for every input, for
   some constants `c` and `d`.
 - `time` counts abstract steps: each primitive operation and each call is one.
-- A default that a call or a construction fills in is evaluated there, and
-  its cost counts toward the enclosing function's.
+- A default that a call or a construction fills in is read as a constant:
+  a read-only parameter costs nothing, and a copy for a `mut` or `own`
+  parameter or a field counts toward the enclosing function's cost.
 
 A bound is an expression on exact integers. It can use the parameters,
 `self`, their fields, pure methods, `result`, `+`, `*`, and `/` and `-`
@@ -1836,13 +1849,13 @@ fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
   `assert used < 64 ==> (word >> used) == 0 by bit_vector`.
 - `assert condition by evaluation` is proven by evaluating its condition
   when the code is checked, and then holds where it is written. The
-  condition is an expression that the value of a constant can be (see
-  [Constants](#constants)), so it names no variable and no parameter, and it
-  mentions no type parameter of the code around it. It is code, in a theorem
-  too: it uses no capability, and each call in it meets its callee's
-  `requires`. It is not evaluated when the program or a test runs. An
-  evaluation that gives `false`, that reaches a `todo`, or that uses more
-  than 10 seconds of CPU time is an error.
+  condition is a constant expression (see [Constants](#constants)). It
+  mentions no type parameter of the code around it: it is evaluated once,
+  so its result would hold for one instantiation and be assumed for all.
+  It is code, in a theorem too: it uses no capability, and each call in it
+  meets its callee's `requires`. It is not evaluated when the program or a
+  test runs. An evaluation that gives `false`, that reaches a `todo`, or
+  that uses more than 10 seconds of CPU time is an error.
 
 ### Patterns
 
@@ -1889,7 +1902,9 @@ match status_code {
   last.
 - A bare name binds, in every pattern. A constant is written with its module
   or its type, `http.ok` or `Status.teapot`. A constant in a pattern has a
-  type with structural equality (see [Equality](#equality)).
+  type with structural equality (see [Equality](#equality)). The check of
+  a `match`'s cases knows the value of a constant that calls no function;
+  a constant that calls one covers only itself.
 - Range patterns match integers and characters.
 - A tuple pattern matches a tuple type, one pattern for each field, in the
   order of the fields. It is written without parentheses, and only as the
