@@ -1,7 +1,7 @@
 use standard.processes
 
 fn say(text: String) uses Console {
-  Console.print_line(text.slice())
+  Console.print_line(text)
 }
 
 fn shown(status: processes.ExitStatus) -> String {
@@ -18,9 +18,9 @@ fn shown(status: processes.ExitStatus) -> String {
 fn show(label: String, bytes: List[UInt8])
   uses Console, Handles
 {
-  Console.print(label.slice())
+  Console.print(label)
   var out = Console.output()
-  let _ = mut out.write(bytes.slice())
+  let _ = mut out.write(bytes)
 }
 
 fn main(arguments: List[String]) -> ExitCode
@@ -62,7 +62,7 @@ fn main(arguments: List[String]) -> ExitCode
     if mut child.take_input() is Some(moved) {
       var input = own moved
       let sent: List[UInt8] = [112, 105, 112, 101, 100, 10]
-      let _ = mut input.write(sent.slice())
+      let _ = mut input.write(sent)
       let _ = own input.close()
     }
     if mut child.take_output() is Some(moved) {

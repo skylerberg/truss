@@ -15,7 +15,8 @@ let remove_unused_dependencies snapshot database packages =
                   [
                     ("file", Json.String file);
                     ( "message",
-                      Json.String (Package_checks.describe_unused_dependency ~package dependency) );
+                      Json.String
+                        (Project_catalog.describe (Unused_dependency { package; dependency })) );
                   ]))
       | Not_a_capability _ -> None)
     (Command_packages.list_manifest_problems snapshot database packages)
@@ -59,15 +60,9 @@ let fix snapshot packages =
     let database = Workspace.open_database snapshot in
     let files = Command_packages.list_files snapshot packages in
     let applied =
-      match
-        apply_fixes snapshot database files (Database.list_file_diagnostics database)
-        @ remove_unused_dependencies snapshot database packages
-        @ lock_file snapshot
-      with
-      | [] ->
-          apply_fixes snapshot database files
-            (Proofs.list_warnings (Proofs.check database snapshot packages files))
-      | applied -> applied
+      apply_fixes snapshot database files (Database.list_file_diagnostics database)
+      @ remove_unused_dependencies snapshot database packages
+      @ lock_file snapshot
     in
     if applied = [] || number = rounds then (snapshot, List.rev fixed)
     else run_round (Command_packages.retake snapshot) (number + 1) (List.rev_append applied fixed)

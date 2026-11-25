@@ -10,13 +10,6 @@ module Shared : sig
   val build : Ground.ty -> value:Lowered.operand -> Lowered.rvalue
 end
 
-module Any : sig
-  val shape : Memory_layout.shape
-  val project_value : Lowered.place -> Lowered.place
-  val project_vtable : Lowered.place -> Lowered.place
-  val build : Ground.ty -> value:Lowered.operand -> vtable:Lowered.operand -> Lowered.rvalue
-end
-
 module Function_value : sig
   val make_shape : Ground.function_type -> Memory_layout.shape
   val project_code : Lowered.place -> Lowered.place

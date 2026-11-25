@@ -1,0 +1,7 @@
+type Settings(retries: Int64 = 3, levels: List[Int64] = [1, 2])
+
+fn fresh() -> Settings
+  cost allocations == 0
+{
+  Settings()
+}

@@ -21,7 +21,7 @@ fn each_of_an_order(items: List[Int64], visit: (fn(Int64) uses generic Granted))
   }
 }
 
-fn contains[Element: Equal](items: Slice[Element], item: Element) -> Bool
+fn contains[Element: Equal](items: List[Element], item: Element) -> Bool
   cost allocations <= items.length() * allocations(Element.equal)
   cost allocated_bytes O(items.length() * allocated_bytes(Element.equal))
 {

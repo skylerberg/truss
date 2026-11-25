@@ -1,0 +1,11 @@
+fn f(text: String) -> UInt64
+  cost time O(text.length())
+{
+  var total: UInt64 = 0
+  for _ in 0..text.length() {
+    for index in 0..1114112 {
+      total = index
+    }
+  }
+  total
+}

@@ -1,8 +1,8 @@
-let view_ty = Storage.make_view_type Codegen_support.uint8
+let view_ty = Storage.make_storage_type Codegen_support.uint8
 let bytes_ty = Storage.make_storage_type Codegen_support.uint8
 
 let intrinsic_types : Lowering.For_testing.Intrinsics.types =
-  { uint64 = Codegen_support.uint64; string_slice = Codegen_support.named "StringSlice" }
+  { uint64 = Codegen_support.uint64; string = Codegen_support.named "String" }
 
 let operate builder ?destination ?(type_arguments = []) operation arguments =
   ignore
@@ -26,7 +26,7 @@ let make_view builder text =
   Emit_c.Ir_builder.emit builder
     (Assign
        ( Lowered.make_local_place view,
-         Storage.build_view view_ty ~buffer:(Constant (Bytes text))
+         Storage.build_borrowed view_ty ~buffer:(Constant (Bytes text))
            ~length:(Lowered.make_uint64_constant (String.length text)) ));
   view
 
@@ -660,12 +660,12 @@ let () =
       in
       let drop_and_copy = Lowering.For_testing.drop_and_copy env in
       let int32 = Ground.make_builtin Int32 in
-      let view_ty = Storage.make_view_type (Ground.make_builtin UInt8) in
+      let view_ty = Storage.make_storage_type (Ground.make_builtin UInt8) in
       let handle_ty = Ground.make_builtin Handle in
       let types : Lowering.For_testing.Intrinsics.types =
         {
           uint64 = Ground.make_builtin UInt64;
-          string_slice = Codegen_support.make_standard_type "text" "StringSlice" ();
+          string = Codegen_support.make_standard_type "text" "String" ();
         }
       in
       let entry =
@@ -676,7 +676,7 @@ let () =
         Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place name,
-               Storage.build_view view_ty ~buffer:(Constant (Bytes text))
+               Storage.build_borrowed view_ty ~buffer:(Constant (Bytes text))
                  ~length:(Lowered.make_uint64_constant (String.length text)) ));
         let open_test_file () =
           let descriptor = Emit_c.Ir_builder.allocate_local builder (Codegen_support.value int32) in

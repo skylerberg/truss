@@ -1,3 +1,0 @@
-fn f(value: Float64) -> Bool {
-  !value.is_nan()
-}

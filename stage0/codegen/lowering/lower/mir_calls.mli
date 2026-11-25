@@ -1,5 +1,5 @@
 val ground_instantiation : Lowering.state -> Types.instantiation -> Ground.instantiation
-val resolve_callee : Lowering.state -> Mir.callee -> (Path.t * Ground.instantiation) option
+val resolve_item : Lowering.state -> Mir.callee -> Path.t * Ground.instantiation
 
 val read_callee_signature :
   Lowering.state -> Path.t -> Ground.instantiation -> Types.signature * Types.substitution
@@ -19,7 +19,7 @@ val evaluate_arguments :
   Types.signature ->
   Types.substitution ->
   Mir.argument list ->
-  (Language.Mode.t * Ground.ty * Lowered.place) list * int
+  (Language.Mode.t * Ground.ty * Lowered.place) list
 
 val lower_argument_place :
   Lowering.state -> Mir.argument -> Language.Mode.t * Ground.ty * Lowered.place

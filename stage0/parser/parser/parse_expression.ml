@@ -1,5 +1,5 @@
 let is_clause_keyword = function
-  | Token.Keyword (Uses | Requires | Ensures | Decreases | Cost) -> true
+  | Token.Keyword (Uses | Requires | Ensures | Decreases | Modifies | Cost) -> true
   | _ -> false
 
 type operator = Binary_operator of Syntax.binary | Is_operator | Range_operator of bool
@@ -119,28 +119,28 @@ let rec parse_type_expression cursor : Syntax.type_expression =
       Cursor.advance cursor;
       let associated =
         if Cursor.accept_punctuation cursor Dot then
-          Some (Atoms.parse_upper_name cursor "an associated type after `Self.`")
+          Some (Atoms.parse_upper_name cursor Self_associated_type)
         else None
       in
       Atoms.make_type_node cursor start (Self_type associated)
-  | Keyword Any, _, _ ->
-      Cursor.advance cursor;
-      Atoms.make_type_node cursor start (Any_type (parse_path_type cursor))
   | Keyword Fn, _, _ ->
       Atoms.make_type_node cursor start (Function_type (parse_function_type cursor ~clauses:false))
+  | Keyword View, _, _ ->
+      Cursor.advance cursor;
+      Atoms.make_type_node cursor start (View_type (parse_type_expression cursor))
   | Punctuation (Open Paren), _, _ -> parse_parenthesized_function_type cursor
   | Upper _, Punctuation Dot, Upper _ ->
       let parameter = Atoms.make_name cursor (Cursor.take cursor) in
       Cursor.advance cursor;
       Atoms.make_type_node cursor start
-        (Associated (parameter, Atoms.parse_upper_name cursor "an associated type"))
+        (Associated (parameter, Atoms.parse_upper_name cursor Associated_type))
   | (Upper _ | Lower _), _, _ ->
       Atoms.make_type_node cursor start (Path_type (parse_path_type cursor))
-  | _ -> Cursor.fail cursor "a type"
+  | _ -> Cursor.fail cursor Type
 
 and parse_path_type cursor : Syntax.path_type =
   let start = Cursor.index cursor in
-  let path = Atoms.parse_upper_path cursor "a type name" in
+  let path = Atoms.parse_upper_path cursor Type_name in
   let arguments =
     if Cursor.is_punctuation cursor (Open Square) then parse_type_arguments cursor
     else begin
@@ -157,8 +157,7 @@ and parse_type_arguments cursor =
         Syntax.Type_argument { kind = Type_error; id = Cursor.allocate_id cursor span })
   in
   if arguments = [] then begin
-    Cursor.report cursor Unexpected_token (Cursor.lookup_token cursor start).span
-      "Type arguments cannot be empty.";
+    Cursor.report cursor (Cursor.lookup_token cursor start).span Empty_type_arguments;
     raise Cursor.Failed
   end;
   arguments
@@ -180,7 +179,7 @@ and parse_function_type cursor ~clauses:with_clauses =
   let start = Cursor.index cursor in
   Cursor.expect_keyword cursor Fn;
   if not (Cursor.is_punctuation cursor (Open Paren)) then
-    Cursor.fail cursor "`(` after `fn` in a function type";
+    Cursor.fail cursor Open_paren_in_function_type;
   let inputs =
     Cursor.parse_bracketed cursor
       ~parse_item:(fun cursor ->
@@ -209,9 +208,8 @@ and parse_function_type cursor ~clauses:with_clauses =
       let rec gather clauses =
         match Cursor.peek_kind cursor with
         | Keyword (Uses | Cost | Requires | Ensures) -> gather (parse_clause cursor :: clauses)
-        | Keyword Decreases ->
-            Cursor.fail cursor
-              "`uses`, `cost`, `requires`, or `ensures`; a function type has no `decreases`"
+        | Keyword Decreases -> Cursor.fail cursor (Function_type_clause Token.Decreases)
+        | Keyword Modifies -> Cursor.fail cursor (Function_type_clause Token.Modifies)
         | _ -> List.rev clauses
       in
       gather []
@@ -226,13 +224,12 @@ and parse_function_type cursor ~clauses:with_clauses =
               (fun (use : Syntax.capability_use) ->
                 Option.is_some use.unless || use.unless_values <> [])
               uses
-        | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> false
+        | Requires _ | Ensures _ | Decreases _ | Modifies _ | Cost _ | Clause_error -> false
       in
       if Option.is_some clause.condition || has_unless then
-        Cursor.report cursor Misplaced_condition
+        Cursor.report cursor
           (Cursor.read_span cursor clause.id |> Cursor.make_file_span cursor)
-          "A function type's clauses take no condition: a call through a function value has no \
-           type arguments to decide one.")
+          Function_type_condition)
     clauses;
   List.iter
     (fun (clause : Syntax.clause) ->
@@ -241,13 +238,9 @@ and parse_function_type cursor ~clauses:with_clauses =
           match amount.kind with
           | Integer _ -> ()
           | _ ->
-              Cursor.report cursor Function_type_cost_bound
-                (Cursor.read_file_span cursor amount.id)
-                "An `O(...)`, `<=`, or `==` bound in a function type is an integer literal, as in \
-                 `O(1)` or `<= 2`, since the type holds a number and not an expression. State a \
-                 bound that depends on a value in the enclosing function's own `cost` clause, \
-                 which names the callback's cost as `time(visit)`.")
-      | Requires _ | Ensures _ | Decreases _ | Uses _ | Clause_error -> ())
+              Cursor.report cursor (Cursor.read_file_span cursor amount.id) Function_type_cost_bound
+          )
+      | Requires _ | Ensures _ | Decreases _ | Modifies _ | Uses _ | Clause_error -> ())
     clauses;
   let is_named (input : Syntax.function_input) = Option.is_some input.name in
   let has_callback_contract =
@@ -257,14 +250,9 @@ and parse_function_type cursor ~clauses:with_clauses =
   let span = (Cursor.lookup_token cursor start).span in
   if has_callback_contract clauses then
     begin if not (List.for_all is_named inputs) then
-      Cursor.report cursor Function_type_names span
-        "A function type with `requires` or `ensures` names every input, as in `fn(index: \
-         UInt64)`, so that its clauses can mention them."
+      Cursor.report cursor span Function_type_needs_names
     end
-  else if List.exists is_named inputs then
-    Cursor.report cursor Function_type_names span
-      "A function type names its inputs only when a `requires` or an `ensures` mentions them; \
-       remove the names, since calls through a function value pass arguments by position.";
+  else if List.exists is_named inputs then Cursor.report cursor span Function_type_extra_names;
   { inputs; output; clauses }
 
 and parse_parenthesized_function_type cursor =
@@ -274,17 +262,13 @@ and parse_parenthesized_function_type cursor =
   match
     if (not (Cursor.is_keyword cursor Fn)) && has_comma cursor ~opener:start then
       Habits.report_tuple cursor ~opening:(Cursor.lookup_token cursor start);
-    if not (Cursor.is_keyword cursor Fn) then
-      Cursor.fail cursor
-        "a function type; parentheses in a type only hold a function type with clauses";
+    if not (Cursor.is_keyword cursor Fn) then Cursor.fail cursor Parenthesized_function_type;
     let function_type = parse_function_type cursor ~clauses:true in
     if function_type.clauses = [] then begin
-      Cursor.report cursor Unexpected_token (Cursor.lookup_token cursor start).span
-        "Parentheses around a function type are only for its clauses; remove them.";
+      Cursor.report cursor (Cursor.lookup_token cursor start).span Parenthesized_type;
       raise Cursor.Failed
     end;
-    if Cursor.index cursor < closer then
-      Cursor.fail cursor "`)` after the clauses of the function type";
+    if Cursor.index cursor < closer then Cursor.fail cursor Function_type_clauses_end;
     function_type
   with
   | function_type ->
@@ -309,8 +293,7 @@ and parse_generics cursor : Syntax.generic_parameter list =
           { kind = Generic_error; id = Cursor.allocate_id cursor span })
     in
     if parameters = [] then begin
-      Cursor.report cursor Unexpected_token (Cursor.lookup_token cursor start).span
-        "Generic parameters cannot be empty.";
+      Cursor.report cursor (Cursor.lookup_token cursor start).span Empty_generic_parameters;
       raise Cursor.Failed
     end;
     parameters
@@ -327,7 +310,7 @@ and parse_generic_parameter cursor : Syntax.generic_parameter =
         let name = Atoms.make_name cursor (Cursor.take cursor) in
         Cursor.expect_punctuation cursor Colon;
         Value_parameter (name, parse_type_expression cursor)
-    | _ -> Cursor.fail cursor "a generic parameter"
+    | _ -> Cursor.fail cursor Generic_parameter
   in
   { kind; id = Cursor.allocate_id_from cursor start }
 
@@ -339,20 +322,15 @@ and parse_capability_reference cursor : Syntax.capability_reference =
     match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1, Cursor.peek_ahead cursor 2) with
     | Keyword Self_type, _, _ ->
         Cursor.advance cursor;
-        if not (Cursor.accept_punctuation cursor Dot) then
-          Cursor.fail cursor
-            "`.` and an associated capability set, as in `Self.Uses`; `Self` is a type, not a \
-             capability";
-        Syntax.Self_capabilities
-          (Atoms.parse_upper_name cursor "an associated capability set after `Self.`")
+        if not (Cursor.accept_punctuation cursor Dot) then Cursor.fail cursor Self_capability_set;
+        Syntax.Self_capabilities (Atoms.parse_upper_name cursor Self_associated_capability_set)
     | Upper _, Punctuation Dot, Upper _ ->
         let parameter = Atoms.make_name cursor (Cursor.take cursor) in
         Cursor.advance cursor;
-        Associated_capabilities
-          (parameter, Atoms.parse_upper_name cursor "an associated capability set")
+        Associated_capabilities (parameter, Atoms.parse_upper_name cursor Associated_capability_set)
     | Lower "generic", Upper _, _ ->
         Cursor.advance cursor;
-        Generic_capability (Atoms.parse_upper_name cursor "the name of a capability parameter")
+        Generic_capability (Atoms.parse_upper_name cursor Capability_parameter_name)
     | _ -> Capability_path (parse_path_type cursor)
   in
   { kind; id = Cursor.allocate_id_from cursor start }
@@ -384,10 +362,9 @@ and parse_condition_after cursor (keyword : Token.keyword) =
          (function
            | `Bound bound -> Some bound
            | `Value (value : Syntax.expression) ->
-               Cursor.report cursor Misplaced_condition
+               Cursor.report cursor
                  (Cursor.read_span cursor value.id |> Cursor.make_file_span cursor)
-                 "A `when` condition names bounds, such as `T: Trait`. A clause that holds where a \
-                  value condition does is written with `==>`, as in `ensures P ==> Q`.";
+                 Value_condition_in_when;
                None)
          (parse_condition_atoms cursor))
   else None
@@ -435,44 +412,35 @@ and parse_clause cursor : Syntax.clause =
     | Keyword Requires -> Requires (parse_expression cursor)
     | Keyword Ensures -> Ensures (parse_expression cursor)
     | Keyword Decreases -> Decreases (parse_expression_list cursor)
+    | Keyword Modifies -> Modifies (parse_expression_list cursor)
     | Keyword Cost -> Cost (parse_cost cursor)
-    | _ -> Cursor.fail cursor "a clause"
+    | _ -> Cursor.fail cursor Clause
   in
   let condition =
     match kind with
-    | Uses _ ->
-        if Cursor.is_keyword cursor When then
-          Cursor.fail cursor
-            "`,` or the end of the `uses` clause; a capability's condition follows `unless`, as in \
-             `uses RunForever unless Source: FiniteCursor`"
-        else None
+    | Uses _ -> if Cursor.is_keyword cursor When then Cursor.fail cursor Uses_separator else None
+    | Modifies _ ->
+        if Cursor.is_keyword cursor When then Cursor.fail cursor Modifies_separator else None
     | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error ->
         parse_condition_after cursor When
   in
   { kind; condition; id = Cursor.allocate_id_from cursor start }
 
 and parse_cost cursor =
-  let amortized =
+  let amortized_word =
     match (Contextual_keyword.of_token (Cursor.peek_kind cursor), Cursor.peek_ahead cursor 1) with
-    | Some Amortized, Lower _ ->
-        Cursor.advance cursor;
-        true
-    | _ -> false
+    | Some Amortized, Lower _ -> Some (Cursor.take cursor)
+    | _ -> None
   in
+  let amortized = Option.is_some amortized_word in
   if Contextual_keyword.of_token (Cursor.peek_kind cursor) = Some Potential then begin
-    Cursor.report cursor Misplaced_potential (Cursor.peek cursor).span
-      "`cost potential` belongs to a type, and states the potential its values hold.";
+    Cursor.report cursor (Cursor.peek cursor).span Misplaced_potential;
     raise Cursor.Failed
   end;
   let resource =
     match
-      Contextual_keyword.expect cursor ~accepted:Contextual_keyword.resources ~category:"a resource"
-        ~expected:
-          (Printf.sprintf "a resource: %s, or `calls(...)`"
-             (String.concat ", "
-                (List.map
-                   (fun metric -> "`" ^ Language.Metric.show metric ^ "`")
-                   Language.Metric.all)))
+      Contextual_keyword.expect cursor ~accepted:Contextual_keyword.resources
+        ~category:Resource_word ~expected:Resource
     with
     | Metric metric -> Syntax.Metric metric
     | _ -> Calls (parse_call_target cursor)
@@ -487,15 +455,19 @@ and parse_cost cursor =
         Exactly (parse_expression cursor)
     | _ ->
         ignore
-          (Contextual_keyword.expect cursor ~accepted:[ O ] ~suggested:[ O ] ~category:"a bound"
-             ~expected:"a bound: `O(...)`, `<=`, or `==`");
+          (Contextual_keyword.expect cursor ~accepted:[ O ] ~suggested:[ O ] ~category:Bound_word
+             ~expected:Cost_bound);
         Big_o (parse_parenthesized_expression cursor)
   in
+  (match (amortized_word, resource, bound) with
+  | Some word, (Calls _ | Metric _), (At_most _ | Exactly _) | Some word, Calls _, Big_o _ ->
+      Cursor.report cursor word.span Amortized_bound
+  | Some _, Metric _, Big_o _ | None, _, _ -> ());
   { amortized; resource; bound }
 
 and parse_call_target cursor =
   let opener = Cursor.index cursor in
-  if not (Cursor.is_punctuation cursor (Open Paren)) then Cursor.fail cursor "`(` after `calls`";
+  if not (Cursor.is_punctuation cursor (Open Paren)) then Cursor.fail cursor Open_paren_after_calls;
   let closer = Cursor.lookup_closer cursor opener in
   Cursor.advance cursor;
   let target =
@@ -505,20 +477,21 @@ and parse_call_target cursor =
     | _ ->
         let capability = parse_path_type cursor in
         if Cursor.accept_punctuation cursor Dot then
-          Call_method (capability, Atoms.lower_name cursor "a method name")
+          Call_method (capability, Atoms.lower_name cursor Method_name)
         else Call_capability capability
   in
-  if Cursor.index cursor < closer then Cursor.fail cursor "`)` after the target of `calls`";
+  if Cursor.index cursor < closer then Cursor.fail cursor Calls_target_end;
   Cursor.skip_to cursor (closer + 1);
   target
 
 and parse_parenthesized_expression cursor =
   let opener = Cursor.index cursor in
-  if not (Cursor.is_punctuation cursor (Open Paren)) then Cursor.fail cursor "`(`";
+  if not (Cursor.is_punctuation cursor (Open Paren)) then
+    Cursor.fail cursor (Token_punctuation (Open Paren));
   let closer = Cursor.lookup_closer cursor opener in
   Cursor.advance cursor;
   let value = parse_expression cursor in
-  if Cursor.index cursor < closer then Cursor.fail cursor "`)`";
+  if Cursor.index cursor < closer then Cursor.fail cursor (Token_punctuation (Close Paren));
   Cursor.skip_to cursor (closer + 1);
   value
 
@@ -559,7 +532,7 @@ and parse_binary cursor ~level ~open_range =
     match Cursor.peek_kind cursor with
     | Punctuation ((Dot_dot | Dot_dot_equal) as range) when level <= range_level ->
         let token = Cursor.take cursor in
-        if not open_range then open_range_error cursor token "start";
+        if not open_range then open_range_error cursor token Syntax_catalog.Parsing.Range_start;
         let stop =
           parse_range_stop cursor ~open_range ~inclusive:(range = Dot_dot_equal) ~operator:token
         in
@@ -613,23 +586,16 @@ and parse_binary cursor ~level ~open_range =
 and parse_range_stop cursor ~open_range ~inclusive ~(operator : Token.t) =
   match Cursor.peek_kind cursor with
   | Punctuation (Close Square | Comma) when open_range ->
-      if inclusive then
-        Cursor.report cursor Open_range operator.span
-          "A range that includes its end needs the end, as in `items[2..=4]`.";
+      if inclusive then Cursor.report cursor operator.span Inclusive_range_without_end;
       None
   | kind when Atoms.begins_expression kind ->
       Some (parse_binary cursor ~level:(range_level + 1) ~open_range:false)
   | _ ->
-      open_range_error cursor operator "end";
+      open_range_error cursor operator Syntax_catalog.Parsing.Range_stop;
       None
 
-and open_range_message part =
-  Printf.sprintf "A range without a%s %s is only allowed directly in brackets, as in `items[2..]`."
-    (if part = "end" then "n" else "")
-    part
-
 and open_range_error cursor (token : Token.t) part =
-  Cursor.report cursor Open_range token.span (open_range_message part);
+  Cursor.report cursor token.span (Open_range_outside_brackets part);
   raise Cursor.Failed
 
 and parse_prefix cursor : Syntax.expression =
@@ -645,9 +611,6 @@ and parse_prefix cursor : Syntax.expression =
     | Keyword Own ->
         Cursor.advance cursor;
         Atoms.make_expression_node cursor start (Mode (Own, parse_postfix cursor))
-    | Keyword Any ->
-        Cursor.advance cursor;
-        Atoms.make_expression_node cursor start (Any (parse_postfix cursor))
     | Keyword (Forall | Exists) -> parse_quantified cursor
     | Keyword Echo ->
         Cursor.advance cursor;
@@ -746,11 +709,11 @@ and parse_postfix cursor : Syntax.expression =
               (parse_type_name_habits cursor start
                  (Atoms.make_expression_node cursor start (Member (value, name))))
         | Integer _ | Float _ -> Habits.report_tuple_field cursor ~field:(Cursor.peek cursor)
-        | _ -> Cursor.fail cursor "a name after `.`")
+        | _ -> Cursor.fail cursor Name_after_dot)
     | Punctuation (Open Square) ->
         if Cursor.peek_ahead cursor 1 = Punctuation (Close Square) then begin
           Cursor.advance cursor;
-          Cursor.fail cursor "an index or type arguments"
+          Cursor.fail cursor Index_or_type_arguments
         end;
         let opener = Cursor.index cursor in
         let items =
@@ -764,10 +727,7 @@ and parse_postfix cursor : Syntax.expression =
         (match items with
         | [ item ] when is_open_range item -> (
             match Cursor.lookup_token cursor (Cursor.lookup_closer cursor opener - 1) with
-            | { kind = Punctuation Comma; span; _ } ->
-                Cursor.report cursor Open_range span
-                  "A range without a start or an end has no comma after it, as in `items[2..]`."
-                  ~fixes:[ Diagnostic.fix "Remove the comma" [ Diagnostic.delete span ] ]
+            | { kind = Punctuation Comma; span; _ } -> Cursor.report cursor span Open_range_comma
             | _ -> ())
         | _ -> ());
         if List.compare_length_with items 1 > 0 then
@@ -779,10 +739,9 @@ and parse_postfix cursor : Syntax.expression =
                       Range { start = None; operator_id; _ } | Range { stop = None; operator_id; _ };
                     _;
                   } ->
-                  Cursor.report cursor Open_range
+                  Cursor.report cursor
                     (Cursor.read_file_span cursor operator_id)
-                    "A range without a start or an end must be the only item in its brackets, as \
-                     in `items[2..]`."
+                    Open_range_with_items
               | _ -> ())
             items;
         with_postfixes (Atoms.make_expression_node cursor start (Bracket (value, items)))
@@ -799,7 +758,7 @@ and parse_postfix cursor : Syntax.expression =
     | Keyword With ->
         Cursor.advance cursor;
         if not (Cursor.is_punctuation cursor (Open Paren)) then
-          Cursor.fail cursor "`(` after `with`";
+          Cursor.fail cursor Open_paren_after_with;
         let updates =
           Cursor.parse_bracketed cursor ~parse_item:update ~recover:(fun span ->
               { kind = Update_error; id = Cursor.allocate_id cursor span })
@@ -857,9 +816,7 @@ and update cursor : Syntax.update =
       match read_path first with
       | Some path -> (path, parse_expression cursor)
       | None ->
-          Cursor.report cursor Unexpected_token
-            (Cursor.read_file_span cursor first.id)
-            "The label of an update is a field or a path of fields, such as `server.port`.";
+          Cursor.report cursor (Cursor.read_file_span cursor first.id) Update_label;
           raise Cursor.Failed)
     else ([], first)
   in
@@ -893,7 +850,7 @@ and parse_primary cursor : Syntax.expression =
         let inner = parse_expression cursor in
         if Cursor.is_punctuation cursor Comma then
           Habits.report_tuple cursor ~opening:(Cursor.lookup_token cursor start);
-        if Cursor.index cursor < closer then Cursor.fail cursor "`)`";
+        if Cursor.index cursor < closer then Cursor.fail cursor (Token_punctuation (Close Paren));
         inner
       with
       | inner ->
@@ -912,7 +869,7 @@ and parse_primary cursor : Syntax.expression =
       let implementations = parse_expression_list cursor in
       Atoms.make_expression_node cursor start
         (Provide { implementations; body = parse_body cursor })
-  | _ -> Cursor.fail cursor "an expression"
+  | _ -> Cursor.fail cursor Expression
 
 and parse_name_expression cursor start =
   match Cursor.peek_kind cursor with
@@ -921,7 +878,7 @@ and parse_name_expression cursor start =
       let literal =
         match Cursor.peek_kind cursor with
         | String literal -> literal
-        | _ -> Cursor.fail cursor "a tagged string after its module path"
+        | _ -> Cursor.fail cursor Tagged_string
       in
       Atoms.make_expression_node cursor start
         (String (parse_string_literal cursor ~start ~modules literal))
@@ -931,7 +888,7 @@ and parse_name_expression cursor start =
       if macro_follows cursor ~name_stop:token.span.stop then parse_macro cursor start name
       else Atoms.make_expression_node cursor start (Name name)
   | _ ->
-      let name = Atoms.parse_upper_name cursor "a name" in
+      let name = Atoms.parse_upper_name cursor Name in
       parse_type_name_habits cursor start (Atoms.make_expression_node cursor start (Name name))
 
 and tagged_string_follows_path cursor =
@@ -1012,8 +969,7 @@ and parse_turbofish cursor start =
   let colons = Cursor.lookup_token cursor (Cursor.index cursor - 1) in
   let less = Cursor.take cursor in
   ignore (Cursor.parse_separated cursor ~separator:Comma parse_type_expression);
-  if not (Cursor.is_punctuation cursor Greater) then
-    Cursor.fail cursor "`>` after the type arguments";
+  if not (Cursor.is_punctuation cursor Greater) then Cursor.fail cursor Type_arguments_end;
   let greater = Cursor.take cursor in
   Habits.report_turbofish cursor ~colons ~less ~greater;
   Atoms.make_error_expression cursor start
@@ -1032,7 +988,7 @@ and parse_interpolation cursor (inner : Token.interpolation) : Syntax.expression
   else
     match
       let value = parse_expression nested in
-      if not (Cursor.is_at_end nested) then Cursor.fail nested "the end of the interpolation";
+      if not (Cursor.is_at_end nested) then Cursor.fail nested Interpolation_end;
       value
     with
     | value -> value
@@ -1079,36 +1035,37 @@ and parse_collection cursor =
           | Some entry -> parse_mixed_collection cursor start entry))
 
 and parse_mixed_collection cursor start ((key : Syntax.expression), _) =
-  Cursor.report cursor Unexpected_token
-    (Cursor.read_file_span cursor key.id)
-    "A collection holds either list elements or map entries, `key: value`, not both.";
+  Cursor.report cursor (Cursor.read_file_span cursor key.id) Mixed_collection;
   Atoms.make_error_expression cursor start
 
 and parse_lambda cursor =
   let start = Cursor.index cursor in
   Cursor.advance cursor;
-  if not (Cursor.is_punctuation cursor (Open Paren)) then
-    Cursor.fail cursor "`(` after `fn` in a lambda";
-  let parse_parameter cursor =
+  if not (Cursor.is_punctuation cursor (Open Paren)) then Cursor.fail cursor Open_paren_in_lambda;
+  let parse_parameter cursor : Syntax.lambda_parameter =
     let pattern = Parse_pattern.parse_pattern cursor in
-    if Cursor.is_punctuation cursor Colon then begin
-      let from = Cursor.compute_previous_stop cursor in
-      Cursor.advance cursor;
-      ignore (Atoms.parse_mode cursor);
-      ignore (parse_type_expression cursor);
-      Habits.report_lambda_annotation cursor ~from ~stop:(Cursor.compute_previous_stop cursor)
-    end;
-    pattern
+    let annotation : Syntax.parameter_annotation option =
+      if Cursor.accept_punctuation cursor Colon then
+        let annotation_start = Cursor.index cursor in
+        let mode = Atoms.parse_mode cursor in
+        let type_ = parse_type_expression cursor in
+        Some { mode; type_; id = Cursor.allocate_id_from cursor annotation_start }
+      else None
+    in
+    { pattern; annotation }
   in
   let parameters =
     Cursor.parse_bracketed cursor ~parse_item:parse_parameter ~recover:(fun span ->
-        { kind = Pattern_error; id = Cursor.allocate_id cursor span })
+        {
+          pattern = { kind = Pattern_error; id = Cursor.allocate_id cursor span };
+          annotation = None;
+        })
   in
   if Cursor.is_punctuation cursor Arrow then begin
     let from = Cursor.compute_previous_stop cursor in
     Cursor.advance cursor;
     ignore (parse_type_expression cursor);
-    Habits.report_lambda_annotation cursor ~from ~stop:(Cursor.compute_previous_stop cursor)
+    Habits.report_lambda_result_type cursor ~from ~stop:(Cursor.compute_previous_stop cursor)
   end;
   Atoms.make_expression_node cursor start (Lambda { parameters; body = parse_body cursor })
 
@@ -1166,7 +1123,7 @@ and opens_body cursor =
 and expect_body_opening cursor =
   if Cursor.is cursor Newline && Cursor.peek_ahead cursor 1 = Punctuation (Open Curly) then
     Cursor.advance cursor;
-  if not (Cursor.is_punctuation cursor (Open Curly)) then Cursor.fail cursor "`{` to start the body"
+  if not (Cursor.is_punctuation cursor (Open Curly)) then Cursor.fail cursor Body_start
 
 and parse_body cursor =
   expect_body_opening cursor;
@@ -1228,8 +1185,7 @@ and find_trailing_callee (statement : Syntax.statement) =
   let rec find_rightmost (value : Syntax.expression) =
     match value.kind with
     | Name _ | Member _ -> Some value
-    | Binary { right = inner; _ } | Return (Some inner) | Echo inner | Mode (_, inner) | Any inner
-      ->
+    | Binary { right = inner; _ } | Return (Some inner) | Echo inner | Mode (_, inner) ->
         find_rightmost inner
     | _ -> None
   in
@@ -1255,9 +1211,7 @@ and parse_trailing_lambda cursor (statement : Syntax.statement) =
   let closing = Cursor.lookup_token cursor closer in
   match (list_uses_of_it (Cursor.group cursor), find_trailing_callee statement) with
   | (_ :: _ as uses), Some callee ->
-      Habits.report_trailing_lambda cursor ~callee
-        ~parameter:(Habits.derive_parameter_name callee)
-        ~opening ~closing
+      Habits.report_trailing_lambda cursor ~callee ~opening ~closing
         ~next:(Cursor.lookup_token cursor (closer + 1))
         ~uses;
       ignore (parse_block cursor);
@@ -1341,9 +1295,7 @@ and parse_statement cursor : Syntax.statement =
 and parse_binding_annotation cursor (pattern : Syntax.pattern) =
   match (pattern.kind, Cursor.peek cursor) with
   | Tuple _, ({ kind = Punctuation Colon; _ } as colon) ->
-      Cursor.report cursor Unexpected_token colon.span
-        "A tuple pattern takes no type annotation: the value's tuple type gives each pattern the \
-         type of its field.";
+      Cursor.report cursor colon.span Tuple_pattern_annotation;
       raise Cursor.Failed
   | _ ->
       if Cursor.accept_punctuation cursor Colon then Some (parse_type_expression cursor) else None
@@ -1357,18 +1309,8 @@ and parse_binding cursor ~is_var =
     if Cursor.is_keyword cursor Else then begin
       (match Cursor.find_previous_token cursor with
       | Some { kind = Punctuation (Close Curly); _ } ->
-          let span = Cursor.read_file_span cursor value.id in
-          Cursor.report cursor Let_else_brace (Cursor.peek cursor).span
-            "The expression before the `else` of a `let ... else` cannot end with `}`; put it in \
-             parentheses."
-            ~fixes:
-              [
-                Diagnostic.fix "Put the expression in parentheses"
-                  [
-                    Diagnostic.insert (Source.make_zero_width span.start) "(";
-                    Diagnostic.insert (Source.make_zero_width span.stop) ")";
-                  ];
-              ]
+          Cursor.report cursor (Cursor.peek cursor).span
+            (Let_else_brace { value = Cursor.read_file_span cursor value.id })
       | _ -> ());
       Cursor.advance cursor;
       Some (parse_body cursor)
@@ -1384,9 +1326,9 @@ and parse_for_loop cursor ~mode =
   let iterable = parse_expression cursor in
   (match iterable.kind with
   | Range { stop = Some { kind = Block _; _ }; operator_id; _ } when not (opens_body cursor) ->
-      Cursor.report cursor Open_range
+      Cursor.report cursor
         (Cursor.read_file_span cursor operator_id)
-        (open_range_message "end");
+        (Open_range_outside_brackets Range_stop);
       raise Cursor.Failed
   | _ -> ());
   let clauses = parse_loop_clauses cursor in
@@ -1399,10 +1341,13 @@ and parse_loop_clauses cursor =
     | Keyword Cost ->
         let keyword = Cursor.take cursor in
         let cost = parse_cost cursor in
-        if cost.amortized then
-          Cursor.report cursor Loop_cost_bound keyword.span
-            "A loop's `cost` bounds the loop's cost so far, so it is never `amortized`. Potential \
-             belongs to the values the loop mutates, which the function's own `cost` accounts for.";
+        if
+          cost.amortized
+          &&
+          match (cost.resource, cost.bound) with
+          | Metric _, Big_o _ -> true
+          | (Metric _ | Calls _), (Big_o _ | At_most _ | Exactly _) -> false
+        then Cursor.report cursor keyword.span Amortized_loop_cost;
         gather
           (({
               kind = Loop_cost cost;
@@ -1429,10 +1374,7 @@ and parse_loop_clauses cursor =
             (fun (clause : Syntax.loop_clause) ->
               match clause.kind with Loop_decreases _ -> true | _ -> false)
             clauses
-        then
-          Cursor.report cursor Repeated_clause keyword.span
-            "A loop has at most one `decreases` clause; list several measures in one, separated by \
-             commas.";
+        then Cursor.report cursor keyword.span Repeated_loop_decreases;
         let measures = parse_expression_list cursor in
         gather
           (({

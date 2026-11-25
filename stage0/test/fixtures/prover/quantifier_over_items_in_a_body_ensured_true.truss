@@ -1,4 +1,4 @@
-fn has_zero(numbers: List[Int64]) -> Bool
+fn has_zero(numbers: own List[Int64]) -> Bool
   requires numbers.length() > 0
   ensures result
 {

@@ -1,0 +1,17 @@
+type Pair(first: Int64, second: Int64)
+
+fn Pair.count(self) -> UInt64 {
+  2
+}
+
+fn Pair.element(self, position: UInt64) lends Int64 {
+  if position == 0 { self.first } else { self.second }
+}
+
+fn sum(pair: Pair) -> Int64 {
+  var total: Int64 = 0
+  for item in pair {
+    total = total.wrapping_add(item)
+  }
+  total
+}

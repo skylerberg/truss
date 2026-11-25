@@ -7,11 +7,16 @@ val convert_from_integer :
 
 val spend : State.context -> State.frame -> (Costs.counter -> Logic.term) -> State.frame
 val declare_unknown_amount : State.context -> State.frame -> Costs.counter -> Logic.term
-val convert_to_any : State.context -> State.frame -> Invocation.site -> State.frame * Logic.term
-val list_impl_packages : State.context -> Types.ty -> Path.package list
 
-val find_concrete_impl :
-  State.context -> Types.trait_reference -> Types.ty -> (Path.t * Types.substitution) option
+val spend_operation :
+  State.context ->
+  State.frame ->
+  potential_change:(unit -> Logic.term) option ->
+  ?note:(Costs.counter -> Logic.term -> unit) ->
+  (Costs.counter -> Costs.charge) ->
+  State.frame
+
+val list_impl_packages : State.context -> Types.ty -> Path.package list
 
 val make_equality :
   State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term

@@ -1,7 +1,7 @@
 use standard.files
 
 fn say(text: String) uses Console {
-  Console.print_line(text.slice())
+  Console.print_line(text)
 }
 
 fn kind_of(entries: List[files.DirectoryEntry], name: String) -> String {

@@ -47,7 +47,7 @@ test "the median is the middle value, or the mean of the two middle values" {
   assert math.median(unknown) is Some(middle) && middle.is_nan()
 }
 
-fn big(text: StringSlice) -> math.BigInteger {
+fn big(text: String) -> math.BigInteger {
   match math.BigInteger.parse_radix(text, radix: 10) {
     Ok(value) => value
     Err(_) => math.BigInteger.zero()
@@ -207,23 +207,23 @@ test "a big integer says its sign and its length in bits, and big integers are o
 test "a big integer goes to bytes and to the built-in integers and back" {
   let bytes_1: List[UInt8] = [1]
   assert big("1").to_big_endian_bytes() == bytes_1
-  assert math.BigInteger.from_big_endian_bytes(bytes_1.slice()) == big("1")
+  assert math.BigInteger.from_big_endian_bytes(bytes_1) == big("1")
   let bytes_8: List[UInt8] = [255]
   assert big("255").to_big_endian_bytes() == bytes_8
-  assert math.BigInteger.from_big_endian_bytes(bytes_8.slice()) == big("255")
+  assert math.BigInteger.from_big_endian_bytes(bytes_8) == big("255")
   let bytes_9: List[UInt8] = [1, 0]
   assert big("256").to_big_endian_bytes() == bytes_9
-  assert math.BigInteger.from_big_endian_bytes(bytes_9.slice()) == big("256")
+  assert math.BigInteger.from_big_endian_bytes(bytes_9) == big("256")
   let bytes_65: List[UInt8] = [1, 0, 0, 0, 0, 0, 0, 1, 2]
   assert big("18446744073709551874").to_big_endian_bytes() == bytes_65
-  assert math.BigInteger.from_big_endian_bytes(bytes_65.slice()) == big("18446744073709551874")
+  assert math.BigInteger.from_big_endian_bytes(bytes_65) == big("18446744073709551874")
   let bytes_136: List[UInt8] = [255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]
   assert big("87112285931760246646623899502532662132735").to_big_endian_bytes() == bytes_136
-  assert math.BigInteger.from_big_endian_bytes(bytes_136.slice()) == big("87112285931760246646623899502532662132735")
+  assert math.BigInteger.from_big_endian_bytes(bytes_136) == big("87112285931760246646623899502532662132735")
   let padded: List[UInt8] = [0, 0, 1, 2]
-  assert math.BigInteger.from_big_endian_bytes(padded.slice(), negative: true) == big("-258")
+  assert math.BigInteger.from_big_endian_bytes(padded, negative: true) == big("-258")
   let none: List[UInt8] = []
-  assert math.BigInteger.from_big_endian_bytes(none.slice(), negative: true).is_zero()
+  assert math.BigInteger.from_big_endian_bytes(none, negative: true).is_zero()
   assert math.BigInteger.zero().to_big_endian_bytes().is_empty()
   let least: Int64 = -9223372036854775808
   let greatest: UInt64 = 18446744073709551615
@@ -261,7 +261,7 @@ test "a big integer becomes the nearest float, with ties to the even one" {
   assert big("332306998946229005119439912489189376").to_float64().to_bits() == 5138607174829735936
 }
 
-fn decimal(text: StringSlice) -> math.Decimal {
+fn decimal(text: String) -> math.Decimal {
   match math.Decimal.parse(text) {
     Ok(value) => value
     Err(_) => math.Decimal.zero()

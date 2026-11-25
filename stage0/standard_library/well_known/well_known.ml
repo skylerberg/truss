@@ -15,8 +15,10 @@ type t =
   | Index_mut
   | Index_assign
   | Iterable
+  | Iterable_mut
   | Cursor
   | Finite_cursor
+  | Into_cursor
   | Model
   | Add
   | Subtract
@@ -33,9 +35,7 @@ type t =
   | Option
   | Result
   | List
-  | Slice
   | String
-  | String_slice
   | Literal
   | Template
   | From_template
@@ -93,8 +93,12 @@ type method_ =
   | Index_at
   | Index_mut_at
   | Index_assign_assign
+  | Iterable_count
+  | Iterable_element
+  | Iterable_mut_element
   | Cursor_next
   | Finite_cursor_remaining
+  | Into_cursor_cursor
   | Fixed_width_integer_minimum_value
   | Fixed_width_integer_maximum_value
   | Fixed_width_integer_bit_width
@@ -139,9 +143,11 @@ type associated =
   | Negate_output
   | Index_key
   | Index_output
+  | Iterable_element_type
   | Cursor_element
+  | Into_cursor_cursor_type
   | Model_value
-  | From_template_part
+  | From_template_interpolation
   | From_elements_element
   | From_entries_key
   | From_entries_value
@@ -160,7 +166,7 @@ type field =
   | Range_stop
   | Range_inclusive
   | Template_literals
-  | Template_parts
+  | Template_interpolations
   | Entry_key
   | Entry_value
   | Option_some_value
@@ -188,8 +194,10 @@ let items =
     (Index_mut, [ "core" ], "IndexMut");
     (Index_assign, [ "core" ], "IndexAssign");
     (Iterable, [ "core" ], "Iterable");
+    (Iterable_mut, [ "core" ], "IterableMut");
     (Cursor, [ "core" ], "Cursor");
     (Finite_cursor, [ "core" ], "FiniteCursor");
+    (Into_cursor, [ "core" ], "IntoCursor");
     (Model, [ "core" ], "Model");
     (Add, [ "core" ], "Add");
     (Subtract, [ "core" ], "Subtract");
@@ -206,9 +214,7 @@ let items =
     (Option, [ "option" ], "Option");
     (Result, [ "result" ], "Result");
     (List, [ "list" ], "List");
-    (Slice, [ "list" ], "Slice");
     (String, [ "text" ], "String");
-    (String_slice, [ "text" ], "StringSlice");
     (Literal, [ "text" ], "Literal");
     (Template, [ "text" ], "Template");
     (From_template, [ "text" ], "FromTemplate");
@@ -268,8 +274,12 @@ let methods =
     (Index_at, Index, "at", Instance Read);
     (Index_mut_at, Index_mut, "at", Instance Mut);
     (Index_assign_assign, Index_assign, "assign", Instance Mut);
+    (Iterable_count, Iterable, "count", Instance Read);
+    (Iterable_element, Iterable, "element", Instance Read);
+    (Iterable_mut_element, Iterable_mut, "element", Instance Mut);
     (Cursor_next, Cursor, "next", Instance Mut);
     (Finite_cursor_remaining, Finite_cursor, "remaining", Instance Read);
+    (Into_cursor_cursor, Into_cursor, "cursor", Instance Own);
     (Fixed_width_integer_minimum_value, Fixed_width_integer, "minimum_value", Static);
     (Fixed_width_integer_maximum_value, Fixed_width_integer, "maximum_value", Static);
     (Fixed_width_integer_bit_width, Fixed_width_integer, "bit_width", Static);
@@ -316,9 +326,11 @@ let associated_types =
     (Negate_output, Negate, "Output");
     (Index_key, Index, "Key");
     (Index_output, Index, "Output");
+    (Iterable_element_type, Iterable, "Element");
     (Cursor_element, Cursor, "Element");
+    (Into_cursor_cursor_type, Into_cursor, "Cursor");
     (Model_value, Model, "Value");
-    (From_template_part, From_template, "Part");
+    (From_template_interpolation, From_template, "Interpolation");
     (From_elements_element, From_elements, "Element");
     (From_entries_key, From_entries, "Key");
     (From_entries_value, From_entries, "Value");
@@ -341,7 +353,7 @@ let fields =
     (Range_stop, Record Range, "stop");
     (Range_inclusive, Record Range, "inclusive");
     (Template_literals, Record Template, "literals");
-    (Template_parts, Record Template, "parts");
+    (Template_interpolations, Record Template, "interpolations");
     (Entry_key, Record Entry, "key");
     (Entry_value, Record Entry, "value");
     (Option_some_value, Variant Option_some, "value");
@@ -366,7 +378,6 @@ let by_path =
 
 let of_path path = Path.Map.find_opt path by_path
 let is known path = of_path path = Some known
-let is_buffer_sequence path = is List path || is Slice path
 
 let locate_method =
   index_rows "method"
@@ -414,11 +425,6 @@ let builtin_types_by_path =
           Language.Builtin_type.all))
 
 let find_builtin_type path = Path.Map.find_opt path builtin_types_by_path
-
-let find_view path =
-  if is List path || find_builtin_type path = Some Array then Some (make_path Slice)
-  else if is String path then Some (make_path String_slice)
-  else None
 
 let make_builtin_capability_path builtin_capability =
   Path.make_standard_path [ "capabilities" ] (Language.Builtin_capability.show builtin_capability)

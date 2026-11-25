@@ -8,7 +8,7 @@ internal type SystemSignals()
 impl Signals for SystemSignals
   uses capabilities.System
 {
-  fn wait(self, signals: Slice[processes.Signal]) -> Option[processes.Signal] {
+  fn wait(self, signals: List[processes.Signal]) -> Option[processes.Signal] {
     var numbers: intrinsic.Storage[Int32] = intrinsic.storage_with_capacity(signals.length())
     for signal in signals
       invariant intrinsic.storage_length(numbers) <= visited.length()
@@ -20,7 +20,7 @@ impl Signals for SystemSignals
       }
     }
     let arrived = intrinsic.runtime_signals_wait(
-      intrinsic.storage_view(numbers),
+      numbers,
       count: intrinsic.storage_length(numbers),
     )
     if arrived == 0 {

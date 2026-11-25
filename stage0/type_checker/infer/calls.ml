@@ -19,23 +19,18 @@ let check_arguments_alone state env (arguments : Syntax.argument list) (unknown 
 
 let make_arity_error state site ~has_receiver (value : Syntax.expression) ~parameter_count
     ~argument_count =
-  let given = Diagnostic.show_count argument_count "is" "are" in
   State.make_error_type state
-    (if argument_count < parameter_count then Missing_argument else Too_many_arguments)
-    (State.read_span state value.id)
-    (match Argument_matching.find_owner site with
-    | Some name ->
-        Printf.sprintf "`%s` has %s, and %s given." name
-          (Diagnostic.show_count parameter_count "field" "fields")
-          (Diagnostic.show_count argument_count "argument is" "arguments are")
-    | None when has_receiver ->
-        Printf.sprintf "This method takes %s besides `self`, and %s given."
-          (Diagnostic.show_count parameter_count "argument" "arguments")
-          given
-    | None ->
-        Printf.sprintf "This function takes %s, and %s given."
-          (Diagnostic.show_count parameter_count "argument" "arguments")
-          given)
+    (Argument_count
+       {
+         at = Written value.id;
+         callee =
+           (match Argument_matching.find_owner site with
+           | Some owner -> Fields_of owner
+           | None when has_receiver -> Method_besides_self
+           | None -> Plain_function);
+         expected = parameter_count;
+         given = argument_count;
+       })
 
 let rec check_function_value_call state env (value : Syntax.expression) (callee : Syntax.expression)
     arguments =
@@ -52,18 +47,9 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
           (fun (argument : Syntax.argument) ->
             Option.map
               (fun (label : Syntax.name) ->
-                State.make_error_type state Unknown_label (State.read_span state label.id)
-                  ~fixes:
-                    [
-                      State.fix "Remove the label."
-                        [
-                          Diagnostic.delete
-                            (Source.Definition_span.make (State.read_span state label.id).start
-                               (State.read_span state argument.value.id).start);
-                        ];
-                    ]
-                  "A call through a function value passes its arguments by position, without \
-                   labels.")
+                State.make_error_type state
+                  (Label_in_indirect_call
+                     { label = Written label.id; value = Written argument.value.id }))
               argument.label)
           arguments
       in
@@ -74,7 +60,7 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
             let parameter : Types.parameter_info =
               { name = "the function value"; mode; type_ = input; has_default = false }
             in
-            let mode = check_argument state env argument.value parameter ~has_generic_type:false in
+            let mode = check_argument state env argument.value parameter in
             { Tables.expression = argument.value; core_argument_index = index; mode })
           arguments
       in
@@ -95,12 +81,10 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
   | Types.Error _ | Types.Hole -> check_arguments_alone state env arguments callee_type
   | _ ->
       check_arguments_alone state env arguments
-        (State.make_error_type state Not_callable (State.read_span state callee.id)
-           (Printf.sprintf "%s is not a function, so it cannot be called."
-              (String.capitalize_ascii (State.describe state callee_type))))
+        (State.make_error_type state
+           (Not_callable { at = Written callee.id; callee = State.make_shown state callee_type }))
 
-and check_argument state env (value : Syntax.expression) (parameter : Types.parameter_info)
-    ~has_generic_type =
+and check_argument state env (value : Syntax.expression) (parameter : Types.parameter_info) =
   let inner =
     match value.kind with
     | Mode (mode, inner)
@@ -110,7 +94,41 @@ and check_argument state env (value : Syntax.expression) (parameter : Types.para
         inner
     | _ -> value
   in
-  let actual = Hooks.check_expression state env ~expected:parameter.type_ inner in
+  let rec view_parts type_ =
+    match State.normalize state type_ with
+    | Types.Named { path; arguments } as known when not (Types.is_view known) ->
+        Types.Named
+          {
+            path;
+            arguments =
+              List.map
+                (function
+                  | Types.Type argument ->
+                      let argument = State.normalize state argument in
+                      Types.Type
+                        (if Types.is_viewable argument then Types.make_view argument
+                         else view_parts argument)
+                  | Types.Value _ as count -> count)
+                arguments;
+          }
+    | other -> other
+  in
+  let rec is_construction (written : Syntax.expression) =
+    match written.kind with
+    | List _ | Map _ -> true
+    | Call ({ kind = Name { case = Upper; _ } | Member (_, { case = Upper; _ }); _ }, _) -> true
+    | Parenthesized inner -> is_construction inner
+    | _ -> false
+  in
+  let expected =
+    match (parameter.mode, inner.kind) with
+    | Read, (If _ | Match _ | Block _)
+      when Types.is_viewable (Conversions.read_expected_head state parameter.type_) ->
+        Types.make_view parameter.type_
+    | Read, _ when is_construction inner -> view_parts parameter.type_
+    | _ -> parameter.type_
+  in
+  let actual = Hooks.check_expression state env ~expected inner in
   if inner != value then begin
     State.record state value actual
   end;
@@ -119,10 +137,8 @@ and check_argument state env (value : Syntax.expression) (parameter : Types.para
     | Some mode -> { parameter with mode }
     | None -> parameter
   in
-  Conversions.coerce state env ~argument:parameter.mode
-    ~takes_view_as_owner:(has_generic_type && parameter.mode = Read)
-    value ~actual ~expected:parameter.type_;
-  Modes.check_mode state env value parameter actual ~has_generic_type;
+  Conversions.coerce state env ~argument:parameter.mode value ~actual ~expected:parameter.type_;
+  Modes.check_mode state env value parameter actual;
   parameter.mode
 
 and match_arguments state site (value : Syntax.expression) (parameters : Types.parameter_info list)
@@ -142,7 +158,7 @@ and match_arguments state site (value : Syntax.expression) (parameters : Types.p
            {
              Argument_matching.label = argument.label;
              punned = find_name argument.value;
-             span = State.read_span state argument.value.id;
+             origin = Written argument.value.id;
            })
          arguments)
   in
@@ -161,8 +177,8 @@ and match_arguments state site (value : Syntax.expression) (parameters : Types.p
                if is_given index || parameter.has_default then None
                else
                  Some
-                   (State.make_error_type state Missing_argument (State.read_span state value.id)
-                      (Printf.sprintf "`%s` is not given, and has no default." parameter.name)))
+                   (State.make_error_type state
+                      (Missing_parameter { at = Written value.id; parameter = parameter.name })))
              parameters)
   in
   {
@@ -199,11 +215,6 @@ and check_arguments state env site (value : Syntax.expression)
     let is_lambda ((argument : Syntax.argument), _) =
       match argument.value.kind with Lambda _ -> true | _ -> false
     in
-    let has_generic_type (_, index) =
-      match (List.nth declared index).type_ with
-      | Types.Parameter _ | Projection _ -> true
-      | _ -> false
-    in
     let is_checked_late (_, index) =
       match (List.nth declared index).type_ with
       | Types.Projection _ -> true
@@ -213,10 +224,7 @@ and check_arguments state env site (value : Syntax.expression)
     let check ((argument : Syntax.argument), index) =
       let parameter = List.nth parameters index in
       let parameter = { parameter with type_ = flatten parameter.type_ } in
-      let mode =
-        check_argument state env argument.value parameter
-          ~has_generic_type:(has_generic_type (argument, index))
-      in
+      let mode = check_argument state env argument.value parameter in
       {
         Tables.expression = argument.value;
         core_argument_index = (if has_receiver then index + 1 else index);
@@ -244,7 +252,7 @@ and check_arguments state env site (value : Syntax.expression)
 
 and check_named_call state env ?expected (value : Syntax.expression) path
     (signature : Types.signature) ~type_arguments arguments =
-  let instance = Instantiation.instantiate state (State.read_span state value.id) signature in
+  let instance = Instantiation.instantiate state ~written:value.id ~declared_on:path signature in
   match Name_lookup.check_explicit_type_arguments state value instance type_arguments with
   | Error error -> check_arguments_alone state env arguments error
   | Ok () -> (
@@ -272,18 +280,19 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
   let type_arguments =
     match type_arguments with
     | Some written -> written
-    | None -> Instantiation.instantiate_type state (State.read_span state value.id) type_path
+    | None -> Instantiation.instantiate_type state ~written:value.id type_path
   in
   let type_ = Types.Named { path = type_path; arguments = type_arguments } in
   (match expected with Some expected -> State.unify_as_hint state type_ expected | None -> ());
   let report_unknown_variant variant =
     Error
-      (State.make_error_type state Unknown_variant (State.read_span state value.id)
-         (Printf.sprintf "`%s` has no variant `%s`." (State.show state type_) variant))
+      (State.make_error_type state
+         (Unknown_variant
+            { at = Written value.id; type_ = State.zonk state type_; variant; candidates = [] }))
   in
   let fields =
     match variant with
-    | None -> Result.map snd (find_record_fields state (State.read_span state value.id) type_)
+    | None -> Result.map snd (find_record_fields state (Core.Written value.id) type_)
     | Some variant -> (
         match Members.find_variants state.lookups type_path type_arguments with
         | Some variants -> (
@@ -295,12 +304,12 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
             | Some { fields = Some fields; _ } -> Ok fields
             | Some { fields = None; _ } ->
                 Error
-                  (State.make_error_type state Too_many_arguments (State.read_span state value.id)
-                     (Printf.sprintf "`%s` has no fields." variant))
+                  (State.make_error_type state
+                     (Variant_without_fields { at = Written value.id; variant }))
             | None -> report_unknown_variant variant)
         | None -> report_unknown_variant variant)
   in
-  let opaque_error = find_opaque_error state (State.read_span state value.id) type_path type_ in
+  let opaque_error = find_opaque_error state (Core.Written value.id) type_path type_ in
   match fields with
   | Error error -> check_arguments_alone state env arguments error
   | Ok fields -> (
@@ -316,17 +325,16 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
         match variant with
         | None when Members.is_tuple_type state.lookups type_path ->
             Argument_matching.Tuple_construction
-              (Types.show (Types.Named { path = type_path; arguments = [] }))
+              (Type_named (Types.Named { path = type_path; arguments = [] }))
         | _ ->
             Argument_matching.Construction
               (match variant with
-              | Some variant -> variant
-              | None -> Types.show (Types.Named { path = type_path; arguments = [] }))
+              | Some variant -> Variant_name variant
+              | None -> Type_named (Types.Named { path = type_path; arguments = [] }))
       in
       match
         ( check_arguments state env site value parameters ~declared:parameters
-            ~flatten:
-              (Solver.flatten state (Bound { at = State.read_span state value.id; of_type = None }))
+            ~flatten:(Solver.flatten state (Bound { at = Written value.id; of_type = None }))
             arguments ~has_receiver:false,
           opaque_error )
       with
@@ -343,26 +351,22 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
                });
           type_)
 
-and find_record_fields state span type_ =
+and find_record_fields state at type_ =
   match State.normalize state type_ with
   | Types.Named { path; arguments } as type_ -> (
       match Members.find_fields state.lookups path arguments with
       | Some fields -> Ok (path, fields)
-      | None -> Error (report_not_a_record state span type_))
+      | None -> Error (report_not_a_record state at type_))
   | (Types.Error _ | Types.Hole) as unknown -> Error unknown
-  | type_ -> Error (report_not_a_record state span type_)
+  | type_ -> Error (report_not_a_record state at type_)
 
-and report_not_a_record state span type_ =
-  State.make_error_type state Not_a_record span
-    (Printf.sprintf "`%s` is not a record, so it cannot be built this way." (State.show state type_))
+and report_not_a_record state at type_ =
+  State.make_error_type state (Not_a_record_construction { at; type_ = State.zonk state type_ })
 
-and find_opaque_error state span type_path type_ =
+and find_opaque_error state at type_path type_ =
   if Members.are_fields_visible state.lookups ~package:state.package type_path then None
   else
-    Some
-      (State.make_error_type state Private_field span
-         (Printf.sprintf "`%s` is opaque, so only its own package can build it."
-            (State.show state type_)))
+    Some (State.make_error_type state (Opaque_construction { at; type_ = State.zonk state type_ }))
 
 and make_field_parameters ~keeps_unlisted (fields : Types.field list) =
   List.map
@@ -380,9 +384,7 @@ and check_record_update state env (value : Syntax.expression) (base : Syntax.exp
   (match List.assoc_opt value.id state.keyword_modes with
   | None -> Modes.note_owned_value state env base
   | Some Own -> ()
-  | Some Mut ->
-      State.report state Wrong_mode (State.read_span state base.id)
-        "`with` takes ownership of its base, so the base is passed `own`, not `mut`."
+  | Some Mut -> State.report state (Mut_base_of_with { at = Written base.id })
   | Some Read -> State.raise_bug "a mode keyword recorded as `Read`");
   let written =
     List.filter_map
@@ -392,10 +394,7 @@ and check_record_update state env (value : Syntax.expression) (base : Syntax.exp
   in
   State.elaborate state value.id
     (Record_update
-       {
-         paths =
-           check_updates state env value ~at:(State.read_span state value.id) base_type written;
-       });
+       { paths = check_updates state env value ~at:(Core.Written value.id) base_type written });
   base_type
 
 and check_updates state env (value : Syntax.expression) ~at record_type
@@ -410,7 +409,7 @@ and check_updates state env (value : Syntax.expression) ~at record_type
       let groups = group_updates updates in
       let { matched; unmatched; error; _ } =
         match_arguments state
-          (Construction (State.show state record_type))
+          (Construction (Type_named (State.zonk state record_type)))
           value parameters (List.map fst groups)
       in
       Option.iter (fun error -> ignore (check_arguments_alone state env unmatched error)) error;
@@ -425,18 +424,11 @@ and check_updates state env (value : Syntax.expression) ~at record_type
           in
           match List.assq argument groups with
           | [] ->
-              ignore
-                (check_argument state env argument.value parameter
-                   ~has_generic_type:
-                     (match declared.type_ with
-                     | Types.Parameter _ | Projection _ -> true
-                     | _ -> false));
+              ignore (check_argument state env argument.value parameter);
               [ (argument.value.id, [ parameter.name ]) ]
           | nested ->
               let at =
-                match argument.label with
-                | Some label -> State.read_span state label.id
-                | None -> at
+                match argument.label with Some label -> Core.Written label.id | None -> at
               in
               List.map
                 (fun (id, path) -> (id, parameter.name :: path))

@@ -80,8 +80,9 @@ let walk_loop_clause visit (written : Core.loop_clause Core.conditional) =
 
 let walk_expression_children visit (node : Core.expression) =
   match node.kind with
-  | Integer _ | Float _ | Boolean _ | Literal _ | Function_value _ | Value_parameter _ | Break
-  | Continue | Todo | Unreachable | Result | Current_target | Yielded | Method_cost _ ->
+  | Integer _ | Float _ | Boolean _ | Literal _ | Function_value _ | Value_parameter _
+  | Parameter_default _ | Break | Continue | Todo | Unreachable | Result | Current_target | Yielded
+  | Method_cost _ ->
       ()
   | Use core_place -> walk_place visit core_place
   | Copy value -> walk_operand visit value
@@ -105,10 +106,7 @@ let walk_expression_children visit (node : Core.expression) =
       | Indirect function_value -> walk_operand visit function_value
       | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> ());
       List.iter
-        (fun index ->
-          match List.nth call.arguments index with
-          | Core.Passed { value; _ } -> walk_operand visit value
-          | Default -> ())
+        (fun index -> walk_operand visit (List.nth call.arguments index).value)
         call.evaluation_order;
       visit.callee call.callee
   | Operator { arguments; _ } | Specification_function { arguments; _ } ->
@@ -116,7 +114,7 @@ let walk_expression_children visit (node : Core.expression) =
   | Compare { left; right; _ } | Connective { left; right; _ } | Identical (left, right) ->
       visit.expression left;
       visit.expression right
-  | Not inner | Echo inner | Old inner | To_any { value = inner; _ } -> visit.expression inner
+  | Not inner | Echo inner | Old inner -> visit.expression inner
   | Matches { value; pattern } ->
       walk_operand visit value;
       visit.pattern pattern
@@ -277,9 +275,7 @@ let is_functional walk =
           | Call { arguments; _ } ->
               if
                 List.exists
-                  (function
-                    | Core.Passed { mode = Language.Mode.Mut; _ } -> true
-                    | Core.Passed _ | Core.Default -> false)
+                  (fun (argument : Core.argument) -> argument.mode = Language.Mode.Mut)
                   arguments
               then fine := false;
               walk_expression_children visit node

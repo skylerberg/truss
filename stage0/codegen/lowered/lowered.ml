@@ -2,6 +2,7 @@ module Item = Item
 include Lowered_types
 
 let make_local_place local = { root = Local local; projections = [] }
+let make_deref_place pointer = { root = Local pointer; projections = [ Deref ] }
 let project place projection = { place with projections = place.projections @ [ projection ] }
 let make_uint64_constant number = Constant (Integer (UInt64, Z.of_int number))
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Lowered" format

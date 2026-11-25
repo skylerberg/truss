@@ -1,0 +1,3 @@
+public fn is_even(value: Int64) -> Bool {
+  value % 2 == 0
+}

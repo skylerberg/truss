@@ -1,0 +1,13 @@
+fn f(count: UInt64) -> UInt64
+  decreases count
+  cost time O(count)
+{
+  if count == 0 {
+    return 0
+  }
+  var total: UInt64 = 0
+  for _ in 0..2 {
+    total = f(count - 1)
+  }
+  total
+}

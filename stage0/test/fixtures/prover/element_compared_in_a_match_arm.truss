@@ -1,4 +1,4 @@
-fn each_equals_itself(values: Slice[Int64], limit: Option[Int64]) -> Bool
+fn each_equals_itself(values: List[Int64], limit: Option[Int64]) -> Bool
   ensures result
 {
   match limit {

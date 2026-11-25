@@ -9,12 +9,7 @@ val check_function_value_call :
   Types.ty
 
 val check_argument :
-  State.state ->
-  State.env ->
-  Syntax.expression ->
-  Types.parameter_info ->
-  has_generic_type:bool ->
-  Language.Mode.t
+  State.state -> State.env -> Syntax.expression -> Types.parameter_info -> Language.Mode.t
 
 val check_arguments :
   State.state ->

@@ -7,7 +7,10 @@ use standard.system.lines
 internal type SystemConsole(input: lines.LineInput)
 
 impl Default for SystemConsole {
-  fn default() -> SystemConsole {
+  fn default() -> SystemConsole
+    cost time O(1)
+    cost allocations == 0
+  {
     SystemConsole(input: lines.LineInput.new())
   }
 }
@@ -15,18 +18,18 @@ impl Default for SystemConsole {
 impl Console for SystemConsole
   uses RunForever, capabilities.System
 {
-  fn print(self, text: StringSlice) {
-    let _ = calls.write_fully(1, bytes: text.bytes)
+  fn print(self, text: String) {
+    let _ = calls.write_fully(1, bytes: text.storage)
   }
 
-  fn print_line(self, text: StringSlice) {
-    let _ = calls.write_fully(1, bytes: text.bytes)
-    let _ = calls.write_fully(1, bytes: "\n".slice().bytes)
+  fn print_line(self, text: String) {
+    let _ = calls.write_fully(1, bytes: text.storage)
+    let _ = calls.write_fully(1, bytes: "\n".storage)
   }
 
-  fn print_error(self, text: StringSlice) {
-    let _ = calls.write_fully(2, bytes: text.bytes)
-    let _ = calls.write_fully(2, bytes: "\n".slice().bytes)
+  fn print_error(self, text: String) {
+    let _ = calls.write_fully(2, bytes: text.storage)
+    let _ = calls.write_fully(2, bytes: "\n".storage)
   }
 
   fn read_line(mut self) -> Option[String] {

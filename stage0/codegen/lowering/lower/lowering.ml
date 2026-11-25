@@ -1,6 +1,5 @@
 type cleanup =
   | Drop_value of Lowered.place
-  | Drop_flagged of { place : Lowered.place; flag : Lowered.place }
   | Free_pointed of Lowered.place
   | Join_group of Lowered.statement
 
@@ -41,6 +40,8 @@ and mir_frame = {
   moves : Moves.t;
   flags : (Moves.path * Lowered.place) list;
   mutable move_state : Moves.state;
+  mutable move_state_at_return : Moves.state option;
+  applied_defaults : (Mir.local, applied_default) Hashtbl.t;
   lending : lending option;
   called_parts : Mir.local list;
   lend_records : (Mir.local, Lowered.place) Hashtbl.t;
@@ -50,6 +51,8 @@ and mir_frame = {
   after_lend : bool array;
   mutable block : Mir.Graph.block;
 }
+
+and applied_default = { default_frame : frame; is_applied : Lowered.place }
 
 type task = { id : Mir.task; group : Lowered.place; end_block : Lowered.block; scope_depth : int }
 
@@ -163,23 +166,13 @@ let allocate_owned_local state (scope : scope) ty =
 let allocate_temporary state ty = allocate_owned_local state (lookup_innermost_scope state) ty
 let allocate_binding state ty = allocate_owned_local state (lookup_binding_scope state.scopes) ty
 
-let allocate_flagged_binding state ty ~flag =
-  let place =
-    Lowered.make_local_place (Emit_c.Ir_builder.allocate_local state.builder (Value ty))
-  in
-  if not (is_trivial state ty) then begin
-    let scope = lookup_binding_scope state.scopes in
-    scope.owned <- Drop_flagged { place; flag } :: scope.owned
-  end;
-  place
-
 let allocate_parameter state ?(in_scope = true) ?name ~owned (mode : Language.Mode.t) ty =
   let own place = if in_scope && owned && not (is_trivial state ty) then own_in_scope state place in
   match Convention.classify_parameter state.context.env mode ty with
   | None -> (None, allocate_temporary state ty)
   | Some (Lowered.Pointer _ as pointer) ->
       let arrives = Emit_c.Ir_builder.allocate_local state.builder ?name pointer in
-      let place : Lowered.place = { root = Local arrives; projections = [ Deref ] } in
+      let place = Lowered.make_deref_place arrives in
       own place;
       (Some arrives, place)
   | Some passed ->
@@ -231,7 +224,7 @@ let set_result_slot state (convention : Convention.result) =
 
 let find_result_place state : Lowered.place option =
   match state.result with
-  | Through pointer -> Some { root = Local pointer; projections = [ Deref ] }
+  | Through pointer -> Some (Lowered.make_deref_place pointer)
   | Returned_in local -> Some (Lowered.make_local_place local)
   | No_result -> None
 
@@ -246,10 +239,6 @@ let drop_scope state (scope : scope) =
     (function
       | Drop_value place ->
           if not (List.mem place state.moved) then Emit_c.Ir_builder.emit state.builder (Drop place)
-      | Drop_flagged { place; flag } ->
-          if not (List.mem place state.moved) then
-            Emit_c.Ir_builder.emit_when state.builder (Holds (Copy flag)) (fun () ->
-                Emit_c.Ir_builder.emit state.builder (Drop place))
       | Free_pointed pointer ->
           Emit_c.Ir_builder.emit state.builder
             (Call { target = Intrinsic Free; arguments = [ Copy pointer ]; result = Discarded })

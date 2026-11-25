@@ -1,4 +1,4 @@
-fn spaced(text: StringSlice) -> String
+fn spaced(text: String) -> String
   cost time O(text.length())
 {
   var output = ""

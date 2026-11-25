@@ -1,0 +1,6 @@
+fn f() -> Int64 {
+  let bump = fn(count: mut Int64) { count = count.saturating_add(1) }
+  var total = 5
+  bump(mut total)
+  total
+}

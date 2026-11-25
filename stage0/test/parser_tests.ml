@@ -18,10 +18,11 @@ let () =
       then Harness.fail "wrong use lines");
   Harness.test "a use line after a definition moves up" (fun () ->
       Parse_support.expect_error "use a.b\n\nfn f() {}\nuse c.d\n" ~code:Use_after_definition
-        ~at:"use c.d" ~fixed:"use a.b\nuse c.d\n\nfn f() {}\n");
+        ~at:"use c.d"
+        ~fixed:("\nfn f() {}\nuse c.d", "use c.d\n\nfn f() {}"));
   Harness.test "a use line after the first definition moves above it" (fun () ->
       Parse_support.expect_error "fn f() {}\nuse c.d\n" ~code:Use_after_definition ~at:"use c.d"
-        ~fixed:"use c.d\nfn f() {}\n");
+        ~fixed:("fn f() {}\nuse c.d", "use c.d\nfn f() {}"));
   Harness.test "a statement at the top level is one error" (fun () ->
       Parse_support.expect_error "fn f() {}\nx = 1\nfn g() {}" ~code:Statement_at_top_level ~at:"x");
   Harness.test "a definition records where its syntax errors are" (fun () ->
@@ -331,7 +332,7 @@ let () =
       | _, tokens, [ _; second ] -> (
           match snd (Parser.For_testing.parse_definition tokens second) with
           | [ diagnostic ] ->
-              if diagnostic.span.start <> 23 then Harness.fail "start %d" diagnostic.span.start
+              if diagnostic.at.start <> 23 then Harness.fail "start %d" diagnostic.at.start
           | _ -> Harness.fail "expected one diagnostic")
       | _ -> Harness.fail "expected two pieces");
   Harness.test "moving a broken definition changes nothing in its tree" (fun () ->
@@ -354,8 +355,9 @@ let () =
             ( method_.value,
               String.sub (Source.text source) method_.base (method_.stop - method_.base),
               List.map
-                (fun (diagnostic : Diagnostic.t) ->
-                  (diagnostic.code, diagnostic.span.start - method_.base))
+                (fun (diagnostic : Syntax_catalog.Parsing.t) ->
+                  ( (Syntax_catalog.Parsing_description.describe diagnostic).code,
+                    diagnostic.at.start - method_.base ))
                 diagnostics )
         | _ -> failwith "expected one method"
       in
@@ -367,9 +369,10 @@ let () =
       in
       match Parser.For_testing.parse_example_definition tokens (List.hd pieces) with
       | _, [ diagnostic ] ->
-          if Diagnostic.Code.name diagnostic.code <> "parser.unexpected_token" then
-            Harness.fail "code %s" (Diagnostic.Code.name diagnostic.code);
-          if diagnostic.span.start <> 41 then Harness.fail "start %d" diagnostic.span.start
+          let code = (Syntax_catalog.Parsing_description.describe diagnostic).code in
+          if Diagnostic.Code.name code <> "parser.unexpected_token" then
+            Harness.fail "code %s" (Diagnostic.Code.name code);
+          if diagnostic.at.start <> 41 then Harness.fail "start %d" diagnostic.at.start
       | _, diagnostics -> Harness.fail "%d diagnostics" (List.length diagnostics))
 
 let () =
@@ -476,8 +479,6 @@ let () =
       expect_type "Self.Key" "Self.Key");
   Harness.test "an associated type of a parameter" (fun () ->
       expect_type "Items.Element" "Items.Element");
-  Harness.test "any with a constraint" (fun () ->
-      expect_type "any Cursor[Element = Int64]" "(any Cursor[Element = Int64])");
   Harness.test "a function type" (fun () ->
       expect_type "fn(mut Element, Element) -> Ordering" "(fn (mut Element Element) -> Ordering)");
   Harness.test "a function type in parentheses with clauses" (fun () ->
@@ -648,10 +649,11 @@ let () =
       expect_expression "a with (own b)" "(with a (own b))");
   Harness.test "the label of an update is a path of fields" (fun () ->
       Parse_support.expect_error "fn f() { p with (g(x): 1) }" ~code:Unexpected_token ~at:"g(x)");
-  Harness.test "modes and any take a postfix expression" (fun () ->
+  Harness.test "a mode takes a postfix expression" (fun () ->
       Parse_support.expect_statement "mut config.servers.sort()"
-        "(mut (call (. (. config servers) sort)))";
-      expect_expression "any UserRoutes(users: [:])" "(any (call UserRoutes (users: (map))))");
+        "(mut (call (. (. config servers) sort)))");
+  Harness.test "`any` is an ordinary name" (fun () ->
+      expect_expression "any(items)" "(call any items)");
   Harness.test "own with an update" (fun () ->
       expect_expression "own config with (debug: true)" "(own (with config (debug: true)))");
   Harness.test "open ranges in brackets" (fun () ->
@@ -668,7 +670,7 @@ let () =
       Parse_support.expect_body_error "let x = items[1..=]" ~code:Open_range ~at:"..=");
   Harness.test "an open range has no comma after it" (fun () ->
       Parse_support.expect_body_error "let x = items[1..,]" ~code:Open_range ~at:","
-        ~fixed:"let x = items[1..]");
+        ~fixed:("let x = items[1..,]", "let x = items[1..]"));
   Harness.test "a bare name does not end a range pattern" (fun () ->
       Parse_support.expect_body_error "match x {\n  lo..hi => 1\n  _ => 0\n}" ~code:Unexpected_token
         ~at:"lo");
@@ -701,6 +703,9 @@ let () =
   Harness.test "a lambda" (fun () ->
       expect_expression "fn(sum, (value, ..)) { sum + value }"
         "(fn (sum (record value ..)) (block (+ sum value)))");
+  Harness.test "a lambda's parameters with annotations" (fun () ->
+      expect_expression "fn(sum: Int64, Point(x, ..): mut Point) { sum + x }"
+        "(fn ((sum: Int64) ((Point x ..): mut Point)) (block (+ sum x)))");
   Harness.test "if, else if, and else" (fun () ->
       expect_expression "if a { 1 } else if b { 2 } else { 3 }"
         "(if a (block 1) (if b (block 2) (block 3)))");
@@ -756,7 +761,7 @@ let () =
   Harness.test "the expression before let ... else cannot end with }" (fun () ->
       Parse_support.expect_body_error "let Some(x) = if ready { a } else { b } else { return }"
         ~code:Let_else_brace ~at:"else { return"
-        ~fixed:"let Some(x) = (if ready { a } else { b }) else { return }");
+        ~fixed:("if ready { a } else { b }", "(if ready { a } else { b })"));
   Harness.test "assignments" (fun () ->
       Parse_support.expect_statements "a = 1\nitems[i] += 2\nflags |= mask"
         [ "(= a 1)"; "(+= ([] items i) 2)"; "(|= flags mask)" ]);

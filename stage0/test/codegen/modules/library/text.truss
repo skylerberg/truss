@@ -11,14 +11,14 @@ test "a string's bytes are its UTF-8 encoding" {
   assert "".bytes().length() == 0
 }
 
-test "a string and a literal are receivers of the methods of a string slice" {
+test "a string and a literal are receivers of the methods of a string" {
   let name: String = "caf\u{e9}"
-  let copied = name.to_string()
+  let copied = name.copy()
   assert copied == name
   assert copied.length() == 5
-  assert "x".to_string() == "x"
+  assert "x".copy() == "x"
   assert name.byte(0) == 99
-  assert StringSlice.to_string(name) == name
+  assert String.copy(name) == name
 }
 
 test "is_ascii is true only when every byte is ASCII" {
@@ -66,7 +66,7 @@ test "a substring is taken at character boundaries" {
   assert text.substring(0, to: 3) == "caf"
   assert text.substring(3, to: 5) == "\u{e9}"
   assert text.substring(5, to: 5) == ""
-  assert text.get_substring(0, to: 5) == Some("caf\u{e9}".slice())
+  assert text.get_substring(0, to: 5) == Some("caf\u{e9}")
   assert text.get_substring(0, to: 4) is None
   assert text.get_substring(4, to: 5) is None
   assert text.get_substring(6, to: 2) is None
@@ -85,11 +85,11 @@ test "prefixes and suffixes are tested and stripped" {
   assert text.ends_with("suffix")
   assert text.ends_with("")
   assert !text.ends_with("suffi")
-  assert text.strip_prefix("prefix-") == Some("body-suffix".slice())
+  assert text.strip_prefix("prefix-") == Some("body-suffix")
   assert text.strip_prefix("body") is None
-  assert text.strip_suffix("-suffix") == Some("prefix-body".slice())
+  assert text.strip_suffix("-suffix") == Some("prefix-body")
   assert text.strip_suffix("prefix") is None
-  assert text.strip_prefix(text) == Some("".slice())
+  assert text.strip_prefix(text) == Some("")
 }
 
 test "trimming removes Unicode white space from the ends only" {
@@ -116,10 +116,10 @@ test "strings compare without regard to ASCII case, and order by bytes" {
   assert !"Hello".equal_ignoring_ascii_case("Hell")
   assert !"Hello".equal_ignoring_ascii_case("Hallo")
   assert !"\u{c9}".equal_ignoring_ascii_case("\u{e9}")
-  assert "apple".slice() < "banana".slice()
-  assert "apple".slice() < "apples".slice()
-  assert "b".slice() > "apple".slice()
-  assert "same".slice() == "same".slice()
+  assert "apple" < "banana"
+  assert "apple" < "apples"
+  assert "b" > "apple"
+  assert "same" == "same"
 }
 
 test "ASCII case conversion changes only ASCII letters and keeps the length" {
@@ -182,10 +182,47 @@ test "contains and occurrences count matches that do not overlap" {
   assert "".occurrences("x") == 0
 }
 
+test "a one-byte pattern matches each of its bytes beside multibyte characters" {
+  let text = "caf\u{e9} au lait"
+  assert text.find("a") == Some(1)
+  assert text.find("t") == Some(12)
+  assert text.find("x") is None
+  assert text.contains("u")
+  assert text.occurrences("a") == 3
+  assert text.occurrences(" ") == 2
+  assert text.occurrences("x") == 0
+  assert "a".find("a") == Some(0)
+  assert "a".occurrences("a") == 1
+}
+
+test "a search skips to the first byte of the pattern and keeps a partial match" {
+  assert "xxxab".find("xab") == Some(2)
+  assert "abcx".find("xy") is None
+  assert "abxab".find_last("ab") == Some(3)
+  assert "xabyabab".occurrences("ab") == 3
+  assert "aaab".replace("ab", replacement: "-") == "aa-"
+  assert "\u{e9}\u{e9}x".find("\u{e9}x") == Some(2)
+  var parts: List[String] = []
+  for part in "a<b<>c<".split("<>") {
+    mut parts.push(part.copy())
+  }
+  assert parts.length() == 2
+  assert parts[0] == "a<b"
+  assert parts[1] == "c<"
+}
+
+test "occurrences counts a byte across blocks of the text" {
+  assert "abc".repeated(200).occurrences("a") == 200
+  assert "abc".repeated(200).occurrences("c") == 200
+  assert "x".repeated(192).occurrences("x") == 192
+  assert "x".repeated(193).occurrences("x") == 193
+  assert "x".repeated(385).occurrences("x") == 385
+}
+
 test "split gives the parts between separators, empty ones included" {
   var parts: List[String] = []
   for part in "a,b,,c".split(",") {
-    mut parts.push(part.to_string())
+    mut parts.push(part.copy())
   }
   assert parts.length() == 4
   assert parts[0] == "a"
@@ -194,7 +231,7 @@ test "split gives the parts between separators, empty ones included" {
   assert parts[3] == "c"
   var ends: List[String] = []
   for part in ",x,".split(",") {
-    mut ends.push(part.to_string())
+    mut ends.push(part.copy())
   }
   assert ends.length() == 3
   assert ends[0] == ""
@@ -208,7 +245,7 @@ test "split gives the parts between separators, empty ones included" {
   assert whole == 1
   var long: List[String] = []
   for part in "one<>two<>three".split("<>") {
-    mut long.push(part.to_string())
+    mut long.push(part.copy())
   }
   assert long.length() == 3
   assert long[1] == "two"
@@ -223,20 +260,20 @@ test "split gives the parts between separators, empty ones included" {
 test "split_at_most stops splitting when it has the parts asked for" {
   var parts: List[String] = []
   for part in "a=b=c=d".split_at_most("=", parts: 2) {
-    mut parts.push(part.to_string())
+    mut parts.push(part.copy())
   }
   assert parts.length() == 2
   assert parts[0] == "a"
   assert parts[1] == "b=c=d"
   var one: List[String] = []
   for part in "a=b".split_at_most("=", parts: 1) {
-    mut one.push(part.to_string())
+    mut one.push(part.copy())
   }
   assert one.length() == 1
   assert one[0] == "a=b"
   var many: List[String] = []
   for part in "a=b".split_at_most("=", parts: 9) {
-    mut many.push(part.to_string())
+    mut many.push(part.copy())
   }
   assert many.length() == 2
 }
@@ -270,12 +307,12 @@ test "trim_matching removes matching characters from both ends" {
 test "split_matching splits at each character that matches" {
   var parts: List[String] = []
   for part in "a1b22c".split_matching(fn(character) { character.is_ascii_digit() }) {
-    mut parts.push(part.to_string())
+    mut parts.push(part.copy())
   }
   assert parts == ["a", "b", "", "c"]
   var one: List[String] = []
   for part in "plain".split_matching(fn(character) { character.is_ascii_digit() }) {
-    mut one.push(part.to_string())
+    mut one.push(part.copy())
   }
   assert one == ["plain"]
 }
@@ -283,7 +320,7 @@ test "split_matching splits at each character that matches" {
 test "split_whitespace gives the words, however much white space is between them" {
   var words: List[String] = []
   for word in "  the quick\t\tbrown\u{a0}fox \n".split_whitespace() {
-    mut words.push(word.to_string())
+    mut words.push(word.copy())
   }
   assert words == ["the", "quick", "brown", "fox"]
   var none = 0
@@ -298,7 +335,7 @@ test "split_whitespace gives the words, however much white space is between them
   assert empty == 0
   var single: List[String] = []
   for word in "word".split_whitespace() {
-    mut single.push(word.to_string())
+    mut single.push(word.copy())
   }
   assert single == ["word"]
 }
@@ -306,12 +343,12 @@ test "split_whitespace gives the words, however much white space is between them
 test "lines gives each line without its line break" {
   var lines: List[String] = []
   for line in "first\nsecond\r\nthird".lines() {
-    mut lines.push(line.to_string())
+    mut lines.push(line.copy())
   }
   assert lines == ["first", "second", "third"]
   var ended: List[String] = []
   for line in "one\n\ntwo\n".lines() {
-    mut ended.push(line.to_string())
+    mut ended.push(line.copy())
   }
   assert ended == ["one", "", "two"]
   var none = 0
@@ -526,7 +563,7 @@ test "a string's uppercase uses the full mappings" {
   assert "\u{1F0} \u{390}".to_uppercase() == "J\u{30C} \u{399}\u{308}\u{301}"
   assert "中文 123".to_uppercase() == "中文 123"
   assert "".to_uppercase() == ""
-  assert "мир".slice().to_uppercase() == "МИР"
+  assert "мир".to_uppercase() == "МИР"
 }
 
 test "a string's lowercase uses the final sigma at the end of a word" {
@@ -541,7 +578,7 @@ test "a string's lowercase uses the final sigma at the end of a word" {
   assert "".to_lowercase() == ""
 }
 
-fn joined_graphemes(text: StringSlice) -> String {
+fn joined_graphemes(text: String) -> String {
   var output = ""
   for grapheme in text.graphemes() {
     if output.length() > 0 {
@@ -600,7 +637,7 @@ test "graphemes join an Indic linker to the consonant after it" {
   assert joined_graphemes("\u{1CF5}\u{915}") == "\u{1CF5}\u{915}"
 }
 
-test "a String gives the graphemes of its slice" {
+test "a String gives the graphemes of a view of it" {
   var count: UInt64 = 0
   let text = "e\u{301}\u{1F1FA}\u{1F1F8}!"
   for _ in text.graphemes() {

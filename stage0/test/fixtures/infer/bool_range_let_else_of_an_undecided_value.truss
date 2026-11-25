@@ -1,0 +1,6 @@
+fn produce[Value]() -> Value { todo }
+
+fn f() -> Int64 {
+  let true..=false = produce() else { return 0 }
+  1
+}

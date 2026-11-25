@@ -1,14 +1,8 @@
 use standard.capabilities
 
-trait Visitor {
-  fn visit(self, session: UInt64)
-    uses capabilities.System
-}
-
 capability Sessions {
   fn touch(session: UInt64)
   fn each(visit: (fn(UInt64) uses capabilities.System))
-  fn each_visitor(visitor: any Visitor)
 }
 
 type Table(sessions: List[UInt64])
@@ -19,9 +13,6 @@ impl Sessions for Table {
   }
 
   fn each(mut self, visit: (fn(UInt64) uses capabilities.System)) {
-  }
-
-  fn each_visitor(mut self, visitor: any Visitor) {
   }
 }
 

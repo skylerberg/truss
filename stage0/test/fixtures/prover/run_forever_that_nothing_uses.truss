@@ -1,9 +1,0 @@
-fn f(values: Slice[UInt64]) -> UInt64
-  uses RunForever
-{
-  var total: UInt64 = 0
-  for value in values {
-    total = value
-  }
-  total
-}

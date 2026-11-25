@@ -1,5 +1,4 @@
 type keyword =
-  | Any
   | Assert
   | Break
   | Capability
@@ -27,6 +26,7 @@ type keyword =
   | Lends
   | Let
   | Match
+  | Modifies
   | Mut
   | Opaque
   | Own
@@ -49,6 +49,7 @@ type keyword =
   | Use
   | Uses
   | Var
+  | View
   | When
   | While
   | With
@@ -173,7 +174,6 @@ let list_interpolations literal = Array.map fst literal.rest
 
 let keywords =
   [
-    ("any", Any);
     ("assert", Assert);
     ("break", Break);
     ("capability", Capability);
@@ -201,6 +201,7 @@ let keywords =
     ("lends", Lends);
     ("let", Let);
     ("match", Match);
+    ("modifies", Modifies);
     ("mut", Mut);
     ("opaque", Opaque);
     ("own", Own);
@@ -223,6 +224,7 @@ let keywords =
     ("use", Use);
     ("uses", Uses);
     ("var", Var);
+    ("view", View);
     ("when", When);
     ("while", While);
     ("with", With);
@@ -321,90 +323,6 @@ let spell_reserved = lookup_spelling reserved_words
 let spell_punctuation = lookup_spelling punctuation
 let spell_foreign = lookup_spelling foreign_sequences
 
-let escape text =
-  let buffer = Buffer.create (String.length text) in
-  String.iteri
-    (fun index character ->
-      match character with
-      | '"' -> Buffer.add_string buffer "\\\""
-      | '\\' -> Buffer.add_string buffer "\\\\"
-      | '\n' -> Buffer.add_string buffer "\\n"
-      | '\t' -> Buffer.add_string buffer "\\t"
-      | '\r' -> Buffer.add_string buffer "\\r"
-      | '\000' -> Buffer.add_string buffer "\\0"
-      | '$' when index + 1 < String.length text && text.[index + 1] = '{' ->
-          Buffer.add_string buffer "\\$"
-      | character when Char.code character < 0x20 || Char.code character = 0x7f ->
-          Buffer.add_string buffer (Printf.sprintf "\\u{%x}" (Char.code character))
-      | character -> Buffer.add_char buffer character)
-    text;
-  Buffer.contents buffer
-
-let rec spell_tokens ?(insertions = []) (tokens : t array) =
-  let spell_inserted offset =
-    String.concat ""
-      (List.filter_map (fun (at, text) -> if at = offset then Some text else None) insertions)
-  in
-  let buffer = Buffer.create 64 in
-  let rec spell index previous_stop =
-    if index = Array.length tokens then begin
-      Option.iter (fun stop -> Buffer.add_string buffer (spell_inserted stop)) previous_stop;
-      true
-    end
-    else
-      let token = tokens.(index) in
-      match token.kind with
-      | End_of_file -> spell (index + 1) previous_stop
-      | kind -> (
-          match if token.is_inserted_closer then None else spell_kind kind with
-          | None -> false
-          | Some text ->
-              (match previous_stop with
-              | Some stop ->
-                  Buffer.add_string buffer (spell_inserted stop);
-                  if stop < token.span.start then begin
-                    Buffer.add_char buffer ' ';
-                    Buffer.add_string buffer (spell_inserted token.span.start)
-                  end
-              | None -> Buffer.add_string buffer (spell_inserted token.span.start));
-              Buffer.add_string buffer text;
-              spell (index + 1) (Some token.span.stop))
-  in
-  if spell 0 None then Some (Buffer.contents buffer) else None
-
-and spell_kind = function
-  | Upper name | Lower name -> Some name
-  | Underscore -> Some "_"
-  | Keyword keyword -> Some (spell_keyword keyword)
-  | Reserved reserved -> Some (spell_reserved reserved)
-  | Integer value -> Some (Z.to_string value)
-  | Float { Decimal.significand; exponent } ->
-      Some (Z.to_string significand ^ "e" ^ Z.to_string exponent)
-  | String literal -> spell_string literal
-  | Punctuation punctuation -> Some (spell_punctuation punctuation)
-  | Foreign foreign -> Some (spell_foreign foreign)
-  | Newline | End_of_file -> None
-
-and spell_string literal =
-  let pieces =
-    Array.to_list
-      (Array.map
-         (fun ((interpolation : interpolation), (text : text)) ->
-           if interpolation.is_closed then
-             Option.map
-               (fun inner -> "${" ^ inner ^ "}" ^ escape text.value)
-               (spell_tokens interpolation.tokens)
-           else None)
-         literal.rest)
-  in
-  if List.mem None pieces then None
-  else
-    let tag = match literal.tag with Some (tag, _) -> tag | None -> "" in
-    Some
-      (tag ^ "\"" ^ escape literal.first.value
-      ^ String.concat "" (List.filter_map Fun.id pieces)
-      ^ "\"")
-
 let joins left right =
   let is_name_byte character =
     (character >= 'a' && character <= 'z')
@@ -441,14 +359,14 @@ let can_begin = function
   | Foreign (Star_star | Colon_equal | Colon_colon | Pipe_greater) -> false
   | Punctuation (Open _ | Minus | Bang | Tilde) -> true
   | Keyword
-      ( Any | Assert | Break | Capability | Concurrent | Continue | Echo | Exists | False | Fn | For
+      ( Assert | Break | Capability | Concurrent | Continue | Echo | Exists | False | Fn | For
       | Forall | If | Impl | Internal | Law | Let | Match | Mut | Own | Parallel | Proof | Provide
       | Public | Return | Self_value | Self_type | Test | Theorem | Todo | Trait | True | Type
       | Unreachable | Use | Var | While ) ->
       true
   | Keyword
       ( Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends
-      | Opaque | Requires | Unless | Uses | When | With ) ->
+      | Modifies | Opaque | Requires | Unless | Uses | View | When | With ) ->
       false
   | Punctuation _ | Newline | End_of_file -> false
 

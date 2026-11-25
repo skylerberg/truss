@@ -11,7 +11,7 @@ impl From[Count] for Int64 {
 }
 
 impl FromTemplate for Sum {
-  type Part = Int64
+  type Interpolation = Int64
 
   fn is_valid_template(literals: List[text.Literal]) -> Bool {
     true
@@ -19,14 +19,14 @@ impl FromTemplate for Sum {
 
   fn from_template(template: Template[Int64]) -> Sum {
     var total = 0
-    for part in template.parts {
-      total += part
+    for interpolation in template.interpolations {
+      total += interpolation
     }
     Sum(pieces: template.literals.length(), total: total)
   }
 }
 
-test "a tagged string gives its tag a template of its text and parts" {
+test "a tagged string gives its tag a template of its text and interpolations" {
   let small = Count(value: 2)
   let large: Int64 = 40
   let sum = Sum"a ${small} b ${large} c"

@@ -1,0 +1,6 @@
+fn bytes_of(name: own String) -> UInt64
+  cost amortized time O(1)
+{
+  let bytes = own name.to_bytes()
+  bytes.length()
+}

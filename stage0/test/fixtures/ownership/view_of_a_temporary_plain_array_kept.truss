@@ -1,0 +1,10 @@
+fn make() -> Array[Int64, 4] { todo }
+
+fn head(values: List[Int64]) -> view List[Int64] {
+  values[..2]
+}
+
+fn f() -> UInt64 {
+  let viewed = head(make())
+  viewed.length()
+}

@@ -220,10 +220,13 @@ let compute_test_keys snapshot database =
         (fun test ->
           match lookups.read_test_key (Lowering.make_root test) with
           | Ok _ -> ()
-          | Error (unsupported : Lowering.unsupported) ->
+          | Error (Unsupported unsupported) ->
               failwith
                 (Printf.sprintf "%s has no key: %s is not supported" (Path.show test)
-                   unsupported.construct))
+                   unsupported.construct)
+          | Error (Todo_types _) ->
+              failwith
+                (Printf.sprintf "%s has no key: it reaches a type defined as todo" (Path.show test)))
         tests
 
 let measure ~name ~has_errors ~root update =

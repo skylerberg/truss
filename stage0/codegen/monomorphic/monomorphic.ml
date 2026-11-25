@@ -1,6 +1,6 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Monomorphic" format
 
-exception Todo_type of Ground.ty
+exception Todo_type of Path.t
 
 type context = {
   find_type_interface : Path.t -> Types.type_interface option;
@@ -34,14 +34,6 @@ let rec ground context substitution (ty : Types.ty) : Ground.ty =
   | Named { path; arguments } ->
       Named { path; arguments = List.map (ground_argument context Types.no_substitution) arguments }
   | Function function_type -> Function (ground_function context Types.no_substitution function_type)
-  | Any { trait; trait_arguments; associated } ->
-      Any
-        {
-          trait;
-          arguments = List.map (ground_argument context Types.no_substitution) trait_arguments;
-          associated =
-            List.map (fun (name, ty) -> (name, ground context Types.no_substitution ty)) associated;
-        }
   | Never -> Never
   | Parameter parameter ->
       raise_bug "the generic parameter %s of %s is not substituted" parameter.name
@@ -58,6 +50,7 @@ and ground_argument context substitution (argument : Types.argument) : Ground.ar
   | Value (Value_parameter parameter) ->
       raise_bug "the value parameter %s is not substituted" parameter.name
   | Value (Value_variable _) -> raise_bug "a value the checker left undecided"
+  | Value (Value_error _) -> raise_bug "a value with an error, which no build reaches"
 
 and ground_function context substitution (function_type : Types.function_type) :
     Ground.function_type =
@@ -83,13 +76,6 @@ let rec convert_ty : Ground.ty -> Types.ty = function
           uses = Types.make_capability_set (List.map Types.make_capability function_type.uses);
           costs = [];
         }
-  | Any { trait; arguments; associated } ->
-      Any
-        {
-          trait;
-          trait_arguments = List.map convert_argument arguments;
-          associated = List.map (fun (name, ty) -> (name, convert_ty ty)) associated;
-        }
 
 and convert_argument : Ground.argument -> Types.argument = function
   | Type ty -> Type (convert_ty ty)
@@ -112,6 +98,19 @@ let make_signature_substitution (signature : Types.signature) (instantiation : G
     (make_substitution signature.generics instantiation.type_arguments)
     (Types.make_capability_substitution signature.capability_parameters
        (convert_capability_arguments instantiation))
+
+let make_declaration_substitution ~(trait : Path.t) ~(trait_generics : Types.generic list)
+    (signature : Types.signature) (instantiation : Ground.instantiation) =
+  match instantiation.type_arguments with
+  | Type self :: arguments ->
+      let count = List.length trait_generics in
+      Types.bind_argument (Types.make_self_parameter trait)
+        (Types.Type (convert_ty self))
+        (Types.combine_substitutions
+           (make_substitution trait_generics (List.take count arguments))
+           (make_signature_substitution signature
+              { instantiation with type_arguments = List.drop count arguments }))
+  | Value _ :: _ | [] -> raise_bug "%s is compiled for no `Self`" (Path.show trait)
 
 let ground_instantiation context substitution (instantiation : Types.instantiation) :
     Ground.instantiation =
@@ -149,7 +148,6 @@ let compute_named_builtin_shape ty (builtin : Language.Builtin_type.t)
   | Never, [] -> Sum []
   | Array, [ Type element; Value count ] -> Array (element, Z.to_int count)
   | Storage, [ Type element ] -> Storage.make_storage_shape element
-  | View, [ Type element ] -> Storage.make_view_shape element
   | Handle, [] -> Builtin_records.Handle.shape
   | Shared, [ Type _ ] -> Builtin_records.Shared.shape
   | Integer, _ -> raise_bug "Integer exists only in specifications"
@@ -159,13 +157,12 @@ let find_builtin_shape (ty : Ground.ty) : Memory_layout.shape option =
   match ty with
   | Never -> Some (Sum [])
   | Function function_type -> Some (Builtin_records.Function_value.make_shape function_type)
-  | Any _ -> Some Builtin_records.Any.shape
   | Named { path; arguments } ->
       Option.map
         (fun builtin -> compute_named_builtin_shape ty builtin arguments)
         (Well_known.find_builtin_type path)
 
-let compute_defined_shape context ty path arguments : Memory_layout.shape =
+let compute_defined_shape context path arguments : Memory_layout.shape =
   match context.find_type_interface path with
   | None -> raise_bug "%s is not a type" (Path.show path)
   | Some interface -> (
@@ -184,11 +181,14 @@ let compute_defined_shape context ty path arguments : Memory_layout.shape =
                  })
                variants)
       | Builtin_type _ -> raise_bug "a built-in type under a path that is not built in"
-      | Types.Todo_type -> raise (Todo_type ty))
+      | Types.Todo_type -> raise (Todo_type path))
 
-let compute_shape context (ty : Ground.ty) =
-  match (find_builtin_shape ty, ty) with
-  | Some shape, _ -> shape
-  | None, Named { path; arguments } -> compute_defined_shape context ty path arguments
-  | None, (Never | Function _ | Any _) ->
-      raise_bug "the unnamed type %s has no built-in shape" (Ground.to_string ty)
+let rec compute_shape context (ty : Ground.ty) =
+  match Ground.find_viewed ty with
+  | Some viewed -> compute_shape context viewed
+  | None -> (
+      match (find_builtin_shape ty, ty) with
+      | Some shape, _ -> shape
+      | None, Named { path; arguments } -> compute_defined_shape context path arguments
+      | None, (Never | Function _) ->
+          raise_bug "the unnamed type %s has no built-in shape" (Ground.to_string ty))

@@ -19,14 +19,11 @@ impl Display for DecodeError {
   }
 }
 
-public fn encode(bytes: Slice[UInt8], uppercase: Bool = false) -> String
+public fn encode(bytes: List[UInt8], uppercase: Bool = false) -> String
   ensures result.length() == 2 * bytes.length()
   cost time O(bytes.length())
   cost allocations <= 1
 {
-  if bytes.length() > UInt64.maximum / 2 {
-    intrinsic.crash("a string cannot hold that many bytes")
-  }
   var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(2 * bytes.length())
   for index in 0..bytes.length()
     invariant intrinsic.storage_length(output) == 2 * index
@@ -39,7 +36,7 @@ public fn encode(bytes: Slice[UInt8], uppercase: Bool = false) -> String
   String(storage: own output)
 }
 
-public fn decode(text: StringSlice) -> Result[List[UInt8], DecodeError]
+public fn decode(text: String) -> Result[List[UInt8], DecodeError]
   ensures match result {
     Ok(bytes) => 2 * bytes.length() == text.length()
     Err(_) => true

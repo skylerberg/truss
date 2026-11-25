@@ -3,7 +3,6 @@ let lower (context : Context.t) (buffer : Intrinsic.buffer) =
   let builder = context.builder in
   let env = context.env in
   let set = Context.set context in
-  let read_argument = Context.read_argument context in
   let read_operand = Context.read_operand context in
   let call = Context.call context in
   let emit_uint64 = Context.emit_uint64 context in
@@ -95,6 +94,12 @@ let lower (context : Context.t) (buffer : Intrinsic.buffer) =
           Emit_c.Ir_builder.emit builder
             (Assign (Lowered.make_local_place order, Binary (Subtract, first, second))));
       set (Convert (Copy (Lowered.make_local_place order), Integer Int8))
+  | Find_byte ->
+      let bytes = read_place 0 in
+      let offset = Context.allocate_uint64_local context in
+      call ~result:(Lowered.make_local_place offset) Find_byte
+        [ Copy (Storage.project_buffer bytes); Context.copy_length bytes; read_operand 1 ];
+      set (Use (Copy (Lowered.make_local_place offset)))
   | Storage_empty -> set (Storage.build_empty (Storage.make_storage_type (read_element_type ())))
   | Storage_with_capacity ->
       let ty = Storage.make_storage_type (read_element_type ()) in
@@ -105,7 +110,7 @@ let lower (context : Context.t) (buffer : Intrinsic.buffer) =
         (Test (Greater, read_operand 0, Lowered.make_uint64_constant 0))
         (fun () -> resize_buffer (Lowered.make_local_place result) (read_operand 0));
       set (Use (Move (Lowered.make_local_place result)))
-  | Storage_length | View_length -> set (Use (Context.copy_length (read_place 0)))
+  | Storage_length -> set (Use (Context.copy_length (read_place 0)))
   | Storage_capacity -> set (Use (Copy (Storage.project_capacity (read_place 0))))
   | Storage_set_capacity ->
       let storage = read_place 0 in
@@ -210,7 +215,7 @@ let lower (context : Context.t) (buffer : Intrinsic.buffer) =
         Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place untyped))));
         Emit_c.Ir_builder.emit builder
-          (Assign ({ root = Local typed; projections = [ Deref ] }, Use (read_operand 0)))
+          (Assign (Lowered.make_deref_place typed, Use (read_operand 0)))
       end;
       add_to_length (Lowered.make_local_place result) (Constant (Integer (UInt64, count)));
       set (Use (Move (Lowered.make_local_place result)))
@@ -237,32 +242,12 @@ let lower (context : Context.t) (buffer : Intrinsic.buffer) =
         in
         Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place untyped))));
-        set (Use (Move { root = Local typed; projections = [ Deref ] }))
+        set (Use (Move (Lowered.make_deref_place typed)))
       end;
       Emit_c.Ir_builder.emit_when builder
         (Test (Storage.make_owned_block_test moved_storage))
         (fun () -> call Free [ Copy (Storage.project_buffer moved_storage) ])
-  | Array_view ->
-      let count = read_array_length () in
-      let array_ty = make_array_type count in
-      let elements : Lowered.operand =
-        if Memory_layout.has_zero_size env array_ty then Constant Storage.empty_buffer
-        else
-          Address
-            {
-              place =
-                Lowered.project
-                  (Context.read (read_argument 0))
-                  (Index (Lowered.make_uint64_constant 0));
-              writable = false;
-            }
-      in
-      set
-        (Storage.build_view
-           (Storage.make_view_type (read_element_type ()))
-           ~buffer:elements
-           ~length:(Constant (Integer (UInt64, count))))
-  | Storage_swap | View_swap ->
+  | Storage_swap ->
       let sequence = read_place 0 in
       check_index (read_operand 1) (Context.copy_length sequence);
       check_index (read_operand 2) (Context.copy_length sequence);
@@ -274,35 +259,35 @@ let lower (context : Context.t) (buffer : Intrinsic.buffer) =
         (Assign (element_at (read_operand 1), Use (Move (element_at (read_operand 2)))));
       Emit_c.Ir_builder.emit builder
         (Assign (element_at (read_operand 2), Use (Move (Lowered.make_local_place held))))
-  | Storage_view ->
+  | Storage_address -> set (Convert (Copy (Storage.project_buffer (read_place 0)), Integer UInt64))
+  | Storage_as -> (
+      let wrapper = Context.read_type_argument context 1 in
+      match Memory_layout.compute_shape env wrapper with
+      | Record [ (field, _) ] ->
+          set (Build { ty = wrapper; variant = None; fields = [ (field, Copy (read_place 0)) ] })
+      | _ -> Context.raise_bug "%s is no record over one storage" (Ground.to_string wrapper))
+  | Storage_range ->
       let storage = read_place 0 in
-      set
-        (Storage.build_view
-           (Storage.make_view_type (read_element_type ()))
-           ~buffer:(Copy (Storage.project_buffer storage))
-           ~length:(Context.copy_length storage))
-  | View_address -> set (Convert (Copy (Storage.project_buffer (read_place 0)), Integer UInt64))
-  | View_slice ->
-      let view = read_place 0 in
-      fail_obligation_when (Test (Greater, read_operand 1, read_operand 2)) "slice out of bounds";
+      fail_obligation_when (Test (Greater, read_operand 1, read_operand 2)) "range out of bounds";
       fail_obligation_when
-        (Test (Greater, read_operand 2, Context.copy_length view))
-        "slice out of bounds";
+        (Test (Greater, read_operand 2, Context.copy_length storage))
+        "range out of bounds";
       let count = emit_uint64 (Binary (Subtract, read_operand 2, read_operand 1)) in
+      let first_element : Lowered.operand =
+        if Memory_layout.has_zero_size env (read_element_type ()) then Constant Storage.empty_buffer
+        else Address { place = Storage.index_element storage (read_operand 1); writable = false }
+      in
       set
-        (Storage.build_view
-           (Storage.make_view_type (read_element_type ()))
-           ~buffer:
-             (Address { place = Storage.index_element view (read_operand 1); writable = false })
-           ~length:count)
-  | Storage_model | View_model | Array_model ->
-      Context.raise_bug "a model, which exists only in specifications"
+        (Storage.build_borrowed
+           (Storage.make_storage_type (read_element_type ()))
+           ~buffer:first_element ~length:count)
+  | Storage_model | Array_model -> Context.raise_bug "a model, which exists only in specifications"
 
 let lower_lend (context : Context.t) (lend : Intrinsic.lend) : Lowered.place =
   let read_place = Context.read_place context in
   let read_operand = Context.read_operand context in
   match lend with
-  | Storage_at | View_at ->
+  | Storage_at ->
       let sequence = read_place 0 in
       Context.check_index context (read_operand 1) (Context.copy_length sequence);
       Storage.index_element sequence (read_operand 1)

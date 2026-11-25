@@ -69,14 +69,6 @@ let find_forwarding (body : Mir.Graph.body) : forwarding option =
       | Some _, _ -> None)
   | _ -> None
 
-let substitute_trait substitution (trait : Types.trait_reference) : Types.trait_reference =
-  {
-    trait with
-    trait_arguments = List.map (Types.substitute_argument substitution) trait.trait_arguments;
-    associated =
-      List.map (fun (name, ty) -> (name, Types.substitute substitution ty)) trait.associated;
-  }
-
 let substitute_target substitution (target : Mir.operand Core.target) :
     Mir.operand Core.target option =
   let substitute_instantiation = Types.substitute_instantiation substitution in
@@ -88,18 +80,10 @@ let substitute_target substitution (target : Mir.operand Core.target) :
         (Trait_method
            {
              method_ with
-             trait = substitute_trait substitution method_.trait;
+             trait = Types.substitute_trait substitution method_.trait;
              self_type = Types.substitute substitution method_.self_type;
              instantiation = substitute_instantiation method_.instantiation;
-             evidence =
-               (match method_.evidence with
-               | Impl { impl; substitution = impl_substitution } ->
-                   Impl
-                     {
-                       impl;
-                       substitution = Types.substitute_substitution substitution impl_substitution;
-                     }
-               | (Bound | Dynamic) as evidence -> evidence);
+             evidence = Types.substitute_evidence substitution method_.evidence;
            })
   | Intrinsic { operation; type_arguments } ->
       Some
@@ -117,8 +101,8 @@ let forward_call ~(substitution : Types.substitution) ~(make_fresh_local : unit 
   let* { held; computed; lending } = find_forwarding body in
   let outer_arguments =
     List.map
-      (function
-        | Mir.Passed { mode = Read | Mut; value; _ } -> Some value | Passed _ | Default -> None)
+      (fun ({ mode; value; _ } : Mir.argument) ->
+        match mode with Read | Mut -> Some value | Own -> None)
       outer.arguments
   in
   let* outer_values =
@@ -218,11 +202,8 @@ let forward_call ~(substitution : Types.substitution) ~(make_fresh_local : unit 
       List.fold_right
         (fun (argument : Mir.argument) arguments ->
           let* arguments = arguments in
-          match argument with
-          | Passed passed ->
-              let* value = find_forwarded passed.value in
-              Some (Mir.Passed { passed with value } :: arguments)
-          | Default -> None)
+          let* value = find_forwarded argument.value in
+          Some ({ argument with value } :: arguments))
         inner.arguments (Some [])
     in
     Some { outer with callee = { inner.callee with target }; arguments }

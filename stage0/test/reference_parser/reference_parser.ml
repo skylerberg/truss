@@ -15,7 +15,6 @@ let token_of_kind (kind : Token.kind) : Truss.token option =
   | Keyword keyword ->
       Some
         (match keyword with
-        | Any -> ANY
         | Assert -> ASSERT
         | Break -> BREAK
         | Capability -> CAPABILITY
@@ -43,6 +42,7 @@ let token_of_kind (kind : Token.kind) : Truss.token option =
         | Lends -> LENDS
         | Let -> LET
         | Match -> MATCH
+        | Modifies -> MODIFIES
         | Mut -> MUT
         | Opaque -> OPAQUE
         | Own -> OWN
@@ -65,6 +65,7 @@ let token_of_kind (kind : Token.kind) : Truss.token option =
         | Use -> USE
         | Uses -> USES
         | Var -> VAR
+        | View -> VIEW
         | When -> WHEN
         | While -> WHILE
         | With -> WITH)

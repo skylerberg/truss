@@ -1,4 +1,8 @@
 let () =
+  Codegen_support.test "an implication evaluates its right operand only where its left holds"
+    (fun () ->
+      Codegen_support.expect_output Fixtures.Lowering.implication_guarding_an_index
+        "test 0 passed\n");
   Codegen_support.test "an index of a list out of bounds is reported where the index is written"
     (fun () ->
       Codegen_support.expect_output Fixtures.Lowering.grid_cell_index_out_of_bounds
@@ -95,7 +99,7 @@ let () =
         (fun ((name, _, expected_types) as lending) ->
           let dropped_types =
             List.filter_map
-              (function Lowered.Item.Any_drop ty -> Some (Ground.to_string ty) | _ -> None)
+              (function Lowered.Item.Untyped_drop ty -> Some (Ground.to_string ty) | _ -> None)
               (Emit_c.references
                  (Backend.For_testing.compile_fragment backend (make_method lending)))
           in
@@ -104,7 +108,8 @@ let () =
             (name ^ ": " ^ String.concat ", " dropped_types))
         deferred_drops);
   Codegen_support.test
-    "the caller of a lending method keeps one record for the lend, and only releases it" (fun () ->
+    "the caller of a lending method keeps one record for the lend, initializes only the header of \
+     its arena, and only releases the lend" (fun () ->
       let caller : Lowered.Item.t =
         Code
           {
@@ -124,7 +129,8 @@ let () =
         |> String.split_on_char ' '
         |> List.filter (String.starts_with ~prefix:"truss_lend")
       in
-      Codegen_support.expect_string ~expected:"truss_lend, truss_lend_arena, truss_lend_release"
+      Codegen_support.expect_string
+        ~expected:"truss_lend, truss_lend_arena, truss_lend_arena_init, truss_lend_release"
         (String.concat ", " (List.sort_uniq String.compare lend_names));
       Codegen_support.expect_int ~expected:1
         (List.length (List.filter (String.equal "truss_lend") lend_names)));

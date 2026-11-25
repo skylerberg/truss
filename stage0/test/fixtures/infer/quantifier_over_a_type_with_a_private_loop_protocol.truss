@@ -1,7 +1,0 @@
-use app.shapes
-
-fn f(shape: shapes.Shape) -> Bool
-  ensures result == (forall side in shape => side > 0)
-{
-  true
-}

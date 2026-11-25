@@ -38,7 +38,7 @@ let () =
             let runs_before = Solver.For_testing.count_queries_run solver in
             let start = Unix.gettimeofday () in
             let failed =
-              Database.decide (Database.prove database [ file ]) ~runs:[] (Lazy.from_val solver);
+              Database.decide (Database.prove database (In_files [ file ])) (Lazy.from_val solver);
               List.length (Database.list_proof_diagnostics database file)
             in
             let row =

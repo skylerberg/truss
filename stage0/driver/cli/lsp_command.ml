@@ -80,17 +80,17 @@ let check ~root encoding (buffers : (string * string) list) =
   in
   let snapshot, _ = Command_packages.load root in
   let base = Workspace.locate_root snapshot in
-  let trial =
-    Workspace.make_trial snapshot
+  let overlay =
+    Workspace.make_overlay snapshot
       (List.map
          (fun (_, path, text) -> (Shown_path.make_relative ~from:base path, Some text))
          buffers)
   in
-  let packages = List.map snd (Workspace.list_packages trial) in
+  let packages = List.map snd (Workspace.list_packages overlay) in
   let find_file path =
     List.find_opt
-      (fun file -> Shown_path.normalize (Command_packages.locate_file trial file) = path)
-      (Command_packages.list_files trial packages)
+      (fun file -> Shown_path.normalize (Command_packages.locate_file overlay file) = path)
+      (Command_packages.list_files overlay packages)
   in
   let opened =
     List.map
@@ -98,9 +98,10 @@ let check ~root encoding (buffers : (string * string) list) =
         (uri, Source.create ~path text, find_file (Shown_path.normalize path)))
       buffers
   in
-  let database = Workspace.open_database trial in
+  let database = Workspace.open_database overlay in
   let proofs =
-    Proofs.check database trial packages (List.filter_map (fun (_, _, file) -> file) opened)
+    Proofs.check database overlay packages
+      (In_files (List.filter_map (fun (_, _, file) -> file) opened))
   in
   Json.Object
     [
@@ -111,7 +112,7 @@ let check ~root encoding (buffers : (string * string) list) =
                let diagnostics, states =
                  match file with
                  | Some file ->
-                     ( Diagnostic.select_shown
+                     ( Description.select_shown
                          (Database.list_file_diagnostics database file
                          @ Proofs.list_diagnostics proofs file),
                        Proofs.list_states proofs file )

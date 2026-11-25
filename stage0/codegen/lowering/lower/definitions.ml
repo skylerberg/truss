@@ -18,7 +18,7 @@ let make_monomorphic_context (interface : Interface.Lookups.t) : Monomorphic.con
   }
 
 let uint64 = Ground.make_builtin UInt64
-let string_slice : Ground.ty = Named { path = Well_known.make_path String_slice; arguments = [] }
+let string : Ground.ty = Named { path = Well_known.make_path String; arguments = [] }
 
 let make_context ~env (lookups : Lookups.t) =
   let monomorphic = make_monomorphic_context lookups.interface in
@@ -27,7 +27,7 @@ let make_context ~env (lookups : Lookups.t) =
     env;
     drop_and_copy = Drop_and_copy.create env;
     monomorphic;
-    types = { uint64; string_slice };
+    types = { uint64; string };
     bool = Ground.make_builtin Bool;
   }
 
@@ -40,7 +40,6 @@ type code = {
   result : Types.result;
   substitution : Types.substitution;
   uses : Types.capability_set;
-  has_defaults : bool;
   assumes_condition : bool;
 }
 
@@ -52,14 +51,19 @@ let make_unwritten_code ~definition ~substitution ~result =
     result;
     substitution;
     uses = Types.no_capabilities;
-    has_defaults = false;
     assumes_condition = false;
   }
 
 let read_written context key =
+  { spans = context.lookups.source.read_spans key; text = context.lookups.source.read_text key }
+
+let make_default_code context (code : code) ~(source : Resolve.Names.key) ~substitution =
   {
-    spans = context.lookups.interface.names.read_spans key;
-    text = context.lookups.interface.names.read_text key;
+    code with
+    definition = source.path;
+    written = Some (read_written context source);
+    enclosing_impl = None;
+    substitution = Types.substitute_substitution code.substitution substitution;
   }
 
 let bind = Monomorphic.make_substitution
@@ -84,10 +88,6 @@ let make_function_code context ~enclosing_impl (key : Resolve.Names.key)
     result = interface.output;
     substitution;
     uses = interface.uses;
-    has_defaults =
-      List.exists
-        (fun (parameter : Types.parameter_info) -> parameter.has_default)
-        interface.parameters;
     assumes_condition = false;
   }
 
@@ -123,7 +123,9 @@ let make_code context (path : Path.t) (instantiation : Ground.instantiation) : c
   match path with
   | Top _ | Method _ | Test _ -> (
       let interface = read_signature context path in
-      let substitution = Monomorphic.make_signature_substitution interface instantiation in
+      let substitution =
+        Instances.make_substitution context.lookups.interface path interface instantiation
+      in
       let enclosing_impl =
         match path with
         | Method { owner = (Impl _ | Derived _) as impl; _ } -> Some impl
@@ -185,8 +187,8 @@ let list_lending_parameters context substitution (result : Types.result) : Lower
   | Returns _ -> []
 
 let make_c_signature context substitution ~(parameters : (Language.Mode.t * Types.ty) list)
-    ~has_defaults ?(uses = Types.no_capabilities) (result : Types.result) :
-    Lowered.signature * Convention.result =
+    ?(uses = Types.no_capabilities) (result : Types.result) : Lowered.signature * Convention.result
+    =
   let ground ty = Monomorphic.ground context.monomorphic substitution ty in
   let result_ty, returns = classify_result context substitution result in
   let written =
@@ -194,15 +196,11 @@ let make_c_signature context substitution ~(parameters : (Language.Mode.t * Type
       (fun (mode, ty) -> Convention.classify_parameter context.env mode (ground ty))
       parameters
   in
-  let mask = if has_defaults then [ Lowered.Raw (Integer UInt64) ] else [] in
   let evidence =
     List.map (fun _ -> Convention.evidence) (list_evidence context substitution uses)
   in
   let lending = list_lending_parameters context substitution result in
-  (Convention.make_signature ~returns (written @ mask @ evidence @ lending) result_ty, result_ty)
-
-let has_defaults (signature : Types.signature) =
-  List.exists (fun (parameter : Types.parameter_info) -> parameter.has_default) signature.parameters
+  (Convention.make_signature ~returns (written @ evidence @ lending) result_ty, result_ty)
 
 let list_interface_parameters (signature : Types.signature) =
   Option.to_list signature.receiver

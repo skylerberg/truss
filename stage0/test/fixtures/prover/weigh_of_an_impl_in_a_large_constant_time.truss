@@ -1,0 +1,25 @@
+trait Weighed {
+  fn weight(self) -> UInt64
+}
+
+type Anvil(mass: UInt64)
+
+impl Weighed for Anvil {
+  fn weight(self) -> UInt64
+    cost time O(1114112)
+  {
+    self.mass
+  }
+}
+
+fn weigh[Item: Weighed](item: Item) -> UInt64
+  cost time O(time(Item.weight))
+{
+  item.weight()
+}
+
+fn f(anvil: Anvil) -> UInt64
+  cost time O(1)
+{
+  weigh(anvil)
+}

@@ -1,0 +1,11 @@
+fn offset(count: UInt64) -> UInt64
+  cost time O(count + 1114112)
+{
+  count
+}
+
+fn f(count: UInt64) -> UInt64
+  cost time O(1)
+{
+  offset(count)
+}

@@ -1,0 +1,15 @@
+type Pair(first: Int64, second: Int64)
+
+fn Pair.count(self) -> UInt64 {
+  2
+}
+
+fn Pair.element(self, position: UInt64) lends Int64 {
+  if position == 0 { self.first } else { self.second }
+}
+
+fn positive(pair: Pair) -> Bool
+  ensures result == (forall item in pair => item > 0)
+{
+  pair.first > 0 && pair.second > 0
+}

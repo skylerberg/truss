@@ -23,15 +23,15 @@ public opaque type Schedule(
 )
   derives Equal
 
-fn failure(message: StringSlice) -> Error {
-  Error(message: message.to_string())
+fn failure(message: String) -> Error {
+  Error(message: message.copy())
 }
 
 let month_names: Array[String, 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
 
 let weekday_names: Array[String, 7] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
 
-fn value_of(text: StringSlice, names: Slice[String], first_name: UInt64) -> Result[UInt64, Error] {
+fn value_of(text: String, names: List[String], first_name: UInt64) -> Result[UInt64, Error] {
   match UInt64.parse(text) {
     Ok(value) => return Ok(value)
     Err(_) => {}
@@ -51,7 +51,7 @@ fn bit(value: UInt64) -> UInt64
   1 << value
 }
 
-fn field_mask(text: StringSlice, low: UInt64, high: UInt64, names: Slice[String], first_name: UInt64) -> Result[UInt64, Error]
+fn field_mask(text: String, low: UInt64, high: UInt64, names: List[String], first_name: UInt64) -> Result[UInt64, Error]
   requires low <= high && high < 64
 {
   var mask: UInt64 = 0
@@ -110,7 +110,7 @@ fn field_mask(text: StringSlice, low: UInt64, high: UInt64, names: Slice[String]
   Ok(mask)
 }
 
-fn expanded(expression: StringSlice) -> String {
+fn expanded(expression: String) -> String {
   let trimmed = expression.trim()
   if trimmed == "@yearly" || trimmed == "@annually" {
     "0 0 1 1 *"
@@ -123,14 +123,14 @@ fn expanded(expression: StringSlice) -> String {
   } else if trimmed == "@hourly" {
     "0 * * * *"
   } else {
-    trimmed.to_string()
+    trimmed.copy()
   }
 }
 
-public fn Schedule.parse(expression: StringSlice) -> Result[Schedule, Error] {
-  var fields: List[StringSlice] = []
+public fn Schedule.parse(expression: String) -> Result[Schedule, Error] {
+  var fields: List[view String] = []
   let text = expanded(expression)
-  for field in text.slice().split_whitespace() {
+  for field in text.split_whitespace() {
     mut fields.push(field)
   }
   if fields.length() != 5 {

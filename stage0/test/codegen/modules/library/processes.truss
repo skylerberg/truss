@@ -34,21 +34,21 @@ test "a finished command's output is text when it is UTF-8" {
 }
 
 fn words_of(command: processes.Command) -> String {
-  var text = command.program().to_string()
+  var text = command.program().copy()
   let arguments = command.argument_list()
   for index in 0..arguments.length() {
     mut text.push("|")
-    mut text.push(arguments[index].slice())
+    mut text.push(arguments[index])
   }
   text
 }
 
 test "a command written as a template splits its text into words and keeps each value whole" {
   let message = "fix the build"
-  let command = processes.Command"git commit  -m ${message.slice()} --author=${"me"}"
+  let command = processes.Command"git commit  -m ${message} --author=${"me"}"
   assert words_of(command) == "git|commit|-m|fix the build|--author=me"
   let empty = ""
-  let listing = processes.Command" ls ${empty.slice()} "
+  let listing = processes.Command" ls ${empty} "
   assert words_of(listing) == "ls|"
   let plain = processes.Command"true"
   assert words_of(plain) == "true"

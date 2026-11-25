@@ -1,16 +1,16 @@
-trait Rows {
-  fn count(self) -> UInt64
-  fn element(mut self, position: UInt64) lends mut List[Int64]
-}
-
 type Grid(cells: List[List[Int64]])
 
-impl Rows for Grid {
+impl Iterable for Grid {
+  type Element = List[Int64]
   fn count(self) -> UInt64 { self.cells.count() }
+  fn element(self, position: UInt64) lends List[Int64] { self.cells[position] }
+}
+
+impl IterableMut for Grid {
   fn element(mut self, position: UInt64) lends mut List[Int64] { mut self.cells[position] }
 }
 
-fn f[Source: Rows](grid: mut Grid, source: mut Source) {
+fn f[Source: IterableMut[Element = List[Int64]]](grid: mut Grid, source: mut Source) {
   for row in mut grid {
     mut row.push(1)
   }

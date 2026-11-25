@@ -15,13 +15,66 @@ let make_builtin_shape (builtin : Language.Builtin_type.t) : Types.type_interfac
         })
       (Resolve.Names.list_builtin_generics builtin)
   in
-  { type_generics; shape = Builtin_type builtin; opaque = true; is_tuple = false; derives = [] }
+  {
+    type_generics;
+    shape = Builtin_type builtin;
+    opaque = true;
+    is_tuple = false;
+    derives = [];
+    declares_potential = false;
+  }
 
 let find_type_interface lookups (path : Path.t) =
   match Well_known.find_builtin_type path with
   | Some builtin -> Some (make_builtin_shape builtin)
   | None -> (
       match find_interface lookups path with Some (Type_interface type_) -> Some type_ | _ -> None)
+
+type field_path_error =
+  | Broken_type
+  | No_fields of { type_ : Types.ty; prefix : string list }
+  | Variant_fields of { type_ : Types.ty; prefix : string list }
+  | Hidden_fields of Types.ty
+  | Unknown_field of { type_ : Types.ty; field : string; candidates : string list }
+
+let find_field_path_type lookups ~package (parameter_type : Types.ty) field_path =
+  let rec walk (ty : Types.ty) prefix = function
+    | [] -> Ok ty
+    | field :: fields -> (
+        match ty with
+        | Error _ -> Error Broken_type
+        | Named { path; arguments } -> (
+            match find_type_interface lookups path with
+            | Some ({ shape = Record _; _ } as interface) -> (
+                if interface.opaque && Path.locate_package path <> package then
+                  Error (Hidden_fields ty)
+                else
+                  let fields_of_type =
+                    Option.value ~default:[] (Types.instantiate_fields interface arguments)
+                  in
+                  match
+                    List.find_opt
+                      (fun (written : Types.field) -> written.field_name = field)
+                      fields_of_type
+                  with
+                  | Some written -> walk written.field_type (prefix @ [ field ]) fields
+                  | None ->
+                      Error
+                        (Unknown_field
+                           {
+                             type_ = ty;
+                             field;
+                             candidates =
+                               List.map
+                                 (fun (written : Types.field) -> written.field_name)
+                                 fields_of_type;
+                           }))
+            | Some { shape = Sum _; _ } -> Error (Variant_fields { type_ = ty; prefix })
+            | Some { shape = Todo_type | Builtin_type _; _ } | None ->
+                Error (No_fields { type_ = ty; prefix }))
+        | _ -> Error (No_fields { type_ = ty; prefix }))
+  in
+  walk parameter_type [] field_path
 
 let find_declared_signature lookups (path : Path.t) =
   match find_interface lookups path with

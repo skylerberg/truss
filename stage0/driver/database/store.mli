@@ -40,26 +40,18 @@ type diagnostic = {
   file : int option;
   is_error : bool;
   code : string;
-  start : int;
-  stop : int;
-  message : string;
   detail : string;
 }
 
+val has_diagnostic : t -> stage:int -> unit:int -> bool
+val mark_reported_units_stale : t -> stage:int -> unit
 val replace_diagnostics : t -> stage:int -> unit:int -> package:string -> diagnostic list -> bool
-
-val list_definition_edges :
-  t -> package:string -> unit_kind:int -> target_kind:int -> markers:int -> (int * int * int) list
-
-val list_definition_edge_names :
-  t -> package:string -> unit_kind:int -> target_kind:int -> string list
+val has_unchecked_body : t -> package:string -> skipped_kind:int option -> bool
 
 val list_code_packages :
   t -> package:string -> unit_kind:int -> target_kind:int -> test_kind:int -> string list option
 
 val find_definition_key_anywhere : t -> id:int -> string option
-val has_unchecked_body : t -> package:string -> generic_kinds:int list -> bool
-val find_package_name : t -> id:int -> string option
 
 type endpoint = { kind : int; id : int; name : string }
 type edge = { target : endpoint; markers : int }
@@ -69,26 +61,23 @@ val list_edges : t -> schema -> source:endpoint -> edge list
 type edge_change = { changed : endpoint; before : int; after : int }
 
 val replace_edges : t -> source:endpoint -> edge list -> edge_change list
+val has_source : t -> target:endpoint -> source_kind:int -> markers:int -> bool
 val list_sources : t -> target:endpoint -> markers:int -> endpoint list
 val list_definitions_naming : t -> target:endpoint -> markers:int -> string list
 val list_names_of_edges_into : t -> kind:int -> id:int -> markers:int -> string list
 val has_unresolved : t -> file:int -> bool
 val mark_sources_stale : t -> target:endpoint -> markers:int -> unit
+
+val mark_stage_of_sources_stale :
+  t -> target:endpoint -> source_kind:int -> markers:int -> stage:int -> unit
+
 val mark_position_holders_stale : t -> target:endpoint -> markers:int -> stages:int -> unit
 
-type call_graph = {
-  unit_kind : int;
-  node_kind : int;
-  calls : int;
-  implements : int;
-  visible : string list;
-}
+type proof_graph = { unit_kind : int; node_kind : int; markers : int }
+type proof_edge = { source : int; target : int; markers : int }
 
-val list_cycle_nodes : t -> call_graph -> seeds:int list -> int list
-val list_callers_closure : t -> call_graph -> seeds:int list -> int list
-val list_call_pairs : t -> call_graph -> nodes:int list -> (int * int) list
-val list_implementers : t -> call_graph -> node:int -> int list
-val list_all_packages : t -> string list
+val list_cycle_nodes : t -> proof_graph -> seeds:int list -> int list
+val list_proof_edges : t -> proof_graph -> nodes:int list -> proof_edge list
 
 type read_edge = { source_kind : int; source : int; target_kind : int; target : int }
 
@@ -99,11 +88,9 @@ val list_edges_into :
   t -> target_kinds:int list -> targets:int list -> markers:int -> read_edge list
 
 val list_definitions_identified : t -> ids:int list -> (int * int * string) list
-val list_targets_of_kind : t -> kind:int -> visible:string list -> int list
 val mark_paths_stale : t -> stage:int -> paths:int list -> unit
-val list_paths_owned_by : t -> owners:int list -> int list
 val list_keys_of_paths : t -> paths:int list -> (int * string) list
-val mark_group_stale : t -> stage:int -> path:int -> unit
+val mark_groups_stale : t -> stage:int -> path:int -> unit
 
 type item = { id : int; key : string; label : string; definition : int option }
 
@@ -114,41 +101,66 @@ val remove_item : t -> id:int -> unit
 
 type item_graph = {
   lower_kind : int;
+  evaluate_kind : int;
   item_kind : int;
   references : int;
   claims : int;
   claim_kinds : int list;
 }
 
-val is_item_claimed : t -> item_graph -> item:int -> bool
-val list_claimed_items : t -> item_graph -> packages:string list option -> int list
+val mark_items_stale : t -> stage:int -> unit
+
+type linked = {
+  linked_id : int;
+  linked_key : string;
+  sites : string option;
+  text_hash : string option;
+  is_unevaluated : bool;
+  is_unit_stale : bool;
+}
+
+val list_linked : t -> item_graph -> profile:int -> unit_kind:int -> roots:int list -> linked list
+
+type claim_edges = Every_edge | Settled_edges of { packages : string list option }
+
+val is_item_claimed : t -> item_graph -> item:int -> over:claim_edges -> bool
+
+val list_claimed_among :
+  t -> item_graph -> items:int list -> packages:string list option -> int list
+
 val merge : string list -> into:string -> unit
 
-type located = { stage : int; base : int option; is_in_test : bool; detail : string }
+type placed = { file : string; base : int; stop : int; spans : string }
+
+type located = {
+  stage : int;
+  definition : (string * placed) option;
+  is_in_test : bool;
+  detail : string;
+}
 
 val list_file_diagnostics : t -> schema -> file:int -> test_kind:int -> located list
-val has_error : t -> package:string -> last_stage:int -> bool
-val find_unproven_definition : t -> files:int list -> origin:int -> string option
+val has_error : t -> package:string -> last_stage:int -> hidden_stage:int option -> bool
 
-type hole = { home : int; start : int; stop : int }
+type scope = Everything | Packages of string list | Files of int list
+
+val find_unproven_definition : t -> scope:scope -> origin:int -> string option
+
+type hole = { home : int; location : string }
 
 val list_holes : t -> schema -> definition:int -> hole list
 val replace_holes : t -> definition:int -> hole list -> unit
 
-type citation = { cited : int; clause_start : int; clause_stop : int }
-
 type verdict = {
   code : string;
-  start : int;
-  stop : int;
-  shows : string;
+  site : string;
   is_proven : bool;
   trusts_compiled_code : bool;
   failure : string option;
-  citation : citation option;
 }
 
-val list_file_verdicts : t -> file:int -> (int * verdict) list
+val list_file_verdicts : t -> file:int -> (string * placed * verdict) list
+val find_placed : t -> schema -> definition:int -> placed option
 val replace_verdicts : t -> definition:int -> verdict list -> bool
 
 val list_differing_rows :
@@ -180,10 +192,7 @@ type unit_entity =
   | Definition_unit
   | Path_unit
   | Dependency_unit
-  | Package_unit
   | Item_unit
-
-type scope = Everything | Packages of string list | Files of int list | Items of int list
 
 val list_stale : t -> stage:int -> entity:unit_entity -> scope:scope -> int list
 
@@ -235,6 +244,16 @@ type selection =
 
 val find_definition : t -> schema -> id:int -> definition option
 val list_definitions : t -> schema -> selection -> definition list
+
+val find_source_definition :
+  t -> target:endpoint -> source_kind:int -> markers:int -> from_:int -> definition option
+
+val list_target_definitions :
+  t -> source:endpoint -> target_kind:int -> markers:int -> origin:int -> (definition * int) list
+
+val list_package_member_keys :
+  t -> schema -> package:string -> member:string -> kind:int -> origin:int -> string list
+
 val replace_definition : t -> definition -> unit
 val remove_definition : t -> id:int -> unit
 
@@ -294,6 +313,7 @@ val replace_module_law_proofs :
 
 val has_module : t -> schema -> module_:int -> bool
 val find_place : t -> schema -> definition:int -> (string * int) option
+val find_file_order : t -> schema -> definition:int -> (string * int) option
 val find_text : t -> schema -> definition:int -> string option
 val find_definition_key : t -> schema -> id:int -> string option
 val list_member_keys : t -> schema -> owner:int -> member:string -> origin:int -> string list

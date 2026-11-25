@@ -24,23 +24,19 @@ let parse_visibility cursor =
       { visibility = Some Internal; tokens = [ Cursor.take cursor ]; opaque = None }
   | _ -> { visibility = None; tokens = []; opaque = None }
 
-let report_misplaced_visibility cursor code (tokens : Token.t list) message =
+let report_misplaced_visibility cursor (tokens : Token.t list) owner =
   match tokens with
   | [] -> ()
   | first :: _ ->
       let last = List.nth tokens (List.length tokens - 1) in
       let next = Cursor.peek cursor in
       let span = Source.make_span first.span.start last.span.stop in
-      Cursor.report cursor code span message
-        ~fixes:
-          [
-            Diagnostic.fix "Remove it"
-              [ Diagnostic.delete (Source.make_span first.span.start next.span.start) ];
-          ]
+      Cursor.report cursor span
+        (Misplaced_visibility { owner; removed = Source.make_span first.span.start next.span.start })
 
 let parse_type_head cursor : Syntax.type_head =
   let start = Cursor.index cursor in
-  let path = Atoms.parse_upper_path cursor "a type name" in
+  let path = Atoms.parse_upper_path cursor Type_name in
   let generics = Parse_expression.parse_generics cursor in
   { path; generics; id = Cursor.allocate_id_from cursor start }
 
@@ -49,8 +45,8 @@ let parse_definition_name cursor =
   | Upper _, _ | Lower _, Punctuation Dot ->
       let head = parse_type_head cursor in
       Cursor.expect_punctuation cursor Dot;
-      Syntax.Member_name (head, Atoms.lower_name cursor "a method name after `.`")
-  | _ -> Plain_name (Atoms.lower_name cursor "a name")
+      Syntax.Member_name (head, Atoms.lower_name cursor Method_name_after_dot)
+  | _ -> Plain_name (Atoms.lower_name cursor Name)
 
 let parse_parameter cursor : Syntax.parameter =
   let start = Cursor.index cursor in
@@ -61,7 +57,7 @@ let parse_parameter cursor : Syntax.parameter =
         Cursor.advance cursor;
         Syntax.Self_parameter mode
     | _ ->
-        let name = Atoms.lower_name cursor "a parameter name" in
+        let name = Atoms.lower_name cursor Parameter_name in
         Cursor.expect_punctuation cursor Colon;
         let mode = Atoms.parse_mode cursor in
         let type_ = Parse_expression.parse_type_expression cursor in
@@ -75,8 +71,7 @@ let parse_parameter cursor : Syntax.parameter =
   { kind; id = Cursor.allocate_id_from cursor start }
 
 let parse_parameters cursor ~method_ =
-  if not (Cursor.is_punctuation cursor (Open Paren)) then
-    Cursor.fail cursor "`(` to start the parameters";
+  if not (Cursor.is_punctuation cursor (Open Paren)) then Cursor.fail cursor Parameters_start;
   let parameters =
     Cursor.parse_bracketed cursor ~parse_item:parse_parameter ~recover:(fun span ->
         { kind = Parameter_error; id = Cursor.allocate_id cursor span })
@@ -85,14 +80,9 @@ let parse_parameters cursor ~method_ =
     (fun index (parameter : Syntax.parameter) ->
       match parameter.kind with
       | Self_parameter _ when not method_ ->
-          Cursor.report cursor Misplaced_self
-            (Cursor.read_file_span cursor parameter.id)
-            "Only a method takes `self`: one written `fn Type.name`, or one in a trait or an \
-             `impl`."
+          Cursor.report cursor (Cursor.read_file_span cursor parameter.id) Self_outside_method
       | Self_parameter _ when index > 0 ->
-          Cursor.report cursor Misplaced_self
-            (Cursor.read_file_span cursor parameter.id)
-            "`self` must be the first parameter."
+          Cursor.report cursor (Cursor.read_file_span cursor parameter.id) Self_not_first
       | _ -> ())
     parameters;
   parameters
@@ -104,16 +94,8 @@ let parse_result cursor =
     let own = Cursor.peek cursor in
     let mode = Atoms.parse_mode cursor in
     if mode = Some Own then
-      Cursor.report cursor Lends_own own.span
-        "A part a `lends` method lends stays with `self`, so it cannot be `own`. A method that \
-         hands over an owned value returns it with `->`."
-        ~fixes:
-          [
-            Diagnostic.fix "Remove `own`"
-              [
-                Diagnostic.delete (Source.make_span own.span.start (Cursor.peek cursor).span.start);
-              ];
-          ];
+      Cursor.report cursor own.span
+        (Lends_own { removed = Source.make_span own.span.start (Cursor.peek cursor).span.start });
     Some (Lends (mode, Parse_expression.parse_type_expression cursor))
   end
   else None
@@ -139,21 +121,15 @@ let parse_clauses cursor =
             skip ();
             { kind = Clause_error; condition = None; id = Cursor.allocate_id_from cursor start }
       in
-      let reject_repeated is_same message =
+      let reject_repeated is_same problem =
         if List.exists (fun (earlier : Syntax.clause) -> is_same earlier.kind) clauses then
-          Cursor.report cursor Repeated_clause (Cursor.lookup_token cursor start).span message
+          Cursor.report cursor (Cursor.lookup_token cursor start).span problem
       in
       (match clause.kind with
-      | Uses _ ->
-          reject_repeated
-            (function Uses _ -> true | _ -> false)
-            "A signature has at most one `uses` clause; list every capability in one, separated by \
-             commas."
+      | Uses _ -> reject_repeated (function Uses _ -> true | _ -> false) Repeated_uses
       | Decreases _ ->
-          reject_repeated
-            (function Decreases _ -> true | _ -> false)
-            "A signature has at most one `decreases` clause; list several measures in one, \
-             separated by commas."
+          reject_repeated (function Decreases _ -> true | _ -> false) Repeated_decreases
+      | Modifies _ -> reject_repeated (function Modifies _ -> true | _ -> false) Repeated_modifies
       | _ -> ());
       gather (clause :: clauses)
   in
@@ -174,23 +150,21 @@ let parse_body cursor =
       in
       if ends_member && not (Cursor.is_after_inserted_closer cursor) then begin
         let has_earlier_error = Cursor.has_reported cursor in
-        Cursor.report cursor Missing_body (Source.make_zero_width stop)
-          "A function needs a body; write `{ todo }` for one that is not written yet."
-          ~fixes:
-            (match Cursor.find_previous_token cursor with
-            | Some previous when Token.can_end previous.kind && not has_earlier_error ->
-                [
-                  Diagnostic.fix "Add `{ todo }`"
-                    [ Diagnostic.insert (Source.make_zero_width stop) " { todo }" ];
-                ]
-            | Some _ | None -> []);
+        Cursor.report cursor (Source.make_zero_width stop)
+          (Missing_body
+             {
+               can_add_todo =
+                 (match Cursor.find_previous_token cursor with
+                 | Some previous -> Token.can_end previous.kind && not has_earlier_error
+                 | None -> false);
+             });
         let at = Cursor.make_definition_span cursor (Source.make_zero_width stop) in
         {
           statements = [ { kind = Statement_error; id = Cursor.allocate_id cursor at } ];
           id = Cursor.allocate_id cursor at;
         }
       end
-      else Cursor.fail cursor "`{` to start the body"
+      else Cursor.fail cursor Body_start
 
 let parse_signature cursor ~name ~method_ : Syntax.signature =
   let generics = Parse_expression.parse_generics cursor in
@@ -219,18 +193,17 @@ let parse_trait_member cursor =
   match Cursor.peek_kind cursor with
   | Keyword Type ->
       Cursor.advance cursor;
-      let name = Atoms.parse_upper_name cursor "the name of an associated type" in
+      let name = Atoms.parse_upper_name cursor Associated_type_name in
       Syntax.Associated_type
         ( name,
           if Cursor.accept_punctuation cursor Colon then Parse_expression.parse_bounds cursor
           else [] )
   | Keyword Capability ->
       Cursor.advance cursor;
-      Associated_capability
-        (Atoms.parse_upper_name cursor "the name of an associated capability set")
+      Associated_capability (Atoms.parse_upper_name cursor Associated_capability_set_name)
   | Keyword Law ->
       Cursor.advance cursor;
-      let name = Atoms.lower_name cursor "the name of a law" in
+      let name = Atoms.lower_name cursor Law_name in
       let parameters = parse_parameters cursor ~method_:false in
       let rec list_premises list =
         if Cursor.accept_keyword cursor Requires then
@@ -239,24 +212,23 @@ let parse_trait_member cursor =
       in
       let requires = list_premises [] in
       Law { name; parameters; requires; body = Parse_expression.parse_body cursor }
-  | _ -> Cursor.fail cursor "`fn`, `type`, `capability`, or `law` to start a member of the trait"
+  | _ -> Cursor.fail cursor Trait_member
 
 let parse_impl_member cursor =
   match Cursor.peek_kind cursor with
   | Keyword Type ->
       Cursor.advance cursor;
-      let name = Atoms.parse_upper_name cursor "the name of an associated type" in
+      let name = Atoms.parse_upper_name cursor Associated_type_name in
       Cursor.expect_punctuation cursor Equal;
       Syntax.Associated_definition (name, Parse_expression.parse_type_expression cursor)
   | Keyword Capability ->
       Cursor.advance cursor;
-      let name = Atoms.parse_upper_name cursor "the name of an associated capability set" in
+      let name = Atoms.parse_upper_name cursor Associated_capability_set_name in
       Cursor.expect_punctuation cursor Equal;
       Capability_definition (name, Parse_expression.parse_capability_uses cursor)
-  | _ -> Cursor.fail cursor "`fn`, `type`, or `capability` to start a member of the `impl`"
+  | _ -> Cursor.fail cursor Impl_member
 
-let parse_capability_member cursor : Syntax.capability_member =
-  Cursor.fail cursor "`fn` to start a method of the capability"
+let parse_capability_member cursor : Syntax.capability_member = Cursor.fail cursor Capability_member
 
 type container = In_trait | In_impl | In_capability
 
@@ -274,15 +246,12 @@ let parse_method_kind cursor ~(container : container) ~name =
           (fun (parameter : Syntax.parameter) ->
             match parameter.kind with
             | Self_parameter _ ->
-                Cursor.report cursor Misplaced_self
-                  (Cursor.read_file_span cursor parameter.id)
-                  "A capability's methods take no `self`; they are called as \
-                   `Capability.method(...)`, and only an implementation's methods take `self`."
+                Cursor.report cursor (Cursor.read_file_span cursor parameter.id) Self_in_capability
             | _ -> ())
           signature.parameters;
         Method_declaration signature
   in
-  if not (Cursor.is_at_end cursor) then Cursor.fail cursor "a line break or `}` after the method";
+  if not (Cursor.is_at_end cursor) then Cursor.fail cursor Line_break_after_method;
   kind
 
 let parse_method cursor ~container : Syntax.definition =
@@ -290,7 +259,7 @@ let parse_method cursor ~container : Syntax.definition =
   Cursor.advance cursor;
   let intended = Some Syntax.Intended_function in
   let kind =
-    match Atoms.lower_name cursor "a method name" with
+    match Atoms.lower_name cursor Method_name with
     | exception Cursor.Failed -> Syntax.Definition_error { intended; name = None }
     | name -> (
         let name = Syntax.Plain_name name in
@@ -303,7 +272,7 @@ let parse_method cursor ~container : Syntax.definition =
 let parse_fields cursor : Syntax.field list =
   let parse_field cursor : Syntax.field =
     let start = Cursor.index cursor in
-    let name = Atoms.lower_name cursor "a field name" in
+    let name = Atoms.lower_name cursor Field_name in
     Cursor.expect_punctuation cursor Colon;
     let type_ = Parse_expression.parse_type_expression cursor in
     let default =
@@ -320,7 +289,7 @@ let parse_variants cursor =
   let parse_variant cursor : Syntax.variant =
     let start = Cursor.index cursor in
     let indirect = Cursor.accept_keyword cursor Indirect in
-    let name = Atoms.parse_upper_name cursor "the name of a variant" in
+    let name = Atoms.parse_upper_name cursor Variant_name in
     let fields =
       if Cursor.is_punctuation cursor (Open Paren) then Some (parse_fields cursor) else None
     in
@@ -344,9 +313,8 @@ let parse_type_clauses cursor =
     | Keyword Cost ->
         Cursor.advance cursor;
         ignore
-          (Contextual_keyword.expect cursor ~accepted:[ Potential ]
-             ~category:"`potential`; a type's only cost clause is `cost potential expression`"
-             ~expected:"`potential`; a type's only cost clause is `cost potential expression`");
+          (Contextual_keyword.expect cursor ~accepted:[ Potential ] ~category:Potential_cost_word
+             ~expected:Potential_word);
         parse_clause (Potential (Parse_expression.parse_expression cursor))
     | _ -> List.rev clauses
   in
@@ -358,17 +326,14 @@ let parse_type_definition cursor ~name ~(tuple : (Source.span * Source.span) opt
     if Cursor.is_punctuation cursor (Open Paren) then Syntax.Fields (parse_fields cursor)
     else if Cursor.accept_punctuation cursor Equal then
       if Cursor.accept_keyword cursor Todo then Type_todo else Variants (parse_variants cursor)
-    else Cursor.fail cursor "`(` to start the fields, or `=` before the variants"
+    else Cursor.fail cursor Type_body_start
   in
   let is_tuple =
     match (tuple, body) with
     | Some _, Fields (_ :: _ :: _) -> true
     | None, _ -> false
     | Some (word, removal), _ ->
-        Cursor.report cursor Misplaced_tuple word
-          "Only a record with two or more fields can be a tuple type. A record with one field \
-           already takes a bare pattern, and a sum type's fields belong to its variants."
-          ~fixes:[ Diagnostic.fix "Remove `tuple`" [ Diagnostic.delete removal ] ];
+        Cursor.report cursor word (One_field_tuple { removed = removal });
         false
   in
   Syntax.Type_definition { is_tuple; name; generics; body; clauses = parse_type_clauses cursor }
@@ -434,11 +399,10 @@ let test cursor =
         let start = Cursor.index cursor in
         Parse_expression.parse_string_literal cursor ~start ~modules:[] literal
     | String { tag = None; _ } ->
-        Cursor.report cursor Interpolation_not_allowed (Cursor.peek cursor).span
-          "A test's name cannot have interpolations.";
+        Cursor.report cursor (Cursor.peek cursor).span Interpolated_test_name;
         raise Cursor.Failed
-    | String _ -> Cursor.fail cursor "a plain string, with no tag, to name the test"
-    | _ -> Cursor.fail cursor "a string to name the test"
+    | String _ -> Cursor.fail cursor Plain_test_name
+    | _ -> Cursor.fail cursor Test_name
   in
   let uses =
     if Cursor.accept_keyword cursor Uses then Parse_expression.parse_capability_list cursor else []
@@ -455,7 +419,7 @@ let parse_law_proof cursor =
   Cursor.advance cursor;
   let trait_ = Parse_expression.parse_path_type cursor in
   Cursor.expect_punctuation cursor Dot;
-  let law = Atoms.lower_name cursor "the name of a law" in
+  let law = Atoms.lower_name cursor Law_name in
   Cursor.expect_keyword cursor For;
   let type_ = parse_type_head cursor in
   Syntax.Law_proof { trait_; law; type_; body = Parse_expression.parse_body cursor }
@@ -465,10 +429,7 @@ type empty = |
 let parse_top_level cursor ~parse_function =
   let start = Cursor.index cursor in
   let { visibility; tokens = visibility_tokens; opaque } = parse_visibility cursor in
-  let reject_visibility construct =
-    report_misplaced_visibility cursor Misplaced_visibility visibility_tokens
-      (Printf.sprintf "%s takes no visibility: nothing refers to it by name." construct)
-  in
+  let reject_visibility owner = report_misplaced_visibility cursor visibility_tokens owner in
   let finish_definition kind =
     (match (visibility, opaque, kind) with
     | _, None, _
@@ -476,13 +437,9 @@ let parse_top_level cursor ~parse_function =
     | _, Some _, Left ((Impl _ | Test _ | Law_proof _), _) ->
         ()
     | _, Some (public, opaque), _ ->
-        Cursor.report cursor Misplaced_opaque opaque.span "Only a type can be `opaque`."
-          ~fixes:
-            [
-              Diagnostic.fix "Remove `opaque`"
-                [ Diagnostic.delete (Source.make_span public.span.stop opaque.span.stop) ];
-            ]);
-    if not (Cursor.is_at_end cursor) then Cursor.fail cursor "a line break after the definition";
+        Cursor.report cursor opaque.span
+          (Misplaced_opaque { removed = Source.make_span public.span.stop opaque.span.stop }));
+    if not (Cursor.is_at_end cursor) then Cursor.fail cursor Line_break_after_definition;
     kind
   in
   let make_failure intended name = Either.Left (Syntax.Definition_error { intended; name }, []) in
@@ -503,7 +460,7 @@ let parse_top_level cursor ~parse_function =
   let make_plain name = Syntax.Plain_name name in
   let parse_upper expected () = Atoms.parse_upper_name cursor expected in
   let parse_type tuple =
-    parse_named Intended_type ~parse_name:(parse_upper "the name of the type")
+    parse_named Intended_type ~parse_name:(parse_upper Defined_type_name)
       ~make_written_name:make_plain ~parse:(fun name ->
         Either.Left (parse_type_definition cursor ~name ~tuple, []))
   in
@@ -518,31 +475,23 @@ let parse_top_level cursor ~parse_function =
         parse_type (Some (word, Source.make_span word.start (Cursor.peek cursor).span.start))
     | Lower written when Cursor.peek_ahead cursor 1 = Keyword Type ->
         let word = (Cursor.take cursor).span in
-        Cursor.report cursor Misplaced_tuple word
-          (Printf.sprintf "Only `tuple` can come before `type`, not `%s`." written)
-          ~fixes:
-            (if String.edit_distance written "tuple" <= 2 then
-               [ Diagnostic.fix "Write `tuple`" [ Diagnostic.replace word "tuple" ] ]
-             else
-               [
-                 Diagnostic.fix
-                   (Printf.sprintf "Remove `%s`" written)
-                   [
-                     Diagnostic.delete (Source.make_span word.start (Cursor.peek cursor).span.start);
-                   ];
-               ]);
+        Cursor.report cursor word
+          (Misplaced_tuple_word
+             {
+               written;
+               is_misspelled = String.edit_distance written "tuple" <= 2;
+               removed = Source.make_span word.start (Cursor.peek cursor).span.start;
+             });
         parse_type None
     | Keyword Type -> parse_type None
     | Keyword Trait ->
-        parse_named Intended_trait ~parse_name:(parse_upper "the name of the trait")
+        parse_named Intended_trait ~parse_name:(parse_upper Trait_name)
           ~make_written_name:make_plain ~parse:(fun name -> Either.Left (parse_trait cursor ~name))
     | Keyword Impl ->
-        report_misplaced_visibility cursor Misplaced_visibility visibility_tokens
-          "An `impl` takes no visibility: it applies wherever its trait and the types it names are \
-           visible.";
+        report_misplaced_visibility cursor visibility_tokens Impl_owner;
         parse_unnamed (fun () -> Either.Left (parse_impl cursor))
     | Keyword Capability ->
-        parse_named Intended_capability ~parse_name:(parse_upper "the name of the capability")
+        parse_named Intended_capability ~parse_name:(parse_upper Capability_name)
           ~make_written_name:make_plain ~parse:(fun name ->
             Either.Left (parse_capability cursor ~name))
     | Keyword Let ->
@@ -557,26 +506,21 @@ let parse_top_level cursor ~parse_function =
           ~make_written_name:Fun.id
           ~parse:(fun name -> Either.Left (parse_constant cursor ~name, []))
     | Keyword Test ->
-        reject_visibility "A test";
+        reject_visibility Test_owner;
         parse_unnamed (fun () -> Either.Left (test cursor, []))
     | Keyword Theorem ->
         parse_named Intended_theorem
-          ~parse_name:(fun () -> Atoms.lower_name cursor "the name of the theorem")
+          ~parse_name:(fun () -> Atoms.lower_name cursor Theorem_name)
           ~make_written_name:make_plain
           ~parse:(fun name -> Either.Left (parse_theorem cursor ~name, []))
     | Keyword Proof ->
-        reject_visibility "A law's proof";
+        reject_visibility Law_proof_owner;
         parse_unnamed (fun () -> Either.Left (parse_law_proof cursor, []))
     | kind when visibility = None && Atoms.begins_statement kind ->
         parse_unnamed (fun () ->
-            Cursor.report cursor Statement_at_top_level (Cursor.peek cursor).span
-              "Statements must be inside a function, a test, or another definition with a body.";
+            Cursor.report cursor (Cursor.peek cursor).span Statement_at_top_level;
             raise Cursor.Failed)
-    | _ ->
-        parse_unnamed (fun () ->
-            Cursor.fail cursor
-              "a definition: `fn`, `type`, `trait`, `impl`, `capability`, `let`, `test`, \
-               `theorem`, or `proof`")
+    | _ -> parse_unnamed (fun () -> Cursor.fail cursor Definition)
   in
   Either.map
     ~left:(fun (kind, methods) -> (make_definition_node cursor start visibility kind, methods))

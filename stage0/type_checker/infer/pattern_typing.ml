@@ -45,28 +45,28 @@ and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syn
           match Hashtbl.find_opt state.locals id with
           | Some local ->
               if not (State.unify state local.type_ type_) then
-                State.report state Mismatch (State.read_span state bound.id)
-                  (Printf.sprintf
-                     "`%s` is a `%s` in the first alternative, and a `%s` here; every alternative \
-                      binds it with one type."
-                     bound.text (State.show state local.type_) (State.show state type_))
+                State.report state
+                  (Alternative_type_mismatch
+                     {
+                       at = Written bound.id;
+                       name = bound.text;
+                       first = State.zonk state local.type_;
+                       here = State.zonk state type_;
+                     })
           | None -> ())
       | _ -> ())
   | Qualified_constant written_constant ->
-      check_qualified_constant state written.id
-        (State.read_span state written.id)
-        written_constant type_
+      check_qualified_constant state written.id (Core.Written written.id) written_constant type_
   | Literal literal ->
-      check_literal_pattern state written.id (State.read_span state written.id) literal type_
+      check_literal_pattern state written.id (Core.Written written.id) literal type_
   | Pattern_range { start; stop; _ } -> (
       match
         Solver.require_within state type_
           (Types.integer_types @ [ Language.Builtin_type.Character; Integer ])
           ~reason:(fun excluded ->
-            State.add_diagnostic state Mismatch
-              (State.read_span state written.id)
-              (Printf.sprintf "A range pattern matches an integer or a `Character`, not %s."
-                 (State.describe state excluded)))
+            State.add_diagnostic state
+              (Range_pattern_type
+                 { at = Written written.id; excluded = State.make_shown state excluded }))
       with
       | Types.Error _ when not (Types.is_error type_) -> ()
       | _ ->
@@ -74,18 +74,16 @@ and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syn
             (fun (bound : Syntax.range_end) ->
               match bound.kind with
               | End_literal literal ->
-                  check_literal_pattern state bound.id (State.read_span state bound.id) literal
-                    type_
+                  check_literal_pattern state bound.id (Written bound.id) literal type_
               | End_constant constant ->
-                  check_qualified_constant state bound.id (State.read_span state bound.id) constant
-                    type_)
+                  check_qualified_constant state bound.id (Written bound.id) constant type_)
             [ start; stop ])
   | Variant { name = variant_name; fields } -> (
       match type_ with
       | Types.Named { path; arguments } -> (
           match Members.find_variants state.lookups path arguments with
           | Some variants -> (
-              check_fields_visible state (State.read_span state written.id) path type_;
+              check_fields_visible state (Core.Written written.id) path type_;
               match
                 List.find_opt
                   (fun (variant : Types.variant) -> variant.variant_name = variant_name.text)
@@ -94,22 +92,16 @@ and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syn
               | Some variant ->
                   (match (variant.fields, fields) with
                   | Some (_ :: _), None ->
-                      State.report state Missing_argument
-                        (State.read_span state written.id)
-                        ~fixes:
-                          [
-                            State.fix "Match its fields with `..`."
-                              [ State.insert (State.read_span state written.id).stop "(..)" ];
-                          ]
-                        (Printf.sprintf
-                           "`%s` has fields, so its pattern names them, or writes `(..)`."
-                           variant.variant_name)
+                      State.report state
+                        (Variant_pattern_without_fields
+                           { at = Written written.id; variant = variant.variant_name })
                   | _ -> ());
                   let declared = Option.value ~default:[] variant.fields in
                   let matched =
                     check_pattern_fields state env written declared
                       (Option.value ~default:[] fields) ~binding:part_binding ~mode
-                      ~owner:variant.variant_name ~is_tuple_type:false
+                      ~owner:(Catalog.Inference.Variant_name variant.variant_name)
+                      ~is_tuple_type:false
                   in
                   state.tables.patterns.(written.id) <-
                     Some
@@ -121,34 +113,37 @@ and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syn
                          })
               | None ->
                   check_unknown
-                  @@ State.make_error_type state Unknown_variant
-                       (State.read_span state variant_name.id)
-                       ~fixes:
-                         (Diagnostic.list_spelling_fixes
-                            (State.read_span state variant_name.id)
-                            ~written:variant_name.text
-                            (List.map
-                               (fun (variant : Types.variant) -> variant.variant_name)
-                               variants))
-                       (Printf.sprintf "`%s` has no variant `%s`." (Types.show type_)
-                          variant_name.text))
+                  @@ State.make_error_type state
+                       (Unknown_variant
+                          {
+                            at = Written variant_name.id;
+                            type_;
+                            variant = variant_name.text;
+                            candidates =
+                              List.filter_map
+                                (fun (variant : Types.variant) ->
+                                  let has_fields =
+                                    match variant.fields with Some (_ :: _) -> true | _ -> false
+                                  in
+                                  if has_fields = Option.is_some fields then
+                                    Some variant.variant_name
+                                  else None)
+                                variants;
+                          }))
           | None ->
               check_unknown
-                (State.make_error_type state Unknown_variant
-                   (State.read_span state written.id)
-                   (Printf.sprintf "`%s` has no variants." (Types.show type_))))
+                (State.make_error_type state (No_variants { at = Written written.id; type_ })))
       | Types.Error _ | Types.Hole -> check_unknown type_
       | _ ->
           check_unknown
-            (State.make_error_type state Unknown_variant
-               (State.read_span state written.id)
-               (Printf.sprintf "`%s` has no variants." (State.show state type_))))
+            (State.make_error_type state
+               (No_variants { at = Written written.id; type_ = State.zonk state type_ })))
   | Record fields -> (
       match type_ with
       | Types.Named { path; arguments } -> (
           match Members.find_fields state.lookups path arguments with
           | Some record_fields -> (
-              check_fields_visible state (State.read_span state written.id) path type_;
+              check_fields_visible state (Written written.id) path type_;
               let is_tuple_type = Members.is_tuple_type state.lookups path in
               match
                 if accepts_tuple_pattern && is_tuple_type then
@@ -156,117 +151,91 @@ and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syn
                 else None
               with
               | Some patterns ->
-                  let span = State.read_span state written.id in
-                  State.report state Missing_label span
-                    ~fixes:
-                      [
-                        State.fix "Remove the parentheses."
-                          [
-                            State.replace
-                              (Source.Definition_span.make span.start (span.start + 1))
-                              "";
-                            State.replace (Source.Definition_span.make (span.stop - 1) span.stop) "";
-                          ];
-                      ]
-                    (Printf.sprintf
-                       "`%s` is a tuple type, so a list of patterns without parentheses matches \
-                        its fields by position, as in `%s`. In parentheses, fields match by name."
-                       (Types.show type_)
-                       (State.quote_span state
-                          (Source.Definition_span.make (span.start + 1) (span.stop - 1))));
+                  State.report state
+                    (Parenthesized_tuple_pattern
+                       {
+                         at = Written written.id;
+                         patterns =
+                           {
+                             covering =
+                               List.map
+                                 (fun (inner : Syntax.pattern) -> Core.Written inner.id)
+                                 patterns;
+                           };
+                         type_;
+                       });
                   check_tuple_fields state env written type_ record_fields patterns
                     ~binding:part_binding ~mode
               | None ->
                   let matched =
                     check_pattern_fields state env written record_fields fields
-                      ~binding:part_binding ~mode ~owner:(Types.show type_) ~is_tuple_type
+                      ~binding:part_binding ~mode ~owner:(Type_named type_) ~is_tuple_type
                   in
                   state.tables.patterns.(written.id) <-
                     Some (Record_pattern { type_; fields = order_fields record_fields matched }))
           | None ->
               check_unknown
-                (State.make_error_type state Not_a_record
-                   (State.read_span state written.id)
-                   (Printf.sprintf "%s is not a record."
-                      (String.capitalize_ascii (State.describe state type_)))))
+                (State.make_error_type state
+                   (Not_a_record_pattern
+                      { at = Written written.id; type_ = State.make_shown state type_ })))
       | Types.Error _ | Types.Hole -> check_unknown type_
       | _ ->
           check_unknown
-            (State.make_error_type state Not_a_record
-               (State.read_span state written.id)
-               (Printf.sprintf "%s is not a record."
-                  (String.capitalize_ascii (State.describe state type_)))))
+            (State.make_error_type state
+               (Not_a_record_pattern
+                  { at = Written written.id; type_ = State.make_shown state type_ })))
   | Tuple patterns -> (
       let check_each type_ = List.iter (fun inner -> recurse inner type_) patterns in
-      let span = State.read_span state written.id in
+      let at : Core.origin = Written written.id in
       let report_no_tuple_type () =
-        State.make_error_type state Not_a_tuple_type span
-          (Printf.sprintf "%s is not a tuple type, so a list of patterns cannot match it."
-             (String.capitalize_ascii (State.describe state type_)))
+        State.make_error_type state
+          (Not_a_tuple_type_pattern { at; type_ = State.make_shown state type_ })
       in
       match type_ with
       | Types.Error _ | Types.Hole -> check_each type_
       | Types.Named { path; arguments } when Members.is_tuple_type state.lookups path -> (
           match Members.find_fields state.lookups path arguments with
           | Some declared when List.length declared = List.length patterns ->
-              check_fields_visible state span path type_;
+              check_fields_visible state at path type_;
               check_tuple_fields state env written type_ declared patterns ~binding:part_binding
                 ~mode
           | Some declared ->
               check_each
-                (State.make_error_type state Arity span
-                   (Printf.sprintf
-                      "`%s` has %d fields, %s, so its tuple pattern has %d patterns, not %d. `_` \
-                       skips a field."
-                      (Types.show type_) (List.length declared)
-                      (Argument_matching.show_names
-                         (List.map (fun (field : Types.field) -> field.field_name) declared))
-                      (List.length declared) (List.length patterns)))
+                (State.make_error_type state
+                   (Tuple_pattern_arity
+                      {
+                        at;
+                        type_;
+                        fields = List.map (fun (field : Types.field) -> field.field_name) declared;
+                        given = List.length patterns;
+                      }))
           | None -> State.raise_bug "the tuple type `%s` has no fields" (Types.show type_))
       | Types.Named { path; arguments } -> (
           match Members.find_fields state.lookups path arguments with
           | Some fields ->
               let field_names = List.map (fun (field : Types.field) -> field.field_name) fields in
-              let labeled_form =
-                Argument_matching.find_labeled_form state ~parameter_names:field_names
+              let form =
+                Argument_matching.find_labeled_form ~parameter_names:field_names
                   (List.map
                      (fun (inner : Syntax.pattern) ->
                        {
                          Argument_matching.label = None;
                          punned = find_bare_name inner;
-                         span = State.read_span state inner.id;
+                         origin = Written inner.id;
                        })
                      patterns)
               in
               check_each
-                (match labeled_form with
-                | Some form ->
-                    State.make_error_type state Not_a_tuple_type span
-                      ~fixes:
-                        [
-                          State.fix "Match its fields by name, in parentheses."
-                            [ State.replace span form ];
-                        ]
-                      (Printf.sprintf
-                         "`%s` is not a tuple type, so its fields match by name, in parentheses, \
-                          as in `%s`."
-                         (Types.show type_) form)
-                | None ->
-                    State.make_error_type state Not_a_tuple_type span
-                      (Printf.sprintf
-                         "`%s` is not a tuple type, so its fields, %s, match by name, in \
-                          parentheses."
-                         (Types.show type_)
-                         (Argument_matching.show_names field_names)))
+                (State.make_error_type state
+                   (Tuple_pattern_for_record { at; type_; fields = field_names; form }))
           | None -> check_each (report_no_tuple_type ()))
       | _ -> check_each (report_no_tuple_type ()))
   | Alternatives alternatives ->
       List.iter (fun alternative -> recurse alternative type_) alternatives
 
-and check_fields_visible (state : State.state) span path type_ =
+and check_fields_visible (state : State.state) at path type_ =
   if not (Members.are_fields_visible state.lookups ~package:state.package path) then
-    State.report state Private_field span
-      (Printf.sprintf "`%s` is opaque, so only its own package can match on it." (Types.show type_))
+    State.report state (Opaque_pattern { at; type_ })
 
 and find_parenthesized_tuple (declared : Types.field list)
     (written_fields : Syntax.pattern_field list) =
@@ -314,28 +283,23 @@ and check_tuple_fields state env (written : Syntax.pattern) type_ (declared : Ty
     (fun (name, bound_field) ->
       let field_names = List.map (fun (field : Types.field) -> field.field_name) declared in
       let bare_names = List.filter_map find_bare_name patterns in
-      State.report state Out_of_order
-        (State.read_span state written.id)
-        ~fixes:
-          (if List.sort compare bare_names = List.sort compare field_names then
-             [
-               State.fix "Put the patterns in the order of the fields."
-                 [
-                   State.replace (State.read_span state written.id) (String.concat ", " field_names);
-                 ];
-             ]
-           else [])
-        (Printf.sprintf
-           "The patterns name the fields of `%s` out of order. A tuple pattern matches each field \
-            by its position, so `%s` here would bind the field `%s`."
-           (Types.show type_) name bound_field))
+      State.report state
+        (Tuple_pattern_out_of_order
+           {
+             at = Written written.id;
+             type_;
+             name;
+             bound_field;
+             reorder =
+               (if List.sort compare bare_names = List.sort compare field_names then
+                  Some field_names
+                else None);
+           }))
     misplaced;
   List.iter2
     (fun (inner : Syntax.pattern) (field : Types.field) ->
       check_pattern_with state env inner
-        (Solver.flatten state
-           (Bound { at = State.read_span state inner.id; of_type = None })
-           field.field_type)
+        (Solver.flatten state (Bound { at = Written inner.id; of_type = None }) field.field_type)
         ~binding ~mode)
     patterns declared;
   state.tables.patterns.(written.id) <-
@@ -357,18 +321,14 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
         match field.kind with
         | Named_field (name, inner) ->
             Some
-              ( {
-                  Argument_matching.label = Some name;
-                  punned = None;
-                  span = State.read_span state inner.id;
-                },
+              ( { Argument_matching.label = Some name; punned = None; origin = Written inner.id },
                 inner )
         | Field inner ->
             Some
               ( {
                   Argument_matching.label = None;
                   punned = find_bare_name inner;
-                  span = State.read_span state inner.id;
+                  origin = Written inner.id;
                 },
                 inner )
         | Rest -> None)
@@ -395,12 +355,7 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
          (List.map (fun (field : Types.field) -> field.field_name) fields)
      with
      | [] -> ()
-     | missing ->
-         State.report state Missing_argument
-           (State.read_span state written.id)
-           (Printf.sprintf "This pattern does not match %s. Name %s, or write `..` for the rest."
-              (Argument_matching.show_names missing)
-              (match missing with [ _ ] -> "it" | _ -> "them")));
+     | missing -> State.report state (Unmatched_fields { at = Written written.id; missing }));
   List.filter_map Fun.id
     (List.map2
        (fun (_, (inner : Syntax.pattern)) index ->
@@ -409,7 +364,7 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
              let declared = List.nth fields index in
              check_pattern_with state env inner
                (Solver.flatten state
-                  (Bound { at = State.read_span state inner.id; of_type = None })
+                  (Bound { at = Written inner.id; of_type = None })
                   declared.field_type)
                ~binding ~mode;
              Some (declared.field_name, inner)
@@ -431,24 +386,23 @@ and check_unknown_pattern state env (written : Syntax.pattern) unknown ~binding 
         fields
   | _ -> ()
 
-and check_constant_pattern (state : State.state) id span path type_ =
+and check_constant_pattern (state : State.state) id at path type_ =
   state.tables.patterns.(id) <- Some (Constant_pattern path);
   match Interface.Definition.find_constant_type state.lookups.interface path with
   | Some constant_type ->
       if not (State.unify state constant_type type_) then
-        Failures.report_mismatch state span ~expected:type_ ~actual:constant_type
+        Failures.report_mismatch state at ~expected:type_ ~actual:constant_type
       else if not (is_structural state (State.resolve state constant_type)) then
-        State.report state Not_structural span
-          (Printf.sprintf
-             "A constant in a pattern needs a type with structural equality, whose `==` compares \
-              contents, because the checks that a `match` covers every case and that every arm is \
-              reachable compare constants by their contents. `%s` does not have it: its equality \
-              is hand-written, or it holds a float, whose `==` treats `-0.0` and `0.0` as equal. \
-              Match with a guard instead, as in `value if value == %s`."
-             (State.show state constant_type)
-             (match path with
-             | Top { name; _ } | Member_constant { name; _ } | Method { name; _ } -> name
-             | _ -> "the_constant"))
+        State.report state
+          (Not_structural
+             {
+               at;
+               type_ = State.zonk state constant_type;
+               constant =
+                 (match path with
+                 | Top { name; _ } | Member_constant { name; _ } | Method { name; _ } -> name
+                 | _ -> "the_constant");
+             })
   | None -> ()
 
 and is_structural ?(seen = []) state (type_ : Types.ty) =
@@ -491,7 +445,7 @@ and is_structural ?(seen = []) state (type_ : Types.ty) =
         | _ -> false)
     | _ -> false
 
-and check_qualified_constant state id span constant type_ =
+and check_qualified_constant state id at constant type_ =
   let constant_lookup : Path.t Resolve.Names.lookup =
     match constant with
     | Module_constant written_path -> (
@@ -505,38 +459,38 @@ and check_qualified_constant state id span constant type_ =
         | _ -> Absent)
   in
   match constant_lookup with
-  | Visible path -> check_constant_pattern state id span path type_
-  | Hidden hidden -> ignore (Members.make_hidden_error state span hidden)
-  | Absent -> State.report state Unknown_member span "This names no constant."
+  | Visible path -> check_constant_pattern state id at path type_
+  | Hidden hidden -> ignore (Members.make_hidden_error state at hidden)
+  | Absent -> State.report state (Not_a_constant { at })
 
-and report_out_of_range state span number excluded =
+and report_out_of_range state at number excluded =
   let low, high = State.read_integer_range state excluded in
-  State.add_diagnostic state Literal_out_of_range span
-    (Printf.sprintf "`%s` does not fit in %s, which holds %s to %s." (Z.to_string number)
-       (State.describe state excluded) (Z.to_string low) (Z.to_string high))
+  State.add_diagnostic state
+    (Literal_does_not_fit { at; number; excluded = State.make_shown state excluded; low; high })
 
 and report_negated_unsigned state (value : Syntax.expression) excluded =
-  State.add_diagnostic state Negated_unsigned (State.read_span state value.id)
-    (Printf.sprintf "%s %s unsigned, so it cannot be negated."
-       (String.capitalize_ascii (State.describe state excluded))
-       (if State.is_within state excluded Types.unsigned_integer_types then "is" else "may be"))
+  State.add_diagnostic state
+    (Negated_unsigned
+       {
+         at = Written value.id;
+         excluded = State.make_shown state excluded;
+         is_unsigned = State.is_within state excluded Types.unsigned_integer_types;
+       })
 
 and check_integer_literal state (env : State.env) ?expected (value : Syntax.expression) number =
-  let span = State.read_span state value.id in
+  let at : Core.origin = Written value.id in
   match
     ( Option.map (State.resolve state) expected,
       Types.list_fitting_integer_types number
       @ if env.specification then [ Language.Builtin_type.Integer ] else [] )
   with
   | Some Types.Integer, _ -> Types.Integer
-  | _, [] ->
-      State.make_error_type state Literal_out_of_range span
-        (Printf.sprintf "`%s` does not fit in any integer type." (Z.to_string number))
+  | _, [] -> State.make_error_type state (Literal_fits_no_integer { at; number })
   | _, allowed ->
       State.make_literal_type state value allowed ~report_excluded:(fun excluded ->
           if Z.sign number < 0 && not (State.is_within state excluded Types.signed_integer_types)
           then report_negated_unsigned state value excluded
-          else report_out_of_range state span number excluded)
+          else report_out_of_range state at number excluded)
 
 and find_character_tag state (literal : Syntax.string_literal) =
   match literal.tag with
@@ -570,12 +524,7 @@ and check_character_value (state : State.state) (literal : Syntax.string_literal
   match value with
   | Some value -> Some (Z.of_int value)
   | None ->
-      State.report state Character_scalar_count
-        (State.read_span state literal.id)
-        (match builtin with
-        | Character ->
-            "`Character\"...\"` holds exactly one Unicode scalar value, with no `${...}`."
-        | _ -> "`UInt8\"...\"` holds exactly one ASCII character, with no `${...}`.");
+      State.report state (Character_literal { at = Written literal.id; tag = builtin });
       None
 
 and check_character_literal state id literal builtin =
@@ -584,7 +533,7 @@ and check_character_literal state id literal builtin =
     (check_character_value state literal builtin);
   Types.make_builtin builtin
 
-and check_literal_pattern state id (span : Source.Definition_span.t) literal type_ =
+and check_literal_pattern state id at literal type_ =
   let record_integer integer = state.tables.patterns.(id) <- Some (Literal_pattern integer) in
   match literal with
   | Literal_integer number ->
@@ -594,28 +543,21 @@ and check_literal_pattern state id (span : Source.Definition_span.t) literal typ
            (Types.list_fitting_integer_types number @ [ Language.Builtin_type.Integer ])
            ~reason:(fun excluded ->
              if State.is_within state excluded Types.integer_types then
-               report_out_of_range state span number excluded
+               report_out_of_range state at number excluded
              else
-               State.add_diagnostic state Mismatch span
-                 (Printf.sprintf "An integer pattern matches an integer, not %s."
-                    (State.describe state excluded))))
+               State.add_diagnostic state
+                 (Integer_pattern_type { at; excluded = State.make_shown state excluded })))
   | Literal_true | Literal_false ->
       if not (State.unify state type_ Types.bool) then
-        Failures.report_mismatch state span ~expected:type_ ~actual:Types.bool
+        Failures.report_mismatch state at ~expected:type_ ~actual:Types.bool
   | Literal_string tagged -> (
       match find_character_tag state tagged with
       | Some builtin ->
           Option.iter record_integer (check_character_value state tagged builtin);
           if not (State.unify state type_ (Types.make_builtin builtin)) then
-            Failures.report_mismatch state span ~expected:type_ ~actual:(Types.make_builtin builtin)
-      | None -> check_string_pattern state span type_)
+            Failures.report_mismatch state at ~expected:type_ ~actual:(Types.make_builtin builtin)
+      | None -> check_string_pattern state at type_)
 
-and check_string_pattern state span type_ =
-  if
-    not
-      (Types.is_well_known String type_
-      || Types.is_well_known String_slice type_
-      || Types.is_error type_)
-  then
-    State.report state Mismatch span
-      (Printf.sprintf "A string pattern matches a string, not `%s`." (Types.show type_))
+and check_string_pattern state at type_ =
+  if not (Types.is_well_known String (Types.strip_view type_) || Types.is_error type_) then
+    State.report state (String_pattern_type { at; type_ })

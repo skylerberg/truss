@@ -123,7 +123,8 @@ let substitute_value_term context (value : Types.value) =
           Facts.add_fact context
             (Facts.make_in_range (Types.make_builtin UInt64) (Logic.Symbol symbol)));
       Logic.Symbol symbol
-  | Value_variable _ -> Facts.raise_unsupported Whole_definition "an unsolved size"
+  | Value_variable _ -> Facts.raise_unsupported Whole_definition Unsolved_size
+  | Value_error _ -> Facts.raise_bug "a value with an error, which no proof reaches"
 
 let is_model_built_from_contents : Path.t -> bool = function
   | Impl { module_; trait; for_type } ->
@@ -132,18 +133,7 @@ let is_model_built_from_contents : Path.t -> bool = function
       && (Well_known.find_builtin_type for_type = Some Array
          || List.exists
               (fun name -> Path.equal for_type (Well_known.make_path name))
-              [
-                List;
-                Slice;
-                List_cursor;
-                String;
-                String_slice;
-                Literal;
-                Set;
-                Sorted_set;
-                Map;
-                Sorted_map;
-              ])
+              [ List; List_cursor; String; Literal; Set; Sorted_set; Map; Sorted_map ])
   | Top _ | Method _ | Member_constant _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> false
 
 let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) ~impl symbol =
@@ -165,16 +155,12 @@ let find_model_impl (context : State.context) (ty : Types.ty) ~(model : Types.ty
     { trait = Well_known.make_path Model; trait_arguments = []; associated = [] }
   in
   let value =
-    Interface.Impls.normalize interface ~list_bounds
-      (Projection { base = ty; trait = model_trait; name = Well_known.show_associated Model_value })
+    Types.erase_views
+      (Interface.Impls.normalize interface ~list_bounds
+         (Projection
+            { base = ty; trait = model_trait; name = Well_known.show_associated Model_value }))
   in
-  if value = model then
-    match
-      Interface.Impls.find_evidence interface ~list_bounds ~checks_conditions:false ty model_trait
-    with
-    | Some (From_impl { impl; _ }) -> Some impl
-    | _ -> None
-  else None
+  if value = model then Option.map fst (Facts.find_impl context model_trait ty) else None
 
 let compute_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   match find_model_impl context ty ~model with
@@ -290,7 +276,7 @@ let rec make_value_term context (frame : State.frame) (value : Types.value) =
       | Some (Types.Value argument) when argument <> Value_parameter parameter ->
           make_value_term context frame argument
       | _ -> substitute_value_term context value)
-  | Known _ | Value_variable _ -> substitute_value_term context value
+  | Known _ | Value_variable _ | Value_error _ -> substitute_value_term context value
 
 let make_array_model context frame (ty : Types.ty) term =
   match ty with
@@ -302,5 +288,5 @@ let make_array_model context frame (ty : Types.ty) term =
                (make_sequence_length context element sequence)
                (make_value_term context frame count));
           sequence
-      | None -> Facts.raise_unsupported Whole_definition "the elements of `%s`" (Types.show ty))
-  | _ -> Facts.raise_unsupported Whole_definition "the elements of `%s`" (Types.show ty)
+      | None -> Facts.raise_unsupported Whole_definition (Elements_of ty))
+  | _ -> Facts.raise_unsupported Whole_definition (Elements_of ty)

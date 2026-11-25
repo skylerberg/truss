@@ -63,12 +63,12 @@ let () =
 
 let () =
   Codegen_support.test
-    "an index of a list, a slice, or an array, and a loop over one, call no lending method"
+    "an index of a list, a range, or an array, and a loop over one, call no lending method"
     (fun () ->
       let names =
         [
           "list_at";
-          "slice_at";
+          "range_at";
           "array_at";
           "list_add";
           "array_add";
@@ -87,10 +87,10 @@ let () =
       in
       let _, backend =
         Codegen_support.load ~roots:(List.map function_ names)
-          "fn list_at(items: List[Int64]) -> Int64 {\n\
+          "fn list_at(items: own List[Int64]) -> Int64 {\n\
           \  items[2]\n\
            }\n\n\
-           fn slice_at(items: Slice[Int64]) -> Int64 {\n\
+           fn range_at(items: List[Int64]) -> Int64 {\n\
           \  items[2]\n\
            }\n\n\
            fn array_at(items: Array[Int64, 4]) -> Int64 {\n\
@@ -102,7 +102,7 @@ let () =
            fn array_add(items: mut Array[Int64, 4]) {\n\
           \  items[2] += 5\n\
            }\n\n\
-           fn list_sum(items: List[Int64]) -> Int64 {\n\
+           fn list_sum(items: own List[Int64]) -> Int64 {\n\
           \  var total: Int64 = 0\n\
           \  for item in items {\n\
           \    total += item\n\
@@ -348,8 +348,8 @@ let () =
       match Option.map list_scaled_copies (find_instance "scaled_or_panic" panicking) with
       | Some [ false ] -> ()
       | _ -> Codegen_support.fail "scaled_or_panic calls no copy of scaled that checks");
-  Codegen_support.test "a call through `any` in a copy that assumes its condition is unreachable"
-    (fun () ->
+  Codegen_support.test
+    "a call of a function value in a copy that assumes its condition is unreachable" (fun () ->
       let small =
         Lowered.Item.make_code
           (Top { module_ = Codegen_support.example; name = "small" })
@@ -364,7 +364,7 @@ let () =
       in
       let _, backend =
         Codegen_support.load ~profile:Release ~roots:[ small ]
-          Fixtures.Source.call_through_any_in_a_copy_that_assumes_its_condition
+          Fixtures.Source.call_of_a_function_value_in_a_copy_that_assumes_its_condition
       in
       if
         not
@@ -376,3 +376,19 @@ let () =
       in
       if String.includes ~affix:"truss_runtime_panic" rendered then
         Codegen_support.fail "the copy that assumes the condition panics:\n%s" rendered)
+
+let () =
+  Codegen_support.test
+    "a product that is proven not to overflow is one signed multiplication after its obligation"
+    (fun () ->
+      let unit_text = render_unit ~profile:Release Fixtures.Source.calls_on_two_lines "multiply" in
+      let lines = String.split_on_char '\n' unit_text in
+      let find_position affix = List.find_index (fun line -> String.includes ~affix line) lines in
+      match (find_position "TRUSS_FAIL_OBLIGATION_WHEN(", find_position " = ((int64_t)(l") with
+      | Some obligation, Some product when obligation < product ->
+          let product_line = List.nth lines product in
+          if
+            (not (String.includes ~affix:" * l" product_line))
+            || String.includes ~affix:"uint64_t" product_line
+          then Codegen_support.fail "the product is not one signed multiplication: %s" product_line
+      | _ -> Codegen_support.fail "no signed multiplication after an obligation in:\n%s" unit_text)

@@ -1,14 +1,14 @@
 use standard.compression
 use standard.hex
 
-fn bytes_of(text: StringSlice) -> List[UInt8] {
+fn bytes_of(text: String) -> List[UInt8] {
   match hex.decode(text) {
     Ok(bytes) => own bytes
     Err(_) => []
   }
 }
 
-fn text_of(bytes: Slice[UInt8]) -> String {
+fn text_of(bytes: List[UInt8]) -> String {
   String.from_utf8_lossy(bytes)
 }
 
@@ -36,7 +36,7 @@ test "data that zlib and gzip compressed decompresses to their input" uses RunFo
 }
 
 test "compress's output decompresses to its input, in each format and at each level" uses RunForever {
-  let inputs: List[List[UInt8]] = [[], "a".bytes().to_list(), pattern(1000), pattern(70000)]
+  let inputs: List[List[UInt8]] = [[], "a".bytes().copy(), pattern(1000), pattern(70000)]
   let formats: List[compression.Format] = [compression.Format.Deflate, compression.Format.Zlib, compression.Format.Gzip]
   let levels: List[compression.Level] = [compression.Level.Fastest, compression.Level.Balanced, compression.Level.Smallest]
   for input in inputs {

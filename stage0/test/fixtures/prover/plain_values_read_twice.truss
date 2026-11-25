@@ -1,0 +1,14 @@
+fn first[Value: Plain](values: List[Value]) -> Value
+  requires values.length() > 0
+  cost time O(1)
+{
+  values[0]
+}
+
+fn first_twice[Value: Plain](values: List[Value]) -> Value
+  requires values.length() > 0
+  cost amortized time O(1)
+{
+  let _ = first(values)
+  first(values)
+}

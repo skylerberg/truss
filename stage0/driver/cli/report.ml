@@ -8,7 +8,7 @@ type t = {
 }
 
 let make_shown_file snapshot database file diagnostics =
-  match Diagnostic.select_shown diagnostics with
+  match Description.select_shown diagnostics with
   | [] -> None
   | diagnostics ->
       Some { file; source = Command_packages.read_source snapshot database file; diagnostics }
@@ -17,7 +17,9 @@ let gather ~proofs database snapshot packages =
   let program_packages = Command_packages.list_program_packages snapshot packages in
   let files = Command_packages.list_files snapshot program_packages in
   let proofs =
-    if proofs then Some (lazy (Proofs.check database snapshot packages files)) else None
+    if proofs then
+      Some (lazy (Proofs.check database snapshot packages (In_packages program_packages)))
+    else None
   in
   {
     checked =
@@ -44,12 +46,11 @@ let gather ~proofs database snapshot packages =
             {
               Project.file;
               line = None;
-              message =
+              problem =
                 (match problem with
                 | Not_a_capability { dependency; capability } ->
-                    Interface.Grants.describe_not_a_capability ~dependency capability
-                | Unused_dependency dependency ->
-                    Package_checks.describe_unused_dependency ~package dependency);
+                    Ungranted_capability { dependency; capability }
+                | Unused_dependency dependency -> Unused_dependency { package; dependency });
             })
           (Command_packages.list_manifest_problems snapshot database packages);
   }
@@ -70,12 +71,9 @@ let count_warnings report =
 let has_errors report = count_errors report > 0
 
 let count_fixable report =
-  let count diagnostics = List.length (Diagnostic.list_machine_applicable diagnostics) in
-  let count_warnings_of file =
-    count (List.filter (fun diagnostic -> not (Diagnostic.is_error diagnostic)) file.diagnostics)
-  in
-  List.fold_left (fun total file -> total + count file.diagnostics) 0 report.checked
-  + List.fold_left (fun total file -> total + count_warnings_of file) 0 (Lazy.force report.proven)
+  List.fold_left
+    (fun total file -> total + List.length (Diagnostic.list_machine_applicable file.diagnostics))
+    0 report.checked
 
 let describe_fixable report =
   match count_fixable report with

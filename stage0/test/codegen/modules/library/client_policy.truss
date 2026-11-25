@@ -4,7 +4,7 @@ use standard.simulation
 use standard.tasks
 use standard.url
 
-fn redirect(status: UInt16, location: StringSlice) -> http.Response {
+fn redirect(status: UInt16, location: String) -> http.Response {
   var response = http.Response.text("", status: http.Status(code: status))
   mut response.headers.set("Location", value: location)
   response
@@ -14,7 +14,7 @@ fn described(request: own http.Request) -> String
   uses Handles, Tasks, RunForever
 {
   let method = "${request.method}"
-  let cookie = request.headers.get("Cookie").unwrap_or("-").to_string()
+  let cookie = request.headers.get("Cookie").unwrap_or("-").copy()
   let authorization = if request.headers.contains("Authorization") { "auth" } else { "-" }
   let content_type = if request.headers.contains("Content-Type") { "typed" } else { "-" }
   let body: List[UInt8] = own request.bytes().unwrap_or([])
@@ -79,11 +79,11 @@ fn exercised() -> List[String]
       var typed = http.Headers.new()
       mut typed.set("Content-Type", value: "text/plain")
       mut typed.set("Authorization", value: "Bearer secret")
-      mut seen.push(match mut plain.send(http.Method.Post, url: url.Url"http://localhost:8097/see-other", headers: typed, body: "hello".bytes().to_list()) {
+      mut seen.push(match mut plain.send(http.Method.Post, url: url.Url"http://localhost:8097/see-other", headers: typed, body: "hello".bytes().copy()) {
         Ok(response) => response.text_body().unwrap_or("")
         Err(error) => "failed: ${error}"
       })
-      mut seen.push(match mut plain.send(http.Method.Post, url: url.Url"http://localhost:8097/temporary", headers: typed, body: "hello".bytes().to_list()) {
+      mut seen.push(match mut plain.send(http.Method.Post, url: url.Url"http://localhost:8097/temporary", headers: typed, body: "hello".bytes().copy()) {
         Ok(response) => response.text_body().unwrap_or("")
         Err(error) => "failed: ${error}"
       })

@@ -1,10 +1,10 @@
-fn has_zero(numbers: List[Int64]) -> Bool
+fn has_zero(numbers: own List[Int64]) -> Bool
   ensures result == (exists index in 0..numbers.length() => numbers[index] == 0)
 {
   exists number in numbers => number == 0
 }
 
-fn all_zero(numbers: List[Int64]) -> Bool
+fn all_zero(numbers: own List[Int64]) -> Bool
   ensures result == (forall index in 0..numbers.length() => numbers[index] == 0)
 {
   forall number in numbers => number == 0

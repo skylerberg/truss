@@ -1,0 +1,14 @@
+fn apply(visit: fn()) {
+  visit()
+}
+
+fn f(count: UInt32)
+  uses RunForever
+{
+  apply(fn() {
+    var i: UInt32 = 0
+    while i < count {
+      i = i + 1
+    }
+  })
+}

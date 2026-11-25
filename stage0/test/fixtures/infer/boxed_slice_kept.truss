@@ -1,3 +1,0 @@
-fn f(items: List[Int64]) {
-  keep(Boxed(value: items[..]))
-}

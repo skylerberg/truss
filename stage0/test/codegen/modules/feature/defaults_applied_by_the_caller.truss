@@ -1,0 +1,156 @@
+trait Scaled {
+  fn mass(self) -> Int64
+
+  fn scaled(self, factor: Int64 = 2) -> Int64 {
+    self.mass() * factor
+  }
+
+  fn labels(self, names: List[String] = ["light", "heavy"]) -> UInt64 {
+    names[0].length() + names[1].length()
+  }
+}
+
+type Box(mass: Int64)
+
+impl Scaled for Box {
+  fn mass(self) -> Int64 {
+    self.mass
+  }
+}
+
+fn scale_through_a_bound[Shape: Scaled](shape: Shape) -> Int64 {
+  shape.scaled()
+}
+
+fn is_missing[Item](extra: Option[Item] = None) -> Bool {
+  extra is None
+}
+
+fn fill(items: mut List[Int64] = []) -> UInt64 {
+  mut items.push(1)
+  items.length()
+}
+
+fn greet(name: String = "world", tags: List[Int64] = [1, 2]) -> UInt64 {
+  name.length() + tags.length()
+}
+
+fn keep(names: own List[String] = ["x", "yz"]) -> List[String] {
+  names
+}
+
+fn scale(value: Int64, factor: Int64 = 2) -> Int64 {
+  value * factor
+}
+
+let doubled: Int64 = scale(5)
+
+fn count_letters(names: List[String] = ["ab", "cde"]) -> UInt64 {
+  names[0].length() + names[1].length()
+}
+
+fn mark_first(names: mut List[String] = ["ab", "cde"]) -> UInt64
+  modifies names[..]
+{
+  mut names[0].push("!")
+  names[0].length() + names[1].length()
+}
+
+fn checked_count(names: List[String] = ["ab", "cde"]) -> Option[UInt64] {
+  if names.length() == 0 {
+    return None
+  }
+  Some(names[0].length() + names[1].length())
+}
+
+fn doubled_count() -> Option[UInt64] {
+  let counted = checked_count()?
+  Some(counted * 2)
+}
+
+fn count_if(wanted: Bool) -> UInt64 {
+  if wanted && count_letters() == 5 {
+    count_letters()
+  } else {
+    0
+  }
+}
+
+fn call(count: fn() -> UInt64) -> UInt64 {
+  count()
+}
+
+type Shelf(books: List[String])
+
+fn Shelf.book(self, position: UInt64 = 0) lends String {
+  self.books[position]
+}
+
+fn Shelf.rename(mut self, position: UInt64 = 0) lends mut String {
+  mut self.books[position]
+}
+
+test "a default of a trait's method is applied on a known type and through a bound" {
+  let box = Box(mass: 5)
+  assert box.scaled() == 10
+  assert box.scaled(3) == 15
+  assert scale_through_a_bound(Box(mass: 5)) == 10
+}
+
+test "a default that owns a list is dropped by the caller that applies it" {
+  let box = Box(mass: 1)
+  assert box.labels() == 10
+}
+
+test "a default whose type names the callee's type parameter" {
+  let present: Option[Int64] = Some(1)
+  assert !is_missing(present)
+  let absent: Bool = is_missing[Int64]()
+  assert absent
+}
+
+test "a mut parameter's default is a place of the caller that the callee mutates" {
+  assert fill() == 1
+  var given: List[Int64] = [4]
+  assert fill(mut given) == 2
+}
+
+test "a view parameter's default views data that outlives the call" {
+  assert greet() == 7
+  assert greet("you") == 5
+}
+
+test "a view parameter's default views strings that last for the call" {
+  assert count_letters() == 5
+  var total: UInt64 = 0
+  for _ in 0..3 {
+    total += count_letters()
+  }
+  assert total == 15
+  assert mark_first() == 6
+}
+
+test "a default's temporaries end on each path that leaves the statement, and only where it was applied" {
+  assert doubled_count() == Some(10)
+  assert count_if(true) == 5
+  assert count_if(false) == 0
+  assert count_letters() + count_letters() == 10
+  assert call(fn() { count_letters() }) == 5
+}
+
+test "an own parameter's default is moved into the callee" {
+  let kept = keep()
+  assert kept.length() == 2
+}
+
+test "a constant built by a call that omits an argument has the default's value" {
+  assert doubled == 10
+}
+
+test "a lending method called with its argument omitted lends the default's part" {
+  var shelf = Shelf(books: ["first", "second"])
+  assert shelf.book().length() == 5
+  assert shelf.book(1).length() == 6
+  mut shelf.rename().push("!")
+  assert shelf.books[0] == "first!"
+}

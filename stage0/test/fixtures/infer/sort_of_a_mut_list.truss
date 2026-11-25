@@ -1,3 +1,0 @@
-fn f(items: mut List[Int64]) {
-  mut items.sort()
-}

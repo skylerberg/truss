@@ -55,3 +55,20 @@ let read_contract = read_from_contract_part (fun part -> part.contract)
 let read_defaults = read_from_contract_part (fun part -> part.defaults)
 let read_default_graphs = read_from_contract_part (fun part -> part.default_graphs)
 let read_type_clauses = read_from_contract_part (fun part -> part.type_clauses)
+
+let read_parameter_default_from read lookups ~definition ~position =
+  let raise_bug format = Compiler_bug.raise_bug ~stage:"MIR" format in
+  match (lookups.find_form_origin definition, read lookups definition) with
+  | Some (Written _, _), Some { source; form = Tree.Parameter_defaults defaults } -> (
+      match List.assoc_opt position defaults with
+      | Some default -> { source; form = default }
+      | None ->
+          raise_bug "the parameter at position %d of `%s` has no default" position
+            (Path.show definition))
+  | Some ((Inherited _ | Derived _), _), _ ->
+      raise_bug "a default read from `%s`, which does not declare it" (Path.show definition)
+  | _, (Some { form = Tree.Field_defaults _; _ } | None) | None, _ ->
+      raise_bug "`%s` has no parameter defaults" (Path.show definition)
+
+let read_parameter_default = read_parameter_default_from read_defaults
+let read_parameter_default_graph = read_parameter_default_from read_default_graphs

@@ -1,5 +1,6 @@
-type problem = { code : Diagnostic.Code.lexer; message : string; start : int; stop : int }
-type checked = { value : Token.kind; problem : problem option; fixes : (string * string) list }
+type problem = { problem : Syntax_catalog.Lexing.number_problem; start : int; stop : int }
+type fix = { replacement : string; reading : Syntax_catalog.Lexing.reading option }
+type checked = { value : Token.kind; problem : problem option; fixes : fix list }
 
 let is_digit character = character >= '0' && character <= '9'
 
@@ -71,11 +72,10 @@ let remove_underscores group = String.replace_all ~sub:"_" ~by:"" group
 
 type issue = { problem : problem; fixable : bool }
 
-let make_issue ?(fixable = true) code message start stop =
-  { problem = { code; message; start; stop }; fixable }
+let make_issue ?(fixable = true) problem start stop =
+  { problem = { problem; start; stop }; fixable }
 
-let make_underscore_issue offset =
-  make_issue Number_underscore "`_` can only go between digits." offset (offset + 1)
+let make_underscore_issue offset = make_issue Misplaced_underscore offset (offset + 1)
 
 let measure_character text offset =
   let decoded = String.get_utf_8_uchar text offset in
@@ -101,12 +101,16 @@ let choose_problem value issues ~fixed =
       match find_leftmost issues with
       | None -> { value; problem = None; fixes = [] }
       | Some first ->
-          { value; problem = Some first.problem; fixes = [ ("Write `" ^ fixed ^ "`", fixed) ] })
+          {
+            value;
+            problem = Some first.problem;
+            fixes = [ { replacement = fixed; reading = None } ];
+          })
 
 let check_radix text =
   let length = String.length text in
-  let base, name =
-    match text.[1] with 'x' -> (16, "hexadecimal") | 'b' -> (2, "binary") | _ -> (8, "octal")
+  let base, (radix : Syntax_catalog.Lexing.radix) =
+    match text.[1] with 'x' -> (16, Hexadecimal) | 'b' -> (2, Binary) | _ -> (8, Octal)
   in
   let is_base_digit character =
     match base with
@@ -128,8 +132,8 @@ let check_radix text =
       [
         (if digits = "" && stop = length then
            [
-             make_issue ~fixable:false Number_missing_digits
-               (Printf.sprintf "`%s` must be followed by %s digits." (String.sub text 0 2) name)
+             make_issue ~fixable:false
+               (Radix_without_digits { prefix = String.sub text 0 2; radix })
                0 stop;
            ]
          else []);
@@ -138,10 +142,9 @@ let check_radix text =
         | _ -> []);
         (if stop < length then
            [
-             make_issue ~fixable:false Number_invalid_digit
-               (Printf.sprintf "`%s` is not a %s digit."
-                  (String.sub text stop (measure_character text stop))
-                  name)
+             make_issue ~fixable:false
+               (Invalid_radix_digit
+                  { digit = String.sub text stop (measure_character text stop); radix })
                stop
                (stop + measure_character text stop);
            ]
@@ -197,18 +200,13 @@ let check_decimal text =
         (match exponent with
         | Some (marker, _, digits) ->
             if remove_underscores (snd digits) = "" then
-              [
-                make_issue ~fixable:false Number_missing_digits
-                  "The exponent needs digits after `e`." marker (fst digits);
-              ]
+              [ make_issue ~fixable:false Exponent_without_digits marker (fst digits) ]
             else list_underscore_issues digits
         | None -> []);
         (if rest < length then
            [
-             make_issue ~fixable:false Number_followed_by_name
-               (Printf.sprintf
-                  "A number cannot be followed directly by a name character such as `%s`."
-                  (String.sub text rest (measure_character text rest)))
+             make_issue ~fixable:false
+               (Followed_by_name (String.sub text rest (measure_character text rest)))
                rest
                (rest + measure_character text rest);
            ]

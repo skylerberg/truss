@@ -10,7 +10,7 @@ type Replacement(title: String, text: String)
 
 type CheckedNumber(value: NumberValue, problem: Option[NumberProblem], fixes: List[Replacement])
 
-fn fits_in_word(digits: StringSlice, radix: UInt32) -> Bool {
+fn fits_in_word(digits: String, radix: UInt32) -> Bool {
   if radix == 16 {
     digits.length() <= 15
   } else if radix == 8 {
@@ -20,7 +20,7 @@ fn fits_in_word(digits: StringSlice, radix: UInt32) -> Bool {
   }
 }
 
-fn parse_digits(digits: StringSlice, radix: UInt32) -> String
+fn parse_digits(digits: String, radix: UInt32) -> String
   requires radix >= 2 && radix <= 36
   uses Panic
 {
@@ -32,7 +32,7 @@ fn parse_digits(digits: StringSlice, radix: UInt32) -> String
     if digits.is_empty() {
       return "0"
     }
-    return digits.substring(start, to: digits.length()).to_string()
+    return digits.substring(start, to: digits.length()).copy()
   }
   if digits.is_empty() {
     return "0"
@@ -47,7 +47,7 @@ fn parse_digits(digits: StringSlice, radix: UInt32) -> String
   "${math.BigInteger.parse_radix(digits, radix).expect("the digits were checked")}"
 }
 
-fn parse_exponent(digits: StringSlice) -> math.BigInteger
+fn parse_exponent(digits: String) -> math.BigInteger
   uses Panic
 {
   if digits.length() <= 18 {
@@ -60,8 +60,9 @@ fn parse_exponent(digits: StringSlice) -> math.BigInteger
   math.BigInteger.parse_radix(digits, radix: 10).expect("the exponent digits were checked")
 }
 
-fn is_name_byte_or_continue(text: StringSlice, position: UInt64) -> UInt64
+fn is_name_byte_or_continue(text: String, position: UInt64) -> UInt64
   uses Panic
+  ensures position < text.length() && is_ascii_name_byte(text.byte(position)) ==> result == 1
 {
   let byte = text.byte(position)
   if is_ascii_name_byte(byte) {
@@ -76,11 +77,15 @@ fn is_name_byte_or_continue(text: StringSlice, position: UInt64) -> UInt64
   0
 }
 
-fn compute_name_end(text: StringSlice, position: UInt64) -> UInt64
+fn compute_name_end(text: String, position: UInt64) -> UInt64
   uses Panic
+  ensures position <= result
+  ensures position < text.length() && is_ascii_name_byte(text.byte(position)) ==> position < result
 {
   var at = position
-  while at < text.length() {
+  while at < text.length()
+    invariant position <= at
+  {
     let width = is_name_byte_or_continue(text, position: at)
     if width == 0 {
       break
@@ -90,7 +95,7 @@ fn compute_name_end(text: StringSlice, position: UInt64) -> UInt64
   at
 }
 
-fn is_radix_prefix(text: StringSlice, start: UInt64) -> Bool
+fn is_radix_prefix(text: String, start: UInt64) -> Bool
   uses Panic
 {
   start + 1 < text.length() && text.byte(start) == 48 && {
@@ -99,7 +104,7 @@ fn is_radix_prefix(text: StringSlice, start: UInt64) -> Bool
   }
 }
 
-fn is_digits_only(text: StringSlice) -> Bool {
+fn is_digits_only(text: String) -> Bool {
   for byte in text.bytes() {
     if !is_digit(byte) && byte != 95 {
       return false
@@ -108,8 +113,10 @@ fn is_digits_only(text: StringSlice) -> Bool {
   true
 }
 
-fn numbers_scan_end(text: StringSlice, start: UInt64) -> UInt64
+fn numbers_scan_end(text: String, start: UInt64) -> UInt64
   uses Panic
+  ensures start <= result
+  ensures start < text.length() && is_digit(text.byte(start)) ==> start < result
 {
   let length = text.length()
   let first_stop = compute_name_end(text, position: start)
@@ -130,10 +137,10 @@ fn numbers_scan_end(text: StringSlice, start: UInt64) -> UInt64
 
 type Cleaned(text: String, first_bad: Option[UInt64])
 
-fn clean_underscores(group: StringSlice) -> Cleaned
+fn clean_underscores(group: String) -> Cleaned
   uses Panic
 {
-  var parts: List[StringSlice] = []
+  var parts: List[view String] = []
   for part in group.split("_") {
     if !part.is_empty() {
       mut parts.push(part)
@@ -152,7 +159,7 @@ fn clean_underscores(group: StringSlice) -> Cleaned
   Cleaned(text: own cleaned, first_bad: None)
 }
 
-fn remove_underscores(group: StringSlice) -> String
+fn remove_underscores(group: String) -> String
   uses Panic
 {
   group.replace("_", replacement: "")
@@ -160,8 +167,8 @@ fn remove_underscores(group: StringSlice) -> String
 
 type Issue(problem: NumberProblem, is_fixable: Bool)
 
-fn make_issue(code: StringSlice, message: StringSlice, start: UInt64, stop: UInt64, is_fixable: Bool = true) -> Issue {
-  Issue(problem: NumberProblem(code: code.to_string(), message: message.to_string(), start, stop), is_fixable)
+fn make_issue(code: String, message: String, start: UInt64, stop: UInt64, is_fixable: Bool = true) -> Issue {
+  Issue(problem: NumberProblem(code: code.copy(), message: message.copy(), start, stop), is_fixable)
 }
 
 fn make_underscore_issue(offset: UInt64) -> Issue
@@ -170,16 +177,16 @@ fn make_underscore_issue(offset: UInt64) -> Issue
   make_issue("lexer.number_underscore", message: "`_` can only go between digits.", start: offset, stop: offset + 1)
 }
 
-fn measure_character(text: StringSlice, offset: UInt64) -> UInt64
+fn measure_character(text: String, offset: UInt64) -> UInt64
   uses Panic
 {
   let decoded = decode_text(text, index: offset)
   if decoded.is_valid { decoded.length } else { 1 }
 }
 
-fn find_leftmost(issues: Slice[Issue], only_unfixable: Bool) -> Option[NumberProblem] {
+fn take_leftmost(issues: own List[Issue], only_unfixable: Bool) -> Option[NumberProblem] {
   var best: Option[NumberProblem] = None
-  for issue in issues {
+  for issue in own issues {
     if only_unfixable && issue.is_fixable {
       continue
     }
@@ -188,13 +195,13 @@ fn find_leftmost(issues: Slice[Issue], only_unfixable: Bool) -> Option[NumberPro
       None => true
     }
     if is_better {
-      best = Some(issue.problem.copy())
+      best = Some(own issue.problem)
     }
   }
   best
 }
 
-fn choose_problem(value: own NumberValue, issues: Slice[Issue], fixed: StringSlice) -> CheckedNumber {
+fn choose_problem(value: own NumberValue, issues: own List[Issue], fixed: String) -> CheckedNumber {
   var has_unfixable = false
   for issue in issues {
     if !issue.is_fixable {
@@ -202,14 +209,14 @@ fn choose_problem(value: own NumberValue, issues: Slice[Issue], fixed: StringSli
     }
   }
   if has_unfixable {
-    return CheckedNumber(own value, problem: find_leftmost(issues, only_unfixable: true), fixes: [])
+    return CheckedNumber(own value, problem: take_leftmost(own issues, only_unfixable: true), fixes: [])
   }
-  match find_leftmost(issues, only_unfixable: false) {
+  match take_leftmost(own issues, only_unfixable: false) {
     None => CheckedNumber(own value, problem: None, fixes: [])
     Some(problem) => CheckedNumber(
       own value,
       problem: Some(own problem),
-      fixes: [Replacement(title: "Write `${fixed}`", text: fixed.to_string())],
+      fixes: [Replacement(title: "Write `${fixed}`", text: fixed.copy())],
     )
   }
 }
@@ -224,7 +231,7 @@ fn is_base_digit(byte: UInt8, base: UInt32) -> Bool {
   }
 }
 
-fn check_radix(text: StringSlice) -> CheckedNumber
+fn check_radix(text: String) -> CheckedNumber
   uses Panic
 {
   let length = text.length()
@@ -266,10 +273,10 @@ fn check_radix(text: StringSlice) -> CheckedNumber
     )
   }
   let value = NumberValue.IntegerValue(parse_digits(digits, radix: base))
-  choose_problem(own value, issues, fixed: "${text.substring(0, to: 2)}${cleaned.text}")
+  choose_problem(own value, own issues, fixed: "${text.substring(0, to: 2)}${cleaned.text}")
 }
 
-type Group(offset: UInt64, text: StringSlice)
+type Group(offset: UInt64, text: view String)
 
 fn Group.stop(self) -> UInt64
   uses Panic
@@ -277,7 +284,7 @@ fn Group.stop(self) -> UInt64
   self.offset + self.text.length()
 }
 
-fn group_from(text: StringSlice, offset: UInt64) -> Group
+fn group_from(text: String, offset: UInt64) -> Group
   uses Panic
 {
   var stop = offset
@@ -287,7 +294,7 @@ fn group_from(text: StringSlice, offset: UInt64) -> Group
   Group(offset, text: text.substring(offset, to: stop))
 }
 
-type Exponent(marker: UInt64, sign: StringSlice, digits: Group)
+type Exponent(marker: UInt64, sign: view String, digits: Group)
 
 fn list_underscore_issues(group: Group, issues: mut List[Issue])
   uses Panic
@@ -297,7 +304,7 @@ fn list_underscore_issues(group: Group, issues: mut List[Issue])
   }
 }
 
-fn check_decimal(text: StringSlice) -> CheckedNumber
+fn check_decimal(text: String) -> CheckedNumber
   uses Panic
 {
   let length = text.length()
@@ -397,19 +404,19 @@ fn check_decimal(text: StringSlice) -> CheckedNumber
       token.normalize_decimal(significand, exponent: exponent_value - math.BigInteger.from(fraction_digits.length())),
     )
   }
-  choose_problem(own value, issues, fixed)
+  choose_problem(own value, own issues, fixed)
 }
 
-fn numbers_check(text: StringSlice) -> CheckedNumber
+fn numbers_check(text: String) -> CheckedNumber
   uses Panic
 {
   if is_radix_prefix(text, start: 0) { check_radix(text) } else { check_decimal(text) }
 }
 
-type Suffix(written: StringSlice, type_name: Option[StringSlice])
+type Suffix(written: view String, type_name: Option[view String])
 
-fn find_suffix(suffix: StringSlice) -> Option[Suffix] {
-  let type_name: Option[StringSlice] = match suffix {
+fn find_suffix(suffix: String) -> Option[Suffix] {
+  let type_name: Option[view String] = match suffix {
     "u8" => Some("UInt8")
     "u16" => Some("UInt16")
     "u32" => Some("UInt32")
@@ -444,14 +451,14 @@ fn find_suffix(suffix: StringSlice) -> Option[Suffix] {
   Some(Suffix(written: suffix, type_name))
 }
 
-fn is_float_suffix(suffix: StringSlice) -> Bool {
+fn is_float_suffix(suffix: String) -> Bool {
   match suffix {
     "f" | "d" | "m" | "f16" | "f32" | "f64" | "f128" => true
     _ => false
   }
 }
 
-fn is_radix(text: StringSlice) -> Bool
+fn is_radix(text: String) -> Bool
   uses Panic
 {
   text.length() >= 2 && text.byte(0) == 48 && {
@@ -460,13 +467,13 @@ fn is_radix(text: StringSlice) -> Bool
   }
 }
 
-fn is_hexadecimal(text: StringSlice) -> Bool
+fn is_hexadecimal(text: String) -> Bool
   uses Panic
 {
   is_radix(text) && (text.byte(1) == 120 || text.byte(1) == 88)
 }
 
-fn skip_hexadecimal_digits(text: StringSlice, position: UInt64) -> UInt64
+fn skip_hexadecimal_digits(text: String, position: UInt64) -> UInt64
   uses Panic
 {
   var at = position
@@ -476,7 +483,7 @@ fn skip_hexadecimal_digits(text: StringSlice, position: UInt64) -> UInt64
   at
 }
 
-fn skip_decimal_digits(text: StringSlice, position: UInt64, with_underscores: Bool) -> UInt64
+fn skip_decimal_digits(text: String, position: UInt64, with_underscores: Bool) -> UInt64
   uses Panic
 {
   var at = position
@@ -486,21 +493,25 @@ fn skip_decimal_digits(text: StringSlice, position: UInt64, with_underscores: Bo
   at
 }
 
-fn sign_follows(text: StringSlice, stop: UInt64, marker: UInt8) -> Bool
+fn sign_follows(text: String, stop: UInt64, marker: UInt8) -> Bool
   uses Panic
 {
   text.byte(stop - 1) == marker && stop + 1 < text.length() && (text.byte(stop) == 43 || text.byte(stop) == 45)
     && is_digit(text.byte(stop + 1))
 }
 
-fn number_scan_end(text: StringSlice, start: UInt64) -> UInt64
+fn number_scan_end(text: String, start: UInt64) -> UInt64
   uses Panic
+  ensures start <= result
+  ensures start < text.length() && is_digit(text.byte(start)) ==> start < result
 {
   let length = text.length()
   var stop = numbers_scan_end(text, start)
   let literal = text.substring(start, to: stop)
   if is_digits_only(literal) {
-    while stop + 1 < length && text.byte(stop) == 39 && is_digit(text.byte(stop + 1)) {
+    while stop + 1 < length && text.byte(stop) == 39 && is_digit(text.byte(stop + 1))
+      invariant start <= stop
+    {
       stop = compute_name_end(text, position: stop + 1)
     }
   }
@@ -522,7 +533,7 @@ fn number_scan_end(text: StringSlice, start: UInt64) -> UInt64
   stop
 }
 
-fn compute_number_end(text: StringSlice) -> UInt64
+fn compute_number_end(text: String) -> UInt64
   uses Panic
 {
   let length = text.length()
@@ -552,126 +563,225 @@ fn compute_number_end(text: StringSlice) -> UInt64
   }
 }
 
-fn make_translation(code: StringSlice, message: StringSlice, start: UInt64, stop: UInt64, translation: StringSlice) -> CheckedNumber
-  uses Panic, RunForever
+type OctalChoice = NotOctal | ValidOctal(octal: String) | InvalidOctal
+
+type Derivation =
+  | Translated(problem: NumberProblem, translation: String)
+  | HexadecimalFloat(problem: NumberProblem)
+  | Suffixed(problem: NumberProblem, is_float: Bool)
+  | LeadingZero(problem: NumberProblem, decimal: String, octal: OctalChoice)
+
+type AppliedFixes(
+  are_separators_fixed: Bool,
+  is_float_truncated: Bool,
+  is_prefix_lowered: Bool,
+  is_suffix_removed: Bool,
+  is_exponent_lowered: Bool,
+  are_zeros_removed: Bool,
+)
+
+type NumberFix = DigitSeparators | HexadecimalFloat | UppercasePrefix | TypeSuffix | UppercaseExponent | LeadingZero
+
+fn AppliedFixes.count_unapplied(self) -> UInt64
+  ensures result == (if self.are_separators_fixed { 0 } else { 1 }) + (if self.is_float_truncated { 0 } else { 1 })
+    + (if self.is_prefix_lowered { 0 } else { 1 }) + (if self.is_suffix_removed { 0 } else { 1 })
+    + (if self.is_exponent_lowered { 0 } else { 1 }) + (if self.are_zeros_removed { 0 } else { 1 })
 {
-  let checked = check_number(translation)
-  let fixes = if checked.problem.is_none() {
-    [Replacement(title: "Write `${translation}`", text: translation.to_string())]
-  } else {
-    []
-  }
-  CheckedNumber(
-    value: own checked.value,
-    problem: Some(NumberProblem(code: code.to_string(), message: message.to_string(), start, stop)),
-    own fixes,
-  )
+  (if self.are_separators_fixed { 0 } else { 1 }) + (if self.is_float_truncated { 0 } else { 1 })
+    + (if self.is_prefix_lowered { 0 } else { 1 }) + (if self.is_suffix_removed { 0 } else { 1 })
+    + (if self.is_exponent_lowered { 0 } else { 1 }) + (if self.are_zeros_removed { 0 } else { 1 })
 }
 
-fn replace_quotes(text: StringSlice) -> String
+fn AppliedFixes.has(self, fix: NumberFix) -> Bool
+  ensures result == match fix {
+    DigitSeparators => self.are_separators_fixed
+    HexadecimalFloat => self.is_float_truncated
+    UppercasePrefix => self.is_prefix_lowered
+    TypeSuffix => self.is_suffix_removed
+    UppercaseExponent => self.is_exponent_lowered
+    LeadingZero => self.are_zeros_removed
+  }
+{
+  match fix {
+    DigitSeparators => self.are_separators_fixed
+    HexadecimalFloat => self.is_float_truncated
+    UppercasePrefix => self.is_prefix_lowered
+    TypeSuffix => self.is_suffix_removed
+    UppercaseExponent => self.is_exponent_lowered
+    LeadingZero => self.are_zeros_removed
+  }
+}
+
+fn AppliedFixes.include(self, fix: NumberFix) -> AppliedFixes
+  requires !self.has(fix)
+  ensures result.count_unapplied() < self.count_unapplied()
+{
+  match fix {
+    DigitSeparators => self with (are_separators_fixed: true)
+    HexadecimalFloat => self with (is_float_truncated: true)
+    UppercasePrefix => self with (is_prefix_lowered: true)
+    TypeSuffix => self with (is_suffix_removed: true)
+    UppercaseExponent => self with (is_exponent_lowered: true)
+    LeadingZero => self with (are_zeros_removed: true)
+  }
+}
+
+fn derive(derivation: own Derivation, text: own String, applied: AppliedFixes, fix: NumberFix) -> Examination
+  requires !applied.has(fix)
+  ensures !(result is Derived(applied: next, ..) && applied.count_unapplied() <= next.count_unapplied())
+{
+  Examination.Derived(own derivation, own text, applied: applied.include(fix))
+}
+
+type Examination = Final(checked: CheckedNumber) | Derived(derivation: Derivation, text: String, applied: AppliedFixes)
+
+fn make_problem(code: String, message: String, start: UInt64, stop: UInt64) -> NumberProblem {
+  NumberProblem(code: code.copy(), message: message.copy(), start, stop)
+}
+
+fn translate(
+  code: String,
+  message: String,
+  start: UInt64,
+  stop: UInt64,
+  translation: own String,
+  applied: AppliedFixes,
+  fix: NumberFix,
+) -> Examination
+  requires !applied.has(fix)
+  ensures !(result is Derived(applied: next, ..) && applied.count_unapplied() <= next.count_unapplied())
+{
+  let text = translation.copy()
+  derive(Derivation.Translated(problem: make_problem(code, message, start, stop), own translation), own text, applied: applied, fix: fix)
+}
+
+fn combine(derivation: own Derivation, derived: own CheckedNumber) -> CheckedNumber
+  uses Panic
+{
+  let is_valid = derived.problem.is_none()
+  match own derivation {
+    Translated(problem, translation) => {
+      let fixes = if is_valid { [Replacement(title: "Write `${translation}`", text: own translation)] } else { [] }
+      CheckedNumber(value: own derived.value, problem: Some(own problem), own fixes)
+    }
+    HexadecimalFloat(problem) => CheckedNumber(value: own derived.value, problem: Some(own problem), fixes: [])
+    Suffixed(problem, is_float) => {
+      let value = match own derived.value {
+        IntegerValue(digits) => if is_float {
+          NumberValue.FloatValue(token.normalize_decimal(digits, exponent: math.BigInteger.zero()))
+        } else {
+          NumberValue.IntegerValue(own digits)
+        }
+        FloatValue(decimal) => NumberValue.FloatValue(own decimal)
+      }
+      CheckedNumber(own value, problem: Some(own problem), fixes: [])
+    }
+    LeadingZero(problem, decimal, octal) => {
+      var alternatives: List[Replacement] = []
+      match own octal {
+        NotOctal => if is_valid {
+          mut alternatives.push(Replacement(title: "Write `${decimal}`", text: own decimal))
+        }
+        ValidOctal(text) => if is_valid {
+          mut alternatives.push(Replacement(title: "Write `${text}` (octal)", own text))
+          mut alternatives.push(Replacement(title: "Write `${decimal}` (decimal)", text: own decimal))
+        }
+        InvalidOctal => {}
+      }
+      CheckedNumber(value: own derived.value, problem: Some(own problem), fixes: own alternatives)
+    }
+  }
+}
+
+fn replace_quotes(text: String) -> String
   uses Panic
 {
   text.replace("'", replacement: "_")
 }
 
-fn lex_foreign_number(text: StringSlice) -> Option[CheckedNumber]
-  uses Panic, RunForever
+fn examine(text: String, applied: AppliedFixes) -> Examination
+  uses Panic
+  ensures !(result is Derived(applied: next, ..) && applied.count_unapplied() <= next.count_unapplied())
 {
   let length = text.length()
   let stop = compute_number_end(text)
   let suffix = text.substring(stop, to: length)
-  if text.find("'") is Some(quote) {
+  if !applied.has(NumberFix.DigitSeparators) && text.find("'") is Some(quote) {
     let grouped = replace_quotes(text)
-    return Some(
-      make_translation(
-        "lexer.number_digit_separator",
-        message: "Digits are grouped with `_`, as in `${grouped}`.",
-        start: quote,
-        stop: quote + 1,
-        translation: grouped,
-      ),
+    return translate(
+      "lexer.number_digit_separator",
+      message: "Digits are grouped with `_`, as in `${grouped}`.",
+      start: quote,
+      stop: quote + 1,
+      translation: own grouped,
+      applied: applied,
+      fix: NumberFix.DigitSeparators,
     )
   }
-  if is_hexadecimal(text) && stop < length && (text.byte(stop) == 46 || text.byte(stop) == 112 || text.byte(stop) == 80) {
-    return Some(
-      CheckedNumber(
-        value: check_number(text.substring(0, to: stop)).value,
-        problem: Some(
-          NumberProblem(
-            code: "lexer.number_hexadecimal_float",
-            message: "Truss has no hexadecimal floats. Write the value as a decimal float.",
-            start: 0,
-            stop: length,
-          ),
-        ),
-        fixes: [],
-      ),
+  if !applied.has(NumberFix.HexadecimalFloat) && is_hexadecimal(text) && stop < length
+    && (text.byte(stop) == 46 || text.byte(stop) == 112 || text.byte(stop) == 80)
+  {
+    let problem = make_problem(
+      "lexer.number_hexadecimal_float",
+      message: "Truss has no hexadecimal floats. Write the value as a decimal float.",
+      start: 0,
+      stop: length,
     )
+    return derive(Derivation.HexadecimalFloat(own problem), text: text.substring(0, to: stop).copy(), applied: applied, fix: NumberFix.HexadecimalFloat)
   }
-  if is_radix(text) && (text.byte(1) == 88 || text.byte(1) == 66 || text.byte(1) == 79) {
+  if !applied.has(NumberFix.UppercasePrefix) && is_radix(text) && (text.byte(1) == 88 || text.byte(1) == 66 || text.byte(1) == 79) {
     let prefix = "0${text.substring(1, to: 2).to_ascii_lowercase()}"
-    return Some(
-      make_translation(
-        "lexer.number_uppercase_prefix",
-        message: "Number prefixes are lowercase: write `${prefix}`.",
-        start: 0,
-        stop: 2,
-        translation: "${prefix}${text.substring(2, to: length)}",
-      ),
+    return translate(
+      "lexer.number_uppercase_prefix",
+      message: "Number prefixes are lowercase: write `${prefix}`.",
+      start: 0,
+      stop: 2,
+      translation: "${prefix}${text.substring(2, to: length)}",
+      applied: applied,
+      fix: NumberFix.UppercasePrefix,
     )
   }
   let lowered_suffix = suffix.to_ascii_lowercase()
-  if !suffix.is_empty() && find_suffix(lowered_suffix) is Some(suffix_entry) {
+  if !applied.has(NumberFix.TypeSuffix) && !suffix.is_empty() && find_suffix(lowered_suffix) is Some(suffix_entry) {
     let number = text.substring(0, to: stop)
-    let checked = check_number(number)
-    let value = match checked.value {
-      IntegerValue(digits) => if is_float_suffix(lowered_suffix) {
-        NumberValue.FloatValue(token.normalize_decimal(digits, exponent: math.BigInteger.zero()))
-      } else {
-        NumberValue.IntegerValue(digits.copy())
-      }
-      FloatValue(decimal) => NumberValue.FloatValue(decimal.copy())
-    }
-    let type_name: StringSlice = match suffix_entry.type_name {
+    let type_name: view String = match suffix_entry.type_name {
       Some(name) => name
       None => if number.contains(".") || number.contains("e") { "Float64" } else { "Int64" }
     }
-    return Some(
-      CheckedNumber(
-        own value,
-        problem: Some(
-          NumberProblem(
-            code: "lexer.number_suffix",
-            message: "Number literals have no type suffixes such as `${suffix}`. A literal takes its type from its context, as in `let value: ${type_name} = ${number}`.",
-            start: stop,
-            stop: length,
-          ),
-        ),
-        fixes: [],
-      ),
+    let problem = make_problem(
+      "lexer.number_suffix",
+      message: "Number literals have no type suffixes such as `${suffix}`. A literal takes its type from its context, as in `let value: ${type_name} = ${number}`.",
+      start: stop,
+      stop: length,
+    )
+    return derive(
+      Derivation.Suffixed(own problem, is_float: is_float_suffix(lowered_suffix)),
+      text: number.copy(),
+      applied: applied,
+      fix: NumberFix.TypeSuffix,
     )
   }
-  if !is_radix(text) && text.find("E") is Some(marker) && marker < stop {
-    return Some(
-      make_translation(
-        "lexer.number_uppercase_exponent",
-        message: "The exponent is written with a lowercase `e`.",
-        start: marker,
-        stop: marker + 1,
-        translation: "${text.substring(0, to: marker)}e${text.substring(marker + 1, to: length)}",
-      ),
+  if !applied.has(NumberFix.UppercaseExponent) && !is_radix(text) && text.find("E") is Some(marker) && marker < stop {
+    return translate(
+      "lexer.number_uppercase_exponent",
+      message: "The exponent is written with a lowercase `e`.",
+      start: marker,
+      stop: marker + 1,
+      translation: "${text.substring(0, to: marker)}e${text.substring(marker + 1, to: length)}",
+      applied: applied,
+      fix: NumberFix.UppercaseExponent,
     )
   }
   let whole = skip_decimal_digits(text, position: 0, with_underscores: true)
   let digits = remove_underscores(text.substring(0, to: whole))
-  if is_radix(text) || digits.length() < 2 || digits.byte(0) != 48 {
-    return None
+  if applied.has(NumberFix.LeadingZero) || is_radix(text) || digits.length() < 2 || digits.byte(0) != 48 {
+    return Examination.Final(numbers_check(text))
   }
   var stripped: UInt64 = 0
   while stripped < length && (text.byte(stripped) == 48 || text.byte(stripped) == 95) {
     stripped += 1
   }
-  let without_zeros: StringSlice = if stripped >= whole { "0" } else { text.substring(stripped, to: whole) }
+  let without_zeros: view String = if stripped >= whole { "0" } else { text.substring(stripped, to: whole) }
   let decimal = "${without_zeros}${text.substring(whole, to: length)}"
   var is_octal_digits = true
   for byte in digits.bytes() {
@@ -680,35 +790,34 @@ fn lex_foreign_number(text: StringSlice) -> Option[CheckedNumber]
     }
   }
   let octal_possible = whole == length && is_octal_digits
-  var alternatives: List[Replacement] = []
-  if octal_possible {
-    let octal = "0o${without_zeros}"
-    if check_number(octal).problem.is_none() && check_number(decimal).problem.is_none() {
-      mut alternatives.push(Replacement(title: "Write `${octal}` (octal)", text: octal.copy()))
-      mut alternatives.push(Replacement(title: "Write `${decimal}` (decimal)", text: decimal.copy()))
-    }
-  } else if check_number(decimal).problem.is_none() {
-    mut alternatives.push(Replacement(title: "Write `${decimal}`", text: decimal.copy()))
+  let octal = if !octal_possible {
+    OctalChoice.NotOctal
+  } else {
+    let written = "0o${without_zeros}"
+    if numbers_check(written).problem.is_none() { OctalChoice.ValidOctal(own written) } else { OctalChoice.InvalidOctal }
   }
   let message = if octal_possible {
     "Decimal numbers do not start with `0`. In C and Go, `${text.substring(0, to: whole)}` would be octal: write `0o${without_zeros}` for octal, or `${without_zeros}` for decimal."
   } else {
     "Decimal numbers do not start with `0`."
   }
-  Some(
-    CheckedNumber(
-      value: check_number(decimal).value,
-      problem: Some(NumberProblem(code: "lexer.number_leading_zero", own message, start: 0, stop: whole)),
-      fixes: own alternatives,
-    ),
-  )
+  let problem = NumberProblem(code: "lexer.number_leading_zero", own message, start: 0, stop: whole)
+  let derived = decimal.copy()
+  derive(Derivation.LeadingZero(own problem, own decimal, own octal), text: own derived, applied: applied, fix: NumberFix.LeadingZero)
 }
 
-fn check_number(text: StringSlice) -> CheckedNumber
-  uses Panic, RunForever
+fn check_number(text: String) -> CheckedNumber
+  uses Panic
 {
-  match lex_foreign_number(text) {
-    Some(checked) => checked
-    None => numbers_check(text)
+  check_with_fixes(text, applied: AppliedFixes(are_separators_fixed: false, is_float_truncated: false, is_prefix_lowered: false, is_suffix_removed: false, is_exponent_lowered: false, are_zeros_removed: false))
+}
+
+fn check_with_fixes(text: String, applied: AppliedFixes) -> CheckedNumber
+  uses Panic
+  decreases applied.count_unapplied()
+{
+  match examine(text, applied) {
+    Final(checked) => own checked
+    Derived(derivation, text: derived, applied: next) => combine(own derivation, derived: check_with_fixes(derived, applied: next))
   }
 }

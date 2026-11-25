@@ -118,7 +118,8 @@ fn combined(word: UInt64, other: UInt64, how: Combination) -> UInt64
   }
 }
 
-fn combine_words(words: mut Slice[UInt64], other: Slice[UInt64], how: Combination)
+fn combine_words(words: mut List[UInt64], other: List[UInt64], how: Combination)
+  modifies words[..]
   requires other.length() == words.length()
   cost time O(words.length())
   cost allocations == 0

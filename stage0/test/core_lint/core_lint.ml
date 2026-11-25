@@ -143,14 +143,16 @@ let check_call_types context (node : Core.expression) (call : Core.call) =
       if List.length parameters = List.length call.arguments then
         List.iteri
           (fun position (expected, (argument : Core.argument)) ->
-            match argument with
-            | Passed { value; _ } ->
-                let found = read_operand_type value in
-                if not (fits context ~expected ~found) then
-                  context.report
-                    "argument %d of a call of `%s` has the type `%s`, and its parameter `%s`"
-                    position callee (Types.show found) (Types.show expected)
-            | Default -> ())
+            let found = read_operand_type argument.value in
+            let expected, found =
+              match argument.mode with
+              | Read -> (Types.erase_views expected, Types.erase_views found)
+              | Mut | Own -> (expected, found)
+            in
+            if not (fits context ~expected ~found) then
+              context.report
+                "argument %d of a call of `%s` has the type `%s`, and its parameter `%s`" position
+                callee (Types.show found) (Types.show expected))
           (List.combine parameters call.arguments);
       let result = match output with Returns result | Lends (_, result) -> Some result in
       Option.iter
@@ -327,16 +329,7 @@ let check_semantics context (form : Core.t) =
                      context.report
                        "an arithmetic operator on `%s` is a call of `%s`, not an Operator"
                        (Types.show self_type) (show_target call.callee.target)
-                 | Trait_method { self_type = Any _; evidence = Impl _ | Bound; _ } ->
-                     context.report "a call of `%s` on an `any` value is not dynamic"
-                       (show_target call.callee.target)
-                 | Trait_method { self_type; evidence = Dynamic; _ }
-                   when match self_type with Any _ -> false | _ -> true ->
-                     context.report "a call of `%s` on `%s` is dynamic"
-                       (show_target call.callee.target) (Types.show self_type)
                  | _ -> ())
-             | To_any { evidence = Dynamic; _ } ->
-                 context.report "a conversion to `any` has dynamic evidence"
              | Operator { operation; arguments } ->
                  check_operator_types context node operation arguments
              | Compare { left; right; _ } -> compare_types context left right
@@ -352,8 +345,8 @@ let check_semantics context (form : Core.t) =
        })
     form.definition
 
-let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolve.Names.key option)
-    (form : Core.t) =
+let check_form (interface : Interface.Lookups.t) (source_lookups : Resolve.Names.source)
+    ~(path : Path.t) ~(key : Resolve.Names.key option) (form : Core.t) =
   let list_bounds =
     let of_key key =
       Interface.Properties.Bounds.of_known (interface.read_elaborated_interface key).scope.bounds
@@ -369,8 +362,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let at = ref None in
   let name = match key with Some key -> Resolve.Names.show_key key | None -> Path.show path in
   let source =
-    lazy
-      (Option.map (fun key -> (interface.names.read_spans key, interface.names.read_text key)) key)
+    lazy (Option.map (fun key -> (source_lookups.read_spans key, source_lookups.read_text key)) key)
   in
   let quote () =
     match (!at, Lazy.force source) with
@@ -457,7 +449,6 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         List.iter (fun (_, input) -> check_type subject input) inputs;
         check_capabilities subject uses;
         check_type subject output
-    | Any reference -> check_trait subject reference
     | Never | Integer -> ()
     | Variable _ | Hole | Error _ ->
         report "%s has the type `%s`, which is not fully inferred" subject (Types.show ty)
@@ -466,6 +457,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     | Types.Value (Value_parameter named) -> check_parameter subject named
     | Types.Value (Known _) -> ()
     | Types.Value (Value_variable _) -> report "%s contains a value inference variable" subject
+    | Types.Value (Value_error _) -> report "%s contains a value with an error" subject
   and check_trait subject (reference : Types.trait_reference) =
     List.iter (check_argument subject) reference.trait_arguments;
     List.iter (fun (_, inner) -> check_type subject inner) reference.associated
@@ -489,11 +481,11 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         check_type "a call's `Self`" self_type;
         check_instantiation "a call" instantiation;
         match evidence with
-        | Impl { substitution; _ } ->
+        | Impl { substitution; _ } | Derived_for_view { substitution; _ } ->
             List.iter
               (fun (_, inner) -> check_argument "an `impl`'s type argument" inner)
               (Types.For_testing.list_arguments substitution)
-        | Bound | Dynamic -> ())
+        | Bound -> ())
     | Intrinsic { type_arguments; _ } ->
         List.iter (check_argument "an intrinsic's type argument") type_arguments
     | Capability_method _ | Indirect _ -> ()
@@ -543,15 +535,15 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         List.iteri
           (fun position ((mode, has_default), (argument : Core.argument)) ->
             match argument with
-            | Passed { mode = passed; _ } when passed <> mode ->
+            | { mode = passed; _ } when passed <> mode ->
                 report "argument %d of a call of `%s` has the mode `%s`, and its parameter `%s`"
                   position callee
                   (Language.Mode.show_prefix passed)
                   (Language.Mode.show_prefix mode)
-            | Default when not has_default ->
+            | { value = Value { kind = Parameter_default _; _ }; _ } when not has_default ->
                 report "a call of `%s` omits argument %d, whose parameter has no default" callee
                   position
-            | Passed _ | Default -> ())
+            | _ -> ())
           (List.combine parameters call.arguments)
   in
   let compound_assignments = ref 0 and current_targets = ref 0 in
@@ -689,7 +681,6 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                    (fun ({ local; type_ } : Core.capture) ->
                      check_place (Local { local; type_; origin = node.origin }))
                    captures
-             | To_any { trait = reference; _ } -> check_trait "a conversion to `any`" reference
              | Provide { implementations; _ } ->
                  List.iter
                    (fun (implementation : Core.implementation) ->
@@ -706,22 +697,21 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  | _ -> ());
                  List.iter
                    (function
-                     | Core.Passed
-                         { mode = Mut; value = Value { kind = Use (Range { base; _ }); _ }; _ } ->
+                     | ({ mode = Mut; value = Value { kind = Use (Range { base; _ }); _ }; _ } :
+                         Core.argument) ->
                          check_mutable_place "a range passed `mut`" base
-                     | Core.Passed { mode = Mut; value = Value _; _ } ->
-                         report "a `mut` parameter receives a value that is not a slice"
-                     | Passed { mode = Mut; value = Place core_place; _ } ->
+                     | { mode = Mut; value = Value _; _ } ->
+                         report "a `mut` parameter receives a value that is not a range"
+                     | { mode = Mut; value = Place core_place; _ } ->
                          check_mutable_place "a `mut` argument" core_place
-                     | Passed { mode = Own; value = Place _; _ } ->
+                     | { mode = Own; value = Place _; _ } ->
                          report "an `own` parameter receives a place"
-                     | Passed { mode = Read; value = Value { kind = Use _; _ }; _ } ->
+                     | { mode = Read; value = Value { kind = Use _; _ }; _ } ->
                          report
                            "a read-only parameter of `%s` receives a `Use`, which moves or copies \
                             the place"
                            (show_target call.callee.target)
-                     | Passed { value; _ } -> check_operand value
-                     | Default -> ())
+                     | { value; _ } -> check_operand value)
                    call.arguments
              | _ -> ());
          statement =
@@ -734,11 +724,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  incr compound_assignments;
                  match value.kind with
                  | Operator { arguments = { kind = Current_target; _ } :: _; _ }
-                 | Call
-                     {
-                       arguments = Passed { value = Value { kind = Current_target; _ }; _ } :: _;
-                       _;
-                     } ->
+                 | Call { arguments = { value = Value { kind = Current_target; _ }; _ } :: _; _ } ->
                      ()
                  | _ ->
                      report
@@ -824,7 +810,10 @@ let index_written_nodes (definition : Syntax.definition) =
     (match value.kind with
     | Match { arms; _ } ->
         List.iter (fun (arm : Syntax.arm) -> List.iter visit_pattern arm.patterns) arms
-    | Lambda { parameters; _ } -> List.iter visit_pattern parameters
+    | Lambda { parameters; _ } ->
+        List.iter
+          (fun (parameter : Syntax.lambda_parameter) -> visit_pattern parameter.pattern)
+          parameters
     | Is { pattern; _ } | Quantified { binder = Binder_in (pattern, _); _ } -> visit_pattern pattern
     | _ -> ());
     Syntax_walk.visit_expression_parts ~on_expression:visit_expression ~on_statement:visit_statement
@@ -880,8 +869,8 @@ let check_written_origins (interface : Interface.Lookups.t) (key : Resolve.Names
     }
     form.definition
 
-let check interface (key : Resolve.Names.key) form =
-  check_form interface ~path:key.path ~key:(Some key) form;
+let check interface source_lookups (key : Resolve.Names.key) form =
+  check_form interface source_lookups ~path:key.path ~key:(Some key) form;
   check_written_origins interface key form
 
 let check_derived_origins path (form : Core.t) =
@@ -901,18 +890,65 @@ let check_derived_origins path (form : Core.t) =
     }
     form.definition
 
-let check_derived interface path form =
-  check_form interface ~path ~key:None form;
+let check_derived interface source_lookups path form =
+  check_form interface source_lookups ~path ~key:None form;
   check_derived_origins path form
 
-let check_file (interface : Interface.Lookups.t) ~find_core (file : Path.file) =
+let list_provided_methods interface (impl : Types.impl_interface) =
+  match Interface.Definition.find_trait_interface interface impl.implements.trait with
+  | Some trait ->
+      List.filter_map
+        (fun (method_ : Types.trait_method) ->
+          if method_.provided then Some method_.method_name else None)
+        trait.methods
+  | None -> []
+
+let check_derived_impls database interface (type_ : Path.t) =
+  let is_todo =
+    match Interface.Definition.find_type_interface interface type_ with
+    | Some { shape = Todo_type; _ } -> true
+    | Some _ | None -> false
+  in
+  let check_impl count (impl : Path.t) =
+    match Interface.Definition.find_impl_interface interface impl with
+    | None -> Harness.fail "`%s` has no interface" (Path.show impl)
+    | Some impl_interface ->
+        let provided = list_provided_methods interface impl_interface in
+        List.fold_left
+          (fun count (name, receiver) ->
+            let path : Path.t = Method { owner = impl; name; receiver } in
+            match Database.For_testing.read_derived_form database path with
+            | Some form ->
+                check_derived interface (Database.make_source_lookups database) path form;
+                count + 1
+            | None when List.mem name provided -> count
+            | None -> Harness.fail "`%s` has no core form for `%s`" (Path.show impl) name
+            | exception Compiler_bug.Bug bug ->
+                Harness.fail "`%s`, `%s`: %s" (Path.show impl) name (Compiler_bug.to_string bug))
+          count impl_interface.impl_methods
+  in
+  if is_todo then 0
+  else
+    List.fold_left
+      (fun count (_, (impl : Path.t)) ->
+        match impl with
+        | Derived { type_ = derived; _ } when Path.equal derived type_ -> check_impl count impl
+        | _ -> count)
+      0
+      (interface.names.list_impls_of_type (Path.locate_package type_) type_)
+
+let check_file database (file : Path.file) =
+  let interface = Database.make_interface_lookups database in
   List.fold_left
     (fun count (declaration : Resolve.Names.declaration) ->
       let key = declaration.key in
-      match find_core key with
-      | Some form ->
-          check interface key form;
-          count + 1
-      | None -> count)
+      let written =
+        match Database.read_checked_body database key with
+        | Some checked ->
+            check interface (Database.make_source_lookups database) key checked.form;
+            1
+        | None -> 0
+      in
+      count + written + check_derived_impls database interface key.path)
     0
     (interface.names.list_declarations_in file)

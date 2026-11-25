@@ -106,15 +106,15 @@ let compute_number_end text =
 
 let rec lex_foreign_number text : Numbers.checked option =
   let length = String.length text in
-  let make_problem code message start stop = Some { Numbers.code; message; start; stop } in
-  let make_translation code message start stop translation =
+  let make_problem problem start stop = Some { Numbers.problem; start; stop } in
+  let make_translation problem start stop translation =
     let (checked : Numbers.checked) = check translation in
     Some
       {
         Numbers.value = checked.value;
-        problem = make_problem code message start stop;
+        problem = make_problem problem start stop;
         fixes =
-          (if checked.problem = None then [ ("Write `" ^ translation ^ "`", translation) ] else []);
+          (if checked.problem = None then [ { replacement = translation; reading = None } ] else []);
       }
   in
   let stop = compute_number_end text in
@@ -124,9 +124,7 @@ let rec lex_foreign_number text : Numbers.checked option =
       let grouped =
         String.map (fun character -> if character = '\'' then '_' else character) text
       in
-      make_translation Number_digit_separator
-        (Printf.sprintf "Digits are grouped with `_`, as in `%s`." grouped)
-        quote (quote + 1) grouped
+      make_translation (Digit_separator { grouped }) quote (quote + 1) grouped
   | None -> (
       if
         is_hexadecimal text && stop < length
@@ -135,17 +133,12 @@ let rec lex_foreign_number text : Numbers.checked option =
         Some
           {
             value = (check (String.sub text 0 stop) : Numbers.checked).value;
-            problem =
-              make_problem Number_hexadecimal_float
-                "Truss has no hexadecimal floats. Write the value as a decimal float." 0 length;
+            problem = make_problem Hexadecimal_float 0 length;
             fixes = [];
           }
       else if is_radix text && Char.uppercase_ascii text.[1] = text.[1] then
         let prefix = "0" ^ String.of_char (Char.lowercase_ascii text.[1]) in
-        make_translation Number_uppercase_prefix
-          (Printf.sprintf "Number prefixes are lowercase: write `%s`." prefix)
-          0 2
-          (prefix ^ String.sub text 2 (length - 2))
+        make_translation (Uppercase_prefix { prefix }) 0 2 (prefix ^ String.sub text 2 (length - 2))
       else if suffix <> "" && List.mem_assoc (String.lowercase_ascii suffix) suffixes then
         let number = String.sub text 0 stop in
         let value =
@@ -164,20 +157,13 @@ let rec lex_foreign_number text : Numbers.checked option =
         Some
           {
             value;
-            problem =
-              make_problem Number_suffix
-                (Printf.sprintf
-                   "Number literals have no type suffixes such as `%s`. A literal takes its type \
-                    from its context, as in `let value: %s = %s`."
-                   suffix type_name number)
-                stop length;
+            problem = make_problem (Type_suffix { suffix; type_name; number }) stop length;
             fixes = [];
           }
       else
         match String.index_opt text 'E' with
         | Some marker when (not (is_radix text)) && marker < stop ->
-            make_translation Number_uppercase_exponent
-              "The exponent is written with a lowercase `e`." marker (marker + 1)
+            make_translation Uppercase_exponent marker (marker + 1)
               (String.mapi (fun index character -> if index = marker then 'e' else character) text)
         | _ ->
             let whole =
@@ -203,24 +189,24 @@ let rec lex_foreign_number text : Numbers.checked option =
                   let octal = "0o" ^ without_zeros in
                   if clean octal && clean decimal then
                     [
-                      ("Write `" ^ octal ^ "` (octal)", octal);
-                      ("Write `" ^ decimal ^ "` (decimal)", decimal);
+                      { Numbers.replacement = octal; reading = Some Octal_reading };
+                      { replacement = decimal; reading = Some Decimal_reading };
                     ]
                   else []
-                else if clean decimal then [ ("Write `" ^ decimal ^ "`", decimal) ]
+                else if clean decimal then [ { Numbers.replacement = decimal; reading = None } ]
                 else []
               in
               Some
                 {
                   value = (check decimal : Numbers.checked).value;
                   problem =
-                    make_problem Number_leading_zero
-                      (if octal_possible then
-                         Printf.sprintf
-                           "Decimal numbers do not start with `0`. In C and Go, `%s` would be \
-                            octal: write `0o%s` for octal, or `%s` for decimal."
-                           (String.sub text 0 whole) without_zeros without_zeros
-                       else "Decimal numbers do not start with `0`.")
+                    make_problem
+                      (Leading_zero
+                         {
+                           octal =
+                             (if octal_possible then Some (String.sub text 0 whole, without_zeros)
+                              else None);
+                         })
                       0 whole;
                   fixes = alternatives;
                 })
@@ -240,10 +226,10 @@ let lex_trailing_point cursor ~start ~stop (checked : Numbers.checked) =
 
 let report_trailing_point (cursor : Cursor.t) ~start ~point =
   let written = String.sub cursor.text start (point + 1 - start) in
-  Cursor.report cursor ~code:Number_missing_digits
+  Cursor.report cursor
     ~fixes:(Cursor.list_code_fixes cursor (Source.make_span start (point + 1)) [ written ^ "0" ])
     (Source.make_span point (point + 1))
-    (Printf.sprintf "A float has a digit after its `.`: `%s0`." written)
+    (Number (Missing_digit_after_point { written }))
 
 let lex_leading_dot (cursor : Cursor.t) =
   let start = cursor.position in
@@ -254,15 +240,13 @@ let lex_leading_dot (cursor : Cursor.t) =
   | Float _ ->
       cursor.position <- stop;
       let fixed = "0" ^ written in
-      let fixes, message =
+      let fixes, shown =
         match checked.problem with
-        | None ->
-            ( Cursor.list_code_fixes cursor (Source.make_span start stop) [ fixed ],
-              Printf.sprintf "A float has a digit before its `.`: `%s`." fixed )
-        | Some _ -> ([], "A float has a digit before its `.`.")
+        | None -> (Cursor.list_code_fixes cursor (Source.make_span start stop) [ fixed ], Some fixed)
+        | Some _ -> ([], None)
       in
-      Cursor.report cursor ~code:Number_missing_digits ~fixes
+      Cursor.report cursor ~fixes
         (Source.make_span start (start + 1))
-        message;
+        (Number (Missing_digit_before_point { fixed = shown }));
       Some checked.value
   | _ -> None

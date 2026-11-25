@@ -1,0 +1,12 @@
+type Entry(code: UInt64)
+
+fn matching(digit: Option[UInt64], entries: List[Entry]) -> Option[List[Entry]]
+  ensures match digit {
+    Some(wanted) => result is Some(kept) && forall i in 0..kept.length() => kept.model()[i].code == wanted
+    None => result is None
+  }
+{
+  digit.map(fn(wanted) {
+    entries.filter(fn(entry) { entry.code == wanted })
+  })
+}

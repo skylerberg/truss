@@ -1,7 +1,7 @@
 use frontend.source
 use frontend.token
 
-let comment_message: StringSlice = "Truss has no comments. Say this with a name, a contract, or a test instead."
+let comment_message: view String = "Truss has no comments. Say this with a name, a contract, or a test instead."
 
 type ConfusableScan = LexedConfusable(kind: token.Kind) | Spaced
   derives Equal
@@ -9,28 +9,35 @@ type ConfusableScan = LexedConfusable(kind: token.Kind) | Spaced
 type OperatorScan = LexedOperator(kind: token.Kind) | Ellipsis
   derives Equal
 
-type StringFormScan = LexedString(kind: token.Kind, ending: Ending) | Skipped
-  derives Equal
+type StringFormScan = FormScanned(scan: ItemScan) | Skipped
 
 fn lex_line_comment(scanner: mut Scanner)
-  uses Panic, RunForever
+  uses Panic
+  modifies scanner.diagnostics, scanner.position, scanner.line_is_blank
+  ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
-  let stop = scanner.compute_end_of_line(start)
+  let stop = scanner.compute_end_of_line(start + 1)
   scanner.position = stop
   scanner.line_is_blank = false
   report(mut scanner, code: "lexer.comment", span: source.make_span(start, stop), message: comment_message)
 }
 
 fn lex_block_comment(scanner: mut Scanner)
-  uses Panic, RunForever
+  uses Panic
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.line_is_blank,
+    scanner.unterminated_at_end
+  ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
   var first_line_break: Option[source.Span] = None
   var depth: UInt64 = 1
   var position = start + 2
   var is_closed = false
-  while !scanner.is_at_end(position) {
+  while !scanner.is_at_end(position)
+    invariant start + 2 <= position
+    decreases scanner.count_remaining(position)
+  {
     if scanner.is_at(position, byte: 42) && scanner.is_at(position + 1, byte: 47) {
       position += 2
       if depth == 1 {
@@ -57,7 +64,7 @@ fn lex_block_comment(scanner: mut Scanner)
     scanner.first_line_break = Some(line_break)
   }
   let message = if is_closed {
-    comment_message.to_string()
+    comment_message.copy()
   } else {
     "${comment_message} This comment is never closed, so it runs to the end of the file."
   }
@@ -66,6 +73,8 @@ fn lex_block_comment(scanner: mut Scanner)
 
 fn record_semicolon(scanner: mut Scanner)
   uses Panic
+  modifies scanner.position, scanner.line_is_blank, scanner.semicolons
+  ensures old(scanner.position) < scanner.position
 {
   mut scanner.semicolons.push(scanner.position)
   scanner.position += 1
@@ -73,7 +82,8 @@ fn record_semicolon(scanner: mut Scanner)
 }
 
 fn report_semicolons(scanner: mut Scanner, line_break: Bool)
-  uses Panic, RunForever
+  uses Panic
+  modifies scanner.diagnostics, scanner.first_line_break, scanner.semicolons
 {
   if scanner.semicolons.is_empty() {
     return
@@ -84,7 +94,8 @@ fn report_semicolons(scanner: mut Scanner, line_break: Bool)
   if line_break && scanner.first_line_break.is_none() {
     scanner.first_line_break = Some(source.make_span(first, stop: first + 1))
   }
-  for start in semicolons {
+  for start in semicolons
+  {
     let title = if line_break { "Replace the `;` with a line break" } else { "Remove the `;`" }
     let fix = source.make_fix(title, edits: [scanner.remove_trivia(start, stop: start + 1, line_break: line_break)])
     report(
@@ -98,10 +109,12 @@ fn report_semicolons(scanner: mut Scanner, line_break: Bool)
 }
 
 fn lex_attribute(scanner: mut Scanner)
-  uses Panic, RunForever
+  uses Panic
+  modifies scanner.diagnostics, scanner.position, scanner.line_is_blank
+  ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
-  let stop = scanner.compute_end_of_line(start)
+  let stop = scanner.compute_end_of_line(start + 1)
   scanner.position = stop
   scanner.line_is_blank = false
   report(
@@ -113,7 +126,12 @@ fn lex_attribute(scanner: mut Scanner)
 }
 
 fn scan_comment(scanner: mut Scanner, inline: Bool) -> Bool
-  uses Panic, RunForever
+  uses Panic
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.line_is_blank,
+    scanner.unterminated_at_end, scanner.semicolons
+  ensures !result ==> scanner.position == old(scanner.position)
+  ensures result ==> old(scanner.position) < scanner.position
+  ensures old(scanner.position) <= scanner.position
 {
   let start = scanner.position
   if scanner.is_at(start, byte: 47) && (scanner.is_at(start + 1, byte: 47) || scanner.is_at(start + 1, byte: 42)) {
@@ -153,8 +171,9 @@ fn scan_comment(scanner: mut Scanner, inline: Bool) -> Bool
   false
 }
 
-fn replace_operator(scanner: mut Scanner, start: UInt64, length: UInt64, replacements: Slice[String], code: StringSlice, message: StringSlice)
+fn replace_operator(scanner: mut Scanner, start: UInt64, length: UInt64, replacements: List[String], code: String, message: String)
   uses Panic
+  modifies scanner.diagnostics
 {
   let span = source.make_span(start, stop: start + length)
   let fixes = scanner.list_code_fixes(span, codes: replacements)
@@ -163,6 +182,10 @@ fn replace_operator(scanner: mut Scanner, start: UInt64, length: UInt64, replace
 
 fn scan_operator(scanner: mut Scanner) -> Option[OperatorScan]
   uses Panic
+  modifies scanner.diagnostics, scanner.position, scanner.line_is_blank
+  ensures result is None ==> scanner.position == old(scanner.position)
+  ensures result is Some(_) ==> old(scanner.position) < scanner.position
+  ensures old(scanner.position) <= scanner.position
 {
   let start = scanner.position
   let first = scanner.byte_after(start)
@@ -212,7 +235,7 @@ fn scan_operator(scanner: mut Scanner) -> Option[OperatorScan]
       mut scanner,
       start,
       length: 3,
-      replacements: [replacement.to_string()],
+      replacements: [replacement.copy()],
       code: "lexer.strict_equality",
       message: "Truss has no `${written}`. `${replacement}` already compares values of the same type.",
     )
@@ -229,6 +252,7 @@ fn scan_operator(scanner: mut Scanner) -> Option[OperatorScan]
 
 fn report_ellipsis(scanner: mut Scanner, start: UInt64, follows_operand: Bool, operand_follows: Bool) -> Option[token.Kind]
   uses Panic
+  modifies scanner.diagnostics
 {
   if follows_operand && operand_follows {
     replace_operator(

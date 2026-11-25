@@ -33,7 +33,7 @@ fn walk_type_expression(cursor: mut TokenCursor, visitor: Visitor, written: synt
   uses Panic, RunForever
 {
   match written.kind {
-    PathType(path_type) | AnyType(path_type) => walk_path_type(mut cursor, visitor, path_type)
+    PathType(path_type) => walk_path_type(mut cursor, visitor, path_type)
     FunctionType(function_type) => {
       for input in function_type.inputs {
         walk_type_expression(mut cursor, visitor, written: input.annotation)
@@ -45,6 +45,7 @@ fn walk_type_expression(cursor: mut TokenCursor, visitor: Visitor, written: synt
         walk_clause(mut cursor, visitor, clause)
       }
     }
+    ViewType(viewed) => walk_type_expression(mut cursor, visitor, written: viewed)
     SelfType(_) | Associated(..) | TypeError => {}
   }
 }
@@ -68,7 +69,7 @@ fn walk_capability_reference(cursor: mut TokenCursor, visitor: Visitor, referenc
   }
 }
 
-fn walk_condition(cursor: mut TokenCursor, visitor: Visitor, condition: Slice[syntax.BoundCondition])
+fn walk_condition(cursor: mut TokenCursor, visitor: Visitor, condition: List[syntax.BoundCondition])
   uses Panic, RunForever
 {
   for bound in condition {
@@ -113,6 +114,9 @@ fn walk_clause(cursor: mut TokenCursor, visitor: Visitor, clause: syntax.Clause)
     Decreases(measures) => for measure in measures {
       on_expression(mut cursor, visitor, value: measure)
     }
+    Modifies(parts) => for part in parts {
+      on_expression(mut cursor, visitor, value: part)
+    }
     Cost(clause: cost_clause) => walk_bound(mut cursor, visitor, bound: cost_clause.bound)
     ClauseError => {}
   }
@@ -148,7 +152,7 @@ fn walk_expression_parts(cursor: mut TokenCursor, visitor: Visitor, value: synta
     Integer(_) | Float(_) | True | False | Todo | Unreachable | Break | Continue | SelfValue | SelfTypeValue | Name(_)
       | ExpressionError => {}
     String(literal) => walk_string_literal(mut cursor, visitor, literal)
-    Member(base: inner, ..) | Try(inner) | Prefix(operand: inner, ..) | Mode(inner, ..) | Any(inner) | Echo(inner) | Parenthesized(inner) => {
+    Member(base: inner, ..) | Try(inner) | Prefix(operand: inner, ..) | Mode(inner, ..) | Echo(inner) | Parenthesized(inner) => {
       on_expression(mut cursor, visitor, value: inner)
     }
     Is(value: inner, ..) => on_expression(mut cursor, visitor, value: inner)
@@ -204,7 +208,14 @@ fn walk_expression_parts(cursor: mut TokenCursor, visitor: Visitor, value: synta
       on_expression(mut cursor, visitor, value: entry.key)
       on_expression(mut cursor, visitor, value: entry.value)
     }
-    Lambda(body, ..) => walk_block(mut cursor, visitor, block: body)
+    Lambda(parameters, body) => {
+      for parameter in parameters {
+        if parameter.annotation is Some(annotation) {
+          walk_type_expression(mut cursor, visitor, written: annotation.written)
+        }
+      }
+      walk_block(mut cursor, visitor, block: body)
+    }
     If(condition, then_block, else_branch) => {
       on_expression(mut cursor, visitor, value: condition)
       walk_block(mut cursor, visitor, block: then_block)

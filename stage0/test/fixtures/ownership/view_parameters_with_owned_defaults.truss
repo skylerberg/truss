@@ -1,4 +1,4 @@
-fn greet(name: StringSlice = "world", tags: Slice[Int64] = [1, 2]) -> UInt64 {
+fn greet(name: String = "world", tags: List[Int64] = [1, 2]) -> UInt64 {
   name.length() + tags.length()
 }
 

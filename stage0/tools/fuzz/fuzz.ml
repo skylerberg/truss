@@ -7,7 +7,9 @@ let fail format =
       if !failures <= 50 then print_endline message)
     format
 
-let lex text = Lexer.lex (Source.create ~path:"fuzz.truss" text)
+let lex text =
+  let tokens, diagnostics = Lexer.lex (Source.create ~path:"fuzz.truss" text) in
+  (tokens, List.map (Syntax_catalog.Lexing_description.render ~text) diagnostics)
 
 let rec check_tokens text ~start ~stop (tokens : Token.t array) =
   let quoted = Diagnostic.quote text in
@@ -73,7 +75,10 @@ let parse text =
   let source = Source.create ~path:"fuzz.truss" text in
   let tokens, lexer_diagnostics = Lexer.lex source in
   let file, parser_diagnostics = Parser.parse tokens ~lexer_diagnostics in
-  (tokens, file, lexer_diagnostics @ parser_diagnostics)
+  ( tokens,
+    file,
+    List.map (Syntax_catalog.Lexing_description.render ~text) lexer_diagnostics
+    @ List.map (Syntax_catalog.Parsing_description.render ~text) parser_diagnostics )
 
 let check_tree text (item : Syntax.definition Syntax.item) =
   let quoted = Diagnostic.quote text in
@@ -137,18 +142,17 @@ let judge : Diagnostic.Code.t -> verdict = function
       | Open_range | Float_pattern | Increment | Double_negation | Match_arm_comma
       | Conditional_operator | Let_mut | Address_of | Closure_bars | Brace_record | Turbofish
       | Trailing_lambda | As_conversion | Elif | Angle_brackets | Qualified_variant | Macro_call
-      | Tuple | Power_operator | Short_declaration | Pipe_operator | Lambda_annotation
+      | Tuple | Power_operator | Short_declaration | Pipe_operator | Lambda_result_type
       | Impl_parameters | Null_coalescing | Misplaced_condition ) ->
       Grammar_rejects
   | Parser (Cost_word | Misplaced_potential | Interpolation_not_allowed) -> Unknown
   | Parser
       ( Use_after_definition | Let_else_brace | Nesting_too_deep | Misplaced_opaque
       | Misplaced_tuple | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause
-      | Loop_cost_bound | Function_type_cost_bound | Function_type_names
+      | Loop_cost_bound | Amortized_bound | Function_type_cost_bound | Function_type_names
       | Misplaced_callback_contract | Misplaced_function_type | Misplaced_associated_type
-      | Misplaced_constraint | Specification_only | Misplaced_assert | Misplaced_proof
-      | Misplaced_loop_exit | Exits_parallel | Echo_in_specification | Reserved_specification_name
-        )
+      | Misplaced_constraint | Misplaced_assert | Misplaced_proof | Misplaced_loop_exit
+      | Exits_parallel | Echo_in_specification | Reserved_specification_name )
   | Lexer _ | Resolve _ | Package _ | Prover _ | Capabilities _ | Ownership _ | Usage _ | Patterns _
   | Types _ | Too_many_diagnostics ->
       Grammar_accepts
@@ -179,7 +183,7 @@ let check_parsers_agree text =
         else
           match token.kind with
           | Keyword Cost -> true
-          | Keyword (Uses | Requires | Ensures | Decreases | Invariant | Derives)
+          | Keyword (Uses | Requires | Ensures | Decreases | Modifies | Invariant | Derives)
           | Punctuation (Open Curly)
           | Newline ->
               false
@@ -605,6 +609,7 @@ let () =
     String.sub text 0 at ^ " " ^ String.concat " " run ^ " "
     ^ String.sub text at (String.length text - at)
   in
+  Array.iter check_parsers_agree examples;
   for _ = 1 to !count do
     check_robust (make_random_text ());
     let several = ref (pick_example ()) in

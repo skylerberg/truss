@@ -1,7 +1,7 @@
 use standard.network
 
 fn say(text: String) uses Console {
-  Console.print_line(text.slice())
+  Console.print_line(text)
 }
 
 fn loops_back(address: network.IpAddress) -> Bool {

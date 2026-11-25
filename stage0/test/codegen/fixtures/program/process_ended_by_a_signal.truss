@@ -6,7 +6,7 @@ fn main(arguments: List[String]) -> ExitCode
   if Processes.run(processes.Command.new("sh").argument("-c").argument("kill -9 $$")) is Ok(ended)
     && ended.status is Signaled(Kill)
   {
-    Console.print_line("ended by a kill".slice())
+    Console.print_line("ended by a kill")
   }
   ExitCode(0)
 }

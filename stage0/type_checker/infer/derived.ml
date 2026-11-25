@@ -125,15 +125,14 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             let reference : Types.trait_reference =
               { trait = Well_known.make_path owner; trait_arguments = []; associated = [] }
             in
-            let evidence : Core.evidence =
+            let evidence : Types.evidence =
               match
                 Interface.Impls.find_evidence lookups.interface ~list_bounds of_type reference
               with
-              | Some (From_impl { impl; substitution }) -> Impl { impl; substitution }
-              | Some From_bound -> Bound
-              | Some From_any -> Dynamic
-              | Some Built_in | Some (Accepted _) | None ->
-                  raise_bug "`%s` is derived for a type with a field that has none"
+              | Some (Evidence evidence) -> evidence
+              | Some (Accepted _) -> raise_bug "a field of an error type, which no build reaches"
+              | Some Built_in | None ->
+                  raise_bug "`%s` is derived for a type with a field that does not have it"
                     (Path.show reference.trait)
             in
             node type_
@@ -174,14 +173,13 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                     ~arguments ~lends:None))
           in
           let text_argument text =
-            Operands.build_argument Read
-              (node (Types.make_named (Well_known.make_path String_slice) []) (Literal (Text text)))
+            Operands.build_argument Read (node Types.string_type (Literal (Text text)))
           in
           let count_argument count =
             Operands.build_argument Read
               (node (Types.make_builtin UInt64) (Integer (Z.of_int count)))
           in
-          let read place : Core.argument = Passed { mode = Read; value = Place place } in
+          let read place : Core.argument = { mode = Read; value = Place place } in
           let variants =
             match shape with
             | Sum variants ->
@@ -315,7 +313,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       Core.Local { local; type_; origin }
                   | [] -> raise_bug "`hash` takes a hasher"
                 in
-                let passed state : Core.argument = Passed { mode = Read; value = Value state } in
+                let passed state : Core.argument = { mode = Read; value = Value state } in
                 let write state number =
                   node hasher_type
                     (Call
@@ -449,16 +447,22 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                         {
                           variant = None;
                           fields =
-                            List.map
-                              (fun (field : Types.field) ->
-                                ( field.field_name,
-                                  if field.field_has_default then None
-                                  else
-                                    Some
-                                      (Core.Value
-                                         (make_method_call Default_default field.field_type []
-                                            field.field_type)) ))
-                              (record_fields ());
+                            (let defaulted, given =
+                               List.partition
+                                 (fun (field : Types.field) -> field.field_has_default)
+                                 (record_fields ())
+                             in
+                             List.map
+                               (fun (field : Types.field) ->
+                                 ( field.field_name,
+                                   Some
+                                     (Core.Value
+                                        (make_method_call Default_default field.field_type []
+                                           field.field_type)) ))
+                               given
+                             @ List.map
+                                 (fun (field : Types.field) -> (field.field_name, None))
+                                 defaulted);
                         }))
             | Serialize_serialize ->
                 let sink, sink_type =
@@ -467,7 +471,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       (Core.Local { local; type_; origin }, type_)
                   | [] -> raise_bug "`serialize` takes a serializer"
                 in
-                let sink_argument : Core.argument = Passed { mode = Mut; value = Place sink } in
+                let sink_argument : Core.argument = { mode = Mut; value = Place sink } in
                 let call method_ arguments =
                   statement
                     (Evaluate
@@ -509,9 +513,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       (Core.Local { local; type_; origin }, type_)
                   | _ -> raise_bug "`deserialize` takes a deserializer"
                 in
-                let make_source_argument mode : Core.argument =
-                  Passed { mode; value = Place source }
-                in
+                let make_source_argument mode : Core.argument = { mode; value = Place source } in
                 let error_type =
                   match result with
                   | Named { arguments = [ _; Type error ]; _ } -> error
@@ -611,13 +613,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   | Some key -> (
                       match lookups.read_contract key with
                       | { definition = Type { invariants; _ }; _ } ->
-                          let spans = lookups.interface.names.read_spans key in
-                          let text = lookups.interface.names.read_text key in
                           let quote_origin (origin : Core.origin) =
-                            collapse_spaces
-                              (Source.Definition_span.quote text
-                                 (Source.Definition_span.locate spans
-                                    (Core_walk.locate_origin origin)))
+                            collapse_spaces (lookups.read_clause_text key origin)
                           in
                           List.mapi
                             (fun index (invariant : Core.condition) ->
@@ -642,7 +639,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                  })
                             ~arguments:
                               [
-                                Passed { mode = Read; value = Place built_place };
+                                { mode = Read; value = Place built_place };
                                 Operands.build_argument Read
                                   (node uint64 (Integer (Z.of_int index)));
                               ]
@@ -693,28 +690,41 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 in
                 let make_fields_then_built variant (fields : Types.field list) end_ : Core.block =
                   let required, defaulted =
-                    match variant with
-                    | None ->
-                        List.partition
-                          (fun (field : Types.field) -> not field.field_has_default)
-                          fields
-                    | Some _ -> (fields, [])
+                    List.partition (fun (field : Types.field) -> not field.field_has_default) fields
                   in
-                  let read =
-                    List.map (fun (field : Types.field) -> (field, make_local ())) required
+                  let optional_type (field : Types.field) =
+                    Types.make_named (Well_known.make_path Option) [ field.field_type ]
                   in
-                  let built = make_local () in
-                  let built_place : Core.place =
-                    Local { local = built; type_ = self_type; origin }
+                  let use_local (field : Types.field) local : Core.expression =
+                    node field.field_type (Use (Local { local; type_ = field.field_type; origin }))
+                  in
+                  let read_required =
+                    List.map
+                      (fun (field : Types.field) -> (field.field_name, make_local ()))
+                      required
+                  in
+                  let read_optional =
+                    List.map
+                      (fun (field : Types.field) -> (field.field_name, make_local ()))
+                      defaulted
                   in
                   let lets =
                     List.map
-                      (fun ((field : Types.field), local) ->
-                        bind_local local field.field_type ~is_var:false
+                      (fun (field : Types.field) ->
+                        bind_local
+                          (List.assoc field.field_name read_required)
+                          field.field_type ~is_var:false
                           (read_field Deserialize_required field field.field_type))
-                      read
+                      required
+                    @ List.map
+                        (fun (field : Types.field) ->
+                          bind_local
+                            (List.assoc field.field_name read_optional)
+                            (optional_type field) ~is_var:false
+                            (read_field Deserialize_optional field (optional_type field)))
+                        defaulted
                   in
-                  let construct =
+                  let defaults_applied =
                     node self_type
                       (Construct
                          {
@@ -723,91 +733,98 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                              List.map
                                (fun (field : Types.field) ->
                                  ( field.field_name,
-                                   match List.assq_opt field read with
-                                   | Some local ->
-                                       Some
-                                         (Core.Value
-                                            (node field.field_type
-                                               (Use
-                                                  (Local { local; type_ = field.field_type; origin }))))
-                                   | None -> None ))
-                               fields;
+                                   Some
+                                     (Core.Value
+                                        (use_local field
+                                           (List.assoc field.field_name read_required))) ))
+                               required
+                             @ List.map
+                                 (fun (field : Types.field) -> (field.field_name, None))
+                                 defaulted;
                          })
                   in
-                  let updates =
+                  let bound =
+                    List.map (fun (field : Types.field) -> (field, make_local ())) fields
+                  in
+                  let bound_patterns =
                     List.map
-                      (fun (field : Types.field) ->
-                        let optional =
-                          Types.make_named (Well_known.make_path Option) [ field.field_type ]
-                        in
+                      (fun ((field : Types.field), local) ->
+                        ( field.field_name,
+                          make_binding field.field_type ~is_var:false ~mode:Own local ))
+                      bound
+                  in
+                  let destructure =
+                    pattern self_type
+                      (match variant with
+                      | None -> Record bound_patterns
+                      | Some variant -> Variant { variant; fields = bound_patterns })
+                  in
+                  let field_value ((field : Types.field), bound_local) =
+                    match List.assoc_opt field.field_name read_optional with
+                    | None -> use_local field bound_local
+                    | Some optional_local ->
+                        let optional = optional_type field in
                         let present = make_local () in
-                        statement
-                          (Evaluate
-                             (node unit
-                                (Match
-                                   {
-                                     scrutinees =
-                                       [
-                                         Operands.build Own
-                                           (read_field Deserialize_optional field optional);
-                                       ];
-                                     arms =
-                                       [
-                                         arm
-                                           (pattern optional
-                                              (Variant
-                                                 {
-                                                   variant = Well_known.show_variant Option_some;
-                                                   fields =
-                                                     [
-                                                       ( Well_known.show_field Option_some_value,
-                                                         make_binding field.field_type ~is_var:false
-                                                           ~mode:Own present );
-                                                     ];
-                                                 }))
+                        node field.field_type
+                          (Match
+                             {
+                               scrutinees =
+                                 [
+                                   Operands.build Own
+                                     (node optional
+                                        (Use
+                                           (Local
+                                              { local = optional_local; type_ = optional; origin })));
+                                 ];
+                               arms =
+                                 [
+                                   arm
+                                     (pattern optional
+                                        (Variant
                                            {
-                                             statements =
+                                             variant = Well_known.show_variant Option_some;
+                                             fields =
                                                [
-                                                 statement
-                                                   (Assign
-                                                      {
-                                                        target =
-                                                          (match variant with
-                                                          | None ->
-                                                              Field
-                                                                {
-                                                                  base = built_place;
-                                                                  field = field.field_name;
-                                                                  type_ = field.field_type;
-                                                                  origin;
-                                                                }
-                                                          | Some _ ->
-                                                              raise_bug
-                                                                "a variant's field with a default");
-                                                        value =
-                                                          node field.field_type
-                                                            (Use
-                                                               (Local
-                                                                  {
-                                                                    local = present;
-                                                                    type_ = field.field_type;
-                                                                    origin;
-                                                                  }));
-                                                      });
+                                                 ( Well_known.show_field Option_some_value,
+                                                   make_binding field.field_type ~is_var:false
+                                                     ~mode:Own present );
                                                ];
-                                             value = None;
-                                           };
-                                         arm (pattern optional Wildcard)
-                                           { statements = []; value = None };
-                                       ];
-                                   }))))
-                      defaulted
+                                           }))
+                                     (make_giving_block (use_local field present));
+                                   arm (pattern optional Wildcard)
+                                     (make_giving_block (use_local field bound_local));
+                                 ];
+                             })
+                  in
+                  let built = make_local () in
+                  let built_place : Core.place =
+                    Local { local = built; type_ = self_type; origin }
+                  in
+                  let rebuilt =
+                    node self_type
+                      (Construct
+                         {
+                           variant;
+                           fields =
+                             List.map
+                               (fun (field, bound_local) ->
+                                 ( field.Types.field_name,
+                                   Some (Core.Value (field_value (field, bound_local))) ))
+                               bound;
+                         })
+                  in
+                  let build =
+                    bind_local built self_type ~is_var:false
+                      (node self_type
+                         (Match
+                            {
+                              scrutinees = [ Operands.build Own defaults_applied ];
+                              arms = [ arm destructure (make_giving_block rebuilt) ];
+                            }))
                   in
                   {
                     statements =
-                      lets
-                      @ [ bind_local built self_type ~is_var:(defaulted <> []) construct ]
-                      @ updates
+                      lets @ [ build ]
                       @ [ finish end_ ]
                       @ List.map (make_invariant_check built_place) invariant_clauses;
                     value =
@@ -860,7 +877,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                         Interface.Impls.find_evidence lookups.interface ~list_bounds string_type
                           reference
                       with
-                      | Some (From_impl { impl; substitution }) ->
+                      | Some (Evidence (Impl { impl; substitution })) ->
                           Callee_uses.make_callee signatures lookups.interface ~list_bounds
                             (Trait_method
                                {
@@ -952,6 +969,62 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 ]
             | _ -> []
           in
+          let costs =
+            match derived_method with
+            | Equal_equal | Ordered_compare | Hash_hash ->
+                let fields =
+                  match variants with
+                  | Some variants -> List.concat_map snd variants
+                  | None -> record_fields ()
+                in
+                let integer kind = node Types.Integer kind in
+                let { Well_known.owner; name; receiver } =
+                  Well_known.locate_method derived_method
+                in
+                let field_cost metric (field : Types.field) =
+                  integer
+                    (Method_cost
+                       {
+                         metric;
+                         method_ =
+                           Trait_method
+                             {
+                               trait =
+                                 {
+                                   trait = Well_known.make_path owner;
+                                   trait_arguments = [];
+                                   associated = [];
+                                 };
+                               name;
+                               receiver;
+                               self_type = field.field_type;
+                               instantiation = Types.no_instantiation;
+                               evidence = Bound;
+                             };
+                       })
+                in
+                let sum_field_costs metric ~start =
+                  List.fold_left
+                    (fun total field ->
+                      integer
+                        (Operator
+                           { operation = Add; arguments = [ total; field_cost metric field ] }))
+                    (integer (Integer start)) fields
+                in
+                let make_cost metric bound : Core.cost Core.conditional =
+                  {
+                    holds_when = [];
+                    clause = { origin; amortized = false; resource = Metric metric; bound };
+                  }
+                in
+                [
+                  make_cost Time (Order_of (sum_field_costs Time ~start:Z.one));
+                  make_cost Allocations (At_most (sum_field_costs Allocations ~start:Z.zero));
+                  make_cost Allocated_bytes
+                    (At_most (sum_field_costs Allocated_bytes ~start:Z.zero));
+                ]
+            | _ -> []
+          in
           Some
             {
               definition =
@@ -968,7 +1041,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                               { holds_when = []; clause })
                             ensures;
                         decreases = [];
-                        costs = [];
+                        costs;
                       };
                     body = Some body;
                   };

@@ -1,4 +1,4 @@
-fn f(code: Int64) -> StringSlice {
+fn f(code: Int64) -> view String {
   match code {
     1 => "one"
     _ => "other"

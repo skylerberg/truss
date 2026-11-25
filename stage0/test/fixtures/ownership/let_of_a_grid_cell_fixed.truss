@@ -1,6 +1,0 @@
-fn look(cell: Cell) {}
-
-fn f(grid: Grid) {
-  let held = grid.cell(0).copy()
-  look(held)
-}

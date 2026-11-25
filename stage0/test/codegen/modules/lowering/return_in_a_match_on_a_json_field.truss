@@ -3,7 +3,7 @@ use standard.json
 fn first(value: json.Value) -> Result[String, String] {
   let name = match value.get("alg") {
     Some(member) => match member.as_text() {
-      Some(text) => text.to_string()
+      Some(text) => text.copy()
       None => return Err("not text")
     }
     None => return Err("missing")
@@ -11,7 +11,7 @@ fn first(value: json.Value) -> Result[String, String] {
   Ok(own name)
 }
 
-fn first_of(text: StringSlice) -> Result[String, String] {
+fn first_of(text: String) -> Result[String, String] {
   match json.parse(text) {
     Ok(value) => first(value)
     Err(_) => Err("no json")
@@ -19,7 +19,7 @@ fn first_of(text: StringSlice) -> Result[String, String] {
 }
 
 test "a return in an arm of a match on a lent part drops only what it holds" {
-  assert first_of("{\"alg\":\"x\"}".slice()) == Ok("x")
-  assert first_of("{\"alg\":1}".slice()) == Err("not text")
-  assert first_of("{}".slice()) == Err("missing")
+  assert first_of("{\"alg\":\"x\"}") == Ok("x")
+  assert first_of("{\"alg\":1}") == Err("not text")
+  assert first_of("{}") == Err("missing")
 }

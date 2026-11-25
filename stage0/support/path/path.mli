@@ -15,6 +15,7 @@ val show_module : module_ -> string
 type file = { module_ : module_; name : string }
 
 val list_file_names : file -> string list
+val show_package_directory : package -> string
 val show_file : file -> string
 
 type receiver = Static | Instance of Language.Mode.t
@@ -32,13 +33,7 @@ type t =
   | Unresolved of { file : file; names : string list }
 
 and reference = { path : t; arguments : argument list; associated : (string * argument) list }
-
-and argument =
-  | Named of reference
-  | Parameter of string
-  | Any of reference
-  | Count of Z.t
-  | Constant of t
+and argument = Named of reference | Parameter of string | Count of Z.t | Constant of t
 
 val standard_package : package
 val make_standard_module : string list -> module_
@@ -54,3 +49,5 @@ val equal : t -> t -> bool
 val hash : t -> int
 
 module Map : Map.S with type key = t
+
+type key = { module_ : module_; path : t; ordinal : int }

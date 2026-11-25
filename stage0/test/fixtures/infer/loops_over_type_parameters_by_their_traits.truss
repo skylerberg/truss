@@ -1,0 +1,33 @@
+fn total[Items: Iterable[Element = Int64]](items: Items) -> Int64 {
+  var sum: Int64 = 0
+  for value in items {
+    sum = sum.wrapping_add(value)
+  }
+  sum
+}
+
+fn reset[Items: IterableMut[Element = Int64]](items: mut Items) {
+  for value in mut items {
+    value = 0
+  }
+}
+
+fn tally[Items: FiniteCursor[Element = Int64], Source: IntoCursor[Cursor = Items]](source: own Source) -> Int64
+  uses Items.Uses
+{
+  var sum: Int64 = 0
+  for value in own source {
+    sum = sum.wrapping_add(value)
+  }
+  sum
+}
+
+fn last_of[Items: Cursor, Source: IntoCursor[Cursor = Items]](source: own Source) -> Option[Items.Element]
+  uses Items.Uses, RunForever
+{
+  var last: Option[Items.Element] = None
+  for value in own source {
+    last = Some(own value)
+  }
+  last
+}

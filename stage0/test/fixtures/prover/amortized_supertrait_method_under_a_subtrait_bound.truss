@@ -1,0 +1,21 @@
+trait Source {
+  type Item
+
+  fn pull(mut self) -> Option[Self.Item]
+
+  fn gather(own self) -> List[Self.Item]
+    cost amortized time O(1)
+  {
+    []
+  }
+}
+
+trait Sized: Source {
+  fn size(self) -> UInt64
+}
+
+fn outer[Items: Sized](items: own Items) -> List[Items.Item]
+  cost amortized time O(1)
+{
+  Source.gather(own items)
+}

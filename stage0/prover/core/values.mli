@@ -17,9 +17,6 @@ val apply_map_literal :
 val make_literal_value :
   State.context -> State.frame -> Types.ty -> Language.Literal.t -> Logic.term
 
-val make_owner_of_view :
-  State.context -> State.frame -> view:Types.ty -> owner:Types.ty -> Logic.term -> Logic.term
-
 val project_field :
   State.context ->
   State.frame ->
@@ -66,6 +63,6 @@ val copy_value :
   ?literal:Language.Literal.t ->
   State.context ->
   State.frame ->
-  Types.ty ->
+  declared:Types.ty ->
   Logic.term ->
   State.frame

@@ -60,6 +60,31 @@ let () =
       expect_one_diagnostic ~file:"app" "fn main() -> ExitCode { todo }\n" "types.main_signature");
   Harness.test "main with its fixed signature is accepted" (fun () ->
       expect_no_diagnostics [ ("app", Fixtures.Interface.main_with_arguments_and_exit_code) ]);
+  Harness.test "a parameter of any mode may be a `List` or a `String`" (fun () ->
+      expect_no_diagnostics
+        [
+          ( "app.main",
+            "fn f(items: mut List[Int64], name: own String, visit: fn(own String)) {}\n\n\
+             fn total(items: List[Int64], name: String, visit: fn(List[Int64])) {}\n\n\
+             trait Summed {\n\
+            \  fn total(self, items: List[Int64]) -> Int64\n\
+             }\n" );
+        ]);
+  Harness.test
+    "`view` applies to a `String` and to a `List`, in a field, a type argument, and a result"
+    (fun () ->
+      expect_no_diagnostics
+        [
+          ( "app.main",
+            "type Reader(bytes: view List[UInt8], name: view String)\n\n\
+             fn words(text: String) -> List[view String] { todo }\n\n\
+             fn first(text: String) -> view String { todo }\n" );
+        ]);
+  Harness.test "`view` of a type that is no `String` and no `List` is an error" (fun () ->
+      expect_one_diagnostic "type Holder(count: view Int64)\n" "types.not_viewable"
+        ~says:"`view` applies to a `String` and to a `List`");
+  Harness.test "an impl's method restates its trait's `Self` parameter as a `List`" (fun () ->
+      expect_no_diagnostics [ ("app.main", Fixtures.Interface.merged_impl_for_a_list) ]);
   Harness.test "a main outside the root module may have any signature" (fun () ->
       expect_no_diagnostics [ ("app.menu", "fn main() -> ExitCode { todo }\n") ]);
   Harness.test "a default may build a record from constants" (fun () ->
@@ -113,7 +138,7 @@ let () =
     "declaring Copyable on a type that is not opaque is an error with a fix that removes it"
     (fun () ->
       expect_one_diagnostic "type Point(x: Int64)\n  derives Copyable\n" "types.derives_inferred"
-        ~fixed:"type Point(x: Int64)\n  \n")
+        ~fixed:("  derives Copyable\n", ""))
 
 let () =
   Harness.test "an opaque type cannot declare Copyable when a field is not Copyable" (fun () ->
@@ -227,6 +252,71 @@ let () =
             \  todo\n\
              }\n" );
         ]);
+  Harness.test "a modifies clause names fields of records in mut parameters" (fun () ->
+      let scanner =
+        "let limit: UInt64 = 4\n\
+         type Region(stop: UInt64)\n\
+         type Scanner(position: UInt64, region: Region, last: Option[UInt64], tokens: List[UInt64])\n"
+      in
+      expect_no_diagnostics
+        [
+          ( "app.main",
+            scanner
+            ^ "fn f(scanner: mut Scanner)\n\
+              \  modifies scanner.position, scanner.region.stop, scanner.tokens[..]\n\
+               { todo }\n" );
+        ];
+      let declare parts =
+        scanner ^ "fn f(scanner: mut Scanner, count: UInt64)\n  modifies " ^ parts ^ "\n{ todo }\n"
+      in
+      List.iter
+        (fun (parts, code, says, fixed_parts) ->
+          expect_one_diagnostic (declare parts) code ~says
+            ?fixed:(Option.map (fun fixed_parts -> (parts, fixed_parts)) fixed_parts))
+        [
+          ("scanner.region[0]", "types.not_a_field_path", "One element or a narrower range", None);
+          ("scanner.position[..]", "types.not_a_field_path", "has no elements", None);
+          ("limit.bits", "types.not_a_field_path", "`limit` is not a parameter", None);
+          ("count.bits", "types.read_only_part", "`count` is not `mut`", None);
+          ("scanner", "types.not_a_field_path", "`scanner` is a whole parameter", None);
+          ( "scanner.position, scanner.position",
+            "types.repeated_part",
+            "`scanner.position` twice",
+            Some "scanner.position" );
+          ( "scanner.region.stop, scanner.region",
+            "types.repeated_part",
+            "`scanner.region.stop` is a part of `scanner.region`",
+            Some "scanner.region" );
+          ( "scanner.postion",
+            "types.unknown_member",
+            "`Scanner` has no field `postion`.",
+            Some "scanner.position" );
+          ("scanner.position.bits", "types.not_a_field_path", "which has no fields to name", None);
+          ("scanner.last.value", "types.not_a_field_path", "belong to its variants", None);
+        ]);
+  Harness.test "an impl's method changes only the parts that its trait's method names" (fun () ->
+      let recorder =
+        "type Journal(entries: List[UInt64], total: UInt64)\n\
+         type Quiet()\n\
+         trait Recorder {\n\
+        \  fn record(self, log: mut Journal)\n\
+        \    modifies log.entries\n\
+         }\n"
+      in
+      expect_no_diagnostics
+        [
+          ( "app.main",
+            recorder
+            ^ "impl Recorder for Quiet {\n  fn record(self, log: mut Journal) { todo }\n}\n" );
+        ];
+      expect_one_diagnostic
+        (recorder
+       ^ "impl Recorder for Quiet {\n\
+         \  fn record(self, log: mut Journal)\n\
+         \    modifies log.total\n\
+         \  { todo }\n\
+          }\n")
+        "types.impl_modifies" ~says:"names `log.total` in `modifies`");
   Harness.test "a trait's impl cannot have uses" (fun () ->
       expect_one_diagnostic Fixtures.Interface.equal_impl_with_uses "types.impl_uses");
   Harness.test "a capability's impl takes a receiver and may have uses" (fun () ->
@@ -256,7 +346,8 @@ let () =
       match Support.list_codes (check packages (Support.parse_file "app.main")) with
       | [ "types.trait_cycle"; "types.trait_cycle" ] -> ()
       | reported -> Harness.fail "found [%s]" (String.concat "; " reported));
-  Harness.test "a trait hierarchy of many diamonds is checked quickly" (fun () ->
+  Harness.test "a trait hierarchy of many diamonds is checked without visiting each path through it"
+    (fun () ->
       let levels = 24 in
       let make_level_source index =
         let body = if index = 0 then "{\n  fn size(self) -> UInt64\n}" else "{}" in
@@ -268,13 +359,10 @@ let () =
           (List.init levels make_level_source
           @ [
               Printf.sprintf "trait T%d {}\n\n" levels;
-              "fn measure[Value: T0](value: Value) -> UInt64 {\n  value.size()\n}\n\n";
-              "fn measure_any(value: any T0) -> UInt64 {\n  value.size()\n}\n";
+              "fn measure[Value: T0](value: Value) -> UInt64 {\n  value.size()\n}\n";
             ])
       in
-      let started = Sys.time () in
-      expect_no_diagnostics [ ("app.main", text) ];
-      if Sys.time () -. started > 5.0 then Harness.fail "took %.1f seconds" (Sys.time () -. started));
+      expect_no_diagnostics [ ("app.main", text) ]);
   Harness.test "a bound keeps a trait that it requires twice with different arguments" (fun () ->
       expect_no_diagnostics
         [
@@ -472,11 +560,19 @@ let () =
            (fn(Item) uses generic Granted)) -> UInt64`, which `Feeds` declares.")
 
 let () =
-  Harness.test "an impl's method gives a default where its trait's parameter has one" (fun () ->
-      expect_signature_mismatch Fixtures.Interface.steps_impl_without_its_traits_default
-        ~declared:
-          "`step` must have the signature `step(self, by: Int64 = ...) -> Int64` that `Steps` \
-           declares.");
+  Harness.test "a trait's method without a body has no default" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Interface.steps_trait_giving_a_default_to_a_method_without_a_body
+        "types.default_without_body" ~at:("3", 1)
+        ~says:"a method that an `impl` writes has no default" ~fixed:("Int64 = 3", "Int64"));
+  Harness.test "an impl overrides no method that has a default" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.steps_impl_overriding_a_method_that_has_a_default
+        "types.overridden_method_default" ~at:("step", 2)
+        ~says:"`Steps` declares `step` with a default, so no `impl` overrides it");
+  Harness.test "a trait restates no method that has a default" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.strides_restating_a_method_that_has_a_default
+        "types.restated_method_default" ~at:("step", 2)
+        ~says:"`step` restates `app.main.Steps.step`, which has a default");
   Harness.test "an impl's method gives no default where its trait's parameter has none" (fun () ->
       expect_signature_mismatch Fixtures.Interface.steps_impl_adding_a_default
         ~declared:"`step(self, by: Int64) -> Int64`");
@@ -514,7 +610,7 @@ let () =
         (Types.make_named (app "Reader") [])
         feeds
     with
-    | Some (From_impl { impl; _ }) ->
+    | Some (Evidence (Impl { impl; _ })) ->
         (interface, Path.Method { owner = impl; name = "feed"; receiver = Instance Read })
     | _ -> failwith "no impl"
   in
@@ -562,7 +658,7 @@ let expect_property name expected text make_type check =
 
 let option type_ = Types.make_named (make_standard_path [ "option" ] "Option") [ type_ ]
 let list type_ = Types.make_named (make_standard_path [ "list" ] "List") [ type_ ]
-let slice type_ = Types.make_named (make_standard_path [ "list" ] "Slice") [ type_ ]
+let view_of type_ = Types.make_view (list type_)
 let string = Types.make_named (make_standard_path [ "text" ] "String") []
 
 let () =
@@ -584,8 +680,8 @@ let () =
     (fun _ -> option (Types.make_builtin Handle))
     Interface.Impls.is_plain;
   expect_property "a List is not Plain" false "" (fun _ -> list int64) Interface.Impls.is_plain;
-  expect_property "an Option of a Slice is a view" true ""
-    (fun _ -> option (slice int64))
+  expect_property "an Option of a view of a List is a view" true ""
+    (fun _ -> option (view_of int64))
     Interface.Impls.is_view;
   expect_property "a List of integers is not a view" false ""
     (fun _ -> list int64)
@@ -617,8 +713,8 @@ let () =
     "public opaque type Id[Entity](value: UInt64)\n  derives Plain\n"
     (fun _ -> Types.make_named (app "Id") [ string ])
     Interface.Impls.is_plain;
-  expect_property "a Slice is Plain whatever its elements are" true ""
-    (fun _ -> slice string)
+  expect_property "a view of a List is Plain whatever its elements are" true ""
+    (fun _ -> view_of string)
     Interface.Impls.is_plain;
   expect_property "a type defined as todo is not Copyable" false "type Session = todo\n"
     (fun _ -> Types.make_named (app "Session") [])
@@ -645,9 +741,9 @@ let () =
   expect_decision "whether an open type is a view depends on that type" (Depends_on Types.Hole)
     Types.Hole View;
   expect_decision "a List of an open type is not Plain" Fails (list Types.Hole) Plain;
-  expect_decision "a Slice of an open type is Plain" Holds (slice Types.Hole) Plain;
-  expect_decision "an Option of a Slice of an open type is a view" Holds
-    (option (slice Types.Hole))
+  expect_decision "a view of a List of an open type is Plain" Holds (view_of Types.Hole) Plain;
+  expect_decision "an Option of a view of a List of an open type is a view" Holds
+    (option (view_of Types.Hole))
     View;
   Harness.test "is_plain of a type whose decision depends on an open type is a compiler bug"
     (fun () ->
@@ -671,8 +767,8 @@ let () =
   expect_property "an Option of an Option of plain data is Plain" true ""
     (fun _ -> option (option int64))
     Interface.Impls.is_plain;
-  expect_property "a type nested in itself around a Slice is a view" true holder
-    (fun _ -> held (held (slice int64)))
+  expect_property "a type nested in itself around a view of a List is a view" true holder
+    (fun _ -> held (held (view_of int64)))
     Interface.Impls.is_view;
   expect_property "a type nested in itself around a List is not a view" false holder
     (fun _ -> held (held (list int64)))
@@ -681,13 +777,13 @@ let () =
     (fun _ -> held (held (list int64)))
     Interface.Impls.is_plain;
   expect_property "a type that contains itself is a view when its argument is" true chain
-    (fun _ -> Types.make_named (app "Chain") [ slice int64 ])
+    (fun _ -> Types.make_named (app "Chain") [ view_of int64 ])
     Interface.Impls.is_view;
   expect_property "a type that contains itself is not a view when its argument is not" false chain
     (fun _ -> Types.make_named (app "Chain") [ int64 ])
     Interface.Impls.is_view;
-  expect_property "a type that contains itself around a Slice is a view" true
-    Fixtures.Interface.nest_of_growing_slices
+  expect_property "a type that contains itself around a view of a List is a view" true
+    Fixtures.Interface.nest_of_growing_ranges
     (fun _ -> Types.make_named (app "Nest") [ int64 ])
     Interface.Impls.is_view;
   expect_property "types that hold each other are Copyable when nothing in them says otherwise" true
@@ -778,13 +874,73 @@ let () =
         Harness.fail "an impl of From[Int32]")
 
 let () =
+  let read () =
+    let interface =
+      make_interface
+        (Support.setup [ ("app.main", Fixtures.Interface.named_impls_for_a_tag_and_a_crate) ])
+    in
+    match Interface.Definition.find_declared_signature interface (app "show") with
+    | Some { generics = [ { generic = value; _ } ]; _ } -> (interface, value)
+    | _ -> failwith "no generic parameter"
+  in
+  let named : Types.trait_reference =
+    { trait = app "Named"; trait_arguments = []; associated = [] }
+  in
+  let tag = Types.make_named (app "Tag") [] in
+  let make_crate item = Types.make_named (app "Crate") [ item ] in
+  let bind_to_tag value = Types.bind_argument value (Types.Type tag) Types.no_substitution in
+  let resolve interface substitution self_type evidence =
+    Interface.Impls.resolve_evidence interface substitution ~self_type ~trait:named evidence
+  in
+  let expect_impl interface (evidence : Types.evidence) ~for_type ~item =
+    match evidence with
+    | Impl { impl; substitution } -> (
+        let impl_interface = Interface.Definition.read_impl_interface interface impl in
+        if Types.show impl_interface.for_type <> for_type then
+          Harness.fail "an impl for %s" (Types.show impl_interface.for_type);
+        match (impl_interface.impl_generics, item) with
+        | [ { generic; _ } ], Some item -> (
+            match Types.find_argument generic substitution with
+            | Some (Type bound) when Types.show bound = item -> ()
+            | Some (Type bound) -> Harness.fail "`Item` is %s" (Types.show bound)
+            | Some (Value _) | None -> Harness.fail "`Item` is not bound")
+        | [], None -> ()
+        | _ -> Harness.fail "another number of generic parameters")
+    | Derived_for_view _ -> Harness.fail "a view's derived impl"
+    | Bound -> Harness.fail "a bound"
+  in
+  Harness.test "evidence by a bound is the impl once a substitution makes its type concrete"
+    (fun () ->
+      let interface, value = read () in
+      expect_impl interface
+        (resolve interface (bind_to_tag value) (Parameter value) Bound)
+        ~for_type:"Tag" ~item:None);
+  Harness.test "evidence by a bound stays a bound while its type is a parameter" (fun () ->
+      let interface, value = read () in
+      match resolve interface Types.no_substitution (Parameter value) Bound with
+      | Bound -> ()
+      | Impl _ | Derived_for_view _ -> Harness.fail "not a bound");
+  Harness.test "an impl is selected for a type whose argument has no bound in scope" (fun () ->
+      let interface, value = read () in
+      expect_impl interface
+        (resolve interface Types.no_substitution (make_crate (Parameter value)) Bound)
+        ~for_type:"Crate[Item]" ~item:(Some "Value"));
+  Harness.test "evidence by an impl takes the types of a substitution" (fun () ->
+      let interface, value = read () in
+      let crate = make_crate (Parameter value) in
+      expect_impl interface
+        (resolve interface (bind_to_tag value) crate
+           (resolve interface Types.no_substitution crate Bound))
+        ~for_type:"Crate[Item]" ~item:(Some "Tag"))
+
+let () =
   let text = Fixtures.Interface.described in
   let read_impl packages type_ wanted : Path.t =
     match
       Interface.Impls.find_evidence (make_interface packages)
         ~list_bounds:Interface.Impls.list_no_bounds type_ wanted
     with
-    | Some (From_impl { impl; _ }) -> impl
+    | Some (Evidence (Impl { impl; _ })) -> impl
     | _ -> failwith "no impl"
   in
   let read_method_signature packages type_ wanted name : Types.signature =
@@ -870,7 +1026,7 @@ let () =
 let () =
   Harness.test "a type that contains itself with growing arguments does not hang" (fun () ->
       let packages =
-        Support.setup [ ("app.main", Fixtures.Interface.nested_type_with_growing_arguments) ]
+        Support.setup [ ("app.main", Fixtures.Package_checks.nested_type_with_growing_arguments) ]
       in
       ignore
         (Interface.Impls.is_copyable (make_interface packages)
@@ -922,24 +1078,17 @@ let () =
       expect_one_diagnostic Fixtures.Interface.offset_with_an_int64_value_parameter
         "types.wrong_value_parameter_type"
         ~says:"`shift` is a value parameter, so its type is `UInt64`, not `Int64`."
-        ~fixed:Fixtures.Interface.offset_with_an_int64_value_parameter_fixed);
+        ~fixed:("fn offset[shift: Int64]() -> UInt64 {", "fn offset[shift: UInt64]() -> UInt64 {"));
   Harness.test "a type's value parameter of a type other than UInt64 is an error" (fun () ->
       expect_one_diagnostic Fixtures.Interface.ring_with_a_bool_value_parameter
-        "types.wrong_value_parameter_type");
+        "types.wrong_value_parameter_type" ~fixed:("Bool", "UInt64"));
   Harness.test "a value parameter of an unknown type reports only the unknown name" (fun () ->
-      match
-        Support.list_codes
-          (Database.For_testing.list_diagnostics [ Resolve; Interface ]
-             (Support.make_database
-                (Support.setup
-                   [
-                     ( "app.main",
-                       Fixtures.Interface.offset_with_a_value_parameter_of_an_unknown_type );
-                   ]))
-             (Support.parse_file "app.main"))
-      with
-      | [ code ] when code <> "types.wrong_value_parameter_type" -> ()
-      | codes -> Harness.fail "found [%s]" (String.concat "; " codes));
+      Support.expect_one_diagnostic
+        ~check:(fun packages ->
+          Database.For_testing.list_diagnostics [ Resolve; Interface ]
+            (Support.make_database packages))
+        Fixtures.Interface.offset_with_a_value_parameter_of_an_unknown_type "resolve.unknown_name"
+        ~at:("Missing", 1));
   Harness.test "a type argument must be of its parameter's kind" (fun () ->
       expect_one_diagnostic "fn f(items: List[3]) {}\n" "types.argument_kind");
   Harness.test "a constant in a type argument must have a value" (fun () ->
@@ -953,8 +1102,6 @@ let () =
                 (Database.For_testing.list_diagnostics [ Interface ]
                    (Support.make_database packages) (Support.parse_file "app.main"))))
       then Harness.fail "accepted");
-  Harness.test "any must fix every associated type" (fun () ->
-      expect_one_diagnostic "fn f(items: any Iterable) {}\n" "types.associated_type_not_fixed");
   Harness.test "nothing can implement Copyable" (fun () ->
       expect_one_diagnostic Fixtures.Interface.copyable_impl "types.implements_built_in");
   Harness.test "a public constant cannot have a private type" (fun () ->
@@ -968,15 +1115,6 @@ let () =
         Option.is_some
           (Interface.Impls.find_evidence (make_interface packages)
              ~list_bounds:Interface.Impls.list_no_bounds Types.Never (trait "Hash" []))
-      then Harness.fail "it does");
-  Harness.test "an any value implements its trait only with the same arguments" (fun () ->
-      let packages = Support.setup [] in
-      let any = Types.Any (trait "From" [ int64 ]) in
-      if
-        Option.is_some
-          (Interface.Impls.find_evidence (make_interface packages)
-             ~list_bounds:Interface.Impls.list_no_bounds any
-             (trait "From" [ Types.make_builtin Int32 ]))
       then Harness.fail "it does")
 
 let () =

@@ -1,6 +1,0 @@
-fn f(held: mut List[Slice[Int64]], source: mut Slice[Int64])
-  requires source.length() > 0
-{
-  mut held.push(source[0..2])
-  source[0] = 1
-}

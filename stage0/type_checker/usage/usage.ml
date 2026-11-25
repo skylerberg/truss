@@ -5,20 +5,16 @@ type context = {
   module_ : Path.module_;
   resolved : Resolve.resolved;
   tables : Infer.tables;
-  spans : Source.Definition_span.t array;
-  text : string Lazy.t;
-  mutable diagnostics : Diagnostic.in_definition list;
+  mutable diagnostics : Catalog.diagnostic list;
 }
 
-let report context ~fixes code (span : Source.Definition_span.t) message =
-  context.diagnostics <-
-    Diagnostic.make ~fixes ~code:(Usage code) span message :: context.diagnostics
+let report context diagnostic =
+  context.diagnostics <- Catalog.Usage diagnostic :: context.diagnostics
 
-type removal = Wildcard | Field_wildcard | Field_deletion of Source.Definition_span.t
 type site = { is_var : bool; is_refutable_position : bool }
-type binding = { name : Syntax.name; removal : removal; site : site }
+type binding = { name : Syntax.name; removal : Catalog.Usage.removal; site : site }
 
-let collect_bindings context (definition : Syntax.definition) =
+let collect_bindings (definition : Syntax.definition) =
   let bindings = ref [] and assigned = ref [] in
   let bind ~site (name : Syntax.name) removal = bindings := { name; removal; site } :: !bindings in
   let rec visit_pattern ~site (written : Syntax.pattern) =
@@ -38,10 +34,7 @@ let collect_bindings context (definition : Syntax.definition) =
       | (field : Syntax.pattern_field) :: following ->
           (match (field.kind, following) with
           | Field { kind = Binding name; _ }, next :: _ when has_rest ->
-              bind ~site name
-                (Field_deletion
-                   (Source.Definition_span.make context.spans.(field.id).start
-                      context.spans.(next.id).start))
+              bind ~site name (Field_deletion { field = Written field.id; next = Written next.id })
           | Field { kind = Binding name; _ }, _ when has_rest || has_several_fields ->
               bind ~site name Field_wildcard
           | (Named_field (_, inner) | Field inner), _ -> visit_pattern ~site inner
@@ -55,7 +48,11 @@ let collect_bindings context (definition : Syntax.definition) =
   let rec visit_expression (value : Syntax.expression) =
     (match value.kind with
     | Is { pattern = written; _ } -> visit_pattern ~site:refutable written
-    | Lambda { parameters; _ } -> List.iter (visit_pattern ~site:irrefutable) parameters
+    | Lambda { parameters; _ } ->
+        List.iter
+          (fun (parameter : Syntax.lambda_parameter) ->
+            visit_pattern ~site:irrefutable parameter.pattern)
+          parameters
     | Match { arms; _ } ->
         List.iter
           (fun (arm : Syntax.arm) -> List.iter (visit_pattern ~site:refutable) arm.patterns)
@@ -78,22 +75,6 @@ let collect_bindings context (definition : Syntax.definition) =
   Syntax_walk.visit_definition ~on_statement:visit_statement visit_expression definition;
   (List.rev !bindings, !assigned)
 
-let describe_removal (binding : binding) =
-  match binding.removal with
-  | Wildcard -> ("Replace it with `_`.", "Write `_`.")
-  | Field_wildcard ->
-      let written = binding.name.text ^ ": _" in
-      (Printf.sprintf "Match its field with `%s`." written, Printf.sprintf "Write `%s`." written)
-  | Field_deletion _ ->
-      ("Delete it, since `..` matches its field.", Printf.sprintf "Delete `%s`." binding.name.text)
-
-let make_edit context (binding : binding) =
-  let span = context.spans.(binding.name.id) in
-  match binding.removal with
-  | Wildcard -> Diagnostic.replace span "_"
-  | Field_wildcard -> Diagnostic.replace span (binding.name.text ^ ": _")
-  | Field_deletion field -> Diagnostic.delete field
-
 let find_shadowed_constant context (occurrences : binding list) =
   let may_be_constant (occurrence : binding) =
     occurrence.site.is_refutable_position
@@ -108,7 +89,7 @@ let find_shadowed_constant context (occurrences : binding list) =
 
 let check_unused context (definition : Syntax.definition) =
   let targets = context.resolved.names in
-  let bindings, assigned = collect_bindings context definition in
+  let bindings, assigned = collect_bindings definition in
   let is_binding = Array.make (Array.length targets) false in
   List.iter (fun (binding : binding) -> is_binding.(binding.name.id) <- true) bindings;
   let is_var = Array.make (Array.length targets) false in
@@ -149,40 +130,20 @@ let check_unused context (definition : Syntax.definition) =
       let name = binding.name in
       if targets.(name.id) = Some Binding && not is_used.(name.id) then
         if is_written.(name.id) then
-          report context Unused_variable context.spans.(name.id) ~fixes:[]
-            (Printf.sprintf
-               "`%s` is assigned but never read. Delete it and its assignments, or read it."
-               name.text)
+          report context (Unread_variable { binding = Written name.id; name = name.text })
         else
-          let occurrences = binding :: List.rev (Hashtbl.find_all later_alternatives name.id) in
-          let instruction, title =
-            match occurrences with
-            | [ only ] -> describe_removal only
-            | _ ->
-                ( "Remove it from every alternative of the pattern.",
-                  Printf.sprintf "Remove `%s` from every alternative." name.text )
+          let alternatives = List.rev (Hashtbl.find_all later_alternatives name.id) in
+          let occurrence (binding : binding) : Catalog.Usage.occurrence =
+            { binding = Written binding.name.id; removal = binding.removal }
           in
-          let removal = Diagnostic.fix title (List.map (make_edit context) occurrences) in
-          match find_shadowed_constant context occurrences with
-          | Some constant ->
-              let written = Path.show constant in
-              let qualification =
-                Diagnostic.fix
-                  (Printf.sprintf "Write `%s`." written)
-                  (List.map
-                     (fun (occurrence : binding) ->
-                       Diagnostic.replace context.spans.(occurrence.name.id) written)
-                     occurrences)
-              in
-              report context Unused_variable context.spans.(name.id)
-                ~fixes:[ qualification; removal ]
-                (Printf.sprintf
-                   "`%s` is never used. A bare name in a pattern binds a variable, which matches \
-                    every value. To match the constant, write `%s`."
-                   name.text written)
-          | None ->
-              report context Unused_variable context.spans.(name.id) ~fixes:[ removal ]
-                (Printf.sprintf "`%s` is never used. %s" name.text instruction))
+          report context
+            (Unused_variable
+               {
+                 name = name.text;
+                 binding = occurrence binding;
+                 alternatives = List.map occurrence alternatives;
+                 constant = find_shadowed_constant context (binding :: alternatives);
+               }))
     bindings
 
 let check_block context (written : Syntax.block) =
@@ -190,21 +151,7 @@ let check_block context (written : Syntax.block) =
     | first :: (next :: _ as rest) ->
         if Infer.statement_diverges context.tables first then begin
           let last = List.nth rest (List.length rest - 1) in
-          let unreachable = context.spans.(next.id) in
-          let line_start =
-            Source.compute_fragment_line_start (Lazy.force context.text) unreachable.start
-          in
-          let deletion_start = if line_start > 0 then line_start - 1 else line_start in
-          report context Unreachable_code unreachable
-            ~fixes:
-              [
-                Diagnostic.fix "Delete the unreachable code."
-                  [
-                    Diagnostic.delete
-                      (Source.Definition_span.make deletion_start context.spans.(last.id).stop);
-                  ];
-              ]
-            "This code is unreachable: the statement before it diverges."
+          report context (Unreachable_code { first = Written next.id; last = Written last.id })
         end
         else check_statements rest
     | _ -> ()
@@ -300,48 +247,23 @@ and is_same_index_key left right =
   | Place_key left, Place_key right -> is_same_place left right
   | _ -> false
 
-let describe_comparison (comparison : Language.Comparison.t) =
-  match comparison with
-  | Equal -> ("==", true)
-  | Not_equal -> ("!=", false)
-  | Less -> ("<", false)
-  | Less_equal -> ("<=", true)
-  | Greater -> (">", false)
-  | Greater_equal -> (">=", true)
-
 let check_comparison context (value : Syntax.expression) comparison (left : Syntax.expression) right
     =
   match (find_place context left, find_place context right) with
   | Some left_place, Some right_place when is_same_place left_place right_place ->
-      let text = Lazy.force context.text in
-      let span = context.spans.(value.id) in
-      let operand = Source.Definition_span.quote text context.spans.(left.id) in
-      let operator, is_always_true = describe_comparison comparison in
-      let outcome =
-        Printf.sprintf "`%s %s %s` compares a value with itself, so it is always %b." operand
-          operator operand is_always_true
-      in
       let is_float =
         match context.tables.types.(left.id) with
         | Some type_ -> Types.is_float_type type_
         | None -> false
       in
-      begin match comparison with
-      | (Equal | Not_equal) when is_float ->
-          let test = operand ^ ".is_nan()" in
-          let replacement = if comparison = Equal then "!" ^ test else test in
-          report context Self_comparison span
-            ~fixes:
-              [
-                Diagnostic.fix
-                  (Printf.sprintf "Write `%s`." replacement)
-                  [ Diagnostic.replace span replacement ];
-              ]
-            (Printf.sprintf
-               "%s `==` treats every NaN as equal to itself, so a test for NaN calls `%s`." outcome
-               test)
-      | _ -> report context Self_comparison span ~fixes:[] outcome
-      end
+      report context
+        (Self_comparison
+           {
+             comparison = Written value.id;
+             operand = Written left.id;
+             operator = comparison;
+             is_float;
+           })
   | _ -> ()
 
 let check_self_comparisons context (definition : Syntax.definition) =
@@ -375,15 +297,10 @@ let check (lookups : Lookups.t) key =
       module_ = key.module_;
       resolved = lookups.read_resolved key;
       tables = lookups.read_tables key;
-      spans = lookups.interface.names.read_spans key;
-      text = lazy (lookups.interface.names.read_text key);
       diagnostics = [];
     }
   in
   check_unused context definition;
   check_unreachable context definition;
   check_self_comparisons context definition;
-  List.sort
-    (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-      compare left.span right.span)
-    context.diagnostics
+  Option.to_list (Unused_run_forever.find lookups key definition) @ List.rev context.diagnostics

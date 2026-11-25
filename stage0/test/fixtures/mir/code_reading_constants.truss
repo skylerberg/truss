@@ -22,4 +22,12 @@ fn build_window() -> Window {
   Window(start: 0)
 }
 
+fn size_window(size: UInt64 = limit) -> UInt64 {
+  size
+}
+
+fn pick_size() -> UInt64 {
+  size_window()
+}
+
 let doubled: UInt64 = pass_limit() + limit

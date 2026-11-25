@@ -51,6 +51,7 @@ type scalar =
 
 type buffer =
   | Compare_bytes
+  | Find_byte
   | Storage_empty
   | Storage_with_capacity
   | Storage_length
@@ -65,17 +66,13 @@ type buffer =
   | Storage_swap
   | Storage_from_array
   | Array_from_storage
-  | Array_view
-  | Storage_view
-  | View_length
-  | View_swap
-  | View_slice
+  | Storage_range
+  | Storage_as
   | Storage_model
-  | View_model
   | Array_model
-  | View_address
+  | Storage_address
 
-type lend = Storage_at | View_at
+type lend = Storage_at
 
 type runtime =
   | Crash
@@ -148,6 +145,7 @@ let list_scalar_operations =
 let list_buffer_operations =
   [
     Compare_bytes;
+    Find_byte;
     Storage_empty;
     Storage_with_capacity;
     Storage_length;
@@ -162,18 +160,14 @@ let list_buffer_operations =
     Storage_swap;
     Storage_from_array;
     Array_from_storage;
-    Array_view;
-    Storage_view;
-    View_length;
-    View_swap;
-    View_slice;
+    Storage_range;
+    Storage_as;
     Storage_model;
-    View_model;
     Array_model;
-    View_address;
+    Storage_address;
   ]
 
-let list_lend_operations = [ Storage_at; View_at ]
+let list_lend_operations = [ Storage_at ]
 
 let list_runtime_operations =
   [
@@ -249,6 +243,7 @@ let show_scalar : scalar -> string = function
 
 let show_buffer : buffer -> string = function
   | Compare_bytes -> "compare_bytes"
+  | Find_byte -> "find_byte"
   | Storage_empty -> "storage_empty"
   | Storage_with_capacity -> "storage_with_capacity"
   | Storage_length -> "storage_length"
@@ -263,17 +258,13 @@ let show_buffer : buffer -> string = function
   | Storage_swap -> "storage_swap"
   | Storage_from_array -> "storage_from_array"
   | Array_from_storage -> "array_from_storage"
-  | Array_view -> "array_view"
-  | Storage_view -> "storage_view"
-  | View_length -> "view_length"
-  | View_swap -> "view_swap"
-  | View_slice -> "view_slice"
+  | Storage_range -> "storage_range"
+  | Storage_as -> "storage_as"
   | Storage_model -> "storage_model"
-  | View_model -> "view_model"
   | Array_model -> "array_model"
-  | View_address -> "view_address"
+  | Storage_address -> "storage_address"
 
-let show_lend : lend -> string = function Storage_at -> "storage_at" | View_at -> "view_at"
+let show_lend : lend -> string = function Storage_at -> "storage_at"
 
 let show_runtime : runtime -> string = function
   | Crash -> "crash"

@@ -1,0 +1,5 @@
+type Counter(count: Int64)
+
+fn Counter.reset(mut self) {
+  mut self.count = 0
+}

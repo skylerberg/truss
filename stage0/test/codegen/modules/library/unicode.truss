@@ -103,7 +103,7 @@ test "normalize replaces compatibility characters only in the compatibility form
   assert unicode.normalize("\u{BD}", form: unicode.Form.CompatibilityComposed) == "1\u{2044}2"
   assert unicode.normalize("\u{FF76}\u{FF9E}", form: unicode.Form.CompatibilityComposed) == "\u{30AC}"
   assert unicode.normalize("\u{FF76}\u{FF9E}", form: unicode.Form.CompatibilityDecomposed) == "\u{30AB}\u{3099}"
-  assert unicode.normalize("\u{FDFA}", form: unicode.Form.CompatibilityDecomposed).slice().characters().count() == 18
+  assert unicode.normalize("\u{FDFA}", form: unicode.Form.CompatibilityDecomposed).characters().count() == 18
 }
 
 test "the four forms of one string differ" {

@@ -1,5 +1,0 @@
-fn f(values: Slice[UInt64]) -> UInt64
-  uses RunForever, Panic
-{
-  values.length() + 1
-}

@@ -1,4 +1,4 @@
-fn total(items: Slice[Int64]) -> Int64
+fn total(items: List[Int64]) -> Int64
   uses Panic
 {
   var sum: Int64 = 0
@@ -36,7 +36,7 @@ fn main(arguments: List[String]) -> ExitCode
   uses Console, Panic
 {
   let count = arguments.length()
-  match arguments[1].slice() {
+  match arguments[1] {
     "overflow" => Console.print_line("${total([9223372036854775807, 1])}")
     "division" => Console.print_line("${quotient(100, divisor: Int64.try_from_integer(count).unwrap_or(0) - 2)}")
     "shift" => Console.print_line("${shifted(count, amount: count * 32)}")

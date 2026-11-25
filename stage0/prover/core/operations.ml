@@ -48,7 +48,7 @@ let check_widened location ~is_written actual expected =
   | Types.Function actual, Types.Function expected
     when (not is_written)
          && not (List.for_all (fun cost -> List.mem cost actual.costs) expected.costs) ->
-      Facts.raise_unsupported location "a function value's costs"
+      Facts.raise_unsupported location Function_value_costs
   | _ -> ()
 
 let find_parameter_spelling (context : State.context) (frame : State.frame) term =
@@ -71,19 +71,16 @@ let make_range_fix context frame ty term =
   | Some (name, low, _), Some text ->
       let least = if Z.sign low = 0 then "0" else name ^ ".minimum" in
       Facts.add_requires context frame
-        [ Text (Printf.sprintf "%s <= %s && %s <= %s.maximum" least text text name) ]
+        [ Code (Printf.sprintf "%s <= %s && %s <= %s.maximum" least text text name) ]
   | _ -> []
 
 let convert_from_integer context frame (site : Invocation.site) term =
   let ty = Facts.substitute_type context frame site.type_ in
-  Facts.oblige context frame Out_of_range
+  Facts.oblige
     ~fixes:(make_range_fix context frame ty term)
+    context frame
     (Facts.locate context frame.source site.origin)
-    [
-      Text "`";
-      Facts.quote frame.source site.origin;
-      Text (Printf.sprintf "` may not fit in `%s`." (Types.show ty));
-    ]
+    (Out_of_range { at = Facts.quote frame.source site.origin; type_ = ty })
     (Facts.make_in_range ty term);
   term
 
@@ -106,75 +103,46 @@ let declare_unknown_amount context frame (counter : Costs.counter) =
   Facts.assume context frame (Logic.less_equal (Costs.least_amount counter.resource) amount);
   amount
 
-let convert_to_any context frame (site : Invocation.site) =
-  let frame =
-    spend context frame (fun (counter : Costs.counter) ->
-        match (counter.resource, counter.counting) with
-        | Metric Allocations, _ -> Logic.int 1
-        | Metric Allocated_bytes, Units -> Logic.int 1
-        | Metric Allocated_bytes, (At_most | Exactly) ->
-            declare_unknown_amount context frame counter
-        | (Metric Time | Calls _), _ -> Costs.zero)
-  in
-  (frame, Facts.arrive context frame "any" (Facts.substitute_type context frame site.type_))
+let spend_operation context frame ~potential_change ?(note = fun _ _ -> ())
+    (charge_of : Costs.counter -> Costs.charge) =
+  let change = Option.map Lazy.from_fun potential_change in
+  spend context frame (fun counter ->
+      let ({ amount; counted } : Costs.charge) = charge_of counter in
+      let find_change () =
+        match Option.map Lazy.force change with
+        | change -> change
+        | exception Facts.Unsupported _ -> None
+      in
+      let amount =
+        match (counted, counter.amortized) with
+        | No_potential, false | (Potential_change | Potential_growth), true -> amount
+        | No_potential, true -> (
+            match find_change () with
+            | Some change -> Costs.plus amount change
+            | None -> declare_unknown_amount context frame counter)
+        | Potential_change, false -> (
+            match find_change () with Some change -> Costs.minus amount change | None -> amount)
+        | Potential_growth, false -> (
+            match find_change () with
+            | Some change -> Costs.minus amount (Costs.at_least_zero change)
+            | None -> amount)
+      in
+      note counter amount;
+      amount)
 
 let list_impl_packages (context : State.context) (ty : Types.ty) =
   List.sort_uniq compare
     ((match ty with Types.Named { path; _ } -> [ Path.locate_package path ] | _ -> [])
     @ [ Path.locate_package context.current; Path.standard_package ])
 
-let find_concrete_impl (context : State.context) (trait : Types.trait_reference) (ty : Types.ty) =
-  match ty with
-  | Types.Named { path; _ } ->
-      let is_own impl =
-        Path.equal impl context.current
-        || match context.current with Method { owner; _ } -> Path.equal owner impl | _ -> false
-      in
-      let list_bounds = context.bounds in
-      let packages =
-        List.sort_uniq compare [ Path.locate_package context.current; Path.locate_package path ]
-      in
-      List.find_map
-        (fun package ->
-          List.find_map
-            (fun impl ->
-              let interface =
-                Interface.Definition.read_impl_interface context.lookups.interface impl
-              in
-              let variables =
-                List.map (fun (generic : Types.generic) -> generic.generic) interface.impl_generics
-              in
-              match
-                Option.bind
-                  (Interface.Impls.match_type ~variables Types.no_substitution interface.for_type ty)
-                  (fun arguments ->
-                    Interface.Impls.match_arguments ~variables arguments
-                      interface.implements.trait_arguments trait.trait_arguments)
-              with
-              | Some arguments
-                when is_own impl
-                     || List.for_all
-                          (fun (argument, bound) ->
-                            Option.is_some
-                              (Interface.Impls.find_evidence context.lookups.interface ~list_bounds
-                                 argument bound))
-                          (Interface.Impls.list_required_bounds interface.impl_generics arguments)
-                ->
-                  Some (impl, arguments)
-              | _ -> None)
-            (Interface.Impls.list_impls_of_trait_for_type context.lookups.interface
-               ~trait:trait.trait ~type_:path package))
-        packages
-  | _ -> None
-
 let find_written_equal context ty left right =
   let equal = Well_known.locate_method Equal_equal in
   let trait : Types.trait_reference =
     { trait = Well_known.make_path equal.owner; trait_arguments = []; associated = [] }
   in
-  match find_concrete_impl context trait ty with
+  match Facts.find_impl context trait ty with
   | Some (((Impl _ : Path.t) as impl), substitution) -> (
-      let evidence : Core.evidence = Impl { impl; substitution } in
+      let evidence : Types.evidence = Impl { impl; substitution } in
       match Contracts.find_method_contract context trait equal.name equal.receiver evidence with
       | Some contract when contract.is_logic_function ->
           let symbol =
@@ -297,12 +265,12 @@ let make_overflow_fix context frame ty (operation : Intrinsic.scalar) left right
         | _ -> None
       in
       match (bound_on_left, operation) with
-      | Some required, _ -> Facts.add_requires context frame [ Text required ]
+      | Some required, _ -> Facts.add_requires context frame [ Code required ]
       | None, (Add | Multiply) when is_unsigned -> (
           match find_parameter_spelling context frame exact with
           | Some text ->
               Facts.add_requires context frame
-                [ Text (Printf.sprintf "%s <= %s.maximum" text name) ]
+                [ Code (Printf.sprintf "%s <= %s.maximum" text name) ]
           | None -> [])
       | None, Subtract when is_unsigned -> []
       | None, _ -> make_range_fix context frame ty exact)
@@ -313,19 +281,19 @@ let make_division_overflow_fix context frame ty left right =
       let dividend_not_minimum = Printf.sprintf "%s != %s.minimum" dividend name in
       match right with
       | Logic.Integer divisor when Z.equal divisor Z.minus_one ->
-          Facts.add_requires context frame [ Text dividend_not_minimum ]
+          Facts.add_requires context frame [ Code dividend_not_minimum ]
       | _ -> (
           match find_parameter_spelling context frame right with
           | Some divisor ->
               Facts.add_requires context frame
-                [ Text (Printf.sprintf "%s || %s != -1" dividend_not_minimum divisor) ]
+                [ Code (Printf.sprintf "%s || %s != -1" dividend_not_minimum divisor) ]
           | None -> []))
   | _ -> []
 
 let make_negation_fix context frame ty inner =
   match (find_integer_limits ty, find_parameter_spelling context frame inner) with
   | Some (name, _, _), Some text ->
-      Facts.add_requires context frame [ Text (Printf.sprintf "%s != %s.minimum" text name) ]
+      Facts.add_requires context frame [ Code (Printf.sprintf "%s != %s.minimum" text name) ]
   | _ -> []
 
 let translate_arithmetic context (frame : State.frame) (site : Invocation.site) ty
@@ -342,33 +310,28 @@ let translate_arithmetic context (frame : State.frame) (site : Invocation.site) 
     | _ -> Facts.raise_bug "`%s` is not arithmetic" (Intrinsic.show_operation (Scalar operation))
   in
   if is_division then
-    Facts.oblige context frame Division location
+    Facts.oblige
       ~fixes:
         (match find_parameter_spelling context frame right with
-        | Some text -> Facts.add_requires context frame [ Text (text ^ " != 0") ]
+        | Some text -> Facts.add_requires context frame [ Code (text ^ " != 0") ]
         | None -> [])
-      [ Text "The divisor in `"; Facts.quote source site.origin; Text "` may be zero." ]
+      context frame location
+      (Divisor_may_be_zero { at = Facts.quote source site.origin })
       (Logic.not_ (Logic.equal right (Logic.int 0)));
   (match Facts.find_bounds ty with
   | Some (low, _) when is_division ->
       if Z.sign low < 0 then
-        Facts.oblige context frame Overflow location
+        Facts.oblige
           ~fixes:(make_division_overflow_fix context frame ty left right)
-          [
-            Text "`";
-            Facts.quote source site.origin;
-            Text (Printf.sprintf "` may overflow `%s`: the least value over -1." (Types.show ty));
-          ]
+          context frame location
+          (Division_overflow { at = Facts.quote source site.origin; type_ = ty })
           (Logic.not_ Logic.(equal left (Integer low) &&& equal right (int (-1))))
   | Some (low, high) ->
       let unsigned = Z.sign low = 0 && not (Types.is_builtin Character ty) in
-      Facts.oblige context frame Overflow location
+      Facts.oblige
         ~fixes:(make_overflow_fix context frame ty operation left right exact)
-        [
-          Text "`";
-          Facts.quote source site.origin;
-          Text (Printf.sprintf "` may overflow `%s`." (Types.show ty));
-        ]
+        context frame location
+        (Overflow { at = Facts.quote source site.origin; type_ = ty })
         (match operation with
         | (Add | Multiply) when unsigned -> Logic.less_equal exact (Integer high)
         | Subtract when unsigned -> Logic.less_equal (Integer low) exact
@@ -469,9 +432,9 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
   let location = Facts.locate context frame.source site.origin in
   (match List.find_opt (function Types.Parameter _ | Projection _ -> true | _ -> false) types with
   | Some parameter ->
-      Facts.raise_unsupported location "`intrinsic.%s` at the type parameter `%s`"
-        (Intrinsic.show_operation (Scalar operation))
-        (Types.show parameter)
+      Facts.raise_unsupported location
+        (Intrinsic_at_parameter
+           { operation = Intrinsic.show_operation (Scalar operation); parameter })
   | None -> ());
   let find_argument index = Option.join (List.nth_opt arguments index) in
   let is_float = match types with ty :: _ -> Facts.find_float_format ty <> None | [] -> false in
@@ -502,39 +465,32 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
   | Negate, ty :: _, [ inner ] when not is_float ->
       let negated = Logic.negate inner in
       if Facts.find_bounds ty <> None then
-        Facts.oblige context frame Overflow location
+        Facts.oblige
           ~fixes:(make_negation_fix context frame ty inner)
-          [
-            Text "`";
-            Facts.quote source site.origin;
-            Text (Printf.sprintf "` may overflow `%s`." (Types.show ty));
-          ]
+          context frame location
+          (Overflow { at = Facts.quote source site.origin; type_ = ty })
           (Facts.make_in_range ty negated)
-      else if ty <> Types.Integer then
-        Facts.raise_unsupported location "negating a value of `%s`" (Types.show ty);
+      else if ty <> Types.Integer then Facts.raise_unsupported location (Negation_of ty);
       negated
   | Complement, ty :: _, [ inner ] -> declare_opaque_operation context frame ty Complement [ inner ]
   | (Shift_left | Shift_right), ty :: _, [ left; right ] ->
       (match find_width ty with
       | Some bits ->
-          let at_amount, text, fixes =
+          let at_amount, (amount, is_operand), fixes =
             match find_argument 1 with
             | Some amount ->
                 ( Facts.locate context frame.source amount,
-                  [ Obligation.Text "The shift amount `"; Facts.quote source amount; Text "`" ],
+                  (Facts.quote source amount, true),
                   match find_parameter_spelling context frame right with
                   | Some text ->
-                      Facts.add_requires context frame [ Text (Printf.sprintf "%s < %d" text bits) ]
+                      Facts.add_requires context frame [ Code (Printf.sprintf "%s < %d" text bits) ]
                   | None -> [] )
-            | None ->
-                ( location,
-                  [ Text "The shift amount in `"; Facts.quote source site.origin; Text "`" ],
-                  [] )
+            | None -> (location, (Facts.quote source site.origin, false), [])
           in
-          Facts.oblige context frame Shift at_amount ~fixes
-            (text @ [ Text (Printf.sprintf " may not be less than %d." bits) ])
+          Facts.oblige ~fixes context frame at_amount
+            (Shift_amount { amount; is_operand; bits })
             Logic.(less right (int bits))
-      | None -> Facts.raise_unsupported location "a shift of `%s`" (Types.show ty));
+      | None -> Facts.raise_unsupported location (Shift_of ty));
       let shifted = declare_opaque_operation context frame ty operation [ left; right ] in
       (match (Facts.find_bounds ty, find_width ty) with
       | Some (low, high), Some bits
@@ -728,17 +684,9 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
         when Facts.find_float_format source <> None && Facts.find_bounds target <> None -> (
           match operands with
           | [ value ] -> (
-              Facts.oblige context frame Requires
+              Facts.oblige context frame
                 (Facts.locate context frame.source site.origin)
-                [
-                  Text "`";
-                  Facts.quote frame.source site.origin;
-                  Text
-                    (Printf.sprintf
-                       "` may not fit `%s`: it must be a number that, cut toward zero, is in its \
-                        range."
-                       (Types.show target));
-                ]
+                (Float_conversion { at = Facts.quote frame.source site.origin; target })
                 (make_float_fits source target value);
               match (find_width target, Facts.find_bounds target) with
               | Some width, Some (low, _) ->
@@ -766,13 +714,9 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
       | Convert, [ _; target ] when Types.is_builtin Character target -> (
           match operands with
           | [ value ] ->
-              Facts.oblige context frame Requires
+              Facts.oblige context frame
                 (Facts.locate context frame.source site.origin)
-                [
-                  Text "`";
-                  Facts.quote frame.source site.origin;
-                  Text "` may not be a Unicode scalar value, which a `Character` must be.";
-                ]
+                (Not_a_scalar_value { at = Facts.quote frame.source site.origin })
                 (Facts.make_in_range target value);
               value
           | _ -> fallback ())

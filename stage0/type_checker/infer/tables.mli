@@ -40,10 +40,11 @@ type resolution =
 val show_resolution : resolution -> string
 
 type literal = Integer_value of Z.t | Float_value of float
+type element_access = Sequence_element | Lent_by_call of call
 
 type loop =
   | Integer_range of { element : Types.ty; inclusive : bool }
-  | Elements of { count : call; element : call; lends : Language.Mode.t }
+  | Elements of { count : call; element : element_access; lends : Language.Mode.t }
   | Pulled of {
       cursor : Types.ty;
       cursor_call : call option;
@@ -63,12 +64,16 @@ type pattern =
 
 type template =
   | Interpolated of { displays : call list }
-  | Tagged of { from_template : call; part : Types.ty; part_conversions : call option list }
+  | Tagged of {
+      from_template : call;
+      interpolation_type : Types.ty;
+      conversions : call option list;
+    }
 
 type conversion =
   | From_never
-  | Owned_to_view
-  | View_to_owned
+  | Array_as_list
+  | To_view
   | Function_widening
   | To_integer
   | From_integer

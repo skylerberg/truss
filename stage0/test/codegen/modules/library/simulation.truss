@@ -239,7 +239,7 @@ test "fail_next makes the next operation of its kind fail, once" uses Panic, Run
   }
 }
 
-fn append_line(file: Path, line: StringSlice) -> Result[Unit, SystemError]
+fn append_line(file: Path, line: String) -> Result[Unit, SystemError]
   uses FileWrite, Handles
 {
   var opened = FileWrite.open(file, mode: files.WriteMode.Append)?
@@ -269,11 +269,11 @@ fn loopback(port: UInt16) -> network.SocketAddress {
   network.SocketAddress(address: network.IpAddress.loopback, port: port)
 }
 
-fn text_of(bytes: Slice[UInt8]) -> String {
+fn text_of(bytes: List[UInt8]) -> String {
   String.from_utf8_lossy(bytes)
 }
 
-fn scripted(code: UInt8, output: StringSlice, error_output: StringSlice) -> processes.Output {
+fn scripted(code: UInt8, output: String, error_output: String) -> processes.Output {
   processes.Output(
     status: processes.ExitStatus.Exited(code: code),
     output: output.to_bytes(),

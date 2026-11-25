@@ -13,14 +13,13 @@ val make_table_fragment : Memory_layout.env -> Lowered.table -> fragment
 val item : fragment -> Lowered.Item.t
 val references : fragment -> Lowered.Item.t list
 val called : fragment -> Lowered.Item.t list
-val list_linked : lookup:(Lowered.Item.t -> fragment) -> Lowered.Item.t list -> fragment list
+val sites : fragment -> Lowered.site list
 
 val trace_reachable :
   lookup:(Lowered.Item.t -> fragment option) ->
   Lowered.Item.t list ->
   (fragment * Lowered.Item.t list) list
 
-val is_small : fragment -> bool
 val failures : fragment -> (failure * Lowered.site) list
 val hash : fragment -> string
 
@@ -33,9 +32,17 @@ val render_file :
   (fragment * linkage) list ->
   string
 
+val render_unit :
+  Memory_layout.env ->
+  Profile.t ->
+  resolve_position:(Lowered.site -> position) ->
+  is_worked_on:(Path.package -> bool) ->
+  find_fragment:(Lowered.Item.t -> fragment option) ->
+  fragment ->
+  string
+
 val shared_structs : string
-val render_sites_file : resolve_position:(Lowered.site -> position) -> fragment list -> string
-val render_capabilities_file : fragment list -> string
+val render_sites_file : resolve_position:(Lowered.site -> position) -> Lowered.site list -> string
 
 module For_testing : sig
   val render_c : fragment -> string

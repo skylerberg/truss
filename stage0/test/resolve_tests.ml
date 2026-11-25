@@ -38,8 +38,8 @@ let locate_name packages name text occurrence =
         let key = declaration.key in
         match
           ( (Support.make_names packages).read_definition key,
-            (Support.make_names packages).read_spans key,
-            (Support.make_names packages).read_place key,
+            (Support.make_source packages).read_spans key,
+            (Support.make_source packages).read_place key,
             Database.read_resolved (Support.make_database packages) key )
         with
         | definition, spans, { base; _ }, Some resolved ->
@@ -223,12 +223,12 @@ let () =
 let () =
   Harness.test "an unknown name is an error with a fix to the closest name" (fun () ->
       expect_one_diagnostic Fixtures.Resolve.misspelled_parameter "resolve.unknown_name"
-        ~fixed:Fixtures.Resolve.misspelled_parameter_fixed);
+        ~fixed:("cuont", "count"));
   Harness.test "null is an error with a fix that writes None" (fun () ->
-      expect_one_diagnostic Fixtures.Resolve.null_literal "resolve.null"
-        ~fixed:Fixtures.Resolve.null_literal_fixed);
+      expect_one_diagnostic Fixtures.Resolve.null_literal "resolve.null" ~fixed:("null", "None"));
   Harness.test "an unknown type is an error" (fun () ->
-      expect_one_diagnostic "fn f(value: Strng) {}\n" "resolve.unknown_name")
+      expect_one_diagnostic "fn f(value: Optin[Int64]) {}\n" "resolve.unknown_name"
+        ~fixed:("Optin", "Option"))
 
 let () =
   Harness.test "a prelude type is the standard library's" (fun () ->
@@ -249,8 +249,8 @@ let find_bracket text written occurrence =
       let key = declaration.key in
       match
         ( (Support.make_names packages).read_definition key,
-          (Support.make_names packages).read_spans key,
-          (Support.make_names packages).read_place key,
+          (Support.make_source packages).read_spans key,
+          (Support.make_source packages).read_place key,
           Database.read_resolved (Support.make_database packages) key )
       with
       | definition, spans, { base; _ }, Some resolved ->
@@ -308,7 +308,8 @@ let () =
   Harness.test "a capability parameter without `generic` is an error with a fix that writes it"
     (fun () ->
       expect_one_diagnostic Fixtures.Resolve.capability_parameter_without_its_marker
-        "resolve.unknown_name" ~fixed:Fixtures.Resolve.capability_parameter_without_its_marker_fixed);
+        "resolve.unknown_name"
+        ~fixed:("uses Granted", "uses generic Granted"));
   Harness.test "a capability parameter cannot share its name with a type parameter" (fun () ->
       expect_one_diagnostic Fixtures.Resolve.capability_parameter_named_like_a_type_parameter
         "resolve.shadowed_name");
@@ -319,13 +320,14 @@ let () =
 let () =
   Harness.test "mut before a call to a function is an error with a fix that removes it" (fun () ->
       expect_one_diagnostic Fixtures.Resolve.mut_before_a_function_call "resolve.not_a_place"
-        ~fixed:Fixtures.Resolve.mut_before_a_function_call_fixed);
+        ~fixed:("mut make", "make"));
   Harness.test "mut before a local's field and method call is a place" (fun () ->
-      expect_no_diagnostics [ ("app.main", Fixtures.Resolve.mut_push_onto_a_local) ]);
+      expect_no_diagnostics [ ("app.main", Fixtures.Infer.mut_push_onto_a_var_list) ]);
   Harness.test "a ? after a call with a mode keyword works on its result" (fun () ->
       expect_no_diagnostics [ ("app.main", Fixtures.Resolve.question_mark_after_a_mut_pop) ]);
   Harness.test "a ? before any method call does not make a place" (fun () ->
-      expect_one_diagnostic Fixtures.Resolve.mut_call_through_a_question_mark "resolve.not_a_place")
+      expect_one_diagnostic Fixtures.Resolve.mut_call_through_a_question_mark "resolve.not_a_place"
+        ~fixed:("mut make", "make"))
 
 let () =
   Harness.test "result in ensures is the return value" (fun () ->
@@ -407,7 +409,7 @@ let () =
     (fun () ->
       expect_one_diagnostic ~others
         "use app.shapes\n\nfn f(shapes: Int64) -> Int64 {\n  shapes.abs()\n}\n"
-        "resolve.unused_import");
+        "resolve.unused_import" ~fixed:("use app.shapes\n", ""));
   Harness.test "a file cannot import a module named like a definition of its module" (fun () ->
       let text =
         "use app.shapes\n\n\
@@ -453,7 +455,7 @@ let () =
         "resolve.not_visible");
   Harness.test "an import nothing uses is an error with a fix that deletes it" (fun () ->
       expect_one_diagnostic ~others Fixtures.Resolve.unused_import "resolve.unused_import"
-        ~fixed:"\nfn f() {}\n");
+        ~fixed:("use app.shapes\n", ""));
   Harness.test "an import used only in an interpolation is used" (fun () ->
       expect_no_diagnostics
         (others
@@ -720,8 +722,9 @@ let () =
   Harness.test "a bare variant in an expression is fixed by writing it under its type" (fun () ->
       expect_one_diagnostic ~says:"`End` is a variant of `Chain`, and in an expression"
         Fixtures.Resolve.bare_variant_in_an_expression "resolve.unknown_name"
-        ~fixed:Fixtures.Resolve.bare_variant_in_an_expression_fixed);
+        ~fixed:("  End", "  Chain.End"));
   Harness.test "a bare variant of two types names both, with a fix for each" (fun () ->
       expect_one_diagnostic ~says:"`Empty` is a variant of `Box` and `Bag`"
         Fixtures.Resolve.bare_variant_of_two_types "resolve.unknown_name"
-        ~fixed:Fixtures.Resolve.bare_variant_of_two_types_fixed)
+        ~alternatives:[ ("  Empty", "  Bag.Empty") ]
+        ~fixed:("  Empty", "  Box.Empty"))

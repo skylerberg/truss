@@ -1,7 +1,0 @@
-fn reset[Value](value: mut Value, to: Value) {
-  value = to
-}
-
-fn f(items: mut List[Int64], others: List[Int64]) {
-  reset(mut items[0..2], to: others[0..2])
-}

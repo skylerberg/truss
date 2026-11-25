@@ -1,12 +1,12 @@
 capability Notes {
-  fn note(text: StringSlice)
+  fn note(text: String)
   fn within(work: (fn() uses Notes))
 }
 
 type Quiet()
 
 impl Notes for Quiet {
-  fn note(self, text: StringSlice) {}
+  fn note(self, text: String) {}
   fn within(self, work: (fn() uses Notes)) {
     work()
   }
