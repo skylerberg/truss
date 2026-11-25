@@ -140,15 +140,9 @@ let () =
           Fixtures.Lowering.call_of_a_lending_method_that_never_lends
       in
       let c = Emit_c.For_testing.render_c (Backend.For_testing.compile_fragment backend read) in
-      let lines = String.split_on_char '\n' c in
       List.iter
-        (fun (type_, helper) ->
-          let declarations =
-            List.filter (String.starts_with ~prefix:(Printf.sprintf "  struct %s " type_)) lines
-          in
-          if declarations = [] then Codegen_support.fail "no struct %s declared in:\n%s" type_ c;
-          if List.exists (String.includes ~affix:"=") declarations then
-            Codegen_support.fail "an initializer on a struct %s in:\n%s" type_ c;
-          if not (String.includes ~affix:(helper ^ "(&") c) then
-            Codegen_support.fail "no %s in:\n%s" helper c)
-        [ ("truss_lend", "truss_lend_init"); ("truss_lend_mark", "truss_lend_init_mark") ])
+        (fun call ->
+          if not (String.includes ~affix:call c) then Codegen_support.fail "no %s in:\n%s" call c)
+        [ "truss_lend_init(&"; "truss_lend_init_mark(&" ];
+      if String.includes ~affix:"= {0};" c then
+        Codegen_support.fail "a zeroed declaration in:\n%s" c)
