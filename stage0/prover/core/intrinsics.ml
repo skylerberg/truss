@@ -614,7 +614,13 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       known
   | Storage_as ->
       ignore (Facts.declare_sort context result_type);
-      Logic.Apply (Facts.make_constructor_symbol result_type None, [ read_operand 0 ])
+      let built =
+        Logic.Apply (Facts.make_constructor_symbol result_type None, [ read_operand 0 ])
+      in
+      Lambdas.check_valid context frame
+        (Facts.locate context frame.source site.origin)
+        result_type built ~deep:false ~moment:Built_here;
+      built
   | Storage_address -> (
       match find_scalar_bytes element with
       | Some bytes ->

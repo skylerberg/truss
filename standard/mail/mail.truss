@@ -380,12 +380,18 @@ fn read_reply[Stream: streams.Duplex](stream: Stream, inbox: mut streams.ByteQue
     if line.length() < 3 {
       return Err(malformed("a reply without a code"))
     }
-    let code = match UInt16.parse(line.part(0, to: 3)) {
-      Ok(code) => code
-      Err(_) => return Err(malformed("a reply without a code"))
+    let code = match line.get_substring(0, to: 3) {
+      Some(digits) => match UInt16.parse(digits) {
+        Ok(code) => code
+        Err(_) => return Err(malformed("a reply without a code"))
+      }
+      None => return Err(malformed("a reply without a code"))
     }
     let is_last = line.length() == 3 || line.bytes()[3] != 45
-    mut lines.push(if line.length() > 4 { line.part(4, to: line.length()).copy() } else { "" })
+    mut lines.push(match line.get_substring(4, to: line.length()) {
+      Some(rest) => rest.copy()
+      None => ""
+    })
     if is_last {
       return Ok(Reply(code: code, lines: own lines))
     }

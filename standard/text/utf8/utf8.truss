@@ -1,0 +1,377 @@
+use standard.intrinsic
+
+public fn is_continuation(byte: UInt8) -> Bool
+  ensures result == (byte >= 128 && byte <= 191)
+  cost time O(1)
+  cost allocations == 0
+{
+  byte >= 128 && byte <= 191
+}
+
+public fn width(bytes: Sequence[UInt8], at: Integer) -> Integer
+  requires 0 <= at && at < bytes.length()
+  ensures result == (if bytes[at] <= 127 {
+    1
+  } else if bytes[at] >= 194 && bytes[at] <= 223 {
+    if bytes.length() - at >= 2 && is_continuation(bytes[at + 1]) { 2 } else { 0 }
+  } else if bytes[at] == 224 {
+    if bytes.length() - at >= 3 && bytes[at + 1] >= 160 && bytes[at + 1] <= 191 && is_continuation(bytes[at + 2]) { 3 } else { 0 }
+  } else if bytes[at] == 237 {
+    if bytes.length() - at >= 3 && bytes[at + 1] >= 128 && bytes[at + 1] <= 159 && is_continuation(bytes[at + 2]) { 3 } else { 0 }
+  } else if bytes[at] >= 225 && bytes[at] <= 239 {
+    if bytes.length() - at >= 3 && is_continuation(bytes[at + 1]) && is_continuation(bytes[at + 2]) { 3 } else { 0 }
+  } else if bytes[at] == 240 {
+    if bytes.length() - at >= 4 && bytes[at + 1] >= 144 && bytes[at + 1] <= 191 && is_continuation(bytes[at + 2]) && is_continuation(bytes[at + 3]) { 4 } else { 0 }
+  } else if bytes[at] >= 241 && bytes[at] <= 243 {
+    if bytes.length() - at >= 4 && is_continuation(bytes[at + 1]) && is_continuation(bytes[at + 2]) && is_continuation(bytes[at + 3]) { 4 } else { 0 }
+  } else if bytes[at] == 244 {
+    if bytes.length() - at >= 4 && bytes[at + 1] >= 128 && bytes[at + 1] <= 143 && is_continuation(bytes[at + 2]) && is_continuation(bytes[at + 3]) { 4 } else { 0 }
+  } else {
+    0
+  })
+  ensures 0 <= result && result <= 4 && result <= bytes.length() - at
+  ensures result > 1 ==> forall i in at + 1..at + result => is_continuation(bytes[i])
+  ensures result > 0 ==> !is_continuation(bytes[at])
+{
+  (if bytes[at] <= 127 {
+    1
+  } else if bytes[at] >= 194 && bytes[at] <= 223 {
+    if bytes.length() - at >= 2 && is_continuation(bytes[at + 1]) { 2 } else { 0 }
+  } else if bytes[at] == 224 {
+    if bytes.length() - at >= 3 && bytes[at + 1] >= 160 && bytes[at + 1] <= 191 && is_continuation(bytes[at + 2]) { 3 } else { 0 }
+  } else if bytes[at] == 237 {
+    if bytes.length() - at >= 3 && bytes[at + 1] >= 128 && bytes[at + 1] <= 159 && is_continuation(bytes[at + 2]) { 3 } else { 0 }
+  } else if bytes[at] >= 225 && bytes[at] <= 239 {
+    if bytes.length() - at >= 3 && is_continuation(bytes[at + 1]) && is_continuation(bytes[at + 2]) { 3 } else { 0 }
+  } else if bytes[at] == 240 {
+    if bytes.length() - at >= 4 && bytes[at + 1] >= 144 && bytes[at + 1] <= 191 && is_continuation(bytes[at + 2]) && is_continuation(bytes[at + 3]) { 4 } else { 0 }
+  } else if bytes[at] >= 241 && bytes[at] <= 243 {
+    if bytes.length() - at >= 4 && is_continuation(bytes[at + 1]) && is_continuation(bytes[at + 2]) && is_continuation(bytes[at + 3]) { 4 } else { 0 }
+  } else if bytes[at] == 244 {
+    if bytes.length() - at >= 4 && bytes[at + 1] >= 128 && bytes[at + 1] <= 143 && is_continuation(bytes[at + 2]) && is_continuation(bytes[at + 3]) { 4 } else { 0 }
+  } else {
+    0
+  })
+}
+
+public fn is_valid_from(bytes: Sequence[UInt8], at: Integer) -> Bool
+  requires 0 <= at && at <= bytes.length()
+  ensures result == (at == bytes.length() || (width(bytes, at) > 0 && is_valid_from(bytes, at: at + width(bytes, at))))
+  decreases bytes.length() - at
+{
+  if at == bytes.length() {
+    true
+  } else {
+    let first_width = width(bytes, at)
+    first_width > 0 && is_valid_from(bytes, at: at + first_width)
+  }
+}
+
+public fn is_valid(bytes: Sequence[UInt8]) -> Bool
+  ensures result == is_valid_from(bytes, at: 0)
+{
+  is_valid_from(bytes, at: 0)
+}
+
+public fn is_boundary(bytes: Sequence[UInt8], at: Integer) -> Bool
+  requires 0 <= at && at <= bytes.length()
+  ensures result == (at == bytes.length() || !is_continuation(bytes[at]))
+{
+  at == bytes.length() || !is_continuation(bytes[at])
+}
+
+public theorem ascii_is_valid_from(bytes: Sequence[UInt8], at: Integer)
+  requires 0 <= at && at <= bytes.length()
+  requires forall i in at..bytes.length() => bytes[i] <= 127
+  ensures is_valid_from(bytes, at)
+  decreases bytes.length() - at
+{
+  if at < bytes.length() {
+    ascii_is_valid_from(bytes, at: at + 1)
+  }
+}
+
+public theorem ascii_is_valid(bytes: Sequence[UInt8])
+  requires forall i in 0..bytes.length() => bytes[i] <= 127
+  ensures is_valid(bytes)
+{
+  ascii_is_valid_from(bytes, at: 0)
+}
+
+public theorem starts_a_character(bytes: Sequence[UInt8], start: Integer, position: Integer)
+  requires 0 <= start && start <= position && position <= bytes.length()
+  requires is_valid_from(bytes, at: start)
+  requires is_boundary(bytes, at: position)
+  ensures is_valid_from(bytes, at: position)
+  decreases position - start
+{
+  if start < position {
+    starts_a_character(bytes, start: start + width(bytes, at: start), position: position)
+  }
+}
+
+public theorem boundary_is_valid_from(bytes: Sequence[UInt8], position: Integer)
+  requires 0 <= position && position <= bytes.length()
+  requires is_valid(bytes)
+  requires is_boundary(bytes, at: position)
+  ensures is_valid_from(bytes, at: position)
+{
+  starts_a_character(bytes, start: 0, position: position)
+}
+
+public theorem character_ends_at_a_boundary(bytes: Sequence[UInt8], at: Integer)
+  requires 0 <= at && at < bytes.length()
+  requires is_valid_from(bytes, at: at)
+  ensures is_boundary(bytes, at: at + width(bytes, at: at))
+{
+}
+
+theorem concatenation_continues(first: Sequence[UInt8], second: Sequence[UInt8], at: Integer)
+  requires 0 <= at && at <= second.length()
+  requires is_valid_from(second, at: at)
+  ensures is_valid_from(first.concatenate(second), at: first.length() + at)
+  decreases second.length() - at
+{
+  if at < second.length() {
+    let first_width = width(second, at: at)
+    assert width(first.concatenate(second), at: first.length() + at) == first_width
+    concatenation_continues(first, second: second, at: at + first_width)
+  }
+}
+
+theorem concatenation_is_valid_from(first: Sequence[UInt8], second: Sequence[UInt8], at: Integer)
+  requires 0 <= at && at <= first.length()
+  requires is_valid_from(first, at: at)
+  requires is_valid(second)
+  ensures is_valid_from(first.concatenate(second), at: at)
+  decreases first.length() - at
+{
+  if at < first.length() {
+    let first_width = width(first, at: at)
+    assert width(first.concatenate(second), at: at) == first_width
+    concatenation_is_valid_from(first, second: second, at: at + first_width)
+  } else {
+    concatenation_continues(first, second: second, at: 0)
+  }
+}
+
+public theorem concatenation_is_valid(first: Sequence[UInt8], second: Sequence[UInt8])
+  requires is_valid(first)
+  requires is_valid(second)
+  ensures is_valid(first.concatenate(second))
+{
+  concatenation_is_valid_from(first, second: second, at: 0)
+}
+
+theorem slice_is_valid_from(bytes: Sequence[UInt8], from: Integer, to: Integer, at: Integer)
+  requires 0 <= from && from <= at && at <= to && to <= bytes.length()
+  requires is_valid_from(bytes, at: at)
+  requires is_boundary(bytes, at: to)
+  ensures is_valid_from(bytes[from..to], at: at - from)
+  decreases to - at
+{
+  if at < to {
+    let first_width = width(bytes, at: at)
+    assert at + first_width <= to
+    assert width(bytes[from..to], at: at - from) == first_width
+    slice_is_valid_from(bytes, from: from, to: to, at: at + first_width)
+  }
+}
+
+public theorem slice_is_valid(bytes: Sequence[UInt8], from: Integer, to: Integer)
+  requires 0 <= from && from <= to && to <= bytes.length()
+  requires is_valid(bytes)
+  requires is_boundary(bytes, at: from)
+  requires is_boundary(bytes, at: to)
+  ensures is_valid(bytes[from..to])
+{
+  starts_a_character(bytes, start: 0, position: from)
+  slice_is_valid_from(bytes, from: from, to: to, at: from)
+}
+
+theorem prefix_is_valid_from(bytes: Sequence[UInt8], prefix: Integer, at: Integer)
+  requires 0 <= at && at <= prefix && prefix <= bytes.length()
+  requires is_valid_from(bytes[..prefix], at: at)
+  requires is_valid_from(bytes, at: prefix)
+  ensures is_valid_from(bytes, at: at)
+  decreases prefix - at
+{
+  if at < prefix {
+    let first_width = width(bytes[..prefix], at: at)
+    assert width(bytes, at: at) == first_width
+    prefix_is_valid_from(bytes, prefix: prefix, at: at + first_width)
+  }
+}
+
+public theorem prefix_and_rest_are_valid(bytes: Sequence[UInt8], prefix: Integer)
+  requires 0 <= prefix && prefix <= bytes.length()
+  requires is_valid(bytes[..prefix])
+  requires is_valid_from(bytes, at: prefix)
+  ensures is_valid(bytes)
+{
+  prefix_is_valid_from(bytes, prefix: prefix, at: 0)
+}
+
+public theorem after_an_ascii_byte_is_a_boundary(bytes: Sequence[UInt8], at: Integer)
+  requires 0 <= at && at < bytes.length()
+  requires is_valid(bytes)
+  requires bytes[at] <= 127
+  ensures is_boundary(bytes, at: at + 1)
+{
+  boundary_is_valid_from(bytes, position: at)
+}
+
+public fn is_ascii_extension(before: Sequence[UInt8], after: Sequence[UInt8]) -> Bool
+  ensures result == (before.length() <= after.length()
+    && (forall i in 0..before.length() => after[i] == before[i])
+    && (forall i in before.length()..after.length() => after[i] <= 127))
+{
+  before.length() <= after.length()
+    && (forall i in 0..before.length() => after[i] == before[i])
+    && (forall i in before.length()..after.length() => after[i] <= 127)
+}
+
+public theorem ascii_extension_is_valid(before: Sequence[UInt8], after: Sequence[UInt8])
+  requires is_valid(before)
+  requires is_ascii_extension(before, after: after)
+  ensures is_valid(after)
+{
+  assert identical(after[..before.length()], before)
+  ascii_is_valid_from(after, at: before.length())
+  prefix_and_rest_are_valid(after, prefix: before.length())
+}
+
+public theorem start_is_a_boundary(bytes: Sequence[UInt8])
+  requires is_valid(bytes)
+  ensures is_boundary(bytes, at: 0)
+{
+}
+
+theorem match_is_valid_from(bytes: Sequence[UInt8], part: Sequence[UInt8], at: Integer, position: Integer)
+  requires 0 <= at && 0 <= position && position <= part.length() && at + part.length() <= bytes.length()
+  requires forall i in 0..part.length() => bytes[at + i] == part[i]
+  requires is_valid_from(part, at: position)
+  requires is_valid_from(bytes, at: at + position)
+  ensures is_valid_from(bytes, at: at + part.length())
+  decreases part.length() - position
+{
+  if position < part.length() {
+    let first_width = width(part, at: position)
+    assert width(bytes, at: at + position) == first_width
+    match_is_valid_from(bytes, part: part, at: at, position: position + first_width)
+  }
+}
+
+public theorem match_lies_between_boundaries(bytes: Sequence[UInt8], part: Sequence[UInt8], at: Integer)
+  requires 0 <= at && at + part.length() <= bytes.length()
+  requires part.length() > 0
+  requires is_valid(bytes)
+  requires is_valid(part)
+  requires forall i in 0..part.length() => bytes[at + i] == part[i]
+  ensures is_boundary(bytes, at: at)
+  ensures is_boundary(bytes, at: at + part.length())
+{
+  assert width(part, at: 0) > 0
+  assert bytes[at] == part[0]
+  boundary_is_valid_from(bytes, position: at)
+  match_is_valid_from(bytes, part: part, at: at, position: 0)
+}
+
+theorem previous_character_starts_within_four_bytes_from(bytes: Sequence[UInt8], start: Integer, position: Integer)
+  requires 0 <= start && start < position && position <= bytes.length()
+  requires is_valid_from(bytes, at: start)
+  requires is_boundary(bytes, at: position)
+  ensures !is_continuation(bytes[position - 1])
+    || (position - 2 >= start && !is_continuation(bytes[position - 2]))
+    || (position - 3 >= start && !is_continuation(bytes[position - 3]))
+    || (position - 4 >= start && !is_continuation(bytes[position - 4]))
+  decreases position - start
+{
+  let first_width = width(bytes, at: start)
+  if start + first_width < position {
+    previous_character_starts_within_four_bytes_from(bytes, start: start + first_width, position: position)
+  }
+}
+
+public theorem previous_character_starts_within_four_bytes(bytes: Sequence[UInt8], position: Integer)
+  requires 0 < position && position <= bytes.length()
+  requires is_valid(bytes)
+  requires is_boundary(bytes, at: position)
+  ensures !is_continuation(bytes[position - 1])
+    || (position >= 2 && !is_continuation(bytes[position - 2]))
+    || (position >= 3 && !is_continuation(bytes[position - 3]))
+    || (position >= 4 && !is_continuation(bytes[position - 4]))
+{
+  previous_character_starts_within_four_bytes_from(bytes, start: 0, position: position)
+}
+
+theorem ascii_mapping_is_valid_from(bytes: Sequence[UInt8], mapped: Sequence[UInt8], at: Integer)
+  requires mapped.length() == bytes.length()
+  requires 0 <= at && at <= bytes.length()
+  requires forall i in 0..bytes.length() => (bytes[i] <= 127 && mapped[i] <= 127) || mapped[i] == bytes[i]
+  requires is_valid_from(bytes, at: at)
+  ensures is_valid_from(mapped, at: at)
+  decreases bytes.length() - at
+{
+  if at < bytes.length() {
+    let first_width = width(bytes, at: at)
+    assert width(mapped, at: at) == first_width
+    ascii_mapping_is_valid_from(bytes, mapped: mapped, at: at + first_width)
+  }
+}
+
+public theorem ascii_mapping_is_valid(bytes: Sequence[UInt8], mapped: Sequence[UInt8])
+  requires mapped.length() == bytes.length()
+  requires forall i in 0..bytes.length() => (bytes[i] <= 127 && mapped[i] <= 127) || mapped[i] == bytes[i]
+  requires is_valid(bytes)
+  ensures is_valid(mapped)
+{
+  ascii_mapping_is_valid_from(bytes, mapped: mapped, at: 0)
+}
+
+public theorem appending_a_valid_character_is_valid(bytes: Sequence[UInt8], prefix: Integer)
+  requires 0 <= prefix && prefix < bytes.length()
+  requires is_valid(bytes[..prefix])
+  requires width(bytes, at: prefix) == bytes.length() - prefix
+  ensures is_valid(bytes)
+{
+  assert is_valid_from(bytes, at: bytes.length())
+  assert is_valid_from(bytes, at: prefix)
+  prefix_and_rest_are_valid(bytes, prefix: prefix)
+}
+
+internal fn push_ascii(output: mut intrinsic.Storage[UInt8], byte: UInt8)
+  requires byte <= 127
+  requires intrinsic.storage_length(output) < intrinsic.storage_capacity(output)
+  ensures identical(intrinsic.storage_model(output), old(intrinsic.storage_model(output)).append(byte))
+  ensures intrinsic.storage_capacity(output) == old(intrinsic.storage_capacity(output))
+  ensures is_valid(old(intrinsic.storage_model(output))) ==> is_valid(intrinsic.storage_model(output))
+  cost time O(1)
+  cost allocations == 0
+{
+  intrinsic.storage_push(mut output, value: byte)
+  proof {
+    if is_valid(old(intrinsic.storage_model(output))) {
+      ascii_extension_is_valid(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+    }
+  }
+}
+
+internal fn shorten_to_boundary(storage: mut intrinsic.Storage[UInt8], length: UInt64)
+  requires length <= intrinsic.storage_length(storage)
+  requires is_valid(intrinsic.storage_model(storage))
+  requires is_boundary(intrinsic.storage_model(storage), at: length)
+  ensures identical(intrinsic.storage_model(storage), old(intrinsic.storage_model(storage))[0..length])
+  ensures intrinsic.storage_capacity(storage) == old(intrinsic.storage_capacity(storage))
+  ensures is_valid(intrinsic.storage_model(storage))
+  cost time O(1)
+  cost allocations == 0
+{
+  proof {
+    slice_is_valid(intrinsic.storage_model(storage), from: 0, to: length)
+  }
+  intrinsic.storage_shorten(mut storage, length: length)
+  proof {
+    assert identical(intrinsic.storage_model(storage), old(intrinsic.storage_model(storage))[0..length])
+  }
+}

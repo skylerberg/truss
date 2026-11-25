@@ -1,0 +1,15 @@
+type Ranges(span: Span, count: UInt64)
+  invariant count <= 10
+
+fn is_ordered(span: Span) -> Bool
+  ensures result
+{
+  span.low <= span.high
+}
+
+fn Ranges.reset(mut self) -> Bool
+  ensures result
+{
+  self.count = 11
+  is_ordered(self.span)
+}

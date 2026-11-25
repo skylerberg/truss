@@ -1,0 +1,12 @@
+fn raced(seconds: Duration) -> Option[UInt64]
+  uses Tasks, Clock
+  ensures !(result is Some(value) && value != 3)
+{
+  concurrent {
+    return Some(3)
+    {
+      Clock.sleep(seconds)
+      return None
+    }
+  }
+}

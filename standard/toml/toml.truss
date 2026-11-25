@@ -1,6 +1,7 @@
 use standard.intrinsic
 use standard.map
 use standard.serialization
+use standard.text.utf8
 use standard.time
 
 public type Value =
@@ -82,11 +83,14 @@ fn with_position(text: String, failure: Failure) -> ParseError
 
 fn peek(text: String, at: UInt64) -> Option[UInt8]
   ensures (result is Some(_)) == (at < text.length())
+  ensures !(result is Some(byte) && byte != text.model()[at])
 {
   if at < text.length() { Some(text.byte(at)) } else { None }
 }
 
-fn is_bare_key_byte(byte: UInt8) -> Bool {
+fn is_bare_key_byte(byte: UInt8) -> Bool
+  ensures result ==> byte <= 127
+{
   (65 <= byte && byte <= 90) || (97 <= byte && byte <= 122) || (48 <= byte && byte <= 57) || byte == 95 || byte == 45
 }
 
@@ -96,19 +100,27 @@ fn is_digit(byte: UInt8) -> Bool {
 
 fn skip_spaces(text: String, at: mut UInt64)
   uses RunForever
+  requires text.is_boundary(at)
+  ensures text.is_boundary(at)
 {
-  while peek(text, at: at) is Some(byte) && (byte == 32 || byte == 9) {
+  while peek(text, at: at) is Some(byte) && (byte == 32 || byte == 9)
+    invariant text.is_boundary(at)
+  {
     at += 1
   }
 }
 
 fn skip_comment(text: String, at: mut UInt64) -> Result[Unit, Failure]
   uses RunForever
+  requires text.is_boundary(at)
+  ensures !(result is Ok(_) && !text.is_boundary(at))
 {
   if peek(text, at: at) != Some(35) {
     return Ok(Unit)
   }
-  while peek(text, at: at) is Some(byte) && byte != 10 {
+  while peek(text, at: at) is Some(byte) && byte != 10
+    invariant at <= text.length()
+  {
     if (byte < 32 && byte != 9 && byte != 13) || byte == 127 {
       return Err(failure_at("a control character in a comment", offset: at))
     }
@@ -117,7 +129,10 @@ fn skip_comment(text: String, at: mut UInt64) -> Result[Unit, Failure]
   Ok(Unit)
 }
 
-fn skip_newline(text: String, at: mut UInt64) -> Bool {
+fn skip_newline(text: String, at: mut UInt64) -> Bool
+  requires text.is_boundary(at)
+  ensures text.is_boundary(at)
+{
   match peek(text, at: at) {
     Some(byte) => {
       if byte == 10 {
@@ -136,8 +151,12 @@ fn skip_newline(text: String, at: mut UInt64) -> Bool {
 
 fn skip_blank(text: String, at: mut UInt64) -> Result[Unit, Failure]
   uses RunForever
+  requires text.is_boundary(at)
+  ensures !(result is Ok(_) && !text.is_boundary(at))
 {
-  while true {
+  while true
+    invariant text.is_boundary(at)
+  {
     skip_spaces(text, at: mut at)
     skip_comment(text, at: mut at)?
     if !skip_newline(text, at: mut at) {
@@ -148,6 +167,8 @@ fn skip_blank(text: String, at: mut UInt64) -> Result[Unit, Failure]
 
 fn end_of_line(text: String, at: mut UInt64) -> Result[Unit, Failure]
   uses RunForever
+  requires text.is_boundary(at)
+  ensures !(result is Ok(_) && !text.is_boundary(at))
 {
   skip_spaces(text, at: mut at)
   skip_comment(text, at: mut at)?
@@ -168,9 +189,14 @@ fn push_code(output: mut String, code: UInt32, at: UInt64) -> Result[Unit, Failu
   }
 }
 
-fn hex_digits(text: String, at: mut UInt64, count: UInt64) -> Result[UInt32, Failure] {
+fn hex_digits(text: String, at: mut UInt64, count: UInt64) -> Result[UInt32, Failure]
+  requires text.is_boundary(at)
+  ensures !(result is Ok(_) && !text.is_boundary(at))
+{
   var code: UInt32 = 0
-  for _ in 0..count {
+  for _ in 0..count
+    invariant text.is_boundary(at)
+  {
     match peek(text, at: at) {
       Some(byte) => {
         let digit = byte.digit_value()
@@ -186,7 +212,11 @@ fn hex_digits(text: String, at: mut UInt64, count: UInt64) -> Result[UInt32, Fai
   Ok(code)
 }
 
-fn escape(text: String, at: mut UInt64, output: mut String) -> Result[Unit, Failure] {
+fn escape(text: String, at: mut UInt64, output: mut String) -> Result[Unit, Failure]
+  requires at < text.length()
+  requires text.model()[at] == 92
+  ensures !(result is Ok(_) && !text.is_boundary(at))
+{
   let start = at
   at = at.saturating_add(1)
   match peek(text, at: at) {
@@ -221,10 +251,13 @@ fn escape(text: String, at: mut UInt64, output: mut String) -> Result[Unit, Fail
   }
 }
 
-fn push_byte_run(output: mut String, text: String, from: UInt64, to: UInt64) {
-  if from < to && to <= text.length() {
-    mut output.push(text.part(from, to: to))
-  }
+fn push_byte_run(output: mut String, text: String, from: UInt64, to: UInt64)
+  requires from <= to
+  requires to <= text.length()
+  requires text.is_boundary(from)
+  requires text.is_boundary(to)
+{
+  mut output.push(text.part(from, to: to))
 }
 
 fn is_forbidden_in_string(byte: UInt8, multiline: Bool) -> Bool {
@@ -239,12 +272,19 @@ fn is_forbidden_in_string(byte: UInt8, multiline: Bool) -> Bool {
 
 fn basic_string(text: String, at: mut UInt64) -> Result[String, Failure]
   uses RunForever
+  requires at < text.length()
+  requires text.model()[at] == 34
+  ensures !(result is Ok(_) && !text.is_boundary(at))
 {
   let start = at
   at = at.saturating_add(1)
   var output = ""
   var run = at
-  while true {
+  while true
+    invariant run <= at
+    invariant at <= text.length()
+    invariant text.is_boundary(run)
+  {
     match peek(text, at: at) {
       Some(byte) => {
         if byte == 34 {
@@ -269,11 +309,18 @@ fn basic_string(text: String, at: mut UInt64) -> Result[String, Failure]
 
 fn literal_string(text: String, at: mut UInt64) -> Result[String, Failure]
   uses RunForever
+  requires at < text.length()
+  requires text.model()[at] == 39
+  ensures !(result is Ok(_) && !text.is_boundary(at))
 {
   let start = at
   at = at.saturating_add(1)
   let from = at
-  while true {
+  while true
+    invariant from <= at
+    invariant at <= text.length()
+    invariant text.is_boundary(from)
+  {
     match peek(text, at: at) {
       Some(byte) => {
         if byte == 39 {
@@ -292,29 +339,45 @@ fn literal_string(text: String, at: mut UInt64) -> Result[String, Failure]
   }
 }
 
-fn starts_with_three(text: String, at: UInt64, byte: UInt8) -> Bool {
+fn starts_with_three(text: String, at: UInt64, byte: UInt8) -> Bool
+  ensures result ==> at + 2 < text.length()
+    && text.model()[at] == byte && text.model()[at + 1] == byte && text.model()[at + 2] == byte
+{
   peek(text, at: at) == Some(byte) && peek(text, at: at.saturating_add(1)) == Some(byte) && peek(text, at: at.saturating_add(2)) == Some(byte)
 }
 
 fn multiline_string(text: String, at: mut UInt64, quote: UInt8) -> Result[String, Failure]
   uses RunForever
+  requires quote == 34 || quote == 39
+  requires at + 2 < text.length()
+  requires text.model()[at + 2] == quote
+  ensures !(result is Ok(_) && !text.is_boundary(at))
 {
   let start = at
   at = at.saturating_add(3)
   let _ = skip_newline(text, at: mut at)
   var output = ""
   var run = at
-  while true {
+  while true
+    invariant run <= at
+    invariant at <= text.length()
+    invariant text.is_boundary(run)
+  {
     match peek(text, at: at) {
       Some(byte) => {
         if byte == quote && starts_with_three(text, at: at, byte: quote) {
           var end = at + 3
           var extra: UInt64 = 0
-          while extra < 2 && peek(text, at: end) == Some(quote) {
+          while extra < 2 && peek(text, at: end) == Some(quote)
+            invariant extra <= 2
+            invariant end == at + 3 + extra
+            invariant end <= text.length()
+            invariant text.model()[end - 1] == quote
+          {
             end += 1
             extra += 1
           }
-          push_byte_run(mut output, text: text, from: run, to: at.saturating_add(extra))
+          push_byte_run(mut output, text: text, from: run, to: at + extra)
           at = end
           return Ok(own output)
         }
@@ -324,7 +387,9 @@ fn multiline_string(text: String, at: mut UInt64, quote: UInt8) -> Result[String
           skip_spaces(text, at: mut after)
           if peek(text, at: after) == Some(10) || (peek(text, at: after) == Some(13) && peek(text, at: after.saturating_add(1)) == Some(10)) {
             at = after
-            while true {
+            while true
+              invariant text.is_boundary(at)
+            {
               skip_spaces(text, at: mut at)
               if !skip_newline(text, at: mut at) {
                 break
@@ -349,6 +414,8 @@ fn multiline_string(text: String, at: mut UInt64, quote: UInt8) -> Result[String
 
 fn simple_key(text: String, at: mut UInt64) -> Result[String, Failure]
   uses RunForever
+  requires text.is_boundary(at)
+  ensures !(result is Ok(_) && !text.is_boundary(at))
 {
   match peek(text, at: at) {
     Some(byte) => {
@@ -359,9 +426,7 @@ fn simple_key(text: String, at: mut UInt64) -> Result[String, Failure]
         return literal_string(text, at: mut at)
       }
       let from = at
-      while peek(text, at: at) is Some(next) && is_bare_key_byte(next) {
-        at += 1
-      }
+      at = bare_key_end(text, from: at)
       if at == from {
         return Err(failure_at("expected a key", offset: at))
       }
@@ -373,11 +438,31 @@ fn simple_key(text: String, at: mut UInt64) -> Result[String, Failure]
   }
 }
 
+fn bare_key_end(text: String, from: UInt64) -> UInt64
+  uses RunForever
+  requires text.is_boundary(from)
+  ensures from <= result
+  ensures text.is_boundary(result)
+{
+  var at = from
+  while peek(text, at: at) is Some(next) && is_bare_key_byte(next)
+    invariant from <= at
+    invariant text.is_boundary(at)
+  {
+    at += 1
+  }
+  at
+}
+
 fn dotted_key(text: String, at: mut UInt64) -> Result[List[String], Failure]
   uses RunForever
+  requires text.is_boundary(at)
+  ensures !(result is Ok(_) && !text.is_boundary(at))
 {
   var keys: List[String] = []
-  while true {
+  while true
+    invariant text.is_boundary(at)
+  {
     skip_spaces(text, at: mut at)
     mut keys.push(simple_key(text, at: mut at)?)
     skip_spaces(text, at: mut at)
@@ -389,13 +474,17 @@ fn dotted_key(text: String, at: mut UInt64) -> Result[List[String], Failure]
 }
 
 fn token_end(text: String, from: UInt64) -> UInt64
+  requires from <= text.length()
   ensures result >= from
+  ensures result <= text.length()
+  ensures text.is_boundary(result)
   uses RunForever
 {
   var at = from
   while peek(text, at: at) is Some(byte)
     && byte != 32 && byte != 9 && byte != 10 && byte != 13 && byte != 44 && byte != 93 && byte != 125 && byte != 35
     invariant at >= from
+    invariant at <= text.length()
   {
     at += 1
   }
@@ -420,6 +509,8 @@ fn is_time_at(text: String, at: UInt64) -> Bool {
 
 fn date_time_value(text: String, at: mut UInt64) -> Result[Value, Failure]
   uses RunForever
+  requires text.is_boundary(at)
+  ensures !(result is Ok(_) && !text.is_boundary(at))
 {
   let start = at
   var end = token_end(text, from: at)
@@ -434,12 +525,15 @@ fn date_time_value(text: String, at: mut UInt64) -> Result[Value, Failure]
   var normalized = ""
   for index in start..end {
     let byte = text.byte(index)
+    if byte > 127 {
+      return Err(failure_at("expected a date or a time", offset: start))
+    }
     if byte == 32 || byte == 116 {
       mut normalized.push("T")
     } else if byte == 122 {
       mut normalized.push("Z")
     } else {
-      push_byte_run(mut normalized, text: text, from: index, to: index + 1)
+      mut normalized.push_byte(byte)
     }
   }
   at = end
@@ -494,8 +588,10 @@ fn without_underscores(token: String, start: UInt64, hexadecimal: Bool) -> Resul
       if !(is_digit_of(previous, hexadecimal: hexadecimal) && is_digit_of(next, hexadecimal: hexadecimal)) {
         return Err(failure_at("an underscore that is not between two digits", offset: start.saturating_add(index)))
       }
+    } else if byte > 127 {
+      return Err(failure_at("expected a value", offset: start.saturating_add(index)))
     } else {
-      push_byte_run(mut digits, text: token, from: index, to: index + 1)
+      mut digits.push_byte(byte)
     }
     previous = byte
   }
@@ -504,6 +600,8 @@ fn without_underscores(token: String, start: UInt64, hexadecimal: Bool) -> Resul
 
 fn number_value(text: String, at: mut UInt64) -> Result[Value, Failure]
   uses RunForever
+  requires text.is_boundary(at)
+  ensures !(result is Ok(_) && !text.is_boundary(at))
 {
   let start = at
   let end = token_end(text, from: at)
@@ -561,7 +659,11 @@ fn number_value(text: String, at: mut UInt64) -> Result[Value, Failure]
   }
 }
 
-fn after_element(text: String, at: mut UInt64, closing: UInt8, inside: String) -> Result[Bool, Failure] {
+fn after_element(text: String, at: mut UInt64, closing: UInt8, inside: String) -> Result[Bool, Failure]
+  requires closing <= 127
+  requires text.is_boundary(at)
+  ensures !(result is Ok(_) && !text.is_boundary(at))
+{
   match peek(text, at: at) {
     Some(byte) => {
       if byte == 44 {
@@ -586,12 +688,17 @@ fn after_element(text: String, at: mut UInt64, closing: UInt8, inside: String) -
 
 fn array_value(text: String, at: mut UInt64, depth: UInt64) -> Result[Value, Failure]
   requires depth <= 128
+  requires at < text.length()
+  requires text.model()[at] == 91
+  ensures !(result is Ok(_) && !text.is_boundary(at))
   uses RunForever
 {
   at = at.saturating_add(1)
   var items: List[Value] = []
   var open = true
-  while open {
+  while open
+    invariant text.is_boundary(at)
+  {
     skip_blank(text, at: mut at)?
     if peek(text, at: at) == Some(93) {
       at += 1
@@ -608,6 +715,8 @@ fn array_value(text: String, at: mut UInt64, depth: UInt64) -> Result[Value, Fai
 
 fn parse_value(text: String, at: mut UInt64, depth: UInt64) -> Result[Value, Failure]
   uses RunForever
+  requires text.is_boundary(at)
+  ensures !(result is Ok(_) && !text.is_boundary(at))
 {
   if depth > 128 {
     return Err(failure_at("values nested too deeply", offset: at))
@@ -851,6 +960,9 @@ fn Document.finish(own self) -> Map[String, Value]
 
 fn inline_table_value(text: String, at: mut UInt64, depth: UInt64) -> Result[Value, Failure]
   requires depth <= 128
+  requires at < text.length()
+  requires text.model()[at] == 123
+  ensures !(result is Ok(_) && !text.is_boundary(at))
   uses RunForever
 {
   at = at.saturating_add(1)
@@ -860,7 +972,9 @@ fn inline_table_value(text: String, at: mut UInt64, depth: UInt64) -> Result[Val
   if !open {
     at = at.saturating_add(1)
   }
-  while open {
+  while open
+    invariant text.is_boundary(at)
+  {
     skip_spaces(text, at: mut at)
     let key_at = at
     let keys = dotted_key(text, at: mut at)?
@@ -888,6 +1002,9 @@ public fn parse(text: String) -> Result[Map[String, Value], ParseError]
 
 fn header_line(text: String, at: mut UInt64, document: mut Document) -> Result[UInt64, Failure]
   uses RunForever
+  requires at < text.length()
+  requires text.model()[at] == 91
+  ensures !(result is Ok(_) && !text.is_boundary(at))
 {
   let line_at = at
   let array = peek(text, at: at.saturating_add(1)) == Some(91)
@@ -910,6 +1027,8 @@ fn header_line(text: String, at: mut UInt64, document: mut Document) -> Result[U
 
 fn key_value_line(text: String, at: mut UInt64, document: mut Document, table: UInt64) -> Result[Unit, Failure]
   uses RunForever
+  requires text.is_boundary(at)
+  ensures !(result is Ok(_) && !text.is_boundary(at))
 {
   let line_at = at
   let keys = dotted_key(text, at: mut at)?
@@ -930,10 +1049,15 @@ fn parse_document(text: String) -> Result[Map[String, Value], Failure]
   var table: UInt64 = 0
   var at: UInt64 = 0
   if text.starts_with("\u{feff}") {
+    proof {
+      utf8.match_lies_between_boundaries(text.model(), part: "\u{feff}".model(), at: 0)
+    }
     at = 3
   }
   skip_blank(text, at: mut at)?
-  while peek(text, at: at) is Some(byte) {
+  while peek(text, at: at) is Some(byte)
+    invariant text.is_boundary(at)
+  {
     if byte == 91 {
       table = header_line(text, at: mut at, document: mut document)?
     } else {

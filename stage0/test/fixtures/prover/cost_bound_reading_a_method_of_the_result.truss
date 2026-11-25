@@ -1,0 +1,16 @@
+type Bounded(count: UInt64)
+  invariant count <= 10
+
+fn Bounded.size(self) -> UInt64
+  ensures result <= 10
+  cost time O(1)
+{
+  self.count
+}
+
+fn bounded(count: UInt64) -> Bounded
+  requires count <= 10
+  cost time O(1 + result.size())
+{
+  Bounded(count: count)
+}

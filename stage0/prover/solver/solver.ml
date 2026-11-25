@@ -267,9 +267,21 @@ let solve solver ~find_output request =
     | Unsatisfiable -> true
     | Satisfiable _ | Undecided _ -> false
   in
+  let is_proven_one_conjunct_at_a_time () =
+    match Logic.list_conjunct_queries request.query with
+    | [] -> false
+    | conjuncts ->
+        List.for_all
+          (fun conjunct ->
+            match check ~is_asking_values:false (Logic.show_query conjunct) with
+            | Unsatisfiable -> true
+            | Satisfiable _ | Undecided _ -> false)
+          conjuncts
+  in
   let status =
     match check ~is_asking_values:true request.text with
     | Undecided _ when is_proven_from_ground_facts () -> Unsatisfiable
+    | Undecided Out_of_steps when is_proven_one_conjunct_at_a_time () -> Unsatisfiable
     | Undecided _ as undecided when Logic.has_uninterpreted_sort request.query ->
         let rec search_from = function
           | [] -> undecided

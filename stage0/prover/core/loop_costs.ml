@@ -180,7 +180,7 @@ let enter (context : State.context) (frame : State.frame) ~entry clauses ~holds 
   {
     costs;
     fresh_mark = context.fresh;
-    facts_mark = List.length context.facts;
+    facts_mark = Fact_list.count context.facts;
     recursive_costs_mark = context.cost.recursive_costs_assumed;
     changed;
   }
@@ -324,7 +324,9 @@ let assumes_recursive_costs (context : State.context) loop =
 let check_iterations context loop_at (head : State.frame) loop ~iterations ~iteration_bounds
     ~(inside : State.frame) ~ends ~breaks =
   let location = Facts.locate context head.source loop_at in
-  let facts = Facts.list_facts_since context loop.facts_mark @ [ inside.condition ] in
+  let facts =
+    Fact_list.list_newest_since context.facts ~count:loop.facts_mark @ [ inside.condition ]
+  in
   let frames = ends @ breaks and varies = Facts.mentions_fresh_after context loop.fresh_mark in
   let constant_count =
     if assumes_recursive_costs context loop then None
@@ -442,7 +444,8 @@ let check_iterations context loop_at (head : State.frame) loop ~iterations ~iter
                 (Logic.Boolean false)))
     loop.costs
 
-let list_facts context loop = Facts.list_facts_since context loop.facts_mark
+let list_facts (context : State.context) loop =
+  Fact_list.list_newest_since context.facts ~count:loop.facts_mark
 
 let list_upper_bounds context loop ~facts term =
   Costs.list_upper_bounds ~varies:(Facts.mentions_fresh_after context loop.fresh_mark) ~facts term
