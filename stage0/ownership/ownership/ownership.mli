@@ -1,7 +1,7 @@
 module Lookups = Lookups
 
 type result = {
-  diagnostics : Diagnostic.in_definition list;
+  diagnostics : Catalog.diagnostic list;
   must_be_disjoint : (Core.id list * Core.id list) list;
 }
 

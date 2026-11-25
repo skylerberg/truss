@@ -2,6 +2,7 @@ type test = { path : Path.t; module_ : Path.module_; name : string; file : strin
 
 let select snapshot database packages ~paths ~match_ =
   let names = Database.make_name_lookups database in
+  let source_lookups = Database.make_source_lookups database in
   List.concat_map
     (fun (file : Path.file) ->
       let source = Command_packages.read_source snapshot database file in
@@ -13,7 +14,8 @@ let select snapshot database packages ~paths ~match_ =
                  && match match_ with Some text -> String.includes ~affix:text name | None -> true
             ->
               let line =
-                fst (Source.compute_position source (names.read_place declaration.key).base)
+                fst
+                  (Source.compute_position source (source_lookups.read_place declaration.key).base)
               in
               Some
                 {

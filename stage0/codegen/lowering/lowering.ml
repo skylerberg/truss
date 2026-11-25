@@ -20,6 +20,7 @@ type linked =
 type lowered_lookups = {
   system : Libc.system;
   read_source : Path.file -> Source.t;
+  source : Resolve.Names.source;
   interface : Interface.Lookups.t;
   find_lowered : Lowered.Item.t -> (lowered, unbuildable) result option;
   find_evaluation : Lowered.Item.t -> evaluation option;
@@ -81,9 +82,9 @@ let is_evaluated = function Evaluate _ -> true | Compiled _ | Folded _ -> false
 let make_data env item ty encoded =
   Emit_c.make_data_fragment env { data_item = item; ty; value = Encoding.decode env ty encoded }
 
-let render_unit system (interface : Interface.Lookups.t) profile ~read_source ~is_worked_on
+let render_unit system (interface : Interface.Lookups.t) ~source profile ~read_source ~is_worked_on
     ~find_lowered fragment =
-  let positions = Positions.create interface.names ~read_source in
+  let positions = Positions.create interface.names ~source ~read_source in
   Emit_c.render_unit (make_env system interface) profile
     ~resolve_position:(fun site ->
       let { Positions.file; line; column } = Positions.locate_site positions site in

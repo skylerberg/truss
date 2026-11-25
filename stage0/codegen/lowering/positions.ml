@@ -2,6 +2,7 @@ module Path_table = Hashtbl.Make (Path)
 
 type t = {
   names : Resolve.Names.lookups;
+  source : Resolve.Names.source;
   read_source : Path.file -> Source.t;
   places : Resolve.Names.place Path_table.t;
   sources : (Path.file, Source.t) Hashtbl.t;
@@ -9,14 +10,14 @@ type t = {
 
 type location = { file : Path.file; line : int; column : int }
 
-let create names ~read_source =
-  { names; read_source; places = Path_table.create 16; sources = Hashtbl.create 4 }
+let create names ~source ~read_source =
+  { names; source; read_source; places = Path_table.create 16; sources = Hashtbl.create 4 }
 
 let read_place positions definition =
   match Path_table.find_opt positions.places definition with
   | Some place -> place
   | None -> (
-      match Option.map positions.names.read_place (positions.names.find_key definition) with
+      match Option.map positions.source.read_place (positions.names.find_key definition) with
       | Some place ->
           Path_table.replace positions.places definition place;
           place

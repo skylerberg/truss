@@ -38,8 +38,8 @@ let locate_name packages name text occurrence =
         let key = declaration.key in
         match
           ( (Support.make_names packages).read_definition key,
-            (Support.make_names packages).read_spans key,
-            (Support.make_names packages).read_place key,
+            (Support.make_source packages).read_spans key,
+            (Support.make_source packages).read_place key,
             Database.read_resolved (Support.make_database packages) key )
         with
         | definition, spans, { base; _ }, Some resolved ->
@@ -249,8 +249,8 @@ let find_bracket text written occurrence =
       let key = declaration.key in
       match
         ( (Support.make_names packages).read_definition key,
-          (Support.make_names packages).read_spans key,
-          (Support.make_names packages).read_place key,
+          (Support.make_source packages).read_spans key,
+          (Support.make_source packages).read_place key,
           Database.read_resolved (Support.make_database packages) key )
       with
       | definition, spans, { base; _ }, Some resolved ->

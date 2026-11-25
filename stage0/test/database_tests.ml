@@ -522,7 +522,8 @@ let count_termination_obligations database ~of_:path =
   | Some (Value (Obligations outcome)) ->
       List.length
         (List.filter
-           (fun (obligation : Prover.Obligation.t) -> obligation.code = Termination)
+           (fun (obligation : Prover.Obligation.t) ->
+             Catalog.Prover_description.find_code obligation.obligation = Termination)
            outcome.obligations)
   | Some (Value (Unsupported _ | Not_proven_here) | Failed | Blocked) | None ->
       failwith ("the proof of " ^ Path.show path ^ " makes no obligations")
@@ -712,7 +713,7 @@ let () =
         (Type_check (make_main_key "Outer"))
         ~includes:[ Name (Tree (make_main_key "Outer")) ]
         ~excludes:[ Name (Place (make_main_key "Outer")); Name (Place (make_main_key "Inner")) ]);
-  Harness.test "a reformat inside a definition recomputes only that definition's proof" (fun () ->
+  Harness.test "a reformat inside a definition recomputes no proof" (fun () ->
       expect_recomputed
         (list_propagated
            ~before:[ ("app.main", callee_and_caller) ]
@@ -729,8 +730,36 @@ let () =
             Import_check (Support.parse_file "app.main");
             Declared (Support.parse_module "app.main");
             Parsed (Support.parse_file "app.main");
-            Proof (make_main_key "callee");
           ]);
+  Harness.test "a reformat inside a definition with a type error recomputes no check of it"
+    (fun () ->
+      let before = "public fn f() -> Int64 { \"one\" }\n"
+      and after = "public fn f() -> Int64 {\n  \"one\"\n}\n" in
+      let database = build [ ("app.main", before) ] in
+      let (), observed =
+        Database.For_testing.observe (fun () ->
+            Database.update database
+              (list_changes ~before:[ ("app.main", before) ] ~after:[ ("app.main", after) ]);
+            Database.For_testing.propagate database)
+      in
+      expect_recomputed observed.recomputed
+        ~exactly:
+          [
+            Import_check (Support.parse_file "app.main");
+            Declared (Support.parse_module "app.main");
+            Parsed (Support.parse_file "app.main");
+          ];
+      match Database.list_file_diagnostics database (Support.parse_file "app.main") with
+      | [ diagnostic ] when diagnostic.span.start = String.index after '"' -> ()
+      | diagnostics ->
+          Harness.fail "listed %s"
+            (String.concat "; "
+               (List.map
+                  (fun (diagnostic : Diagnostic.t) ->
+                    Printf.sprintf "%s at %d"
+                      (Diagnostic.Code.name diagnostic.code)
+                      diagnostic.span.start)
+                  diagnostics)));
   Harness.test "moving a definition to another file of its module recomputes no definition's part"
     (fun () ->
       expect_recomputed

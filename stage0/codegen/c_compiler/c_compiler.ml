@@ -57,7 +57,6 @@ let is_clang compiler = String.includes ~affix:"clang" compiler.identity
 let required_flags =
   [
     "-std=c11";
-    "-fwrapv";
     "-fno-strict-aliasing";
     "-fno-finite-loops";
     "-ffp-contract=off";

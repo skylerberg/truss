@@ -74,6 +74,26 @@ let list_tests store (package : Path.package) name =
 
 let name_law_proofs ~package ~law ~type_ = Printf.sprintf "%s %s %d" package law type_
 
+let read_column store ~(note : Kind.lookup -> int -> string -> unit) lookup
+    (key : Resolve.Names.key) find =
+  let id = Ids.of_key key in
+  note lookup id "";
+  match find store (Store.locate_schema store key.module_.package) ~definition:id with
+  | Some value -> value
+  | None ->
+      Compiler_bug.raise_bug ~stage:"Database" "%s is not declared" (Resolve.Names.show_key key)
+
+let make_source store ~note : Resolve.Names.source =
+  let read_column lookup key find = read_column store ~note lookup key find in
+  {
+    read_text = (fun key -> read_column Text key Store.find_text);
+    read_spans = (fun key -> Marshal.from_string (read_column Tree key Store.find_spans) 0);
+    read_place =
+      (fun key ->
+        let file, base = read_column Place key Store.find_place in
+        { file = decode_file file; base });
+  }
+
 let make_lookups store ~(note : Kind.lookup -> int -> string -> unit) ~is_package
     ~list_dependency_names : Resolve.Names.lookups =
   let locate (package : Path.package) = Store.locate_schema store package in
@@ -87,9 +107,9 @@ let make_lookups store ~(note : Kind.lookup -> int -> string -> unit) ~is_packag
     | None ->
         Compiler_bug.raise_bug ~stage:"Database" "%s is not declared" (Resolve.Names.show_key key)
   in
-  let read_column lookup key find =
-    look_up lookup key (fun schema id -> require key (find store schema ~definition:id))
-  in
+  let read_column lookup key find = read_column store ~note lookup key find in
+  let read_definition key = Marshal.from_string (read_column Tree key Store.find_tree) 0 in
+  let read_spans key = Marshal.from_string (read_column Tree key Store.find_spans) 0 in
   let list_written schema selection =
     List.filter_map
       (fun (row : Store.definition) ->
@@ -190,15 +210,17 @@ let make_lookups store ~(note : Kind.lookup -> int -> string -> unit) ~is_packag
         List.map snd (list_written (locate file.module_.package) (Of_file (Ids.of_file file))));
     list_package_declarations =
       (fun package -> list_sorted (locate package) (Of_package (Path.show_package package)));
-    read_definition = (fun key -> Marshal.from_string (read_column Tree key Store.find_tree) 0);
-    read_text = (fun key -> read_column Text key Store.find_text);
-    read_spans = (fun key -> Marshal.from_string (read_column Tree key Store.find_spans) 0);
-    list_syntax_errors =
-      (fun key -> Marshal.from_string (read_column Tree key Store.find_syntax_errors) 0);
-    read_place =
+    read_definition;
+    read_order = (fun key -> Source.Node_order.compute (read_spans key));
+    list_broken_parts =
       (fun key ->
-        let file, base = read_column Place key Store.find_place in
-        { file = decode_file file; base });
+        Resolve.Parts.list_broken_parts ~spans:(read_spans key)
+          ~syntax_errors:(Marshal.from_string (read_column Tree key Store.find_syntax_errors) 0)
+          (read_definition key));
+    read_file_order =
+      (fun key ->
+        let file, index = read_column Place key Store.find_file_order in
+        { file = decode_file file; index });
     find_container =
       (fun key ->
         look_up Container key (fun schema id ->

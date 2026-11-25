@@ -4,9 +4,9 @@
  (libraries
   language
   compiler_bug
-  diagnostic
+  catalog
+  core
   path
-  source
   resolve
   syntax
   syntax_walk

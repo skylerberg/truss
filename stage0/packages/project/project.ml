@@ -49,9 +49,10 @@ type package = {
 }
 
 type source_file = { path : string; directory : string; file : Path.file }
-type problem = { file : string; line : int option; message : string }
+type problem = { file : string; line : int option; problem : Project_catalog.Problem.t }
 
-let show_problem { file; line; message } =
+let show_problem { file; line; problem } =
+  let message = Project_catalog.describe problem in
   match line with
   | Some line -> Printf.sprintf "%s:%d: %s" file line message
   | None -> Printf.sprintf "%s: %s" file message
@@ -66,11 +67,8 @@ type layout = {
 
 let list_files (files : files) root = Option.value (files.find_tree root) ~default:[]
 
-let report_manifest_problem problems directory format =
-  Printf.ksprintf
-    (fun message ->
-      problems := { file = make_manifest_path directory; line = None; message } :: !problems)
-    format
+let report_manifest_problem problems directory problem =
+  problems := { file = make_manifest_path directory; line = None; problem } :: !problems
 
 let lay_out (files_in : files) root =
   let files = list_files files_in root in
@@ -105,33 +103,35 @@ let lay_out (files_in : files) root =
         else
           match Manifest.parse text with
           | manifest -> Some (directory, manifest)
-          | exception Manifest.Malformed { line; message } ->
+          | exception Manifest.Malformed { line; problem } ->
               problems :=
-                { file = make_manifest_path directory; line = Some line; message } :: !problems;
+                {
+                  file = make_manifest_path directory;
+                  line = Some line;
+                  problem = Manifest problem;
+                }
+                :: !problems;
               None)
       manifests
   in
-  let read_project_setting ~default ~table ~owner read =
+  let read_project_setting ~default ~setting:nested read =
     List.fold_left
       (fun setting (directory, (manifest : Manifest.t)) ->
         match read manifest with
         | Some written when directory = "" -> written
         | Some _ ->
-            report_problem directory
-              "%s is its project's. Write `[%s]` in the project's manifest, `truss.toml` at its \
-               root."
-              owner table;
+            report_problem directory (Nested_project_setting nested);
             setting
         | None -> setting)
       default parsed
   in
   let time_limit_seconds =
-    read_project_setting ~default:Manifest.default_time_limit_seconds ~table:"test"
-      ~owner:"A test's time limit" (fun manifest -> manifest.time_limit_seconds)
+    read_project_setting ~default:Manifest.default_time_limit_seconds ~setting:Time_limit
+      (fun manifest -> manifest.time_limit_seconds)
   in
   let x86_64_level =
-    read_project_setting ~default:X86_64_level.default ~table:"build"
-      ~owner:"A build's x86-64 level" (fun manifest -> manifest.x86_64_level)
+    read_project_setting ~default:X86_64_level.default ~setting:X86_64_level (fun manifest ->
+        manifest.x86_64_level)
   in
   let seen = Package_table.create 8 in
   let packages =
@@ -140,13 +140,13 @@ let lay_out (files_in : files) root =
         match manifest.package with
         | None -> None
         | Some package when root = Project && package.name = Path.standard_package ->
-            report_problem directory "The package name `standard` is the standard library's.";
+            report_problem directory Standard_name;
             None
         | Some package -> (
             match Package_table.find_opt seen package.name with
             | Some other ->
-                report_problem directory "The package name `%s` is already used by %s."
-                  (Path.show_package package.name) (make_manifest_path other);
+                report_problem directory
+                  (Name_in_use { name = package.name; manifest = make_manifest_path other });
                 None
             | None ->
                 Package_table.replace seen package.name directory;
@@ -189,17 +189,13 @@ let select_packages (files : files) (project_layout : layout) =
     List.exists (fun (package : Manifest.package) -> package.name = name) packages
   in
   let problems = ref [] in
-  let lock_problem format =
-    Printf.ksprintf
-      (fun message -> problems := { file = lock_file; line = None; message } :: !problems)
-      format
-  in
+  let lock_problem problem = problems := { file = lock_file; line = None; problem } :: !problems in
   let written_text = files.find_text Project lock_file in
   let written =
     match Registry.Lock.parse (Option.value ~default:"" written_text) with
     | entries -> Some entries
-    | exception Registry.Lock.Malformed { line; message } ->
-        problems := { file = lock_file; line = Some line; message } :: !problems;
+    | exception Registry.Lock.Malformed { line; problem } ->
+        problems := { file = lock_file; line = Some line; problem = Lock problem } :: !problems;
         None
   in
   let missing = ref [] and failed = ref [] in
@@ -210,10 +206,10 @@ let select_packages (files : files) (project_layout : layout) =
         match files.find_unavailable_reason hash with
         | Some reason ->
             failed := hash :: !failed;
-            Error reason
+            Error (Project_catalog.Problem.Unavailable reason)
         | None ->
             missing := (name, version, hash) :: !missing;
-            Error "its files are not fetched yet")
+            Error Project_catalog.Problem.Unfetched)
     | Some _ -> Registry.Selection.read_manifest_and_record ~read:(files.find_text root) name
   in
   let selected, selection_problems =
@@ -235,17 +231,19 @@ let select_packages (files : files) (project_layout : layout) =
   let is_build_fetched = missing = [] in
   let lock_fix = ref None in
   if is_build_fetched then begin
-    List.iter
-      (fun problem -> lock_problem "%s" (Registry.Selection.describe_problem problem))
-      selection_problems;
+    List.iter (fun problem -> lock_problem (Selection problem)) selection_problems;
     List.iter
       (fun (selected : Registry.Selection.package) ->
         match selected.manifest.truss with
         | Some version when not (Manifest.toolchain_builds version) ->
-            lock_problem "`%s` %s is written for Truss %s, and this toolchain is Truss %s."
-              (Path.show_package selected.name)
-              (Registry.Version.show selected.version)
-              version Manifest.truss_version
+            lock_problem
+              (Registry_toolchain
+                 {
+                   name = selected.name;
+                   version = selected.version;
+                   truss = version;
+                   toolchain = Manifest.truss_version;
+                 })
         | _ -> ())
       selected;
     match written with
@@ -260,11 +258,7 @@ let select_packages (files : files) (project_layout : layout) =
         if current = [] && written_text = None then ()
         else if written_text <> Some text then begin
           lock_fix := Some text;
-          lock_problem "This is not the lock file the manifests give. %sRun `truss check --fix`."
-            (String.concat ""
-               (List.map
-                  (fun difference -> difference ^ " ")
-                  (Registry.Selection.list_differences ~written ~current)))
+          lock_problem (Stale_lock (Registry.Selection.list_differences ~written ~current))
         end
     | _ -> ()
   end;
@@ -343,13 +337,10 @@ let make_cycle_problem ((place : place), cycle) =
       | Project -> make_manifest_path place.directory
       | Registry _ -> lock_file);
     line = None;
-    message =
+    problem =
       (match cycle with
-      | [ package; _ ] -> Printf.sprintf "`%s` cannot depend on itself." (Path.show_package package)
-      | cycle ->
-          Printf.sprintf "Packages cannot depend on each other in a cycle: %s."
-            (String.concat " -> "
-               (List.map (fun package -> Printf.sprintf "`%s`" (Path.show_package package)) cycle)));
+      | [ package; _ ] -> Self_dependency package
+      | cycle -> Dependency_cycle cycle);
   }
 
 let list_problems (project_layout : layout) (chosen : selection) =
@@ -363,22 +354,18 @@ let list_problems (project_layout : layout) (chosen : selection) =
     (fun (directory, (package : Manifest.package)) ->
       (match package.truss with
       | None ->
-          report_problem directory
-            "`[package]` needs `truss = \"%s\"`, the version of Truss the package is written for."
-            Manifest.truss_version
+          report_problem directory (Missing_truss_version { toolchain = Manifest.truss_version })
       | Some version when not (Manifest.toolchain_builds version) ->
-          report_problem directory "`%s` is written for Truss %s, and this toolchain is Truss %s."
-            (Path.show_package package.name) version Manifest.truss_version
+          report_problem directory
+            (Project_toolchain
+               { name = package.name; truss = version; toolchain = Manifest.truss_version })
       | Some _ -> ());
       (match package.name with
       | { owner = None; name } ->
           List.iter
             (fun (other : Path.package) ->
               if other.owner = Some name then
-                report_problem directory
-                  "The package name `%s` is the owner in `%s`, so a path that starts with it could \
-                   be read two ways. Give one of them another name."
-                  name (Path.show_package other))
+                report_problem directory (Owner_named_like { name; other }))
             (List.sort_uniq Path.compare_package
                (List.map (fun (_, (package : Manifest.package)) -> package.name) packages
                @ List.concat_map
@@ -391,8 +378,7 @@ let list_problems (project_layout : layout) (chosen : selection) =
       List.iter
         (fun (dependency : Manifest.dependency) ->
           if dependency.package.owner = None && find_named dependency.package = None then
-            report_problem directory "`%s` is not a package of this project."
-              (Path.show_package dependency.package))
+            report_problem directory (Not_a_project_package dependency.package))
         package.dependencies)
     packages;
   project_layout.problems @ chosen.lock_problems @ List.rev !problems

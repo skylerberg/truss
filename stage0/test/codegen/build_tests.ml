@@ -536,3 +536,30 @@ let () =
             [ "__AVX512F__"; "__AVX512DQ__"; "__AVX512CD__"; "__AVX512BW__"; "__AVX512VL__" ],
             [ "__AVX10_2__" ] );
         ]
+
+let () =
+  Codegen_support.test "an object folds a comparison that holds unless signed arithmetic wraps"
+    (fun () ->
+      let directory = Filename.concat (Lazy.force Codegen_support.scratch) "signed-overflow" in
+      match C_compiler.find ~x86_64_level:X86_64_level.default ~objects:directory () with
+      | Error message -> failwith message
+      | Ok c_compiler when C_compiler.For_testing.has_sanitizer c_compiler -> ()
+      | Ok c_compiler -> (
+          match
+            C_compiler.For_testing.compile_objects c_compiler Development
+              [
+                C_compiler.make_source ~name:"successor"
+                  "void truss_signed_arithmetic_wraps(void);\n\
+                   void truss_compare_successor(long long value) {\n\
+                  \  if (!(value + 1 > value)) truss_signed_arithmetic_wraps();\n\
+                   }\n";
+              ]
+          with
+          | Ok [ path ] ->
+              if
+                String.includes ~affix:"truss_signed_arithmetic_wraps"
+                  (In_channel.with_open_bin path In_channel.input_all)
+              then
+                Codegen_support.fail "the object keeps the comparison, so signed arithmetic wraps"
+          | Ok _ -> failwith "one source made several objects"
+          | Error message -> failwith message))

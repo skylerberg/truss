@@ -12,46 +12,21 @@ let contains_run_forever (uses : Types.capability_set) =
     (fun capability -> Types.find_base capability = Built_in Run_forever)
     (Types.list_capabilities uses)
 
-let is_space character = character = ' ' || character = '\n' || character = '\r' || character = '\t'
+let cover_use (use : Syntax.capability_use) : Core.origin Catalog.range =
+  {
+    covering =
+      Core.Written use.capability.id
+      :: List.map
+           (fun (bound : Syntax.bound_condition) -> Core.Written bound.id)
+           (Option.value use.unless ~default:[])
+      @ List.map (fun (value : Syntax.expression) -> Core.Written value.id) use.unless_values;
+  }
 
-let rec skip_spaces_before text position =
-  if position > 0 && is_space text.[position - 1] then skip_spaces_before text (position - 1)
-  else position
-
-let rec skip_spaces_after text position =
-  if position < String.length text && is_space text.[position] then
-    skip_spaces_after text (position + 1)
-  else position
-
-let delete_clause ~text ~is_only_clause (clause : Source.Definition_span.t) =
-  let start = skip_spaces_before text clause.start in
-  let brace = skip_spaces_after text clause.stop in
-  let is_brace_on_own_line =
-    brace < String.length text
-    && text.[brace] = '{'
-    && String.contains (String.sub text clause.stop (brace - clause.stop)) '\n'
-  in
-  if is_only_clause && is_brace_on_own_line then
-    Diagnostic.replace (Source.Definition_span.make start brace) " "
-  else Diagnostic.delete (Source.Definition_span.make start clause.stop)
-
-let locate_use spans (use : Syntax.capability_use) =
-  let locate id = Source.Definition_span.locate spans id in
-  let capability = locate use.capability.id in
-  let stops =
-    List.map
-      (fun (bound : Syntax.bound_condition) -> (locate bound.id).stop)
-      (Option.value use.unless ~default:[])
-    @ List.map (fun (value : Syntax.expression) -> (locate value.id).stop) use.unless_values
-  in
-  Source.Definition_span.make capability.start (List.fold_left max capability.stop stops)
-
-let make_removal ~text ~spans (signature : Syntax.signature) (clause : Syntax.clause)
-    (uses : Syntax.capability_use list) index =
-  if List.length uses = 1 then
-    delete_clause ~text ~is_only_clause:(signature.clauses = [ clause ])
-      (Source.Definition_span.locate spans clause.id)
-  else Diagnostic.delete_list_entry (List.map (locate_use spans) uses) index
+let find_siblings (signature : Syntax.signature) (clause : Syntax.clause) uses index :
+    Core.origin Catalog.siblings =
+  match uses with
+  | [ _ ] -> Alone { clause = Written clause.id; is_only_clause = signature.clauses = [ clause ] }
+  | _ -> Catalog.read_entry_siblings (List.map cover_use uses) index
 
 let list_run_forever_entries (signature : Syntax.signature) =
   List.concat_map
@@ -79,17 +54,13 @@ let find (lookups : Lookups.t) (key : Resolve.Names.key) (definition : Syntax.de
          && not (lookups.uses_run_forever key || lookups.is_recursive key.path) -> (
       match list_run_forever_entries signature with
       | [ (clause, uses, index) ] ->
-          let spans = names.read_spans key in
           Some
-            (Diagnostic.make ~severity:Warning ~code:(Usage Unused_run_forever)
-               ~fixes:
-                 [
-                   Diagnostic.fix "Remove `RunForever`"
-                     [ make_removal ~text:(names.read_text key) ~spans signature clause uses index ];
-                 ]
-               (locate_use spans (List.nth uses index))
-               (Printf.sprintf
-                  "Nothing in `%s` may run forever, so its `RunForever` is unused. Remove it."
-                  (Path.show key.path)))
+            (Catalog.Usage
+               (Unused_run_forever
+                  {
+                    function_ = key.path;
+                    entry = cover_use (List.nth uses index);
+                    siblings = find_siblings signature clause uses index;
+                  }))
       | [] | _ :: _ :: _ -> None)
   | _ -> None

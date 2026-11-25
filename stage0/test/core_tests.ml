@@ -48,7 +48,10 @@ and show_expression (node : Core.expression) =
         match callee.target with
         | Trait_method { self_type; evidence; _ } ->
             Printf.sprintf " for %s by %s" (Types.show self_type)
-              (match evidence with Impl { impl; _ } -> Path.show impl | Bound -> "a bound")
+              (match evidence with
+              | Impl { impl; _ } -> Path.show impl
+              | Derived_for_view { viewed; _ } -> "a view of " ^ Path.show viewed
+              | Bound -> "a bound")
         | _ -> ""
       in
       Printf.sprintf "%s%s(%s)"
@@ -88,7 +91,9 @@ let make_definition_form text (path : Path.t) =
   in
   match definition with
   | Some (key, core) ->
-      Core_lint.check (Database.make_interface_lookups (Support.make_database packages)) key core;
+      Core_lint.check
+        (Database.make_interface_lookups (Support.make_database packages))
+        (Support.make_source packages) key core;
       core
   | None -> failwith (Printf.sprintf "`%s` has no core form" (Path.show path))
 
@@ -275,8 +280,8 @@ let () =
           let key = declaration.key in
           match
             ( find_core packages key,
-              (Support.make_names packages).read_spans key,
-              (Support.make_names packages).read_text key )
+              (Support.make_source packages).read_spans key,
+              (Support.make_source packages).read_text key )
           with
           | Some form, spans, written ->
               let actual = ref [] in
@@ -353,7 +358,9 @@ let () =
             Some
               (Printf.sprintf "%s(%s) for %s by %s" (Language.Metric.show metric)
                  (Core_lint.show_target method_) (Types.show self_type)
-                 (match evidence with Bound -> "a bound" | Impl _ -> "an impl"))
+                 (match evidence with
+                 | Bound -> "a bound"
+                 | Impl _ | Derived_for_view _ -> "an impl"))
         | Method_cost { metric; method_ } ->
             Some
               (Printf.sprintf "%s(%s)" (Language.Metric.show metric) (Core_lint.show_target method_))
@@ -388,8 +395,8 @@ let () =
           let key = declaration.key in
           match
             ( find_core packages key,
-              (Support.make_names packages).read_spans key,
-              (Support.make_names packages).read_text key )
+              (Support.make_source packages).read_spans key,
+              (Support.make_source packages).read_text key )
           with
           | ( Some { definition = Function { contract = { costs = [ cost ]; _ }; _ }; _ },
               spans,
@@ -614,7 +621,10 @@ let () =
       in
       match Database.read_checked_body database key with
       | Some { form; _ } ->
-          Core_lint.check (Database.make_interface_lookups database) key form;
+          Core_lint.check
+            (Database.make_interface_lookups database)
+            (Database.make_source_lookups database)
+            key form;
           expect_observed
             [ "intrinsic.shared_update uses [standard.capabilities.Tasks]" ]
             (List.filter_map

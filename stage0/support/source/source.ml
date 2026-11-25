@@ -36,6 +36,43 @@ module Definition_span = struct
     String.sub text span.start (span.stop - span.start)
 end
 
+module Node_order = struct
+  type t = { ranks : int array; last_contained : int array }
+
+  let compute (spans : Definition_span.t array) =
+    let count = Array.length spans in
+    let ordered = Array.init count Fun.id in
+    Array.stable_sort
+      (fun left right ->
+        compare (spans.(left).start, -spans.(left).stop) (spans.(right).start, -spans.(right).stop))
+      ordered;
+    let ranks = Array.make count 0 and last_contained = Array.make count 0 in
+    let encloses outer inner =
+      spans.(outer).start <= spans.(inner).start && spans.(inner).stop <= spans.(outer).stop
+    in
+    let enclosing = ref [] in
+    Array.iteri
+      (fun rank id ->
+        ranks.(id) <- rank;
+        let rec close = function
+          | outer :: rest when not (encloses outer id) ->
+              last_contained.(outer) <- rank - 1;
+              close rest
+          | open_ -> open_
+        in
+        enclosing := id :: close !enclosing)
+      ordered;
+    List.iter (fun id -> last_contained.(id) <- count - 1) !enclosing;
+    { ranks; last_contained }
+
+  let count order = Array.length order.ranks
+  let compare order left right = Int.compare order.ranks.(left) order.ranks.(right)
+
+  let contains order ~outer ~inner =
+    order.ranks.(outer) <= order.ranks.(inner)
+    && order.ranks.(inner) <= order.last_contained.(outer)
+end
+
 type t = { path : string; text : string; line_starts : int array }
 
 let byte_order_mark = "\xEF\xBB\xBF"

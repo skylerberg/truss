@@ -1,3 +1,11 @@
 (library
  (name registry)
- (libraries structural_key unix blake3 path grant manifest file_system))
+ (libraries
+  structural_key
+  unix
+  blake3
+  path
+  grant
+  manifest
+  file_system
+  project_catalog))

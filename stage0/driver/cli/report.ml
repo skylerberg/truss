@@ -8,7 +8,7 @@ type t = {
 }
 
 let make_shown_file snapshot database file diagnostics =
-  match Diagnostic.select_shown diagnostics with
+  match Description.select_shown diagnostics with
   | [] -> None
   | diagnostics ->
       Some { file; source = Command_packages.read_source snapshot database file; diagnostics }
@@ -46,12 +46,11 @@ let gather ~proofs database snapshot packages =
             {
               Project.file;
               line = None;
-              message =
+              problem =
                 (match problem with
                 | Not_a_capability { dependency; capability } ->
-                    Interface.Grants.describe_not_a_capability ~dependency capability
-                | Unused_dependency dependency ->
-                    Package_checks.describe_unused_dependency ~package dependency);
+                    Ungranted_capability { dependency; capability }
+                | Unused_dependency dependency -> Unused_dependency { package; dependency });
             })
           (Command_packages.list_manifest_problems snapshot database packages);
   }

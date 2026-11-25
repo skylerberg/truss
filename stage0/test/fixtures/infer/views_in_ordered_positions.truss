@@ -1,0 +1,17 @@
+fn sorted_words(text: String) -> UInt64 {
+  var words = text.split(",")
+  mut words.sort()
+  words.length()
+}
+
+fn distinct_words(text: String) -> UInt64 {
+  var counts: Map[view String, Int64] = [:]
+  for word in text.split(",") {
+    mut counts.insert(word, value: 1)
+  }
+  counts.length()
+}
+
+fn later(first: view String, second: view String) -> view String {
+  first.max(second)
+}
