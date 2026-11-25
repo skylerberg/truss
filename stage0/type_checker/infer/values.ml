@@ -26,12 +26,14 @@ let find_all options =
 
 let rec check_string_literal state env ?expected (value : Syntax.expression)
     (literal : Syntax.string_literal) =
-  let parts =
-    List.map (fun (part, _) -> (part, Hooks.check_expression state env part)) literal.rest
+  let interpolations =
+    List.map
+      (fun (interpolated, _) -> (interpolated, Hooks.check_expression state env interpolated))
+      literal.rest
   in
   match literal.tag with
   | None ->
-      if parts <> [] then
+      if interpolations <> [] then
         State.check_when_final state (fun () ->
             let display = Types.make_trait_reference ~arguments:[] (Well_known.make_path Display) in
             Option.iter
@@ -39,19 +41,20 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                 State.elaborate state value.id (Template (Interpolated { displays })))
               (find_all
                  (List.map
-                    (fun ((part : Syntax.expression), part_type) ->
-                      let part_type = State.finalize_type state part_type in
-                      match State.find_evidence state part_type display with
+                    (fun ((interpolated : Syntax.expression), interpolated_type) ->
+                      let interpolated_type = State.finalize_type state interpolated_type in
+                      match State.find_evidence state interpolated_type display with
                       | Some _ ->
                           Some
-                            (Tables.make_method_call display Display_display ~self_type:part_type
-                               ~result:Types.unit
-                               [ (part, Read) ])
+                            (Tables.make_method_call display Display_display
+                               ~self_type:interpolated_type ~result:Types.unit
+                               [ (interpolated, Read) ])
                       | None ->
                           State.report state
-                            (Not_displayable { at = Written part.id; type_ = part_type });
+                            (Not_displayable
+                               { at = Written interpolated.id; type_ = interpolated_type });
                           None)
-                    parts)));
+                    interpolations)));
       Types.string_type
   | Some tag -> (
       match State.find_target state tag.last with
@@ -63,7 +66,9 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                 arguments = Instantiation.instantiate_type state ~written:tag.last.id tag_path;
               }
           in
-          List.iter (fun (part, _) -> Modes.note_owned_value state env part) parts;
+          List.iter
+            (fun (interpolated, _) -> Modes.note_owned_value state env interpolated)
+            interpolations;
           (match expected with
           | Some expected -> ignore (State.unify state tag_type expected)
           | None -> ());
@@ -78,18 +83,18 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                     Tables.make_method_call template_trait From_template_from_template
                       ~self_type:tag_type ~result:tag_type []
                   in
-                  let part =
-                    Solver.resolve_associated_type state tag_type template_trait From_template_part
-                      ~at:(Written literal.id)
+                  let interpolation_type =
+                    Solver.resolve_associated_type state tag_type template_trait
+                      From_template_interpolation ~at:(Written literal.id)
                   in
                   Option.iter
-                    (fun part_conversions ->
+                    (fun conversions ->
                       State.elaborate state value.id
-                        (Template (Tagged { from_template; part; part_conversions })))
+                        (Template (Tagged { from_template; interpolation_type; conversions })))
                     (find_all
                        (List.map
-                          (fun ((part_expression : Syntax.expression), part_type) ->
-                            let part_type = State.finalize_type state part_type in
+                          (fun ((interpolated : Syntax.expression), interpolated_type) ->
+                            let interpolated_type = State.finalize_type state interpolated_type in
                             let make_from source =
                               Types.make_trait_reference ~arguments:[ Types.Type source ]
                                 (Well_known.make_path From)
@@ -97,47 +102,48 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                             let convert_from from =
                               Some
                                 (Some
-                                   (Tables.make_method_call from From_from ~self_type:part
-                                      ~result:part
-                                      [ (part_expression, Own) ]))
+                                   (Tables.make_method_call from From_from
+                                      ~self_type:interpolation_type ~result:interpolation_type
+                                      [ (interpolated, Own) ]))
                             in
-                            let view = Types.make_view part_type in
+                            let view = Types.make_view interpolated_type in
                             if
-                              Types.is_viewable part_type
+                              Types.is_viewable interpolated_type
                               && Places.is_borrowed state.State.resolved state.State.tables
-                                   part_expression
-                              && Option.is_some (State.find_evidence state part (make_from view))
+                                   interpolated
+                              && Option.is_some
+                                   (State.find_evidence state interpolation_type (make_from view))
                             then begin
                               let rec strip_parentheses (written : Syntax.expression) =
                                 match written.kind with
                                 | Parenthesized inner -> strip_parentheses inner
                                 | _ -> written
                               in
-                              let place = strip_parentheses part_expression in
+                              let place = strip_parentheses interpolated in
                               state.places_without_keyword <-
                                 List.filter
                                   (fun (noted, _) -> noted <> place.id)
                                   state.places_without_keyword;
-                              Conversions.convert state env ~expression:part_expression
-                                (Written part_expression.id) ~actual:part_type ~expected:view;
+                              Conversions.convert state env ~expression:interpolated
+                                (Written interpolated.id) ~actual:interpolated_type ~expected:view;
                               convert_from (make_from view)
                             end
-                            else if Types.equal part_type part then Some None
+                            else if Types.equal interpolated_type interpolation_type then Some None
                             else
-                              let from = make_from part_type in
-                              match State.find_evidence state part from with
+                              let from = make_from interpolated_type in
+                              match State.find_evidence state interpolation_type from with
                               | Some _ -> convert_from from
                               | None ->
                                   State.report state
-                                    (Template_part_conversion
+                                    (Interpolation_not_convertible
                                        {
-                                         at = Written part_expression.id;
-                                         part_type;
-                                         part;
+                                         at = Written interpolated.id;
+                                         interpolated_type;
+                                         interpolation_type;
                                          tag_type;
                                        });
                                   None)
-                          parts))
+                          interpolations))
               | None ->
                   if not (Types.is_error tag_type) then
                     State.report state (Not_a_tag { at = Written literal.id; tag_type }));

@@ -1183,7 +1183,7 @@ values, which makes an injection attack impossible by construction:
 
 1. Only the compiler creates literal text, so text produced at run time
    never passes as trusted query text.
-2. Each interpolated value is converted to the `Part` type of the tag, so a
+2. Each interpolated value is converted to the tag's `Interpolation` type, so a
    value with no meaning in SQL is a type error.
 3. An API takes the type of the template, not `String`, and `SqlQuery` is
    opaque, so other packages cannot construct one.

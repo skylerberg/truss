@@ -1215,11 +1215,12 @@ let describe : Inference.t -> Nodes.description = function
         (say
            (Printf.sprintf "`%s` does not implement `Display`, so it cannot be interpolated."
               (Types.show type_)))
-  | Template_part_conversion { at = origin; part_type; part; tag_type } ->
+  | Interpolation_not_convertible { at = origin; interpolated_type; interpolation_type; tag_type }
+    ->
       make No_impl (Build.at origin)
         (say
-           (Printf.sprintf "`%s` cannot become a `%s`, the part type of `%s`."
-              (Types.show part_type) (Types.show part) (Types.show tag_type)))
+           (Printf.sprintf "`%s` cannot become a `%s`, the interpolation type of `%s`."
+              (Types.show interpolated_type) (Types.show interpolation_type) (Types.show tag_type)))
   | Not_a_tag { at = origin; tag_type } ->
       make No_impl (Build.at origin)
         (say

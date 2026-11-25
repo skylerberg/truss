@@ -2040,6 +2040,11 @@ let () =
       expect_type Fixtures.Infer.accented_character_literal "Character\"é\"" "Character";
       if not (has_integer Fixtures.Infer.accented_character_literal 0xE9) then
         Harness.fail "no value");
+  Harness.test
+    "a tagged template rejects an interpolated value that its interpolation type has no `From` \
+     impl for" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.shout_of_a_number "types.no_impl"
+        ~says:"`Int64` cannot become a `String`, the interpolation type of `Shout`.");
   Harness.test "a UInt8 literal holds its ASCII character's value" (fun () ->
       if not (has_integer Fixtures.Infer.uint8_newline_literal 10) then Harness.fail "no value");
   Harness.test "a Character literal of two scalar values is an error" (fun () ->

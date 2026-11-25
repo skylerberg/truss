@@ -1458,8 +1458,8 @@ let () =
   Harness.test "a call of from_template through a bound must meet the tag's check" (fun () ->
       expect_not_proven Fixtures.Prover.from_template_through_a_bound "prover.requires"
         ~fixed:
-          ( "fn make[Made: FromTemplate](template: Template[Made.Part]) -> Made {",
-            "fn make[Made: FromTemplate](template: Template[Made.Part]) -> Made\n\
+          ( "fn make[Made: FromTemplate](template: Template[Made.Interpolation]) -> Made {",
+            "fn make[Made: FromTemplate](template: Template[Made.Interpolation]) -> Made\n\
             \  requires Made.is_valid_template(template.literals)\n\
              {" ));
   Harness.test "a call of from_template through a bound meets the check its caller requires"

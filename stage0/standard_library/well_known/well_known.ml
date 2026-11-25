@@ -147,7 +147,7 @@ type associated =
   | Cursor_element
   | Into_cursor_cursor_type
   | Model_value
-  | From_template_part
+  | From_template_interpolation
   | From_elements_element
   | From_entries_key
   | From_entries_value
@@ -166,7 +166,7 @@ type field =
   | Range_stop
   | Range_inclusive
   | Template_literals
-  | Template_parts
+  | Template_interpolations
   | Entry_key
   | Entry_value
   | Option_some_value
@@ -330,7 +330,7 @@ let associated_types =
     (Cursor_element, Cursor, "Element");
     (Into_cursor_cursor_type, Into_cursor, "Cursor");
     (Model_value, Model, "Value");
-    (From_template_part, From_template, "Part");
+    (From_template_interpolation, From_template, "Interpolation");
     (From_elements_element, From_elements, "Element");
     (From_entries_key, From_entries, "Key");
     (From_entries_value, From_entries, "Value");
@@ -353,7 +353,7 @@ let fields =
     (Range_stop, Record Range, "stop");
     (Range_inclusive, Record Range, "inclusive");
     (Template_literals, Record Template, "literals");
-    (Template_parts, Record Template, "parts");
+    (Template_interpolations, Record Template, "interpolations");
     (Entry_key, Record Entry, "key");
     (Entry_value, Record Entry, "value");
     (Option_some_value, Variant Option_some, "value");

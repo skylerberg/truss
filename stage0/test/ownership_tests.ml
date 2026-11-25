@@ -681,7 +681,7 @@ let () =
       expect_one_diagnostic
         (keep ^ Fixtures.Ownership.list_moved_then_bound)
         "ownership.use_after_move" ~fixed:("own items", "items.copy()") ~at:("items\n  look", 1));
-  Harness.test "a tagged string moves its parts, and a plain string reads them" (fun () ->
+  Harness.test "a tagged string moves its interpolations, and a plain string reads them" (fun () ->
       let shout = Fixtures.Ownership.shout in
       expect_one_diagnostic
         (shout ^ Fixtures.Ownership.shout_of_a_name)
@@ -977,12 +977,13 @@ let () =
 let () =
   let make = Fixtures.Ownership.make in
   Harness.test
-    "a borrowed string in a tagged template is taken as a view where the part type converts from \
-     one" (fun () -> expect_fine Fixtures.Ownership.template_part_taken_as_a_view);
+    "a borrowed string in a tagged template is taken as a view where the interpolation type \
+     converts from one" (fun () ->
+      expect_fine Fixtures.Ownership.template_interpolation_taken_as_a_view);
   Harness.test
-    "a borrowed string in a tagged template is moved where the part type converts only from an \
-     owned string" (fun () ->
-      expect_one_diagnostic Fixtures.Ownership.template_part_that_needs_an_owned_string
+    "a borrowed string in a tagged template is moved where the interpolation type converts only \
+     from an owned string" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.template_interpolation_that_needs_an_owned_string
         "ownership.not_owned"
         ~fixed:("Sentence\"hello ${name}\"", "Sentence\"hello ${name.copy()}\""));
   Harness.test "a `let` can bind a range of a temporary list" (fun () ->
