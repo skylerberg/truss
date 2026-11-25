@@ -28,7 +28,7 @@ type 'bounds scope = {
 
 type elaborated_interface = {
   interface : interface;
-  diagnostics : Catalog.description list;
+  diagnostics : Catalog.diagnostic list;
   named : (Syntax.id * Types.ty) list;
   scope : known_bounds scope;
 }

@@ -54,7 +54,19 @@ type node = Nodes.node = private
 
 type description = node t
 
-val make_reported : _ t -> Diagnostic.reported
+type diagnostic =
+  | Usage of Usage.t
+  | Package of Package.t
+  | Typing of Typing.t
+  | Resolve of Resolve.t
+  | Patterns of Patterns.t
+  | Capabilities of Capabilities.t
+  | Ownership of Ownership.t
+  | Inference of Inference.t
+  | Prover of Prover.t
+
+val describe : diagnostic -> description
+val make_reported : diagnostic -> Diagnostic.reported
 val read_entry_siblings : Core.origin range list -> int -> Core.origin siblings
 
 module Usage = Usage

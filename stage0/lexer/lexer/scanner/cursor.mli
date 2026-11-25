@@ -15,7 +15,7 @@ type t = {
   source : Source.t;
   text : string;
   length : int;
-  diagnostics : Diagnostic.Collector.t;
+  diagnostics : Syntax_catalog.Lexing.t Dynarray.t;
   mutable position : int;
   mutable first_line_break : Source.span option;
   mutable blank_line : bool;
@@ -28,7 +28,9 @@ type t = {
   scan_foreign_escape : t -> Buffer.t -> bool;
 }
 
-val create : scan_foreign_escape:(t -> Buffer.t -> bool) -> Source.t -> Diagnostic.Collector.t -> t
+val create :
+  scan_foreign_escape:(t -> Buffer.t -> bool) -> Source.t -> Syntax_catalog.Lexing.t Dynarray.t -> t
+
 val is_at_end : t -> int -> bool
 val lookup_char : t -> int -> char
 val is_at : t -> int -> char -> bool

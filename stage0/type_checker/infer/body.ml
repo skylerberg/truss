@@ -503,7 +503,8 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       let reported = Hashtbl.create 16 in
       Error
         (List.filter
-           (fun description ->
+           (fun diagnostic ->
+             let description = Catalog.describe diagnostic in
              (not (Hashtbl.mem reported description))
              && begin
                Hashtbl.add reported description ();

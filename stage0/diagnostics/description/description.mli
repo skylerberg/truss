@@ -39,7 +39,7 @@ type 'node t = {
   fixes : 'node fix list;
 }
 
-type quoted = { definition_text : string; start : int; stop : int }
+type quoted = { source_text : string; start : int; stop : int }
 
 type ('node, 'span) source = {
   text : string Lazy.t;
@@ -50,7 +50,6 @@ type ('node, 'span) source = {
 
 val render_with : ('node, 'span) source -> 'node t -> 'span Diagnostic.diagnostic
 val render_file : text:string -> Source.span t -> Diagnostic.t
-val render_spans : Source.span t -> Diagnostic.t
 val select_shown : Diagnostic.t list -> Diagnostic.t list
 
 module For_testing : sig

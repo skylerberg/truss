@@ -305,7 +305,6 @@ type 'span diagnostic = {
 }
 
 type t = Source.span diagnostic
-type in_definition = Source.Definition_span.t diagnostic
 
 val make :
   ?severity:severity ->
@@ -331,16 +330,6 @@ val reported_elsewhere : reported
 val map_spans : ('a -> 'b) -> 'a diagnostic -> 'b diagnostic
 val apply_edits : string -> Source.span edit list -> string
 val list_machine_applicable : t list -> t list
-
-module Collector : sig
-  type diagnostic := t
-  type t
-
-  val create : unit -> t
-  val add : t -> diagnostic -> unit
-  val to_list : t -> diagnostic list
-end
-
 val paint_severity : is_colored:bool -> severity -> string -> string
 val render : is_colored:bool -> Source.t -> t -> string
 val to_json_object : Source.t -> t -> string

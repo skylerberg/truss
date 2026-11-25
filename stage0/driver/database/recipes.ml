@@ -19,6 +19,10 @@ let read_file (database : Tracker.t) id =
 let parse (file : Path.file) text =
   Parser.parse_source (Source.create ~path:(Path.show_file file) text)
 
+let parse_with_diagnostics file text =
+  let tree, diagnostics = parse file text in
+  (tree, List.map (fun diagnostic -> Renderer.Syntax diagnostic) diagnostics)
+
 let replace_entries (database : Tracker.t) ~source (module_ : Path.module_) ~file_name entries =
   let module_id = Ids.of_module module_ in
   let names = Lookups.make_names database Tracker.untracked in
@@ -52,7 +56,7 @@ let run_parse (database : Tracker.t) id =
   let tree, diagnostics =
     Tracker.record database Parse id (fun recorder ->
         recorder.note Reads (Lookup Source) id "";
-        parse file text)
+        parse_with_diagnostics file text)
   in
   let is_diagnosed_otherwise =
     Tracker.replace_file_diagnostics database Parse ~package:file.module_.package ~file:id
@@ -116,8 +120,7 @@ let run_resolve (database : Tracker.t) (row : Store.definition) =
                     List.iter (recorder.note References (Entity Import) file) used_imports)
                   row.file;
                 (section, Tracker.Value resolved, [])
-            | Some (Error descriptions) ->
-                (section, Failed, List.map (Renderer.render names key) descriptions)
+            | Some (Error diagnostics) -> (section, Failed, diagnostics)
             | None -> (section, Blocked, []))
           (Resolve.resolve names key))
   in
@@ -148,7 +151,7 @@ let run_check_imports (database : Tracker.t) id =
         recorder.note Reads (Lookup Source) id "";
         recorder.note Reads (Selection Unresolved) id "";
         recorder.note Reads (Selection Import_references) id "";
-        List.map (Description.render_file ~text)
+        List.map (fun import -> Renderer.Import import)
         @@ Resolve.list_file_diagnostics
              (Lookups.make_names database recorder)
              file
@@ -208,9 +211,7 @@ let run_header database (row : Store.definition) =
       with
       | Ok header -> (Value header, [])
       | Error [] -> (Blocked, [])
-      | Error descriptions ->
-          ( Failed,
-            List.map (Renderer.render (Lookups.make_names database recorder) key) descriptions ))
+      | Error descriptions -> (Failed, descriptions))
 
 let run_elaborate database (row : Store.definition) =
   let key = Declarations.decode_key row.key in
@@ -223,9 +224,7 @@ let run_elaborate database (row : Store.definition) =
       match (elaborated.diagnostics, elaborated.interface) with
       | [], Error_interface _ -> (Blocked, [])
       | [], _ -> (Value elaborated, [])
-      | descriptions, _ ->
-          ( Failed,
-            List.map (Renderer.render (Lookups.make_names database recorder) key) descriptions ))
+      | descriptions, _ -> (Failed, descriptions))
 
 let run_derive_interface database (row : Store.definition) =
   let key = Declarations.decode_key row.key in
@@ -289,18 +288,14 @@ let run_check_signature database (row : Store.definition) =
               key
           with
           | [] -> (Value (), [])
-          | descriptions ->
-              ( Failed,
-                List.map (Renderer.render (Lookups.make_names database recorder) key) descriptions
-              ))
+          | descriptions -> (Failed, descriptions))
       | Failed | Blocked -> (Blocked, []))
 
 let check_types check database recorder key : Infer.checked Tracker.outcome * _ =
   match check (Lookups.make_infer database recorder) key with
   | Ok checked -> (Value checked, [])
   | Error [] -> (Blocked, [])
-  | Error descriptions ->
-      (Failed, List.map (Renderer.render (Lookups.make_names database recorder) key) descriptions)
+  | Error descriptions -> (Failed, descriptions)
 
 let run_check_contract database (row : Store.definition) =
   let key = Declarations.decode_key row.key in
@@ -379,9 +374,7 @@ let run_check_usage database (row : Store.definition) =
   run_fact database Check_usage Facts.usage_check row ~id:row.id (fun recorder ->
       match Usage.check (Lookups.make_usage database recorder) key with
       | [] -> (Value (), [])
-      | descriptions ->
-          ( Failed,
-            List.map (Renderer.render (Lookups.make_names database recorder) key) descriptions ))
+      | descriptions -> (Failed, descriptions))
 
 let run_check_ownership database (row : Store.definition) =
   let key = Declarations.decode_key row.key in
@@ -389,9 +382,7 @@ let run_check_ownership database (row : Store.definition) =
       let result = Ownership.check (Lookups.make_ownership database recorder) key in
       match result.diagnostics with
       | [] -> (Value result.must_be_disjoint, [])
-      | descriptions ->
-          ( Failed,
-            List.map (Renderer.render (Lookups.make_names database recorder) key) descriptions ))
+      | descriptions -> (Failed, descriptions))
 
 let run_generate_mir (database : Tracker.t) (row : Store.definition) =
   let path = (Declarations.decode_key row.key).path in
@@ -492,10 +483,8 @@ let check_package_unit database stage ~package ~unit check =
   Tracker.record database stage unit (fun recorder ->
       match Package_checks.run (Lookups.make_package_checks database recorder) package check with
       | Placed placed ->
-          let names = Lookups.make_names database recorder in
           List.map
-            (fun ({ key; description } : Package_checks.placed) ->
-              (Ids.of_key key, Renderer.render names key description))
+            (fun ({ key; diagnostic } : Package_checks.placed) -> (Ids.of_key key, diagnostic))
             placed
       | Dependency_used _ ->
           Compiler_bug.raise_bug ~stage:"Database"
@@ -698,7 +687,7 @@ let pose_unit (database : Tracker.t) (recorder : Tracker.recorder) (row : Store.
       let runs = list_runs database recorder lookups proof in
       Some
         {
-          posed = Prover.pose lookups ~runs key proof;
+          posed = Prover.pose ~runs proof;
           has_unfinished_run =
             List.exists
               (function
@@ -778,35 +767,21 @@ let run_decide (database : Tracker.t) answered (row : Store.definition) =
             List.iter (fun (marker, target, id, name) -> recorder.note marker target id name) notes;
             match unit with
             | Some { posed; has_unfinished_run } ->
-                ( Prover.list_states
-                    (Lookups.make_proof database recorder)
-                    posed ~answers ~refutations,
-                  has_unfinished_run )
+                (Prover.list_states posed ~answers ~refutations, has_unfinished_run)
             | None -> ([], false)))
   in
   Tracker.report Decide row.id
     ~is_changed:
       (Store.replace_verdicts database.store ~definition:row.id
          (List.map
-            (fun ({ site; is_proven; trusts_compiled_code; failure; citation } : Prover.state) :
-                 Store.verdict ->
+            (fun ({ site; is_proven; trusts_compiled_code; failure } : Prover.state) : Store.verdict
+               ->
               {
                 code = Diagnostic.Code.name (Prover site.code);
-                start = site.span.start;
-                stop = site.span.stop;
-                shows = site.shows;
+                site = Marshal.to_string site.shows [];
                 is_proven;
                 trusts_compiled_code;
                 failure = Option.map (fun failure -> Marshal.to_string failure []) failure;
-                citation =
-                  Option.map
-                    (fun ({ cited; clause } : Prover.citation) : Store.citation ->
-                      {
-                        cited = Ids.of_key cited;
-                        clause_start = clause.start;
-                        clause_stop = clause.stop;
-                      })
-                    citation;
               })
             states));
   if has_unfinished_run then Tracker.mark_stale database Decide row.id

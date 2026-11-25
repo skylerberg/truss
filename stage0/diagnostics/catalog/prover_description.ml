@@ -725,7 +725,7 @@ let describe : Prover.t -> Nodes.description = function
   | Proves { location; instance; obligation } ->
       make (find_code obligation) (locate location)
         (describe_instance instance @ describe_obligation obligation)
-  | Unproven { location; instance; obligation; failure; fixes } ->
+  | Unproven { location; instance; obligation; failure; fixes; cited = _ } ->
       let code = find_code obligation in
       make code (locate location) ~fixes:(List.map describe_fix fixes)
         (describe_instance instance @ describe_obligation obligation @ describe_failure failure
@@ -741,6 +741,28 @@ let describe : Prover.t -> Nodes.description = function
       make Evaluation (At Nodes.Definition)
         (say (Printf.sprintf "The value of `%s` cannot be computed: %s" (Path.show path) report))
 
-let describe_citation = function
-  | Prover.Cited_here -> "This is the clause that must hold."
-  | Cited_at { path; line } -> Printf.sprintf " The clause that must hold is at `%s:%d`." path line
+let find_cited : Prover.t -> Prover.quoted option = function
+  | Unproven { cited; _ } -> cited
+  | Proves _ | Unreadable _ | Unevaluated _ -> None
+
+let describe_cited diagnostic (citation : Prover.citation) =
+  let (description : Nodes.description) = describe diagnostic in
+  match (find_cited diagnostic, citation) with
+  | Some { key; origin }, Cited_here ->
+      {
+        description with
+        notes =
+          description.notes
+          @ [
+              ( Description.At (Nodes.In_definition (key, origin)),
+                say "This is the clause that must hold." );
+            ];
+      }
+  | Some _, Cited_at { path; line } ->
+      {
+        description with
+        message =
+          description.message
+          @ say (Printf.sprintf " The clause that must hold is at `%s:%d`." path line);
+      }
+  | None, _ -> description

@@ -7,7 +7,7 @@ type t = {
   base : int;
   group_ends : int array;
   angle_closers : int option array;
-  diagnostics : Diagnostic.Collector.t;
+  diagnostics : Syntax_catalog.Parsing.t Dynarray.t;
   mutable index : int;
   mutable nesting_depth : int;
   spans : Source.Definition_span.t Dynarray.t;
@@ -265,14 +265,13 @@ let joins_neighbors cursor (span : Source.span) code =
   in
   Token.joins_neighbor ~before ~after code
 
-let has_reported cursor = Diagnostic.Collector.to_list cursor.diagnostics <> []
+let has_reported cursor = not (Dynarray.is_empty cursor.diagnostics)
 
 let report cursor ?(fixes = []) at (problem : Syntax_catalog.Parsing.problem) =
   (match problem with
   | Missing_body -> cursor.syntax_errors := at :: !(cursor.syntax_errors)
   | _ -> record_syntax_error cursor ~index:cursor.index at);
-  Diagnostic.Collector.add cursor.diagnostics
-    (Syntax_catalog.Parsing_description.render { at; problem; fixes })
+  Dynarray.add_last cursor.diagnostics { Syntax_catalog.Parsing.at; problem; fixes }
 
 let fail cursor expected =
   let token = peek cursor in

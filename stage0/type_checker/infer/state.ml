@@ -89,7 +89,7 @@ type state = {
   signatures : Signatures.t;
   visible_packages : Path.package list Lazy.t;
   tables : Tables.t;
-  mutable diagnostics : Catalog.description list;
+  mutable diagnostics : Catalog.diagnostic list;
   unifier : Unify.t;
   locals : (Syntax.id, local) Hashtbl.t;
   law_parameters : (string * Types.ty) list;
@@ -111,13 +111,11 @@ type state = {
   annotatable : (Syntax.id, unit) Hashtbl.t;
 }
 
-let report_description state (description : Catalog.description) =
-  state.diagnostics <- description :: state.diagnostics;
-  Catalog.make_reported description
+let record_diagnostic state (diagnostic : Catalog.diagnostic) =
+  state.diagnostics <- diagnostic :: state.diagnostics;
+  Catalog.make_reported diagnostic
 
-let add_diagnostic state diagnostic =
-  report_description state (Catalog.Inference_description.describe diagnostic)
-
+let add_diagnostic state diagnostic = record_diagnostic state (Catalog.Inference diagnostic)
 let report state diagnostic = ignore (add_diagnostic state diagnostic)
 let is_formula env = env.specification || env.in_quantifier
 

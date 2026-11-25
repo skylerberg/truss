@@ -4,7 +4,7 @@ type state = {
   definition : Syntax.definition;
   elaborated : Environment.elaborated_interface;
   spans : Source.Definition_span.t array;
-  diagnostics : Catalog.description list ref;
+  diagnostics : Catalog.diagnostic list ref;
 }
 
 val report : state -> Catalog.Typing.t -> unit

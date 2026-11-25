@@ -15,7 +15,7 @@ type t = {
   source : Source.t;
   text : string;
   length : int;
-  diagnostics : Diagnostic.Collector.t;
+  diagnostics : Syntax_catalog.Lexing.t Dynarray.t;
   mutable position : int;
   mutable first_line_break : Source.span option;
   mutable blank_line : bool;
@@ -52,8 +52,7 @@ let is_at cursor index character = index < cursor.length && cursor.text.[index] 
 let satisfies cursor index is_wanted = index < cursor.length && is_wanted cursor.text.[index]
 
 let report cursor ?(notes = []) ?(fixes = []) at problem =
-  Diagnostic.Collector.add cursor.diagnostics
-    (Syntax_catalog.Lexing_description.render ~text:cursor.text { at; problem; notes; fixes })
+  Dynarray.add_last cursor.diagnostics { Syntax_catalog.Lexing.at; problem; notes; fixes }
 
 let is_line_break character = character = '\n' || character = '\r'
 let is_end_of_line cursor index = is_at_end cursor index || is_line_break cursor.text.[index]

@@ -15,14 +15,11 @@ let list_bound_diagnostics lookups ~package ~list_bounds named =
                 (fun (argument, bound) ->
                   match Impls.find_evidence lookups ~list_bounds argument bound with
                   | None ->
-                      [
-                        Catalog.Typing_description.describe
-                          (Bound_unmet { at = Written id; type_; argument; bound });
-                      ]
+                      [ Catalog.Typing (Bound_unmet { at = Written id; type_; argument; bound }) ]
                   | Some evidence ->
                       List.map
                         (fun ((interface : Types.impl_interface), package, capability) ->
-                          Catalog.Capabilities_description.describe
+                          Catalog.Capabilities
                             (Not_granted
                                {
                                  at = Written id;
@@ -654,5 +651,5 @@ let list_diagnostics (lookups : Lookups.t) key =
   in
   (try check state
    with Properties.Recursion_limit diagnostic ->
-     state.diagnostics := Catalog.Typing_description.describe diagnostic :: !(state.diagnostics));
+     state.diagnostics := Catalog.Typing diagnostic :: !(state.diagnostics));
   List.rev !(state.diagnostics)

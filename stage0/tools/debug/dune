@@ -4,6 +4,7 @@
   source
   diagnostic
   description
+  syntax_catalog
   token
   lexer
   zarith

@@ -14,7 +14,7 @@ module Elaborator : sig
   val read_span : t -> Syntax.id -> Source.Definition_span.t
   val list_known_bounds : t -> Properties.Bounds.t
   val find_self_type : t -> Types.ty option
-  val list_diagnostics : t -> Catalog.description list
+  val list_diagnostics : t -> Catalog.diagnostic list
   val list_named_types : t -> (Syntax.id * Types.ty) list
   val show_path : Syntax.path -> string
   val split_field_path : Syntax.expression -> (string * Syntax.name list) option
@@ -48,7 +48,7 @@ module Elaborator : sig
   val list_cost_operands : t -> Syntax.expression -> cost_operand list
 
   val elaborate_header :
-    Lookups.t -> Resolve.Names.key -> (Environment.header, Catalog.description list) result
+    Lookups.t -> Resolve.Names.key -> (Environment.header, Catalog.diagnostic list) result
 
   val elaborate_definition : Lookups.t -> Resolve.Names.key -> Environment.elaborated_interface
 end

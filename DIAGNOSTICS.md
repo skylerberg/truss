@@ -100,26 +100,27 @@ directory: every sentence of a family is in its description module.
 ## The renderer
 
 The renderer is the only code that reads a definition's tree, spans, and
-text for a diagnostic. It turns a description into the
-`Diagnostic.in_definition` that the database stores today, and it owns
-every layout decision: indentation, separators, and where a brace goes.
+text for a diagnostic. It turns a description into a `Diagnostic.t`, and
+it owns every layout decision: indentation, separators, and where a brace
+goes.
 
-The database renders a unit's descriptions when the unit runs, with the
-unit's name lookups, so it stores rendered diagnostics as before.
-Storing descriptions, and rendering them when the database lists
-diagnostics, is the step that lets a reformat change no stored fact; it
-is not done.
+A pass returns catalog values, `Catalog.diagnostic` after parsing and
+`Syntax_catalog.Syntax_diagnostic.t` before, and the database stores them
+as they are. The database renders a value when it lists diagnostics, with
+the definition's current spans and text. No unit reads spans or text to
+report a diagnostic, so a reformat changes no stored fact and reruns no
+check. A prover verdict stores its site and its failure the same way.
 
 A node is an origin in the definition being checked, the definition
 itself, or an origin in another definition. The prover quotes a callee's
 clause through the last, and the renderer reads that definition's text
-for the quote. A location or an edit is always in the definition being
-checked.
+for the quote. An edit is always in the definition being checked, and so
+is a location, except the note that points at a cited clause in the same
+file; a clause in another file is cited by its path and line.
 
 The lexer and the parser report before a tree exists. Their payloads hold
-spans in place of nodes. The parser sees only tokens, so its payloads hold
-code spelled from tokens, and `Description.render_spans` renders them
-without source text.
+spans in place of nodes, and the listing renders them with the file's
+text.
 
 ## Fixes
 

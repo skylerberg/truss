@@ -3,8 +3,14 @@ type piece = Split.piece = { first : int; stop : int }
 let split = Split.split_pieces
 let is_use (tokens : Token.t array) piece = tokens.(piece.first).kind = Keyword Use
 
+let sort_by_start diagnostics =
+  List.stable_sort
+    (fun (left : Syntax_catalog.Parsing.t) (right : Syntax_catalog.Parsing.t) ->
+      compare left.at.start right.at.start)
+    diagnostics
+
 let parse_piece (tokens : Token.t array) piece parse =
-  let diagnostics = Diagnostic.Collector.create () in
+  let diagnostics = Dynarray.create () in
   let base = tokens.(piece.first).span.start in
   let cursor = Cursor.create ~diagnostics ~base tokens ~first:piece.first ~stop:piece.stop in
   let value = parse cursor in
@@ -15,7 +21,7 @@ let parse_piece (tokens : Token.t array) piece parse =
        positions = Cursor.collect_positions cursor;
      }
       : _ Syntax.item),
-    Diagnostic.Collector.to_list diagnostics )
+    sort_by_start (Dynarray.to_list diagnostics) )
 
 let overlaps (tokens : Token.t array) piece (span : Source.span) =
   let start = tokens.(piece.first).span.start and stop = tokens.(piece.stop - 1).span.stop in
@@ -23,13 +29,13 @@ let overlaps (tokens : Token.t array) piece (span : Source.span) =
   else span.start < stop && start < span.stop
 
 let attach_lexer_errors tokens ~lexer_diagnostics ~nested piece
-    ((item : _ Syntax.item), (diagnostics : Diagnostic.t list)) =
+    ((item : _ Syntax.item), (diagnostics : Syntax_catalog.Parsing.t list)) =
   let errors =
     List.filter
       (fun (span : Source.span) ->
         overlaps tokens piece span
         && not (List.exists (fun inner -> overlaps tokens inner span) nested))
-      (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.span) lexer_diagnostics)
+      (List.map (fun (diagnostic : Syntax_catalog.Lexing.t) -> diagnostic.at) lexer_diagnostics)
   in
   match errors with
   | [] -> (item, diagnostics)
@@ -49,7 +55,9 @@ let attach_lexer_errors tokens ~lexer_diagnostics ~nested piece
               syntax_errors = List.sort_uniq compare (syntax_errors @ item.positions.syntax_errors);
             };
         },
-        List.map (fun (diagnostic : Diagnostic.t) -> { diagnostic with fixes = [] }) diagnostics )
+        List.map
+          (fun (diagnostic : Syntax_catalog.Parsing.t) -> { diagnostic with fixes = [] })
+          diagnostics )
 
 let check_definition cursor (definition : Syntax.definition) =
   Precedence.check_definition cursor definition;
@@ -74,7 +82,8 @@ let parse_methods tokens ~lexer_diagnostics (container : Syntax.definition) piec
         pieces
   | None -> []
 
-let parse_definition tokens ~lexer_diagnostics piece : Syntax.top_level * Diagnostic.t list =
+let parse_definition tokens ~lexer_diagnostics piece :
+    Syntax.top_level * Syntax_catalog.Parsing.t list =
   let parsed, diagnostics =
     parse_piece tokens piece (fun cursor ->
         let definition, methods = Parse_definition.parse_definition cursor in
@@ -126,8 +135,11 @@ let use_after_definition (tokens : Token.t array) piece (line : _ Syntax.item) ~
         ]
     | None -> []
   in
-  Syntax_catalog.Parsing_description.render
-    { at = Source.make_span line.base line.stop; problem = Use_after_definition; fixes }
+  {
+    Syntax_catalog.Parsing.at = Source.make_span line.base line.stop;
+    problem = Use_after_definition;
+    fixes;
+  }
 
 let parse tokens ~lexer_diagnostics =
   let rec gather pieces ~uses ~definitions ~diagnostics ~destination =
@@ -162,15 +174,18 @@ let parse tokens ~lexer_diagnostics =
   let uses, definitions, diagnostics =
     gather (split tokens) ~uses:[] ~definitions:[] ~diagnostics:[] ~destination:None
   in
-  ( { Syntax.uses; definitions },
-    List.stable_sort
-      (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span.start right.span.start)
-      diagnostics )
+  ({ Syntax.uses; definitions }, sort_by_start diagnostics)
 
 let parse_source source =
   let tokens, lexer_diagnostics = Lexer.lex source in
   let file, parser_diagnostics = parse tokens ~lexer_diagnostics in
-  (file, lexer_diagnostics @ parser_diagnostics)
+  ( file,
+    List.map
+      (fun diagnostic -> Syntax_catalog.Syntax_diagnostic.Lexing diagnostic)
+      lexer_diagnostics
+    @ List.map
+        (fun diagnostic -> Syntax_catalog.Syntax_diagnostic.Parsing diagnostic)
+        parser_diagnostics )
 
 module For_testing = struct
   type piece = Split.piece = { first : int; stop : int }

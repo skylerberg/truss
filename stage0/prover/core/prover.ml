@@ -292,18 +292,13 @@ let resolve_location (names : Resolve.Names.lookups) (key : Resolve.Names.key)
     | Node origin -> Core_walk.locate_origin origin
     | Whole_definition -> (names.read_definition key).id)
 
-let render (lookups : Lookups.t) key description =
-  Renderer.render lookups.interface.names key (Catalog.Prover_description.describe description)
-
-type site = { code : Diagnostic.Code.prover; span : Source.Definition_span.t; shows : string }
-type citation = { cited : Resolve.Names.key; clause : Source.Definition_span.t }
+type site = { code : Diagnostic.Code.prover; shows : Catalog.Prover.t }
 
 type state = {
   site : site;
   is_proven : bool;
   trusts_compiled_code : bool;
-  failure : Source.Definition_span.t Diagnostic.diagnostic option;
-  citation : citation option;
+  failure : Catalog.Prover.t option;
 }
 
 let find_declared_evaluation : Logic.declaration -> Obligation.evaluation option = function
@@ -417,47 +412,41 @@ let make_refutation_request ({ query; _ } : posed_obligation) =
   (Solver.make_request refutation, refutation)
 
 type posed =
-  | Unreadable of Source.Definition_span.t Diagnostic.diagnostic
-  | Posed of {
-      key : Resolve.Names.key;
-      obligations : posed_obligation list;
-      failed_evaluation : Source.Definition_span.t Diagnostic.diagnostic option;
-    }
+  | Unreadable of Catalog.Prover.t
+  | Posed of { obligations : posed_obligation list; failed_evaluation : Catalog.Prover.t option }
 
-let make_site (failure : Source.Definition_span.t Diagnostic.diagnostic) =
-  match failure.code with
-  | Prover code -> { code; span = failure.span; shows = failure.message }
+let make_site shows =
+  match (Catalog.describe (Prover shows)).code with
+  | Prover code -> { code; shows }
   | _ -> Compiler_bug.raise_bug ~stage:"Prover" "a proof site has a code of another family"
 
-let pose (lookups : Lookups.t) ~runs key proof =
+let pose ~runs proof =
   let runs = Evaluation_table.of_seq (List.to_seq runs) in
   match proof with
-  | Not_proven_here -> Posed { key; obligations = []; failed_evaluation = None }
+  | Not_proven_here -> Posed { obligations = []; failed_evaluation = None }
   | Unsupported { location; construct; foreign } ->
-      Unreadable (render lookups key (Unreadable { location; construct; foreign }))
+      Unreadable (Unreadable { location; construct; foreign })
   | Obligations outcome ->
       Posed
         {
-          key;
           obligations =
             List.map
               (fun (obligation : Obligation.t) ->
                 pose_obligation runs
                   (make_site
-                     (render lookups key
-                        (Proves
-                           {
-                             location = obligation.location;
-                             instance = obligation.instance;
-                             obligation = obligation.obligation;
-                           })))
+                     (Proves
+                        {
+                          location = obligation.location;
+                          instance = obligation.instance;
+                          obligation = obligation.obligation;
+                        }))
                   obligation)
               outcome.obligations;
           failed_evaluation =
             Option.bind outcome.evaluation (fun (evaluation : Obligation.evaluation) ->
                 match (evaluation, Evaluation_table.find_opt runs evaluation) with
                 | Constant_value path, Some (Failed report) ->
-                    Some (render lookups key (Unevaluated { path; report }))
+                    Some (Catalog.Prover.Unevaluated { path; report })
                 | Constant_value _, (Some (Evaluated _ | Unfinished _) | None) -> None
                 | Assertion _, _ ->
                     Compiler_bug.raise_bug ~stage:"Prover"
@@ -476,19 +465,6 @@ let list_refutation_requests posed answers =
     (fun (obligation, answer) ->
       if is_refutable obligation answer then Some (make_refutation_request obligation) else None)
     (List.combine (list_posed posed) answers)
-
-let note_cited_clause (failure : Source.span Diagnostic.diagnostic) clause =
-  {
-    failure with
-    notes = failure.notes @ [ (clause, Catalog.Prover_description.describe_citation Cited_here) ];
-  }
-
-let name_cited_clause (failure : Source.span Diagnostic.diagnostic) ~path ~line =
-  {
-    failure with
-    message =
-      failure.message ^ Catalog.Prover_description.describe_citation (Cited_at { path; line });
-  }
 
 let explain_failure (posed : posed_obligation) answer ~is_refuted : Catalog.Prover.failure option =
   match answer with
@@ -521,61 +497,42 @@ let fail_site failure =
     is_proven = false;
     trusts_compiled_code = false;
     failure = Some failure;
-    citation = None;
   }
 
-let list_states (lookups : Lookups.t) posed ~answers ~refutations =
+let list_states posed ~answers ~refutations =
   match posed with
   | Unreadable failure -> [ fail_site failure ]
-  | Posed { key; obligations; failed_evaluation } ->
+  | Posed { obligations; failed_evaluation } ->
       let refutations = Queue.of_seq (List.to_seq refutations) in
-      let _, states =
-        List.fold_left2
-          (fun (reported, states) (posed : posed_obligation) answer ->
-            let { site; obligation; _ } = posed in
-            let is_refuted = is_refutable posed answer && Queue.pop refutations = Solver.Proven in
-            let explained = explain_failure posed answer ~is_refuted in
-            let is_reported = List.mem (site.code, site.shows) reported in
-            let failure =
-              match explained with
-              | Some failure when not is_reported ->
-                  Some
-                    (render lookups key
-                       (Unproven
-                          {
-                            location = obligation.location;
-                            instance = obligation.instance;
-                            obligation = obligation.obligation;
-                            failure;
-                            fixes = obligation.fixes;
-                          }))
-              | Some _ | None -> None
-            in
-            ( (if Option.is_some failure then (site.code, site.shows) :: reported else reported),
-              states
-              @ [
-                  {
-                    site;
-                    is_proven = explained = None;
-                    trusts_compiled_code = answer = Solver.Proven && posed.has_run_result;
-                    failure;
-                    citation =
-                      Option.bind failure (fun _ ->
-                          Option.map
-                            (fun ((cited : Resolve.Names.key), origin) ->
-                              {
-                                cited;
-                                clause =
-                                  Source.Definition_span.locate
-                                    (lookups.interface.names.read_spans cited)
-                                    (Core_walk.locate_origin origin);
-                              })
-                            obligation.cited);
-                  };
-                ] ))
-          ([], []) obligations answers
-      in
-      states @ List.map fail_site (Option.to_list failed_evaluation)
+      List.map2
+        (fun (posed : posed_obligation) answer ->
+          let { site; obligation; _ } = posed in
+          let is_refuted = is_refutable posed answer && Queue.pop refutations = Solver.Proven in
+          let explained = explain_failure posed answer ~is_refuted in
+          {
+            site;
+            is_proven = explained = None;
+            trusts_compiled_code = answer = Solver.Proven && posed.has_run_result;
+            failure =
+              Option.map
+                (fun failure ->
+                  Catalog.Prover.Unproven
+                    {
+                      location = obligation.location;
+                      instance = obligation.instance;
+                      obligation = obligation.obligation;
+                      failure;
+                      fixes = obligation.fixes;
+                      cited =
+                        Option.map
+                          (fun ((key : Resolve.Names.key), origin) : Catalog.Prover.quoted ->
+                            { key; origin })
+                          obligation.cited;
+                    })
+                explained;
+          })
+        obligations answers
+      @ List.map fail_site (Option.to_list failed_evaluation)
 
 module For_testing = struct
   let list_queries posed =

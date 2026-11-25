@@ -23,7 +23,7 @@ type context = {
   implements_capability : bool;
   is_constant : bool;
   mutable mutable_locals : Core.local list;
-  mutable diagnostics : Catalog.description list;
+  mutable diagnostics : Catalog.diagnostic list;
   mutable must_be_disjoint : (Core.id list * Core.id list) list;
 }
 

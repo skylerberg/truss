@@ -4,7 +4,7 @@ type state = {
   definition : Syntax.definition;
   elaborated : Environment.elaborated_interface;
   spans : Source.Definition_span.t array;
-  diagnostics : Catalog.description list ref;
+  diagnostics : Catalog.diagnostic list ref;
 }
 
 let report state diagnostic = ignore (Elaborator.record_diagnostic state.diagnostics diagnostic)

@@ -8,8 +8,7 @@ type checking = {
 }
 
 let report checking diagnostic =
-  ignore
-    (State.report_description checking.state (Catalog.Capabilities_description.describe diagnostic))
+  ignore (State.record_diagnostic checking.state (Catalog.Capabilities diagnostic))
 
 type function_body = { path : Path.t; implementation : Interface.Impls.implementation option }
 

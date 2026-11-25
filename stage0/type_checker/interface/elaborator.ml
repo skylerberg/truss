@@ -15,7 +15,7 @@ type t = {
   self_capabilities : (string * Types.capability_set) list;
   is_in_capability : bool;
   is_in_impl : bool;
-  diagnostics : Catalog.description list ref;
+  diagnostics : Catalog.diagnostic list ref;
   named : (Syntax.id * Types.ty) list ref;
   spans : Source.Definition_span.t array;
 }
@@ -129,9 +129,9 @@ let list_trait_closure (lookups : Lookups.t) path =
   List.rev !closure
 
 let record_diagnostic diagnostics (diagnostic : Catalog.Typing.t) =
-  let description = Catalog.Typing_description.describe diagnostic in
-  diagnostics := description :: !diagnostics;
-  Catalog.make_reported description
+  let reported = Catalog.Typing diagnostic in
+  diagnostics := reported :: !diagnostics;
+  Catalog.make_reported reported
 
 let report_error_type context diagnostic =
   Types.Error (record_diagnostic context.diagnostics diagnostic)

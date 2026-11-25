@@ -29,8 +29,8 @@ type checked = Body.checked = {
   uses_run_forever : bool;
 }
 
-val check_contract : Lookups.t -> Resolve.Names.key -> (checked, Catalog.description list) result
-val check_body : Lookups.t -> Resolve.Names.key -> (checked, Catalog.description list) result
+val check_contract : Lookups.t -> Resolve.Names.key -> (checked, Catalog.diagnostic list) result
+val check_body : Lookups.t -> Resolve.Names.key -> (checked, Catalog.diagnostic list) result
 val derive_form : Lookups.t -> Path.t -> Core.t option
 val is_derived_method : Path.t -> bool
 

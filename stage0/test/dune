@@ -39,6 +39,7 @@
   diagnostic
   description
   catalog
+  syntax_catalog
   project_catalog
   token
   lexer

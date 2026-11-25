@@ -227,6 +227,7 @@ type t =
       obligation : obligation;
       failure : failure;
       fixes : fix list;
+      cited : quoted option;
     }
   | Unreadable of { location : location; construct : construct; foreign : string option }
   | Unevaluated of { path : Path.t; report : string }

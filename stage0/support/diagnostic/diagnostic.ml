@@ -606,7 +606,6 @@ type 'span diagnostic = {
 }
 
 type t = Source.span diagnostic
-type in_definition = Source.Definition_span.t diagnostic
 
 let make ?(severity : severity = Error) ?(notes = []) ?(fixes = []) ~code span message =
   { code; severity; message; span; notes; fixes }
@@ -716,19 +715,6 @@ let list_machine_applicable (diagnostics : t list) =
           clear
       | _ -> false)
     diagnostics
-
-module Collector = struct
-  type diagnostic = t
-  type nonrec t = diagnostic Dynarray.t
-
-  let create () = Dynarray.create ()
-  let add collector diagnostic = Dynarray.add_last collector diagnostic
-
-  let to_list collector =
-    List.stable_sort
-      (fun (left : diagnostic) (right : diagnostic) -> compare left.span.start right.span.start)
-      (Dynarray.to_list collector)
-end
 
 let show_location source offset =
   let line, column = Source.compute_position source offset in

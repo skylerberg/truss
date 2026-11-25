@@ -55,7 +55,7 @@ let find (lookups : Lookups.t) (key : Resolve.Names.key) (definition : Syntax.de
       match list_run_forever_entries signature with
       | [ (clause, uses, index) ] ->
           Some
-            (Catalog.Usage_description.describe
+            (Catalog.Usage
                (Unused_run_forever
                   {
                     function_ = key.path;

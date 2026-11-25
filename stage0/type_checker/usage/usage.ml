@@ -5,11 +5,11 @@ type context = {
   module_ : Path.module_;
   resolved : Resolve.resolved;
   tables : Infer.tables;
-  mutable diagnostics : Catalog.description list;
+  mutable diagnostics : Catalog.diagnostic list;
 }
 
 let report context diagnostic =
-  context.diagnostics <- Catalog.Usage_description.describe diagnostic :: context.diagnostics
+  context.diagnostics <- Catalog.Usage diagnostic :: context.diagnostics
 
 type site = { is_var : bool; is_refutable_position : bool }
 type binding = { name : Syntax.name; removal : Catalog.Usage.removal; site : site }

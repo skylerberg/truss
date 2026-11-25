@@ -2,6 +2,7 @@
  (name renderer)
  (libraries
   catalog
+  syntax_catalog
   description
   diagnostic
   compiler_bug
@@ -9,4 +10,4 @@
   core
   core_walk
   resolve
-  syntax))
+  path))

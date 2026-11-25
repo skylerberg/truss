@@ -32,7 +32,7 @@ type context = {
   implements_capability : bool;
   is_constant : bool;
   mutable mutable_locals : Core.local list;
-  mutable diagnostics : Catalog.description list;
+  mutable diagnostics : Catalog.diagnostic list;
   mutable must_be_disjoint : (Core.id list * Core.id list) list;
 }
 
@@ -117,14 +117,15 @@ let find_place_without_keyword context (place : Core.origin) =
   Hashtbl.find_opt context.places_without_keyword (Core_walk.locate_origin place)
 
 let report context diagnostic =
-  let (description : Catalog.description) = Catalog.Ownership_description.describe diagnostic in
+  let description = Catalog.Ownership_description.describe diagnostic in
   let is_reported =
     List.exists
-      (fun (reported : Catalog.description) ->
+      (fun reported ->
+        let (reported : Catalog.description) = Catalog.describe reported in
         reported.location = description.location && reported.message = description.message)
       context.diagnostics
   in
-  if not is_reported then context.diagnostics <- description :: context.diagnostics
+  if not is_reported then context.diagnostics <- Catalog.Ownership diagnostic :: context.diagnostics
 
 let classify_binding_mode context (root : Place.root) : Language.Mode.t =
   match root with

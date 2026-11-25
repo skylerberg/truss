@@ -4,7 +4,9 @@ let expect_equal_lists show name expected actual =
       (String.concat "; " (List.map show expected))
       (String.concat "; " (List.map show actual))
 
-let lex text = Lexer.lex (Source.create ~path:"test.truss" text)
+let lex text =
+  let tokens, diagnostics = Lexer.lex (Source.create ~path:"test.truss" text) in
+  (tokens, List.map (Syntax_catalog.Lexing_description.render ~text) diagnostics)
 
 let list_codes text =
   List.map
@@ -112,7 +114,10 @@ let () =
       let source = Source.create ~path:"test.truss" text in
       match snd (Lexer.lex source) with
       | [ diagnostic ] ->
-          let rendered = Diagnostic.render ~is_colored:false source diagnostic in
+          let rendered =
+            Diagnostic.render ~is_colored:false source
+              (Syntax_catalog.Lexing_description.render ~text diagnostic)
+          in
           if not (String.starts_with ~prefix:"test.truss:1:10:" rendered) then
             Harness.fail "expected the position 1:10, got %s" rendered;
           if String.contains rendered '\xEF' then
@@ -142,7 +147,12 @@ let () =
   Harness.test "JSON output is valid UTF-8 when a message is about a bad byte" (fun () ->
       let source = Source.create ~path:"test.truss" "\"\\\xFF\"" in
       let json =
-        String.concat "," (List.map (Diagnostic.to_json_object source) (snd (Lexer.lex source)))
+        String.concat ","
+          (List.map
+             (fun diagnostic ->
+               Diagnostic.to_json_object source
+                 (Syntax_catalog.Lexing_description.render ~text:(Source.text source) diagnostic))
+             (snd (Lexer.lex source)))
       in
       if not (String.is_valid_utf_8 json) then Harness.fail "the JSON is not valid UTF-8: %S" json)
 

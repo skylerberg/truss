@@ -88,7 +88,7 @@ type state = {
   signatures : Signatures.t;
   visible_packages : Path.package list Lazy.t;
   tables : Tables.t;
-  mutable diagnostics : Catalog.description list;
+  mutable diagnostics : Catalog.diagnostic list;
   unifier : Unify.t;
   locals : (Syntax.id, local) Hashtbl.t;
   law_parameters : (string * Types.ty) list;
@@ -112,7 +112,7 @@ type state = {
 
 val add_diagnostic : state -> Catalog.Inference.t -> Diagnostic.reported
 val report : state -> Catalog.Inference.t -> unit
-val report_description : state -> Catalog.description -> Diagnostic.reported
+val record_diagnostic : state -> Catalog.diagnostic -> Diagnostic.reported
 val is_formula : env -> bool
 val reject_in_formula : state -> env -> Core.origin -> Catalog.Inference.formula_construct -> unit
 val read_span : state -> Syntax.id -> Source.Definition_span.t

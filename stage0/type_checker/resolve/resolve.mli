@@ -81,12 +81,14 @@ type head = {
 val find_head : resolved -> Syntax.expression -> head option
 
 val resolve :
-  Names.lookups ->
-  Names.key ->
-  (section * (resolution, Catalog.description list) result option) list
+  Names.lookups -> Names.key -> (section * (resolution, Catalog.diagnostic list) result option) list
 
 val list_file_diagnostics :
-  Names.lookups -> Path.file -> Syntax.file -> used:string list option -> Source.span Catalog.t list
+  Names.lookups ->
+  Path.file ->
+  Syntax.file ->
+  used:string list option ->
+  Catalog.Resolve.import list
 
 type trait_header = {
   associated : string list;

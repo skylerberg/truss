@@ -1,10 +1,15 @@
 let attempt source ~recovery =
-  let diagnostics = Diagnostic.Collector.create () in
+  let diagnostics = Dynarray.create () in
   let scanner = Scanner.create source diagnostics in
   let tokens, open_at_end =
     Layout.lex_file ~source ~diagnostics ~recovery (fun () -> Scanner.lex_next scanner)
   in
-  (tokens, Diagnostic.Collector.to_list diagnostics, open_at_end)
+  ( tokens,
+    List.stable_sort
+      (fun (left : Syntax_catalog.Lexing.t) (right : Syntax_catalog.Lexing.t) ->
+        compare left.at.start right.at.start)
+      (Dynarray.to_list diagnostics),
+    open_at_end )
 
 let scan source =
   match attempt source ~recovery:false with
@@ -25,13 +30,15 @@ let rec iter_names visit (tokens : Token.t array) =
       | _ -> ())
     tokens
 
-let remove_colliding_renames text (tokens : Token.t array) (diagnostics : Diagnostic.t list) =
+let remove_colliding_renames text (tokens : Token.t array)
+    (diagnostics : Syntax_catalog.Lexing.t list) =
   let written = Hashtbl.create 64 in
   iter_names (fun name -> Hashtbl.replace written name ()) tokens;
-  let find_rename (diagnostic : Diagnostic.t) =
-    match (diagnostic.code, diagnostic.fixes) with
-    | Lexer Name_case, [ { edits = [ edit ]; _ } ] ->
-        let span = diagnostic.span in
+  let find_rename (diagnostic : Syntax_catalog.Lexing.t) =
+    match (diagnostic.problem, diagnostic.fixes) with
+    | Name (Not_ascii _), _ -> None
+    | Name _, [ { edits = [ edit ]; _ } ] ->
+        let span = diagnostic.at in
         Some (String.sub text span.start (span.stop - span.start), edit.replacement)
     | _ -> None
   in
@@ -41,7 +48,7 @@ let remove_colliding_renames text (tokens : Token.t array) (diagnostics : Diagno
     || List.exists (fun (other, again) -> again = renamed && other <> spelling) renames
   in
   List.map
-    (fun (diagnostic : Diagnostic.t) ->
+    (fun (diagnostic : Syntax_catalog.Lexing.t) ->
       match find_rename diagnostic with
       | Some rename when collides rename -> { diagnostic with fixes = [] }
       | _ -> diagnostic)
@@ -147,7 +154,10 @@ let lex source =
     List.concat_map
       (fun (diagnostic : Diagnostic.t) ->
         match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
-      (Diagnostic.list_machine_applicable diagnostics)
+      (Diagnostic.list_machine_applicable
+         (List.map
+            (Syntax_catalog.Lexing_description.render ~text:(Source.text source))
+            diagnostics))
   in
   match edits with
   | [] -> (mark_inserted_closers tokens, diagnostics)

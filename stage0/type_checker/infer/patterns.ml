@@ -13,11 +13,11 @@ type space = Wild | Constructed of constructor * space list | Alternatives of sp
 type context = {
   lookups : Lookups.t;
   module_ : Path.module_;
-  mutable diagnostics : Catalog.description list;
+  mutable diagnostics : Catalog.diagnostic list;
 }
 
 let report context diagnostic =
-  context.diagnostics <- Catalog.Patterns_description.describe diagnostic :: context.diagnostics
+  context.diagnostics <- Catalog.Patterns diagnostic :: context.diagnostics
 
 let compute_integer_range type_ =
   let compute_bounds signed width =

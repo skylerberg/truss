@@ -15,10 +15,9 @@ end))
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Package_checks" format
 
-type placed = { key : Resolve.Names.key; description : Catalog.description }
+type placed = { key : Resolve.Names.key; diagnostic : Catalog.diagnostic }
 
-let place (key : Resolve.Names.key) diagnostic =
-  { key; description = Catalog.Package_description.describe diagnostic }
+let place (key : Resolve.Names.key) diagnostic = { key; diagnostic = Catalog.Package diagnostic }
 
 let read_definition (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
   lookups.interface.names.read_definition declaration.key
@@ -648,8 +647,8 @@ let report_unused (lookups : Lookups.t) (declaration : Resolve.Names.declaration
   in
   {
     key = declaration.key;
-    description =
-      Catalog.Usage_description.describe
+    diagnostic =
+      Catalog.Usage
         (Unused_definition
            {
              name = find_name (read_definition lookups declaration);
@@ -789,7 +788,7 @@ let check_definition (lookups : Lookups.t) key check_declaration =
   match check_declaration (names.read_declaration key) with
   | placed -> Placed placed
   | exception Interface.Properties.Recursion_limit diagnostic ->
-      Placed [ { key; description = Catalog.Typing_description.describe diagnostic } ]
+      Placed [ { key; diagnostic = Catalog.Typing diagnostic } ]
 
 let run (lookups : Lookups.t) package check =
   let list_contained = memoize (list_contained_types lookups) in

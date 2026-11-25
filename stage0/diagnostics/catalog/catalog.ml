@@ -58,7 +58,29 @@ let read_entry_siblings (entries : Core.origin range list) index : Core.origin s
       Compiler_bug.raise_bug ~stage:"Catalog" "the siblings of the only entry of a list"
   | _, _ -> Previous (List.nth entries (index - 1))
 
-let make_reported (_ : _ t) = Diagnostic.reported_elsewhere
+type diagnostic =
+  | Usage of Usage.t
+  | Package of Package.t
+  | Typing of Typing.t
+  | Resolve of Resolve.t
+  | Patterns of Patterns.t
+  | Capabilities of Capabilities.t
+  | Ownership of Ownership.t
+  | Inference of Inference.t
+  | Prover of Prover.t
+
+let describe : diagnostic -> description = function
+  | Usage diagnostic -> Usage_description.describe diagnostic
+  | Package diagnostic -> Package_description.describe diagnostic
+  | Typing diagnostic -> Typing_description.describe diagnostic
+  | Resolve diagnostic -> Resolve_description.describe diagnostic
+  | Patterns diagnostic -> Patterns_description.describe diagnostic
+  | Capabilities diagnostic -> Capabilities_description.describe diagnostic
+  | Ownership diagnostic -> Ownership_description.describe diagnostic
+  | Inference diagnostic -> Inference_description.describe diagnostic
+  | Prover diagnostic -> Prover_description.describe diagnostic
+
+let make_reported (_ : diagnostic) = Diagnostic.reported_elsewhere
 
 module Usage = Usage
 module Usage_description = Usage_description

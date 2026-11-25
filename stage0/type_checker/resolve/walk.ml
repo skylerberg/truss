@@ -76,7 +76,7 @@ type section_names = {
   names : target option array;
   brackets : bracket option array;
   mutable holes : (Syntax.id * (string * value) list) list;
-  mutable diagnostics : Catalog.description list;
+  mutable diagnostics : Catalog.diagnostic list;
   mutable used_imports : string list;
 }
 
@@ -131,10 +131,10 @@ let run_in_section state section walk =
   state.section <- enclosing
 
 let add_diagnostic state diagnostic =
-  let description = Catalog.Resolve_description.describe diagnostic in
+  let reported = Catalog.Resolve diagnostic in
   let names = lookup_current_names state in
-  names.diagnostics <- description :: names.diagnostics;
-  Catalog.make_reported description
+  names.diagnostics <- reported :: names.diagnostics;
+  Catalog.make_reported reported
 
 let report state diagnostic = ignore (add_diagnostic state diagnostic)
 

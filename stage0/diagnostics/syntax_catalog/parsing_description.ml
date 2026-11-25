@@ -485,4 +485,4 @@ let describe ({ at; problem; fixes } : Parsing.t) : Source.span Description.t =
         fixes;
   }
 
-let render diagnostic = Description.render_spans (describe diagnostic)
+let render ~text diagnostic = Description.render_file ~text (describe diagnostic)

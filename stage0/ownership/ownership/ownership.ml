@@ -1,7 +1,7 @@
 module Lookups = Lookups
 
 type result = {
-  diagnostics : Catalog.description list;
+  diagnostics : Catalog.diagnostic list;
   must_be_disjoint : (Core.id list * Core.id list) list;
 }
 
@@ -94,4 +94,4 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
 let check (lookups : Lookups.t) key =
   try check_definition lookups key
   with Interface.Properties.Recursion_limit diagnostic ->
-    { diagnostics = [ Catalog.Typing_description.describe diagnostic ]; must_be_disjoint = [] }
+    { diagnostics = [ Catalog.Typing diagnostic ]; must_be_disjoint = [] }

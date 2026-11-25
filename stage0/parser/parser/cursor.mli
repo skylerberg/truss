@@ -3,7 +3,12 @@ exception Failed
 type t
 
 val create :
-  diagnostics:Diagnostic.Collector.t -> base:int -> Token.t array -> first:int -> stop:int -> t
+  diagnostics:Syntax_catalog.Parsing.t Dynarray.t ->
+  base:int ->
+  Token.t array ->
+  first:int ->
+  stop:int ->
+  t
 
 val enter_interpolation : t -> Token.interpolation -> t
 val index : t -> int

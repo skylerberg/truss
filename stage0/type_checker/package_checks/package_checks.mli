@@ -1,6 +1,6 @@
 module Lookups = Lookups
 
-type placed = { key : Resolve.Names.key; description : Catalog.description }
+type placed = { key : Resolve.Names.key; diagnostic : Catalog.diagnostic }
 type use = Used | Unused of { is_named : bool }
 
 type check =

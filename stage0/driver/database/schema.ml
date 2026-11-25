@@ -114,10 +114,9 @@ let tables =
        INTEGER NOT NULL, stop INTEGER NOT NULL, PRIMARY KEY (definition, position)"
       [];
     keyed_by_columns "verdict"
-      "definition INTEGER NOT NULL, position INTEGER NOT NULL, code TEXT NOT NULL, start INTEGER \
-       NOT NULL, stop INTEGER NOT NULL, shows TEXT NOT NULL, proven INTEGER NOT NULL, \
-       trusts_compiled_code INTEGER NOT NULL, failure BLOB, cited INTEGER, cited_start INTEGER, \
-       cited_stop INTEGER, PRIMARY KEY (definition, position)"
+      "definition INTEGER NOT NULL, position INTEGER NOT NULL, code TEXT NOT NULL, site BLOB NOT \
+       NULL, proven INTEGER NOT NULL, trusts_compiled_code INTEGER NOT NULL, failure BLOB, PRIMARY \
+       KEY (definition, position)"
       [];
     keyed_by_id "grant"
       ("dependency INTEGER PRIMARY KEY, " ^ state ^ ", capabilities BLOB, unknown BLOB")
@@ -139,9 +138,8 @@ let tables =
       [];
     keyed_by_columns "diagnostic"
       "stage INTEGER NOT NULL, unit INTEGER NOT NULL, position INTEGER NOT NULL, package TEXT NOT \
-       NULL, definition INTEGER, file INTEGER, severity TEXT NOT NULL, code TEXT NOT NULL, start \
-       INTEGER NOT NULL, stop INTEGER NOT NULL, message TEXT NOT NULL, detail BLOB NOT NULL, \
-       PRIMARY KEY (stage, unit, position)"
+       NULL, definition INTEGER, file INTEGER, severity TEXT NOT NULL, code TEXT NOT NULL, detail \
+       BLOB NOT NULL, PRIMARY KEY (stage, unit, position)"
       [
         ("diagnostic_definition", "definition");
         ("diagnostic_file", "file");

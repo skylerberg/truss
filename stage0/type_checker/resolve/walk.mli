@@ -38,7 +38,7 @@ type section_names = {
   names : target option array;
   brackets : bracket option array;
   mutable holes : (Syntax.id * (string * value) list) list;
-  mutable diagnostics : Catalog.description list;
+  mutable diagnostics : Catalog.diagnostic list;
   mutable used_imports : string list;
 }
 

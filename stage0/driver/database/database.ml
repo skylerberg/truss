@@ -316,28 +316,86 @@ let has_unchecked_body (database : t) (package : Path.package) =
   Store.locate_schema database.store package = Main
   && Store.has_unchecked_body database.store ~package:(Path.show_package package) ~skipped_kind:None
 
+let decode_placed (placed : Store.placed) : Renderer.placed =
+  {
+    file = Declarations.decode_file placed.file;
+    base = placed.base;
+    stop = placed.stop;
+    spans = Marshal.from_string placed.spans 0;
+  }
+
+let make_render_lookups (database : t) placed_by_key : Renderer.lookups =
+  let texts = Hashtbl.create 4 in
+  {
+    read_placed =
+      (fun key ->
+        match Hashtbl.find_opt placed_by_key key with
+        | Some placed -> placed
+        | None -> (
+            match
+              Store.find_placed database.store
+                (Store.locate_schema database.store key.module_.package)
+                ~definition:(Ids.of_key key)
+            with
+            | Some placed -> decode_placed placed
+            | None ->
+                Compiler_bug.raise_bug ~stage:"Database" "%s has no place in a file"
+                  (Resolve.Names.show_key key)));
+    read_file_text =
+      (fun file ->
+        match Hashtbl.find_opt texts file with
+        | Some text -> text
+        | None ->
+            let text = Source.text (Lookups.read_source database Tracker.untracked file) in
+            Hashtbl.replace texts file text;
+            text);
+  }
+
+let decode_rows rows find_placed =
+  let placed_by_key = Hashtbl.create 16 in
+  let decoded =
+    List.map
+      (fun row ->
+        ( row,
+          Option.map
+            (fun (key, placed) ->
+              let key = Declarations.decode_key key in
+              Hashtbl.replace placed_by_key key (decode_placed placed);
+              key)
+            (find_placed row) ))
+      rows
+  in
+  (decoded, placed_by_key)
+
 let list_located (database : t) (file : Path.file) ~is_selected : Diagnostic.t list =
   let hides_unused = lazy (has_unchecked_body database file.module_.package) in
   let is_shown (stage : Kind.stage) = stage <> Check_unexported || not (Lazy.force hides_unused) in
+  let rows, placed_by_key =
+    decode_rows
+      (Store.list_file_diagnostics database.store
+         (Store.locate_schema database.store file.module_.package)
+         ~file:(Ids.of_file file) ~test_kind:(Declarations.rank_kind Test))
+      (fun (located : Store.located) -> located.definition)
+  in
+  let lookups = make_render_lookups database placed_by_key in
+  let render (located : Store.located) = function
+    | Some key ->
+        Renderer.render lookups key (Marshal.from_string located.detail 0 : Catalog.diagnostic)
+    | None ->
+        Renderer.render_file_diagnostic ~text:(lookups.read_file_text file)
+          (Marshal.from_string located.detail 0 : Renderer.file_diagnostic)
+  in
   List.sort_uniq
     (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
       compare (left.span, left.code, left.message) (right.span, right.code, right.message))
     (List.filter_map
-       (fun (located : Store.located) ->
+       (fun ((located : Store.located), key) ->
          let stage = List.nth Kind.stages located.stage in
          match find_checker stage with
          | Some checker when is_shown stage && is_selected checker located ->
-             Some
-               (match located.base with
-               | Some base ->
-                   Diagnostic.map_spans
-                     (Source.Definition_span.to_file ~base)
-                     (Marshal.from_string located.detail 0 : Diagnostic.in_definition)
-               | None -> (Marshal.from_string located.detail 0 : Diagnostic.t))
+             Some (render located key)
          | Some _ | None -> None)
-       (Store.list_file_diagnostics database.store
-          (Store.locate_schema database.store file.module_.package)
-          ~file:(Ids.of_file file) ~test_kind:(Declarations.rank_kind Test)))
+       rows)
 
 let list_diagnostics checkers database file =
   list_located database file ~is_selected:(fun checker _ -> List.mem checker checkers)
@@ -350,7 +408,7 @@ let list_blocking_diagnostics database file =
          match checker with
          | Parse -> true
          | Resolve | Interface | Infer | Usage | Ownership ->
-             Option.is_some located.base && not located.is_in_test
+             Option.is_some located.definition && not located.is_in_test
          | Package_checks | Unexported -> false))
 
 let read_source (database : t) = Lookups.read_source database Tracker.untracked
@@ -550,54 +608,66 @@ let decide ?on_bug proofs solver =
 type proof_site = { code : string; span : Source.span; shows : string }
 type proof_state = { site : proof_site; is_proven : bool; trusts_compiled_code : bool }
 
+let list_verdicts (database : t) (file : Path.file) =
+  let rows, placed_by_key =
+    decode_rows
+      (Store.list_file_verdicts database.store ~file:(Ids.of_file file))
+      (fun (key, placed, _) -> Some (key, placed))
+  in
+  ( List.map (fun ((_, _, verdict), key) -> (Option.get key, verdict)) rows,
+    make_render_lookups database placed_by_key )
+
+let render_site lookups key ({ code; site; _ } : Store.verdict) =
+  let shown =
+    Renderer.render lookups key (Prover (Marshal.from_string site 0 : Catalog.Prover.t))
+  in
+  { code; span = shown.span; shows = shown.message }
+
 let list_proof_states (database : t) (file : Path.file) =
-  List.map
-    (fun (base, ({ code; start; stop; shows; is_proven; trusts_compiled_code; _ } : Store.verdict))
-       ->
-      {
-        site =
-          {
-            code;
-            span = Source.Definition_span.to_file ~base (Source.Definition_span.make start stop);
-            shows;
-          };
-        is_proven;
-        trusts_compiled_code;
-      })
-    (Store.list_file_verdicts database.store ~file:(Ids.of_file file))
+  let verdicts, lookups = list_verdicts database file in
+  List.stable_sort
+    (fun left right -> compare (left.site.span, left.site.code) (right.site.span, right.site.code))
+    (List.map
+       (fun (key, ({ is_proven; trusts_compiled_code; _ } as verdict : Store.verdict)) ->
+         { site = render_site lookups key verdict; is_proven; trusts_compiled_code })
+       verdicts)
+
+let describe_proof_failure (database : t) (lookups : Renderer.lookups) (file : Path.file) failure =
+  match Catalog.Prover_description.find_cited failure with
+  | None -> Catalog.Prover_description.describe failure
+  | Some { key = cited; origin } ->
+      let placed = lookups.read_placed cited in
+      if placed.file = file then Catalog.Prover_description.describe_cited failure Cited_here
+      else
+        let source = Lookups.read_source database Tracker.untracked placed.file in
+        let clause = Renderer.locate lookups cited origin in
+        Catalog.Prover_description.describe_cited failure
+          (Cited_at
+             { path = Source.path source; line = fst (Source.compute_position source clause.start) })
 
 let list_proof_diagnostics (database : t) (file : Path.file) =
-  let names = make_name_lookups database in
-  let cite (failure : Diagnostic.t) ({ cited; clause_start; clause_stop } : Store.citation) =
-    match Store.find_definition_key_anywhere database.store ~id:cited with
-    | None -> failure
-    | Some key ->
-        let (place : Resolve.Names.place) = names.read_place (Declarations.decode_key key) in
-        let clause =
-          Source.Definition_span.to_file ~base:place.base
-            (Source.Definition_span.make clause_start clause_stop)
-        in
-        if place.file = file then Prover.note_cited_clause failure clause
-        else
-          let source = read_source database place.file in
-          Prover.name_cited_clause failure ~path:(Source.path source)
-            ~line:(fst (Source.compute_position source clause.start))
+  let verdicts, lookups = list_verdicts database file in
+  let _, failures =
+    List.fold_left
+      (fun (shown_failures, failures) (key, (verdict : Store.verdict)) ->
+        match verdict.failure with
+        | None -> (shown_failures, failures)
+        | Some failure ->
+            let site = render_site lookups key verdict in
+            let shown = (key, site.code, site.shows) in
+            if List.mem shown shown_failures then (shown_failures, failures)
+            else
+              ( shown :: shown_failures,
+                Renderer.render_description lookups key
+                  (describe_proof_failure database lookups file
+                     (Marshal.from_string failure 0 : Catalog.Prover.t))
+                :: failures ))
+      ([], []) verdicts
   in
   List.sort
     (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
       compare (left.span, left.code, left.message) (right.span, right.code, right.message))
-    (List.filter_map
-       (fun (base, (verdict : Store.verdict)) ->
-         Option.map
-           (fun failure ->
-             let failure =
-               Diagnostic.map_spans
-                 (Source.Definition_span.to_file ~base)
-                 (Marshal.from_string failure 0 : Diagnostic.in_definition)
-             in
-             Option.fold ~none:failure ~some:(cite failure) verdict.citation)
-           verdict.failure)
-       (Store.list_file_verdicts database.store ~file:(Ids.of_file file)))
+    failures
 
 let list_unit_targets (database : t) stage id =
   List.map
@@ -1110,19 +1180,23 @@ module For_testing = struct
          (fun (key : Resolve.Names.key) ->
            match find_proof database key with
            | Some (Value proof) ->
-               let base = (lookups.interface.names.read_place key).base in
                List.map
-                 (fun (({ code; span; shows } : Prover.site), input) ->
+                 (fun (({ code; shows } : Prover.site), input) ->
+                   let shown =
+                     Renderer.render
+                       (make_render_lookups database (Hashtbl.create 1))
+                       key (Prover shows)
+                   in
                    ( {
                        code = Diagnostic.Code.name (Prover code);
-                       span = Source.Definition_span.to_file ~base span;
-                       shows;
+                       span = shown.span;
+                       shows = shown.message;
                      },
                      input ))
                  (Prover.For_testing.list_queries
-                    (Prover.pose lookups
+                    (Prover.pose
                        ~runs:(Recipes.list_runs database Tracker.untracked lookups proof)
-                       key proof))
+                       proof))
            | Some (Failed | Blocked) | None -> [])
          (list_proof_keys proofs))
 

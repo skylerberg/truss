@@ -51,7 +51,7 @@ let rec skip_spaces_after text position =
     skip_spaces_after text (position + 1)
   else position
 
-type quoted = { definition_text : string; start : int; stop : int }
+type quoted = { source_text : string; start : int; stop : int }
 
 type ('node, 'span) source = {
   text : string Lazy.t;
@@ -114,7 +114,7 @@ let rename_types type_names text =
 
 let substitute source clause replacements type_names =
   let quoted = source.read_quoted clause in
-  let clause_text = String.sub quoted.definition_text quoted.start (quoted.stop - quoted.start) in
+  let clause_text = String.sub quoted.source_text quoted.start (quoted.stop - quoted.start) in
   let buffer = Buffer.create (String.length clause_text) in
   let next =
     List.fold_left
@@ -144,9 +144,9 @@ let render_pieces source pieces =
        (function
          | Text text -> text
          | Quote node ->
-             let { definition_text; start; stop } = source.read_quoted node in
+             let { source_text; start; stop } = source.read_quoted node in
              if start = stop then raise_bug "a quote of an empty span at %d" start;
-             String.sub definition_text start (stop - start)
+             String.sub source_text start (stop - start)
          | Quote_over range ->
              let start, stop = locate_range source range in
              String.sub (Lazy.force source.text) start (stop - start)
@@ -247,7 +247,7 @@ let render_file ~text (description : Source.span t) =
       read_quoted =
         (fun span ->
           let start, stop = locate span in
-          { definition_text = text; start; stop });
+          { source_text = text; start; stop });
       make_span = Source.make_span;
     }
     description
