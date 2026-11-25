@@ -436,7 +436,8 @@ let () =
         not
           (List.exists
              (fun (problem : Project.problem) ->
-               String.includes ~affix:"`two` is not a package of this project" problem.message)
+               String.includes ~affix:"`two` is not a package of this project"
+                 (Project.show_problem problem))
              problems)
       then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems));
       match Cli.Command_packages.load root with
@@ -547,7 +548,7 @@ let report_problems report =
 let expect_problem ?file files message =
   let problems_reported = list_problems files in
   let is_expected (problem : Project.problem) =
-    String.includes ~affix:message problem.message
+    String.includes ~affix:message (Project.show_problem problem)
     && match file with Some file -> problem.file = file | None -> true
   in
   if not (List.exists is_expected problems_reported) then
@@ -702,7 +703,8 @@ let () =
           (List.exists
              (fun (problem : Project.problem) ->
                problem.file = "one/truss.toml"
-               && String.includes ~affix:"A test's time limit is its project's" problem.message)
+               && String.includes ~affix:"A test's time limit is its project's"
+                    (Project.show_problem problem))
              problems)
       then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems)));
   test "a time limit of 0 is malformed, at its line" (fun () ->
@@ -739,7 +741,8 @@ let () =
           (List.exists
              (fun (problem : Project.problem) ->
                problem.file = "one/truss.toml"
-               && String.includes ~affix:"A build's x86-64 level is its project's" problem.message)
+               && String.includes ~affix:"A build's x86-64 level is its project's"
+                    (Project.show_problem problem))
              problems)
       then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems));
       if Workspace.x86_64_level (fst project) <> V3 then fail "read the package's level");
@@ -750,10 +753,12 @@ let () =
           match
             Manifest.parse (Printf.sprintf "[project]\n[build]\nx86_64_level = %s\n" written)
           with
-          | exception Manifest.Malformed { line = 3; message }
-            when String.includes ~affix:expected message ->
+          | exception Manifest.Malformed { line = 3; problem }
+            when String.includes ~affix:expected (Project_catalog.describe_manifest_problem problem)
+            ->
               ()
-          | exception Manifest.Malformed { line; message } -> fail "line %d: %s" line message
+          | exception Manifest.Malformed { line; problem } ->
+              fail "line %d: %s" line (Project_catalog.describe_manifest_problem problem)
           | _ -> fail "accepted"))
     [ ({|"v5"|}, {|`"v1"`, `"v2"`, `"v3"`, `"v4"`|}); ("3", "is a string in quotes") ];
   test "a key of [build] other than x86_64_level is malformed, at its line" (fun () ->
@@ -764,20 +769,29 @@ let () =
 let edit start stop replacement = Diagnostic.replace (Source.make_span start stop) replacement
 
 let make_diagnostic ~fixes start stop =
-  Diagnostic.make ~fixes ~code:(Usage Unused_variable) (Source.make_span start stop) "x."
+  Diagnostic.For_rendering.make ~fixes ~code:(Usage Unused_variable) (Source.make_span start stop)
+    "x."
 
 let () =
   test "edits apply at the offsets of the text they were made for" (fun () ->
       expect_string ~expected:"A bb C"
         (Diagnostic.apply_edits "a bb c" [ edit 0 1 "A"; edit 5 6 "C" ]));
   test "a fix that overlaps an earlier one waits for the next round" (fun () ->
-      let first = make_diagnostic ~fixes:[ Diagnostic.fix "one" [ edit 0 3 "x" ] ] 0 3 in
-      let second = make_diagnostic ~fixes:[ Diagnostic.fix "two" [ edit 2 4 "y" ] ] 2 4 in
+      let first =
+        make_diagnostic ~fixes:[ Diagnostic.For_rendering.fix "one" [ edit 0 3 "x" ] ] 0 3
+      in
+      let second =
+        make_diagnostic ~fixes:[ Diagnostic.For_rendering.fix "two" [ edit 2 4 "y" ] ] 2 4
+      in
       if Diagnostic.list_machine_applicable [ first; second ] <> [ first ] then fail "chose both");
   test "a diagnostic with several fixes is left for the person or agent to choose" (fun () ->
       let choice =
         make_diagnostic
-          ~fixes:[ Diagnostic.fix "one" [ edit 0 1 "x" ]; Diagnostic.fix "two" [ edit 0 1 "y" ] ]
+          ~fixes:
+            [
+              Diagnostic.For_rendering.fix "one" [ edit 0 1 "x" ];
+              Diagnostic.For_rendering.fix "two" [ edit 0 1 "y" ];
+            ]
           0 1
       in
       if Diagnostic.list_machine_applicable [ choice ] <> [] then fail "chose one");
@@ -1923,11 +1937,11 @@ let () =
       match
         List.filter
           (fun (problem : Project.problem) ->
-            String.includes ~affix:"not a package of this project" problem.message)
+            String.includes ~affix:"not a package of this project" (Project.show_problem problem))
           problems
       with
-      | [ { file = "truss.lock"; message; _ } ]
-        when String.includes ~affix:"Run `truss add acme.units`" message ->
+      | [ ({ file = "truss.lock"; _ } as problem) ]
+        when String.includes ~affix:"Run `truss add acme.units`" (Project.show_problem problem) ->
           ()
       | _ -> fail "problems: [%s]" (String.concat "; " (List.map Project.show_problem problems)));
   test "registry packages that depend on each other in a cycle are a problem, and none is built"

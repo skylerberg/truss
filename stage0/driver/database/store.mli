@@ -40,9 +40,6 @@ type diagnostic = {
   file : int option;
   is_error : bool;
   code : string;
-  start : int;
-  stop : int;
-  message : string;
   detail : string;
 }
 
@@ -132,7 +129,14 @@ val list_claimed_among :
 
 val merge : string list -> into:string -> unit
 
-type located = { stage : int; base : int option; is_in_test : bool; detail : string }
+type placed = { file : string; base : int; stop : int; spans : string }
+
+type located = {
+  stage : int;
+  definition : (string * placed) option;
+  is_in_test : bool;
+  detail : string;
+}
 
 val list_file_diagnostics : t -> schema -> file:int -> test_kind:int -> located list
 val has_error : t -> package:string -> last_stage:int -> hidden_stage:int option -> bool
@@ -141,25 +145,21 @@ type scope = Everything | Packages of string list | Files of int list
 
 val find_unproven_definition : t -> scope:scope -> origin:int -> string option
 
-type hole = { home : int; start : int; stop : int }
+type hole = { home : int; location : string }
 
 val list_holes : t -> schema -> definition:int -> hole list
 val replace_holes : t -> definition:int -> hole list -> unit
 
-type citation = { cited : int; clause_start : int; clause_stop : int }
-
 type verdict = {
   code : string;
-  start : int;
-  stop : int;
-  shows : string;
+  site : string;
   is_proven : bool;
   trusts_compiled_code : bool;
   failure : string option;
-  citation : citation option;
 }
 
-val list_file_verdicts : t -> file:int -> (int * verdict) list
+val list_file_verdicts : t -> file:int -> (string * placed * verdict) list
+val find_placed : t -> schema -> definition:int -> placed option
 val replace_verdicts : t -> definition:int -> verdict list -> bool
 
 val list_differing_rows :
@@ -312,6 +312,7 @@ val replace_module_law_proofs :
 
 val has_module : t -> schema -> module_:int -> bool
 val find_place : t -> schema -> definition:int -> (string * int) option
+val find_file_order : t -> schema -> definition:int -> (string * int) option
 val find_text : t -> schema -> definition:int -> string option
 val find_definition_key : t -> schema -> id:int -> string option
 val list_member_keys : t -> schema -> owner:int -> member:string -> origin:int -> string list

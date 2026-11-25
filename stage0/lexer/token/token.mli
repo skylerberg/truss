@@ -163,7 +163,6 @@ val spell_reserved : reserved -> string
 val spell_punctuation : punctuation -> string
 val spell_foreign : foreign -> string
 val definition_keywords : keyword list
-val spell_tokens : ?insertions:(int * string) list -> t array -> string option
 val joins : char -> char -> bool
 val can_end : kind -> bool
 val can_begin : kind -> bool

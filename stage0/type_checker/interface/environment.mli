@@ -12,7 +12,7 @@ type interface =
       law : string;
       for_type : Types.ty;
     }
-  | Error_interface of Diagnostic.reported
+  | Error_interface of Catalog.reported
 
 type declared_bounds
 type known_bounds
@@ -23,12 +23,12 @@ type 'bounds scope = {
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability_set) list;
   bounds : (Types.parameter * Types.trait_reference list) list;
-  broken_parameters : (Types.parameter * Diagnostic.reported) list;
+  broken_parameters : (Types.parameter * Catalog.reported) list;
 }
 
 type elaborated_interface = {
   interface : interface;
-  diagnostics : Diagnostic.in_definition list;
+  diagnostics : Catalog.diagnostic list;
   named : (Syntax.id * Types.ty) list;
   scope : known_bounds scope;
 }

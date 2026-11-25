@@ -1,9 +1,9 @@
 type failure = Unmet | Unmet_associated of (string * Types.ty * Types.ty) | Refused of int
 type decision = Holds | Waits | Fails of failure | Becomes of State.goal list
 
-let read_cause_span : State.cause -> Source.Definition_span.t = function
+let read_cause_origin : State.cause -> Core.origin = function
   | Bound { at; _ } | Operator { at; _ } | Method_call at | Loop at | Quantifier at -> at
-  | Excluded _ -> State.raise_bug "a requirement of a set has no span of its own"
+  | Excluded _ -> State.raise_bug "a requirement of a set has no origin of its own"
 
 let list_goal_arguments (goal : State.goal) =
   match goal.requirement with
@@ -16,7 +16,7 @@ let fail (state : State.state) (goal : State.goal) failure =
     | Unmet -> Failures.report_failure state goal goal.subject
     | Unmet_associated associated -> Failures.report_failure state goal ~associated goal.subject
     | Refused root ->
-        Failures.report_decided_in_specification state (read_cause_span goal.cause) root
+        Failures.report_decided_in_specification state (read_cause_origin goal.cause) root
   in
   List.iter (fun (_, output) -> ignore (State.unify state output (Types.Error report))) goal.outputs;
   List.iter
@@ -85,7 +85,7 @@ let narrow (state : State.state) goal variable set =
   | Types.Variable member
     when Unify.unify state.unifier variable (Unify.make_fresh_number state.unifier set) ->
       State.record_narrowing state member ~allowed:set ~report_excluded:(fun excluded ->
-          Failures.report_requirement state goal ~unmet:"" excluded);
+          Failures.report_requirement state goal ~impl_need:None excluded);
       Holds
   | _ -> Fails Unmet
 
@@ -208,7 +208,7 @@ let select (state : State.state) (goal : State.goal) trait ~subject
             }
             :: !conditions
         in
-        let cause : State.cause = Bound { at = read_cause_span goal.cause; of_type = None } in
+        let cause : State.cause = Bound { at = read_cause_origin goal.cause; of_type = None } in
         let flatten = flatten_into state cause ~projections:(ref []) ~add in
         List.iter
           (fun (argument, bound) ->
@@ -389,7 +389,7 @@ let decide_default (state : State.state) ~site ~at type_ =
   match (State.resolve state type_, State.find_domain state type_) with
   | Types.Variable root, Some domain -> (
       let default = make_default_type domain in
-      record_decisions state ~at:(State.read_current_frame state).span;
+      record_decisions state ~at:(State.read_current_frame state).origin;
       ignore (Unify.unify state.unifier type_ default);
       state.unifier.decided_numbers <- [];
       match Failures.find_refused_class state ~sides:[ (type_, default) ] with
@@ -413,21 +413,17 @@ let solve_head (state : State.state) ?default_at index =
       if Unify.count_solutions state.unifier <> count then solve_givers ()
   | _ -> ()
 
-let compare_in_source_order state left right =
-  let left : Source.Definition_span.t = State.read_span state left
-  and right : Source.Definition_span.t = State.read_span state right in
-  compare (left.start, -left.stop) (right.start, -right.stop)
-
 let constrain_capability_equalities (state : State.state) (frame : State.frame) =
   List.iter
     (fun (left, right) ->
       let report_missing _ =
-        State.report state Mismatch frame.span
-          (Printf.sprintf
-             "Two function types here must use the same capabilities, and one uses `%s` where the \
-              other uses `%s`."
-             (Types.show_capabilities (State.resolve_capabilities state left))
-             (Types.show_capabilities (State.resolve_capabilities state right)))
+        State.report state
+          (Capability_mismatch
+             {
+               at = frame.origin;
+               left = State.resolve_capabilities state left;
+               right = State.resolve_capabilities state right;
+             })
       in
       state.capability_constraints <-
         { subset = left; restriction = None; superset = right; report_missing }
@@ -445,7 +441,7 @@ let list_output_unknowns (state : State.state) (goal : State.goal) =
 
 let force_statement_inputs (state : State.state) (frame : State.frame) =
   List.iter
-    (fun input -> ignore (decide_default state ~site:Statement_end ~at:frame.span input))
+    (fun input -> ignore (decide_default state ~site:Statement_end ~at:frame.origin input))
     (snd
        (walk_givers state ([], [])
           (List.filter (is_owned state frame)
@@ -475,23 +471,18 @@ let list_frame_unknowns (state : State.state) (frame : State.frame) =
 let list_goal_unknowns state goal = list_goal_inputs state goal @ list_output_unknowns state goal
 
 let report_undetermined (state : State.state) (frame : State.frame) unsolved =
-  let quote id = State.quote_span state (State.read_span state id) in
   let holds_unsolved id =
     List.exists (fun unknown -> List.mem unknown unsolved) (list_node_unknowns state id)
   in
-  let report id message =
-    State.add_diagnostic state Cannot_infer (State.read_span state id) message
+  let report id undetermined =
+    State.add_diagnostic state (Undetermined { at = Written id; undetermined })
   in
   match
     List.find_opt
       (fun binding -> Hashtbl.mem state.annotatable binding && holds_unsolved binding)
       (List.rev frame.bindings)
   with
-  | Some binding ->
-      let name = quote binding in
-      report binding
-        (Printf.sprintf "The type of `%s` cannot be inferred from this statement alone. %s" name
-           (Failures.make_declaration_remedy name))
+  | Some binding -> report binding Binding_type
   | None -> (
       let origins =
         List.sort
@@ -503,31 +494,19 @@ let report_undetermined (state : State.state) (frame : State.frame) unsolved =
       in
       match origins with
       | (_, Generic_argument { written; parameter; declared_on }) :: _ ->
-          let kind =
-            match parameter.kind with
-            | Types.Type_generic _ -> "a type parameter"
-            | Value_generic -> "a value parameter"
-          in
           report written
-            (Printf.sprintf "Nothing here determines `%s`, %s of `%s`. %s" parameter.generic.name
-               kind
-               (Failures.show_declaration declared_on)
-               (Failures.make_bracket_remedy declared_on parameter))
-      | (_, List_literal literal) :: _ ->
-          report literal
-            (Printf.sprintf
-               "Nothing here determines the element type of `%s`. Bind the list with a typed \
-                `let`, such as `let names: List[String] = []`."
-               (quote literal))
-      | (_, Map_literal literal) :: _ ->
-          report literal
-            (Printf.sprintf
-               "Nothing here determines the key and value types of `%s`. Bind the map with a typed \
-                `let`, such as `let ages: Map[String, UInt8] = [:]`."
-               (quote literal))
-      | [] ->
-          State.add_diagnostic state Cannot_infer frame.span
-            "The types here cannot be inferred from this code alone.")
+            (Generic_argument
+               {
+                 parameter = parameter.generic.name;
+                 is_type =
+                   (match parameter.kind with
+                   | Types.Type_generic _ -> true
+                   | Value_generic -> false);
+                 declared_on;
+               })
+      | (_, List_literal literal) :: _ -> report literal List_element
+      | (_, Map_literal literal) :: _ -> report literal Map_entries
+      | [] -> State.add_diagnostic state (Types_undetermined { at = frame.origin }))
 
 let report_unsolved (state : State.state) (frame : State.frame) =
   let unsolved =
@@ -548,11 +527,8 @@ let report_unsolved (state : State.state) (frame : State.frame) =
                       (fun unknown -> List.mem unknown unsolved)
                       (list_trait_unknowns trait) ->
               Some
-                ( State.add_diagnostic state Cannot_infer at
-                    (Printf.sprintf
-                       "This call does not determine the arguments of `%s`. Write the call in full \
-                        with them."
-                       (match trait.trait with Top { name; _ } -> name | path -> Path.show path)),
+                ( State.add_diagnostic state
+                    (Trait_arguments_undetermined { at; trait = trait.trait }),
                   list_trait_unknowns trait )
           | _ -> None)
         state.goals
@@ -612,7 +588,7 @@ let hand_open_parts_to_parent (state : State.state) (frame : State.frame) parent
   List.iter (State.check_compiled_binding state) settled_bindings;
   List.iter
     (State.check_compiled_expression state)
-    (List.sort (compare_in_source_order state) settled_expressions)
+    (List.sort (State.compare_in_source_order state) settled_expressions)
 
 let settle (state : State.state) (frame : State.frame) =
   let parent = match state.frames with _ :: parent :: _ -> Some parent | _ -> None in
@@ -624,13 +600,13 @@ let settle (state : State.state) (frame : State.frame) =
   solve_all state;
   report_unsolved state frame;
   (match parent with
-  | Some _ -> record_decisions state ~at:frame.span
+  | Some _ -> record_decisions state ~at:frame.origin
   | None -> state.unifier.decided_numbers <- []);
   hand_open_parts_to_parent state frame parent;
   if Option.is_none parent && state.goals <> [] then
     State.raise_bug "a goal is pending at the end of the definition"
 
-let run_in_statement (state : State.state) (env : State.env) span body =
+let run_in_statement (state : State.state) (env : State.env) origin body =
   let frame : State.frame =
     {
       first_variable = state.unifier.next + 1;
@@ -640,7 +616,7 @@ let run_in_statement (state : State.state) (env : State.env) span body =
       compiled_expressions = [];
       compiled_bindings = [];
       specification_only_report = None;
-      span;
+      origin;
     }
   in
   state.frames <- frame :: state.frames;

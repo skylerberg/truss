@@ -138,7 +138,7 @@ let () =
     "declaring Copyable on a type that is not opaque is an error with a fix that removes it"
     (fun () ->
       expect_one_diagnostic "type Point(x: Int64)\n  derives Copyable\n" "types.derives_inferred"
-        ~fixed:"type Point(x: Int64)\n  \n")
+        ~fixed:"type Point(x: Int64)\n")
 
 let () =
   Harness.test "an opaque type cannot declare Copyable when a field is not Copyable" (fun () ->

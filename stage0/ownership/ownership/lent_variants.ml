@@ -2,13 +2,8 @@ let check context (mir : Mir.Graph.t) =
   let rec check_part ~variant (part : Mir.yielded) =
     match (part, variant) with
     | Part (Borrow { mode = Mut; origin; _ }), Some variant ->
-        Context.report context Lent_mut_in_variant
-          (Context.locate_with_mode_keyword context origin)
-          (Printf.sprintf
-             "This place is lent `mut` inside the variant `%s`. The caller could replace the \
-              variant, and the place would be left without a value. Lend the place itself, and \
-              give the caller another method that says whether the place is there."
-             variant)
+        Context.report context
+          (Lent_mut_in_variant { at = Context.cover_with_mode_keyword context origin; variant })
     | Part _, _ -> ()
     | Built { variant = built; fields; _ }, _ ->
         let variant = if Option.is_some built then built else variant in

@@ -55,10 +55,7 @@ let make_unwritten_code ~definition ~substitution ~result =
   }
 
 let read_written context key =
-  {
-    spans = context.lookups.interface.names.read_spans key;
-    text = context.lookups.interface.names.read_text key;
-  }
+  { spans = context.lookups.source.read_spans key; text = context.lookups.source.read_text key }
 
 let make_default_code context (code : code) ~(source : Resolve.Names.key) ~substitution =
   {

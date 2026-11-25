@@ -264,10 +264,8 @@ let check_recursion_depth ~depth type_ trait =
   if depth > Properties.recursion_limit then
     raise
       (Properties.Recursion_limit
-         (Printf.sprintf
-            "Deciding whether `%s` implements `%s` needs more than %d nested impls. The compiler \
-             stops there: bounds that ask for ever larger types never finish."
-            (Types.show type_) (Types.show_trait trait) Properties.recursion_limit))
+         (Recursion_limit
+            { limit = Properties.recursion_limit; recursion = Evidence { type_; trait } }))
 
 let reads_self_only lookups (trait : Path.t) =
   let self = Types.make_self_parameter trait in
@@ -453,11 +451,11 @@ and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Type
   if depth > Properties.recursion_limit then
     raise
       (Properties.Recursion_limit
-         (Printf.sprintf
-            "Finding the capabilities in `%s` needs more than %d nested capability sets. The \
-             compiler stops there: capability sets defined from each other never finish."
-            (Types.show_capability (Capability_projection { base = type_; trait; name }))
-            Properties.recursion_limit))
+         (Recursion_limit
+            {
+              limit = Properties.recursion_limit;
+              recursion = Capability_set (Capability_projection { base = type_; trait; name });
+            }))
   else
     match find_evidence lookups ~list_bounds ~checks_conditions:false type_ trait with
     | Some (Evidence (Impl { impl; substitution })) -> (
@@ -591,7 +589,7 @@ and normalize_in_impl lookups ~list_bounds (impl : Types.impl_interface) type_ =
           if Path.equal projected.trait impl.implements.trait then
             match List.assoc_opt name impl.implements.associated with
             | Some chosen -> Some chosen
-            | None -> Some (Types.Error Diagnostic.reported_elsewhere)
+            | None -> Some (Types.Error Catalog.reported_elsewhere)
           else
             project_associated_type lookups
               ~list_bounds:(list_impl_bounds lookups impl ~list_bounds)
@@ -756,12 +754,12 @@ let read_scope (lookups : Lookups.t) (key : Resolve.Names.key) :
     ->
       scope
 
-type declaring_clause =
+type declaring_clause = Catalog.Capabilities.declaring_clause =
   | Own_uses
   | Impl_uses
   | Associated_capability_set of { name : string; is_defined : bool; is_named : bool }
 
-type capability_declaration =
+type capability_declaration = Catalog.Capabilities.declaration =
   | Declared_by of declaring_clause
   | Fixed_by_trait of { trait : Types.trait_reference; method_name : string }
 
@@ -822,17 +820,6 @@ let find_capability_declaration lookups (path : Path.t) (capability : Types.capa
   | Member_constant _ | Impl _ | Derived _ | Law_proof _ | Unresolved _ ->
       raise_bug "%s declares no capabilities" (Path.show path)
 
-let show_declaring_clause clause capability =
-  match clause with
-  | Own_uses -> Printf.sprintf "`uses %s`" capability
-  | Impl_uses -> Printf.sprintf "`uses %s` on the `impl`" capability
-  | Associated_capability_set { name; is_defined; is_named } ->
-      let set =
-        if is_defined then Printf.sprintf "`%s` in the `impl`'s `capability %s`" capability name
-        else Printf.sprintf "`capability %s = %s` in the `impl`" name capability
-      in
-      if is_named then set else Printf.sprintf "%s and `uses Self.%s` on the method" set name
-
 let decide_property property lookups ~list_bounds type_ =
   Properties.decide_property lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds)
     property type_
@@ -844,7 +831,7 @@ let has_property property lookups ~list_bounds type_ =
   | Depends_on open_type ->
       raise_bug "whether `%s` %s depends on the open type `%s`, so it has no bool answer"
         (Types.show type_)
-        (Properties.show_property property)
+        (Catalog.Typing_description.show_property property)
         (Types.show open_type)
 
 let is_copyable = has_property Copyable

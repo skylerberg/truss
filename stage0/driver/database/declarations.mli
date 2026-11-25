@@ -15,6 +15,8 @@ val make_lookups :
   list_dependency_names:(Path.package -> Path.package list) ->
   Resolve.Names.lookups
 
+val make_source : Store.t -> note:(Kind.lookup -> int -> string -> unit) -> Resolve.Names.source
+
 type change = { lookup : Kind.lookup; scope : int; name : string; is_spans_only : bool }
 
 val list_replaced_lookups :

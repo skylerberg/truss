@@ -102,7 +102,7 @@ type rvalue =
   | Parameter_default of { definition : Path.t; position : int; substitution : Types.substitution }
   | Specification of specification
 
-and path_note =
+and path_note = Catalog.Prover.path_note =
   | Arm_taken of Core.origin list
   | Condition_holds of { condition : Core.origin; holds : bool }
   | Else_runs of Core.origin

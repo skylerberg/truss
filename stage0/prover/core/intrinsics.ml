@@ -60,7 +60,7 @@ let apply_range context (frame : State.frame) ~node (site : Invocation.site) ~(b
     match base_type with
     | Types.Named { arguments = Types.Type element :: _; _ } -> element
     | _ when Types.is_well_known String base_type -> Types.make_builtin UInt8
-    | _ -> Facts.raise_unsupported location "a range of `%s`" (Types.show base_type)
+    | _ -> Facts.raise_unsupported location (Range_of base_type)
   in
   let is_sequence =
     match base_type with
@@ -72,7 +72,7 @@ let apply_range context (frame : State.frame) ~node (site : Invocation.site) ~(b
     else
       match Models.find_model context base_type collection ~element with
       | Some model -> model
-      | None -> Facts.raise_unsupported location "a range of `%s`" (Types.show base_type)
+      | None -> Facts.raise_unsupported location (Range_of base_type)
   in
   let length = Models.make_sequence_length context element model in
   let is_whole =
@@ -86,8 +86,8 @@ let apply_range context (frame : State.frame) ~node (site : Invocation.site) ~(b
         length
   in
   if not is_whole then
-    Facts.oblige context frame Out_of_bounds location
-      [ Text "`"; Facts.quote frame.source site.origin; Text "` may not be within the collection." ]
+    Facts.oblige context frame location
+      (Out_of_bounds { at = Facts.quote frame.source site.origin })
       Logic.(less_equal (int 0) low &&& less_equal low high &&& less_equal high length);
   let range =
     if is_whole then model else make_sequence_range context element model ~start:low ~stop:high
@@ -113,7 +113,7 @@ let apply_range context (frame : State.frame) ~node (site : Invocation.site) ~(b
 let index_element context element term index =
   match Models.index_sequence context element term index with
   | Some term -> term
-  | None -> Facts.raise_unsupported Whole_definition "the elements of a sequence"
+  | None -> Facts.raise_unsupported Whole_definition Sequence_elements
 
 let assume_unchanged_outside context frame element ~before ~after ~start ~stop =
   let length sequence = Models.make_sequence_length context element sequence in
@@ -190,13 +190,9 @@ let call_libc context frame ~(site : Invocation.site) (function_ : Libc.function
     | Through_zero -> None
   in
   let require requirement condition =
-    Facts.oblige context frame Requires
+    Facts.oblige context frame
       (Facts.locate context frame.source site.origin)
-      [
-        Text "`";
-        Facts.quote frame.source site.origin;
-        Text (Printf.sprintf "` may not %s." requirement);
-      ]
+      (Intrinsic_requirement { at = Facts.quote frame.source site.origin; requirement })
       condition
   in
   let make_element_type scalar = Types.make_builtin (Intrinsic.convert_libc_scalar scalar) in
@@ -219,25 +215,23 @@ let call_libc context frame ~(site : Invocation.site) (function_ : Libc.function
               Facts.assume context frame (Logic.equal (model after) (model before));
               Option.iter
                 (fun counted ->
-                  require "have the room it writes into"
+                  require Room_written
                     (Logic.less_equal
                        (Logic.add (length element (model before)) counted)
                        (capacity before)))
                 counted
           | _, Some counted ->
-              require "have the elements it mutates"
-                (Logic.less_equal counted (length element (model before)))
+              require Elements_mutated (Logic.less_equal counted (length element (model before)))
           | _, None -> ())
       | Some (Libc.Elements (scalar, extent)), Some view, _ -> (
           let element = make_element_type scalar in
           let elements = make_buffer_model context Storage element view in
           match count extent with
           | Some counted ->
-              require "have the elements it reads"
-                (Logic.less_equal counted (length element elements))
+              require Elements_read (Logic.less_equal counted (length element elements))
           | None ->
               let last = Logic.subtract (length element elements) (Logic.int 1) in
-              require "end with a zero, which it reads up to"
+              require Ends_with_zero
                 Logic.(
                   greater_equal (length element elements) (int 1)
                   &&&
@@ -402,18 +396,14 @@ let model_storage context frame element term =
 let require_precondition context (frame : State.frame) (site : Invocation.site) requirement
     condition =
   if frame.makes_obligations then
-    Facts.oblige context frame Requires
+    Facts.oblige context frame
       (Facts.locate context frame.source site.origin)
-      [
-        Text "`";
-        Facts.quote frame.source site.origin;
-        Text (Printf.sprintf "` may not %s." requirement);
-      ]
+      (Intrinsic_requirement { at = Facts.quote frame.source site.origin; requirement })
       condition
   else Facts.assume context frame condition
 
 let require_element context frame site element index sequence =
-  require_precondition context frame site "have an element at its index"
+  require_precondition context frame site Element_at_index
     Logic.(
       less_equal (int 0) index &&& less index (Models.make_sequence_length context element sequence))
 
@@ -440,7 +430,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
   let length sequence = Models.make_sequence_length context element sequence in
   let capacity term = make_buffer_capacity context element term in
   let storage = model_storage context frame element in
-  let require ?(requirement = "have the room it writes into") condition =
+  let require ?(requirement = Catalog.Prover.Room_written) condition =
     require_precondition context frame site requirement condition
   in
   let assume_capacity_kept () =
@@ -458,7 +448,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
   let read_changed_storage () = storage (List.hd changed) in
   let assume_swapped before after =
     let first = read_operand 1 and second = read_operand 2 in
-    require ~requirement:"have elements at both of its indexes"
+    require ~requirement:Elements_at_both_indexes
       Logic.(in_bounds first before &&& in_bounds second before);
     let limit = make_index_name () in
     Facts.assume context frame
@@ -514,8 +504,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
   | Storage_shorten ->
       let shorter = read_operand 1 in
       let before = storage (read_operand 0) and after = read_changed_storage () in
-      require ~requirement:"be given a length at most the storage's"
-        (Logic.less_equal shorter (length before));
+      require ~requirement:Length_within_storage (Logic.less_equal shorter (length before));
       assume_capacity_kept ();
       let limit = make_index_name () in
       Facts.assume context frame (Logic.equal (length after) shorter);
@@ -532,8 +521,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       known
   | Storage_pop ->
       let buffer = read_operand 0 in
-      require ~requirement:"have an element to pop"
-        (Logic.greater (length (storage buffer)) (Logic.int 0));
+      require ~requirement:Element_to_pop (Logic.greater (length (storage buffer)) (Logic.int 0));
       assume_capacity_kept ();
       let longer = append_part context frame element (read_changed_storage ()) known in
       Facts.assume context frame (Logic.equal (storage buffer) longer);
@@ -541,7 +529,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
   | Storage_insert ->
       let buffer = read_operand 0 and index = read_operand 1 and value = read_operand 2 in
       let before = storage buffer and after = read_changed_storage () in
-      require ~requirement:"be given an index at most the storage's length"
+      require ~requirement:Index_within_length
         Logic.(less_equal (int 0) index &&& less_equal index (length before));
       require (Logic.less (length before) (capacity buffer));
       assume_capacity_kept ();
@@ -614,7 +602,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
   | Storage_range ->
       let start = read_operand 1 and stop = read_operand 2 in
       let whole = storage (read_operand 0) and part = storage known in
-      require ~requirement:"be given a range within the storage"
+      require ~requirement:Range_within_storage
         Logic.(
           less_equal (int 0) start &&& less_equal start stop &&& less_equal stop (length whole));
       let limit = make_index_name () in
@@ -652,7 +640,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       known
   | Array_from_storage ->
       let elements = make_buffer_model context Storage element (read_operand 0) in
-      require ~requirement:"have as many elements as the array's count"
+      require ~requirement:Count_of_array
         (Logic.equal (length elements) (read_array_count result_type));
       Facts.assume context frame
         (Logic.equal (Models.make_array_model context frame result_type known) elements);
@@ -818,13 +806,12 @@ let find_sequence_model context frame (sequence : Types.ty) term =
           ~element:(find_sequence_element context frame sequence)
       with
       | Some model -> model
-      | None ->
-          Facts.raise_unsupported Whole_definition "the elements of `%s`" (Types.show sequence))
+      | None -> Facts.raise_unsupported Whole_definition (Elements_of sequence))
 
 let oblige_in_bounds context (frame : State.frame) ~origin condition =
-  Facts.oblige context frame Out_of_bounds
+  Facts.oblige context frame
     (Facts.locate context frame.source origin)
-    [ Text "`"; Facts.quote frame.source origin; Text "` may not be within the collection." ]
+    (Out_of_bounds { at = Facts.quote frame.source origin })
     condition
 
 let read_sequence_element context frame (sequence : Types.ty) term index ~node ~origin =

@@ -38,10 +38,10 @@ type action =
 
 type position = { block : Mir.Graph.block; index : int }
 type step = { action : action; origin : Core.origin }
-type fork_join_block = { keyword : string; branches : position list list }
+type fork_join_block = { schedule : Language.Loop_mode.t; branches : position list list }
 
 type fork_join_loop = {
-  keyword : string;
+  schedule : Language.Loop_mode.t;
   body : position list;
   pattern_locals : Core.local list;
   temporaries : Mir.local list;
@@ -824,7 +824,7 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
         | Fork { concurrent; branches; _ } ->
             Some
               {
-                keyword = (if concurrent then "concurrent" else "parallel");
+                schedule = (if concurrent then Concurrent else Parallel);
                 branches =
                   List.map
                     (fun (branch : Mir.Graph.branch) -> list_positions branch.blocks)
@@ -840,7 +840,7 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
           ->
             Some
               {
-                keyword = (if loop.schedule = Parallel then "parallel" else "concurrent");
+                schedule = loop.schedule;
                 body =
                   List.filter
                     (fun position ->

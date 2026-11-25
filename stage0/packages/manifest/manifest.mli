@@ -9,7 +9,7 @@ type t = {
 
 val default_time_limit_seconds : int
 
-exception Malformed of { line : int; message : string }
+exception Malformed of { line : int; problem : Project_catalog.Problem.manifest }
 
 val parse : string -> t
 val has_project_table : string -> bool

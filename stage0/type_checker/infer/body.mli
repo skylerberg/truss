@@ -8,7 +8,4 @@ type checked = {
 }
 
 val check :
-  Lookups.t ->
-  Resolve.Names.key ->
-  checks_body:bool ->
-  (checked, Diagnostic.in_definition list) result
+  Lookups.t -> Resolve.Names.key -> checks_body:bool -> (checked, Catalog.diagnostic list) result

@@ -69,9 +69,11 @@ let read_source packages (file : Path.file) =
   | None -> failwith ("no file " ^ Path.show_file file)
 
 let parse_errors packages file =
+  let source = read_source packages file in
   List.map
-    (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
-    (snd (Parser.parse_source (read_source packages file)))
+    (fun diagnostic ->
+      (Syntax_catalog.Syntax_diagnostic.render ~text:(Source.text source) diagnostic).message)
+    (snd (Parser.parse_source source))
 
 let list_codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
@@ -149,6 +151,7 @@ let collect_core_nodes packages (key : Resolve.Names.key) : core_nodes =
       }
 
 let make_names packages = Database.make_name_lookups (make_database packages)
+let make_source packages = Database.make_source_lookups (make_database packages)
 
 let list_declarations packages (module_ : Path.module_) =
   (make_names packages).list_declarations module_
