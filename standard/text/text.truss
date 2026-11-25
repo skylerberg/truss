@@ -169,16 +169,6 @@ public fn Literal.text(self) -> view String
   self.text
 }
 
-public fn String.to_string(self) -> String
-  ensures identical(result.model(), self.model())
-  cost time O(self.length())
-  cost allocations <= 1
-{
-  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(self.length())
-  self.copy_onto(mut output)
-  String(storage: own output)
-}
-
 internal fn String.push_byte(mut self, byte: UInt8)
   ensures identical(self.model(), old(self.model()).append(byte))
   cost amortized time O(1)
@@ -253,7 +243,7 @@ impl Parse for String {
   type Error = Never
 
   fn parse(text: String) -> Result[String, Never] {
-    Ok(text.to_string())
+    Ok(text.copy())
   }
 }
 

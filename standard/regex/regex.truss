@@ -889,7 +889,7 @@ fn Builder.collect_groups(mut self, text: String) -> Option[ParseError]
               return failure(PatternErrorKind.UnsupportedSyntax, offset: index)
             }
             mut self.groups.push(index)
-            mut self.names.push(text.part(index + 3, to: end).to_string())
+            mut self.names.push(text.part(index + 3, to: end).copy())
           } else if kind != 58 {
             return failure(PatternErrorKind.UnsupportedSyntax, offset: index)
           }
@@ -934,7 +934,7 @@ fn compile(text: String, placeholders: Bool) -> Result[Regex, ParseError]
     mut program.push(builder.ranges[index])
     index += 1
   }
-  Ok(Regex(pattern: text.to_string(), program: own program, group_names: own builder.names))
+  Ok(Regex(pattern: text.copy(), program: own program, group_names: own builder.names))
 }
 
 public opaque type Interpolation(source: String)
@@ -1445,12 +1445,12 @@ public fn Regex.replace_first(self, text: String, replacement: String) -> String
 {
   match self.find_from(text, offset: 0) {
     Some(matched) => {
-      var output = text.part(0, to: matched.start).to_string()
+      var output = text.part(0, to: matched.start).copy()
       mut output.push(replacement)
       mut output.push(text.part(matched.end, to: text.length()))
       output
     }
-    None => text.to_string()
+    None => text.copy()
   }
 }
 

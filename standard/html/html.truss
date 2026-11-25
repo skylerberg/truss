@@ -78,7 +78,7 @@ public opaque type Interpolation(content: Content)
 
 impl From[view String] for Interpolation {
   fn from(value: own view String) -> Interpolation {
-    Interpolation(content: Content.Text(text: value.to_string()))
+    Interpolation(content: Content.Text(text: value.copy()))
   }
 }
 

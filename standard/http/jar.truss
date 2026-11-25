@@ -34,8 +34,8 @@ public fn Cookie.parse(set_cookie: String) -> Result[Cookie, Error] {
     return Err(malformed("a Set-Cookie with an empty name"))
   }
   var cookie = Cookie(
-    name: name.to_string(),
-    value: value.to_string(),
+    name: name.copy(),
+    value: value.copy(),
     path: None,
     is_secure: false,
     is_http_only: false,
@@ -58,7 +58,7 @@ public fn Cookie.parse(set_cookie: String) -> Result[Cookie, Error] {
       }
     } else if key.equal_ignoring_ascii_case("Path") {
       if argument.starts_with("/") {
-        cookie.path = Some(argument.to_string())
+        cookie.path = Some(argument.copy())
       }
     } else if key.equal_ignoring_ascii_case("Secure") {
       cookie.is_secure = true
@@ -119,7 +119,7 @@ fn default_path(path: String) -> String {
     return "/"
   }
   match path.find_last("/") {
-    Some(index) => if index == 0 { "/" } else { path.split_at(index).first.to_string() }
+    Some(index) => if index == 0 { "/" } else { path.split_at(index).first.copy() }
     None => "/"
   }
 }

@@ -1030,11 +1030,11 @@ public fn String.replace(self, pattern: String, replacement: String) -> String
     Panic.crash("the pattern is empty")
   }
   if pattern.length() > self.length() {
-    return self.to_string()
+    return self.copy()
   }
   let count = self.occurrences(pattern)
   if count == 0 {
-    return self.to_string()
+    return self.copy()
   }
   if replacement.length() > UInt64.maximum / 4 / count || self.length() > UInt64.maximum / 4 {
     intrinsic.crash("a string cannot hold that many bytes")
@@ -1084,7 +1084,7 @@ public fn String.replace_first(self, pattern: String, replacement: String) -> St
   cost time O(self.length() + replacement.length())
 {
   if pattern.length() > self.length() {
-    return self.to_string()
+    return self.copy()
   }
   match self.find(pattern) {
     Some(offset) => {
@@ -1098,7 +1098,7 @@ public fn String.replace_first(self, pattern: String, replacement: String) -> St
       self.part(offset + pattern.length(), to: self.length()).copy_onto(mut output)
       String(storage: own output)
     }
-    None => self.to_string()
+    None => self.copy()
   }
 }
 
@@ -1331,7 +1331,7 @@ internal fn String.padded(self, width: UInt64, fill: Character, at_start: Bool) 
 {
   let count = self.character_count()
   if count >= width {
-    return self.to_string()
+    return self.copy()
   }
   let missing = width - count
   let unit = fill.utf8_length()

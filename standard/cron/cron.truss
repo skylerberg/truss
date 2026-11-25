@@ -24,7 +24,7 @@ public opaque type Schedule(
   derives Equal
 
 fn failure(message: String) -> Error {
-  Error(message: message.to_string())
+  Error(message: message.copy())
 }
 
 let month_names: Array[String, 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
@@ -123,7 +123,7 @@ fn expanded(expression: String) -> String {
   } else if trimmed == "@hourly" {
     "0 * * * *"
   } else {
-    trimmed.to_string()
+    trimmed.copy()
   }
 }
 

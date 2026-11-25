@@ -166,7 +166,7 @@ internal fn normalize_decimal(significand: String, exponent: own math.BigInteger
   }
   let zeros = significand.length() - stop
   let shifted = exponent + math.BigInteger.from(zeros)
-  Decimal(significand: significand.substring(0, to: stop).to_string(), exponent: "${shifted}")
+  Decimal(significand: significand.substring(0, to: stop).copy(), exponent: "${shifted}")
 }
 
 internal type Tag(name: String, span: source.Span)
@@ -567,7 +567,7 @@ fn format_lowercase_hexadecimal(byte: UInt8) -> String
   let high = UInt64.from_integer(byte / 16)
   let low = UInt64.from_integer(byte % 16)
   if high == 0 {
-    digits.substring(low, to: low + 1).to_string()
+    digits.substring(low, to: low + 1).copy()
   } else {
     "${digits.substring(high, to: high + 1)}${digits.substring(low, to: low + 1)}"
   }

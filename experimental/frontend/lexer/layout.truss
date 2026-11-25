@@ -206,7 +206,7 @@ fn find_closing_edits(scanner: Scanner, run: Run, openers: List[Opener]) -> Opti
     let replacement = if place.starts_line && opener.bracket == token.Bracket.Curly {
       "\n${layout_indentation(scanner.source, offset: opener.span.start)}${closer}"
     } else {
-      closer.to_string()
+      closer.copy()
     }
     mut edits.push(source.insert(source.make_zero_width(position), replacement))
     earliest = position

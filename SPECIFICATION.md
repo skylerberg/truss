@@ -640,7 +640,10 @@ fn Option[Value].take(mut self) -> Option[Value] {
   the target can assign the operand's place. The variable of a `for` loop is
   not copied: the loop lends its collection for the body.
 - **`Copyable` types have `copy()`,** whose result is identical to the
-  original.
+  original. A copy of a `List`, a `String`, or an `Array` costs one unit of
+  time and at most one allocation, plus the cost of copying each element:
+  `text.copy()` is within `cost time O(text.length())`. A copy of any other
+  type costs `time(T.copy)`.
 - **Handles are not `Copyable`,** nor is a type that holds one.
 - `Copyable` and `Plain` are prelude traits that the compiler implements and
   no `impl` can, and `Plain` requires `Copyable`. The compiler derives them
@@ -689,8 +692,7 @@ var longest: view String = words[0]
   view of one is expected.
 - **A view converts to no owned value.** `copy()` makes a `List` or a
   `String` that owns copies of the viewed elements, and a view where an
-  owned value is needed is an error with that fix. `to_list()` and
-  `to_string()` make the same copy and state its cost.
+  owned value is needed is an error with that fix.
 - **A read-only parameter takes a view whatever its declared type says.**
   A parameter declared `List[String]` takes a `List[view String]`, and one
   declared `Map[String, Int64]` is looked up with a `view String`: in a
@@ -1633,8 +1635,8 @@ mut grid.cell(position).visit()
   ```truss
   fn tally(counts: mut Map[String, UInt64], word: String) {
     match counts.get(word) {
-      Some(count) => counts[word.to_string()] = count.saturating_add(1)
-      None => counts[word.to_string()] = 1
+      Some(count) => counts[word.copy()] = count.saturating_add(1)
+      None => counts[word.copy()] = 1
     }
   }
   ```

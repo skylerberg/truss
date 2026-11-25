@@ -10,7 +10,7 @@ impl From[String] for Word {
 
 impl From[view String] for Word {
   fn from(value: own view String) -> Word {
-    Word(text: value.to_string())
+    Word(text: value.copy())
   }
 }
 

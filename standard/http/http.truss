@@ -56,7 +56,7 @@ public fn Method.from_name(name: String) -> Method
   } else if name == "TRACE" {
     Method.Trace
   } else {
-    Method.Other(name: name.to_string())
+    Method.Other(name: name.copy())
   }
 }
 
@@ -187,7 +187,7 @@ public fn Headers.contains(self, name: String) -> Bool {
 }
 
 public fn Headers.add(mut self, name: String, value: String) {
-  mut self.entries.push(Header(name: name.to_string(), value: value.to_string()))
+  mut self.entries.push(Header(name: name.copy(), value: value.copy()))
 }
 
 public fn Headers.remove(mut self, name: String) {
@@ -306,7 +306,7 @@ public fn Body.from_bytes(bytes: own List[UInt8]) -> Body {
 }
 
 public fn Body.from_text(text: String) -> Body {
-  Body.from_bytes(text.bytes().to_list())
+  Body.from_bytes(text.bytes().copy())
 }
 
 fn channel_body(chunks: tasks.Channel[flow.Chunk], credit: own Option[Credit], limit: UInt64) -> Body {
@@ -321,7 +321,7 @@ fn next_chunk(source: mut Source) -> Result[Option[List[UInt8]], Error]
       if position >= bytes.length() {
         return Ok(None)
       }
-      let piece = bytes[position..].to_list()
+      let piece = bytes[position..].copy()
       position = bytes.length()
       Ok(Some(own piece))
     }
@@ -596,7 +596,7 @@ public fn Responder.write(mut self, bytes: List[UInt8]) -> Result[Unit, Error]
     return Ok(Unit)
   }
   self.bytes_sent = self.bytes_sent.saturating_add(bytes.length())
-  deliver(self, message: flow.Outbound.Data(stream: self.stream, bytes: bytes.to_list(), is_end: false, ack: self.ack.copy()))
+  deliver(self, message: flow.Outbound.Data(stream: self.stream, bytes: bytes.copy(), is_end: false, ack: self.ack.copy()))
 }
 
 public fn Responder.finish(mut self) -> Result[Unit, Error]
@@ -665,20 +665,20 @@ public fn Response.new(status: Status = Status.ok) -> Response {
 public fn Response.text(body: String, status: Status = Status.ok) -> Response {
   var headers = Headers.new()
   mut headers.add("Content-Type", value: "text/plain; charset=utf-8")
-  Response(status: status, headers: own headers, body: body.bytes().to_list())
+  Response(status: status, headers: own headers, body: body.bytes().copy())
 }
 
 public fn Response.html(page: html.Html, status: Status = Status.ok) -> Response {
   var headers = Headers.new()
   mut headers.add("Content-Type", value: "text/html; charset=utf-8")
-  Response(status: status, headers: own headers, body: page.text().bytes().to_list())
+  Response(status: status, headers: own headers, body: page.text().bytes().copy())
 }
 
 public fn Response.json[Item: serialization.Serialize](item: Item, status: Status = Status.ok) -> Response {
   var headers = Headers.new()
   mut headers.add("Content-Type", value: "application/json")
   let text = json.encode(item)
-  Response(status: status, headers: own headers, body: text.bytes().to_list())
+  Response(status: status, headers: own headers, body: text.bytes().copy())
 }
 
 fn is_compressible(content_type: Option[String]) -> Bool {
@@ -769,7 +769,7 @@ impl Display for Error {
 }
 
 fn malformed(message: String) -> Error {
-  Error.Malformed(message: message.to_string())
+  Error.Malformed(message: message.copy())
 }
 
 fn system[Value](outcome: own Result[Value, SystemError]) -> Result[Value, Error] {
@@ -929,7 +929,7 @@ fn read_head[Stream: streams.Duplex](
   let headers = read_headers(connection, inbox: mut inbox, budget: mut budget)?
   Ok(Some(Head(
     method: Method.from_name(parts[0]),
-    target: parts[1].to_string(),
+    target: parts[1].copy(),
     version_one_zero: version == "HTTP/1.0",
     headers: own headers,
   )))
@@ -1602,7 +1602,7 @@ fn serve_one[Stream: streams.Duplex](
           body: channel_body(chunks, credit: None, limit: body_limit),
           peer: peer,
           client: client,
-          client_certificates: certificates.to_list(),
+          client_certificates: certificates.copy(),
         )
         var responder = new_responder(outbound, stream: 0, is_head: is_head)
         let outcome = run_handler(handler, request: own request, responder: mut responder, gone: gone, seconds: options.request_timeout_seconds)
@@ -1738,7 +1738,7 @@ fn answer_arrival(
         body: channel_body(arrival.chunks.copy(), credit: own credit, limit: limits.body_bytes),
         peer: peer,
         client: client,
-        client_certificates: certificates.to_list(),
+        client_certificates: certificates.copy(),
       )
       let outcome = run_handler(handler, request: own request, responder: mut responder, gone: arrival.cancelled, seconds: options.request_timeout_seconds)
       if outcome == Handled.Completed {
@@ -2036,12 +2036,12 @@ fn parse_route(text: String) -> Option[Route]
           return None
         }
       }
-      mut names.push(name.to_string())
-      mut segments.push(if rest { Segment.Rest(name: name.to_string()) } else { Segment.Named(name: name.to_string()) })
+      mut names.push(name.copy())
+      mut segments.push(if rest { Segment.Rest(name: name.copy()) } else { Segment.Named(name: name.copy()) })
     } else if piece.contains("{") || piece.contains("}") {
       return None
     } else if !(last && piece.is_empty()) {
-      mut segments.push(Segment.Fixed(text: piece.to_string()))
+      mut segments.push(Segment.Fixed(text: piece.copy()))
     }
   }
   let trailing_slash = path.length() > 1 && path.ends_with("/")
@@ -2160,7 +2160,7 @@ fn first_variable(names: List[String]) -> Option[String]
     match Environment.variable(name) {
       Some(value) => {
         if !value.trim().is_empty() {
-          return Some(value.trim().to_string())
+          return Some(value.trim().copy())
         }
       }
       None => {}
@@ -2258,7 +2258,7 @@ fn basic_authorization(proxy: url.Url) -> Option[String] {
   let information = proxy.user_information()?
   let decoded = match url.decode_component(information) {
     Ok(text) => own text
-    Err(_) => information.to_string()
+    Err(_) => information.copy()
   }
   Some("Basic ${base64.encode(decoded.bytes())}")
 }
@@ -2436,9 +2436,9 @@ fn request_head(method: Method, url: url.Url, headers: Headers, body_length: UIn
 fn request_fields(method: Method, url: url.Url, headers: Headers, body_length: UInt64) -> List[hpack.Field] {
   var fields: List[hpack.Field] = [
     hpack.Field(name: ":method", value: "${method}"),
-    hpack.Field(name: ":scheme", value: url.scheme().to_string()),
+    hpack.Field(name: ":scheme", value: url.scheme().copy()),
     hpack.Field(name: ":authority", value: match headers.get("Host") {
-      Some(host) => host.to_string()
+      Some(host) => host.copy()
       None => authority_of(url)
     }),
     hpack.Field(name: ":path", value: request_target(url)),
@@ -2851,7 +2851,7 @@ public fn Client.stream[Output](
   var current_method = method.copy()
   var address = url.copy()
   var request_headers = headers.copy()
-  var request_body = body.to_list()
+  var request_body = body.copy()
   var redirects_left = self.options.redirects
   var attempt: UInt64 = 1
   while true {
@@ -2890,7 +2890,7 @@ public fn Client.stream[Output](
     }
     let code = opened.status.code
     let location = match opened.headers.get("Location") {
-      Some(location) => if is_redirect(code) && self.options.redirects > 0 { Some(location.to_string()) } else { None }
+      Some(location) => if is_redirect(code) && self.options.redirects > 0 { Some(location.copy()) } else { None }
       None => None
     }
     match location {
@@ -3297,7 +3297,7 @@ public fn accept_websocket(
 {
   let is_upgrade = request.method == Method.Get && has_token(request.headers.get("Connection"), token: "upgrade")
     && has_token(request.headers.get("Upgrade"), token: "websocket")
-  let key = request.headers.get("Sec-WebSocket-Key").unwrap_or("").trim().to_string()
+  let key = request.headers.get("Sec-WebSocket-Key").unwrap_or("").trim().copy()
   if !is_upgrade || !websocket.is_valid_key(key) {
     let _ = mut responder.send(Response.text("a WebSocket upgrade is expected here", status: Status.bad_request))
     return Err(malformed("a request that is not a WebSocket upgrade"))
@@ -3443,10 +3443,10 @@ fn parse_field(parser: mut EventParser, line: String) {
     mut parser.data.push(value)
     parser.has_data = true
   } else if field == "event" {
-    parser.name = Some(value.to_string())
+    parser.name = Some(value.copy())
   } else if field == "id" {
     if !value.contains("\u{0}") {
-      parser.id = Some(value.to_string())
+      parser.id = Some(value.copy())
     }
   } else if field == "retry" {
     match UInt64.parse(value) {
@@ -3484,7 +3484,7 @@ public fn EventParser.next(mut self, body: mut Body) -> Result[Option[Event], Er
         if !self.is_started {
           self.is_started = true
           if line.starts_with("\u{feff}") {
-            line = line.part(3, to: line.length()).to_string()
+            line = line.part(3, to: line.length()).copy()
           }
         }
         if line.is_empty() {

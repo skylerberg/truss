@@ -1,0 +1,25 @@
+fn duplicate(text: String) -> String
+  cost time O(text.length())
+  cost allocations <= 1
+{
+  text.copy()
+}
+
+fn duplicate_list(items: List[Int64]) -> List[Int64]
+  cost time O(items.length())
+  cost allocations <= 1
+{
+  items.copy()
+}
+
+fn duplicate_amortized(text: String) -> String
+  cost amortized time O(text.length())
+{
+  text.copy()
+}
+
+fn duplicate_view(text: view String) -> String
+  cost time O(text.length())
+{
+  text.copy()
+}

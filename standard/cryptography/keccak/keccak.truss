@@ -71,7 +71,7 @@ internal fn absorb(rate: UInt64, message: List[UInt8], suffix: UInt8) -> Sponge 
     permute(mut state)
     start += rate
   }
-  var last: List[UInt8] = message[start..].to_list()
+  var last: List[UInt8] = message[start..].copy()
   mut last.push(suffix)
   while last.length() < rate {
     mut last.push(0)

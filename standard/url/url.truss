@@ -263,7 +263,7 @@ internal fn parse_authority(text: String, from: UInt64, to: UInt64) -> Result[Au
       Some(error) => return Err(error)
       None => {}
     }
-    user_information = Some(text.part(from, to: at).to_string())
+    user_information = Some(text.part(from, to: at).copy())
     start = at + 1
   }
   if start < to && text.byte(start) == 91 {
@@ -313,7 +313,7 @@ internal fn parse_path_query_fragment(text: String, from: UInt64) -> Result[Path
       Some(error) => return Err(error)
       None => {}
     }
-    query = Some(text.part(next + 1, to: query_end).to_string())
+    query = Some(text.part(next + 1, to: query_end).copy())
     next = query_end
   }
   if next < length {
@@ -321,9 +321,9 @@ internal fn parse_path_query_fragment(text: String, from: UInt64) -> Result[Path
       Some(error) => return Err(error)
       None => {}
     }
-    fragment = Some(text.part(next + 1, to: length).to_string())
+    fragment = Some(text.part(next + 1, to: length).copy())
   }
-  Ok(PathQueryFragment(path: text.part(from, to: path_end).to_string(), query: own query, fragment: own fragment))
+  Ok(PathQueryFragment(path: text.part(from, to: path_end).copy(), query: own query, fragment: own fragment))
 }
 
 internal fn starts_authority(text: String, from: UInt64) -> Bool
@@ -748,7 +748,7 @@ public fn Url.path_segments(self) -> List[String]
       if percent_decode(path, from: index, to: end, form: false) is Ok(segment) {
         intrinsic.storage_push(mut output, value: own segment)
       } else {
-        intrinsic.storage_push(mut output, value: path.part(index, to: end).to_string())
+        intrinsic.storage_push(mut output, value: path.part(index, to: end).copy())
       }
     }
     more = end < path.length()
