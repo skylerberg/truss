@@ -757,6 +757,9 @@ let () =
       expect_proven Fixtures.Prover.recursion_and_loop_on_a_measure_kept_at_zero;
       expect_codes Fixtures.Prover.recursion_on_a_measure_below_zero [ "prover.termination" ];
       expect_not_proven Fixtures.Prover.loop_measure_below_zero "prover.termination");
+  Harness.test "a requires fix leaves out a comparison that holds for every value" (fun () ->
+      expect_not_proven Fixtures.Prover.recursion_on_a_measure_below_zero "prover.termination"
+        ~fixed:("  decreases steps\n{", "  decreases steps\n  requires 0 <= steps\n{"));
   Harness.test "a recursive call in a quantifier's body decreases within the quantifier's range"
     (fun () ->
       expect_proven Fixtures.Prover.recursion_in_a_quantifier_over_smaller_values;
@@ -1068,6 +1071,37 @@ let () =
       if not (String.includes ~affix:"`point` is Point(x: 9223372036854775807, y: 3)" record) then
         Harness.fail "message %S" record;
       if not (String.includes ~affix:"`flag` is true" flag) then Harness.fail "message %S" flag);
+  Harness.test "a counterexample's path leaves out an if on a Bool local whose value it shows"
+    (fun () ->
+      List.iter
+        (fun (fixture, shown) ->
+          let actual = read_message fixture in
+          if
+            (not (String.includes ~affix:shown actual))
+            || String.includes ~affix:"On that path" actual
+          then Harness.fail "message %S" actual)
+        [
+          (Fixtures.Prover.increment_under_a_flag, "`flag` is true");
+          (Fixtures.Prover.increment_unless_a_flag, "`flag` is false");
+        ]);
+  Harness.test "a requires fix states a negated comparison as the opposite comparison" (fun () ->
+      expect_not_proven
+        (point ^ Fixtures.Prover.point_kept_off_a_corner)
+        "prover.ensures"
+        ~fixed:
+          ( "  ensures point.x != 5 || point.y != 6\n{",
+            "  ensures point.x != 5 || point.y != 6\n  requires point.x != 5 || point.y != 6\n{" );
+      expect_not_proven Fixtures.Prover.increment_unless_a_flag "prover.overflow"
+        ~fixed:
+          ( "fn f(flag: Bool, count: UInt8) -> UInt8 {",
+            "fn f(flag: Bool, count: UInt8) -> UInt8\n\
+            \  requires (!flag) ==> (count <= UInt8.maximum - 1)\n\
+             {" )
+        ~alternatives:
+          [
+            ( "fn f(flag: Bool, count: UInt8) -> UInt8 {",
+              "fn f(flag: Bool, count: UInt8) -> UInt8\n  uses Panic\n{" );
+          ]);
   Harness.test "a requires can match on a parameter" (fun () ->
       expect_proven (shape ^ Fixtures.Prover.requires_matching_a_shape));
   Harness.test "with replaces one field and keeps the others" (fun () ->
@@ -1186,7 +1220,7 @@ let () =
         ~fixed:
           ( "ensures result >= self.first && result >= self.second\n{\n  self.first",
             "ensures result >= self.first && result >= self.second\n\
-            \  requires self.first >= self.first && self.first >= self.second\n\
+            \  requires self.first >= self.second\n\
              {\n\
             \  self.first" ));
   Harness.test "a loop over a user's collection gets the facts of its `count` and its `element`"
@@ -1755,7 +1789,7 @@ let () =
              {\n\
             \  exchange(mut items[first], second: mut items[second])",
             "requires first < items.length() && second < items.length()\n\
-            \  requires !(first == second)\n\
+            \  requires first != second\n\
              {\n\
             \  exchange(mut items[first], second: mut items[second])" ));
   Harness.test "two different elements can be lent together" (fun () ->
@@ -1791,7 +1825,7 @@ let () =
         ~fixed:
           ( "requires first < items.length() && second < items.length()\n{\n  parallel {",
             "requires first < items.length() && second < items.length()\n\
-            \  requires !(first == second)\n\
+            \  requires first != second\n\
              {\n\
             \  parallel {" ))
 
@@ -1803,7 +1837,7 @@ let () =
         ~fixed:
           ( "ensures result == self.value\n{\n  if self.present {",
             "ensures result == self.value\n\
-            \  requires (!(self.present)) ==> (self.other == self.value)\n\
+            \  requires (!self.present) ==> (self.other == self.value)\n\
              {\n\
             \  if self.present {" ))
 
@@ -3054,7 +3088,10 @@ let () =
 let () =
   Harness.test "a counterexample says which way each if on its path goes" (fun () ->
       let actual = read_message Fixtures.Prover.step_up_or_down in
-      if not (String.includes ~affix:"On that path, `up` is true, `count > 100` is true." actual)
+      if
+        not
+          (String.includes ~affix:"`up` is true" actual
+          && String.includes ~affix:"On that path, `count > 100` is true." actual)
       then Harness.fail "message %S" actual);
   Harness.test "a counterexample says which arm of a match its path takes" (fun () ->
       let actual = read_message Fixtures.Prover.bump_of_an_option in

@@ -1,0 +1,5 @@
+fn f(point: Point) -> Int64
+  ensures point.x != 5 || point.y != 6
+{
+  0
+}

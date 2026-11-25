@@ -599,7 +599,7 @@ let describe_path_note = function
       Description.Text "the arm `"
       :: join ", " (List.map (fun pattern -> [ Build.quote pattern ]) patterns)
       @ [ Text "` is taken" ]
-  | Condition_holds { condition; holds } ->
+  | Condition_holds { condition; holds; _ } ->
       [ Text "`"; Build.quote condition; Text (Printf.sprintf "` is %b" holds) ]
   | Else_runs pattern ->
       [ Text "`"; Build.quote pattern; Text "` does not match, so the `else` runs" ]
@@ -754,6 +754,7 @@ and show_goal ~is_nested (code : Code.t) =
   | Compared { left; comparison; right } ->
       Printf.sprintf "%s %s %s" (show_value 0 left) (show_comparison comparison)
         (show_value 0 right)
+  | Not ((Name _ | Field _ | Boolean _) as inner) -> "!" ^ show_code inner
   | Not inner -> "!(" ^ show_code inner ^ ")"
   | All parts -> join " && " parts
   | Any parts -> join " || " parts

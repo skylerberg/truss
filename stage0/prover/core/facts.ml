@@ -249,28 +249,70 @@ let rec find_value_code context : Logic.term -> Catalog.Code.t option = function
 
 and find_value_codes context parts = collect_codes (List.map (find_value_code context) parts)
 
+let find_comparison_operator : Logic.operator -> Language.Comparison.t option = function
+  | Less -> Some Less
+  | Less_equal -> Some Less_equal
+  | Greater -> Some Greater
+  | Greater_equal -> Some Greater_equal
+  | Equal -> Some Equal
+  | _ -> None
+
+let negate_comparison : Language.Comparison.t -> Language.Comparison.t = function
+  | Equal -> Not_equal
+  | Not_equal -> Equal
+  | Less -> Greater_equal
+  | Less_equal -> Greater
+  | Greater -> Less_equal
+  | Greater_equal -> Less
+
+let find_compared (term : Logic.term) =
+  match term with
+  | Operation (Not, [ Operation (operator, [ left; right ]) ]) ->
+      Option.map
+        (fun comparison -> (negate_comparison comparison, left, right))
+        (find_comparison_operator operator)
+  | Operation (operator, [ left; right ]) ->
+      Option.map (fun comparison -> (comparison, left, right)) (find_comparison_operator operator)
+  | _ -> None
+
+let is_valid_by_arithmetic term =
+  match find_compared term with
+  | Some (comparison, left, right) -> (
+      match Logic.linearize (Logic.minus left right) with
+      | sums, difference when List.for_all (fun (_, coefficient) -> Z.equal coefficient Z.zero) sums
+        -> (
+          let sign = Z.sign difference in
+          match comparison with
+          | Equal -> sign = 0
+          | Not_equal -> sign <> 0
+          | Less -> sign < 0
+          | Less_equal -> sign <= 0
+          | Greater -> sign > 0
+          | Greater_equal -> sign >= 0)
+      | _ -> false)
+  | None -> false
+
 let find_goal_code context term =
-  let rec find_goal : Logic.term -> Catalog.Code.t option = function
-    | Logic.Operation (Less, [ left; right ]) -> find_comparison left Language.Comparison.Less right
-    | Logic.Operation (Less_equal, [ left; right ]) ->
-        find_comparison left Language.Comparison.Less_equal right
-    | Logic.Operation (Greater, [ left; right ]) ->
-        find_comparison left Language.Comparison.Greater right
-    | Logic.Operation (Greater_equal, [ left; right ]) ->
-        find_comparison left Language.Comparison.Greater_equal right
-    | Logic.Operation (Equal, [ left; right ]) ->
-        find_comparison left Language.Comparison.Equal right
-    | Logic.Operation (And, parts) ->
-        Option.map (fun parts -> Catalog.Code.All parts) (collect_codes (List.map find_goal parts))
-    | Logic.Operation (Or, parts) ->
+  let rec find_goal (term : Logic.term) : Catalog.Code.t option =
+    match (find_compared term, term) with
+    | Some (comparison, left, right), _ -> find_comparison left comparison right
+    | None, Operation (And, parts) -> (
+        match List.filter (fun part -> not (is_valid_by_arithmetic part)) parts with
+        | [] -> None
+        | [ part ] -> find_goal part
+        | parts ->
+            Option.map
+              (fun parts -> Catalog.Code.All parts)
+              (collect_codes (List.map find_goal parts)))
+    | None, Operation (Or, parts) ->
         Option.map (fun parts -> Catalog.Code.Any parts) (collect_codes (List.map find_goal parts))
-    | Logic.Operation (Not, [ inner ]) ->
+    | None, Operation (Not, [ inner ]) ->
         Option.map (fun inner -> Catalog.Code.Not inner) (find_goal inner)
-    | Logic.Operation (Implies, [ premise; conclusion ]) -> (
+    | None, Operation (Implies, [ premise; conclusion ]) -> (
         match (find_goal premise, find_goal conclusion) with
         | Some premise, Some conclusion -> Some (Implies { premise; conclusion })
         | _ -> None)
-    | term -> find_value_code context term
+    | None, term -> find_value_code context term
   and find_comparison left comparison right =
     match (find_value_code context left, find_value_code context right) with
     | Some left, Some right -> Some (Catalog.Code.Compared { left; comparison; right })

@@ -272,12 +272,18 @@ let list_counterexample_values members (obligation : Obligation.t) answer_values
     (List.rev obligation.values
     @ List.rev_map (fun (term, name) -> (Logic.Symbol.Named_term term, name)) obligation.locals)
 
-let list_path_notes (obligation : Obligation.t) answer_values =
+let list_path_notes (obligation : Obligation.t) answer_values ~shown =
+  let is_shown : Catalog.Prover.path_note -> bool = function
+    | Condition_holds { local_value = Some (name, value); _ } ->
+        List.assoc_opt name shown = Some (Catalog.Model_value.Boolean value)
+    | Condition_holds { local_value = None; _ } | Arm_taken _ | Else_runs _ | Returns_early _ ->
+        false
+  in
   List.filter_map Fun.id
     (List.mapi
        (fun index (note, _) ->
          match List.assoc_opt (Logic.Symbol.Reached index) answer_values with
-         | Some (Solver.Atom "true") -> Some note
+         | Some (Solver.Atom "true") when not (is_shown note) -> Some note
          | _ -> None)
        obligation.path_notes)
 
@@ -451,12 +457,14 @@ let explain_failure (posed : posed_obligation) answer ~is_refuted : Catalog.Prov
   | Solver.Proven -> None
   | Counterexample _ when is_refuted -> Some Refuted
   | Counterexample values ->
+      let shown =
+        list_counterexample_values (Logic.list_members posed.query) posed.obligation values
+      in
       Some
         (Counterexample
            {
-             values =
-               list_counterexample_values (Logic.list_members posed.query) posed.obligation values;
-             path = list_path_notes posed.obligation values;
+             values = shown;
+             path = list_path_notes posed.obligation values ~shown;
              failed_runs = posed.failed_runs;
            })
   | Unknown unknown ->
