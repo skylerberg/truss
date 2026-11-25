@@ -2169,7 +2169,8 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   in `while at < text.length() && text.byte(at) == 32`.
 - **A loop without a measure uses `RunForever`** (see
   [Termination](#termination)). A `for` loop over a range or over a
-  collection's elements always terminates.
+  collection's elements always terminates, so a `decreases` on one is an
+  error.
 - In the clauses of a loop over a range, the loop variable is the index of
   the next iteration: in `for i in start..end`, `i` is `start` on entry and
   `end` where the loop ends, and `end + 1` after `start..=end`.

@@ -203,17 +203,16 @@ let make_panic_fix (context : State.context) : Catalog.Prover.fix list =
   match find_signature context with
   | Some (signature, body) when not context.inherits_precondition ->
       [
-        Add_panic
-          (match
-             ( List.find_opt
-                 (fun (clause : Syntax.clause) ->
-                   match clause.kind with Uses _ -> true | _ -> false)
-                 signature.clauses,
-               signature.clauses )
-           with
-          | Some uses, _ -> After_uses (Written uses.id)
-          | None, first :: _ -> Before_clause (Written first.id)
-          | None, [] -> Before_body (Written body.id));
+        (match
+           ( List.find_opt
+               (fun (clause : Syntax.clause) ->
+                 match clause.kind with Uses _ -> true | _ -> false)
+               signature.clauses,
+             signature.clauses )
+         with
+        | Some uses, _ -> Add_panic_to_uses (Written uses.id)
+        | None, first :: _ -> Add_panic (Before_clause (Written first.id))
+        | None, [] -> Add_panic (Before_body (Written body.id)));
       ]
   | Some _ | None -> []
 
@@ -257,30 +256,12 @@ let find_comparison_operator : Logic.operator -> Language.Comparison.t option = 
   | Equal -> Some Equal
   | _ -> None
 
-let negate_comparison : Language.Comparison.t -> Language.Comparison.t = function
-  | Equal -> Not_equal
-  | Not_equal -> Equal
-  | Less -> Greater_equal
-  | Less_equal -> Greater
-  | Greater -> Less_equal
-  | Greater_equal -> Less
-
-let find_compared (term : Logic.term) =
+let is_valid_by_arithmetic (term : Logic.term) =
   match term with
-  | Operation (Not, [ Operation (operator, [ left; right ]) ]) ->
-      Option.map
-        (fun comparison -> (negate_comparison comparison, left, right))
-        (find_comparison_operator operator)
-  | Operation (operator, [ left; right ]) ->
-      Option.map (fun comparison -> (comparison, left, right)) (find_comparison_operator operator)
-  | _ -> None
-
-let is_valid_by_arithmetic term =
-  match find_compared term with
-  | Some (comparison, left, right) -> (
-      match Logic.linearize (Logic.minus left right) with
-      | sums, difference when List.for_all (fun (_, coefficient) -> Z.equal coefficient Z.zero) sums
-        -> (
+  | Operation (operator, [ left; right ]) -> (
+      match (find_comparison_operator operator, Logic.linearize (Logic.minus left right)) with
+      | Some comparison, (sums, difference)
+        when List.for_all (fun (_, coefficient) -> Z.equal coefficient Z.zero) sums -> (
           let sign = Z.sign difference in
           match comparison with
           | Equal -> sign = 0
@@ -290,13 +271,12 @@ let is_valid_by_arithmetic term =
           | Greater -> sign > 0
           | Greater_equal -> sign >= 0)
       | _ -> false)
-  | None -> false
+  | _ -> false
 
 let find_goal_code context term =
   let rec find_goal (term : Logic.term) : Catalog.Code.t option =
-    match (find_compared term, term) with
-    | Some (comparison, left, right), _ -> find_comparison left comparison right
-    | None, Operation (And, parts) -> (
+    match term with
+    | Operation (And, parts) -> (
         match List.filter (fun part -> not (is_valid_by_arithmetic part)) parts with
         | [] -> None
         | [ part ] -> find_goal part
@@ -304,15 +284,19 @@ let find_goal_code context term =
             Option.map
               (fun parts -> Catalog.Code.All parts)
               (collect_codes (List.map find_goal parts)))
-    | None, Operation (Or, parts) ->
+    | Operation (Or, parts) ->
         Option.map (fun parts -> Catalog.Code.Any parts) (collect_codes (List.map find_goal parts))
-    | None, Operation (Not, [ inner ]) ->
+    | Operation (Not, [ inner ]) ->
         Option.map (fun inner -> Catalog.Code.Not inner) (find_goal inner)
-    | None, Operation (Implies, [ premise; conclusion ]) -> (
+    | Operation (Implies, [ premise; conclusion ]) -> (
         match (find_goal premise, find_goal conclusion) with
         | Some premise, Some conclusion -> Some (Implies { premise; conclusion })
         | _ -> None)
-    | None, term -> find_value_code context term
+    | Operation (operator, [ left; right ]) -> (
+        match find_comparison_operator operator with
+        | Some comparison -> find_comparison left comparison right
+        | None -> find_value_code context term)
+    | term -> find_value_code context term
   and find_comparison left comparison right =
     match (find_value_code context left, find_value_code context right) with
     | Some left, Some right -> Some (Catalog.Code.Compared { left; comparison; right })
@@ -338,15 +322,15 @@ let add_requires (context : State.context) (frame : State.frame) required : Cata
     =
   match find_signature context with
   | Some (signature, body) when not context.inherits_precondition ->
-      let before =
+      let place : Catalog.Prover.clause_place =
         match context.requires_being_read with
-        | Some origin -> (read_requires_clause signature origin).id
-        | None -> body.id
+        | Some origin -> Before_clause (Written (read_requires_clause signature origin).id)
+        | None -> Before_body (Written body.id)
       in
       [
         Add_requires
           {
-            before = Written before;
+            place;
             required;
             premise =
               (match frame.condition with

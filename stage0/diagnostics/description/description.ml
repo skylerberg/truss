@@ -179,12 +179,9 @@ let read_indentation text position =
 
 let add_line_before source node line =
   let text = Lazy.force source.text and start, _ = source.locate node in
-  let line_start = Source.compute_fragment_line_start text start
-  and indentation = read_indentation text start in
-  if line_start + String.length indentation = start then
-    let indentation = if indentation = "" then "  " else indentation in
-    Some (Diagnostic.replace (source.make_span line_start line_start) (indentation ^ line ^ "\n"))
-  else if text.[start - 1] = ' ' then
+  if start > 0 && text.[start - 1] = '\n' then
+    Some (Diagnostic.replace (source.make_span start start) ("  " ^ line ^ "\n"))
+  else if start > 0 && text.[start - 1] = ' ' then
     Some (Diagnostic.replace (source.make_span (start - 1) start) ("\n  " ^ line ^ "\n"))
   else None
 

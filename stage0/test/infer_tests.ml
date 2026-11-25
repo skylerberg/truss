@@ -1800,6 +1800,10 @@ let () =
         "types.not_iterable"
         ~says:"A quantifier cannot go over `Pair`: it does not implement `Iterable`."
         ~at:("pair =>", 1));
+  Harness.test "a `decreases` on a loop over a range or over a collection's elements is an error"
+    (fun () ->
+      Support.expect_codes ~check Fixtures.Infer.measures_of_loops_that_end
+        [ "types.misplaced_measure"; "types.misplaced_measure" ]);
   Harness.test "an `own` loop over a type with its own `cursor` and no `IntoCursor` is an error"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.own_loop_over_a_type_with_its_own_cursor

@@ -222,19 +222,17 @@ type required =
       type_names : (string * Types.ty) list;
     }
 
-type panic_place =
-  | After_uses of Core.origin
-  | Before_clause of Core.origin
-  | Before_body of Core.origin
+type clause_place = Before_clause of Core.origin | Before_body of Core.origin
 
 type fix =
   | Add_requires of {
-      before : Core.origin;
+      place : clause_place;
       required : required list;
       premise : Code.t option;
       condition : Types.condition;
     }
-  | Add_panic of panic_place
+  | Add_panic of clause_place
+  | Add_panic_to_uses of Core.origin
 
 type citation = Cited_here | Cited_at of { path : string; line : int }
 type instance = (string * Language.Builtin_type.t) list
