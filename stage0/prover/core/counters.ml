@@ -186,7 +186,14 @@ let check_promise_amounts context (start : State.frame) promises ~output =
       if not promise.inherited then
         match promise.clause.bound with
         | Order_of amount | At_most amount | Exactly amount ->
-            let result = Option.map (Facts.arrive context start "result") output in
+            let result =
+              Option.map
+                (fun output ->
+                  let result = Facts.arrive context start "result" output in
+                  Validity.assume_valid context start output result;
+                  result)
+                output
+            in
             Conditions.with_obligation_condition context promise.clause.holds_when (fun () ->
                 ignore (Validity.read_specification context { start with result } amount)))
     promises
@@ -319,7 +326,7 @@ let check_lambda_exits context counters (exits : State.frame list) location ~typ
         counters.promised)
     exits;
   let facts =
-    Facts.list_facts_since context facts_mark
+    Fact_list.list_newest_since context.facts ~count:facts_mark
     @ List.map (fun (exit_ : State.frame) -> exit_.condition) exits
   in
   List.filter_map

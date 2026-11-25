@@ -32,7 +32,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       type_clauses = Tables.Path_table.create 16;
       callees = Tables.Path_table.create 16;
       stated = Tables.Stated_table.create 64;
-      facts = [];
+      facts = Fact_list.empty;
       scopes = [];
       quantifier_facts = Tables.Term_table.create 16;
       written_quantifiers = Tables.Term_table.create 4;
@@ -272,7 +272,8 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
             (match self with
             | Logic.Symbol symbol -> context.entry <- symbol :: context.entry
             | _ -> ());
-            if not is_update_step then Validity.assume_valid context frame self_type self;
+            Validity.assume_valid context frame ~includes_invariants:(not is_update_step) self_type
+              self;
             { frame with self = Some self; self_type = Some self_type }
         | local ->
             let ty = Facts.substitute_type context frame parameter.type_ in
@@ -470,10 +471,10 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                 ~moment:(Mut_parameter_at_return (Facts.read_parameter_name parameter))
           | _ -> ())
         mut_parameters;
-      (match (mut_self, is_update_step, frame.self, frame.self_type) with
-      | true, false, Some self, Some self_type ->
+      (match (mut_self, frame.self, frame.self_type) with
+      | true, Some self, Some self_type ->
           Lambdas.check_valid context frame Whole_definition self_type self ~deep:true
-            ~moment:Self_at_return
+            ~includes_invariants:(not is_update_step) ~moment:Self_at_return
       | _ -> ());
       (match (context.lending, frame.yielded_so_far) with
       | Some { return_postconditions; _ }, Some yielded_so_far ->

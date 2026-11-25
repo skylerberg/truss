@@ -231,8 +231,7 @@ let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
     let invariants_hold =
       match find_invariants context ty with
       | _ when not includes_invariants -> Logic.Boolean true
-      | Some _ when Facts.find_constructors context ty = None ->
-          apply_opaque_validity context ty term
+      | Some _ when Facts.find_constructors context ty = None -> Logic.Boolean true
       | Some (source, written) -> (
           let current = find_module context context.current in
           let hidden, shown = List.partition (names_private_definition context ~current) written in
@@ -305,8 +304,9 @@ let rec find_parts_in_range context ?(seen = []) ty term =
         then Some (Facts.make_in_range ty term)
         else None
 
-let assume_valid context frame ty term =
-  Facts.assume context frame (make_validity context frame ~assuming:true ty term)
+let assume_valid ?includes_invariants context frame ty term =
+  Facts.assume context frame
+    (make_validity context frame ~assuming:true ?includes_invariants ty term)
 
 let declare_callback_arguments context frame inputs =
   List.map

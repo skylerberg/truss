@@ -35,6 +35,7 @@ val oblige :
   ?cited:Resolve.Names.key * Core.origin ->
   ?fixes:Catalog.Prover.fix list ->
   ?can_be_required:bool ->
+  ?is_proven_by_evaluation:bool ->
   ?holds_when:Types.condition ->
   State.context ->
   State.frame ->
@@ -116,7 +117,6 @@ val find_impl :
   State.context -> Types.trait_reference -> Types.ty -> (Path.t * Types.substitution) option
 
 val find_local_type : State.context -> State.frame -> Locals.key -> Types.ty option
-val list_facts_since : State.context -> int -> Logic.term list
 val restrict : State.frame -> Logic.term -> State.frame
 val name_path_condition : State.context -> State.frame -> Logic.term -> Logic.term
 

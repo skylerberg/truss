@@ -1,0 +1,4 @@
+fn broken() -> String {
+  let bytes: List[UInt8] = [104, 255]
+  String.from_valid_utf8(own bytes)
+}

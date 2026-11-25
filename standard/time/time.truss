@@ -2,6 +2,7 @@ use standard.core
 use standard.intrinsic
 use standard.serialization
 use standard.text
+use standard.text.utf8
 
 public opaque type Duration(nanoseconds: Int64)
   derives Plain, Equal, Hash, Ordered
@@ -618,6 +619,7 @@ internal fn parse_number(text: String, from: UInt64, most: UInt64) -> Result[Num
   requires most <= 9
   ensures !(result is Ok(number) && (number.end <= from || number.end > text.length() || number.end - from > most))
   ensures !(result is Ok(number) && (number.value < 0 || number.value > 999999999))
+  ensures !(result is Ok(number) && number.end > from && text.model()[number.end - 1] > 127)
   cost time O(1)
 {
   var value: Int64 = 0
@@ -625,6 +627,7 @@ internal fn parse_number(text: String, from: UInt64, most: UInt64) -> Result[Num
   while index < text.length() && index - from < most && text.byte(index) >= 48 && text.byte(index) <= 57
     invariant from <= index
     invariant index <= text.length()
+    invariant index > from ==> text.model()[index - 1] <= 127
     invariant index - from <= most
     invariant 0 <= value
     invariant index - from <= 0 ==> value < 1
@@ -652,6 +655,7 @@ internal fn parse_field(text: String, from: UInt64, width: UInt64) -> Result[Int
   requires from <= text.length()
   requires 1 <= width && width <= 9
   ensures !(result is Ok(value) && (value < 0 || value > 999999999 || width > text.length() - from))
+  ensures !(result is Ok(_) && !text.is_boundary(from + width))
   cost time O(1)
 {
   let number = parse_number(text, from: from, most: width)?
@@ -826,6 +830,7 @@ internal fn write_fraction(output: mut String, value: UInt64, digits: UInt64)
   var end = text.length()
   while end > 0 && text.byte(end - 1) == 48
     invariant end <= text.length()
+    invariant end < text.length() ==> text.model()[end] == 48
     decreases end
   {
     end -= 1
@@ -2315,6 +2320,7 @@ fn layout_parts(pattern: String) -> Option[List[LayoutPart]]
   while index < pattern.length()
     invariant run <= index
     invariant index <= pattern.length()
+    invariant pattern.is_boundary(run)
     decreases pattern.length() - index
   {
     if pattern.byte(index) != 37 {
@@ -2433,12 +2439,14 @@ fn weekday_name_end(text: String, from: UInt64) -> UInt64
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
+  ensures result > from ==> text.model()[result - 1] <= 127
 {
   var index = from
   while index < text.length() && ((65 <= text.byte(index) && text.byte(index) <= 90)
     || (97 <= text.byte(index) && text.byte(index) <= 122))
     invariant from <= index
     invariant index <= text.length()
+    invariant index > from ==> text.model()[index - 1] <= 127
     decreases text.length() - index
   {
     index += 1
@@ -2455,6 +2463,7 @@ public fn Layout.parse_date_time(self, text: String) -> Result[DateTime, ParseTi
   while index < self.parts.length()
     invariant index <= self.parts.length()
     invariant position <= text.length()
+    invariant text.is_boundary(position)
     invariant 0 <= fields.year && fields.year <= 999999999
     invariant 0 <= fields.month && fields.month <= 999999999
     invariant 0 <= fields.day && fields.day <= 999999999
@@ -2468,6 +2477,11 @@ public fn Layout.parse_date_time(self, text: String) -> Result[DateTime, ParseTi
       Text(expected) => {
         if expected.length() > text.length() - position || !text.matches_at(expected, offset: position) {
           return Err(ParseTimeError.Malformed(offset: position))
+        }
+        proof {
+          if expected.length() > 0 {
+            utf8.match_lies_between_boundaries(text.model(), part: expected.model(), at: position)
+          }
         }
         position += expected.length()
       }

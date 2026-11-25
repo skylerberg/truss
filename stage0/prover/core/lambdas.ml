@@ -443,8 +443,8 @@ let find_lambda_definition context frame (function_type : Types.function_type)
       | _ -> None)
   | _ -> None
 
-let check_valid context frame location ty term ~deep ~moment =
-  match Validity.make_validity context frame ~assuming:false ~deep ty term with
+let check_valid ?includes_invariants context frame location ty term ~deep ~moment =
+  match Validity.make_validity context frame ~assuming:false ~deep ?includes_invariants ty term with
   | Logic.Boolean true -> ()
   | valid -> Facts.oblige context frame location (Invariant_may_fail { type_ = ty; moment }) valid
 
@@ -462,7 +462,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   let called = Facts.declare_fresh context frame "called" Logic.Bool in
   let inside = { (Facts.restrict frame called) with result = None } in
   let start_fresh = context.fresh
-  and start_facts = List.length context.facts
+  and start_facts = Fact_list.count context.facts
   and start_declarations = List.length context.declarations in
   let arguments =
     List.map
@@ -486,9 +486,11 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
          (fun index pair -> (index, pair))
          (List.combine written.code.parameters function_type.inputs))
   in
-  let mark = context.fresh and facts_mark = List.length context.facts in
+  let mark = context.fresh and facts_mark = Fact_list.count context.facts in
   let premises =
-    List.drop (List.length context.facts - facts_mark) (Facts.list_facts_since context start_facts)
+    List.drop
+      (Fact_list.count context.facts - facts_mark)
+      (Fact_list.list_newest_since context.facts ~count:start_facts)
   in
   let ended = ref [] in
   let saved_returns = context.returns
@@ -582,7 +584,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
           ~facts_mark)
   in
   let end_fresh = context.fresh in
-  let shown = Facts.list_facts_since context facts_mark in
+  let shown = Fact_list.list_newest_since context.facts ~count:facts_mark in
   let term =
     match find_lambda_definition context frame function_type written with
     | Some term -> term

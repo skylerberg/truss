@@ -239,7 +239,7 @@ let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context f
   in
   assume_invariants context head clauses;
   check_measures_defined context head clauses;
-  let ended_mark = List.length context.facts in
+  let ended_mark = Fact_list.count context.facts in
   let received = receive head before in
   let through = received.through in
   let inside = received.advance (Facts.restrict head received.has_another) in
@@ -251,7 +251,8 @@ let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context f
     ~iterations:(Some iterations) ~iteration_bounds:most ~ends ~breaks ~with_through;
   let ended = received.advance (Facts.restrict head (Logic.not_ received.has_another)) in
   let ended_facts =
-    Facts.list_facts_since context ended_mark @ Loop_costs.list_facts context costs
+    Fact_list.list_newest_since context.facts ~count:ended_mark
+    @ Loop_costs.list_facts context costs
   in
   let exit_ =
     Loop_costs.leave context ~clause_at:head

@@ -145,7 +145,7 @@ type context = {
   type_clauses : (source * Mir.type_clauses option Lazy.t) option Tables.Path_table.t;
   callees : known_callee Tables.Path_table.t;
   stated : unit Tables.Stated_table.t;
-  mutable facts : Logic.term list;
+  mutable facts : Fact_list.t;
   mutable obligations : Obligation.t list;
   mutable fresh : int;
   mutable values : (Logic.symbol * string) list;

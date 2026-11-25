@@ -101,7 +101,7 @@ let assert_bit_vector (context : State.context) frame ~named ~origin
     ~(read : State.frame -> Logic.term) =
   let saved_facts = context.facts and saved_path_notes = context.path_notes in
   let saved_stated = Tables.Stated_table.copy context.stated in
-  context.facts <- [];
+  context.facts <- Fact_list.empty;
   context.path_notes <- [];
   let isolated =
     {
