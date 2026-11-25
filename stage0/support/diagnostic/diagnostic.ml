@@ -197,10 +197,13 @@ module Code = struct
     | Missing_required_impl
     | Implements_built_in_capability
     | Impl_uses
-    | Mut_self_for_slice
-    | Read_only_owning_parameter
+    | Impl_modifies
+    | Not_viewable
     | Unknown_associated_type
     | Unknown_associated_capability
+    | Not_a_field_path
+    | Read_only_part
+    | Repeated_part
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
 
@@ -209,6 +212,7 @@ module Code = struct
     | Unused_function
     | Unused_constant
     | Unused_run_forever
+    | Unmodified_part
     | Unreachable_code
     | Self_comparison
 
@@ -229,6 +233,8 @@ module Code = struct
     | Lent_mut_in_variant
     | Needs_lent_mut
     | Task_outlives_view
+    | Undeclared_change
+    | Resized_range
 
   type capabilities =
     | Not_available
@@ -485,10 +491,13 @@ module Code = struct
     | Missing_required_impl -> "missing_required_impl"
     | Implements_built_in_capability -> "implements_built_in_capability"
     | Impl_uses -> "impl_uses"
-    | Mut_self_for_slice -> "mut_self_for_slice"
-    | Read_only_owning_parameter -> "read_only_owning_parameter"
+    | Impl_modifies -> "impl_modifies"
+    | Not_viewable -> "not_viewable"
     | Unknown_associated_type -> "unknown_associated_type"
     | Unknown_associated_capability -> "unknown_associated_capability"
+    | Not_a_field_path -> "not_a_field_path"
+    | Read_only_part -> "read_only_part"
+    | Repeated_part -> "repeated_part"
 
   let name_patterns_code code =
     match code with
@@ -503,6 +512,7 @@ module Code = struct
     | Unused_function -> "unused_function"
     | Unused_constant -> "unused_constant"
     | Unused_run_forever -> "unused_run_forever"
+    | Unmodified_part -> "unmodified_part"
     | Unreachable_code -> "unreachable_code"
     | Self_comparison -> "self_comparison"
 
@@ -524,6 +534,8 @@ module Code = struct
     | Lent_mut_in_variant -> "lent_mut_in_variant"
     | Needs_lent_mut -> "needs_lent_mut"
     | Task_outlives_view -> "task_outlives_view"
+    | Undeclared_change -> "undeclared_change"
+    | Resized_range -> "resized_range"
 
   let name_capabilities_code code =
     match code with
@@ -596,19 +608,13 @@ type 'span diagnostic = {
 }
 
 type t = Source.span diagnostic
-type in_definition = Source.Definition_span.t diagnostic
-
-let make ?(severity : severity = Error) ?(notes = []) ?(fixes = []) ~code span message =
-  { code; severity; message; span; notes; fixes }
 
 let is_error (diagnostic : _ diagnostic) = diagnostic.severity = Error
 let show_severity : severity -> string = function Error -> "error" | Warning -> "warning"
 
 type reported = Reported
 
-let make_reported (_ : _ diagnostic) = Reported
 let reported_elsewhere = Reported
-let fix title edits = { title; edits }
 let replace span replacement = { span; replacement }
 let insert at replacement = { span = at; replacement }
 let delete span = { span; replacement = "" }
@@ -623,11 +629,6 @@ let find_closest text candidates =
   match String.spellcheck ~max_dist:(fun _ -> limit) enumerate_candidates text with
   | closest :: _ -> Some closest
   | [] -> None
-
-let list_spelling_fixes span ~written candidates =
-  match find_closest written candidates with
-  | Some candidate -> [ fix (Printf.sprintf "Write `%s`." candidate) [ replace span candidate ] ]
-  | None -> []
 
 let show_count count singular plural =
   Printf.sprintf "%d %s" count (if count = 1 then singular else plural)
@@ -711,35 +712,6 @@ let list_machine_applicable (diagnostics : t list) =
           clear
       | _ -> false)
     diagnostics
-
-let limit = 200
-
-module Collector = struct
-  type diagnostic = t
-  type nonrec t = diagnostic Dynarray.t
-
-  let create () = Dynarray.create ()
-  let add collector diagnostic = Dynarray.add_last collector diagnostic
-
-  let to_list collector =
-    List.stable_sort
-      (fun (left : diagnostic) (right : diagnostic) -> compare left.span.start right.span.start)
-      (Dynarray.to_list collector)
-end
-
-let select_shown diagnostics =
-  let rec take count last = function
-    | [] -> []
-    | rest when count = limit ->
-        [
-          make
-            ~severity:(if List.exists is_error rest then (Error : severity) else Warning)
-            ~code:Too_many_diagnostics (Source.make_zero_width last)
-            (Printf.sprintf "%d more diagnostics are not shown." (List.length rest));
-        ]
-    | (first : t) :: rest -> first :: take (count + 1) first.span.stop rest
-  in
-  take 0 0 diagnostics
 
 let show_location source offset =
   let line, column = Source.compute_position source offset in
@@ -911,6 +883,9 @@ let to_json_object source diagnostic =
     (encode_json_span source diagnostic.span)
     (String.concat "," notes) (String.concat "," fixes)
 
-module For_testing = struct
-  let limit = limit
+module For_rendering = struct
+  let make ?(severity : severity = Error) ?(notes = []) ?(fixes = []) ~code span message =
+    { code; severity; message; span; notes; fixes }
+
+  let fix title edits = { title; edits }
 end

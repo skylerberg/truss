@@ -46,12 +46,22 @@ let make_impl_method trait_interface impl_interface impl (declared : Types.trait
           ~default:declared.method_receiver;
     }
 
-let list_impl_methods (interface : Interface.Lookups.t) impl =
-  let impl_interface = Interface.Definition.read_impl_interface interface impl in
-  let trait_interface =
-    Interface.Definition.read_trait_interface interface impl_interface.implements.trait
-  in
-  List.map (make_impl_method trait_interface impl_interface impl) trait_interface.methods
+let list_methods_of_evidence (interface : Interface.Lookups.t) ~trait (evidence : Types.evidence) =
+  let trait_interface = Interface.Definition.read_trait_interface interface trait in
+  List.filter_map
+    (fun (declared : Types.trait_method) ->
+      Option.map
+        (function
+          | Interface.Impls.Declaration_for_view ->
+              Path.Method
+                { owner = trait; name = declared.method_name; receiver = declared.method_receiver }
+          | Method_of_impl { impl; _ } ->
+              make_impl_method trait_interface
+                (Interface.Definition.read_impl_interface interface impl)
+                impl declared)
+        (Interface.Impls.locate_method interface evidence ~name:declared.method_name
+           ~receiver:declared.method_receiver))
+    trait_interface.methods
 
 let is_self_of_enclosing_trait (type_ : Types.ty) =
   match type_ with
@@ -67,14 +77,30 @@ let rec list_code_of_impl_for interface ((type_ : Types.ty), (bound : Types.trai
           Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type:type_
             ~trait:required Bound
         with
-        | Impl { impl; substitution } ->
-            list_impl_methods interface impl
+        | (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }) as
+          evidence ->
+            list_methods_of_evidence interface ~trait:required.trait evidence
             @ List.concat_map (list_code_of_impl_for interface)
                 (Interface.Impls.list_required_bounds
                    (Interface.Definition.read_impl_interface interface impl).impl_generics
                    substitution)
         | Bound -> [])
     (Interface.Properties.list_bound_closure interface ~self:type_ bound)
+
+let list_code_supplied_to_self (interface : Interface.Lookups.t) ~trait substitution =
+  match Types.find_argument (Types.make_self_parameter trait) substitution with
+  | Some (Type self) ->
+      list_code_of_impl_for interface
+        ( self,
+          {
+            trait;
+            trait_arguments =
+              List.filter_map
+                (fun (generic : Types.generic) -> Types.find_argument generic.generic substitution)
+                (Interface.Definition.read_trait_interface interface trait).trait_generics;
+            associated = [];
+          } )
+  | Some (Value _) | None -> []
 
 let list_code_supplied_to_bound interface instance (type_, bound) =
   list_code_of_impl_for interface
@@ -140,11 +166,13 @@ let resolve_callee (interface : Interface.Lookups.t) instance (callee : _ Core.t
                ~self:self_type trait)
       in
       let target, supplied =
-        match evidence with
-        | Impl { impl; substitution } ->
+        match Interface.Impls.locate_method interface evidence ~name ~receiver with
+        | Some Declaration_for_view ->
+            (Some declaration, lazy (list_code_supplied_to_declaration ()))
+        | Some (Method_of_impl { impl; substitution }) ->
             let method_ = Path.Method { owner = impl; name; receiver } in
             (Some method_, lazy (list_code_supplied_to method_ ~bound_by_owner:substitution))
-        | Bound ->
+        | None ->
             ( (if is_self_of_enclosing_trait self_type then Some declaration else None),
               lazy (list_code_supplied_to_declaration ()) )
       in
@@ -176,7 +204,7 @@ let resolve_node (lookups : lookups) (declaration : Path.t) instance =
           ~trait Bound
       with
       | Impl { impl; _ } -> Some (Path.Method { owner = impl; name; receiver })
-      | Bound -> None
+      | Derived_for_view _ | Bound -> None
     in
     match lookups.mir.find_form_origin method_ with
     | Some (Inherited key, _) when Path.equal key.path declaration -> Some method_
@@ -208,7 +236,9 @@ let list_statement_edges interface instance (statement : Tree.statement) =
         (List.concat_map
            (fun (implementation : Tree.provided) ->
              List.concat_map
-               (fun (provided : Core.provided) -> list_impl_methods interface provided.impl)
+               (fun (provided : Core.provided) ->
+                 list_methods_of_evidence interface ~trait:provided.capability
+                   (Impl { impl = provided.impl; substitution = provided.arguments }))
                implementation.provides)
            provided)
   | Basic

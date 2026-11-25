@@ -121,7 +121,7 @@ internal fn Map[Key: Hash + Ordered, Value].index_of(self, key: Key) -> UInt64
     overflow_within_log(self)
     modeled_keys(self)
   }
-  let position = self.index.find(self.keys.slice(), key: key)
+  let position = self.index.find(self.keys, key: key)
   proof {
     assert forall i in 0..self.keys.length() => forall j in 0..self.keys.length() =>
       i == j || !identical(self.keys.model()[i], self.keys.model()[j])
@@ -179,7 +179,7 @@ internal fn Map[Key: Hash + Ordered, Value].make_room(mut self, hash: UInt64)
     return
   }
   if capacity == 0 || (length + 1) * 8 > capacity * 7 || (capacity <= 8 * length && !self.index.has_room(hash)) {
-    mut self.index.grow(self.keys.slice())
+    mut self.index.grow(self.keys)
   }
 }
 
@@ -269,7 +269,7 @@ internal fn Map[Key: Hash + Ordered, Value].push_entry(mut self, key: own Key, v
     assert self.index.places.length() == count && count == old(self.keys.length())
     assert self.index.overflow.height() <= 2 * log(old(self.keys.length())) + 1
   }
-  mut self.index.place(self.keys.slice(), hash: hash)
+  mut self.index.place(self.keys, hash: hash)
   proof {
     assert self.keys.length() == count + 1 && self.values.length() == count + 1
     assert self.index.slots.length() == room
@@ -345,9 +345,9 @@ internal fn Map[Key: Hash + Ordered, Value].remove_at(mut self, position: UInt64
     overflow_within_count(self.index, keys: self.keys.model(), count: self.keys.length(), missing: self.keys.length())
   }
   let last = self.keys.length() - 1
-  mut self.index.unplace(self.keys.slice(), position: position)
+  mut self.index.unplace(self.keys, position: position)
   if position == last {
-    mut self.index.drop_last(self.keys.slice())
+    mut self.index.drop_last(self.keys)
     let removed_key = mut self.keys.pop()
     let removed = mut self.values.pop()
     proof {
@@ -362,7 +362,7 @@ internal fn Map[Key: Hash + Ordered, Value].remove_at(mut self, position: UInt64
       None => unreachable
     }
   } else {
-    let needs_attach = mut self.index.detach_last(self.keys.slice(), hole: position)
+    let needs_attach = mut self.index.detach_last(self.keys, hole: position)
     let removed_key = mut self.keys.swap_remove(position)
     let removed = mut self.values.swap_remove(position)
     proof {
@@ -378,7 +378,7 @@ internal fn Map[Key: Hash + Ordered, Value].remove_at(mut self, position: UInt64
           missing: position,
         )
       }
-      mut self.index.attach(self.keys.slice(), position: position)
+      mut self.index.attach(self.keys, position: position)
     } else {
       proof {
         indexes_on_agreeing(
@@ -569,7 +569,7 @@ public fn Map[Key: Hash + Ordered, Value].is_empty(self) -> Bool
   self.length() == 0
 }
 
-fn HashIndex.place_next[Key: Hash + Ordered](mut self, keys: Slice[Key], position: UInt64, bound: UInt64)
+fn HashIndex.place_next[Key: Hash + Ordered](mut self, keys: List[Key], position: UInt64, bound: UInt64)
   requires forall i in 0..keys.length() => forall j in 0..keys.length() =>
     i < j ==> !(keys.model()[i] == keys.model()[j])
   requires position < keys.length() && keys.length() <= bound && bound <= 1152921504606846976
@@ -598,7 +598,7 @@ fn HashIndex.place_next[Key: Hash + Ordered](mut self, keys: Slice[Key], positio
   }
 }
 
-fn build_index[Key: Hash + Ordered](keys: Slice[Key], bound: UInt64) -> HashIndex
+fn build_index[Key: Hash + Ordered](keys: List[Key], bound: UInt64) -> HashIndex
   requires forall i in 0..keys.length() => forall j in 0..keys.length() =>
     i < j ==> !(keys.model()[i] == keys.model()[j])
   requires keys.length() <= bound && bound <= 1152921504606846976
@@ -680,7 +680,7 @@ impl Iterable for Map[Key: Hash + Ordered, Value] {
   }
 }
 
-public type Keys[Key](keys: Slice[Key])
+public type Keys[Key](keys: view List[Key])
 
 impl Iterable for Keys[Key] {
   type Element = Key
@@ -701,7 +701,7 @@ impl Iterable for Keys[Key] {
   }
 }
 
-public type Values[Value](values: Slice[Value])
+public type Values[Value](values: view List[Value])
 
 impl Iterable for Values[Value] {
   type Element = Value
@@ -726,14 +726,14 @@ public fn Map[Key: Hash + Ordered, Value].keys(self) -> Keys[Key]
   ensures result.count() == self.length()
   cost time O(1)
 {
-  Keys(keys: self.keys.slice())
+  Keys(keys: self.keys)
 }
 
 public fn Map[Key: Hash + Ordered, Value].values(self) -> Values[Value]
   ensures result.count() == self.length()
   cost time O(1)
 {
-  Values(values: self.values.slice())
+  Values(values: self.values)
 }
 
 public fn Map[Key: Hash + Ordered, Value].value_at(mut self, position: UInt64) lends mut Value
@@ -1010,7 +1010,7 @@ internal fn Map[Key: Hash + Ordered, Value].retain_keys(
   var values = own previous.values
   let count = keys.length()
   compact_keys(mut keys, values: mut values, keep: keep)
-  let index = build_index(keys.slice(), bound: count)
+  let index = build_index(keys, bound: count)
   self = Map(keys: own keys, values: own values, index: own index)
 }
 
@@ -1036,7 +1036,7 @@ public fn Map[Key: Hash + Ordered, Value].retain(
   var values = own previous.values
   let count = keys.length()
   compact(mut keys, values: mut values, keep: keep)
-  let index = build_index(keys.slice(), bound: count)
+  let index = build_index(keys, bound: count)
   self = Map(keys: own keys, values: own values, index: own index)
   proof {
     modeled_keys(self)
@@ -1272,7 +1272,7 @@ impl FromEntries for Map[Key: Hash + Ordered, Value] {
     }
     let key_list = List(storage: own keys)
     let value_list = List(storage: own values)
-    let index = build_index(key_list.slice(), bound: count)
+    let index = build_index(key_list, bound: count)
     let map = Map(keys: own key_list, values: own value_list, index: own index)
     proof {
       modeled_keys(map)

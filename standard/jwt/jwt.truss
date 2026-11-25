@@ -41,14 +41,14 @@ impl Display for Error {
   }
 }
 
-fn malformed(message: StringSlice) -> Error {
+fn malformed(message: String) -> Error {
   Error.Malformed(message: message.to_string())
 }
 
 public type Algorithm = Hs256 | Hs384 | Hs512 | Rs256 | Rs384 | Rs512 | Ps256 | Ps384 | Ps512 | Es256 | Es384 | EdDsa
   derives Equal
 
-public fn Algorithm.name(self) -> StringSlice {
+public fn Algorithm.name(self) -> view String {
   match self {
     Hs256 => "HS256"
     Hs384 => "HS384"
@@ -65,7 +65,7 @@ public fn Algorithm.name(self) -> StringSlice {
   }
 }
 
-public fn Algorithm.from_name(name: StringSlice) -> Option[Algorithm] {
+public fn Algorithm.from_name(name: String) -> Option[Algorithm] {
   let all: List[Algorithm] = [
     Algorithm.Hs256, Algorithm.Hs384, Algorithm.Hs512, Algorithm.Rs256, Algorithm.Rs384, Algorithm.Rs512,
     Algorithm.Ps256, Algorithm.Ps384, Algorithm.Ps512, Algorithm.Es256, Algorithm.Es384, Algorithm.EdDsa,
@@ -86,7 +86,7 @@ fn hash_of(algorithm: Algorithm) -> cryptography.HashFunction {
   }
 }
 
-fn mac(function: cryptography.HashFunction, key: Slice[UInt8], message: Slice[UInt8]) -> List[UInt8] {
+fn mac(function: cryptography.HashFunction, key: List[UInt8], message: List[UInt8]) -> List[UInt8] {
   match function {
     Sha384 => {
       let code = cryptography.hmac_sha384(key, message: message)
@@ -107,13 +107,13 @@ fn curve_of(algorithm: Algorithm) -> cryptography.Curve {
   if algorithm == Algorithm.Es384 { cryptography.Curve.P384 } else { cryptography.Curve.P256 }
 }
 
-fn sign_with(key: jwk.Key, algorithm: Algorithm, input: Slice[UInt8]) -> Result[List[UInt8], Error]
+fn sign_with(key: jwk.Key, algorithm: Algorithm, input: List[UInt8]) -> Result[List[UInt8], Error]
   uses Random, Panic, RunForever
 {
   let function = hash_of(algorithm)
   match key.material {
     Secret(bytes) => match algorithm {
-      Hs256 | Hs384 | Hs512 => Ok(mac(function, key: bytes.slice(), message: input))
+      Hs256 | Hs384 | Hs512 => Ok(mac(function, key: bytes, message: input))
       _ => Err(Error.NoKey)
     }
     RsaPrivate(private_key) => match algorithm {
@@ -142,7 +142,7 @@ fn sign_with(key: jwk.Key, algorithm: Algorithm, input: Slice[UInt8]) -> Result[
   }
 }
 
-fn verifies(key: jwk.Key, algorithm: Algorithm, input: Slice[UInt8], signature: Slice[UInt8]) -> Bool
+fn verifies(key: jwk.Key, algorithm: Algorithm, input: List[UInt8], signature: List[UInt8]) -> Bool
   uses Panic
 {
   let function = hash_of(algorithm)
@@ -150,8 +150,8 @@ fn verifies(key: jwk.Key, algorithm: Algorithm, input: Slice[UInt8], signature: 
   match public_key.material {
     Secret(bytes) => match algorithm {
       Hs256 | Hs384 | Hs512 => {
-        let expected = mac(function, key: bytes.slice(), message: input)
-        cryptography.constant_time_equal(expected.slice(), second: signature)
+        let expected = mac(function, key: bytes, message: input)
+        cryptography.constant_time_equal(expected, second: signature)
       }
       _ => false
     }
@@ -181,7 +181,7 @@ fn verifies(key: jwk.Key, algorithm: Algorithm, input: Slice[UInt8], signature: 
 
 fn segment(value: json.Value) -> String {
   let text = value.to_text()
-  jwk.encoded(text.slice().bytes())
+  jwk.encoded(text.bytes())
 }
 
 public fn sign[Item: serialization.Serialize](
@@ -201,9 +201,9 @@ public fn sign[Item: serialization.Serialize](
   var input = segment(json.Value.Object(members: own header))
   mut input.push(".")
   mut input.push(segment(json.to_value(claims)))
-  let signature = sign_with(key, algorithm: algorithm, input: input.slice().bytes())?
+  let signature = sign_with(key, algorithm: algorithm, input: input.bytes())?
   mut input.push(".")
-  mut input.push(jwk.encoded(signature.slice()))
+  mut input.push(jwk.encoded(signature))
   Ok(own input)
 }
 
@@ -231,18 +231,18 @@ public fn Token.claims[Item: serialization.Deserialize](self) -> Result[Item, Er
   }
 }
 
-fn decoded_json(text: StringSlice) -> Result[json.Value, Error] {
+fn decoded_json(text: String) -> Result[json.Value, Error] {
   let bytes = match jwk.decoded(text) {
     Ok(bytes) => own bytes
     Err(_) => return Err(malformed("a segment that is not base64url"))
   }
-  match json.parse_bytes(bytes.slice()) {
+  match json.parse_bytes(bytes) {
     Ok(value) => Ok(own value)
     Err(_) => Err(malformed("a segment that is not JSON"))
   }
 }
 
-fn text_member(value: json.Value, name: StringSlice) -> Option[String] {
+fn text_member(value: json.Value, name: String) -> Option[String] {
   match value.get(name) {
     Some(member) => match member.as_text() {
       Some(text) => Some(text.to_string())
@@ -252,7 +252,7 @@ fn text_member(value: json.Value, name: StringSlice) -> Option[String] {
   }
 }
 
-fn seconds_of(claims: json.Value, name: StringSlice) -> Result[Option[Int64], Error] {
+fn seconds_of(claims: json.Value, name: String) -> Result[Option[Int64], Error] {
   match claims.get(name) {
     Some(value) => match value.as_int64() {
       Some(seconds) => Ok(Some(seconds))
@@ -262,7 +262,7 @@ fn seconds_of(claims: json.Value, name: StringSlice) -> Result[Option[Int64], Er
   }
 }
 
-fn has_audience(claims: json.Value, audience: StringSlice) -> Bool {
+fn has_audience(claims: json.Value, audience: String) -> Bool {
   match claims.get("aud") {
     Some(value) => {
       match value.as_text() {
@@ -295,7 +295,7 @@ fn is_named(key: jwk.Key, key_id: Option[String]) -> Bool {
   }
 }
 
-fn check_signature(keys: Slice[jwk.Key], key_id: Option[String], algorithm: Algorithm, input: Slice[UInt8], signature: Slice[UInt8]) -> Result[Unit, Error]
+fn check_signature(keys: List[jwk.Key], key_id: Option[String], algorithm: Algorithm, input: List[UInt8], signature: List[UInt8]) -> Result[Unit, Error]
   uses Panic
 {
   var has_candidate = false
@@ -310,10 +310,10 @@ fn check_signature(keys: Slice[jwk.Key], key_id: Option[String], algorithm: Algo
   if has_candidate { Err(Error.Signature) } else { Err(Error.NoKey) }
 }
 
-public fn verify(token: StringSlice, keys: Slice[jwk.Key], rules: Validation) -> Result[Token, Error]
+public fn verify(token: String, keys: List[jwk.Key], rules: Validation) -> Result[Token, Error]
   uses Clock, Panic
 {
-  let parts: List[StringSlice] = token.split(".")
+  let parts: List[view String] = token.split(".")
   if parts.length() != 3 {
     return Err(malformed("a token that does not have three segments"))
   }
@@ -346,7 +346,7 @@ public fn verify(token: StringSlice, keys: Slice[jwk.Key], rules: Validation) ->
   var input = parts[0].to_string()
   mut input.push(".")
   mut input.push(parts[1])
-  check_signature(keys, key_id: key_id, algorithm: algorithm, input: input.slice().bytes(), signature: signature.slice())?
+  check_signature(keys, key_id: key_id, algorithm: algorithm, input: input.bytes(), signature: signature)?
   let claims = decoded_json(parts[1])?
   if claims.as_members() is None {
     return Err(malformed("claims that are not a JSON object"))
@@ -400,8 +400,8 @@ public fn verify(token: StringSlice, keys: Slice[jwk.Key], rules: Validation) ->
   Ok(Token(header: Header(algorithm: algorithm, key_id: own key_id, kind: own kind), claims: own claims))
 }
 
-public fn verify_with_set(token: StringSlice, keys: jwk.KeySet, rules: Validation) -> Result[Token, Error]
+public fn verify_with_set(token: String, keys: jwk.KeySet, rules: Validation) -> Result[Token, Error]
   uses Clock, Panic
 {
-  verify(token, keys: keys.keys.slice(), rules: rules)
+  verify(token, keys: keys.keys, rules: rules)
 }

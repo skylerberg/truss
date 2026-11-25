@@ -37,6 +37,10 @@
   compiler_bug
   source
   diagnostic
+  description
+  catalog
+  syntax_catalog
+  project_catalog
   token
   lexer
   zarith
@@ -77,7 +81,8 @@
   manifest
   registry
   backend
-  c_compiler)
+  c_compiler
+  x86_64_level)
  (deps
   served_length/served_length.exe
   (glob_files %{workspace_root}/*.md)

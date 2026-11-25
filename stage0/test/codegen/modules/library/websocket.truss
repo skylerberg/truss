@@ -20,7 +20,7 @@ fn chat(request: own http.Request, responder: mut http.Responder)
       var socket = own opened
       while mut socket.receive() is Ok(Some(message)) {
         let reply = match message {
-          Text(text) => http.Message.Text(text: text.slice().to_ascii_uppercase())
+          Text(text) => http.Message.Text(text: text.to_ascii_uppercase())
           Binary(bytes) => http.Message.Binary(bytes: bytes.copy())
         }
         if mut socket.send(reply) is Err(_) {
@@ -32,27 +32,27 @@ fn chat(request: own http.Request, responder: mut http.Responder)
   }
 }
 
-fn raw_exchange(raw: StringSlice) -> String
+fn raw_exchange(raw: String) -> String
   uses NetworkClient, Handles, Tasks, Panic, RunForever
 {
   let connection = network.connect("localhost", port: 8090).expect("the server accepts")
   let _ = connection.send_all(raw.bytes())
   var reply: List[UInt8] = []
-  while connection.receive(mut reply, limit: 4096) is Ok(count) && count > 0 && !String.from_utf8_lossy(reply.slice()).slice().contains("\r\n\r\n") {}
-  String.from_utf8_lossy(reply.slice())
+  while connection.receive(mut reply, limit: 4096) is Ok(count) && count > 0 && !String.from_utf8_lossy(reply).contains("\r\n\r\n") {}
+  String.from_utf8_lossy(reply)
 }
 
-fn raw_session(raw: Slice[UInt8], expected: StringSlice) -> String
+fn raw_session(raw: List[UInt8], expected: String) -> String
   uses NetworkClient, Handles, Tasks, Panic, RunForever
 {
   let connection = network.connect("localhost", port: 8090).expect("the server accepts")
   let _ = connection.send_all(raw)
   var reply: List[UInt8] = []
   var reads: UInt64 = 0
-  while reads < 20 && !String.from_utf8_lossy(reply.slice()).slice().contains(expected) && connection.receive(mut reply, limit: 4096) is Ok(count) && count > 0 {
+  while reads < 20 && !String.from_utf8_lossy(reply).contains(expected) && connection.receive(mut reply, limit: 4096) is Ok(count) && count > 0 {
     reads += 1
   }
-  String.from_utf8_lossy(reply.slice())
+  String.from_utf8_lossy(reply)
 }
 
 fn conversation() -> List[String]
@@ -66,7 +66,7 @@ fn conversation() -> List[String]
       var client = http.Client.new()
       let talked = mut client.websocket(url.Url"ws://localhost:8090/chat", session: fn(socket) {
         var heard: List[String] = []
-        mut heard.push("protocol ${socket.protocol().unwrap_or("none".slice())}")
+        mut heard.push("protocol ${socket.protocol().unwrap_or("none")}")
         let _ = mut socket.send_text("hello")
         match mut socket.receive() {
           Ok(Some(Text(text))) => mut heard.push(own text)
@@ -77,10 +77,10 @@ fn conversation() -> List[String]
           Ok(Some(Binary(bytes))) => mut heard.push("${bytes.length()} bytes")
           _ => mut heard.push("no bytes")
         }
-        let long = "x".slice().repeated(70000)
-        let _ = mut socket.send_text(long.slice())
+        let long = "x".repeated(70000)
+        let _ = mut socket.send_text(long)
         match mut socket.receive() {
-          Ok(Some(Text(text))) => mut heard.push("${text.length()} ${text.slice().starts_with("XXX")}")
+          Ok(Some(Text(text))) => mut heard.push("${text.length()} ${text.starts_with("XXX")}")
           _ => mut heard.push("no long text")
         }
         mut heard.push("closed ${mut socket.close() is Ok(_)}")
@@ -91,9 +91,9 @@ fn conversation() -> List[String]
         Err(error) => mut seen.push("failed: ${error}")
       }
       let plain = mut client.websocket(url.Url"ws://localhost:8090/chat", session: fn(socket) {
-        let _ = mut socket.send_text("y".slice().repeated(1000).slice())
+        let _ = mut socket.send_text("y".repeated(1000))
         let reply = match mut socket.receive() {
-          Ok(Some(Text(text))) => "${text.length()} ${text.slice().starts_with("YYY")}"
+          Ok(Some(Text(text))) => "${text.length()} ${text.starts_with("YYY")}"
           _ => "no reply"
         }
         let _ = mut socket.close()
@@ -104,20 +104,20 @@ fn conversation() -> List[String]
         Err(error) => mut seen.push("failed: ${error}")
       }
       let upgrade = "GET /chat HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
-      let offered = raw_exchange("${upgrade}Sec-WebSocket-Extensions: x-unknown, permessage-deflate; client_max_window_bits\r\n\r\n".slice())
-      let declined = raw_exchange("${upgrade}Sec-WebSocket-Extensions: permessage-deflate; bogus\r\n\r\n".slice())
-      mut seen.push("${offered.slice().contains("Sec-WebSocket-Extensions: permessage-deflate; server_no_context_takeover; client_no_context_takeover\r\n")} ${declined.slice().contains("Sec-WebSocket-Extensions")}")
-      var compressed = "${upgrade}Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n".slice().bytes().to_list()
+      let offered = raw_exchange("${upgrade}Sec-WebSocket-Extensions: x-unknown, permessage-deflate; client_max_window_bits\r\n\r\n")
+      let declined = raw_exchange("${upgrade}Sec-WebSocket-Extensions: permessage-deflate; bogus\r\n\r\n")
+      mut seen.push("${offered.contains("Sec-WebSocket-Extensions: permessage-deflate; server_no_context_takeover; client_no_context_takeover\r\n")} ${declined.contains("Sec-WebSocket-Extensions")}")
+      var compressed = "${upgrade}Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n".bytes().to_list()
       mut compressed.append_slice([193, 135, 0, 0, 0, 0, 242, 72, 205, 201, 201, 7, 0][..])
-      mut seen.push("${raw_session(compressed.slice(), expected: "HELLO").slice().contains("HELLO")}")
+      mut seen.push("${raw_session(compressed, expected: "HELLO").contains("HELLO")}")
       let handshake = raw_exchange("GET /chat HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n")
-      mut seen.push("${handshake.slice().starts_with("HTTP/1.1 101 Switching Protocols")} ${handshake.slice().contains("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")}")
+      mut seen.push("${handshake.starts_with("HTTP/1.1 101 Switching Protocols")} ${handshake.contains("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")}")
       match http.get("http://localhost:8090/chat") {
         Ok(response) => mut seen.push("${response.status.code}")
         Err(error) => mut seen.push("failed: ${error}")
       }
       let events = mut client.stream(http.Method.Get, url: url.Url"http://localhost:8090/events", receive: fn(_, headers, body) {
-        var found: List[String] = [headers.get("content-type").unwrap_or("none".slice()).to_string()]
+        var found: List[String] = [headers.get("content-type").unwrap_or("none").copy()]
         var parser = http.EventParser.new()
         while mut parser.next(mut body) is Ok(Some(event)) {
           let name = match event.name {

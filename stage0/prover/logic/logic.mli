@@ -24,8 +24,7 @@ module Symbol : sig
     | Valid of Types.ty
     | Rank of Types.ty
     | Capacity of Types.ty
-    | Owner_of_view of Types.ty
-    | Slice_of of Types.ty
+    | Range_of of Types.ty
     | Model of Types.ty
     | Sequence_range of Types.ty
     | Slack of Types.ty

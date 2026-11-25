@@ -4,7 +4,7 @@ fn drop_last(list: mut List[Int64])
   let _ = mut list.pop()
 }
 
-fn f(values: Slice[Int64]) -> List[Int64]
+fn f(values: List[Int64]) -> List[Int64]
   cost amortized time O(values.length())
 {
   var kept: List[Int64] = []

@@ -1,6 +1,6 @@
 use standard.collections
 
-fn total(items: Slice[Int64]) -> Int64
+fn total(items: List[Int64]) -> Int64
   uses Panic
 {
   var sum: Int64 = 0
@@ -22,22 +22,22 @@ fn shifted(value: UInt64, amount: UInt64) -> UInt64
   value.checked_shift_left(amount).expect("shift amount out of range")
 }
 
-fn element(items: Slice[Int64], index: UInt64) -> Int64
+fn element(items: List[Int64], index: UInt64) -> Int64
   uses Panic
 {
   items.get(index).expect("index out of bounds")
 }
 
-fn tail_length(items: Slice[Int64], start: UInt64) -> UInt64
+fn tail_length(items: List[Int64], start: UInt64) -> UInt64
   uses Panic
 {
   if start > items.length() {
-    Panic.crash("slice out of bounds")
+    Panic.crash("range out of bounds")
   }
   items[start..].length()
 }
 
-fn port(ports: Map[String, UInt16], name: StringSlice) -> UInt16
+fn port(ports: Map[String, UInt16], name: String) -> UInt16
   uses Panic
 {
   ports.get(name).expect("index out of bounds")
@@ -83,21 +83,21 @@ fn shelved(shelf: Shelf, index: UInt64) -> Int64
   shelf[index]
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Console, Panic
 {
   let numbers = [9223372036854775807, 0]
   let count = arguments.length()
-  match arguments[1].slice() {
+  match arguments[1] {
     "overflow" => Console.print_line("${total([9223372036854775807, 1])}")
     "division" => Console.print_line("${quotient(100, divisor: Int64.try_from_integer(count).unwrap_or(0) - 2)}")
     "shift" => Console.print_line("${shifted(count, amount: count * 32)}")
-    "index" => Console.print_line("${element(numbers.slice(), index: count)}")
-    "slice" => Console.print_line("${tail_length(numbers.slice(), start: count + 1)}")
+    "index" => Console.print_line("${element(numbers, index: count)}")
+    "range" => Console.print_line("${tail_length(numbers, start: count + 1)}")
     "key" => Console.print_line("${port(["http": 80], name: "https")}")
     "assignment" => Console.print_line("${marked(count)}")
     "inherited" => Console.print_line("${shelved(Shelf(items: [4, 5]), index: count)}")
-    _ => Console.print_line("${total(numbers)} ${element(numbers.slice(), index: 1)} ${tail_length(numbers.slice(), start: 1)} ${marked(1)} ${shelved(Shelf(items: [4, 5]), index: 1)}")
+    _ => Console.print_line("${total(numbers)} ${element(numbers, index: 1)} ${tail_length(numbers, start: 1)} ${marked(1)} ${shelved(Shelf(items: [4, 5]), index: 1)}")
   }
   ExitCode.success
 }

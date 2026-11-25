@@ -69,7 +69,7 @@ fn continues_type_arguments(kind: token.Kind) -> Bool {
       _ => false
     }
     Keyword(keyword) => match keyword {
-      SelfType | Fn | Mut | Own | Capability => true
+      SelfType | Fn | Mut | Own | View | Capability => true
       _ => false
     }
     _ => false
@@ -178,7 +178,7 @@ fn TokenCursor.peek_ahead(self, count: UInt64) -> token.Kind
   self.lookup_token(self.index + count).kind
 }
 
-fn TokenCursor.name(self, kind: token.Kind) -> StringSlice
+fn TokenCursor.name(self, kind: token.Kind) -> view String
   uses Panic
 {
   match kind {
@@ -187,7 +187,7 @@ fn TokenCursor.name(self, kind: token.Kind) -> StringSlice
   }
 }
 
-fn TokenCursor.is_lower_named(self, kind: token.Kind, text: StringSlice) -> Bool
+fn TokenCursor.is_lower_named(self, kind: token.Kind, text: String) -> Bool
   uses Panic
 {
   match kind {
@@ -198,8 +198,7 @@ fn TokenCursor.is_lower_named(self, kind: token.Kind, text: StringSlice) -> Bool
 
 fn record_syntax_error(cursor: mut TokenCursor, span: source.Span)
   uses Panic
-  ensures cursor.index == old(cursor.index)
-  ensures cursor.region.stop == old(cursor.region.stop)
+  modifies cursor.syntax_errors
 {
   let recorded = if span.start == span.stop && cursor.index > cursor.region.first {
     let previous_start = cursor.lookup_token(cursor.index - 1).span.start
@@ -212,7 +211,7 @@ fn record_syntax_error(cursor: mut TokenCursor, span: source.Span)
 
 fn advance(cursor: mut TokenCursor)
   uses Panic
-  ensures cursor.region.stop == old(cursor.region.stop)
+  modifies cursor.region.after_inserted_closer, cursor.index, cursor.syntax_errors
   ensures cursor.index >= old(cursor.index)
   ensures old(cursor.index) < cursor.region.stop ==> cursor.index == old(cursor.index) + 1
 {
@@ -363,9 +362,9 @@ fn TokenCursor.has_reported(self) -> Bool {
 
 fn report(
   cursor: mut TokenCursor,
-  code: StringSlice,
+  code: String,
   span: source.Span,
-  message: StringSlice,
+  message: String,
   fixes: own List[source.Fix] = [],
 )
   uses Panic
@@ -395,7 +394,7 @@ fn TokenCursor.describe(self, current: token.Token) -> String
   }
 }
 
-fn fail(cursor: mut TokenCursor, expected: StringSlice) -> Failure
+fn fail(cursor: mut TokenCursor, expected: String) -> Failure
   uses Panic
 {
   let current = cursor.peek()
@@ -486,7 +485,7 @@ fn TokenCursor.find_angle_closer(self) -> Option[UInt64]
 
 fn skip_to(cursor: mut TokenCursor, limit: UInt64)
   uses Panic
-  ensures cursor.region.stop == old(cursor.region.stop)
+  modifies cursor.region.after_inserted_closer, cursor.index, cursor.syntax_errors
   ensures cursor.index >= old(cursor.index)
   ensures cursor.index >= limit || cursor.index >= cursor.region.stop
 {
@@ -494,7 +493,6 @@ fn skip_to(cursor: mut TokenCursor, limit: UInt64)
   let bound = if limit < stop { limit } else { stop }
   let start = cursor.index
   while cursor.index < bound
-    invariant cursor.region.stop == stop
     invariant cursor.index >= start
   {
     advance(mut cursor)
@@ -503,7 +501,7 @@ fn skip_to(cursor: mut TokenCursor, limit: UInt64)
 
 fn skip_one(cursor: mut TokenCursor)
   uses Panic
-  ensures cursor.region.stop == old(cursor.region.stop)
+  modifies cursor.region.after_inserted_closer, cursor.index, cursor.syntax_errors
   ensures old(cursor.index) < cursor.region.stop ==> cursor.index > old(cursor.index)
 {
   if cursor.index < cursor.region.stop {
@@ -779,7 +777,7 @@ fn TokenCursor.find_enclosing_interpolation(self, first: UInt64, stop: UInt64, s
   None
 }
 
-fn TokenCursor.spell(self, span: source.Span, insertions: Slice[source.Edit] = []) -> Option[String]
+fn TokenCursor.spell(self, span: source.Span, insertions: List[source.Edit] = []) -> Option[String]
   uses Panic, RunForever
 {
   var first = self.region.first
@@ -812,7 +810,7 @@ fn TokenCursor.find_spelling_at(self, edge: SpanEdge, offset: UInt64) -> Option[
   None
 }
 
-fn TokenCursor.joins_neighbors(self, span: source.Span, code: StringSlice) -> Bool
+fn TokenCursor.joins_neighbors(self, span: source.Span, code: String) -> Bool
   uses Panic, RunForever
 {
   var before: Option[UInt8] = None

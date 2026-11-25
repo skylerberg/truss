@@ -1,4 +1,4 @@
-fn show(text: StringSlice) {}
+fn show(text: String) {}
 
 fn make() -> List[String] { todo }
 

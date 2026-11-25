@@ -1,3 +1,3 @@
-fn f(name: StringSlice) -> String {
+fn f(name: String) -> String {
   name + "!"
 }

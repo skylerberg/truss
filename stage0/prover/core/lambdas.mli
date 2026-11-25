@@ -24,7 +24,7 @@ val check_valid :
   Types.ty ->
   Logic.term ->
   deep:bool ->
-  when_:string ->
+  moment:Catalog.Prover.invariant_moment ->
   unit
 
 val remove_temporaries : 'a Locals.t -> 'a Locals.t
@@ -39,7 +39,11 @@ val run_lambda_body :
   (State.frame * Logic.term) option
 
 val classify_counting : Mir.cost -> Costs.counting
-val list_loop_counters : Logic.term Locals.t -> Mir.body -> Costs.counter list
+
+val list_loop_counters :
+  State.context -> Logic.term Locals.t -> Mir.body -> (Costs.counter * Types.condition) list
+
+val assign_counters : State.context -> (Costs.counter * Types.condition) list -> unit
 val list_facts_since : State.context -> int -> Logic.term list
 
 val translate_lambda :
@@ -52,7 +56,7 @@ val translate_lambda :
     (entries:Logic.term list ->
     exits:Logic.term list ->
     result:Logic.term ->
-    (Obligation.piece * Logic.term) list) ->
+    (Catalog.Prover.quoted * Logic.term) list) ->
   State.frame * Logic.term
 
 val make_passed_values :

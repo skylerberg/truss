@@ -1,10 +1,7 @@
 let report_unmatched_receiver_mode state env arguments (member : Syntax.name) =
   Calls.check_arguments_alone state env arguments
-    (State.make_error_type state Wrong_receiver (State.read_span state member.id)
-       (Printf.sprintf
-          "`%s` has no overload for this receiver's mode; pass the receiver `mut` or `own` as its \
-           overloads take."
-          member.text))
+    (State.make_error_type state
+       (No_receiver_overload { at = Written member.id; name = member.text }))
 
 let rec check_call state env ?expected (value : Syntax.expression) (callee : Syntax.expression)
     (arguments : Syntax.argument list) : Types.ty =
@@ -39,8 +36,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
       | _ ->
           Calls.check_arguments_alone state env arguments
             (State.make_error_type state
-               (if arguments = [] then Missing_argument else Too_many_arguments)
-               (State.read_span state value.id) "`old` takes one value: `old(value)`."))
+               (Old_arity { at = Written value.id; given = List.length arguments })))
   | Final -> (
       let names_result (argument : Syntax.expression) =
         match argument.kind with
@@ -56,9 +52,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
           part
       | _ ->
           Calls.check_arguments_alone state env arguments
-            (State.make_error_type state Not_callable (State.read_span state value.id)
-               "`final` takes the part that a lending method lends: `final(result)` is that part \
-                as the caller left it."))
+            (State.make_error_type state (Final_misused { at = Written value.id })))
   | Identical -> (
       match arguments with
       | [ first; second ] ->
@@ -66,15 +60,13 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
           let first_type = Hooks.check_expression state env first.value in
           let second_type = Hooks.check_expression state env ~expected:first_type second.value in
           if not (State.unify state first_type second_type) then
-            Failures.report_mismatch state
-              (State.read_span state second.value.id)
-              ~expected:first_type ~actual:second_type;
+            Failures.report_mismatch state (Written second.value.id) ~expected:first_type
+              ~actual:second_type;
           Types.bool
       | _ ->
           Calls.check_arguments_alone state env arguments
             (State.make_error_type state
-               (if List.length arguments < 2 then Missing_argument else Too_many_arguments)
-               (State.read_span state value.id) "`identical` takes two values of one type."))
+               (Identical_arity { at = Written value.id; given = List.length arguments })))
   | Specification_function (Call_cost metric) -> check_callee_cost state env value metric arguments
   | Specification_function Log -> check_specification_function state env value Log arguments
   | Specification_function Power -> check_specification_function state env value Power arguments
@@ -96,8 +88,8 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
       | None -> State.raise_bug "`%s` has no signature" (Path.show path))
   | Definition ((Trait | Capability), _) | Type_parameter _ | Capability_parameter _ ->
       Calls.check_arguments_alone state env arguments
-        (State.make_error_type state Not_callable (State.read_span state callee.id)
-           (Printf.sprintf "`%s` is not a function or a type, so it cannot be called." name.text))
+        (State.make_error_type state
+           (Not_a_function_or_type { at = Written callee.id; name = name.text }))
   | Unknown report -> Calls.check_arguments_alone state env arguments (Types.Error report)
   | Local _ | Law_parameter _ | Value_parameter _
   | Definition (Constant, _)
@@ -111,9 +103,8 @@ and check_specification_function state env (value : Syntax.expression)
   List.iter
     (fun (argument : Syntax.argument) ->
       match function_ with
-      | Log -> Clauses.require_integer state env argument.value ~described:"An argument of `log`"
-      | Power ->
-          Clauses.require_integer state env argument.value ~described:"An argument of `power`"
+      | Log -> Clauses.require_integer state env argument.value ~subject:Log_argument
+      | Power -> Clauses.require_integer state env argument.value ~subject:Power_argument
       | Callback_cost _ | Calls -> ignore (Hooks.check_expression state env argument.value)
       | Callback_ensures -> State.raise_bug "`.ensures` checked as an integer function")
     arguments;
@@ -121,9 +112,9 @@ and check_specification_function state env (value : Syntax.expression)
 
 and check_callback_ensures state env (value : Syntax.expression) (base : Syntax.expression)
     (arguments : Syntax.argument list) =
-  let span = State.read_span state value.id in
-  let reject code message =
-    Calls.check_arguments_alone state env arguments (State.make_error_type state code span message)
+  let at : Core.origin = Written value.id in
+  let reject diagnostic =
+    Calls.check_arguments_alone state env arguments (State.make_error_type state diagnostic)
   in
   let base_type = Conversions.read_actual_head state base (Hooks.check_expression state env base) in
   match (base.kind, base_type) with
@@ -138,38 +129,26 @@ and check_callback_ensures state env (value : Syntax.expression) (base : Syntax.
           function_type.inputs
         @ if Types.equal function_type.output Types.unit then [] else [ function_type.output ]
       in
-      let shape =
-        String.concat ", "
-          (List.concat_map
-             (fun ((mode : Language.Mode.t), _) ->
-               match mode with
-               | Mut -> [ "its value at entry"; "its value at exit" ]
-               | Read | Own -> [ "an input" ])
-             function_type.inputs
-          @ if Types.equal function_type.output Types.unit then [] else [ "the result" ])
-      in
       match List.find_map (fun (argument : Syntax.argument) -> argument.label) arguments with
       | _ when not env.specification ->
           Calls.check_arguments_alone state env arguments
             (Types.Error
-               (State.report_specification_only state span
-                  (Printf.sprintf
-                     "`%s.ensures` names the postcondition of the function passed for `%s`, so it \
-                      appears only in specifications."
-                     last.text last.text)))
+               (State.report_specification_only state
+                  (Callback_ensures_in_code { at; name = last.text })))
       | Some label ->
           Calls.check_arguments_alone state env arguments
-            (State.make_error_type state Unknown_label (State.read_span state label.id)
-               (Printf.sprintf
-                  "`%s.ensures` takes its arguments by position, as a call through `%s` does."
-                  last.text last.text))
+            (State.make_error_type state
+               (Callback_ensures_label { at = Written label.id; name = last.text }))
       | None when List.length expected <> List.length arguments ->
           reject
-            (if List.length arguments < List.length expected then Missing_argument
-             else Too_many_arguments)
-            (Printf.sprintf "`%s.ensures` takes %d %s: %s." last.text (List.length expected)
-               (if List.length expected = 1 then "argument" else "arguments")
-               (if shape = "" then "none" else shape))
+            (Callback_ensures_arity
+               {
+                 at;
+                 name = last.text;
+                 inputs = List.map fst function_type.inputs;
+                 has_result = not (Types.equal function_type.output Types.unit);
+                 given = List.length arguments;
+               })
       | None ->
           List.iter2
             (fun (argument : Syntax.argument) expected_type ->
@@ -178,36 +157,20 @@ and check_callback_ensures state env (value : Syntax.expression) (base : Syntax.
           State.elaborate state value.id
             (Specification_call (Specification_function Callback_ensures));
           Types.bool)
-  | Name last, Types.Function _ ->
-      reject Not_callable
-        (Printf.sprintf
-           "`%s` is not a parameter of this definition, and `.ensures` names the postcondition of \
-            the function passed for a function parameter, as in `transform.ensures(value, \
-            output)`."
-           last.text)
+  | Name last, Types.Function _ -> reject (Ensures_of_non_parameter { at; name = last.text })
   | _, (Types.Error _ as error) -> Calls.check_arguments_alone state env arguments error
-  | _ ->
-      reject Not_callable
-        (Printf.sprintf
-           "`.ensures` follows a function parameter, as in `transform.ensures(value, output)`, and \
-            this is %s."
-           (State.describe state base_type))
+  | _ -> reject (Ensures_without_function { at; base = State.make_shown state base_type })
 
 and check_callee_cost state env (value : Syntax.expression) (metric : Language.Metric.t)
     (arguments : Syntax.argument list) =
-  let report_not_a_callee operand_description =
-    let cost_function = Language.Metric.show metric in
-    State.make_error_type state Not_callable (State.read_span state value.id)
-      (Printf.sprintf
-         "`%s` takes a function parameter, as in `%s(visit)`, or a method of a bound, as in \
-          `%s(Element.equal)`, and %s."
-         cost_function cost_function cost_function operand_description)
+  let report_not_a_callee operand =
+    State.make_error_type state (Cost_operand_not_callee { at = Written value.id; metric; operand })
   in
   match arguments with
   | [ { value = { kind = Member (base, member); _ }; _ } ] -> (
       match Interface.Elaborator.find_bounded_type (State.read_context state) base with
       | Some type_ -> check_method_cost state value metric type_ member
-      | None -> report_not_a_callee "its operand is neither")
+      | None -> report_not_a_callee Operand_is_neither)
   | [ { value = { kind = Name last; _ } as operand; _ } ] -> (
       match
         ( State.find_target state last,
@@ -219,9 +182,9 @@ and check_callee_cost state env (value : Syntax.expression) (metric : Language.M
       | Some (Unknown _), _ ->
           check_specification_function state env value (Callback_cost metric) arguments
       | Some (Local _), Some other ->
-          report_not_a_callee (Printf.sprintf "`%s` is a `%s`" last.text (State.show state other))
-      | _ -> report_not_a_callee (Printf.sprintf "`%s` is neither" last.text))
-  | _ -> report_not_a_callee "its operand is neither"
+          report_not_a_callee (Local_of_type { name = last.text; type_ = State.zonk state other })
+      | _ -> report_not_a_callee (Name_is_neither last.text))
+  | _ -> report_not_a_callee Operand_is_neither
 
 and check_method_cost state (value : Syntax.expression) (metric : Language.Metric.t)
     (type_ : Types.ty) (member : Syntax.name) =
@@ -234,15 +197,13 @@ and check_method_cost state (value : Syntax.expression) (metric : Language.Metri
         (Specification_call (Method_cost { metric; trait; name; receiver; self_type }));
       Types.Integer
   | None, [] ->
-      State.make_error_type state Unknown_member (State.read_span state member.id)
-        (Printf.sprintf "`%s` has no method `%s`: no trait that bounds it declares one."
-           (State.show state type_) member.text)
+      State.make_error_type state
+        (No_bound_method
+           { at = Written member.id; type_ = State.zonk state type_; name = member.text })
   | None, _ ->
-      State.make_error_type state Ambiguous_method (State.read_span state member.id)
-        (Printf.sprintf
-           "`%s` has more than one method `%s`, and none of them is the only one that takes `self` \
-            read-only, so `%s` cannot tell which one is meant."
-           (State.show state type_) member.text (Language.Metric.show metric))
+      State.make_error_type state
+        (Ambiguous_cost_method
+           { at = Written member.id; type_ = State.zonk state type_; name = member.text; metric })
 
 and report_unknown_static_method state ?expected (value : Syntax.expression) type_
     (member : Syntax.name) (arguments : Syntax.argument list) =
@@ -253,8 +214,8 @@ and report_unknown_static_method state ?expected (value : Syntax.expression) typ
   in
   let empty_literal =
     if member.text <> "new" || arguments <> [] then None
-    else if implements From_elements then Some "[]"
-    else if implements From_entries then Some "[:]"
+    else if implements From_elements then Some Catalog.Inference.Empty_list
+    else if implements From_entries then Some Empty_map
     else None
   in
   let is_expected =
@@ -265,20 +226,23 @@ and report_unknown_static_method state ?expected (value : Syntax.expression) typ
   let error =
     match empty_literal with
     | Some literal ->
-        State.make_error_type state Unknown_member (State.read_span state member.id)
-          ~fixes:
-            (if is_expected then
-               [
-                 State.fix
-                   (Printf.sprintf "Write `%s`." literal)
-                   [ State.replace (State.read_span state value.id) literal ];
-               ]
-             else [])
-          (Printf.sprintf "`%s` has no method `new`. The literal `%s` is an empty `%s`."
-             (State.show state type_) literal (State.show state type_))
+        State.make_error_type state
+          (New_on_literal_type
+             {
+               at = Written member.id;
+               type_ = State.zonk state type_;
+               literal;
+               call = (if is_expected then Some (Written value.id) else None);
+             })
     | None ->
-        State.make_error_type state Unknown_member (State.read_span state member.id)
-          (Name_lookup.describe_missing_method state type_ member.text)
+        State.make_error_type state
+          (No_method
+             {
+               at = Written member.id;
+               owner = Name_lookup.make_method_owner state type_;
+               name = member.text;
+               candidates = [];
+             })
   in
   ignore (State.unify state type_ error);
   error
@@ -287,12 +251,9 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
     arguments =
   let report_ambiguous (traits : Types.trait_reference list) =
     Calls.check_arguments_alone state env arguments
-      (State.make_error_type state Ambiguous_method (State.read_span state member.id)
-         (Printf.sprintf
-            "More than one trait gives `%s` a method `%s`: %s. Call it through the trait to say \
-             which."
-            (State.show state type_) member.text
-            (String.concat ", " (List.map (fun trait -> "`" ^ Types.show_trait trait ^ "`") traits))))
+      (State.make_error_type state
+         (Ambiguous_static_method
+            { at = Written member.id; type_ = State.zonk state type_; name = member.text; traits }))
   in
   let wanted_mode = Name_lookup.classify_receiver_mode arguments in
   let wanted = Path.Instance wanted_mode in
@@ -346,7 +307,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                   match (static_method, trait_static_method, overloads) with
                   | Hidden hidden, _, _ | _, Hidden hidden, _ | _, _, Hidden hidden ->
                       Calls.check_arguments_alone state env arguments
-                        (Members.make_hidden_error state (State.read_span state member.id) hidden)
+                        (Members.make_hidden_error state (Written member.id) hidden)
                   | _ ->
                       Calls.check_arguments_alone state env arguments
                         (report_unknown_static_method state ?expected value type_ member arguments))
@@ -354,7 +315,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                   match (arguments, List.assoc_opt wanted overloads) with
                   | ([] | { Syntax.label = Some _; _ } :: _), _ ->
                       report_missing_receiver state env value arguments
-                  | receiver :: rest, Some (Type_overload method_path | View_overload method_path)
+                  | receiver :: rest, Some (Type_overload method_path | List_overload method_path)
                     ->
                       let inner =
                         match receiver.value.kind with
@@ -368,18 +329,17 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                       if inner != receiver.value then begin
                         State.record state receiver.value receiver_type
                       end;
-                      if
-                        not
-                          (State.unify state
-                             (Option.value ~default:receiver_type
-                                (Conversions.find_view_as ~owned:receiver_head ~view:type_))
-                             type_)
-                      then
-                        Failures.report_mismatch state (State.read_span state inner.id)
-                          ~expected:type_ ~actual:receiver_type;
+                      let receiver_as_self =
+                        match Types.find_list_of_array receiver_head with
+                        | Some list when Types.is_well_known List type_ -> list
+                        | _ -> receiver_type
+                      in
+                      if not (State.unify ~modulo_views:true state receiver_as_self type_) then
+                        Failures.report_mismatch state (Written inner.id) ~expected:type_
+                          ~actual:receiver_type;
                       Modes.check_mode state env receiver.value
                         { name = "self"; mode = wanted_mode; type_; has_default = false }
-                        receiver_type ~has_generic_type:false;
+                        receiver_type;
                       check_method_with_receiver state env ?expected value ~receiver:receiver.value
                         ~receiver_type method_path rest
                   | _ :: _, Some (Trait_overload (trait, method_)) ->
@@ -416,18 +376,30 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
           | Some (Trait_overload (trait, method_)) ->
               check_trait_method_through_type state env ?expected value type_ trait method_
                 arguments
-          | Some (Type_overload _ | View_overload _) ->
+          | Some (Type_overload _ | List_overload _) ->
               State.raise_bug "a generic parameter has a method of its own"
           | None -> report_unmatched_receiver_mode state env arguments member)
       | [], Ok (Hidden _) -> State.raise_bug "a generic parameter has a method of its own"
       | [], Ok Absent ->
-          State.make_error_type state Unknown_member (State.read_span state member.id)
-            (Printf.sprintf "`%s` has no method `%s`." parameter.name member.text))
+          State.make_error_type state
+            (No_method
+               {
+                 at = Written member.id;
+                 owner = Named_owner parameter.name;
+                 name = member.text;
+                 candidates = [];
+               }))
   | Types.Error _ | Types.Hole -> Calls.check_arguments_alone state env arguments type_
   | _ ->
       Calls.check_arguments_alone state env arguments
-        (State.make_error_type state Unknown_member (State.read_span state member.id)
-           (Printf.sprintf "`%s` has no method `%s`." (State.show state type_) member.text))
+        (State.make_error_type state
+           (No_method
+              {
+                at = Written member.id;
+                owner = Type_owner { type_ = State.zonk state type_; list = None };
+                name = member.text;
+                candidates = [];
+              }))
 
 and check_trait_method_through_type state env ?expected:_ ?trait_arguments
     (value : Syntax.expression) self_type (trait : Types.trait_reference)
@@ -436,10 +408,14 @@ and check_trait_method_through_type state env ?expected:_ ?trait_arguments
   match trait_arguments with
   | Some written when List.length written <> List.length trait_generics ->
       Calls.check_arguments_alone state env arguments
-        (State.make_error_type state Arity (State.read_span state value.id)
-           (Printf.sprintf "`%s` takes %s, and %s given." (Types.show_trait trait)
-              (Diagnostic.show_count (List.length trait_generics) "type argument" "type arguments")
-              (Diagnostic.show_count (List.length written) "is" "are")))
+        (State.make_error_type state
+           (Trait_arity
+              {
+                at = Written value.id;
+                trait;
+                expected = List.length trait_generics;
+                given = List.length written;
+              }))
   | Some trait_arguments ->
       check_trait_method_call state env value self_type trait method_ arguments ~trait_arguments
   | None ->
@@ -459,9 +435,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
         let parameter : Types.parameter_info =
           { name = "self"; mode; type_ = receiver_type; has_default = false }
         in
-        let mode =
-          Calls.check_argument state env receiver.value parameter ~has_generic_type:false
-        in
+        let mode = Calls.check_argument state env receiver.value parameter in
         Ok ([ { Tables.expression = receiver.value; core_argument_index = 0; mode } ], rest)
     | Some _, ([] | { label = Some _; _ } :: _) ->
         Error (report_missing_receiver state env value arguments)
@@ -486,13 +460,12 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
                  callee_result = result;
                  lends = Types.find_lent_mode instance.signature.output;
                });
-          Solver.require state (Method_call (State.read_span state value.id)) self_type reference;
+          Solver.require state (Method_call (Written value.id)) self_type reference;
           State.normalize state result)
 
 and report_missing_receiver state env (value : Syntax.expression) arguments =
   Calls.check_arguments_alone state env arguments
-    (State.make_error_type state Missing_argument (State.read_span state value.id)
-       "A method written in full takes its receiver as its first argument, without a label.")
+    (State.make_error_type state (Receiver_missing_in_full_call { at = Written value.id }))
 
 and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_arguments
     (member : Syntax.name) arguments =
@@ -529,16 +502,20 @@ and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_
       with
       | Some (declared_by, method_) ->
           let self_type = Unify.make_fresh_type state.unifier in
-          Solver.require state
-            (Method_call (State.read_span state value.id))
-            self_type
+          Solver.require state (Method_call (Written value.id)) self_type
             (Instantiation.make_fresh_trait_reference state trait);
           check_trait_method_through_type state env value self_type
             (Instantiation.make_fresh_trait_reference state declared_by)
             method_ arguments
       | None ->
-          State.make_error_type state Unknown_member (State.read_span state member.id)
-            (Printf.sprintf "`%s` has no method `%s`." (Path.show trait) member.text))
+          State.make_error_type state
+            (No_method
+               {
+                 at = Written member.id;
+                 owner = Path_owner trait;
+                 name = member.text;
+                 candidates = [];
+               }))
 
 and check_capability_call state env (value : Syntax.expression) capability (member : Syntax.name)
     arguments =
@@ -572,17 +549,32 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
           result)
   | None ->
       Calls.check_arguments_alone state env arguments
-        (State.make_error_type state Unknown_member (State.read_span state member.id)
-           (Printf.sprintf "`%s` has no method `%s`." (Path.show capability) member.text))
+        (State.make_error_type state
+           (No_method
+              {
+                at = Written member.id;
+                owner = Path_owner capability;
+                name = member.text;
+                candidates = [];
+              }))
 
 and check_method_call state env ?expected (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) ~type_arguments arguments =
-  let receiver_type =
+  let written_receiver_type =
     let head = Conversions.read_expected_head state (Hooks.check_expression state env base) in
     if Name_lookup.has_sealed_method state head member.text then head
     else
-      Solver.decide_default state ~site:Method_call ~at:(State.read_span state value.id)
+      Solver.decide_default state ~site:Method_call ~at:(Written value.id)
         (Conversions.read_actual_head state base head)
+  in
+  let is_view_receiver = Types.is_view written_receiver_type in
+  let receiver_type =
+    Conversions.read_expected_head state (Types.strip_view written_receiver_type)
+  in
+  let is_implemented_by_the_view (trait : Types.trait_reference) =
+    match State.find_evidence state written_receiver_type trait with
+    | Some (Evidence (Derived_for_view _)) -> true
+    | Some (Evidence (Impl _ | Bound) | Built_in | Accepted _) | None -> false
   in
   let has_mode_keyword = List.mem_assoc value.id state.keyword_modes in
   let lent_mode =
@@ -607,7 +599,7 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
     | None
       when (not has_mode_keyword)
            && ((not place)
-              || State.decide_property state Interface.Properties.Plain receiver_type
+              || State.decide_property state Interface.Properties.Plain written_receiver_type
                  <> Interface.Properties.Fails
               || not (List.mem_assoc (Path.Instance Mut) overloads)) -> (
         match List.assoc_opt (Path.Instance Own) overloads with
@@ -632,22 +624,15 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
     chosen
   in
   let report_wrong_receiver overloads =
-    State.make_error_type state Wrong_receiver (State.read_span state member.id)
-      (Printf.sprintf "`%s` has no overload that takes %s here; it has %s." member.text
-         (Path.show_receiver wanted)
-         (String.concat ", "
-            (List.map (fun (receiver, _) -> Path.show_receiver receiver) overloads)))
+    State.make_error_type state
+      (Wrong_receiver_overload
+         { at = Written member.id; name = member.text; wanted; overloads = List.map fst overloads })
   in
   let report_missing_receiver_mode : 'a. (Path.receiver * 'a) list -> Types.ty =
    fun overloads ->
     if (not has_mode_keyword) && place && List.mem_assoc (Path.Instance Mut) overloads then
-      State.make_error_type state Missing_mode (State.read_span state base.id)
-        ~fixes:
-          [
-            State.fix "Pass it `mut`." [ State.insert (State.read_span state base.id).start "mut " ];
-          ]
-        (Printf.sprintf "`%s` takes `mut self`, so the call site passes its receiver `mut`."
-           member.text)
+      State.make_error_type state
+        (Missing_receiver_mode { receiver = Written base.id; name = member.text })
     else report_wrong_receiver (List.map (fun (receiver, _) -> (receiver, ())) overloads)
   in
   match receiver_type with
@@ -661,7 +646,7 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
       match Name_lookup.resolve_overloads state receiver_type member.text with
       | Ok (Hidden hidden) ->
           Calls.check_arguments_alone state env arguments
-            (Members.make_hidden_error state (State.read_span state member.id) hidden)
+            (Members.make_hidden_error state (Written member.id) hidden)
       | Ok Absent ->
           let candidates =
             match receiver_type with
@@ -672,52 +657,66 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
             | _ -> []
           in
           Calls.check_arguments_alone state env arguments
-            (State.make_error_type state Unknown_member (State.read_span state member.id)
-               ~fixes:
-                 (Diagnostic.list_spelling_fixes (State.read_span state member.id)
-                    ~written:member.text candidates)
-               (Name_lookup.describe_missing_method state receiver_type member.text))
+            (State.make_error_type state
+               (No_method
+                  {
+                    at = Written member.id;
+                    owner = Name_lookup.make_method_owner state receiver_type;
+                    name = member.text;
+                    candidates;
+                  }))
       | Ok (Visible overloads) -> (
-          match choose_temporary overloads with
+          match
+            choose_temporary
+              (if is_view_receiver then
+                 List.filter
+                   (fun (receiver, overload) ->
+                     match overload with
+                     | Name_lookup.Trait_overload (trait, _) when is_implemented_by_the_view trait
+                       ->
+                         true
+                     | _ -> receiver = Path.Instance Read)
+                   overloads
+               else overloads)
+          with
+          | None when is_view_receiver ->
+              State.make_error_type state
+                (View_receiver
+                   {
+                     at = Written member.id;
+                     name = member.text;
+                     receivers = List.map fst overloads;
+                   })
           | None -> report_missing_receiver_mode overloads
-          | Some (_, (Type_overload method_path | View_overload method_path)) ->
+          | Some (_, (Type_overload method_path | List_overload method_path)) ->
               check_method_with_receiver state env ?expected ~type_arguments value ~receiver:base
-                ~receiver_type method_path arguments
+                ~receiver_type:written_receiver_type method_path arguments
           | Some (_, Trait_overload (trait, method_)) ->
-              check_trait_method_with_receiver state env value ~receiver:base ~receiver_type trait
-                method_ ~type_arguments arguments)
+              check_trait_method_with_receiver state env value ~receiver:base
+                ~receiver_type:
+                  (if is_implemented_by_the_view trait then written_receiver_type else receiver_type)
+                trait method_ ~type_arguments arguments)
       | Error traits ->
-          let receiver_text = State.quote_span state (State.read_span state base.id) in
-          let arguments_text =
-            List.map
-              (fun (argument : Syntax.argument) ->
-                let start =
-                  match argument.label with
-                  | Some label -> (State.read_span state label.id).start
-                  | None -> (State.read_span state argument.value.id).start
-                in
-                State.quote_span state
-                  (Source.Definition_span.make start (State.read_span state argument.value.id).stop))
-              arguments
-          in
-          State.make_error_type state Ambiguous_method (State.read_span state member.id)
-            ~fixes:
-              (List.map
-                 (fun (trait : Types.trait_reference) ->
-                   let name =
-                     match trait.trait with Top { name; _ } -> name | path -> Path.show path
-                   in
-                   State.fix
-                     (Printf.sprintf "Call `%s`'s `%s`." name member.text)
-                     [
-                       State.replace (State.read_span state value.id)
-                         (Printf.sprintf "%s.%s(%s)" name member.text
-                            (String.concat ", " (receiver_text :: arguments_text)));
-                     ])
-                 traits)
-            (Printf.sprintf
-               "More than one trait gives `%s` a method `%s`. Write the call in full to say which."
-               (State.show state receiver_type) member.text))
+          State.make_error_type state
+            (Ambiguous_method_call
+               {
+                 at = Written member.id;
+                 call = Written value.id;
+                 type_ = State.zonk state receiver_type;
+                 name = member.text;
+                 receiver = Written base.id;
+                 arguments =
+                   List.map
+                     (fun (argument : Syntax.argument) : Core.origin Catalog.range ->
+                       {
+                         covering =
+                           (match argument.label with
+                           | Some label -> [ Written label.id; Written argument.value.id ]
+                           | None -> [ Written argument.value.id ]);
+                       })
+                     arguments;
+                 traits;
+               }))
 
 and check_method_with_receiver state env ?expected ?(type_arguments = [])
     (value : Syntax.expression) ~(receiver : Syntax.expression) ~receiver_type method_path arguments
@@ -739,17 +738,9 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
       | Error error -> Calls.check_arguments_alone state env arguments error
       | Ok () -> (
           (match instance.signature.receiver with
-          | Some (mode, self_type) -> (
-              let receiver_head = Conversions.read_actual_head state receiver receiver_type in
-              match Conversions.find_view_as ~owned:receiver_head ~view:self_type with
-              | Some _ ->
-                  Conversions.coerce state env ~argument:mode receiver ~actual:receiver_type
-                    ~expected:self_type
-              | None ->
-                  if not (State.unify state self_type receiver_type) then
-                    Failures.report_mismatch state
-                      (State.read_span state receiver.id)
-                      ~expected:self_type ~actual:receiver_type)
+          | Some (mode, self_type) ->
+              Conversions.coerce state env ~argument:mode receiver ~actual:receiver_type
+                ~expected:self_type
           | None -> ());
           (match (expected, instance.signature.output) with
           | Some expected, Returns output -> State.unify_as_hint state output expected
@@ -807,6 +798,6 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                  lends = Types.find_lent_mode instance.signature.output;
                });
           List.iter
-            (Solver.require state (Method_call (State.read_span state value.id)) receiver_type)
+            (Solver.require state (Method_call (Written value.id)) receiver_type)
             (Option.to_list (Name_lookup.find_sealed_provider state receiver_type trait) @ [ trait ]);
           State.normalize state result)

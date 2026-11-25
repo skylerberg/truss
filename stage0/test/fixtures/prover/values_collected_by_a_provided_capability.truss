@@ -13,7 +13,7 @@ impl Sink for Collected {
   }
 }
 
-fn collects(values: Slice[Int64]) -> UInt64
+fn collects(values: List[Int64]) -> UInt64
   cost amortized time O(values.length())
 {
   var collected = Collected(values: [])

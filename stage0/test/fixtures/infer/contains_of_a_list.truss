@@ -1,3 +1,0 @@
-fn f(items: own List[Int64]) -> Bool {
-  items.contains(1)
-}

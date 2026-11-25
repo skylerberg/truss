@@ -1,3 +1,0 @@
-fn f(tables: Map[Array[UInt8, 3], Int64], key: Slice[UInt8]) -> Bool {
-  tables.contains(key)
-}

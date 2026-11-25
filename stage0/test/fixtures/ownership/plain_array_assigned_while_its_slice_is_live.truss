@@ -1,5 +1,0 @@
-fn f(values: mut Array[Int64, 4]) -> UInt64 {
-  let view = values.slice()
-  values[0] = 7
-  view.length()
-}

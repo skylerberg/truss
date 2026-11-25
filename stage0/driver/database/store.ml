@@ -247,9 +247,6 @@ type diagnostic = {
   file : int option;
   is_error : bool;
   code : string;
-  start : int;
-  stop : int;
-  message : string;
   detail : string;
 }
 
@@ -287,8 +284,7 @@ let replace_diagnostics store ~stage ~unit ~package diagnostics =
       (fun position diagnostic ->
         Sql.run store.sql
           "INSERT INTO main.diagnostic (stage, unit, position, package, definition, file, \
-           severity, code, start, stop, message, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, \
-           ?9, ?10, ?11, ?12)"
+           severity, code, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
           [
             Integer stage;
             Integer unit;
@@ -298,9 +294,6 @@ let replace_diagnostics store ~stage ~unit ~package diagnostics =
             encode_optional diagnostic.file;
             Text (if diagnostic.is_error then "error" else "warning");
             Text diagnostic.code;
-            Integer diagnostic.start;
-            Integer diagnostic.stop;
-            Text diagnostic.message;
             Blob diagnostic.detail;
           ])
       diagnostics
@@ -468,9 +461,8 @@ let mark_stage_of_sources_stale store ~(target : endpoint) ~source_kind ~markers
 let mark_position_holders_stale store ~(target : endpoint) ~markers ~stages =
   Sql.run store.sql
     "INSERT OR IGNORE INTO main.stale (stage, id) SELECT source_kind, source FROM main.edge WHERE \
-     target_kind = ?1 AND target = ?2 AND name = ?3 AND (markers & ?4) != 0 AND (((?5 >> \
-     source_kind) & 1) != 0 OR EXISTS (SELECT 1 FROM main.diagnostic WHERE stage = source_kind AND \
-     unit = source))"
+     target_kind = ?1 AND target = ?2 AND name = ?3 AND (markers & ?4) != 0 AND ((?5 >> \
+     source_kind) & 1) != 0"
     [ Integer target.kind; Integer target.id; Text target.name; Integer markers; Integer stages ]
 
 type call_graph = { unit_kind : int; node_kind : int; calls : int }
@@ -763,21 +755,46 @@ let merge paths ~into =
         paths;
       save merged ~into)
 
-type located = { stage : int; base : int option; is_in_test : bool; detail : string }
+type placed = { file : string; base : int; stop : int; spans : string }
+
+let placed_columns = "f.key, def.base, def.stop, s.spans"
+
+let join_placed schema =
+  Printf.sprintf
+    "CROSS JOIN %s.file f ON f.id = def.file CROSS JOIN %s.syntax s ON s.definition = def.id" schema
+    schema
+
+let read_placed row ~first =
+  {
+    file = Sql.read_blob row first;
+    base = Sql.read_integer row (first + 1);
+    stop = Sql.read_integer row (first + 2);
+    spans = Sql.read_blob row (first + 3);
+  }
+
+type located = {
+  stage : int;
+  definition : (string * placed) option;
+  is_in_test : bool;
+  detail : string;
+}
 
 let list_file_diagnostics store schema ~file ~test_kind =
   let schema = name_schema schema in
   Sql.list_rows store.sql
     (Printf.sprintf
-       "SELECT d.stage, def.base, def.kind = ?2, d.detail FROM %s.definition def CROSS JOIN \
-        %s.diagnostic d ON d.definition = def.id WHERE def.file = ?1 UNION ALL SELECT d.stage, \
-        NULL, 0, d.detail FROM %s.diagnostic d WHERE d.file = ?1"
-       schema schema schema) [ Integer file; Integer test_kind ] (fun row ->
+       "SELECT d.stage, def.key, %s, def.kind = ?2, d.detail FROM %s.definition def CROSS JOIN \
+        %s.diagnostic d ON d.definition = def.id %s WHERE def.file = ?1 UNION ALL SELECT d.stage, \
+        NULL, NULL, NULL, NULL, NULL, 0, d.detail FROM %s.diagnostic d WHERE d.file = ?1"
+       placed_columns schema schema (join_placed schema) schema)
+    [ Integer file; Integer test_kind ]
+    (fun row ->
       {
         stage = Sql.read_integer row 0;
-        base = (if Sql.is_null row 1 then None else Some (Sql.read_integer row 1));
-        is_in_test = Sql.read_integer row 2 <> 0;
-        detail = Sql.read_blob row 3;
+        definition =
+          (if Sql.is_null row 1 then None else Some (Sql.read_blob row 1, read_placed row ~first:2));
+        is_in_test = Sql.read_integer row 6 <> 0;
+        detail = Sql.read_blob row 7;
       })
 
 let has_error store ~package ~last_stage ~hidden_stage =
@@ -803,19 +820,14 @@ let find_unproven_definition store ~scope ~origin =
         ON d.id = p.definition WHERE p.state != 0 AND d.origin = ?1%s LIMIT 1"
        membership) (Integer origin :: members) (fun row -> Sql.read_blob row 0)
 
-type hole = { home : int; start : int; stop : int }
+type hole = { home : int; location : string }
 
 let list_holes store schema ~definition =
   Sql.list_rows store.sql
-    (Printf.sprintf "SELECT home, start, stop FROM %s.hole WHERE definition = ?1 ORDER BY position"
+    (Printf.sprintf "SELECT home, location FROM %s.hole WHERE definition = ?1 ORDER BY position"
        (name_schema schema))
     [ Integer definition ]
-    (fun row ->
-      {
-        home = Sql.read_integer row 0;
-        start = Sql.read_integer row 1;
-        stop = Sql.read_integer row 2;
-      })
+    (fun row -> { home = Sql.read_integer row 0; location = Sql.read_blob row 1 })
 
 let replace_holes store ~definition holes =
   if list_holes store Main ~definition <> holes then begin
@@ -823,53 +835,28 @@ let replace_holes store ~definition holes =
     List.iteri
       (fun position (hole : hole) ->
         Sql.run store.sql
-          "INSERT INTO main.hole (definition, position, home, start, stop) VALUES (?1, ?2, ?3, ?4, \
-           ?5)"
-          [
-            Integer definition;
-            Integer position;
-            Integer hole.home;
-            Integer hole.start;
-            Integer hole.stop;
-          ])
+          "INSERT INTO main.hole (definition, position, home, location) VALUES (?1, ?2, ?3, ?4)"
+          [ Integer definition; Integer position; Integer hole.home; Blob hole.location ])
       holes
   end
 
-type citation = { cited : int; clause_start : int; clause_stop : int }
-
 type verdict = {
   code : string;
-  start : int;
-  stop : int;
-  shows : string;
+  site : string;
   is_proven : bool;
   trusts_compiled_code : bool;
   failure : string option;
-  citation : citation option;
 }
 
-let verdict_columns =
-  "v.code, v.start, v.stop, v.shows, v.proven, v.trusts_compiled_code, v.failure, v.cited, \
-   v.cited_start, v.cited_stop"
+let verdict_columns = "v.code, v.site, v.proven, v.trusts_compiled_code, v.failure"
 
 let read_verdict row ~first =
   {
     code = Sql.read_text row first;
-    start = Sql.read_integer row (first + 1);
-    stop = Sql.read_integer row (first + 2);
-    shows = Sql.read_text row (first + 3);
-    is_proven = Sql.read_integer row (first + 4) <> 0;
-    trusts_compiled_code = Sql.read_integer row (first + 5) <> 0;
-    failure = (if Sql.is_null row (first + 6) then None else Some (Sql.read_blob row (first + 6)));
-    citation =
-      (if Sql.is_null row (first + 7) then None
-       else
-         Some
-           {
-             cited = Sql.read_integer row (first + 7);
-             clause_start = Sql.read_integer row (first + 8);
-             clause_stop = Sql.read_integer row (first + 9);
-           });
+    site = Sql.read_blob row (first + 1);
+    is_proven = Sql.read_integer row (first + 2) <> 0;
+    trusts_compiled_code = Sql.read_integer row (first + 3) <> 0;
+    failure = (if Sql.is_null row (first + 4) then None else Some (Sql.read_blob row (first + 4)));
   }
 
 let list_verdicts store ~definition =
@@ -881,10 +868,18 @@ let list_verdicts store ~definition =
 let list_file_verdicts store ~file =
   Sql.list_rows store.sql
     (Printf.sprintf
-       "SELECT d.base, %s FROM main.definition d CROSS JOIN main.verdict v ON v.definition = d.id \
-        WHERE d.file = ?1 ORDER BY d.base + v.start, d.base + v.stop, v.code, v.position"
-       verdict_columns) [ Integer file ] (fun row ->
-      (Sql.read_integer row 0, read_verdict row ~first:1))
+       "SELECT def.key, %s, %s FROM main.definition def CROSS JOIN main.verdict v ON v.definition \
+        = def.id %s WHERE def.file = ?1 ORDER BY def.base, v.position"
+       placed_columns verdict_columns (join_placed "main"))
+    [ Integer file ]
+    (fun row -> (Sql.read_blob row 0, read_placed row ~first:1, read_verdict row ~first:5))
+
+let find_placed store schema ~definition =
+  let schema = name_schema schema in
+  Sql.find_row store.sql
+    (Printf.sprintf "SELECT %s FROM %s.definition def %s WHERE def.id = ?1" placed_columns schema
+       (join_placed schema))
+    [ Integer definition ] (read_placed ~first:0)
 
 let replace_verdicts store ~definition verdicts =
   let is_changed = list_verdicts store ~definition <> verdicts in
@@ -893,22 +888,16 @@ let replace_verdicts store ~definition verdicts =
     List.iteri
       (fun position (verdict : verdict) ->
         Sql.run store.sql
-          "INSERT INTO main.verdict (definition, position, code, start, stop, shows, proven, \
-           trusts_compiled_code, failure, cited, cited_start, cited_stop) VALUES (?1, ?2, ?3, ?4, \
-           ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
+          "INSERT INTO main.verdict (definition, position, code, site, proven, \
+           trusts_compiled_code, failure) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
           [
             Integer definition;
             Integer position;
             Text verdict.code;
-            Integer verdict.start;
-            Integer verdict.stop;
-            Text verdict.shows;
+            Blob verdict.site;
             Integer (Bool.to_int verdict.is_proven);
             Integer (Bool.to_int verdict.trusts_compiled_code);
             (match verdict.failure with Some failure -> Blob failure | None -> Null);
-            encode_optional (Option.map (fun citation -> citation.cited) verdict.citation);
-            encode_optional (Option.map (fun citation -> citation.clause_start) verdict.citation);
-            encode_optional (Option.map (fun citation -> citation.clause_stop) verdict.citation);
           ])
       verdicts
   end;
@@ -1527,6 +1516,15 @@ let find_place store schema ~definition =
   Sql.find_row store.sql
     (Printf.sprintf
        "SELECT file.key, definition.base FROM %s.definition CROSS JOIN %s.file ON file.id = \
+        definition.file WHERE definition.id = ?1"
+       schema schema) [ Integer definition ] (fun row ->
+      (Sql.read_blob row 0, Sql.read_integer row 1))
+
+let find_file_order store schema ~definition =
+  let schema = name_schema schema in
+  Sql.find_row store.sql
+    (Printf.sprintf
+       "SELECT file.key, definition.position FROM %s.definition CROSS JOIN %s.file ON file.id = \
         definition.file WHERE definition.id = ?1"
        schema schema) [ Integer definition ] (fun row ->
       (Sql.read_blob row 0, Sql.read_integer row 1))

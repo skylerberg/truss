@@ -1,7 +1,7 @@
-fn f(items: Slice[String], other: StringSlice) -> UInt64 {
-  var outer = other
+fn f(items: List[String], other: String) -> UInt64 {
+  var outer: view String = other
   for item in items {
-    outer = item.slice()
+    outer = item
   }
   outer.length()
 }

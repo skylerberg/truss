@@ -1,4 +1,4 @@
-fn f(items: Slice[UInt32])
+fn f(items: List[UInt32])
   cost time O(items.length())
 {
   for item in items

@@ -1,33 +1,33 @@
 use standard.csv
 use standard.streams
 
-fn joined(row: Slice[String]) -> String {
+fn joined(row: List[String]) -> String {
   var text = ""
   for field in row {
     mut text.push("[")
-    mut text.push(field.slice())
+    mut text.push(field)
     mut text.push("]")
   }
   text
 }
 
-fn shown(rows: Slice[List[String]]) -> String {
+fn shown(rows: List[List[String]]) -> String {
   var text = ""
   for row in rows {
-    mut text.push(joined(row.slice()).slice())
+    mut text.push(joined(row))
     mut text.push(";")
   }
   text
 }
 
-fn parsed(text: StringSlice) -> String {
+fn parsed(text: String) -> String {
   match csv.parse(text) {
-    Ok(rows) => shown(rows.slice())
+    Ok(rows) => shown(rows)
     Err(_) => "error"
   }
 }
 
-fn fails(text: StringSlice, expected: csv.ParseError) -> Bool {
+fn fails(text: String, expected: csv.ParseError) -> Bool {
   csv.parse(text) == Err(expected)
 }
 
@@ -64,23 +64,23 @@ test "a quote in the wrong place is an error that says where" {
 
 test "options change the delimiter and the quote, and trim fields" {
   let tabs = csv.Options(delimiter: Character"\t")
-  assert csv.parse("a\tb,c\n", options: tabs) is Ok(rows) && shown(rows.slice()) == "[a][b,c];"
+  assert csv.parse("a\tb,c\n", options: tabs) is Ok(rows) && shown(rows) == "[a][b,c];"
   let single = csv.Options(delimiter: Character";", quote: Character"'")
-  assert csv.parse("'a;b';c\n", options: single) is Ok(rows) && shown(rows.slice()) == "[a;b][c];"
+  assert csv.parse("'a;b';c\n", options: single) is Ok(rows) && shown(rows) == "[a;b][c];"
   let trimmed = csv.Options(trim_fields: true)
   assert csv.parse("  a  ,\tb c\t, \" d \" \n", options: trimmed) is Ok(rows)
-    && shown(rows.slice()) == "[a][b c][ d ];"
+    && shown(rows) == "[a][b c][ d ];"
   assert parsed("  a  , b") == "[  a  ][ b];"
 }
 
 test "rows are written so that they read back the same" {
   let rows: List[List[String]] = [["a", "b,c", "say \"hi\""], ["", " padded ", "two\nlines"], [""], []]
-  let text = csv.format(rows.slice())
+  let text = csv.format(rows)
   assert text == "a,\"b,c\",\"say \"\"hi\"\"\"\n,\" padded \",\"two\nlines\"\n\"\"\n\n"
-  assert csv.parse(text.slice()) is Ok(read) && read == rows
+  assert csv.parse(text) is Ok(read) && read == rows
   var builder = ""
   let fields: List[String] = ["x", "y z"]
-  csv.format_row(fields.slice(), output: mut builder, options: csv.Options(delimiter: Character";"))
+  csv.format_row(fields, output: mut builder, options: csv.Options(delimiter: Character";"))
   assert builder == "x;y z"
 }
 
@@ -101,13 +101,13 @@ test "a table gives cells by the name of their column" {
 test "rows are read one at a time from a stream" uses RunForever {
   provide streams.NoHandles() {
     let bytes = "a,b\n\"multi\nline\",c\n\nlast".to_bytes()
-    var reader = csv.RowReader.new(streams.ByteReader.new(bytes.slice()))
-    assert mut reader.next_row() is Ok(Some(first)) && joined(first.slice()) == "[a][b]"
-    assert mut reader.next_row() is Ok(Some(second)) && joined(second.slice()) == "[multi\nline][c]"
+    var reader = csv.RowReader.new(streams.ByteReader.new(bytes))
+    assert mut reader.next_row() is Ok(Some(first)) && joined(first) == "[a][b]"
+    assert mut reader.next_row() is Ok(Some(second)) && joined(second) == "[multi\nline][c]"
     assert mut reader.next_row() is Ok(Some(blank)) && blank.length() == 0
-    assert mut reader.next_row() is Ok(Some(last)) && joined(last.slice()) == "[last]"
+    assert mut reader.next_row() is Ok(Some(last)) && joined(last) == "[last]"
     assert mut reader.next_row() is Ok(None)
-    var again = csv.RowReader.new(streams.ByteReader.new(bytes.slice()))
+    var again = csv.RowReader.new(streams.ByteReader.new(bytes))
     var count: UInt64 = 0
     while mut again.next_row() is Ok(Some(_)) {
       count += 1

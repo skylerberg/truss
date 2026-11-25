@@ -2,9 +2,9 @@
 
 %token ASSERT BREAK CAPABILITY CONCURRENT CONTINUE COST DECREASES DERIVES ECHO ELSE
 %token ENSURES EXISTS FALSE FN FOR FORALL IF IMPL IN INDIRECT INTERNAL INVARIANT IS LAW LENDS
-%token LET MATCH MUT OPAQUE OWN PARALLEL PROOF PROVIDE PUBLIC REQUIRES RETURN
+%token LET MATCH MODIFIES MUT OPAQUE OWN PARALLEL PROOF PROVIDE PUBLIC REQUIRES RETURN
 %token SELF SELF_TYPE TEST THEOREM TODO TRAIT TRUE TYPE UNLESS UNREACHABLE USE USES
-%token VAR WHEN WHILE WITH
+%token VAR VIEW WHEN WHILE WITH
 
 %token LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE COMMA COLON
 %token DOT DOTDOT DOTDOTEQ ARROW FATARROW QUESTION BAR
@@ -131,6 +131,7 @@ clause:
   | REQUIRES expression when_opt { () }
   | ENSURES expression when_opt { () }
   | DECREASES separated_nonempty_list(COMMA, expression) when_opt { () }
+  | MODIFIES separated_nonempty_list(COMMA, expression) { () }
   | COST cost when_opt { () }
 
 capability_use:
@@ -226,6 +227,7 @@ type_expression:
   | UPPER DOT UPPER { () }
   | function_type { () }
   | LPAREN function_type nonempty_list(function_type_clause) RPAREN { () }
+  | VIEW type_expression { () }
 
 path_type:
   | qualified_upper { () }

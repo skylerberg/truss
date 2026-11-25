@@ -1,4 +1,4 @@
-fn g[Element: Equal](items: Slice[Element], item: Element, visit: fn(Element)) -> Bool
+fn g[Element: Equal](items: List[Element], item: Element, visit: fn(Element)) -> Bool
   cost allocations <= items.length() * (allocations(Element.equal) + allocations(visit))
   cost allocated_bytes O(allocated_bytes(Element.equal) + allocated_bytes(visit))
 {

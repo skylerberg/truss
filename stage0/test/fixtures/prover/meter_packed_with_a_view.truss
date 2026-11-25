@@ -1,4 +1,4 @@
-type Pack(view: Slice[Int64], meter: Meter, names: List[Int64])
+type Pack(viewed: view List[Int64], meter: Meter, names: List[Int64])
 
 fn burn_pack(pack: own Pack)
   cost amortized time O(1)
@@ -7,9 +7,9 @@ fn burn_pack(pack: own Pack)
   mut held.meter.spend()
 }
 
-fn spends_a_pack(values: Slice[Int64], credit: UInt32)
+fn spends_a_pack(values: List[Int64], credit: UInt32)
   cost time O(1)
 {
-  let pack = Pack(view: values, meter: Meter(credit: credit), names: [])
+  let pack = Pack(viewed: values, meter: Meter(credit: credit), names: [])
   burn_pack(own pack)
 }

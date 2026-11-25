@@ -12,7 +12,7 @@ fn Grid.cell(mut self, row: UInt64, column: UInt64 = 0) lends mut Int64
   mut self.cells[row * self.width + column]
 }
 
-fn second(items: Slice[Int64]) -> Int64 {
+fn second(items: List[Int64]) -> Int64 {
   items[1]
 }
 

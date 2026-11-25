@@ -28,24 +28,16 @@ let of_token (kind : Token.kind) =
 let resources = List.map (fun metric -> Metric metric) Language.Metric.all @ [ Calls ]
 
 let correct_misspelling cursor (token : Token.t) name ~words ~category =
-  let message =
-    Printf.sprintf "Expected %s, one of %s, found `%s`." category
-      (String.concat ", " (List.map (fun word -> "`" ^ spell word ^ "`") words))
-      name
+  let report correction =
+    Cursor.report cursor token.span
+      (Misspelled_cost_word { category; words = List.map spell words; found = name; correction })
   in
   match List.filter (fun word -> String.edit_distance name (spell word) <= 2) words with
   | [ word ] ->
-      let spelling = spell word in
-      Cursor.report cursor Diagnostic.Code.Cost_word token.span message
-        ~fixes:
-          [
-            Diagnostic.fix
-              (Printf.sprintf "Write `%s`" spelling)
-              [ Diagnostic.replace token.span spelling ];
-          ];
+      report (Some (spell word));
       word
   | _ ->
-      Cursor.report cursor Diagnostic.Code.Cost_word token.span message;
+      report None;
       raise Cursor.Failed
 
 let expect ?suggested cursor ~accepted ~category ~expected =

@@ -9,7 +9,7 @@ fn site(request: own http.Request, responder: mut http.Responder)
   let _ = http.serve_directory(request, responder: mut responder, root: Path.new("/site"), prefix: "/static")
 }
 
-fn exchange_bytes(raw: StringSlice) -> List[UInt8]
+fn exchange_bytes(raw: String) -> List[UInt8]
   uses NetworkClient, Handles, Tasks, Panic, RunForever
 {
   let connection = network.connect("localhost", port: 8092).expect("the server accepts")
@@ -19,13 +19,13 @@ fn exchange_bytes(raw: StringSlice) -> List[UInt8]
   reply
 }
 
-fn exchange(raw: StringSlice) -> String
+fn exchange(raw: String) -> String
   uses NetworkClient, Handles, Tasks, Panic, RunForever
 {
-  String.from_utf8_lossy(exchange_bytes(raw).slice())
+  String.from_utf8_lossy(exchange_bytes(raw))
 }
 
-fn body_bytes_of(reply: Slice[UInt8]) -> List[UInt8] {
+fn body_bytes_of(reply: List[UInt8]) -> List[UInt8] {
   for index in 0..reply.length() {
     if index + 4 <= reply.length() && reply[index] == 13 && reply[index + 1] == 10 && reply[index + 2] == 13 && reply[index + 3] == 10 {
       return reply[index + 4..].to_list()
@@ -34,24 +34,24 @@ fn body_bytes_of(reply: Slice[UInt8]) -> List[UInt8] {
   []
 }
 
-fn get(path: StringSlice, extra: StringSlice = "") -> String
+fn get(path: String, extra: String = "") -> String
   uses NetworkClient, Handles, Tasks, Panic, RunForever
 {
-  exchange("GET ${path} HTTP/1.1\r\nHost: x\r\n${extra}Connection: close\r\n\r\n".slice())
+  exchange("GET ${path} HTTP/1.1\r\nHost: x\r\n${extra}Connection: close\r\n\r\n")
 }
 
-fn header_of(reply: StringSlice, name: StringSlice) -> String {
+fn header_of(reply: String, name: String) -> String {
   for line in reply.split("\r\n") {
-    if line.to_ascii_lowercase().starts_with("${name.to_ascii_lowercase()}: ".slice()) {
-      return line.substring(name.length() + 2, to: line.length()).to_string()
+    if line.to_ascii_lowercase().starts_with("${name.to_ascii_lowercase()}: ") {
+      return line.substring(name.length() + 2, to: line.length()).copy()
     }
   }
   "none"
 }
 
-fn body_of(reply: StringSlice) -> String {
+fn body_of(reply: String) -> String {
   match reply.find("\r\n\r\n") {
-    Some(at) => reply.substring(at + 4, to: reply.length()).to_string()
+    Some(at) => reply.substring(at + 4, to: reply.length()).copy()
     None => ""
   }
 }
@@ -65,48 +65,48 @@ fn browse() -> List[String]
     {
       var seen: List[String] = []
       let index = get("/static/")
-      mut seen.push("${index.slice().starts_with("HTTP/1.1 200")} ${header_of(index.slice(), name: "Content-Type")} ${body_of(index.slice())}")
+      mut seen.push("${index.starts_with("HTTP/1.1 200")} ${header_of(index, name: "Content-Type")} ${body_of(index)}")
       let moved = get("/static/docs")
-      mut seen.push("${moved.slice().starts_with("HTTP/1.1 301")} ${header_of(moved.slice(), name: "Location")}")
+      mut seen.push("${moved.starts_with("HTTP/1.1 301")} ${header_of(moved, name: "Location")}")
       let first = get("/static/data.bin")
-      let tag = header_of(first.slice(), name: "ETag")
-      let again = get("/static/data.bin", extra: "If-None-Match: ${tag}\r\n".slice())
-      mut seen.push("${first.slice().starts_with("HTTP/1.1 200")} ${header_of(first.slice(), name: "Content-Length")} ${again.slice().starts_with("HTTP/1.1 304")}")
+      let tag = header_of(first, name: "ETag")
+      let again = get("/static/data.bin", extra: "If-None-Match: ${tag}\r\n")
+      mut seen.push("${first.starts_with("HTTP/1.1 200")} ${header_of(first, name: "Content-Length")} ${again.starts_with("HTTP/1.1 304")}")
       let part = get("/static/data.bin", extra: "Range: bytes=10-19\r\n")
-      mut seen.push("${part.slice().starts_with("HTTP/1.1 206")} ${header_of(part.slice(), name: "Content-Range")} ${body_of(part.slice()).length()}")
+      mut seen.push("${part.starts_with("HTTP/1.1 206")} ${header_of(part, name: "Content-Range")} ${body_of(part).length()}")
       let beyond = get("/static/data.bin", extra: "Range: bytes=2000-\r\n")
-      mut seen.push("${beyond.slice().starts_with("HTTP/1.1 416")} ${header_of(beyond.slice(), name: "Content-Range")}")
+      mut seen.push("${beyond.starts_with("HTTP/1.1 416")} ${header_of(beyond, name: "Content-Range")}")
       let packed = get("/static/app.js", extra: "Accept-Encoding: gzip\r\n")
       let brotli = get("/static/app.js", extra: "Accept-Encoding: gzip, br\r\n")
       let preferred = get("/static/app.js", extra: "Accept-Encoding: br;q=0.5, gzip\r\n")
-      mut seen.push("${header_of(packed.slice(), name: "Content-Encoding")} ${body_of(packed.slice())}, ${header_of(brotli.slice(), name: "Content-Encoding")} ${body_of(brotli.slice())}, ${header_of(preferred.slice(), name: "Content-Encoding")}")
+      mut seen.push("${header_of(packed, name: "Content-Encoding")} ${body_of(packed)}, ${header_of(brotli, name: "Content-Encoding")} ${body_of(brotli)}, ${header_of(preferred, name: "Content-Encoding")}")
       let styles_reply = exchange_bytes("GET /static/site.css HTTP/1.1\r\nHost: x\r\nAccept-Encoding: zstd\r\nConnection: close\r\n\r\n")
-      let styles = String.from_utf8_lossy(styles_reply.slice())
-      let unpacked = match zstd.decompress(body_bytes_of(styles_reply.slice())) {
+      let styles = String.from_utf8_lossy(styles_reply)
+      let unpacked = match zstd.decompress(body_bytes_of(styles_reply)) {
         Ok(bytes) => String.from_utf8_lossy(bytes)
         Err(_) => "not zstd"
       }
-      mut seen.push("${header_of(styles.slice(), name: "Content-Encoding")} ${unpacked.length()} ${unpacked.slice().starts_with("p { margin: 0 }")}")
-      mut seen.push("${get("/static/../secret.txt").slice().starts_with("HTTP/1.1 404")} ${get("/static/%2e%2e/secret.txt").slice().starts_with("HTTP/1.1 404")}")
+      mut seen.push("${header_of(styles, name: "Content-Encoding")} ${unpacked.length()} ${unpacked.starts_with("p { margin: 0 }")}")
+      mut seen.push("${get("/static/../secret.txt").starts_with("HTTP/1.1 404")} ${get("/static/%2e%2e/secret.txt").starts_with("HTTP/1.1 404")}")
       let posted = exchange("POST /static/ HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-      mut seen.push("${posted.slice().starts_with("HTTP/1.1 405")} ${header_of(posted.slice(), name: "Allow")}")
+      mut seen.push("${posted.starts_with("HTTP/1.1 405")} ${header_of(posted, name: "Allow")}")
       let head = exchange("HEAD /static/data.bin HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
-      mut seen.push("${head.slice().starts_with("HTTP/1.1 200")} ${header_of(head.slice(), name: "Content-Length")} ${body_of(head.slice()).length()}")
+      mut seen.push("${head.starts_with("HTTP/1.1 200")} ${header_of(head, name: "Content-Length")} ${body_of(head).length()}")
       return own seen
     }
   }
 }
 
 test "a directory is served with index pages, validators, ranges, compressed siblings, and no escapes" uses Panic, RunForever {
-  let data = "0123456789".slice().repeated(100)
+  let data = "0123456789".repeated(100)
   let setup = simulation.Setup.new()
     .with_file(Path.new("/site/index.html"), contents: "<h1>home</h1>")
     .with_file(Path.new("/site/docs/index.html"), contents: "<h1>docs</h1>")
-    .with_file(Path.new("/site/data.bin"), contents: data.slice())
+    .with_file(Path.new("/site/data.bin"), contents: data)
     .with_file(Path.new("/site/app.js"), contents: "console.log('plain')")
     .with_file(Path.new("/site/app.js.gz"), contents: "PRECOMPRESSED")
     .with_file(Path.new("/site/app.js.br"), contents: "BROTLI")
-    .with_file(Path.new("/site/site.css"), contents: "p { margin: 0 }\n".slice().repeated(100).slice())
+    .with_file(Path.new("/site/site.css"), contents: "p { margin: 0 }\n".repeated(100))
     .with_file(Path.new("/secret.txt"), contents: "secret")
   provide simulation.World.from(own setup) {
     let seen = browse()

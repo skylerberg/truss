@@ -1,4 +1,4 @@
-fn count(items: Slice[Int64]) -> UInt64 {
+fn count(items: List[Int64]) -> UInt64 {
   var counted: UInt64 = 0
   for _ in items
     invariant counted == visited.length()

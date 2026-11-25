@@ -63,7 +63,7 @@ let () =
           ("capabilities.lambda_uses", "fn() { intrinsic.shared_key(self.ticks) }");
           ("capabilities.not_available", "intrinsic.shared_key(self.ticks)");
           ("capabilities.not_available", "intrinsic.shared_key(ticks)");
-          ("types.unsatisfied_bound", "intrinsic.Shared[Slice[Int64]]");
+          ("types.unsatisfied_bound", "intrinsic.Shared[view List[Int64]]");
         ]
       in
       let show = List.map (fun (code, excerpt) -> code ^ " at " ^ excerpt) in

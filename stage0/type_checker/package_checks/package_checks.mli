@@ -1,9 +1,6 @@
 module Lookups = Lookups
 
-type placed = { key : Resolve.Names.key; diagnostic : Diagnostic.in_definition }
-
-val describe_unused_dependency : package:Path.package -> Path.package -> string
-
+type placed = { key : Resolve.Names.key; diagnostic : Catalog.diagnostic }
 type use = Used | Unused of { is_named : bool }
 
 type check =

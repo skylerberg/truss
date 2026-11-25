@@ -48,12 +48,7 @@ type frame = {
   lends : (Logic.term * (frame -> Logic.term -> frame)) list Locals.t;
 }
 
-type changed = {
-  changed_locals : Locals.local list;
-  changes_self : bool;
-  reassigned : Locals.local list;
-}
-
+type changed_part = { root : Locals.local; fields : string list }
 type place_value = One of Logic.term | Run of Logic.term * Logic.term
 type noted_place = { origin : Core.origin; value : place_value }
 
@@ -99,12 +94,18 @@ type stated = Tables.stated =
   | Method_cost_bound of Logic.symbol
 
 type call_amount = {
-  call : Obligation.piece;
+  call : Catalog.Prover.quoted;
   callee : Path.t;
   states_cost : bool;
   counts_potential : bool;
   counter : Costs.counter;
   amount : Logic.term;
+}
+
+type buffer = {
+  kind : Language.Builtin_type.t;
+  element : Types.ty;
+  model_of : Logic.term -> Logic.term;
 }
 
 type lending = {
@@ -147,6 +148,7 @@ type context = {
   home : Resolve.Names.key;
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   mutable counters : Costs.counter list;
+  mutable conditional_counters : Costs.counter list;
   mutable bounded_counters : Costs.counter list;
   mutable recursive_costs_assumed : int;
   fresh_order : int Tables.Symbol_table.t;
@@ -159,9 +161,9 @@ type context = {
   mutable potentials : Logic.term list;
   models : (Logic.term -> Logic.term) option Tables.Model_table.t;
   holds_potential : bool Tables.Type_table.t;
-  buffers : (Types.ty * (Logic.term -> Logic.term)) option Tables.Type_table.t;
+  buffers : buffer option Tables.Type_table.t;
   mutable equalities : Logic.term list;
-  mutable path_notes : (string * Logic.term) list;
+  mutable path_notes : (Catalog.Prover.path_note * Logic.term) list;
   mutable entry : Logic.symbol list;
   inherits_precondition : bool;
   mutable holes : (Resolve.Names.key * Obligation.location) list;
@@ -180,7 +182,7 @@ type context = {
   keeps_failures : bool;
   mutable panics : bool;
   mutable can_declare_panic : bool;
-  panic_condition : Obligation.message option;
+  panic_condition : Catalog.Prover.quoted list option;
   mutable obligation_condition : Types.condition;
   mutable skipped_conditions : Types.condition list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;

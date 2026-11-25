@@ -1,6 +1,6 @@
 use standard.base64
 
-fn decodes_to(text: StringSlice, expected: StringSlice) -> Bool {
+fn decodes_to(text: String, expected: String) -> Bool {
   base64.decode(text) == Ok(expected.to_bytes())
 }
 

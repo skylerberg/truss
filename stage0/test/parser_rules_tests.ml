@@ -34,6 +34,16 @@ let () =
   Harness.test "uses appears at most once" (fun () ->
       Parse_support.expect_error "fn f() uses Clock uses Random {}" ~code:Repeated_clause
         ~at:"uses Random");
+  Harness.test "modifies lists the parts that a function changes, at most once, with no condition"
+    (fun () ->
+      Parse_support.expect_definition "fn f(a: mut A)\n  modifies a.b, a.c.d\n{}"
+        "(fn f ((a: mut A)) (modifies (. a b) (. (. a c) d)) (block))";
+      Parse_support.expect_error "fn f(a: mut A) modifies a.b modifies a.c {}" ~code:Repeated_clause
+        ~at:"modifies a.c";
+      Parse_support.expect_error "fn f(a: mut A) modifies a.b when A: Display {}"
+        ~code:Unexpected_token ~at:"when";
+      Parse_support.expect_error "fn f(visit: (fn(mut A) modifies a.b)) {}" ~code:Unexpected_token
+        ~at:"modifies");
   Harness.test "a missing body gets { todo }" (fun () ->
       Parse_support.expect_error "fn f() -> Int64\nfn g() {}" ~code:Missing_body ~at:"\nfn g"
         ~fixed:"fn f() -> Int64 { todo }\nfn g() {}");

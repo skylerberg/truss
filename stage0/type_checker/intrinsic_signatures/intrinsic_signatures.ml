@@ -2,7 +2,6 @@ let make_parameter operation name : Types.parameter =
   { owner = Intrinsic.make_operation_path operation; name }
 
 let make_storage_type element = Types.make_builtin Storage ~arguments:[ Type element ]
-let make_view_type element = Types.make_builtin View ~arguments:[ Type element ]
 let make_libc_scalar_type scalar = Types.make_builtin (Intrinsic.convert_libc_scalar scalar)
 
 let make_sequence_type element =
@@ -57,6 +56,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
       output;
       uses = Types.make_capability_set (list_uses operation);
       costs = [];
+      modifies = [];
       specification_only = false;
       is_update_step = false;
       capture_free_parameters = [];
@@ -138,8 +138,14 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
       make
         ~output:(Returns (Types.make_builtin Int8))
         [
-          input "left" (make_view_type (Types.make_builtin UInt8));
-          input "right" (make_view_type (Types.make_builtin UInt8));
+          input "left" (make_storage_type (Types.make_builtin UInt8));
+          input "right" (make_storage_type (Types.make_builtin UInt8));
+        ]
+  | Buffer Find_byte ->
+      make ~output:(Returns uint64)
+        [
+          input "bytes" (make_storage_type (Types.make_builtin UInt8));
+          input "byte" (Types.make_builtin UInt8);
         ]
   | Buffer Storage_empty ->
       make ~generics:[ "Element" ] ~output:(Returns (make_storage_type element)) []
@@ -166,30 +172,15 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
       make_array_signature
         ~make_output:(fun array -> Returns array)
         (fun _ -> [ input ~mode:Own "storage" (make_storage_type element) ])
-  | Buffer Array_view ->
-      make_array_signature
-        ~make_output:(fun _ -> Returns (make_view_type element))
-        (fun array -> [ input "array" array ])
   | Lend Storage_at -> with_storage ~output:(Lends (Read, element)) [ input "index" uint64 ]
-  | Buffer Storage_view -> with_storage ~output:(Returns (make_view_type element)) []
-  | Buffer View_length ->
-      make ~generics:[ "Element" ] ~output:(Returns uint64)
-        [ input "view" (make_view_type element) ]
-  | Lend View_at ->
-      make ~generics:[ "Element" ]
-        ~output:(Lends (Read, element))
-        [ input "view" (make_view_type element); input "index" uint64 ]
-  | Buffer View_swap ->
-      make ~generics:[ "Element" ]
-        [
-          input ~mode:Mut "view" (make_view_type element);
-          input "first" uint64;
-          input "second" uint64;
-        ]
-  | Buffer View_slice ->
-      make ~generics:[ "Element" ]
-        ~output:(Returns (make_view_type element))
-        [ input "view" (make_view_type element); input "start" uint64; input "stop" uint64 ]
+  | Buffer Storage_range ->
+      with_storage
+        ~output:(Returns (Types.make_view (make_storage_type element)))
+        [ input "start" uint64; input "stop" uint64 ]
+  | Buffer Storage_as ->
+      make ~generics:[ "Element"; "Wrapper" ]
+        ~output:(Returns (Types.make_view (make_parameter_type "Wrapper")))
+        [ input "storage" (make_storage_type element) ]
   | Buffer Storage_model ->
       {
         (with_storage ~output:(Returns (make_sequence_type element)) []) with
@@ -203,22 +194,8 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
         with
         specification_only = true;
       }
-  | Buffer View_model ->
-      {
-        (make ~generics:[ "Element" ]
-           ~output:(Returns (make_sequence_type element))
-           [ input "view" (make_view_type element) ])
-        with
-        specification_only = true;
-      }
-  | Buffer View_address ->
-      make ~generics:[ "Element" ] ~output:(Returns uint64)
-        [ input "view" (make_view_type element) ]
-  | Runtime Crash ->
-      make ~output:(Returns Types.Never)
-        [
-          input "message" (Types.Named { path = Well_known.make_path String_slice; arguments = [] });
-        ]
+  | Buffer Storage_address -> with_storage ~output:(Returns uint64) []
+  | Runtime Crash -> make ~output:(Returns Types.Never) [ input "message" Types.string_type ]
   | Runtime Handle_from ->
       make
         ~output:(Returns (Types.make_builtin Handle))
@@ -291,7 +268,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
   | Runtime Live_blocks -> make ~output:(Returns uint64) []
   | Runtime Environment_entry ->
       make
-        ~output:(Returns (make_view_type (Types.make_builtin UInt8)))
+        ~output:(Returns (Types.make_view (make_storage_type (Types.make_builtin UInt8))))
         [ input "index" uint64; input ~mode:Mut "is_present" bool ]
   | Runtime (System_is_os _ | System_is_architecture _) -> make ~output:(Returns bool) []
   | Runtime (Libc function_) ->
@@ -302,14 +279,14 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
           (Returns
              (match result with
              | Returns scalar | Points_at scalar -> make_libc_scalar_type scalar
-             | Text -> make_view_type (Types.make_builtin UInt8)
+             | Text -> Types.make_view (make_storage_type (Types.make_builtin UInt8))
              | Never -> Types.Never))
         (List.concat_map
            (fun (name, (passes : Libc.passes)) ->
              match passes with
              | Value scalar -> [ input name (make_libc_scalar_type scalar) ]
              | Elements (scalar, _) ->
-                 [ input name (make_view_type (make_libc_scalar_type scalar)) ]
+                 [ input name (make_storage_type (make_libc_scalar_type scalar)) ]
              | Room (scalar, _) | Elements_to_change (scalar, _) ->
                  [ input ~mode:Mut name (make_storage_type (make_libc_scalar_type scalar)) ]
              | Written (scalar, names) ->
@@ -320,7 +297,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
   | Runtime (Libc_number number) ->
       make ~output:(Returns (make_libc_scalar_type (Libc.classify_number number))) []
 
-type time = Constant_time | Linear_in of int | Unbounded_time
+type time = Constant_time | Linear_in of int | Linear_in_result | Unbounded_time
 type amount = Argument of int | Generic of string
 type allocations = No_allocations | One_if_positive of amount | Unknown_allocations
 type cost = { time : time; allocations : allocations }
@@ -336,10 +313,9 @@ let classify_cost (operation : Intrinsic.operation) =
       | Swap_bytes | Rotate_left | Rotate_right | Multiply_high )
   | Buffer
       ( Storage_empty | Storage_length | Storage_capacity | Storage_pop | Storage_swap
-      | Storage_view | View_length | View_swap | View_slice | View_address | Array_view
-      | Array_from_storage | Storage_model | View_model | Array_model | Storage_lengthen
-      | Storage_shorten | Storage_push )
-  | Lend (Storage_at | View_at)
+      | Storage_range | Storage_as | Storage_address | Array_from_storage | Storage_model
+      | Array_model | Storage_lengthen | Storage_shorten | Storage_push )
+  | Lend Storage_at
   | Runtime
       ( Crash | Handle_from | Handle_descriptor | Handle_release | Report_tests_to | Live_blocks
       | Libc_number _ | System_is_os _ | System_is_architecture _ ) ->
@@ -347,6 +323,7 @@ let classify_cost (operation : Intrinsic.operation) =
   | Runtime Holds_invariant -> { time = Unbounded_time; allocations = Unknown_allocations }
   | Buffer (Compare_bytes | Storage_remove | Storage_insert) | Runtime Environment_entry ->
       { time = Linear_in 0; allocations = No_allocations }
+  | Buffer Find_byte -> { time = Linear_in_result; allocations = No_allocations }
   | Buffer Storage_set_capacity -> { time = Linear_in 0; allocations = Unknown_allocations }
   | Buffer Storage_with_capacity ->
       { time = Constant_time; allocations = One_if_positive (Argument 0) }

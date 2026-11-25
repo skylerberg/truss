@@ -1,23 +1,23 @@
 use standard.url
 
-fn trimmed(text: StringSlice) -> StringSlice {
+fn trimmed(text: String) -> view String {
   text.trim()
 }
 
-type Attribute(key: StringSlice, argument: StringSlice)
+type Attribute(key: view String, argument: view String)
 
-fn split_attribute(text: StringSlice) -> Attribute {
+fn split_attribute(text: String) -> Attribute {
   match text.find("=") {
     Some(index) => {
       let halves = text.split_at(index)
       Attribute(key: trimmed(halves.first), argument: trimmed(halves.second.strip_prefix("=").unwrap_or(halves.second)))
     }
-    None => Attribute(key: trimmed(text), argument: "".slice())
+    None => Attribute(key: trimmed(text), argument: "")
   }
 }
 
-public fn Cookie.parse(set_cookie: StringSlice) -> Result[Cookie, Error] {
-  var parts: List[StringSlice] = []
+public fn Cookie.parse(set_cookie: String) -> Result[Cookie, Error] {
+  var parts: List[view String] = []
   for part in set_cookie.split(";") {
     mut parts.push(part)
   }
@@ -94,7 +94,7 @@ internal fn CookieJar.new() -> CookieJar {
   CookieJar(cookies: [], sequence: 0)
 }
 
-fn is_address(host: StringSlice) -> Bool {
+fn is_address(host: String) -> Bool {
   if host.contains(":") || host.starts_with("[") {
     return true
   }
@@ -106,7 +106,7 @@ fn is_address(host: StringSlice) -> Bool {
   true
 }
 
-fn domain_matches(host: StringSlice, domain: StringSlice) -> Bool {
+fn domain_matches(host: String, domain: String) -> Bool {
   if host == domain {
     return true
   }
@@ -114,7 +114,7 @@ fn domain_matches(host: StringSlice, domain: StringSlice) -> Bool {
     && host.bytes()[host.length() - domain.length() - 1] == 46
 }
 
-fn default_path(path: StringSlice) -> String {
+fn default_path(path: String) -> String {
   if !path.starts_with("/") {
     return "/"
   }
@@ -124,7 +124,7 @@ fn default_path(path: StringSlice) -> String {
   }
 }
 
-fn path_matches(request_path: StringSlice, cookie_path: StringSlice) -> Bool {
+fn path_matches(request_path: String, cookie_path: String) -> Bool {
   if request_path == cookie_path {
     return true
   }
@@ -134,17 +134,17 @@ fn path_matches(request_path: StringSlice, cookie_path: StringSlice) -> Bool {
 
 fn host_of(address: url.Url) -> String {
   match address.host() {
-    Some(host) => "${host}".slice().to_ascii_lowercase()
+    Some(host) => "${host}".to_ascii_lowercase()
     None => ""
   }
 }
 
-fn request_path(address: url.Url) -> StringSlice {
+fn request_path(address: url.Url) -> view String {
   let path = address.path()
-  if path.is_empty() { "/".slice() } else { path }
+  if path.is_empty() { "/" } else { path }
 }
 
-internal fn CookieJar.store(mut self, address: url.Url, set_cookie: StringSlice, now: Int64) {
+internal fn CookieJar.store(mut self, address: url.Url, set_cookie: String, now: Int64) {
   let cookie = match Cookie.parse(set_cookie) {
     Ok(cookie) => own cookie
     Err(_) => return
@@ -157,7 +157,7 @@ internal fn CookieJar.store(mut self, address: url.Url, set_cookie: StringSlice,
   let is_host_only = cookie.domain == None
   let domain = match cookie.domain {
     Some(domain) => {
-      if !domain.slice().contains(".") && domain != host {
+      if !domain.contains(".") && domain != host {
         return
       }
       if !domain_matches(host, domain: domain) {

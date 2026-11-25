@@ -1,7 +1,7 @@
 type while_loop = {
   while_at : Core.origin;
   while_clauses : Mir.loop_clause list;
-  changed : State.changed;
+  changed : State.changed_part list;
   bind_parts : State.frame -> State.frame;
   test : State.frame -> (State.frame * Logic.term) option;
   run_body : State.frame -> State.frame list * State.frame list;
@@ -28,14 +28,14 @@ type for_loop = {
   collection : (State.frame -> Types.ty * Logic.term) option;
   element_call : (State.frame -> Logic.term) option;
   bind_element : State.frame -> Logic.term -> State.frame;
-  compute_changed_in : State.frame -> State.changed;
-  compute_changed_by_body : State.frame -> State.changed;
+  compute_changed_in : State.frame -> State.changed_part list;
+  compute_changed_by_body : State.frame -> State.changed_part list;
   run_body : State.frame -> Logic.term -> State.frame list * State.frame list;
   bind_parts : State.frame -> State.frame;
 }
 
-val havoc : State.context -> State.frame -> State.changed -> State.frame
-val forget_changes : State.context -> State.frame -> State.changed -> State.frame
+val havoc : State.context -> State.frame -> State.changed_part list -> State.frame
+val forget_changes : State.context -> State.frame -> State.changed_part list -> State.frame
 val keep_holding_clauses : State.context -> Mir.loop_clause list -> Mir.loop_clause list
 val run_while_loop : State.context -> State.frame -> while_loop -> State.frame option
 val run_for_loop : State.context -> State.frame -> for_loop -> State.frame option

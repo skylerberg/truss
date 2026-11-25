@@ -1,4 +1,4 @@
-fn f(items: Slice[Int64]) -> Int64
+fn f(items: List[Int64]) -> Int64
   requires forall i in 0..items.length() => items[i] > 0
 {
   0

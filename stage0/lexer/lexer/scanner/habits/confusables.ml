@@ -57,27 +57,25 @@ let follows_joining_confusable (cursor : Cursor.t) start replacement =
 
 let scan (cursor : Cursor.t) ~scalar_value ~length =
   let start = cursor.position in
-  let report ~replacement ~name =
-    Cursor.report cursor ~code:Confusable_character
+  let report ~replacement ~spelled =
+    Cursor.report cursor
       ~fixes:
         (if follows_joining_confusable cursor start replacement then []
          else
            Cursor.list_code_fixes cursor (Source.make_span start (start + length)) [ replacement ])
       (Source.make_span start (start + length))
-      (Printf.sprintf "%s is not %s. Truss is written with ASCII punctuation."
-         (Cursor.show_character cursor start)
-         name);
+      (Confusable { character = Cursor.decode_character cursor start; spelled });
     cursor.position <- start + length;
     cursor.line_is_blank <- false
   in
   match find scalar_value with
   | Some Space ->
-      report ~replacement:" " ~name:"the space character";
+      report ~replacement:" " ~spelled:Space_character;
       Some Spaced
   | Some (Spelled spelling) -> (
       match find_confusable_token spelling with
       | Some kind ->
-          report ~replacement:spelling ~name:("`" ^ spelling ^ "`");
+          report ~replacement:spelling ~spelled:(Punctuation spelling);
           Some (Lexed kind)
       | None -> None)
   | Some (Opening_quote closing) ->

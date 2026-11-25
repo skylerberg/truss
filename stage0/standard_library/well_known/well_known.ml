@@ -35,9 +35,7 @@ type t =
   | Option
   | Result
   | List
-  | Slice
   | String
-  | String_slice
   | Literal
   | Template
   | From_template
@@ -216,9 +214,7 @@ let items =
     (Option, [ "option" ], "Option");
     (Result, [ "result" ], "Result");
     (List, [ "list" ], "List");
-    (Slice, [ "list" ], "Slice");
     (String, [ "text" ], "String");
-    (String_slice, [ "text" ], "StringSlice");
     (Literal, [ "text" ], "Literal");
     (Template, [ "text" ], "Template");
     (From_template, [ "text" ], "FromTemplate");
@@ -382,7 +378,6 @@ let by_path =
 
 let of_path path = Path.Map.find_opt path by_path
 let is known path = of_path path = Some known
-let is_buffer_sequence path = is List path || is Slice path
 
 let locate_method =
   index_rows "method"
@@ -430,11 +425,6 @@ let builtin_types_by_path =
           Language.Builtin_type.all))
 
 let find_builtin_type path = Path.Map.find_opt path builtin_types_by_path
-
-let find_view path =
-  if is List path || find_builtin_type path = Some Array then Some (make_path Slice)
-  else if is String path then Some (make_path String_slice)
-  else None
 
 let make_builtin_capability_path builtin_capability =
   Path.make_standard_path [ "capabilities" ] (Language.Builtin_capability.show builtin_capability)

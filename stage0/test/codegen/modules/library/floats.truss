@@ -643,7 +643,7 @@ test "every shown float reads back as itself" {
   }
 }
 
-fn reads(text: StringSlice, bits: UInt64) -> Bool {
+fn reads(text: String, bits: UInt64) -> Bool {
   match Float64.parse(text) {
     Ok(value) => value.to_bits() == bits
     Err(_) => false
@@ -692,7 +692,7 @@ test "text that is not a number says where it stops being one" {
   assert Float64.parse("1_000") == Err(core.ParseFloatError.InvalidCharacter(offset: 1))
 }
 
-fn reads_single(text: StringSlice, bits: UInt32) -> Bool {
+fn reads_single(text: String, bits: UInt32) -> Bool {
   match Float32.parse(text) {
     Ok(value) => value.to_bits() == bits
     Err(_) => false

@@ -1,0 +1,15 @@
+fn is_short(items: List[Int64]) -> Bool {
+  items.length() < 3
+}
+
+fn measure(items: List[Int64]) -> UInt64
+  requires is_short(items)
+{
+  items.length()
+}
+
+fn f(items: own List[Int64]) -> UInt64
+  requires is_short(items)
+{
+  measure(items)
+}

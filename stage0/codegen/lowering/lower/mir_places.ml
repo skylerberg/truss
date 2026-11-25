@@ -94,8 +94,12 @@ type sequence =
   | Buffer of { buffer : Lowered.place; element : Ground.ty }
   | Inline_array of { array : Lowered.place; element : Ground.ty; count : Z.t; is_empty : bool }
 
+let ground_sequence state (sequence : Types.ty) =
+  let ty = Lowering.ground state sequence in
+  Option.value ~default:ty (Ground.find_viewed ty)
+
 let find_sequence state (place : Lowered.place) (sequence : Types.ty) =
-  match Lowering.ground state sequence with
+  match ground_sequence state sequence with
   | Named { path; arguments = [ Type element; Value count ] } as ty
     when Well_known.find_builtin_type path = Some Array ->
       Inline_array
@@ -105,15 +109,9 @@ let find_sequence state (place : Lowered.place) (sequence : Types.ty) =
           count;
           is_empty = Memory_layout.has_zero_size state.context.env ty;
         }
-  | Named { path; arguments = Type element :: _ } as ty when Well_known.is_buffer_sequence path -> (
-      match (Memory_layout.of_type state.context.env ty).form with
-      | Struct [ field ] -> Buffer { buffer = Lowered.project place (Field field.name); element }
-      | _ ->
-          Definitions.raise_bug "the sequence `%s` holds more than one built-in buffer"
-            (Ground.to_string ty))
   | ty ->
-      Definitions.raise_bug "an element or a range of `%s`, which is not a sequence"
-        (Ground.to_string ty)
+      let field, _, element = Targets.read_list_parts state.context.monomorphic ty in
+      Buffer { buffer = Lowered.project place (Field field); element }
 
 let lower_element state place index ~sequence ~origin =
   match find_sequence state place sequence with
@@ -145,13 +143,19 @@ let lower_range state place start stop ~sequence ~origin =
   in
   Option.iter
     (fun stop ->
-      fail_out_of_bounds state ~origin (Test (Greater, stop, length)) "slice out of bounds")
+      fail_out_of_bounds state ~origin (Test (Greater, stop, length)) "range out of bounds")
     stop;
   let stop = Option.value stop ~default:length in
-  fail_out_of_bounds state ~origin (Test (Greater, start, stop)) "slice out of bounds";
+  fail_out_of_bounds state ~origin (Test (Greater, start, stop)) "range out of bounds";
   let count = Lowering.allocate_temporary state (Ground.make_builtin UInt64) in
   Emit_c.Ir_builder.emit state.builder (Assign (count, Binary (Subtract, stop, start)));
-  Targets.lower_slice state ~element ~buffer:first_element ~length:(Copy count)
+  let range_type : Ground.ty =
+    match ground_sequence state sequence with
+    | Named { path; _ } as text when Well_known.is String path -> text
+    | Named _ | Function _ | Never ->
+        Named { path = Well_known.make_path List; arguments = [ Type element ] }
+  in
+  Targets.lower_borrowed_sequence state range_type ~buffer:first_element ~length:(Copy count)
 
 let rec lower_place state (written : Mir.place) : Lowered.place =
   let root =

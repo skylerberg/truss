@@ -1,0 +1,5 @@
+fn overlap(items: mut List[Int64]) {
+  var target: view List[Int64] = items[1..5]
+  let source = items[0..4]
+  mut target.copy_from(source)
+}

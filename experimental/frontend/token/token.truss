@@ -29,6 +29,7 @@ internal type Keyword =
   | Lends
   | Let
   | Match
+  | Modifies
   | Mut
   | Opaque
   | Own
@@ -51,6 +52,7 @@ internal type Keyword =
   | Use
   | Uses
   | Var
+  | View
   | When
   | While
   | With
@@ -152,7 +154,7 @@ internal fn make_token(kind: Kind, span: source.Span) -> Token {
 internal type Decimal(significand: String, exponent: String)
   derives Equal
 
-internal fn normalize_decimal(significand: StringSlice, exponent: own math.BigInteger) -> Decimal
+internal fn normalize_decimal(significand: String, exponent: own math.BigInteger) -> Decimal
   uses Panic
 {
   if significand == "0" {
@@ -197,11 +199,11 @@ internal fn Tables.empty() -> Tables {
   Tables(tokens: [], names: [], literals: [], integers: [], decimals: [])
 }
 
-internal fn Tables.name(self, index: UInt64) -> StringSlice
+internal fn Tables.name(self, index: UInt64) -> view String
   uses Panic
 {
   if index < self.names.length() {
-    self.names[index].slice()
+    self.names[index]
   } else {
     Panic.crash("a name index past the table")
   }
@@ -229,7 +231,7 @@ internal fn Tables.token(self, index: UInt64) -> Token
 
 internal type Lexed(tables: Tables, first: UInt64, stop: UInt64)
 
-internal fn find_word(spelling: StringSlice) -> Option[Kind] {
+internal fn find_word(spelling: String) -> Option[Kind] {
   match spelling {
     "assert" => Some(Kind.Keyword(Keyword.Assert))
     "break" => Some(Kind.Keyword(Keyword.Break))
@@ -258,6 +260,7 @@ internal fn find_word(spelling: StringSlice) -> Option[Kind] {
     "lends" => Some(Kind.Keyword(Keyword.Lends))
     "let" => Some(Kind.Keyword(Keyword.Let))
     "match" => Some(Kind.Keyword(Keyword.Match))
+    "modifies" => Some(Kind.Keyword(Keyword.Modifies))
     "mut" => Some(Kind.Keyword(Keyword.Mut))
     "opaque" => Some(Kind.Keyword(Keyword.Opaque))
     "own" => Some(Kind.Keyword(Keyword.Own))
@@ -280,6 +283,7 @@ internal fn find_word(spelling: StringSlice) -> Option[Kind] {
     "use" => Some(Kind.Keyword(Keyword.Use))
     "uses" => Some(Kind.Keyword(Keyword.Uses))
     "var" => Some(Kind.Keyword(Keyword.Var))
+    "view" => Some(Kind.Keyword(Keyword.View))
     "when" => Some(Kind.Keyword(Keyword.When))
     "while" => Some(Kind.Keyword(Keyword.While))
     "with" => Some(Kind.Keyword(Keyword.With))
@@ -298,7 +302,7 @@ internal fn find_word(spelling: StringSlice) -> Option[Kind] {
   }
 }
 
-internal fn spell_keyword(keyword: Keyword) -> StringSlice {
+internal fn spell_keyword(keyword: Keyword) -> view String {
   match keyword {
     Assert => "assert"
     Break => "break"
@@ -327,6 +331,7 @@ internal fn spell_keyword(keyword: Keyword) -> StringSlice {
     Lends => "lends"
     Let => "let"
     Match => "match"
+    Modifies => "modifies"
     Mut => "mut"
     Opaque => "opaque"
     Own => "own"
@@ -349,13 +354,14 @@ internal fn spell_keyword(keyword: Keyword) -> StringSlice {
     Use => "use"
     Uses => "uses"
     Var => "var"
+    View => "view"
     When => "when"
     While => "while"
     With => "with"
   }
 }
 
-internal fn spell_reserved(reserved: Reserved) -> StringSlice {
+internal fn spell_reserved(reserved: Reserved) -> view String {
   match reserved {
     As => "as"
     Async => "async"
@@ -371,7 +377,7 @@ internal fn spell_reserved(reserved: Reserved) -> StringSlice {
   }
 }
 
-internal fn spell_punctuation(punctuation: Punctuation) -> StringSlice {
+internal fn spell_punctuation(punctuation: Punctuation) -> view String {
   match punctuation {
     Open(bracket) => match bracket {
       Paren => "("
@@ -426,7 +432,7 @@ internal fn spell_punctuation(punctuation: Punctuation) -> StringSlice {
   }
 }
 
-internal fn spell_foreign(foreign: Foreign) -> StringSlice {
+internal fn spell_foreign(foreign: Foreign) -> view String {
   match foreign {
     PlusPlus => "++"
     MinusMinus => "--"
@@ -475,8 +481,8 @@ internal fn can_begin(kind: Kind) -> Bool {
       _ => false
     }
     Keyword(keyword) => match keyword {
-      Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends | Opaque
-        | Requires | Unless | Uses | When | With => false
+      Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends | Modifies
+        | Opaque | Requires | Unless | Uses | View | When | With => false
       _ => true
     }
     Newline | EndOfFile => false
@@ -497,7 +503,7 @@ internal fn joins(left: UInt8, right: UInt8) -> Bool {
     || (is_operator_byte(left) && is_operator_byte(right))
 }
 
-internal fn joins_neighbor(before: Option[UInt8], after: Option[UInt8], code: StringSlice) -> Bool
+internal fn joins_neighbor(before: Option[UInt8], after: Option[UInt8], code: String) -> Bool
   uses Panic
 {
   if code.is_empty() {
@@ -516,7 +522,7 @@ internal fn joins_neighbor(before: Option[UInt8], after: Option[UInt8], code: St
   }
 }
 
-fn escape_spelling(text: StringSlice) -> String
+fn escape_spelling(text: String) -> String
   uses Panic
 {
   var buffer = String.with_capacity(text.length())
@@ -567,7 +573,7 @@ fn format_lowercase_hexadecimal(byte: UInt8) -> String
   }
 }
 
-fn spell_inserted(insertions: Slice[source.Edit], offset: UInt64, buffer: mut String) {
+fn spell_inserted(insertions: List[source.Edit], offset: UInt64, buffer: mut String) {
   for insertion in insertions {
     if insertion.span.start == offset {
       mut buffer.push(insertion.replacement)
@@ -627,7 +633,7 @@ fn open_string(
   advance_string(literal, literal_index, segment: 0, enclosing: enclosing, strings: mut strings, buffer: mut buffer)
 }
 
-internal fn spell_tokens(tables: Tables, first: UInt64, stop: UInt64, insertions: Slice[source.Edit]) -> Option[String]
+internal fn spell_tokens(tables: Tables, first: UInt64, stop: UInt64, insertions: List[source.Edit]) -> Option[String]
   uses Panic
 {
   var buffer = ""

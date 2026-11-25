@@ -13,17 +13,11 @@ type space = Wild | Constructed of constructor * space list | Alternatives of sp
 type context = {
   lookups : Lookups.t;
   module_ : Path.module_;
-  spans : Source.Definition_span.t array Lazy.t;
-  text : string Lazy.t;
-  mutable diagnostics : Diagnostic.in_definition list;
+  mutable diagnostics : Catalog.diagnostic list;
 }
 
-let read_span context (origin : Core.origin) : Source.Definition_span.t =
-  Source.Definition_span.locate (Lazy.force context.spans) (Core_walk.locate_origin origin)
-
-let report context ?(fixes = []) code (span : Source.Definition_span.t) message =
-  context.diagnostics <-
-    Diagnostic.make ~fixes ~code:(Patterns code) span message :: context.diagnostics
+let report context diagnostic =
+  context.diagnostics <- Catalog.Patterns diagnostic :: context.diagnostics
 
 let compute_integer_range type_ =
   let compute_bounds signed width =
@@ -392,14 +386,6 @@ let has_error context type_ =
   in
   contains_error type_
 
-let read_indentation text (position : int) =
-  let line_start = Source.compute_fragment_line_start text position in
-  let indentation_end =
-    Option.value ~default:(String.length text)
-      (String.find_first_index (Fun.negate Char.Ascii.is_blank) ~start:line_start text)
-  in
-  String.sub text line_start (indentation_end - line_start)
-
 let rec list_or_patterns (written : Core.pattern) =
   match written.kind with
   | Alternatives alternatives ->
@@ -491,46 +477,21 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
       (fun (arm : Core.arm) ->
         if List.length arm.patterns = List.length types then begin
           let row = List.map (build_space context) arm.patterns in
-          let arm_span = read_span context arm.origin in
           let reachable = is_useful context types !rows row in
-          if not reachable then begin
-            let unreachable =
-              "Earlier arms already match everything this arm matches, so it is never reached."
-            in
-            match find_shadowing context types !covering_arms row with
+          if not reachable then
+            begin match find_shadowing context types !covering_arms row with
             | Some shadowing ->
-                let written = Path.show shadowing.constant in
-                report context Unreachable_arm arm_span
-                  ~fixes:
-                    [
-                      Diagnostic.fix
-                        (Printf.sprintf "Write `%s`." written)
-                        (List.map
-                           (fun (bound : Core.pattern) ->
-                             Diagnostic.replace (read_span context bound.origin) written)
-                           shadowing.bindings);
-                    ]
-                  (Printf.sprintf
-                     "%s `%s` in an earlier arm binds a variable, which matches every value. To \
-                      match the constant, write `%s`."
-                     unreachable shadowing.name written)
-            | None ->
-                report context Unreachable_arm arm_span
-                  ~fixes:
-                    [
-                      Diagnostic.fix "Delete the arm."
-                        [
-                          Diagnostic.delete
-                            (Source.Definition_span.make
-                               (arm_span.start
-                               - String.length
-                                   (read_indentation (Lazy.force context.text) arm_span.start)
-                               - 1)
-                               arm_span.stop);
-                        ];
-                    ]
-                  unreachable
-          end
+                report context
+                  (Shadowing_arm
+                     {
+                       arm = arm.origin;
+                       name = shadowing.name;
+                       constant = shadowing.constant;
+                       bindings =
+                         List.map (fun (bound : Core.pattern) -> bound.origin) shadowing.bindings;
+                     })
+            | None -> report context (Unreachable_arm { arm = arm.origin })
+            end
           else
             List.iter
               (fun ((group : Core.pattern), alternatives) ->
@@ -542,29 +503,19 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
                     let before = List.take index alternatives in
                     let prior = if before = [] then !rows else !rows @ [ build_row_with before ] in
                     if not (is_useful context types prior (build_row_with [ alternative ])) then
-                      let read_pattern_span (pattern : Core.pattern) =
-                        read_span context pattern.origin
-                      in
-                      let alternative_span = read_pattern_span alternative in
-                      let deleted =
-                        match if index > 0 then List.nth_opt alternatives (index - 1) else None with
-                        | Some previous ->
-                            Source.Definition_span.make (read_pattern_span previous).stop
-                              alternative_span.stop
-                        | None -> (
-                            match List.nth_opt alternatives 1 with
-                            | Some next ->
-                                Source.Definition_span.make alternative_span.start
-                                  (read_pattern_span next).start
-                            | None -> alternative_span)
-                      in
-                      report context Unreachable_alternative alternative_span
-                        ~fixes:
-                          [ Diagnostic.fix "Delete the alternative." [ Diagnostic.delete deleted ] ]
-                        (if before = [] then
-                           "Earlier arms already match everything this alternative matches."
-                         else
-                           "The alternatives before this one already match everything it matches."))
+                      let origin_of (pattern : Core.pattern) = pattern.origin in
+                      report context
+                        (Unreachable_alternative
+                           {
+                             alternative = alternative.origin;
+                             previous =
+                               Option.map origin_of
+                                 (if index > 0 then List.nth_opt alternatives (index - 1) else None);
+                             next =
+                               (if index > 0 then None
+                                else Option.map origin_of (List.nth_opt alternatives 1));
+                             is_after_alternatives = before <> [];
+                           }))
                   alternatives)
               (List.concat_map list_or_patterns arm.patterns);
           if Option.is_none arm.guard then begin
@@ -582,46 +533,26 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
     in
     match collect_witnesses !rows [] with
     | [] -> ()
-    | first :: _ as all ->
-        let fixes =
-          match List.rev arms with
-          | last :: _ ->
-              let last = read_span context last.origin in
-              let indent = read_indentation (Lazy.force context.text) last.start in
-              [
-                Diagnostic.fix "Add an arm for each missing case."
-                  [
-                    Diagnostic.replace
-                      (Source.Definition_span.make_zero_width last.stop)
-                      (String.concat ""
-                         (List.map
-                            (fun witness ->
-                              "\n" ^ indent ^ show_row context types witness ^ " => todo")
-                            all));
-                  ];
-              ]
-          | [] -> []
-        in
-        report context Not_covered (read_span context node.origin) ~fixes
-          (Printf.sprintf "This `match` does not cover every case: `%s` is not covered%s."
-             (show_row context types first)
-             (match List.length all with
-             | 1 -> ""
-             | 2 -> ", nor 1 other"
-             | count when count >= witness_limit -> ", nor others"
-             | count -> Printf.sprintf ", nor %d others" (count - 1)))
+    | first :: others as all ->
+        report context
+          (Not_covered
+             {
+               match_ = node.origin;
+               last_arm =
+                 Option.map (fun (last : Core.arm) -> last.origin) (List.nth_opt (List.rev arms) 0);
+               witness = show_row context types first;
+               other_witnesses = List.map (show_row context types) others;
+               may_have_more = List.length all >= witness_limit;
+             })
   end
 
 let check_irrefutable context (written : Core.pattern) =
   if not (has_error context written.type_) then
     match find_witness context [ written.type_ ] [ [ build_space context written ] ] with
     | Some witness ->
-        report context Refutable
-          (read_span context written.origin)
-          (Printf.sprintf
-             "This pattern can fail: it does not match `%s`. Use `match`, an `is` test, or `let \
-              ... else`."
-             (show context written.type_ (List.hd witness)))
+        report context
+          (Refutable
+             { pattern = written.origin; witness = show context written.type_ (List.hd witness) })
     | None -> ()
 
 let check_definition context (definition : Core.definition) =
@@ -647,17 +578,6 @@ let check_definition context (definition : Core.definition) =
     definition
 
 let check (lookups : Lookups.t) (key : Resolve.Names.key) (form : Core.t) =
-  let context =
-    {
-      lookups;
-      module_ = key.module_;
-      spans = lazy (lookups.interface.names.read_spans key);
-      text = lazy (lookups.interface.names.read_text key);
-      diagnostics = [];
-    }
-  in
+  let context = { lookups; module_ = key.module_; diagnostics = [] } in
   check_definition context form.definition;
-  List.sort
-    (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-      compare left.span right.span)
-    context.diagnostics
+  List.rev context.diagnostics

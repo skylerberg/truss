@@ -1,7 +1,7 @@
 type context = Code | Ordinary_string | Raw_string
 
 val remove_trivia :
-  Cursor.t -> start:int -> stop:int -> line_break:bool -> Source.span Diagnostic.edit
+  Cursor.t -> start:int -> stop:int -> line_break:bool -> Syntax_catalog.Lexing.edit
 
 val report_forbidden_run : Cursor.t -> context:context -> unit
 val report_invalid_run : Cursor.t -> unit
@@ -9,4 +9,4 @@ val copy_plain : Cursor.t -> Buffer.t -> is_special:(char -> bool) -> unit
 val read_character : Cursor.t -> Buffer.t -> context:context -> unit
 val consume_line_break : Cursor.t -> Source.span
 val note_line_break : Cursor.t -> Source.span -> unit
-val reject : ?code:Diagnostic.Code.lexer -> Cursor.t -> length:int -> string -> unit
+val reject : Cursor.t -> length:int -> Syntax_catalog.Lexing.problem -> unit

@@ -1,36 +1,36 @@
 use standard.collections
 
-fn same_text(first: StringSlice, second: StringSlice) -> Bool
+fn same_text(first: String, second: String) -> Bool
   cost allocations == 0
 {
   first == second
 }
 
-fn earlier_text(first: StringSlice, second: StringSlice) -> Bool
+fn earlier_text(first: String, second: String) -> Bool
   cost allocations == 0
 {
   first < second
 }
 
-fn same_numbers(first: Slice[Int64], second: Slice[Int64]) -> Bool
+fn same_numbers(first: List[Int64], second: List[Int64]) -> Bool
   cost allocations == 0
 {
   first == second
 }
 
-fn hashed(text: StringSlice, hasher: Hasher) -> Hasher
+fn hashed(text: String, hasher: Hasher) -> Hasher
   cost allocations == 0
 {
   text.hash(hasher)
 }
 
-fn has_name(names: Set[String], name: StringSlice) -> Bool
+fn has_name(names: Set[String], name: String) -> Bool
   cost allocations == 0
 {
   names.contains(name)
 }
 
-fn port_of(ports: Map[String, Int64], name: StringSlice) -> Int64
+fn port_of(ports: Map[String, Int64], name: String) -> Int64
   cost allocations == 0
 {
   match ports.get(name) {
@@ -39,7 +39,7 @@ fn port_of(ports: Map[String, Int64], name: StringSlice) -> Int64
   }
 }
 
-fn has_sorted_key(ports: collections.SortedMap[String, Int64], name: StringSlice) -> Bool
+fn has_sorted_key(ports: collections.SortedMap[String, Int64], name: String) -> Bool
   cost allocations == 0
 {
   ports.contains(name)

@@ -1,5 +1,5 @@
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Console, Processes
 {
   match Processes.run(lines(8000)) {

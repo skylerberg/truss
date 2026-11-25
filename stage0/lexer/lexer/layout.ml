@@ -126,14 +126,17 @@ let find_closing_edits source tokens ~closers ~is_unterminated_string openers =
         | None -> None
         | Some (position, starts_line) ->
             let position = max position earliest in
-            let closer = spell_closer opener.bracket in
-            let replacement =
+            let indentation =
               if starts_line && opener.bracket = Curly then
-                "\n" ^ extract_indentation source opener.span.start ^ closer
-              else closer
+                Some (extract_indentation source opener.span.start)
+              else None
             in
             find_edits position
-              (Diagnostic.insert (Source.make_zero_width position) replacement :: reversed)
+              ({
+                 Syntax_catalog.Lexing.replaced = Source.make_zero_width position;
+                 code = Closer { bracket = opener.bracket; indentation };
+               }
+              :: reversed)
               outer)
   in
   find_edits 0 [] openers
@@ -154,7 +157,9 @@ let run ~source ~diagnostics ~mode read_next_input =
     Dynarray.add_last closers None;
     previous := Some token.kind
   in
-  let report diagnostic = Diagnostic.Collector.add diagnostics diagnostic in
+  let report ?(notes = []) ?(fixes = []) at problem =
+    Dynarray.add_last diagnostics { Syntax_catalog.Lexing.at; problem; notes; fixes }
+  in
   let push bracket span =
     stack := { bracket; span; index = Dynarray.length output } :: !stack;
     open_count.(index_bracket bracket) <- open_count.(index_bracket bracket) + 1
@@ -179,56 +184,45 @@ let run ~source ~diagnostics ~mode read_next_input =
       insert_closer position
     done
   in
-  let list_closing_fixes openers ~title =
+  let list_closing_fixes openers : Syntax_catalog.Lexing.fix list =
     match find_closing_edits source output ~closers ~is_unterminated_string openers with
-    | Some edits -> [ Diagnostic.fix title edits ]
+    | Some edits ->
+        [ { action = Insert_closers (List.map (fun opener -> opener.bracket) openers); edits } ]
     | None -> []
   in
-  let close_all ~position ~reason =
+  let close_all ~position ~before =
     match !stack with
     | [] -> ()
     | innermost :: outer ->
-        let closers =
-          String.concat "" (List.map (fun opener -> spell_closer opener.bracket) !stack)
-        in
         let notes =
           List.map
             (fun opener ->
               ( opener.span,
-                Printf.sprintf "This `%s` is not closed either." (spell_opener opener.bracket) ))
+                Syntax_catalog.Lexing.Also_unclosed { opener = spell_opener opener.bracket } ))
             outer
         in
-        report
-          (Diagnostic.make ~code:(Lexer Unclosed_bracket) ~notes
-             ~fixes:(list_closing_fixes !stack ~title:(Printf.sprintf "Insert `%s`" closers))
-             innermost.span
-             (Printf.sprintf "This `%s` is never closed%s." (spell_opener innermost.bracket) reason));
+        report ~notes ~fixes:(list_closing_fixes !stack) innermost.span
+          (Unclosed_bracket { opener = spell_opener innermost.bracket; before = Some before });
         close_silently position
   in
   let close_bracket (current : Token.t) bracket =
     let span = current.span in
     if open_count.(index_bracket bracket) = 0 then
-      report
-        (Diagnostic.make ~code:(Lexer Unmatched_closing_bracket) span
-           (Printf.sprintf "This `%s` has no `%s` to close." (spell_closer bracket)
-              (spell_opener bracket)))
+      report span
+        (Unmatched_closer { closer = spell_closer bracket; opener = spell_opener bracket })
     else begin
       let rec close_unclosed () =
         match !stack with
         | opener :: _ when opener.bracket <> bracket ->
             report
-              (Diagnostic.make ~code:(Lexer Unclosed_bracket)
-                 ~notes:
-                   [
-                     ( span,
-                       Printf.sprintf "This `%s` closes an earlier `%s` first."
-                         (spell_closer bracket) (spell_opener bracket) );
-                   ]
-                 ~fixes:
-                   (list_closing_fixes [ opener ]
-                      ~title:(Printf.sprintf "Insert `%s`" (spell_closer opener.bracket)))
-                 opener.span
-                 (Printf.sprintf "This `%s` is never closed." (spell_opener opener.bracket)));
+              ~notes:
+                [
+                  ( span,
+                    Closes_earlier { closer = spell_closer bracket; opener = spell_opener bracket }
+                  );
+                ]
+              ~fixes:(list_closing_fixes [ opener ]) opener.span
+              (Unclosed_bracket { opener = spell_opener opener.bracket; before = None });
             insert_closer span.start;
             close_unclosed ()
         | _ -> ()
@@ -244,10 +238,8 @@ let run ~source ~diagnostics ~mode read_next_input =
         close_silently (compute_closer_position first_line_break position)
     | Interpolation when ends_unterminated -> close_silently position
     | File _ ->
-        close_all
-          ~position:(compute_closer_position first_line_break position)
-          ~reason:" before the end of the file"
-    | Interpolation -> close_all ~position ~reason:" before the end of the interpolation");
+        close_all ~position:(compute_closer_position first_line_break position) ~before:End_of_file
+    | Interpolation -> close_all ~position ~before:End_of_interpolation);
     (match (mode, !previous) with
     | File _, Some previous_kind when Token.can_end previous_kind ->
         emit
@@ -276,7 +268,7 @@ let run ~source ~diagnostics ~mode read_next_input =
           when !stack <> [] && token_starts_definition source ~first_line_break kind span.start ->
             close_all
               ~position:(compute_closer_position first_line_break span.start)
-              ~reason:" before the next definition"
+              ~before:Next_definition
         | _ -> ());
         let ignores_line_breaks =
           match !stack with { bracket = Paren | Square; _ } :: _ -> true | _ -> false

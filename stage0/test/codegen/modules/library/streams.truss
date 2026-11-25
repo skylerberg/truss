@@ -3,7 +3,7 @@ use standard.streams
 type Trickle(received: List[UInt8], step: UInt64)
 
 impl streams.Writer for Trickle {
-  fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
+  fn write(mut self, bytes: List[UInt8]) -> Result[UInt64, SystemError] {
     var accepted: UInt64 = 0
     while accepted < self.step && accepted < bytes.length()
       decreases self.step - accepted
@@ -54,7 +54,7 @@ impl streams.Reader for Drip {
   }
 }
 
-fn drip(text: StringSlice, step: UInt64) -> Drip {
+fn drip(text: String, step: UInt64) -> Drip {
   Drip(bytes: text.to_bytes(), position: 0, step: step)
 }
 

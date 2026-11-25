@@ -5,7 +5,7 @@ trait Scaled {
     self.mass() * factor
   }
 
-  fn labels(self, names: Slice[String] = ["light", "heavy"]) -> UInt64 {
+  fn labels(self, names: List[String] = ["light", "heavy"]) -> UInt64 {
     names[0].length() + names[1].length()
   }
 }
@@ -31,7 +31,7 @@ fn fill(items: mut List[Int64] = []) -> UInt64 {
   items.length()
 }
 
-fn greet(name: StringSlice = "world", tags: Slice[Int64] = [1, 2]) -> UInt64 {
+fn greet(name: String = "world", tags: List[Int64] = [1, 2]) -> UInt64 {
   name.length() + tags.length()
 }
 
@@ -45,16 +45,18 @@ fn scale(value: Int64, factor: Int64 = 2) -> Int64 {
 
 let doubled: Int64 = scale(5)
 
-fn count_letters(names: Slice[String] = ["ab", "cde"]) -> UInt64 {
+fn count_letters(names: List[String] = ["ab", "cde"]) -> UInt64 {
   names[0].length() + names[1].length()
 }
 
-fn mark_first(names: mut Slice[String] = ["ab", "cde"]) -> UInt64 {
+fn mark_first(names: mut List[String] = ["ab", "cde"]) -> UInt64
+  modifies names[..]
+{
   mut names[0].push("!")
   names[0].length() + names[1].length()
 }
 
-fn checked_count(names: Slice[String] = ["ab", "cde"]) -> Option[UInt64] {
+fn checked_count(names: List[String] = ["ab", "cde"]) -> Option[UInt64] {
   if names.length() == 0 {
     return None
   }

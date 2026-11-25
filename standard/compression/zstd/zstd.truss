@@ -25,7 +25,7 @@ impl Display for Error {
   }
 }
 
-fn malformed[Value](message: StringSlice) -> Result[Value, Error] {
+fn malformed[Value](message: String) -> Result[Value, Error] {
   Err(Error.Malformed(message: message.to_string()))
 }
 
@@ -83,13 +83,13 @@ fn highest_bit(value: UInt32) -> UInt32
   bit
 }
 
-fn byte_at(bytes: Slice[UInt8], at: UInt64) -> UInt64
+fn byte_at(bytes: List[UInt8], at: UInt64) -> UInt64
   ensures result <= UInt8.maximum
 {
   if at < bytes.length() { intrinsic.convert(bytes[at]) } else { 0 }
 }
 
-fn little_endian(bytes: Slice[UInt8], at: UInt64, count: UInt64) -> UInt64 {
+fn little_endian(bytes: List[UInt8], at: UInt64, count: UInt64) -> UInt64 {
   var value: UInt64 = 0
   for index in 0..count {
     if index < 8 {
@@ -99,13 +99,13 @@ fn little_endian(bytes: Slice[UInt8], at: UInt64, count: UInt64) -> UInt64 {
   value
 }
 
-fn u16_at(bytes: Slice[UInt8], at: UInt64) -> UInt64
+fn u16_at(bytes: List[UInt8], at: UInt64) -> UInt64
   ensures result <= UInt16.maximum
 {
   byte_at(bytes, at: at) | (byte_at(bytes, at: at.saturating_add(1)) << 8)
 }
 
-fn u32_at(bytes: Slice[UInt8], at: UInt64) -> UInt64
+fn u32_at(bytes: List[UInt8], at: UInt64) -> UInt64
   ensures result <= UInt32.maximum
 {
   little_endian(bytes, at: at, count: 4) & 0xFFFFFFFF
@@ -120,7 +120,7 @@ fn Forward.read(mut self, count: UInt32) -> UInt32
   var value: UInt32 = 0
   for index in 0..count {
     let position = self.bit.saturating_add(intrinsic.convert[UInt32, UInt64](index))
-    let byte = byte_at(self.bytes.slice(), at: position / 8)
+    let byte = byte_at(self.bytes, at: position / 8)
     let bit: UInt32 = intrinsic.convert((byte >> (position % 8)) & 1)
     value = value | (bit << index)
   }
@@ -142,7 +142,7 @@ fn Backward.is_exhausted(self) -> Bool {
   self.remaining == 0 && self.overrun == 0
 }
 
-fn backward_of(bytes: Slice[UInt8]) -> Result[Backward, Error] {
+fn backward_of(bytes: List[UInt8]) -> Result[Backward, Error] {
   if bytes.is_empty() {
     return malformed("an empty bit stream")
   }
@@ -162,11 +162,11 @@ fn Backward.peek(self, count: UInt32) -> UInt32
   let mask: UInt64 = (1 << intrinsic.convert[UInt32, UInt64](count)) - 1
   if wanted <= self.remaining {
     let at = self.remaining - wanted
-    let word = little_endian(self.bytes.slice(), at: at / 8, count: 8)
+    let word = little_endian(self.bytes, at: at / 8, count: 8)
     return intrinsic.convert((word >> (at % 8)) & mask & 0xFFFFFFFF)
   }
   let available: UInt64 = self.remaining
-  let low = little_endian(self.bytes.slice(), at: 0, count: 8) & ((1 << available) - 1)
+  let low = little_endian(self.bytes, at: 0, count: 8) & ((1 << available) - 1)
   intrinsic.convert((low << (intrinsic.convert[UInt32, UInt64](count) - available)) & mask & 0xFFFFFFFF)
 }
 
@@ -194,7 +194,7 @@ internal type FseEntry(symbol: UInt16, bits: UInt32, baseline: UInt32)
 internal type FseTable(log: UInt32, entries: List[FseEntry])
   invariant log <= 9
 
-internal fn spread_symbols(counts: Slice[Int16], log: UInt32) -> Result[List[UInt16], Error]
+internal fn spread_symbols(counts: List[Int16], log: UInt32) -> Result[List[UInt16], Error]
   requires log <= 9
 {
   let size: UInt64 = 1 << intrinsic.convert[UInt32, UInt64](log)
@@ -239,7 +239,7 @@ internal fn spread_symbols(counts: Slice[Int16], log: UInt32) -> Result[List[UIn
   Ok(own symbols)
 }
 
-internal fn build_fse(counts: Slice[Int16], log: UInt32) -> Result[FseTable, Error] {
+internal fn build_fse(counts: List[Int16], log: UInt32) -> Result[FseTable, Error] {
   if log > 9 {
     return malformed("an FSE table too large")
   }
@@ -281,7 +281,7 @@ internal fn build_fse(counts: Slice[Int16], log: UInt32) -> Result[FseTable, Err
 
 type Counts(values: List[Int16], log: UInt32, consumed: UInt64)
 
-fn read_counts(bytes: Slice[UInt8], maximum_symbol: UInt64, maximum_log: UInt32) -> Result[Counts, Error]
+fn read_counts(bytes: List[UInt8], maximum_symbol: UInt64, maximum_log: UInt32) -> Result[Counts, Error]
   requires maximum_log <= 9 && maximum_symbol <= 255 {
   var reader = Forward(bytes: bytes.to_list(), bit: 0)
   let log = (mut reader.read(4) & 15) + 5
@@ -364,7 +364,7 @@ fn next_state(table: FseTable, entry: FseEntry, stream: mut Backward) -> UInt64 
   intrinsic.convert[UInt32, UInt64](entry.baseline) + intrinsic.convert[UInt32, UInt64](mut stream.read(entry.bits))
 }
 
-fn decode_weights(bytes: Slice[UInt8], at: UInt64) -> Result[Weights, Error] {
+fn decode_weights(bytes: List[UInt8], at: UInt64) -> Result[Weights, Error] {
   if at >= bytes.length() {
     return malformed("a missing Huffman header")
   }
@@ -387,7 +387,7 @@ fn decode_weights(bytes: Slice[UInt8], at: UInt64) -> Result[Weights, Error] {
   }
   let section = bytes[at + 1..at + 1 + header]
   let counts = read_counts(section, maximum_symbol: 255, maximum_log: 6)?
-  let table = build_fse(counts.values.slice(), log: counts.log)?
+  let table = build_fse(counts.values, log: counts.log)?
   if counts.consumed >= section.length() {
     return malformed("Huffman weights without a bit stream")
   }
@@ -423,7 +423,7 @@ fn decode_weights(bytes: Slice[UInt8], at: UInt64) -> Result[Weights, Error] {
 
 type HuffmanRead(table: Huffman, consumed: UInt64)
 
-fn read_huffman(bytes: Slice[UInt8], at: UInt64) -> Result[HuffmanRead, Error] {
+fn read_huffman(bytes: List[UInt8], at: UInt64) -> Result[HuffmanRead, Error] {
   let read = decode_weights(bytes, at: at)?
   var weights = own read.values
   var total: UInt32 = 0
@@ -488,7 +488,7 @@ fn read_huffman(bytes: Slice[UInt8], at: UInt64) -> Result[HuffmanRead, Error] {
   Ok(HuffmanRead(table: Huffman(bits: bits, symbols: own symbols, lengths: own lengths), consumed: read.consumed))
 }
 
-fn decode_huffman_stream(table: Huffman, stream: Slice[UInt8], count: UInt64, output: mut List[UInt8]) -> Result[Unit, Error] {
+fn decode_huffman_stream(table: Huffman, stream: List[UInt8], count: UInt64, output: mut List[UInt8]) -> Result[Unit, Error] {
   var reader = backward_of(stream)?
   for _ in 0..count {
     let index: UInt64 = intrinsic.convert(reader.peek(table.bits))
@@ -514,7 +514,7 @@ type FrameState(
   repeats: Array[UInt64, 3],
 )
 
-fn decode_literals(block: Slice[UInt8], state: mut FrameState) -> Result[Literals, Error] {
+fn decode_literals(block: List[UInt8], state: mut FrameState) -> Result[Literals, Error] {
   if block.is_empty() {
     return malformed("a block without literals")
   }
@@ -599,7 +599,7 @@ fn decode_literals(block: Slice[UInt8], state: mut FrameState) -> Result[Literal
 
 type TableRead(table: FseTable, consumed: UInt64)
 
-fn read_table(block: Slice[UInt8], at: UInt64, mode: UInt64, defaults: Slice[Int16], default_log: UInt32, maximum_symbol: UInt64, maximum_log: UInt32, previous: Option[FseTable]) -> Result[TableRead, Error]
+fn read_table(block: List[UInt8], at: UInt64, mode: UInt64, defaults: List[Int16], default_log: UInt32, maximum_symbol: UInt64, maximum_log: UInt32, previous: Option[FseTable]) -> Result[TableRead, Error]
   requires maximum_log <= 9 && maximum_symbol <= 255 {
   if mode == 0 {
     return Ok(TableRead(table: build_fse(defaults, log: default_log)?, consumed: 0))
@@ -613,7 +613,7 @@ fn read_table(block: Slice[UInt8], at: UInt64, mode: UInt64, defaults: Slice[Int
   }
   if mode == 2 {
     let counts = read_counts(block[at..], maximum_symbol: maximum_symbol, maximum_log: maximum_log)?
-    return Ok(TableRead(table: build_fse(counts.values.slice(), log: counts.log)?, consumed: counts.consumed))
+    return Ok(TableRead(table: build_fse(counts.values, log: counts.log)?, consumed: counts.consumed))
   }
   match previous {
     Some(table) => Ok(TableRead(table: table.copy(), consumed: 0))
@@ -625,7 +625,7 @@ fn entry_of(table: FseTable, state: UInt64) -> Result[FseEntry, Error] {
   if state < table.entries.length() { Ok(table.entries[state]) } else { malformed("an FSE state out of range") }
 }
 
-fn decode_sequences(block: Slice[UInt8], literals: Slice[UInt8], state: mut FrameState, output: mut List[UInt8], limit: UInt64) -> Result[Unit, Error] {
+fn decode_sequences(block: List[UInt8], literals: List[UInt8], state: mut FrameState, output: mut List[UInt8], limit: UInt64) -> Result[Unit, Error] {
   if block.is_empty() {
     return malformed("a block without a sequences section")
   }
@@ -744,7 +744,7 @@ fn decode_sequences(block: Slice[UInt8], literals: Slice[UInt8], state: mut Fram
   Ok(Unit)
 }
 
-fn decode_frame(input: Slice[UInt8], at: UInt64, output: mut List[UInt8], limit: UInt64) -> Result[UInt64, Error] {
+fn decode_frame(input: List[UInt8], at: UInt64, output: mut List[UInt8], limit: UInt64) -> Result[UInt64, Error] {
   if at >= input.length() || input.length() - at < 6 {
     return malformed("a frame without its header")
   }
@@ -817,7 +817,7 @@ fn decode_frame(input: Slice[UInt8], at: UInt64, output: mut List[UInt8], limit:
       if literals.consumed > block.length() {
         return malformed("literals past their block")
       }
-      decode_sequences(block[literals.consumed..], literals: literals.bytes.slice(), state: mut state, output: mut output, limit: limit)?
+      decode_sequences(block[literals.consumed..], literals: literals.bytes, state: mut state, output: mut output, limit: limit)?
       index += size
     } else {
       return malformed("a block of the reserved type")
@@ -846,7 +846,7 @@ fn decode_frame(input: Slice[UInt8], at: UInt64, output: mut List[UInt8], limit:
   malformed("a frame without a last block")
 }
 
-public fn decompress(input: Slice[UInt8], limit: UInt64 = 268435456) -> Result[List[UInt8], Error] {
+public fn decompress(input: List[UInt8], limit: UInt64 = 268435456) -> Result[List[UInt8], Error] {
   var output: List[UInt8] = []
   var index: UInt64 = 0
   if input.is_empty() {

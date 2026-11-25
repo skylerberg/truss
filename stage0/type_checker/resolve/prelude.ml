@@ -36,11 +36,9 @@ let items : Well_known.t list =
     Range;
     Exit_code;
     String;
-    String_slice;
     From_template;
     Template;
     List;
-    Slice;
     From_elements;
     Sequence;
     Finite_set;

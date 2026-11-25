@@ -4,6 +4,7 @@ type failure = Echo | Todo
 type helper =
   | Lend
   | Compare_bytes
+  | Find_byte
   | Float64_bits
   | Float32_bits
   | Float64_from_bits
@@ -131,6 +132,7 @@ let runtime_declarations =
 let render_helper_name = function
   | Lend -> "truss_lend"
   | Compare_bytes -> "truss_compare_bytes"
+  | Find_byte -> "truss_find_byte"
   | Float64_bits -> "truss_float64_bits"
   | Float32_bits -> "truss_float32_bits"
   | Float64_from_bits -> "truss_float64_from_bits"
@@ -238,6 +240,16 @@ __attribute__((unused)) static inline void truss_lend_transfer(struct truss_lend
       {|static inline int32_t truss_compare_bytes(const void *first, const void *second, uint64_t count) {
   int order = __builtin_memcmp(first, second, count);
   return (order > 0) - (order < 0);
+}
+|}
+    );
+    ( Find_byte,
+      {|static inline uint64_t truss_find_byte(const void *bytes, uint64_t count, uint8_t byte) {
+  if (count == 0) {
+    return 0;
+  }
+  const unsigned char *found = __builtin_memchr(bytes, byte, count);
+  return found ? (uint64_t)(found - (const unsigned char *)bytes) : count;
 }
 |}
     );

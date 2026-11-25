@@ -191,6 +191,101 @@ let list_evaluated_asserts (code : Tree.t) =
     code;
   List.rev !evaluated
 
+let rec list_leading_fields : Tree.projection list -> string list = function
+  | Field field :: projections -> field :: list_leading_fields projections
+  | (Variant_field _ | Element _ | Range _) :: _ | [] -> []
+
+let append_fields (place : Tree.place) fields =
+  { place with projections = place.projections @ List.map (fun field -> Tree.Field field) fields }
+
+let list_mut_provided_places (provided : Tree.provided list) =
+  List.filter_map
+    (fun (implementation : Tree.provided) ->
+      match (implementation.mode, implementation.value) with
+      | Language.Mode.Mut, Borrow { place; _ } -> Some place
+      | Mut, (Use _ | Take _ | Immediate _) | (Read | Own), _ -> None)
+    provided
+
+type changed = { origin : Core.origin; place : Tree.place; is_elements : bool }
+
+let classify_changed_part (changed : changed) =
+  let fields = list_leading_fields changed.place.projections in
+  ( fields,
+    match List.drop (List.length fields) changed.place.projections with
+    | [] -> changed.is_elements
+    | (Element _ | Range _) :: _ -> true
+    | (Field _ | Variant_field _) :: _ -> false )
+
+let list_changed_places ~list_modified (blocks : Tree.block list) =
+  let changed = ref [] in
+  let note origin place = changed := { origin; place; is_elements = false } :: !changed in
+  let note_passed origin callee position place =
+    match list_modified callee position with
+    | Some modified ->
+        List.iter
+          (fun (part : Types.modified) ->
+            changed :=
+              {
+                origin;
+                place = append_fields place part.field_path;
+                is_elements = part.is_elements;
+              }
+              :: !changed)
+          modified
+    | None -> note origin place
+  in
+  let note_arguments origin (call : Tree.call) =
+    List.iteri
+      (fun position (argument : Tree.argument) ->
+        match argument with
+        | { mode = Language.Mode.Mut; value = Borrow { place; _ } | Use { place; _ }; _ } ->
+            note_passed origin call.callee position place
+        | { mode = Mut; value = Take _ | Immediate _; _ } | { mode = Read | Own; _ } -> ())
+      call.arguments
+  in
+  let rec note_lent origin : Tree.yielded -> unit = function
+    | Part (Borrow { place; _ }) -> note origin place
+    | Part _ -> ()
+    | Built { fields; _ } ->
+        List.iter (fun (_, field) -> Option.iter (note_lent origin) field) fields
+  in
+  let note_local origin local = note origin { Tree.root = Local local; projections = [] } in
+  let rec visit (block : Tree.block) =
+    List.iter
+      (fun (statement : Tree.statement) ->
+        let origin = statement.origin in
+        (match statement.kind with
+        | Basic (Assign { target; value = Operand (Borrow { place; mode = Language.Mode.Mut; _ }) })
+          ->
+            note origin target;
+            note origin place
+        | Basic (Assign { target; _ }) | Choose { target; _ } -> note origin target
+        | Basic (Call { destination; call }) ->
+            Option.iter (note origin) destination;
+            note_arguments origin call
+        | Basic (Lend { call; _ }) -> note_arguments origin call
+        | Provide { target; provided; _ } ->
+            note origin target;
+            List.iter (note origin) (list_mut_provided_places provided)
+        | For { iteration = Pull { cursor; next; _ }; _ } -> note_passed origin next 0 cursor
+        | Yield { mode = Language.Mode.Mut; part } -> note_lent origin part
+        | Jump (Cancel { winner; returned; _ }) ->
+            note_local origin winner;
+            Option.iter (fun (_, local) -> note_local origin local) returned
+        | Basic
+            ( Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
+            | Path_note _ | Proof _ | Evaluated_assert _ )
+        | Assert_by_bit_vector _ | While _ | Fork _ | Resume _
+        | For { iteration = Range _; _ }
+        | Yield { mode = Read | Own; _ }
+        | Jump (Return _ | Break | Continue | Unreachable | Written_unreachable | Todo) ->
+            ());
+        List.iter visit (list_nested_blocks statement))
+      block.statements
+  in
+  List.iter visit blocks;
+  List.rev !changed
+
 let find_callee (statement : Tree.statement) : Tree.callee option =
   match statement.kind with
   | Basic (Call { call; _ } | Lend { call; _ }) -> Some call.callee

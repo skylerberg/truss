@@ -1,4 +1,4 @@
-fn f(name: StringSlice, count: UInt8) -> UInt8 {
+fn f(name: String, count: UInt8) -> UInt8 {
   if name.length() > 3 {
     count + 1
   } else {

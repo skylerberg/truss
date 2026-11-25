@@ -4,7 +4,7 @@ fn doubled(items: mut List[Int64]) {
   }
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Console
 {
   var numbers: List[Int64] = [1, 2, 3, 4]

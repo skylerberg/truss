@@ -3,11 +3,11 @@ use standard.console
 type Recorded(lines: List[String])
 
 impl Console for Recorded {
-  fn print_line(mut self, text: StringSlice) {
-    mut self.lines.push(text.to_string())
+  fn print_line(mut self, text: String) {
+    mut self.lines.push(text.copy())
   }
 
-  fn print_error(mut self, text: StringSlice) {
+  fn print_error(mut self, text: String) {
     mut self.lines.push("error: ${text}")
   }
 
@@ -15,7 +15,7 @@ impl Console for Recorded {
     None
   }
 
-  fn print(self, text: StringSlice) {}
+  fn print(self, text: String) {}
 
   fn input(self) -> console.Input { todo }
 
@@ -29,11 +29,11 @@ impl Console for Recorded {
 type Quiet()
 
 impl Console for Quiet {
-  fn print_line(self, text: StringSlice) {}
-  fn print_error(self, text: StringSlice) {}
+  fn print_line(self, text: String) {}
+  fn print_error(self, text: String) {}
   fn read_line(self) -> Option[String] { Some("typed") }
 
-  fn print(self, text: StringSlice) {}
+  fn print(self, text: String) {}
 
   fn input(self) -> console.Input { todo }
 
@@ -49,11 +49,11 @@ type Prefixed(prefix: String)
 impl Console for Prefixed
   uses Console
 {
-  fn print_line(self, text: StringSlice) {
-    Console.print_line("${self.prefix}${text}".slice())
+  fn print_line(self, text: String) {
+    Console.print_line("${self.prefix}${text}")
   }
 
-  fn print_error(self, text: StringSlice) {
+  fn print_error(self, text: String) {
     Console.print_error(text)
   }
 
@@ -61,7 +61,7 @@ impl Console for Prefixed
     Console.read_line()
   }
 
-  fn print(self, text: StringSlice) {
+  fn print(self, text: String) {
     Console.print(text)
   }
 
@@ -82,11 +82,11 @@ impl Console for Prefixed
   }
 }
 
-fn greet(name: StringSlice) -> UInt64
+fn greet(name: String) -> UInt64
   uses Console
 {
-  Console.print_line("hello ${name}".slice())
-  Console.print_error("done".slice())
+  Console.print_line("hello ${name}")
+  Console.print_error("done")
   name.length()
 }
 

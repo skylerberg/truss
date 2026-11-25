@@ -7,6 +7,7 @@ let rec visit_type_expression on_expression (type_ : Syntax.type_expression) =
         inputs;
       Option.iter (visit_type_expression on_expression) output;
       List.iter (visit_clause on_expression) clauses
+  | View_type viewed -> visit_type_expression on_expression viewed
   | Self_type _ | Associated _ | Type_error -> ()
 
 and visit_path_type on_expression (path : Syntax.path_type) =
@@ -39,6 +40,7 @@ and visit_clause on_expression (clause : Syntax.clause) =
   | Uses uses -> List.iter (visit_capability_use on_expression) uses
   | Requires value | Ensures value -> on_expression value
   | Decreases measures -> List.iter on_expression measures
+  | Modifies parts -> List.iter on_expression parts
   | Cost cost -> (
       match cost.bound with Big_o value | At_most value | Exactly value -> on_expression value)
   | Clause_error -> ()
@@ -306,6 +308,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
           inputs;
         Option.iter walk_type output;
         List.iter walk_clause clauses
+    | View_type viewed -> walk_type viewed
     | Type_error -> ()
   and walk_path_type (path_type : Syntax.path_type) =
     walk_path path_type.path;
@@ -344,6 +347,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
     | Uses uses -> List.iter walk_capability_use uses
     | Requires value | Ensures value -> walk_expression value
     | Decreases measures -> List.iter walk_expression measures
+    | Modifies parts -> List.iter walk_expression parts
     | Cost cost -> (
         (match cost.resource with
         | Calls (Call_parameter name) -> on_name name

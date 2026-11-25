@@ -1,20 +1,20 @@
-type Holder(view: Slice[Meter], tag: UInt32)
+type Holder(meters: view List[Meter], tag: UInt32)
 
-fn hold(meters: Slice[Meter]) -> Holder
-  ensures identical(result.view, meters)
+fn hold(meters: List[Meter]) -> Holder
+  ensures identical(result.meters, meters)
   cost amortized time O(1)
 {
-  Holder(view: meters, tag: 0)
+  Holder(meters: meters, tag: 0)
 }
 
-fn spend_first(meters: mut Slice[Meter])
+fn spend_first(meters: mut List[Meter])
   requires meters.length() > 0
   cost amortized time O(1)
 {
   mut meters[0].spend()
 }
 
-fn spends_after_holding(meters: mut Slice[Meter])
+fn spends_after_holding(meters: mut List[Meter])
   requires meters.length() > 0
   cost time O(1)
 {

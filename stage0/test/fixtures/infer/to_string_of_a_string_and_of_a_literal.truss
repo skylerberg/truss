@@ -1,7 +1,0 @@
-fn f(name: own String) -> String {
-  name.to_string()
-}
-
-fn g() -> String {
-  "x".to_string()
-}

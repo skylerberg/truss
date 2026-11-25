@@ -1,0 +1,9 @@
+fn total(bytes: List[UInt8]) -> UInt64 {
+  bytes.length()
+}
+
+fn f() -> UInt64 {
+  let value = 1
+  let bytes = value.to_big_endian_bytes()
+  total(bytes)
+}

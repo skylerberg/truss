@@ -14,7 +14,7 @@ impl Display for Error {
   }
 }
 
-fn failure(message: StringSlice) -> Error {
+fn failure(message: String) -> Error {
   Error(message: message.to_string())
 }
 
@@ -83,7 +83,7 @@ let huffman_counts: Array[UInt16, 31] = [0, 0, 0, 0, 0, 10, 26, 32, 6, 0, 5, 3, 
 
 let huffman_offsets: Array[UInt16, 31] = [0, 0, 0, 0, 0, 0, 10, 36, 68, 74, 74, 79, 82, 84, 90, 92, 95, 95, 95, 95, 98, 106, 119, 145, 174, 186, 190, 205, 224, 253, 253]
 
-fn entry_size(name: StringSlice, value: StringSlice) -> UInt64 {
+fn entry_size(name: String, value: String) -> UInt64 {
   name.length().saturating_add(value.length()).saturating_add(32)
 }
 
@@ -101,7 +101,7 @@ fn evict(table: mut Table) {
   }
 }
 
-fn insert(table: mut Table, name: StringSlice, value: StringSlice) {
+fn insert(table: mut Table, name: String, value: String) {
   let size = entry_size(name, value: value)
   if size > table.limit {
     mut table.entries.clear()
@@ -146,7 +146,7 @@ fn entry_value(table: Table, index: UInt64) -> Result[String, Error] {
   Ok(table.entries[table.entries.length() - 1 - position].value.copy())
 }
 
-fn read_integer(block: Slice[UInt8], at: mut UInt64, prefix_bits: UInt64) -> Result[UInt64, Error] {
+fn read_integer(block: List[UInt8], at: mut UInt64, prefix_bits: UInt64) -> Result[UInt64, Error] {
   if at >= block.length() || prefix_bits == 0 || prefix_bits > 8 {
     return Err(failure("a header block that ends early"))
   }
@@ -172,7 +172,7 @@ fn read_integer(block: Slice[UInt8], at: mut UInt64, prefix_bits: UInt64) -> Res
   Err(failure("a header block that ends early"))
 }
 
-fn huffman_decode(bytes: Slice[UInt8]) -> Result[List[UInt8], Error] {
+fn huffman_decode(bytes: List[UInt8]) -> Result[List[UInt8], Error] {
   var output: List[UInt8] = List.with_capacity(bytes.length())
   var code: UInt32 = 0
   var length: UInt64 = 0
@@ -208,7 +208,7 @@ fn huffman_decode(bytes: Slice[UInt8]) -> Result[List[UInt8], Error] {
   Ok(own output)
 }
 
-fn huffman_length(bytes: Slice[UInt8]) -> UInt64 {
+fn huffman_length(bytes: List[UInt8]) -> UInt64 {
   var bits: UInt64 = 0
   for byte in bytes {
     bits = bits.saturating_add(intrinsic.convert(huffman_lengths[intrinsic.convert[UInt8, UInt64](byte)]))
@@ -216,7 +216,7 @@ fn huffman_length(bytes: Slice[UInt8]) -> UInt64 {
   bits.saturating_add(7) / 8
 }
 
-fn huffman_encode(output: mut List[UInt8], bytes: Slice[UInt8]) {
+fn huffman_encode(output: mut List[UInt8], bytes: List[UInt8]) {
   var pending: UInt64 = 0
   var bits: UInt64 = 0
   for byte in bytes {
@@ -242,7 +242,7 @@ fn huffman_encode(output: mut List[UInt8], bytes: Slice[UInt8]) {
   }
 }
 
-fn read_string(block: Slice[UInt8], at: mut UInt64) -> Result[String, Error] {
+fn read_string(block: List[UInt8], at: mut UInt64) -> Result[String, Error] {
   if at >= block.length() {
     return Err(failure("a header block that ends early"))
   }
@@ -266,13 +266,13 @@ public fn Decoder.new(limit: UInt64 = 4096) -> Decoder {
   Decoder(table: Table(entries: [], size: 0, limit: limit), maximum: limit)
 }
 
-public fn Decoder.decode(mut self, block: Slice[UInt8], list_limit: UInt64 = 65536) -> Result[List[Field], Error]
+public fn Decoder.decode(mut self, block: List[UInt8], list_limit: UInt64 = 65536) -> Result[List[Field], Error]
   uses RunForever
 {
   decode_block(mut self.table, maximum: self.maximum, block: block, list_limit: list_limit)
 }
 
-fn decode_block(table: mut Table, maximum: UInt64, block: Slice[UInt8], list_limit: UInt64) -> Result[List[Field], Error]
+fn decode_block(table: mut Table, maximum: UInt64, block: List[UInt8], list_limit: UInt64) -> Result[List[Field], Error]
   uses RunForever
 {
   var fields: List[Field] = []
@@ -332,7 +332,7 @@ fn write_integer(output: mut List[UInt8], flags: UInt8, prefix_bits: UInt64, val
   mut output.push(intrinsic.convert(rest & 255))
 }
 
-fn write_string(output: mut List[UInt8], text: StringSlice) {
+fn write_string(output: mut List[UInt8], text: String) {
   let bytes = text.bytes()
   let compressed = huffman_length(bytes)
   if compressed < bytes.length() {
@@ -357,7 +357,7 @@ public fn Encoder.set_limit(mut self, limit: UInt64) {
   }
 }
 
-public fn Encoder.encode(mut self, fields: Slice[Field]) -> List[UInt8] {
+public fn Encoder.encode(mut self, fields: List[Field]) -> List[UInt8] {
   var output: List[UInt8] = []
   match self.pending_limit {
     Some(limit) => {
