@@ -286,7 +286,7 @@ let make_empty_parts context frame element =
   Facts.assume context frame
     (Logic.equal (Models.make_sequence_length context element parts) (Logic.int 0));
   Facts.assume context frame
-    (make_each_sum context element (fun sum _ -> Logic.equal (sum parts) Costs.zero));
+    (make_each_sum context element (fun sum _ -> Logic.equal (sum parts) (Logic.int 0)));
   parts
 
 let append_part context frame element parts part =

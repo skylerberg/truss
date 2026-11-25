@@ -53,5 +53,7 @@ val find_method_contract :
   State.contract option
 
 val find_integer_literal : Mir.formula -> Z.t option
-val deduplicate_counters : 'a list -> 'a list
-val find_resource : Mir.cost -> locals:Logic.term Locals.t -> Costs.resource option
+val mentions_specification : Mir.formula -> (Mir.specification -> bool) -> bool
+val mentions_result : Mir.formula -> bool
+val mentions_history : Mir.formula -> bool
+val find_promiser : Lookups.t -> State.source -> Catalog.Prover.promiser

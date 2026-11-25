@@ -25,6 +25,15 @@ let make_float_equal left right =
 let make_float_less left right =
   Logic.(not_ (is_nan left) &&& is_nan right ||| Operation (Fp_lt, [ left; right ]))
 
+let rec compare_lexicographically before after =
+  match (before, after) with
+  | [ right ], [ left ] -> Logic.(less_equal (int 0) right &&& less left right)
+  | right :: before, left :: after ->
+      Logic.(
+        less_equal (int 0) right
+        &&& (less left right ||| (equal left right &&& compare_lexicographically before after)))
+  | _ -> Logic.Boolean true
+
 let compare_terms ty (compared : Language.Comparison.t) left right =
   if Facts.find_float_format ty <> None then
     match compared with
@@ -90,52 +99,6 @@ let convert_from_integer context frame (site : Invocation.site) term =
     (Out_of_range { at = Facts.quote frame.source site.origin; type_ = ty })
     (Facts.make_in_range ty term);
   term
-
-let spend (context : State.context) (frame : State.frame) (amount_of : Costs.counter -> Logic.term)
-    =
-  if context.counters = [] then frame
-  else
-    {
-      frame with
-      State.spent =
-        List.map
-          (fun (counter, term) ->
-            if List.mem counter context.counters then (counter, Costs.plus term (amount_of counter))
-            else (counter, term))
-          frame.spent;
-    }
-
-let declare_unknown_amount context frame (counter : Costs.counter) =
-  let amount = Facts.declare_fresh context frame "spent" Logic.Int in
-  Facts.assume context frame (Logic.less_equal (Costs.least_amount counter.resource) amount);
-  amount
-
-let spend_operation context frame ~potential_change ?(note = fun _ _ -> ())
-    (charge_of : Costs.counter -> Costs.charge) =
-  let change = Option.map Lazy.from_fun potential_change in
-  spend context frame (fun counter ->
-      let ({ amount; counted } : Costs.charge) = charge_of counter in
-      let find_change () =
-        match Option.map Lazy.force change with
-        | change -> change
-        | exception Facts.Unsupported _ -> None
-      in
-      let amount =
-        match (counted, counter.amortized) with
-        | No_potential, false | (Potential_change | Potential_growth), true -> amount
-        | No_potential, true -> (
-            match find_change () with
-            | Some change -> Costs.plus amount change
-            | None -> declare_unknown_amount context frame counter)
-        | Potential_change, false -> (
-            match find_change () with Some change -> Costs.minus amount change | None -> amount)
-        | Potential_growth, false -> (
-            match find_change () with
-            | Some change -> Costs.minus amount (Costs.at_least_zero change)
-            | None -> amount)
-      in
-      note counter amount;
-      amount)
 
 let list_impl_packages (context : State.context) (ty : Types.ty) =
   List.sort_uniq compare
@@ -378,6 +341,12 @@ let find_innermost_axiom (context : State.context) (frame : State.frame) term =
          named <> [] && List.for_all (fun name -> List.mem name axiom.parameters) named ->
       Some axiom
   | _ -> None
+
+let assume_typed context (frame : State.frame) term =
+  let guarded = Logic.( ==> ) frame.condition term in
+  match find_innermost_axiom context frame guarded with
+  | Some axiom -> axiom.hypotheses <- guarded :: axiom.hypotheses
+  | None -> Facts.assume context frame term
 
 let rec map_each_value context (frame : State.frame) value make =
   if not (Logic.mentions frame.bound value) then make frame value

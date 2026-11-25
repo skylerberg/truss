@@ -272,17 +272,25 @@ let find_integer_literal (formula : Mir.formula) =
   | { statements = []; value = Some (Immediate { value = Integer number; _ }) } -> Some number
   | _ -> None
 
-let deduplicate_counters counters =
-  List.fold_left
-    (fun distinct counter -> if List.mem counter distinct then distinct else distinct @ [ counter ])
-    [] counters
+let mentions_specification (formula : Mir.formula) is_one =
+  let mentions = ref false in
+  let visit (statement : Mir.statement) =
+    match statement.kind with
+    | Basic (Assign { value = Specification value; _ }) when is_one value -> mentions := true
+    | _ -> ()
+  in
+  Mir.iter_formula visit formula;
+  !mentions
 
-let find_resource (cost : Mir.cost) ~locals : Costs.resource option =
-  match cost.resource with
-  | Metric metric -> Some (Metric metric)
-  | Calls (Function_parameter local) ->
-      Option.map
-        (fun term -> Costs.Calls (Through term))
-        (Locals.find_opt (Core_local local) locals)
-  | Calls (Capability path) -> Some (Calls (Capability path))
-  | Calls (Capability_method (path, name)) -> Some (Calls (Capability_method (path, name)))
+let mentions_result (clause : Mir.formula) =
+  mentions_specification clause (function Result -> true | _ -> false)
+
+let mentions_history (clause : Mir.formula) =
+  mentions_specification clause (function Yielded -> true | _ -> false)
+
+let find_promiser (lookups : Lookups.t) (source : State.source) : Catalog.Prover.promiser =
+  match source.key with
+  | { path = Method { owner; _ }; _ }
+    when Resolve.Names.find_kind lookups.interface.names owner = Some Resolve.Names.Capability ->
+      Capability_promiser
+  | _ -> Trait_promiser

@@ -38,13 +38,7 @@ val run_lambda_body :
   type_:Types.ty ->
   (State.frame * Logic.term) option
 
-val classify_counting : Mir.cost -> Costs.counting
-
-val list_loop_counters :
-  State.context -> Logic.term Locals.t -> Mir.body -> (Costs.counter * Types.condition) list
-
-val assign_counters : State.context -> (Costs.counter * Types.condition) list -> unit
-val list_facts_since : State.context -> int -> Logic.term list
+val run_code : State.context -> State.frame -> Mir.t -> type_:Types.ty -> State.frame * Logic.term
 
 val translate_lambda :
   State.context ->
