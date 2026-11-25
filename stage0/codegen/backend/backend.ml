@@ -5,7 +5,6 @@ let raise_bug format = Compiler_bug.raise_bug ~stage:"Backend" format
 module Item_table = Hashtbl.Make (Lowered.Item)
 
 type 'value ran = 'value Lowering.ran = Ran of 'value | Unfinished of string | Stopped of string
-type results = { find : string -> string option; add : string -> string -> unit }
 
 type t = {
   lookups : Lowering.lowered_lookups;
@@ -13,7 +12,6 @@ type t = {
   c_compiler : C_compiler.t;
   profile : profile;
   show_file : Path.file -> string;
-  results : results option;
   evaluation_cpu_time_limit_ms : int;
   programs : string;
   lowered : Lowering.lowered Item_table.t;
@@ -90,11 +88,6 @@ let read_lowered backend item =
       | Some (Error unbuildable) -> raise_unbuildable backend unbuildable
       | None -> raise_bug "%s is requested from code with errors" (Lowered.Item.to_string item))
 
-let read_test_key backend root =
-  match backend.lookups.read_test_key root with
-  | Ok test_key -> test_key
-  | Error unbuildable -> raise_unbuildable backend unbuildable
-
 let programs_built = Atomic.make 0
 
 let make_program_path backend =
@@ -102,20 +95,6 @@ let make_program_path backend =
     (Printf.sprintf "program-%d-%d" (Unix.getpid ()) (Atomic.fetch_and_add programs_built 1))
 
 let wall_clock_factor = 30
-let show_profile = function Development -> "development" | Release -> "release"
-let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-18 result key"
-
-let make_result_key backend root =
-  derive_result_key
-    (Cbor.encode
-       (Cbor.Array
-          [
-            Cbor.int Emit_c.version;
-            Cbor.Text (Libc.show_system backend.lookups.system);
-            Cbor.Text (show_profile backend.profile);
-            Bytes (C_compiler.make_fingerprint backend.c_compiler backend.profile);
-            Bytes (read_test_key backend root);
-          ]))
 
 let list_needed_evaluators backend roots =
   List.filter_map
@@ -255,11 +234,6 @@ and run_evaluators backend evaluators =
   let backend = { backend with profile = Development } in
   let has_run evaluator = Option.is_some (find_run backend evaluator) in
   let dependencies = Item_table.create 16 in
-  let find_stored_run evaluator =
-    Option.map
-      (fun output -> Ran output)
-      (Option.bind backend.results (fun results -> results.find (make_result_key backend evaluator)))
-  in
   let rec note_dependencies dependents evaluator =
     if List.exists (Lowered.Item.equal evaluator) dependents then
       match evaluator with
@@ -270,14 +244,11 @@ and run_evaluators backend evaluators =
           raise_bug "%s is evaluated by code that reads its result"
             (Lowered.Item.to_string evaluator)
     else if not (has_run evaluator || Item_table.mem dependencies evaluator) then
-      match find_stored_run evaluator with
-      | Some run -> record_run backend evaluator run
-      | None -> (
-          match list_needed_evaluators backend [ evaluator; Lowering.test_runner ] with
-          | needed ->
-              Item_table.replace dependencies evaluator needed;
-              List.iter (note_dependencies (evaluator :: dependents)) needed
-          | exception Cannot_build message -> record_run backend evaluator (Stopped message))
+      match list_needed_evaluators backend [ evaluator; Lowering.test_runner ] with
+      | needed ->
+          Item_table.replace dependencies evaluator needed;
+          List.iter (note_dependencies (evaluator :: dependents)) needed
+      | exception Cannot_build message -> record_run backend evaluator (Stopped message)
   in
   List.iter (note_dependencies []) evaluators;
   let find_run_without_a_program evaluator =
@@ -310,11 +281,7 @@ and run_evaluators backend evaluators =
         ~time_limit_ms:(wall_clock_factor * cpu_time_limit_ms)
         ~roots:(Array.to_list runnable) ~output:program;
       run_test_program program ~count:(Array.length runnable) (fun number record ->
-          let evaluator = runnable.(number) and run = make_run record in
-          (match (run, backend.results) with
-          | Ran output, Some results -> results.add (make_result_key backend evaluator) output
-          | _ -> ());
-          record_run backend evaluator run)
+          record_run backend runnable.(number) (make_run record))
     end
   in
   let rec run_ready () =
@@ -342,24 +309,18 @@ let capture_failure work =
   | exception Cannot_build message -> Error message
   | exception Test_report.Malformed message -> Error message
 
-let is_cacheable (record : Test_report.record) =
+let is_silent_pass (record : Test_report.record) =
   record.outcome = Passed && record.message = None && record.echo = None && record.output = None
 
-let find_stored results key =
-  Option.map
-    (fun microseconds ->
-      {
-        Test_report.outcome = Passed;
-        message = None;
-        echo = None;
-        output = None;
-        microseconds;
-        cached = true;
-      })
-    (Option.bind (Option.bind (results.find key) Cbor.decode) Cbor.find_int)
-
-let store results key (record : Test_report.record) =
-  results.add key (Cbor.encode (Cbor.int record.microseconds))
+let make_cached_record (pass : Lowering.test_pass) =
+  {
+    Test_report.outcome = Passed;
+    message = None;
+    echo = None;
+    output = None;
+    microseconds = pass.microseconds;
+    cached = true;
+  }
 
 type progress =
   | Lowering
@@ -397,11 +358,13 @@ let find_unfinished backend evaluators =
 
 let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_ms tests =
   capture_failure @@ fun () ->
-  let results = backend.results in
+  let compiler_fingerprint = C_compiler.make_fingerprint backend.c_compiler backend.profile in
   let roots = List.map Lowering.make_root tests in
   report_progress Lowering;
-  let is_keyed test =
-    results <> None && not (Interface.Definition.is_external_test backend.lookups.interface test)
+  let find_pass root =
+    match backend.lookups.find_test_pass root with
+    | Some pass when pass.compiler_fingerprint = compiler_fingerprint -> Some pass
+    | Some _ | None -> None
   in
   let known =
     List.mapi
@@ -410,16 +373,17 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
         | _ :: _ as todo_types ->
             ( index,
               root,
-              None,
+              false,
               Some (make_incomplete_record (describe_todo_types backend todo_types)) )
         | [] ->
-            let key = if is_keyed test then Some (make_result_key backend root) else None in
-            let known_record =
-              match (results, key) with
-              | Some results, Some key when not rerun -> find_stored results key
-              | _ -> None
+            let is_recordable =
+              not (Interface.Definition.is_external_test backend.lookups.interface test)
             in
-            (index, root, key, known_record))
+            let known_record =
+              if is_recordable && not rerun then Option.map make_cached_record (find_pass root)
+              else None
+            in
+            (index, root, is_recordable, known_record))
       (List.combine tests roots)
   in
   List.iter
@@ -465,10 +429,12 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
     run_test_program program ~count:(Array.length runnable)
       ~on_start:(fun number -> report_progress (Started { test = read_test_index number }))
       (fun number record ->
-        let _, _, key, _ = runnable.(number) in
-        (match (results, key) with
-        | Some results, Some key when is_cacheable record -> store results key record
-        | _ -> ());
+        let _, root, is_recordable, _ = runnable.(number) in
+        if is_recordable then
+          backend.lookups.record_test_run root
+            (if is_silent_pass record then
+               Some { compiler_fingerprint; microseconds = record.microseconds }
+             else None);
         end_test (read_test_index number) record)
   end;
   List.map
@@ -604,7 +570,7 @@ let evaluate backend evaluated =
       | Ok (Compiled _), _ -> raise_bug "%s is lowered to code" (Lowered.Item.to_string item))
     evaluated lowered
 
-let create ?(show_file = Path.show_file) ?results ?(evaluation_cpu_time_limit_ms = 10_000)
+let create ?(show_file = Path.show_file) ?(evaluation_cpu_time_limit_ms = 10_000)
     ?(programs = Filename.get_temp_dir_name ()) lookups c_compiler profile =
   {
     lookups;
@@ -612,7 +578,6 @@ let create ?(show_file = Path.show_file) ?results ?(evaluation_cpu_time_limit_ms
     c_compiler;
     profile;
     show_file;
-    results;
     evaluation_cpu_time_limit_ms;
     programs;
     lowered = Item_table.create 64;

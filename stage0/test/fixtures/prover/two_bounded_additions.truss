@@ -1,0 +1,6 @@
+fn f(count: UInt8) -> UInt8
+  requires count < 100
+{
+  let first = count + 1
+  first + 1
+}

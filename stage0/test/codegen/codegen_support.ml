@@ -194,17 +194,17 @@ let make_database packages =
 let make_example_package files : Project.package list =
   [ { name = { owner = None; name = "example" }; dependencies = []; files } ]
 
-let create_backend ?results ?evaluation_cpu_time_limit_ms ?(profile = Backend.Development) ~package
-    database =
+let create_backend ?evaluation_cpu_time_limit_ms ?(profile = Backend.Development) ~package database
+    =
   Database.For_testing.lower_roots database;
-  Backend.create ?results ?evaluation_cpu_time_limit_ms
+  Backend.create ?evaluation_cpu_time_limit_ms
     (match Database.find_lowered_lookups database [ package ] with
     | Ok lookups -> lookups
     | Error message -> failwith message)
     (Lazy.force c_compiler) profile
 
-let make_backend ?results ?evaluation_cpu_time_limit_ms ?profile database =
-  create_backend ?results ?evaluation_cpu_time_limit_ms ?profile ~package:example.package database
+let make_backend ?evaluation_cpu_time_limit_ms ?profile database =
+  create_backend ?evaluation_cpu_time_limit_ms ?profile ~package:example.package database
 
 let extend_standard_library files =
   Database.For_testing.extend_package ~loaded:(Lazy.force standard_package_database) files
@@ -222,7 +222,7 @@ let load_standard_probe ?(roots = []) (file : Path.file) text =
         (String.concat "" (List.map (Diagnostic.render ~is_colored:false source) diagnostics)));
   (database, create_backend ~package:Path.standard_package database)
 
-let load_checked ~list_diagnostics ?results ?(roots = []) ?profile files =
+let load_checked ~list_diagnostics ?(roots = []) ?profile files =
   let packages = make_example_package files in
   let database = make_database packages in
   List.iter (Database.For_testing.add_root database) roots;
@@ -235,15 +235,15 @@ let load_checked ~list_diagnostics ?results ?(roots = []) ?profile files =
           fail "the source has diagnostics:\n%s"
             (String.concat "" (List.map (Diagnostic.render ~is_colored:false source) diagnostics)))
     files;
-  (database, make_backend ?results ?profile database)
+  (database, make_backend ?profile database)
 
-let load_files ?results ?roots ?profile files =
-  load_checked ~list_diagnostics:Database.list_file_diagnostics ?results ?roots ?profile files
+let load_files ?roots ?profile files =
+  load_checked ~list_diagnostics:Database.list_file_diagnostics ?roots ?profile files
 
-let load ?results ?roots ?profile text =
+let load ?roots ?profile text =
   load_checked
     ~list_diagnostics:(Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers)
-    ?results ?roots ?profile
+    ?roots ?profile
     [ (example_file, text) ]
 
 let list_tests_in database (module_ : Path.module_) =

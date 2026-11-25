@@ -10,8 +10,6 @@
   lowered
   lowering
   emit_c
-  cbor
-  blake3
   c_compiler
   profile
   process

@@ -12,7 +12,7 @@ ask which definitions a change impacts.
 |---|---|---|
 | A change costs O(change) | Building, checking, proving, and answering a question do work in proportion to the rows that changed and the rows that depend on them, never to the project. | A reader depends on the smallest fact it reads. A fact that did not change stops propagation. No stage and no tool walks a package to answer a local question. |
 | A question is a query | A tool's question is answered by selecting rows. A new question needs a query, not a new traversal with an index of its own. | Identity, placement, state, dependencies, diagnostics, and each fact with a reader of its own are columns and rows. |
-| The database is a function of the files | Two databases built from the same files hold the same rows. | Every id is a function of the key it names. Two databases, such as two agents' worktrees, compare by set difference. |
+| The database is a function of the files | Two databases built from the same files hold the same rows. Nothing is kept for files that may come back, so switching branches is an edit like any other. | Every id is a function of the key it names. Two databases, such as two agents' worktrees, compare by set difference. |
 | The compiler stays an ordinary compiler | A pass is a pure function from values to values. | One orchestrator owns the database. No pass sees a table, and no read starts a computation. |
 
 ## Roles
@@ -129,6 +129,7 @@ ownership       (definition, state, must_be_disjoint)
 proof           (definition, state, value)
 hole            (definition, position, home, location)
 verdict         (definition, position, code, site, proven, trusts_compiled_code, failure)
+solver_run      (definition, position, input_hash, output)
 ```
 
 One row can hold several facts. A group of columns that some reader takes
@@ -147,6 +148,7 @@ of the groups whose columns changed.
 | `syntax.syntax_errors` | Every stage that asks whether a part of a definition is broken |
 | `hole` | `holes`, which reads no proof |
 | `verdict` | The editor's proof states, and an agent that asks which obligations are not proven |
+| `solver_run` | The definition's own Decide unit when it runs again |
 
 ### Facts of a dependency and an item
 
@@ -157,6 +159,7 @@ item           (id, definition, key)
 lowered        (item, state, code, is_evaluated, sites)
 test_key       (item, state, key)
 evaluation     (item, state, value)
+test_run       (item, state, compiler_fingerprint, microseconds)
 unit           (item, profile, state, text_hash)
 ```
 
@@ -249,10 +252,11 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Check unexported | Function, method, constant, or member constant, with the other stale units of the drain | `Package_checks.classify_uses`, then `Package_checks.run` with `Unexported` | The `references` edges into the definition, one user at a time, and the declaration of each user | Diagnostics |
 | Check a dependency | Dependency | `Package_checks.run` with `Dependency` | Whether a body of the package references the dependency | `dependency_use` |
 | Prove | Definition | `Prover.prove` | MIR, contracts, `ownership`, `recursion_group`, `proof_group` | `proof`, `hole`, `claims` edges to the items of its evaluations |
-| Decide | Definition | `Prover.pose`, the solver, `Prover.list_states` | The proof, the results of running its evaluations, and the solver's answers | `verdict` |
+| Decide | Definition | `Prover.pose`, the solver, `Prover.list_states` | The proof, the results of running its evaluations, and the outputs of the unit's own runs of Z3 | `verdict`, `solver_run` |
 | Lower | Item | `Lowering.lower`, `Lowering.check_calls` | MIR and interfaces; the callees of the item's definition and of each callee | `lowered`, `references` edges to the items its code names |
 | Key tests | Item, with the items of its reference cycle | `Lowering.derive_test_keys` | `lowered`, and the test keys of the items it references | `test_key` |
 | Evaluate | Evaluated item | None: the command runs the item's evaluator, which is compiled code, and records the result | The item's `lowered` code, the test key of its evaluator, and the layout of its type | `evaluation`, `references` edges to the items that its value names |
+| Run test | Test | None: the command runs the test, which is compiled code, and records whether it passed | The item's test key | `test_run` |
 | Render, once for each profile | Item | `Lowering.render_unit` | The item's `lowered` code, or the `evaluation` of an evaluated item, and the interfaces of the types that the unit defines. A development unit: the `lowered` code of each small callee that it copies. A release unit: the place of each definition whose lines it names, and that definition's file. | `unit` |
 
 A unit reads facts of earlier stages. Where a unit reads a fact of its own
@@ -320,12 +324,22 @@ takes its stale units from the query that lists the linked items. A drain for
 an editor's files is the exception: it joins from the definitions of those
 files, because the proofs of every other file can be stale.
 
-Evaluate and Decide each take an input that no pass computes. A command
-runs the evaluations that its Decide units or its program need, which are
-compiled code, and records each result as the `evaluation` of its item.
-Decide asks the solver about the queries of all its stale units at once, so
-that the solver answers them in parallel, and then computes each unit from
-the solver's answers. A Decide unit reads its proof, and the test key and
+Evaluate, Run test, and Decide each take an input that no pass computes. A
+command runs the evaluations that its Decide units or its program need,
+which are compiled code, and records each result as the `evaluation` of its
+item. `test` runs each test whose `test_run` row is missing, stale, or
+recorded under another C compiler, and records a pass with the fingerprint
+of the C compiler that built it. A test that fails leaves no row, and so
+does an external test. A Run test unit reads its item's test key, so a change to the
+code that the test reaches marks it stale. Decide asks the solver about the
+queries of all its stale units at once, so that the solver answers them in
+parallel, and then computes each unit from the solver's answers. Each run of
+Z3 that answers a unit's queries is a `solver_run` row of the unit: the hash
+of the text sent to Z3, and Z3's output. A unit that runs again gives the
+solver the outputs of its rows, and the solver runs Z3 only for a text that
+no row holds, so an edit that changes one obligation of a body runs Z3 for
+that obligation alone. The unit then replaces its rows with the runs it
+used. A Decide unit reads its proof, and the test key and
 the `evaluation` of each item that the proof evaluates, so it is stale when
 the proof changes, when the code that an evaluation runs changes, or when a
 result changes. Where an evaluation has not run, Decide poses its queries
@@ -373,7 +387,8 @@ runs the evaluation again.
 | A dependency's database is a SQLite file in the user's cache, attached read-only. Registry packages beyond the standard library share one merged file. | Every database of a machine shares one copy of the standard library. SQLite attaches ten files at most. |
 | A package build records no `reads` edge and marks no reader. | A package's database is built once from nothing and never updated, so no unit of it runs a second time, and the build deleted its `reads` edges before it saved the file. Writing and then deleting them took 6.0 s of the 30 s that the standard library takes to build. The edges that the build's own checks select, `references`, `instantiates`, and `calls`, are still written. |
 | A change set is one transaction. A command that asks about files other than the saved ones, such as an editor's unsaved buffers or the files after a rename, moves the worktree's database to those files, and the database commits only while it holds the saved files. | A crash leaves the state before a change set or after it. Each such command took a copy of the database, which cost the size of the database, 150 ms for 144 MB, at every check an editor ran, and each copy began without the proofs of the last. The database now costs the update for the files that differ from the files it held, and keeps every fact that both sets of files share. A command on the saved files while an editor holds unsaved buffers pays that update once each way. An update that changes which dependency databases are attached commits where it stands, because SQLite cannot detach a database inside a transaction: `upgrade`, the one command that asks about other versions of the dependencies, writes their lock file when it ends. `upgrade` compares two states, so it alone copies the database. |
-| The solver's answers stay in the user's cache, keyed by query, and a `verdict` row records the answer that an obligation got. | Worktrees and CI share answers. A command with no change reads verdicts and runs no part of the prover. |
+| A Decide unit's runs of Z3 are `solver_run` rows of the unit, replaced each time the unit runs, and a `verdict` row records the answer that an obligation got. | Z3's output is a function of the text it is sent, and the compiler pins Z3's version, so a run's output holds for as long as the database, which lasts one build of the compiler. The rows leave the database with their unit, so the database holds the runs of its current proofs and no others. A command with no change reads verdicts and runs no part of the prover. The answers were kept in the user's cache before, keyed by query, where answers for files that were gone stayed until the cache was evicted by size. |
+| A `solver_run` row is keyed by the BLAKE3 hash of the text sent to Z3, and holds Z3's output. | The text is the whole of Z3's input, so equal texts get equal outputs. The rendering numbers every symbol by first appearance, so renaming a local or a definition keeps the text. A marshaled query holds the names, so it would change. The query itself is in the `proof` value already, so no row repeats it. Z3's output names a counterexample's values by their canonical names, and each request maps them to its own symbols. |
 | `Prover.decide` splits into `Prover.pose`, which gives a proof's queries, and `Prover.list_states`, which renders the solver's answers. Decide calls both. | Each half is a pure function, and the solver's run between them is the orchestrator's. |
 | A proof's obligations stay in the `proof` value, and no `obligation` table holds them. | A query states the result of running each evaluation that it names, so it is known only when Decide runs, and Decide is the one reader of an obligation. The rows an editor or an agent reads are the `verdict` rows: a site, its message, and whether it is proven. |
 | A `verdict` row holds its site and its failure as catalog values, and the failure names the clause it cites as a node in that clause's definition. The listing renders both and places them in their files. | A rendered diagnostic would be stale after every reformat of the definitions it names, and every edit above them. Rendered when it is listed, a verdict is computed again only when its proof changes. |
@@ -388,7 +403,8 @@ runs the evaluation again.
 | A development unit copies a small callee only where the callee's package is outside the project. | An edit to a small function of the project leaves its callers' units unchanged. When the project gains or loses a package, every development unit is rendered again. |
 | A release unit names a file by its package and its path in the package. The C compiler's `-fdebug-prefix-map` puts the package's directory in the project in place of the package's name. | The line table of a release build names each file by its path in the project, which the workspace knows and the database does not. With the directory in the compiler's flags, it is part of the object's name, and a unit's text is a function of the database alone. |
 | A release unit reads the whole text of each file whose lines it names. | A line number is a count of the lines above it. An edit to a file therefore renders again the release units of the file's items, and a unit whose lines did not move comes out unchanged. |
-| The result of an evaluation is a fact of its item. | Decide and Render read it as they read any fact, so no command hands results to a stage, and the back end renders no unit of its own. The user's cache still holds each value under the key of its evaluator's code, so another worktree takes the value without running the evaluator. |
+| The result of an evaluation is a fact of its item. | Decide and Render read it as they read any fact, so no command hands results to a stage, and the back end renders no unit of its own. |
+| A test's pass is a fact of its item, which the command that ran the test records with the fingerprint of the C compiler that built it. | The test key covers the code that the test reaches, and the fingerprint covers the C compiler and the flags of the profile, so a pass is read only while both hold. The passes were kept in the user's cache before, under a key that held a version number of the emitter, which an author bumped by hand when the emitted code changed. The database lasts one build of the compiler, so no such number is needed. |
 | A recursion group is found by two recursive queries: the definitions a changed definition reaches over `calls` and `assumes` edges, intersected with the definitions that reach it. The strongly connected components of that set are computed in memory, once over its `calls` edges and once over both, and written as `recursion_group` and `proof_group` rows. | Every cycle through a changed definition lies inside that set, so no component is kept between commands. The two queries walk the changed definition's callees and callers inside SQLite, and only run when its `calls` or `assumes` edges change. |
 | A proof group is a strongly connected component over `calls` and `assumes` edges together, kept apart from the recursion group. | A recursion group is a cycle of calls, which a measure shows to end, and the usage check and the termination check read it. A proof group is a cycle of proofs that assume one another. Where it holds a member that the recursion group lacks, the cycle closes through a contract or an invariant, which no measure covers, so the prover rejects it. A pass that searched other definitions for such a cycle would walk the package and read their bodies. |
 | A definition has an `assumes` edge to each type of its own package whose values it uses, and a type has one to each type of its fields. | The dependency of a proof on an invariant then composes along the edges: a function that uses a record reaches the invariant of the record's field with no pass looking inside the record. A type of another package cannot lie on a cycle with the definition, so it gets no edge. |
@@ -439,6 +455,7 @@ runs the evaluation again.
 | A build renders the units of the items that an edit changes. | `database_tests`: after an edit to one body, listing the linked items of a program renders the development unit of that item alone, with as many statements in forty modules as in four and as many steps more than a listing that renders nothing, and the release units of that item's file and of no other. |
 | A question costs the same at every project size. | `database_tests` counts the statements and the steps of listing a file's diagnostics, a definition's dependents and dependencies, and the definitions that name it, in four modules and in forty. |
 | A command that asks about other files than the saved ones copies no database. | `database_tests`: the database of an overlay is the worktree's own, a second overlay recomputes no proof, a database that holds an overlay is closed without a commit, and it equals a build from nothing for the overlay and again for the saved files. |
+| An edit that changes one obligation of a body runs Z3 for that obligation alone. | `prover_tests`: deciding an edited body runs Z3 only for the queries that changed. |
 | A propagated database equals one built from nothing. | `database_tests` compares every table after each of seventeen edits, and `stage0/tools/database_fuzz` compares them after random edits. |
 | No unit reads a whole package. | No selection is scoped by the definitions of a package, and the lookup of a package's declarations raises a compiler bug when a unit calls it. |
 | A bulk edit costs in proportion to its size. | `database_tests` counts the steps of each check for ten and for forty tests added together, generic functions whose calls grow in a chain, and unused functions that call each other in a chain. It counts the steps of writing edges for ten and for forty items that reference each other in a cycle, and checks that a test key records no read. It also compares the steps of every statement of a build from nothing in four modules and in forty. |

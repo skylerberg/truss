@@ -103,7 +103,7 @@ that the toolchain runs:
 
 ```text
 $ truss --version
-stage0 (Truss 0.1, code generation 29, Unicode 18.0.0)
+stage0 (Truss 0.1, Unicode 18.0.0)
 ```
 
 ### Hello, world
@@ -5222,6 +5222,15 @@ From the tightest binding to the loosest:
   `truss` executable was rebuilt while the old process ran. It exits within
   a minute, or at once with `truss stop`. `--no-server`, or
   `TRUSS_NO_SERVER=1`, runs a command in its own process.
+- **A project's checked state is `.truss/database.sqlite`** in its root.
+  It holds the proofs and the passing tests, so a new checkout of the
+  project, such as a git worktree, proves and tests everything once. Copy
+  the database from another checkout, here `../main`, to start from its
+  state. Use SQLite's backup, since a background process may have the file
+  open:
+  `mkdir -p .truss && sqlite3 ../main/.truss/database.sqlite ".backup .truss/database.sqlite"`.
+  The first command then checks only the files that differ between the two
+  checkouts. A database made by another build of `truss` is ignored.
 - **`TRUSS_CC`** names the C compiler, and **`TRUSS_Z3`** the Z3 executable.
 - **An x86-64 program is built for the x86-64-v3 level** unless the
   project's manifest names another ([Projects](#projects)). Before `main`
