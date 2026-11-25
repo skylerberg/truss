@@ -636,30 +636,37 @@ and compute_parts_potential context frame ~seen declared term (variant, fields) 
       else total)
     Costs.zero fields
 
-let compute_elements_potential context (ty : Types.ty) term =
-  let rec sum_elements ~enclosing (ty : Types.ty) term =
-    if not (has_potential context ty) then Costs.zero
+let compute_elements_potential context (declared : Types.ty) term =
+  let rec sum_elements ~enclosing (declared : Types.ty) term =
+    if not (has_potential context declared) then Costs.zero
     else
+      let ty = Types.erase_views declared in
       match Facts.find_constructors context ty with
       | Some shape -> (
+          let declared_fields = Option.value ~default:[] (list_declared_fields context declared) in
           let sum_fields (variant, fields) =
             List.fold_left
-              (fun total (field, field_type) ->
-                if List.exists (Types.equal field_type) (ty :: enclosing) then total
+              (fun total (field, erased_field_type) ->
+                let field_type =
+                  Option.value ~default:erased_field_type
+                    (List.assoc_opt (variant, field) declared_fields)
+                in
+                if List.exists (Types.equal field_type) (declared :: enclosing) then total
                 else
                   Costs.plus total
-                    (sum_elements ~enclosing:(ty :: enclosing) field_type
+                    (sum_elements ~enclosing:(declared :: enclosing) field_type
                        (Validity.select_field context ty variant field term)))
               Costs.zero fields
           in
           try choose_by_variant ty term shape sum_fields with Facts.Unsupported _ -> Costs.zero)
       | None -> (
           match (find_potential_clause context ty, find_buffer context ty) with
-          | None, Some { element; model_of; _ } when has_potential context element ->
+          | None, Some { element; model_of; _ }
+            when has_potential context (find_declared_element declared ~erased:element) ->
               sum_element_potentials context element (model_of term)
           | _ -> Costs.zero)
   in
-  sum_elements ~enclosing:[] ty term
+  sum_elements ~enclosing:[] declared term
 
 let has_declared_potential context ty = Option.is_some (find_potential_clause context ty)
 

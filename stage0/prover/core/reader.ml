@@ -347,7 +347,13 @@ let compute_changes ?(also = []) context run (frame : State.frame) (blocks : Mir
         | Local local ->
             let root = Locals.make_key run.infos local in
             if is_bound root then
-              Some { State.root; fields = Mir.list_leading_fields place.Mir.projections }
+              Some
+                {
+                  State.root;
+                  declared_root_type =
+                    Facts.substitute_declared_type context frame run.infos.(local).type_;
+                  fields = Mir.list_leading_fields place.Mir.projections;
+                }
             else None
         | Constant _ | Literal _ -> None)
       (resolve_aliases frame run place)
