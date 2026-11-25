@@ -217,27 +217,8 @@ let quantify_over (context : State.context) (frame : State.frame)
     let frame =
       match count with
       | Some count when frame.makes_obligations ->
-          Operations.spend context frame (fun counter ->
-              let spent =
-                match
-                  (List.assoc_opt counter body_frame.spent, List.assoc_opt counter after.State.spent)
-                with
-                | Some start, Some total -> Costs.since ~start total
-                | _ -> Costs.zero
-              in
-              if
-                Facts.mentions_fresh_after context mark spent
-                || Logic.mentions [ bound_symbol ] spent
-              then Operations.declare_unknown_amount context frame counter
-              else
-                match counter.counting with
-                | Units ->
-                    Costs.plus
-                      (Costs.times (Costs.at_least_zero count) (Costs.plus spent (Logic.int 1)))
-                      (Logic.int 1)
-                | At_most | Exactly ->
-                    if spent = Costs.zero then Costs.zero
-                    else Operations.declare_unknown_amount context frame counter)
+          Counters.spend_quantifier context frame ~count ~fresh_mark:mark ~bound:bound_symbol
+            ~before:body_frame ~after
       | _ -> frame
     in
     let term =
@@ -265,7 +246,7 @@ let quantify_over (context : State.context) (frame : State.frame)
         Logic.(less_equal low each &&& (if inclusive then less_equal else less) each high)
       in
       let count =
-        if inclusive then Costs.plus (Costs.minus high low) (Logic.int 1) else Costs.minus high low
+        if inclusive then Logic.plus (Logic.minus high low) (Logic.int 1) else Logic.minus high low
       in
       make ~count symbol Int premise inner each
 

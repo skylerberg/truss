@@ -386,6 +386,123 @@ let integer_of_bits ~is_signed ~width bits =
       unsigned
   else unsigned
 
+let plus left right =
+  match (left, right) with
+  | Integer x, Integer y -> Integer (Z.add x y)
+  | (Integer x, other | other, Integer x) when Z.equal x Z.zero -> other
+  | _ -> add left right
+
+let minus left right =
+  match (left, right) with
+  | Integer x, Integer y -> Integer (Z.sub x y)
+  | other, Integer x when Z.equal x Z.zero -> other
+  | _ when left = right -> Integer Z.zero
+  | _ -> subtract left right
+
+let times left right =
+  match (left, right) with
+  | Integer x, Integer y -> Integer (Z.mul x y)
+  | (Integer x, other | other, Integer x) when Z.equal x Z.one -> other
+  | (Integer x, _ | _, Integer x) when Z.equal x Z.zero -> Integer Z.zero
+  | _ -> multiply left right
+
+let larger left right =
+  match (left, right) with
+  | Integer x, Integer y -> Integer (Z.max x y)
+  | _ when left = right -> left
+  | _ -> ite (greater_equal left right) left right
+
+let at_least_zero term = larger term (Integer Z.zero)
+
+let combine_linear (sums, constant) =
+  let scale (atom, coefficient) = times (Integer coefficient) atom in
+  let positive = List.filter (fun (_, coefficient) -> Z.sign coefficient > 0) sums in
+  let negative =
+    List.filter_map
+      (fun (atom, coefficient) ->
+        if Z.sign coefficient < 0 then Some (atom, Z.neg coefficient) else None)
+      sums
+  in
+  let total =
+    List.fold_left (fun total entry -> plus total (scale entry)) (Integer Z.zero) positive
+  in
+  let total =
+    if Z.sign constant >= 0 then plus total (Integer constant)
+    else minus total (Integer (Z.neg constant))
+  in
+  List.fold_left (fun total entry -> minus total (scale entry)) total negative
+
+let rec linearize term =
+  let rec add_scaled coefficient term (sums, constant) =
+    match term with
+    | Integer value -> (sums, Z.add constant (Z.mul coefficient value))
+    | Operation (Add, arguments) ->
+        List.fold_left
+          (fun sums_and_constant argument -> add_scaled coefficient argument sums_and_constant)
+          (sums, constant) arguments
+    | Operation (Negate, [ inner ]) -> add_scaled (Z.neg coefficient) inner (sums, constant)
+    | Operation (Subtract, first :: rest) ->
+        List.fold_left
+          (fun sums_and_constant argument ->
+            add_scaled (Z.neg coefficient) argument sums_and_constant)
+          (add_scaled coefficient first (sums, constant))
+          rest
+    | Operation (Multiply, [ Integer factor; inner ])
+    | Operation (Multiply, [ inner; Integer factor ]) ->
+        add_scaled (Z.mul coefficient factor) inner (sums, constant)
+    | other -> (
+        match normalize_node other with
+        | Operation (Add, _) as sum -> add_scaled coefficient sum (sums, constant)
+        | other -> add_atom coefficient other (sums, constant))
+  and add_atom coefficient other (sums, constant) =
+    let rec add_to = function
+      | [] -> [ (other, coefficient) ]
+      | (atom, atom_coefficient) :: rest when atom = other ->
+          (atom, Z.add atom_coefficient coefficient) :: rest
+      | entry :: rest -> entry :: add_to rest
+    in
+    (add_to sums, constant)
+  and normalize_node = function
+    | Apply (Symbol.Cost_most, [ left; right ]) -> (
+        let left = normalize_linear left and right = normalize_linear right in
+        let rec list_summands coefficient = function
+          | Operation (Add, parts) -> List.concat_map (list_summands coefficient) parts
+          | Operation (Negate, [ inner ]) -> list_summands (Z.neg coefficient) inner
+          | Operation (Subtract, first :: rest) ->
+              list_summands coefficient first
+              @ List.concat_map (list_summands (Z.neg coefficient)) rest
+          | Operation (Multiply, [ Integer factor; inner ]) ->
+              list_summands (Z.mul coefficient factor) inner
+          | Integer _ -> []
+          | other -> [ (other, coefficient) ]
+        in
+        match
+          List.filter
+            (fun part -> List.mem part (list_summands Z.one right))
+            (list_summands Z.one left)
+        with
+        | [] -> Apply (Symbol.Cost_most, [ left; right ])
+        | common ->
+            let shared =
+              List.fold_left
+                (fun total (atom, coefficient) -> plus total (times (Integer coefficient) atom))
+                (Integer Z.zero) common
+            in
+            add shared
+              (Apply
+                 ( Symbol.Cost_most,
+                   [ normalize_linear (minus left shared); normalize_linear (minus right shared) ]
+                 )))
+    | Apply (name, arguments) -> Apply (name, List.map normalize_linear arguments)
+    | Is (constructor, argument) -> Is (constructor, normalize_linear argument)
+    | Operation (operator, arguments) -> Operation (operator, List.map normalize_linear arguments)
+    | other -> other
+  in
+  let sums, constant = add_scaled Z.one term ([], Z.zero) in
+  (List.filter (fun (_, coefficient) -> not (Z.equal coefficient Z.zero)) sums, constant)
+
+and normalize_linear term = combine_linear (linearize term)
+
 let find_constant_difference left right =
   let rec collect coefficient term ((constant, atoms) as sums) =
     match term with

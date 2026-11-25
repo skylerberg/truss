@@ -22,9 +22,6 @@ val call_contract :
   type_arguments:Types.argument list ->
   State.frame * Logic.term
 
-val make_callback_cost :
-  State.context -> State.frame -> Language.Metric.t -> Types.ty -> Logic.term -> Logic.term
-
 val apply_call :
   ?leave_lent:(Logic.term -> Logic.term) ->
   State.context ->

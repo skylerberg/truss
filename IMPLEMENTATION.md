@@ -117,6 +117,21 @@ develop as well as make it easier to bootstrap the compiler in parts.
   control-flow graph. A stage that needs a value in another state runs the
   MIR's statements in that state.
 
+### The prover
+
+- **The cost modules hold the rules of cost checking.** A cost is ghost
+  state of the one symbolic execution, so the modules that execute the MIR
+  call the cost modules at each statement, and a new cost rule edits a cost
+  module. The state of cost checking is one record, `context.cost`.
+
+  | Module | Holds |
+  |---|---|
+  | `Costs` | The counters and the terms of an amount |
+  | `Counters` | The counters of a body: their assignment from cost clauses, spending, and the obligations at return |
+  | `Potentials` | The potential that a value holds |
+  | `Amounts` | The amount that a call or an operation spends |
+  | `Loop_costs` | The cost rules of a loop |
+
 ### Documents
 
 Each document has one job, and a fact is stated in one of them:

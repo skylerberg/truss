@@ -1,7 +1,7 @@
 let find_selected_place (context : State.context) selection =
   let shift offset : State.place_value -> State.place_value = function
-    | One index -> One (Costs.plus offset index)
-    | Run (start, stop) -> Run (Costs.plus offset start, Costs.plus offset stop)
+    | One index -> One (Logic.plus offset index)
+    | Run (start, stop) -> Run (Logic.plus offset start, Logic.plus offset stop)
   in
   let rec find_from offset = function
     | [] -> Facts.raise_bug "a selection of no range or element"
@@ -11,7 +11,7 @@ let find_selected_place (context : State.context) selection =
           (List.assoc_opt innermost context.indexes)
     | range :: inner -> (
         match List.assoc_opt range context.indexes with
-        | Some { value = Run (start, _); _ } -> find_from (Costs.plus offset start) inner
+        | Some { value = Run (start, _); _ } -> find_from (Logic.plus offset start) inner
         | Some { value = One _; _ } -> Facts.raise_bug "a selection that selects inside an element"
         | None -> None)
   in
@@ -59,9 +59,9 @@ let note_place (context : State.context) (frame : State.frame) ~node ~origin val
 
 let run_without_costs : 'a. _ -> (unit -> 'a) -> 'a =
  fun (context : State.context) read ->
-  let saved = context.counters in
-  context.counters <- [];
-  Fun.protect ~finally:(fun () -> context.counters <- saved) read
+  let saved = context.cost.counters in
+  context.cost.counters <- [];
+  Fun.protect ~finally:(fun () -> context.cost.counters <- saved) read
 
 let run_as_specification (context : State.context) read =
   let panics = context.panics in
@@ -104,6 +104,19 @@ let rec find_part context ty term = function
   | field :: fields ->
       Option.bind (find_record_field_type context ty field) (fun field_type ->
           find_part context field_type (select_field context ty None field term) fields)
+
+let find_root context (frame : State.frame) : Locals.local -> (Types.ty * Logic.term) option =
+  function
+  | Core_local Self -> (
+      match (frame.self_type, frame.self) with Some ty, Some term -> Some (ty, term) | _ -> None)
+  | root -> (
+      match (Facts.find_local_type context frame root, Locals.find_opt root frame.locals) with
+      | Some ty, Some term -> Some (ty, term)
+      | _ -> None)
+
+let find_changed_part context frame (part : State.changed_part) =
+  Option.bind (find_root context frame part.root) (fun (ty, term) ->
+      find_part context ty term part.fields)
 
 let rec replace_part context ty whole fields make_part =
   match fields with
