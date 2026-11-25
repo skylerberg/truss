@@ -9,9 +9,9 @@ type decided_type
 type context = {
   lookups : Lookups.t;
   list_bounds : Interface.Impls.bounds;
-  spans : Source.Definition_span.t array Lazy.t;
-  text : string Lazy.t;
   mode_keywords : (Syntax.id, Core.mode_keyword) Hashtbl.t;
+  bare_names : (Syntax.id, string) Hashtbl.t Lazy.t;
+  parameter_types : (Syntax.id, Syntax.id) Hashtbl.t Lazy.t;
   places_without_keyword : (Syntax.id, Language.Mode.t) Hashtbl.t;
   names : string Local_table.t;
   origins : Core.origin Local_table.t;
@@ -24,7 +24,7 @@ type context = {
   implements_capability : bool;
   is_constant : bool;
   mutable mutable_locals : Core.local list;
-  mutable diagnostics : Diagnostic.in_definition list;
+  mutable diagnostics : Catalog.diagnostic list;
   mutable must_be_disjoint : (Core.id list * Core.id list) list;
 }
 
@@ -33,27 +33,14 @@ val is_view : context -> Types.ty -> bool
 val holds_function : context -> Types.ty -> bool
 val lends_nothing : context -> Types.ty -> bool
 val stores_function : context -> Mir.callee -> int -> bool
-val locate_origin : context -> Core.origin -> Source.Definition_span.t
-val describe_call : context -> Core.origin -> string
 val find_place_without_keyword : context -> Core.origin -> Language.Mode.t option
-
-val report :
-  context ->
-  ?fixes:Source.Definition_span.t Diagnostic.fix list ->
-  ?notes:(Source.Definition_span.t * string) list ->
-  Diagnostic.Code.ownership ->
-  Source.Definition_span.t ->
-  string ->
-  unit
-
+val report : context -> Catalog.Ownership.t -> unit
 val classify_binding_mode : context -> Place.root -> Language.Mode.t
 val views_literal : context -> Place.root -> bool
-val show_root : context -> Place.root -> string
-val find_owned_scrutinee : context -> Place.root -> owned_scrutinee option
-val show : context -> Place.t -> string
+val find_root : context -> Place.root -> Catalog.Ownership.root
+val find_owned_scrutinee : context -> Place.root -> Catalog.Ownership.scrutinee option
+val find_place : context -> Place.t -> Catalog.Ownership.place
 val collect : context -> Mir.Graph.t -> mode_keywords:Core.mode_keyword list -> unit
-
-val copy_fix :
-  context -> string -> Types.ty -> Core.origin -> Source.Definition_span.t Diagnostic.fix list
-
-val locate_with_mode_keyword : context -> Core.origin -> Source.Definition_span.t
+val find_copy : context -> Types.ty -> Core.origin -> Catalog.Ownership.copy option
+val find_view_declaration : context -> Place.root -> Catalog.Ownership.view_declaration option
+val cover_with_mode_keyword : context -> Core.origin -> Core.origin Catalog.range

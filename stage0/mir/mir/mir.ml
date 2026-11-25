@@ -15,9 +15,14 @@ let list_callee_modified_parts ~read_signature (lookups : Interface.Lookups.t) s
   match callee.target with
   | Function { path; _ } -> list_parts_of path
   | Trait_method { trait; name; receiver; evidence; self_type; _ } -> (
-      match Interface.Impls.resolve_evidence lookups substitution ~self_type ~trait evidence with
-      | Impl { impl; _ } -> list_parts_of (Method { owner = impl; name; receiver })
-      | Bound -> list_parts_of (Method { owner = trait.trait; name; receiver }))
+      match
+        Interface.Impls.locate_method lookups
+          (Interface.Impls.resolve_evidence lookups substitution ~self_type ~trait evidence)
+          ~name ~receiver
+      with
+      | Some (Method_of_impl { impl; _ }) -> list_parts_of (Method { owner = impl; name; receiver })
+      | Some Declaration_for_view | None ->
+          list_parts_of (Method { owner = trait.trait; name; receiver }))
   | Capability_method { capability; name } ->
       list_parts_of (Path.make_capability_method capability name)
   | Intrinsic { operation = Buffer Storage_swap | Lend Storage_at; _ } when position = 0 ->

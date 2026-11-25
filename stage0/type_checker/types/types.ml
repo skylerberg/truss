@@ -295,6 +295,8 @@ let list_fitting_integer_types number =
 let is_float_type type_ =
   match find_builtin type_ with Some builtin -> List.mem builtin float_types | None -> false
 
+type property = Copyable | Plain | View | Holds_function
+
 type substitution = {
   arguments : (parameter * argument) list;
   capability_arguments : (parameter * capability_set) list;
@@ -404,11 +406,16 @@ let substitute_substitution outer =
   map_substitution ~argument:(substitute_argument outer)
     ~capabilities:(substitute_capabilities outer)
 
-type evidence = Impl of { impl : Path.t; substitution : substitution } | Bound
+type evidence =
+  | Impl of { impl : Path.t; substitution : substitution }
+  | Derived_for_view of { viewed : Path.t; substitution : substitution }
+  | Bound
 
 let substitute_evidence outer = function
   | Impl { impl; substitution } ->
       Impl { impl; substitution = substitute_substitution outer substitution }
+  | Derived_for_view { viewed; substitution } ->
+      Derived_for_view { viewed; substitution = substitute_substitution outer substitution }
   | Bound -> Bound
 
 let extract_result_type = function Returns type_ | Lends (_, type_) -> type_

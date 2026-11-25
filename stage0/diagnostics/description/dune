@@ -1,0 +1,3 @@
+(library
+ (name description)
+ (libraries diagnostic compiler_bug source))

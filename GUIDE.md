@@ -103,7 +103,7 @@ that the toolchain runs:
 
 ```text
 $ truss --version
-stage0 (Truss 0.1, code generation 28, Unicode 18.0.0)
+stage0 (Truss 0.1, code generation 29, Unicode 18.0.0)
 ```
 
 ### Hello, world

@@ -8,6 +8,9 @@ type edge = Calls of Path.t | Supplies of { supplier : supplier; code : Path.t l
 
 val list_statement_edges : Interface.Lookups.t -> Types.substitution -> Tree.statement -> edge list
 
+val list_code_supplied_to_self :
+  Interface.Lookups.t -> trait:Path.t -> Types.substitution -> Path.t list
+
 val list_code_supplied_to_generics :
   Interface.Lookups.t ->
   ?instance:Types.substitution ->

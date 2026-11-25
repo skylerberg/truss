@@ -12,6 +12,7 @@ val parse_errors : Project.package list -> Path.file -> string list
 val make_database : Project.package list -> Database.t
 val extend_standard_library : Project.package list -> Database.t
 val make_names : Project.package list -> Resolve.Names.lookups
+val make_source : Project.package list -> Resolve.Names.source
 val list_declarations : Project.package list -> Path.module_ -> Resolve.Names.declaration list
 val list_codes : Diagnostic.t list -> string list
 

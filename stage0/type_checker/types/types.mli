@@ -117,6 +117,7 @@ val compute_missing_capabilities :
 
 val replace_capabilities : (capability -> capability_set option) -> capability_set -> capability_set
 
+type property = Copyable | Plain | View | Holds_function
 type substitution
 
 val no_substitution : substitution
@@ -141,7 +142,10 @@ val map_condition_types :
 val map_conditions : (condition -> condition) -> capability_set -> capability_set
 val substitute_substitution : substitution -> substitution -> substitution
 
-type evidence = Impl of { impl : Path.t; substitution : substitution } | Bound
+type evidence =
+  | Impl of { impl : Path.t; substitution : substitution }
+  | Derived_for_view of { viewed : Path.t; substitution : substitution }
+  | Bound
 
 val substitute_evidence : substitution -> evidence -> evidence
 val extract_result_type : result -> ty

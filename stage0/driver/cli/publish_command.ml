@@ -4,13 +4,14 @@ end))
 
 let list_unfinished snapshot database packages =
   let names = Database.make_name_lookups database in
+  let source_lookups = Database.make_source_lookups database in
   List.concat_map
     (fun file ->
       let source = Command_packages.read_source snapshot database file in
       List.concat_map
         (fun (declaration : Resolve.Names.declaration) ->
           let key = declaration.key in
-          let ({ base; _ } : Resolve.Names.place) = names.read_place key in
+          let ({ base; _ } : Resolve.Names.place) = source_lookups.read_place key in
           List.map
             (fun ({ keyword; span; _ } : Inspect.unfinished) ->
               let line, column =
@@ -20,7 +21,7 @@ let list_unfinished snapshot database packages =
                 Source.path source,
                 line,
                 column ))
-            (Inspect.list_unfinished (names.read_spans key) (names.read_definition key)))
+            (Inspect.list_unfinished (source_lookups.read_spans key) (names.read_definition key)))
         (names.list_declarations_in file))
     (Command_packages.list_files snapshot packages)
 

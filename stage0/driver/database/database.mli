@@ -96,6 +96,7 @@ val list_manifest_problems : t -> Path.package -> manifest_problem list
 val find_code_packages : t -> Path.package -> Path.package list option
 val find_lowered_lookups : t -> Path.package list -> (Lowering.lowered_lookups, string) result
 val make_name_lookups : t -> Resolve.Names.lookups
+val make_source_lookups : t -> Resolve.Names.source
 val list_definitions_naming : t -> Path.t -> Resolve.Names.key list
 val list_readers_of_module : t -> Path.module_ -> Resolve.Names.key list * Path.file list
 

@@ -14,6 +14,15 @@ module Definition_span : sig
   val quote : string -> t -> string
 end
 
+module Node_order : sig
+  type t
+
+  val compute : Definition_span.t array -> t
+  val count : t -> int
+  val compare : t -> int -> int -> int
+  val contains : t -> outer:int -> inner:int -> bool
+end
+
 type t
 
 val create : path:string -> string -> t

@@ -2652,6 +2652,8 @@ let () =
       expect_proven Fixtures.Prover.copies_of_a_string_and_a_list_within_their_lengths);
   Harness.test "a copy of a string does not cost constant time" (fun () ->
       expect_not_proven Fixtures.Prover.copy_of_a_string_in_constant_time "prover.cost");
+  Harness.test "a list of views passed `own` or `mut` holds no potential for its elements"
+    (fun () -> expect_proven Fixtures.Prover.list_of_views_passed_on_in_constant_amortized_time);
   Harness.test "a view holds no potential, so returning one costs constant amortized time"
     (fun () -> expect_proven Fixtures.Prover.view_returned_in_constant_amortized_time);
   Harness.test "a finite cursor collects through a bound in its remaining count of nexts" (fun () ->
@@ -2920,7 +2922,9 @@ let () =
     | Obligations { obligations; _ } ->
         List.find_map
           (fun (obligation : Prover.Obligation.t) ->
-            if obligation.code = code then Some obligation.query else None)
+            if Catalog.Prover_description.find_code obligation.obligation = code then
+              Some obligation.query
+            else None)
           obligations
     | Unsupported _ | Not_proven_here -> None
   in

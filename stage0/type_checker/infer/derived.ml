@@ -612,13 +612,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   | Some key -> (
                       match lookups.read_contract key with
                       | { definition = Type { invariants; _ }; _ } ->
-                          let spans = lookups.interface.names.read_spans key in
-                          let text = lookups.interface.names.read_text key in
                           let quote_origin (origin : Core.origin) =
-                            collapse_spaces
-                              (Source.Definition_span.quote text
-                                 (Source.Definition_span.locate spans
-                                    (Core_walk.locate_origin origin)))
+                            collapse_spaces (lookups.read_clause_text key origin)
                           in
                           List.mapi
                             (fun index (invariant : Core.condition) ->

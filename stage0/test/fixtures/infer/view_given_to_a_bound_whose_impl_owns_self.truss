@@ -1,0 +1,17 @@
+trait Doubled {
+  fn doubled(own self) -> Self
+}
+
+impl Doubled for String {
+  fn doubled(own self) -> String {
+    self
+  }
+}
+
+fn twice[Value: Doubled](value: own Value) -> Value {
+  value.doubled()
+}
+
+fn f(name: view String) -> view String {
+  twice(name)
+}

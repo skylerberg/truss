@@ -145,7 +145,7 @@ let has_bound lookups ~list_bounds type_ trait =
     (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait)
     (list_known_bounds lookups ~list_bounds type_)
 
-type property = Copyable | Plain | View | Holds_function
+type property = Types.property = Copyable | Plain | View | Holds_function
 type occurrence = Environment.occurrence = In_place | Indirect | Function_input
 type requirement = Environment.requirement = Never | Requires of Types.ty list
 type exposure = Environment.exposure = Always | If_any of Types.ty list
@@ -192,24 +192,13 @@ let combine_conditions find_conditions types =
       | _ -> None)
     (Some []) types
 
-exception Recursion_limit of string
+exception Recursion_limit of Catalog.Typing.t
 
 let recursion_limit = 64
 let largest_condition = 64
 
-let show_property = function
-  | Copyable -> "is `Copyable`"
-  | Plain -> "is `Plain`"
-  | View -> "is a view"
-  | Holds_function -> "holds a function"
-
-let fail_at_recursion_limit query =
-  raise
-    (Recursion_limit
-       (Printf.sprintf
-          "%s needs more than %d nested types. The compiler stops there: an associated type that \
-           holds a larger type can grow a type forever."
-          query recursion_limit))
+let fail_at_recursion_limit recursion =
+  raise (Recursion_limit (Recursion_limit { limit = recursion_limit; recursion }))
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Interface" format
 
@@ -244,8 +233,7 @@ let rec compute_conditions lookups ~facts_of ~resolve ~compute_leaf ?(in_progres
       | None, _ ->
           if List.exists (Types.equal type_) in_progress then Some []
           else if List.length in_progress > recursion_limit then
-            fail_at_recursion_limit
-              (Printf.sprintf "Deciding whether `%s` %s" (Types.show type_) (show_property property))
+            fail_at_recursion_limit (Property { type_; property })
           else
             let (facts : Environment.type_facts) = facts_of path in
             Option.bind (find_stored_conditions facts property) (fun arguments_conditions ->
@@ -293,8 +281,7 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
                 recursions := { recursive = type_; occurrence; defining } :: !recursions
             | None, Some ({ shape = Record _ | Sum _; _ } as interface) ->
                 if List.length enclosing > recursion_limit then
-                  fail_at_recursion_limit
-                    (Printf.sprintf "Listing the types that `%s` holds" (Types.show type_));
+                  fail_at_recursion_limit (Contents { type_ });
                 let substitution = Types.make_substitution interface.type_generics arguments in
                 List.iter
                   (fun (condition, step) ->
