@@ -1062,7 +1062,9 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
               | _ -> None)
         | Some Equal_equal, _, [ left; right ] when Facts.is_equality_identity context self_type ->
             Without_contract (Some (frame, Logic.equal left right))
-        | Some Equal_equal, Impl { impl = Derived _; _ }, [ left; right ] ->
+        | ( Some Equal_equal,
+            (Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ }),
+            [ left; right ] ) ->
             let spent =
               Operations.spend context frame (fun counter ->
                   Amounts.compute_callee_amount
@@ -1081,10 +1083,10 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             in
             let path, callee_substitution =
               match evidence with
-              | Impl { impl; substitution } ->
+              | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
                   let path = Path.Method { owner = impl; name; receiver } in
                   (path, bind_callee path arguments capability_arguments ~fixed:substitution)
-              | _ -> (trait_path, trait_substitution)
+              | Bound -> (trait_path, trait_substitution)
             in
             let compute_substitution (clauses : State.clauses) =
               if clauses.inherited then trait_substitution else callee_substitution

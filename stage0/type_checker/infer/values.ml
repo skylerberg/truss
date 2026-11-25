@@ -5,7 +5,7 @@ let takes_literal (state : State.state) (collection : Types.ty) (trait : Types.t
         Interface.Impls.find_evidence state.lookups.interface
           ~list_bounds:(State.lookup_bounds state) ~checks_conditions:false collection trait
       with
-      | Some (Evidence (Impl _) | Evidence Bound) -> true
+      | Some (Evidence (Impl _ | Derived_for_view _ | Bound)) -> true
       | Some (Built_in | Accepted _) | None -> false)
   | _ -> false
 

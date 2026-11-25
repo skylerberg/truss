@@ -571,6 +571,11 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
   let receiver_type =
     Conversions.read_expected_head state (Types.strip_view written_receiver_type)
   in
+  let is_implemented_by_the_view (trait : Types.trait_reference) =
+    match State.find_evidence state written_receiver_type trait with
+    | Some (Evidence (Derived_for_view _)) -> true
+    | Some (Evidence (Impl _ | Bound) | Built_in | Accepted _) | None -> false
+  in
   let has_mode_keyword = List.mem_assoc value.id state.keyword_modes in
   let lent_mode =
     if has_mode_keyword then None
@@ -594,7 +599,7 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
     | None
       when (not has_mode_keyword)
            && ((not place)
-              || State.decide_property state Interface.Properties.Plain receiver_type
+              || State.decide_property state Interface.Properties.Plain written_receiver_type
                  <> Interface.Properties.Fails
               || not (List.mem_assoc (Path.Instance Mut) overloads)) -> (
         match List.assoc_opt (Path.Instance Own) overloads with
@@ -662,11 +667,17 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
                   }))
       | Ok (Visible overloads) -> (
           match
-            if is_view_receiver then
-              Option.map
-                (fun overload -> (Path.Instance Read, overload))
-                (List.assoc_opt (Path.Instance Read) overloads)
-            else choose_temporary overloads
+            choose_temporary
+              (if is_view_receiver then
+                 List.filter
+                   (fun (receiver, overload) ->
+                     match overload with
+                     | Name_lookup.Trait_overload (trait, _) when is_implemented_by_the_view trait
+                       ->
+                         true
+                     | _ -> receiver = Path.Instance Read)
+                   overloads
+               else overloads)
           with
           | None when is_view_receiver ->
               State.make_error_type state
@@ -681,8 +692,10 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
               check_method_with_receiver state env ?expected ~type_arguments value ~receiver:base
                 ~receiver_type:written_receiver_type method_path arguments
           | Some (_, Trait_overload (trait, method_)) ->
-              check_trait_method_with_receiver state env value ~receiver:base ~receiver_type trait
-                method_ ~type_arguments arguments)
+              check_trait_method_with_receiver state env value ~receiver:base
+                ~receiver_type:
+                  (if is_implemented_by_the_view trait then written_receiver_type else receiver_type)
+                trait method_ ~type_arguments arguments)
       | Error traits ->
           State.make_error_type state
             (Ambiguous_method_call

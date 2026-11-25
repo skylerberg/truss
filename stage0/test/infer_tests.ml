@@ -1374,6 +1374,21 @@ let () =
     ];
   Harness.test "a `mut` list parameter and a range of a mutable place can be written through"
     (fun () -> expect_fine Fixtures.Infer.lists_written_through_parameters_and_ranges);
+  Harness.test "a view implements a trait whose inherited methods take `Self` by `own`" (fun () ->
+      expect_fine Fixtures.Infer.views_in_ordered_positions);
+  Harness.test "a view satisfies no bound whose impl writes a method that takes `self` by `own`"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.view_given_to_a_bound_whose_impl_owns_self
+        "types.unsatisfied_bound");
+  Harness.test
+    "a view satisfies no bound whose supertrait's impl writes a method that takes `self` by `mut`"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.view_given_to_a_bound_whose_supertrait_mutates_self
+        "types.unsatisfied_bound");
+  Harness.test "a view is no receiver of an inherited method whose supertrait's impl mutates `self`"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.view_receiver_of_a_method_whose_supertrait_mutates_self
+        "types.wrong_receiver");
   Harness.test "a view satisfies no bound whose trait has a `mut self` method" (fun () ->
       expect_one_diagnostic Fixtures.Infer.view_written_through_a_copy_in_generic_code
         "types.unsatisfied_bound" ~says:"a view implements a trait only where");

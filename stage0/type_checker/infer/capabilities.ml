@@ -90,7 +90,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.operand C
                  .uses
          | None -> ());
       match evidence with
-      | Impl { impl; _ } when needs_grant impl -> (
+      | (Impl { impl; _ } | Derived_for_view { viewed = impl; _ }) when needs_grant impl -> (
           match Interface.Definition.find_impl_interface state.lookups.interface impl with
           | Some interface when List.mem (name, receiver) interface.impl_methods ->
               Option.iter
@@ -102,7 +102,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.operand C
                 (Signatures.read state.signatures state.lookups.interface
                    (Method { owner = impl; name; receiver }))
           | Some _ | None -> ())
-      | Impl _ | Bound -> ())
+      | Impl _ | Derived_for_view _ | Bound -> ())
   | Capability_method _ | Intrinsic _ | Indirect _ -> ()
 
 let rec require_available checking scope (origin : Core.origin) ~subject ?alternative

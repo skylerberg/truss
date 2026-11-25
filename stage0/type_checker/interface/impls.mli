@@ -45,7 +45,20 @@ val list_no_bounds : bounds
 val list_required_bounds :
   Types.generic list -> Types.substitution -> (Types.ty * Types.trait_reference) list
 
-val reads_self_only : Lookups.t -> Path.t -> bool
+type method_code =
+  | Method_of_impl of { impl : Path.t; substitution : Types.substitution }
+  | Declaration_for_view
+
+val locate_method :
+  Lookups.t -> Types.evidence -> name:string -> receiver:Path.receiver -> method_code option
+
+type obligation =
+  | Provides of Types.trait_method
+  | Bounds_associated_type of { name : string; chosen : Types.ty; bound : Types.trait_reference }
+  | Requires of Types.trait_reference
+
+val list_obligations :
+  Types.trait_interface -> Types.impl_interface -> self:Types.ty -> obligation list
 
 val find_evidence :
   Lookups.t ->
