@@ -641,7 +641,14 @@ and resolve_expression state scope (value : Syntax.expression) =
         entries
   | Lambda { parameters; body } ->
       let inner =
-        List.fold_left (fun scope pattern_ -> bind_pattern state scope pattern_) scope parameters
+        List.fold_left
+          (fun inner ({ pattern; annotation } : Syntax.lambda_parameter) ->
+            Option.iter
+              (fun (annotation : Syntax.parameter_annotation) ->
+                resolve_type_expression state scope annotation.type_)
+              annotation;
+            bind_pattern state inner pattern)
+          scope parameters
       in
       resolve_block state inner body
   | If { condition = test; then_; else_ } ->

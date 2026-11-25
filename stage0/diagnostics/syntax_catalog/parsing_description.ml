@@ -141,7 +141,7 @@ let find_code : Parsing.problem -> Diagnostic.Code.parser = function
   | Power_operator -> Power_operator
   | Short_declaration _ -> Short_declaration
   | Pipe_operator _ -> Pipe_operator
-  | Lambda_annotation -> Lambda_annotation
+  | Lambda_result_type -> Lambda_result_type
   | Impl_parameters _ -> Impl_parameters
   | Null_coalescing _ -> Null_coalescing
   | Trailing_lambda _ -> Trailing_lambda
@@ -351,10 +351,8 @@ let describe_problem : Parsing.problem -> Source.span Description.piece list = f
   | Short_declaration _ -> say "Truss has no `:=`. A new name is declared with `let name = value`."
   | Pipe_operator _ ->
       say "Truss has no `|>`. A function is called with its argument: `function(value)`."
-  | Lambda_annotation ->
-      say
-        "A lambda's parameters and result have no annotations. Their types are inferred from where \
-         the lambda is passed."
+  | Lambda_result_type ->
+      say "A lambda declares no result type. Its result type is the type of its body's value."
   | Impl_parameters _ ->
       say
         "An `impl` has no parameters of its own. The type after `for` declares them, with their \
@@ -646,7 +644,7 @@ let describe_fixes (at : Source.span) : Parsing.problem -> Source.span Descripti
             replace (Source.make_span value.stop callee.stop) ")";
           ];
       ]
-  | Lambda_annotation -> [ fix (say "Remove the annotation") [ delete at ] ]
+  | Lambda_result_type -> [ fix (say "Remove the result type") [ delete at ] ]
   | Impl_parameters { parameters = Some parameters } ->
       [ fix (say "Remove the parameters") [ delete parameters ] ]
   | Null_coalescing { value; default; needs_parentheses; _ } ->

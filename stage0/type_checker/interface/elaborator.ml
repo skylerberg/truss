@@ -254,9 +254,10 @@ and elaborate_count_name context (name : Syntax.name) : Types.argument =
       match Constants.evaluate_count context.lookups path with
       | Ok value -> Types.Value (Types.Known value)
       | Error error ->
-          Types.Type
-            (report_error_type context
-               (Count_error { at = Written name.id; written = name.text; error })))
+          Types.Value
+            (Value_error
+               (record_diagnostic context.diagnostics
+                  (Count_error { at = Written name.id; written = name.text; error }))))
   | Some (Unknown report) -> Types.Type (Types.Error report)
   | _ -> raise_bug "`%s` is not resolved as a type argument" name.text
 

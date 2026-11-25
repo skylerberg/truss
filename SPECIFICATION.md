@@ -2021,18 +2021,30 @@ fn production(config: own Config) -> Config {
 ### Lambdas
 
 ```ebnf
-lambda = "fn" "(" list(pattern) ")" block ;
+lambda           = "fn" "(" list(lambda_parameter) ")" block ;
+lambda_parameter = pattern [ ":" [ mode ] type ] ;
 ```
 
 ```truss
 let passing = scores.filter(fn(score) { score >= threshold })
 mut scores.update_each(fn(score) { score = score / 2 })
+let halve = fn(score: UInt8) { score / 2 }
 ```
 
-- A lambda's parameter types, modes, and result type come from the function
-  type it is passed as. Types are inferred from the outside in, never from
-  the lambda's body. Where nothing gives a lambda a function type, the `let`
-  has a type or the call has type arguments.
+- A lambda's parameter modes and types come from the function type it is
+  passed as. An annotation states them as a function's parameter does, so
+  `score: UInt8` is read-only and `score: mut UInt8` is `mut`. An
+  annotation must state the mode and the type that the function type gives:
+  it never converts the argument.
+- A lambda that nothing passes as a function type takes its parameter modes
+  and types from its annotations: `halve` has the type
+  `fn(UInt8) -> UInt8`.
+- Types are inferred from the outside in, never from the lambda's body.
+  Each parameter's type is decided before the body is checked, by the
+  function type or by the annotation, and a parameter whose type neither
+  decides is an error.
+- A lambda declares no result type. Its result type is the type of its
+  body's value, converted to the function type's result.
 - A lambda captures local variables by view and cannot mutate them. A
   lambda that captures a variable is a view; one that captures none can be
   returned, stored, and moved.

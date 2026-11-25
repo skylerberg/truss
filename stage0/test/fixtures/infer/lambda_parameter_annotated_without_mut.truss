@@ -1,0 +1,5 @@
+fn f(scores: List[Int64]) -> List[Int64] {
+  var halved = scores.copy()
+  mut halved.update_each(fn(score: Int64) { score = score / 2 })
+  halved
+}

@@ -1,0 +1,7 @@
+fn hold[Change](change: Change) -> Int64 {
+  0
+}
+
+fn f() -> Int64 {
+  hold(fn(x: Int64) { x })
+}

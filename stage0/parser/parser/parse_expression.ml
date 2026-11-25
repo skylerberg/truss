@@ -1042,26 +1042,30 @@ and parse_lambda cursor =
   let start = Cursor.index cursor in
   Cursor.advance cursor;
   if not (Cursor.is_punctuation cursor (Open Paren)) then Cursor.fail cursor Open_paren_in_lambda;
-  let parse_parameter cursor =
+  let parse_parameter cursor : Syntax.lambda_parameter =
     let pattern = Parse_pattern.parse_pattern cursor in
-    if Cursor.is_punctuation cursor Colon then begin
-      let from = Cursor.compute_previous_stop cursor in
-      Cursor.advance cursor;
-      ignore (Atoms.parse_mode cursor);
-      ignore (parse_type_expression cursor);
-      Habits.report_lambda_annotation cursor ~from ~stop:(Cursor.compute_previous_stop cursor)
-    end;
-    pattern
+    let annotation : Syntax.parameter_annotation option =
+      if Cursor.accept_punctuation cursor Colon then
+        let annotation_start = Cursor.index cursor in
+        let mode = Atoms.parse_mode cursor in
+        let type_ = parse_type_expression cursor in
+        Some { mode; type_; id = Cursor.allocate_id_from cursor annotation_start }
+      else None
+    in
+    { pattern; annotation }
   in
   let parameters =
     Cursor.parse_bracketed cursor ~parse_item:parse_parameter ~recover:(fun span ->
-        { kind = Pattern_error; id = Cursor.allocate_id cursor span })
+        {
+          pattern = { kind = Pattern_error; id = Cursor.allocate_id cursor span };
+          annotation = None;
+        })
   in
   if Cursor.is_punctuation cursor Arrow then begin
     let from = Cursor.compute_previous_stop cursor in
     Cursor.advance cursor;
     ignore (parse_type_expression cursor);
-    Habits.report_lambda_annotation cursor ~from ~stop:(Cursor.compute_previous_stop cursor)
+    Habits.report_lambda_result_type cursor ~from ~stop:(Cursor.compute_previous_stop cursor)
   end;
   Atoms.make_expression_node cursor start (Lambda { parameters; body = parse_body cursor })
 
