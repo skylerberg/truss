@@ -247,9 +247,6 @@ type diagnostic = {
   file : int option;
   is_error : bool;
   code : string;
-  start : int;
-  stop : int;
-  message : string;
   detail : string;
 }
 
@@ -265,6 +262,16 @@ let list_unit_diagnostics store schema ~stage ~unit =
     (fun row ->
       ((if Sql.is_null row 0 then None else Some (Sql.read_integer row 0)), Sql.read_blob row 1))
 
+let has_diagnostic store ~stage ~unit =
+  Sql.has_row store.sql "SELECT 1 FROM main.diagnostic WHERE stage = ?1 AND unit = ?2 LIMIT 1"
+    [ Integer stage; Integer unit ]
+
+let mark_reported_units_stale store ~stage =
+  Sql.run store.sql
+    "INSERT OR IGNORE INTO main.stale (stage, id) SELECT DISTINCT stage, unit FROM main.diagnostic \
+     WHERE stage = ?1"
+    [ Integer stage ]
+
 let replace_diagnostics store ~stage ~unit ~package diagnostics =
   let is_changed =
     list_unit_diagnostics store Main ~stage ~unit
@@ -277,8 +284,7 @@ let replace_diagnostics store ~stage ~unit ~package diagnostics =
       (fun position diagnostic ->
         Sql.run store.sql
           "INSERT INTO main.diagnostic (stage, unit, position, package, definition, file, \
-           severity, code, start, stop, message, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, \
-           ?9, ?10, ?11, ?12)"
+           severity, code, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
           [
             Integer stage;
             Integer unit;
@@ -288,37 +294,21 @@ let replace_diagnostics store ~stage ~unit ~package diagnostics =
             encode_optional diagnostic.file;
             Text (if diagnostic.is_error then "error" else "warning");
             Text diagnostic.code;
-            Integer diagnostic.start;
-            Integer diagnostic.stop;
-            Text diagnostic.message;
             Blob diagnostic.detail;
           ])
       diagnostics
   end;
   is_changed
 
-let list_definition_edges store ~package ~unit_kind ~target_kind ~markers =
-  Sql.list_rows store.sql
-    "SELECT d.id, e.target, e.markers FROM main.definition d CROSS JOIN main.edge e ON \
-     e.source_kind = ?1 AND e.source = d.id AND e.target_kind = ?2 WHERE d.package = ?3 AND \
-     (e.markers & ?4) != 0"
-    [ Integer unit_kind; Integer target_kind; Text package; Integer markers ] (fun row ->
-      (Sql.read_integer row 0, Sql.read_integer row 1, Sql.read_integer row 2))
-
-let list_definition_edge_names store ~package ~unit_kind ~target_kind =
-  Sql.list_rows store.sql
-    "SELECT DISTINCT e.name FROM main.definition d CROSS JOIN main.edge e ON e.source_kind = ?1 \
-     AND e.source = d.id AND e.target_kind = ?2 WHERE d.package = ?3 ORDER BY e.name"
-    [ Integer unit_kind; Integer target_kind; Text package ] (fun row -> Sql.read_text row 0)
+let has_unchecked_body store ~package ~skipped_kind =
+  Sql.has_row store.sql
+    "SELECT 1 FROM main.body b INDEXED BY body_without_value CROSS JOIN main.definition d ON d.id \
+     = b.definition WHERE b.state != 0 AND d.origin = 0 AND +d.package = ?1 AND d.kind IS NOT ?2 \
+     LIMIT 1"
+    [ Text package; (match skipped_kind with Some kind -> Integer kind | None -> Null) ]
 
 let list_code_packages store ~package ~unit_kind ~target_kind ~test_kind =
-  if
-    Sql.has_row store.sql
-      "SELECT 1 FROM main.definition d LEFT JOIN main.body b ON b.definition = d.id WHERE \
-       d.package = ?1 AND d.origin = 0 AND d.kind != ?2 AND (b.state IS NULL OR b.state != 0) \
-       LIMIT 1"
-      [ Text package; Integer test_kind ]
-  then None
+  if has_unchecked_body store ~package ~skipped_kind:(Some test_kind) then None
   else
     Some
       (Sql.list_rows store.sql
@@ -334,22 +324,6 @@ let find_definition_key_anywhere store ~id =
       Sql.find_row store.sql (Printf.sprintf "SELECT key FROM %s.definition WHERE id = ?1" schema)
         [ Integer id ] (fun row -> Sql.read_blob row 0))
     ("main" :: List.map snd store.attached)
-
-let has_unchecked_body store ~package ~generic_kinds =
-  Sql.has_row store.sql
-    (Printf.sprintf
-       "SELECT 1 FROM main.definition d LEFT JOIN main.body b ON b.definition = d.id WHERE \
-        d.package = ?1 AND d.origin = 0 AND (b.state IS NULL OR b.state != 0)%s LIMIT 1"
-       (match generic_kinds with
-       | [] -> ""
-       | kinds ->
-           Printf.sprintf " AND d.is_generic = 1 AND d.ordinal = 0 AND d.kind IN (%s)"
-             (String.concat ", " (List.map string_of_int kinds))))
-    [ Text package ]
-
-let find_package_name store ~id =
-  Sql.find_row store.sql "SELECT name FROM main.package WHERE id = ?1" [ Integer id ] (fun row ->
-      Sql.read_text row 0)
 
 type endpoint = { kind : int; id : int; name : string }
 type edge = { target : endpoint; markers : int }
@@ -430,6 +404,14 @@ let replace_edges store ~(source : endpoint) edges =
       [ Integer source.kind; Integer source.id; Text (encode_rows removed) ];
   written @ removed
 
+let has_source store ~(target : endpoint) ~source_kind ~markers =
+  Sql.has_row store.sql
+    "SELECT 1 FROM main.edge WHERE target_kind = ?1 AND target = ?2 AND name = ?3 AND source_kind \
+     = ?4 AND (markers & ?5) != 0 LIMIT 1"
+    [
+      Integer target.kind; Integer target.id; Text target.name; Integer source_kind; Integer markers;
+    ]
+
 let list_sources store ~(target : endpoint) ~markers =
   Sql.list_rows store.sql
     "SELECT source_kind, source FROM main.edge WHERE target_kind = ?1 AND target = ?2 AND name = \
@@ -463,67 +445,58 @@ let mark_sources_stale store ~(target : endpoint) ~markers =
      target_kind = ?1 AND target = ?2 AND name = ?3 AND (markers & ?4) != 0"
     [ Integer target.kind; Integer target.id; Text target.name; Integer markers ]
 
+let mark_stage_of_sources_stale store ~(target : endpoint) ~source_kind ~markers ~stage =
+  Sql.run store.sql
+    "INSERT OR IGNORE INTO main.stale (stage, id) SELECT ?5, source FROM main.edge WHERE \
+     target_kind = ?1 AND target = ?2 AND name = ?3 AND source_kind = ?4 AND (markers & ?6) != 0"
+    [
+      Integer target.kind;
+      Integer target.id;
+      Text target.name;
+      Integer source_kind;
+      Integer stage;
+      Integer markers;
+    ]
+
 let mark_position_holders_stale store ~(target : endpoint) ~markers ~stages =
   Sql.run store.sql
     "INSERT OR IGNORE INTO main.stale (stage, id) SELECT source_kind, source FROM main.edge WHERE \
-     target_kind = ?1 AND target = ?2 AND name = ?3 AND (markers & ?4) != 0 AND (((?5 >> \
-     source_kind) & 1) != 0 OR EXISTS (SELECT 1 FROM main.diagnostic WHERE stage = source_kind AND \
-     unit = source))"
+     target_kind = ?1 AND target = ?2 AND name = ?3 AND (markers & ?4) != 0 AND ((?5 >> \
+     source_kind) & 1) != 0"
     [ Integer target.kind; Integer target.id; Text target.name; Integer markers; Integer stages ]
 
-type call_graph = {
-  unit_kind : int;
-  node_kind : int;
-  calls : int;
-  implements : int;
-  visible : string list;
-}
+type proof_graph = { unit_kind : int; node_kind : int; markers : int }
+type proof_edge = { source : int; target : int; markers : int }
 
 let list_schema_names store = "main" :: List.map snd store.attached
 
 let make_successor_arms store ~of_ =
-  List.concat_map
+  List.map
     (fun schema ->
-      [
-        Printf.sprintf
-          "SELECT e.target FROM %s CROSS JOIN %s.edge e ON e.source_kind = ?1 AND e.source = \
-           %s.node AND e.target_kind = ?2 WHERE (e.markers & ?3) != 0"
-          of_ schema of_;
-        Printf.sprintf
-          "SELECT e.source FROM %s CROSS JOIN %s.edge e ON e.target_kind = ?2 AND e.target = \
-           %s.node AND e.name = '' CROSS JOIN %s.definition d ON d.path = e.source WHERE \
-           e.source_kind = ?1 AND (e.markers & ?4) != 0 AND d.package IN (SELECT value FROM \
-           json_each(?5))"
-          of_ schema of_ schema;
-      ])
+      Printf.sprintf
+        "SELECT e.target FROM %s CROSS JOIN %s.edge e ON e.source_kind = ?1 AND e.source = %s.node \
+         AND e.target_kind = ?2 WHERE (e.markers & ?3) != 0"
+        of_ schema of_)
     (list_schema_names store)
 
 let make_predecessor_arms store ~of_ =
-  List.concat_map
+  List.map
     (fun schema ->
-      [
-        Printf.sprintf
-          "SELECT e.source FROM %s CROSS JOIN %s.edge e ON e.target_kind = ?2 AND e.target = \
-           %s.node AND e.name = '' WHERE e.source_kind = ?1 AND (e.markers & ?3) != 0"
-          of_ schema of_;
-        Printf.sprintf
-          "SELECT e.target FROM %s CROSS JOIN %s.edge e ON e.source_kind = ?1 AND e.source = \
-           %s.node AND e.target_kind = ?2 WHERE (e.markers & ?4) != 0"
-          of_ schema of_;
-      ])
+      Printf.sprintf
+        "SELECT e.source FROM %s CROSS JOIN %s.edge e ON e.target_kind = ?2 AND e.target = %s.node \
+         AND e.name = '' WHERE e.source_kind = ?1 AND (e.markers & ?3) != 0"
+        of_ schema of_)
     (list_schema_names store)
 
 let make_closure name arms =
-  Printf.sprintf "%s(node) AS (SELECT value FROM json_each(?6) UNION %s)" name
+  Printf.sprintf "%s(node) AS (SELECT value FROM json_each(?4) UNION %s)" name
     (String.concat " UNION " arms)
 
-let bind_call_graph graph ~seeds : cell list =
+let bind_proof_graph graph ~seeds : cell list =
   [
     Integer graph.unit_kind;
     Integer graph.node_kind;
-    Integer graph.calls;
-    Integer graph.implements;
-    Text (encode_texts graph.visible);
+    Integer graph.markers;
     Text (encode_integers seeds);
   ]
 
@@ -533,66 +506,28 @@ let list_cycle_nodes store graph ~seeds =
        "WITH RECURSIVE %s, %s SELECT node FROM forward INTERSECT SELECT node FROM backward"
        (make_closure "forward" (make_successor_arms store ~of_:"forward"))
        (make_closure "backward" (make_predecessor_arms store ~of_:"backward")))
-    (bind_call_graph graph ~seeds)
+    (bind_proof_graph graph ~seeds)
     (fun row -> Sql.read_integer row 0)
 
-let list_callers_closure store graph ~seeds =
+let list_proof_edges store graph ~nodes =
   Sql.list_rows store.sql
-    (Printf.sprintf "WITH RECURSIVE %s SELECT node FROM backward"
-       (make_closure "backward" (make_predecessor_arms store ~of_:"backward")))
-    (bind_call_graph graph ~seeds)
-    (fun row -> Sql.read_integer row 0)
-
-let list_call_pairs store graph ~nodes =
-  Sql.list_rows store.sql
-    (Printf.sprintf "WITH scope(node) AS (SELECT value FROM json_each(?6)) %s"
+    (Printf.sprintf "WITH scope(node) AS (SELECT value FROM json_each(?4)) %s"
        (String.concat " UNION "
-          (List.concat_map
+          (List.map
              (fun schema ->
-               [
-                 Printf.sprintf
-                   "SELECT scope.node, e.target FROM scope CROSS JOIN %s.edge e ON e.source_kind = \
-                    ?1 AND e.source = scope.node AND e.target_kind = ?2 WHERE (e.markers & ?3) != \
-                    0 AND +e.target IN (SELECT node FROM scope)"
-                   schema;
-                 Printf.sprintf
-                   "SELECT scope.node, e.source FROM scope CROSS JOIN %s.edge e ON e.target_kind = \
-                    ?2 AND e.target = scope.node AND e.name = '' CROSS JOIN %s.definition d ON \
-                    d.path = e.source WHERE e.source_kind = ?1 AND (e.markers & ?4) != 0 AND \
-                    d.package IN (SELECT value FROM json_each(?5)) AND +e.source IN (SELECT node \
-                    FROM scope)"
-                   schema schema;
-               ])
+               Printf.sprintf
+                 "SELECT scope.node, e.target, e.markers & ?3 FROM scope CROSS JOIN %s.edge e ON \
+                  e.source_kind = ?1 AND e.source = scope.node AND e.target_kind = ?2 WHERE \
+                  (e.markers & ?3) != 0 AND +e.target IN (SELECT node FROM scope)"
+                 schema)
              (list_schema_names store))))
-    (bind_call_graph graph ~seeds:nodes)
-    (fun row -> (Sql.read_integer row 0, Sql.read_integer row 1))
-
-let list_implementers store graph ~node =
-  Sql.list_rows store.sql
-    (String.concat " UNION "
-       (List.map
-          (fun schema ->
-            Printf.sprintf
-              "SELECT e.source FROM %s.edge e CROSS JOIN %s.definition d ON d.path = e.source \
-               WHERE e.target_kind = ?1 AND e.target = ?2 AND e.name = '' AND e.source_kind = ?3 \
-               AND (e.markers & ?4) != 0 AND d.package IN (SELECT value FROM json_each(?5))"
-              schema schema)
-          (list_schema_names store)))
-    [
-      Integer graph.node_kind;
-      Integer node;
-      Integer graph.unit_kind;
-      Integer graph.implements;
-      Text (encode_texts graph.visible);
-    ]
-    (fun row -> Sql.read_integer row 0)
-
-let list_all_packages store =
-  List.concat_map
-    (fun schema ->
-      Sql.list_rows store.sql (Printf.sprintf "SELECT name FROM %s.package" schema) [] (fun row ->
-          Sql.read_text row 0))
-    (list_schema_names store)
+    (bind_proof_graph graph ~seeds:nodes)
+    (fun row ->
+      {
+        source = Sql.read_integer row 0;
+        target = Sql.read_integer row 1;
+        markers = Sql.read_integer row 2;
+      })
 
 type read_edge = { source_kind : int; source : int; target_kind : int; target : int }
 
@@ -635,30 +570,11 @@ let list_definitions_identified store ~ids =
         (fun row -> (Sql.read_integer row 0, Sql.read_integer row 1, Sql.read_blob row 2)))
     (list_schema_names store)
 
-let list_targets_of_kind store ~kind ~visible =
-  Sql.list_rows store.sql
-    "SELECT DISTINCT e.target FROM main.edge e CROSS JOIN main.definition d ON d.path = e.source \
-     WHERE e.target_kind = ?1 AND d.package IN (SELECT value FROM json_each(?2))"
-    [ Integer kind; Text (encode_texts visible) ]
-    (fun row -> Sql.read_integer row 0)
-
 let mark_paths_stale store ~stage ~paths =
   Sql.run store.sql
     "INSERT OR IGNORE INTO main.stale (stage, id) SELECT DISTINCT ?1, path FROM main.definition \
      WHERE path IN (SELECT value FROM json_each(?2))"
     [ Integer stage; Text (encode_integers paths) ]
-
-let list_paths_owned_by store ~owners =
-  List.concat_map
-    (fun schema ->
-      Sql.list_rows store.sql
-        (Printf.sprintf
-           "SELECT DISTINCT path FROM %s.definition WHERE owner IN (SELECT value FROM \
-            json_each(?1))"
-           schema)
-        [ Text (encode_integers owners) ]
-        (fun row -> Sql.read_integer row 0))
-    (list_schema_names store)
 
 let list_keys_of_paths store ~paths =
   List.concat_map
@@ -672,11 +588,16 @@ let list_keys_of_paths store ~paths =
         (fun row -> (Sql.read_integer row 0, Sql.read_blob row 1)))
     (list_schema_names store)
 
-let mark_group_stale store ~stage ~path =
-  Sql.run store.sql
-    "INSERT OR IGNORE INTO main.stale (stage, id) SELECT ?1, path FROM main.recursion_group WHERE \
-     representative = (SELECT representative FROM main.recursion_group WHERE path = ?2)"
-    [ Integer stage; Integer path ]
+let mark_groups_stale store ~stage ~path =
+  List.iter
+    (fun table ->
+      Sql.run store.sql
+        (Printf.sprintf
+           "INSERT OR IGNORE INTO main.stale (stage, id) SELECT ?1, path FROM main.%s WHERE \
+            representative = (SELECT representative FROM main.%s WHERE path = ?2)"
+           table table)
+        [ Integer stage; Integer path ])
+    [ "recursion_group"; "proof_group" ]
 
 type item = { id : int; key : string; label : string; definition : int option }
 
@@ -697,58 +618,132 @@ let remove_item store ~id = Sql.run store.sql "DELETE FROM main.item WHERE id = 
 
 type item_graph = {
   lower_kind : int;
+  evaluate_kind : int;
   item_kind : int;
   references : int;
   claims : int;
   claim_kinds : int list;
 }
 
-let is_item_claimed store graph ~item =
-  Sql.has_row store.sql
-    "WITH RECURSIVE up(node) AS (VALUES (?1) UNION SELECT e.source FROM up CROSS JOIN main.edge e \
-     ON e.target_kind = ?2 AND e.target = up.node AND e.name = '' WHERE e.source_kind = ?3 AND \
-     (e.markers & ?4) != 0) SELECT 1 FROM up CROSS JOIN main.edge c ON c.target_kind = ?2 AND \
-     c.target = up.node AND c.name = '' WHERE (c.markers & ?5) != 0 LIMIT 1"
+let mark_items_stale store ~stage =
+  Sql.run store.sql "INSERT OR IGNORE INTO main.stale (stage, id) SELECT ?1, id FROM main.item"
+    [ Integer stage ]
+
+type linked = {
+  linked_id : int;
+  linked_key : string;
+  sites : string option;
+  text_hash : string option;
+  is_unevaluated : bool;
+  is_unit_stale : bool;
+}
+
+let list_linked store graph ~profile ~unit_kind ~roots =
+  Sql.list_rows store.sql
+    "WITH RECURSIVE down(node) AS (SELECT value FROM json_each(?4) UNION SELECT e.target FROM down \
+     CROSS JOIN main.lowered l ON l.item = down.node CROSS JOIN main.edge e ON e.source_kind = \
+     CASE WHEN l.is_evaluated = 1 THEN ?6 ELSE ?2 END AND e.source = down.node AND e.target_kind = \
+     ?1 WHERE (e.markers & ?3) != 0) SELECT down.node, i.key, l.sites, u.state, u.text_hash, \
+     l.is_evaluated = 1 AND EXISTS (SELECT 1 FROM main.stale s WHERE s.stage = ?6 AND s.id = \
+     down.node), EXISTS (SELECT 1 FROM main.stale s WHERE s.stage = ?7 AND s.id = down.node) FROM \
+     down CROSS JOIN main.item i ON i.id = down.node LEFT JOIN main.lowered l ON l.item = \
+     down.node LEFT JOIN main.unit u ON u.item = down.node AND u.profile = ?5"
     [
-      Integer item;
       Integer graph.item_kind;
       Integer graph.lower_kind;
       Integer graph.references;
-      Integer graph.claims;
+      Text (encode_integers roots);
+      Integer profile;
+      Integer graph.evaluate_kind;
+      Integer unit_kind;
     ]
+    (fun row ->
+      {
+        linked_id = Sql.read_integer row 0;
+        linked_key = Sql.read_blob row 1;
+        sites = (if Sql.is_null row 2 then None else Some (Sql.read_blob row 2));
+        text_hash =
+          (if Sql.is_null row 3 || Sql.read_integer row 3 <> 0 then None
+           else Some (Sql.read_blob row 4));
+        is_unevaluated = (not (Sql.is_null row 5)) && Sql.read_integer row 5 = 1;
+        is_unit_stale = Sql.read_integer row 6 = 1;
+      })
 
-let list_claimed_items store graph ~packages =
-  let claim_kinds = String.concat ", " (List.map string_of_int graph.claim_kinds) in
-  let roots =
-    match packages with
-    | Some _ ->
-        Printf.sprintf
-          "SELECT c.target FROM main.definition d CROSS JOIN main.edge c ON c.source_kind IN (%s) \
-           AND c.source = d.id AND c.target_kind = ?1 WHERE d.package IN (SELECT value FROM \
-           json_each(?5)) AND (c.markers & ?4) != 0 AND NOT EXISTS (SELECT 1 FROM main.stale s \
-           WHERE s.stage = c.source_kind AND s.id = c.source)"
-          claim_kinds
-    | None ->
-        Printf.sprintf
-          "SELECT c.target FROM main.edge c WHERE c.source_kind IN (%s) AND c.target_kind = ?1 AND \
-           ?5 IS NOT NULL AND (c.markers & ?4) != 0 AND NOT EXISTS (SELECT 1 FROM main.stale s \
-           WHERE s.stage = c.source_kind AND s.id = c.source)"
-          claim_kinds
+type claim_edges = Every_edge | Settled_edges of { packages : string list option }
+
+let require_settled ~stage ~unit =
+  Printf.sprintf " AND NOT EXISTS (SELECT 1 FROM main.stale s WHERE s.stage = %s AND s.id = %s)"
+    stage unit
+
+let select_claim_kinds graph =
+  Printf.sprintf " AND c.source_kind IN (%s)"
+    (String.concat ", " (List.map string_of_int graph.claim_kinds))
+
+let select_settled_claims ~packages ~parameter =
+  let condition = require_settled ~stage:"c.source_kind" ~unit:"c.source" in
+  match packages with
+  | None -> ("", condition, [])
+  | Some packages ->
+      ( " CROSS JOIN main.definition d ON d.id = c.source",
+        Printf.sprintf "%s AND +d.package IN (SELECT value FROM json_each(?%d))" condition parameter,
+        [ Text (encode_texts packages) ] )
+
+let is_item_claimed store graph ~item ~over =
+  let reference_condition, claimant, claim_condition, packages =
+    match over with
+    | Every_edge -> ("", "", "", [])
+    | Settled_edges { packages } ->
+        let claimant, claim_condition, packages = select_settled_claims ~packages ~parameter:4 in
+        (require_settled ~stage:"?3" ~unit:"e.source", claimant, claim_condition, packages)
   in
+  let has_claim node =
+    Sql.has_row store.sql
+      (Printf.sprintf
+         "SELECT 1 FROM main.edge c%s WHERE c.target_kind = ?1 AND c.target = ?2 AND c.name = ''%s \
+          AND (c.markers & ?3) != 0%s LIMIT 1"
+         claimant (select_claim_kinds graph) claim_condition)
+      ([ Integer graph.item_kind; Integer node; Integer graph.claims ] @ packages)
+  in
+  let find_referrer node ~from =
+    Sql.find_row store.sql
+      (Printf.sprintf
+         "SELECT e.source FROM main.edge e WHERE e.target_kind = ?1 AND e.target = ?2 AND e.name = \
+          '' AND e.source_kind = ?3 AND e.source >= ?4 AND (e.markers & ?5) != 0%s ORDER BY \
+          e.source LIMIT 1"
+         reference_condition)
+      [
+        Integer graph.item_kind;
+        Integer node;
+        Integer graph.lower_kind;
+        Integer from;
+        Integer graph.references;
+      ] (fun row -> Sql.read_integer row 0)
+  in
+  let visited = Hashtbl.create 16 in
+  let rec search = function
+    | [] -> false
+    | (node, from) :: pending -> (
+        match find_referrer node ~from with
+        | None -> search pending
+        | Some referrer ->
+            let pending = if referrer = max_int then pending else (node, referrer + 1) :: pending in
+            if Hashtbl.mem visited referrer then search pending
+            else begin
+              Hashtbl.replace visited referrer ();
+              has_claim referrer || search ((referrer, min_int) :: pending)
+            end)
+  in
+  Hashtbl.replace visited item ();
+  has_claim item || search [ (item, min_int) ]
+
+let list_claimed_among store graph ~items ~packages =
+  let claimant, claim_condition, packages = select_settled_claims ~packages ~parameter:4 in
   Sql.list_rows store.sql
     (Printf.sprintf
-       "WITH RECURSIVE down(node) AS (%s UNION SELECT e.target FROM down CROSS JOIN main.edge e ON \
-        e.source_kind = ?2 AND e.source = down.node AND e.target_kind = ?1 WHERE (e.markers & ?3) \
-        != 0 AND NOT EXISTS (SELECT 1 FROM main.stale s WHERE s.stage = ?2 AND s.id = down.node)) \
-        SELECT node FROM down"
-       roots)
-    [
-      Integer graph.item_kind;
-      Integer graph.lower_kind;
-      Integer graph.references;
-      Integer graph.claims;
-      Text (encode_texts (Option.value packages ~default:[]));
-    ]
+       "SELECT DISTINCT c.target FROM json_each(?1) i CROSS JOIN main.edge c ON c.target_kind = ?2 \
+        AND c.target = i.value AND c.name = ''%s%s WHERE (c.markers & ?3) != 0%s"
+       (select_claim_kinds graph) claimant claim_condition)
+    ([ Text (encode_integers items); Integer graph.item_kind; Integer graph.claims ] @ packages)
     (fun row -> Sql.read_integer row 0)
 
 let merge paths ~into =
@@ -771,50 +766,79 @@ let merge paths ~into =
         paths;
       save merged ~into)
 
-type located = { stage : int; base : int option; is_in_test : bool; detail : string }
+type placed = { file : string; base : int; stop : int; spans : string }
+
+let placed_columns = "f.key, def.base, def.stop, s.spans"
+
+let join_placed schema =
+  Printf.sprintf
+    "CROSS JOIN %s.file f ON f.id = def.file CROSS JOIN %s.syntax s ON s.definition = def.id" schema
+    schema
+
+let read_placed row ~first =
+  {
+    file = Sql.read_blob row first;
+    base = Sql.read_integer row (first + 1);
+    stop = Sql.read_integer row (first + 2);
+    spans = Sql.read_blob row (first + 3);
+  }
+
+type located = {
+  stage : int;
+  definition : (string * placed) option;
+  is_in_test : bool;
+  detail : string;
+}
 
 let list_file_diagnostics store schema ~file ~test_kind =
   let schema = name_schema schema in
   Sql.list_rows store.sql
     (Printf.sprintf
-       "SELECT d.stage, def.base, def.kind = ?2, d.detail FROM %s.definition def CROSS JOIN \
-        %s.diagnostic d ON d.definition = def.id WHERE def.file = ?1 UNION ALL SELECT d.stage, \
-        NULL, 0, d.detail FROM %s.diagnostic d WHERE d.file = ?1"
-       schema schema schema) [ Integer file; Integer test_kind ] (fun row ->
+       "SELECT d.stage, def.key, %s, def.kind = ?2, d.detail FROM %s.definition def CROSS JOIN \
+        %s.diagnostic d ON d.definition = def.id %s WHERE def.file = ?1 UNION ALL SELECT d.stage, \
+        NULL, NULL, NULL, NULL, NULL, 0, d.detail FROM %s.diagnostic d WHERE d.file = ?1"
+       placed_columns schema schema (join_placed schema) schema)
+    [ Integer file; Integer test_kind ]
+    (fun row ->
       {
         stage = Sql.read_integer row 0;
-        base = (if Sql.is_null row 1 then None else Some (Sql.read_integer row 1));
-        is_in_test = Sql.read_integer row 2 <> 0;
-        detail = Sql.read_blob row 3;
+        definition =
+          (if Sql.is_null row 1 then None else Some (Sql.read_blob row 1, read_placed row ~first:2));
+        is_in_test = Sql.read_integer row 6 <> 0;
+        detail = Sql.read_blob row 7;
       })
 
-let has_error store ~package ~last_stage =
+let has_error store ~package ~last_stage ~hidden_stage =
   Sql.has_row store.sql
-    "SELECT 1 FROM main.diagnostic WHERE package = ?1 AND severity = 'error' AND stage <= ?2 LIMIT \
-     1"
-    [ Text package; Integer last_stage ]
+    "SELECT 1 FROM main.diagnostic WHERE package = ?1 AND severity = 'error' AND stage <= ?2 AND \
+     stage IS NOT ?3 LIMIT 1"
+    [ Text package; Integer last_stage; encode_optional hidden_stage ]
 
-let find_unproven_definition store ~files ~origin =
+type scope = Everything | Packages of string list | Files of int list
+
+let find_unproven_definition store ~scope ~origin =
+  let membership, members =
+    match scope with
+    | Everything -> ("", [])
+    | Packages packages ->
+        (" AND +d.package IN (SELECT value FROM json_each(?2))", [ Text (encode_texts packages) ])
+    | Files files ->
+        (" AND +d.file IN (SELECT value FROM json_each(?2))", [ Text (encode_integers files) ])
+  in
   Sql.find_row store.sql
-    "SELECT d.key FROM main.definition d LEFT JOIN main.proof p ON p.definition = d.id WHERE \
-     d.file IN (SELECT value FROM json_each(?1)) AND d.origin = ?2 AND (p.state IS NULL OR p.state \
-     != 0) LIMIT 1"
-    [ Text (encode_integers files); Integer origin ]
-    (fun row -> Sql.read_blob row 0)
+    (Printf.sprintf
+       "SELECT d.key FROM main.proof p INDEXED BY proof_without_value CROSS JOIN main.definition d \
+        ON d.id = p.definition WHERE p.state != 0 AND d.origin = ?1%s LIMIT 1"
+       membership) (Integer origin :: members) (fun row -> Sql.read_blob row 0)
 
-type hole = { home : int; start : int; stop : int }
+type hole = { home : int; location : string }
 
 let list_holes store schema ~definition =
   Sql.list_rows store.sql
-    (Printf.sprintf "SELECT home, start, stop FROM %s.hole WHERE definition = ?1 ORDER BY position"
+    (Printf.sprintf "SELECT home, location FROM %s.hole WHERE definition = ?1 ORDER BY position"
        (name_schema schema))
     [ Integer definition ]
-    (fun row ->
-      {
-        home = Sql.read_integer row 0;
-        start = Sql.read_integer row 1;
-        stop = Sql.read_integer row 2;
-      })
+    (fun row -> { home = Sql.read_integer row 0; location = Sql.read_blob row 1 })
 
 let replace_holes store ~definition holes =
   if list_holes store Main ~definition <> holes then begin
@@ -822,53 +846,28 @@ let replace_holes store ~definition holes =
     List.iteri
       (fun position (hole : hole) ->
         Sql.run store.sql
-          "INSERT INTO main.hole (definition, position, home, start, stop) VALUES (?1, ?2, ?3, ?4, \
-           ?5)"
-          [
-            Integer definition;
-            Integer position;
-            Integer hole.home;
-            Integer hole.start;
-            Integer hole.stop;
-          ])
+          "INSERT INTO main.hole (definition, position, home, location) VALUES (?1, ?2, ?3, ?4)"
+          [ Integer definition; Integer position; Integer hole.home; Blob hole.location ])
       holes
   end
 
-type citation = { cited : int; clause_start : int; clause_stop : int }
-
 type verdict = {
   code : string;
-  start : int;
-  stop : int;
-  shows : string;
+  site : string;
   is_proven : bool;
   trusts_compiled_code : bool;
   failure : string option;
-  citation : citation option;
 }
 
-let verdict_columns =
-  "v.code, v.start, v.stop, v.shows, v.proven, v.trusts_compiled_code, v.failure, v.cited, \
-   v.cited_start, v.cited_stop"
+let verdict_columns = "v.code, v.site, v.proven, v.trusts_compiled_code, v.failure"
 
 let read_verdict row ~first =
   {
     code = Sql.read_text row first;
-    start = Sql.read_integer row (first + 1);
-    stop = Sql.read_integer row (first + 2);
-    shows = Sql.read_text row (first + 3);
-    is_proven = Sql.read_integer row (first + 4) <> 0;
-    trusts_compiled_code = Sql.read_integer row (first + 5) <> 0;
-    failure = (if Sql.is_null row (first + 6) then None else Some (Sql.read_blob row (first + 6)));
-    citation =
-      (if Sql.is_null row (first + 7) then None
-       else
-         Some
-           {
-             cited = Sql.read_integer row (first + 7);
-             clause_start = Sql.read_integer row (first + 8);
-             clause_stop = Sql.read_integer row (first + 9);
-           });
+    site = Sql.read_blob row (first + 1);
+    is_proven = Sql.read_integer row (first + 2) <> 0;
+    trusts_compiled_code = Sql.read_integer row (first + 3) <> 0;
+    failure = (if Sql.is_null row (first + 4) then None else Some (Sql.read_blob row (first + 4)));
   }
 
 let list_verdicts store ~definition =
@@ -880,10 +879,18 @@ let list_verdicts store ~definition =
 let list_file_verdicts store ~file =
   Sql.list_rows store.sql
     (Printf.sprintf
-       "SELECT d.base, %s FROM main.definition d CROSS JOIN main.verdict v ON v.definition = d.id \
-        WHERE d.file = ?1 ORDER BY d.base + v.start, d.base + v.stop, v.code, v.position"
-       verdict_columns) [ Integer file ] (fun row ->
-      (Sql.read_integer row 0, read_verdict row ~first:1))
+       "SELECT def.key, %s, %s FROM main.definition def CROSS JOIN main.verdict v ON v.definition \
+        = def.id %s WHERE def.file = ?1 ORDER BY def.base, v.position"
+       placed_columns verdict_columns (join_placed "main"))
+    [ Integer file ]
+    (fun row -> (Sql.read_blob row 0, read_placed row ~first:1, read_verdict row ~first:5))
+
+let find_placed store schema ~definition =
+  let schema = name_schema schema in
+  Sql.find_row store.sql
+    (Printf.sprintf "SELECT %s FROM %s.definition def %s WHERE def.id = ?1" placed_columns schema
+       (join_placed schema))
+    [ Integer definition ] (read_placed ~first:0)
 
 let replace_verdicts store ~definition verdicts =
   let is_changed = list_verdicts store ~definition <> verdicts in
@@ -892,22 +899,16 @@ let replace_verdicts store ~definition verdicts =
     List.iteri
       (fun position (verdict : verdict) ->
         Sql.run store.sql
-          "INSERT INTO main.verdict (definition, position, code, start, stop, shows, proven, \
-           trusts_compiled_code, failure, cited, cited_start, cited_stop) VALUES (?1, ?2, ?3, ?4, \
-           ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
+          "INSERT INTO main.verdict (definition, position, code, site, proven, \
+           trusts_compiled_code, failure) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
           [
             Integer definition;
             Integer position;
             Text verdict.code;
-            Integer verdict.start;
-            Integer verdict.stop;
-            Text verdict.shows;
+            Blob verdict.site;
             Integer (Bool.to_int verdict.is_proven);
             Integer (Bool.to_int verdict.trusts_compiled_code);
             (match verdict.failure with Some failure -> Blob failure | None -> Null);
-            encode_optional (Option.map (fun citation -> citation.cited) verdict.citation);
-            encode_optional (Option.map (fun citation -> citation.clause_start) verdict.citation);
-            encode_optional (Option.map (fun citation -> citation.clause_stop) verdict.citation);
           ])
       verdicts
   end;
@@ -1007,10 +1008,7 @@ type unit_entity =
   | Definition_unit
   | Path_unit
   | Dependency_unit
-  | Package_unit
   | Item_unit
-
-type scope = Everything | Packages of string list | Files of int list | Items of int list
 
 let list_stale store ~stage ~entity ~scope =
   let table, id_column =
@@ -1020,7 +1018,6 @@ let list_stale store ~stage ~entity ~scope =
     | Definition_unit -> ("definition", "id")
     | Path_unit -> ("definition", "path")
     | Dependency_unit -> ("dependency", "id")
-    | Package_unit -> ("package", "id")
     | Item_unit -> ("item", "id")
   in
   let list_joined ~from_ column members =
@@ -1038,14 +1035,12 @@ let list_stale store ~stage ~entity ~scope =
   | Everything, _ ->
       Sql.list_rows store.sql "SELECT id FROM main.stale WHERE stage = ?1" [ Integer stage ]
         (fun row -> Sql.read_integer row 0)
-  | Packages packages, Package_unit -> list_stale_among "name" (encode_texts packages)
   | Packages packages, (File_unit | Module_unit | Definition_unit | Path_unit | Dependency_unit) ->
       list_stale_among "package" (encode_texts packages)
   | Files files, (Definition_unit | Path_unit) -> list_among "file" (encode_integers files)
   | Files files, File_unit -> list_among "id" (encode_integers files)
-  | Items items, Item_unit -> list_among "id" (encode_integers items)
-  | (Packages _ | Files _), Item_unit | Items _, _ -> []
-  | Files _, (Module_unit | Dependency_unit | Package_unit) -> []
+  | (Packages _ | Files _), Item_unit -> []
+  | Files _, (Module_unit | Dependency_unit) -> []
 
 type entry = {
   file : int;
@@ -1192,6 +1187,48 @@ let list_definitions store schema selection =
     (Printf.sprintf "SELECT %s FROM %s.definition WHERE %s" definition_columns (name_schema schema)
        condition)
     arguments read_definition
+
+let qualified_definition_columns =
+  String.concat ", "
+    (List.map
+       (fun column -> "d." ^ String.trim column)
+       (String.split_on_char ',' definition_columns))
+
+let find_source_definition store ~(target : endpoint) ~source_kind ~markers ~from_ =
+  Sql.find_row store.sql
+    (Printf.sprintf
+       "SELECT %s FROM main.edge e CROSS JOIN main.definition d ON d.id = e.source WHERE \
+        e.target_kind = ?1 AND e.target = ?2 AND e.name = ?3 AND e.source_kind = ?4 AND e.source \
+        >= ?5 AND (e.markers & ?6) != 0 ORDER BY e.source LIMIT 1"
+       qualified_definition_columns)
+    [
+      Integer target.kind;
+      Integer target.id;
+      Text target.name;
+      Integer source_kind;
+      Integer from_;
+      Integer markers;
+    ]
+    read_definition
+
+let list_target_definitions store ~(source : endpoint) ~target_kind ~markers ~origin =
+  Sql.list_rows store.sql
+    (Printf.sprintf
+       "SELECT %s, e.markers FROM main.edge e CROSS JOIN main.definition d ON d.path = e.target \
+        WHERE e.source_kind = ?1 AND e.source = ?2 AND e.target_kind = ?3 AND (e.markers & ?4) != \
+        0 AND d.origin = ?5 AND d.ordinal = 0 ORDER BY e.target"
+       qualified_definition_columns)
+    [ Integer source.kind; Integer source.id; Integer target_kind; Integer markers; Integer origin ]
+    (fun row -> (read_definition row, Sql.read_integer row 20))
+
+let list_package_member_keys store schema ~package ~member ~kind ~origin =
+  Sql.list_rows store.sql
+    (Printf.sprintf
+       "SELECT key FROM %s.definition WHERE package = ?1 AND member = ?2 AND kind = ?3 AND origin \
+        = ?4 AND ordinal = 0"
+       (name_schema schema))
+    [ Text package; Text member; Integer kind; Integer origin ]
+    (fun row -> Sql.read_blob row 0)
 
 let replace_definition store (definition : definition) =
   Sql.run store.sql
@@ -1490,6 +1527,15 @@ let find_place store schema ~definition =
   Sql.find_row store.sql
     (Printf.sprintf
        "SELECT file.key, definition.base FROM %s.definition CROSS JOIN %s.file ON file.id = \
+        definition.file WHERE definition.id = ?1"
+       schema schema) [ Integer definition ] (fun row ->
+      (Sql.read_blob row 0, Sql.read_integer row 1))
+
+let find_file_order store schema ~definition =
+  let schema = name_schema schema in
+  Sql.find_row store.sql
+    (Printf.sprintf
+       "SELECT file.key, definition.position FROM %s.definition CROSS JOIN %s.file ON file.id = \
         definition.file WHERE definition.id = ?1"
        schema schema) [ Integer definition ] (fun row ->
       (Sql.read_blob row 0, Sql.read_integer row 1))

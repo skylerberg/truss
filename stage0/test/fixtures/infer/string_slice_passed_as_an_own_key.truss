@@ -1,3 +1,0 @@
-fn f(counts: mut Map[String, Int64], word: StringSlice) {
-  mut counts.insert(word, value: 1)
-}

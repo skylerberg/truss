@@ -58,12 +58,9 @@ val report_null_coalescing :
   default:Syntax.expression ->
   unit
 
-val derive_parameter_name : Syntax.expression -> string
-
 val report_trailing_lambda :
   Cursor.t ->
   callee:Syntax.expression ->
-  parameter:string ->
   opening:Token.t ->
   closing:Token.t ->
   next:Token.t ->

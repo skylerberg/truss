@@ -1,0 +1,11 @@
+fn large() -> UInt64
+  cost time O(1114112)
+{
+  0
+}
+
+fn f() -> UInt64
+  cost time O(1)
+{
+  large()
+}

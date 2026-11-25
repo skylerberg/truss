@@ -29,6 +29,7 @@ impl Ordered for UInt8 {
 impl Default for UInt8 {
   fn default() -> UInt8
     cost time O(1)
+    cost allocations == 0
   {
     0
   }
@@ -176,6 +177,7 @@ impl Ordered for UInt16 {
 impl Default for UInt16 {
   fn default() -> UInt16
     cost time O(1)
+    cost allocations == 0
   {
     0
   }
@@ -323,6 +325,7 @@ impl Ordered for UInt32 {
 impl Default for UInt32 {
   fn default() -> UInt32
     cost time O(1)
+    cost allocations == 0
   {
     0
   }
@@ -470,6 +473,7 @@ impl Ordered for UInt64 {
 impl Default for UInt64 {
   fn default() -> UInt64
     cost time O(1)
+    cost allocations == 0
   {
     0
   }

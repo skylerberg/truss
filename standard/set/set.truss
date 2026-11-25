@@ -384,9 +384,6 @@ impl Iterable for Set[Element: Hash + Ordered] {
 
   fn count(self) -> UInt64
     ensures result == self.length()
-    ensures forall member: Element =>
-      self.model().contains(member) ==>
-        (exists position in 0..result => identical(self.element(position), member))
     cost time O(1)
   {
     self.map.keys.length()
@@ -402,13 +399,24 @@ impl Iterable for Set[Element: Hash + Ordered] {
   }
 }
 
-public fn Set[Element: Hash + Ordered].cursor(own self) -> list.ListCursor[Element]
-  ensures result.remaining() == self.length()
-  ensures identical(result.model().elements(), self.model())
-  cost time O(self.length())
-  cost amortized time O(self.length())
+public theorem every_member_is_an_element[Element: Hash + Ordered](set: Set[Element])
+  ensures forall member: Element =>
+    set.model().contains(member) ==>
+      (exists position in 0..set.count() => identical(set.element(position), member))
 {
-  own self.map.keys.cursor()
+}
+
+impl IntoCursor for Set[Element: Hash + Ordered] {
+  type Cursor = list.ListCursor[Element]
+
+  fn cursor(own self) -> list.ListCursor[Element]
+    ensures result.remaining() == self.length()
+    ensures identical(result.model().elements(), self.model())
+    cost time O(self.length())
+    cost amortized time O(self.length())
+  {
+    own self.map.keys.cursor()
+  }
 }
 
 impl Equal for Set[Element: Hash + Ordered] {
@@ -461,6 +469,8 @@ impl Default for Set[Element: Hash + Ordered] {
   fn default() -> Set[Element]
     ensures result.length() == 0
     ensures forall value: Element => !result.model().contains(value)
+    cost time O(1)
+    cost allocations == 0
   {
     Set(map: map.Map.default())
   }

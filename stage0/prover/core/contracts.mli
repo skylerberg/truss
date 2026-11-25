@@ -30,6 +30,7 @@ val select_precondition_clauses : State.contract -> State.clauses
 val find_declared_clauses : Lookups.t -> Path.t -> State.clauses option
 val read_signature : State.context -> Path.t -> Types.signature option
 val find_callee_clauses : State.context -> Path.t -> State.clauses option
+val list_modified_parts : State.context -> Path.t -> int -> Types.modified list option
 val find_function_contract : State.context -> Path.t -> State.contract option
 val find_capability_contract : State.context -> Path.t -> string -> State.contract option
 val find_capability_clauses : State.context -> Path.t -> string -> State.clauses option
@@ -48,7 +49,7 @@ val find_method_contract :
   Types.trait_reference ->
   string ->
   Path.receiver ->
-  Core.evidence ->
+  Types.evidence ->
   State.contract option
 
 val find_integer_literal : Mir.formula -> Z.t option

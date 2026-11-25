@@ -1,10 +1,10 @@
 type scanned = Lexed of Token.kind | Ellipsis
 
-let replace cursor ~start ~length ~replacements ~code message =
-  Cursor.report cursor ~code
+let replace cursor ~start ~length ~replacements problem =
+  Cursor.report cursor
     ~fixes:(Cursor.list_code_fixes cursor (Source.make_span start (start + length)) replacements)
     (Source.make_span start (start + length))
-    message
+    problem
 
 let scan (cursor : Cursor.t) =
   let start = cursor.position in
@@ -13,15 +13,14 @@ let scan (cursor : Cursor.t) =
     cursor.position <- start + length;
     Some (Lexed kind)
   in
-  let make_replaced ~length ~replacements ~message kind =
-    replace cursor ~start ~length ~replacements ~code:Foreign_operator message;
+  let make_replaced ~length ~replacements ~operator kind =
+    replace cursor ~start ~length ~replacements (Foreign_operator operator);
     make_lexed kind length
   in
   if is 0 ':' && is 1 '=' then make_lexed (Foreign Colon_equal) 2
   else if is 0 ':' && is 1 ':' && is 2 '<' then make_lexed (Foreign Colon_colon) 2
   else if is 0 ':' && is 1 ':' then begin
-    replace cursor ~start ~length:2 ~replacements:[ "." ] ~code:Path_separator
-      "Truss separates the names of a path with `.`, as in `json.parse` and `Shape.Circle`.";
+    replace cursor ~start ~length:2 ~replacements:[ "." ] Path_separator;
     make_lexed (Punctuation Dot) 2
   end
   else if is 0 '-' && is 1 '-' then make_lexed (Foreign Minus_minus) 2
@@ -29,18 +28,15 @@ let scan (cursor : Cursor.t) =
   else if is 0 '*' && is 1 '*' then make_lexed (Foreign Star_star) 2
   else if is 0 '|' && is 1 '>' then make_lexed (Foreign Pipe_greater) 2
   else if is 0 '.' && is 1 '.' && is 2 '<' then
-    make_replaced ~length:3 ~replacements:[ ".." ] ~message:"Truss has no `..<`; write `..`."
-      (Punctuation Dot_dot)
+    make_replaced ~length:3 ~replacements:[ ".." ] ~operator:Half_open_range (Punctuation Dot_dot)
   else if is 0 '<' && is 1 '>' then
-    make_replaced ~length:2 ~replacements:[ "!=" ] ~message:"Truss has no `<>`; write `!=`."
-      (Punctuation Not_equal)
+    make_replaced ~length:2 ~replacements:[ "!=" ] ~operator:Diamond (Punctuation Not_equal)
   else if (is 0 '=' || is 0 '!') && is 1 '=' && is 2 '=' && not (is 3 '=') then (
     let written, replacement, kind =
       if is 0 '=' then ("===", "==", Token.Equal_equal) else ("!==", "!=", Not_equal)
     in
-    replace cursor ~start ~length:3 ~replacements:[ replacement ] ~code:Strict_equality
-      (Printf.sprintf "Truss has no `%s`. `%s` already compares values of the same type." written
-         replacement);
+    replace cursor ~start ~length:3 ~replacements:[ replacement ]
+      (Strict_equality { written; replacement });
     make_lexed (Punctuation kind) 3)
   else if is 0 '.' && is 1 '.' && is 2 '.' then begin
     cursor.position <- start + 3;
@@ -50,22 +46,14 @@ let scan (cursor : Cursor.t) =
   else None
 
 let lex_ellipsis cursor ~start ~follows_operand ~operand_follows =
-  let make_replaced ~replacements message kind =
-    replace cursor ~start ~length:3 ~replacements ~code:Foreign_operator message;
+  let make_replaced ~replacements operator kind =
+    replace cursor ~start ~length:3 ~replacements (Foreign_operator operator);
     Some kind
   in
   match (follows_operand, operand_follows) with
   | true, true ->
-      make_replaced ~replacements:[ ".."; "..=" ]
-        "Truss has no `...`. A range that leaves out its end is written `..`, and one that \
-         includes its end is written `..=`."
-        (Token.Punctuation Dot_dot_equal)
-  | false, false ->
-      make_replaced ~replacements:[ "todo" ]
-        "Truss has no `...`; code that is not written yet is `todo`." (Token.Keyword Todo)
+      make_replaced ~replacements:[ ".."; "..=" ] Range_ellipsis (Token.Punctuation Dot_dot_equal)
+  | false, false -> make_replaced ~replacements:[ "todo" ] Todo_ellipsis (Token.Keyword Todo)
   | _ ->
-      Cursor.report cursor ~code:Foreign_operator
-        (Source.make_span start (start + 3))
-        "Truss has no `...`: it has no spread or rest operator, and a function takes a list where \
-         it takes any number of values.";
+      Cursor.report cursor (Source.make_span start (start + 3)) (Foreign_operator Spread_ellipsis);
       None

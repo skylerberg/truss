@@ -6,22 +6,19 @@ let select_arithmetic_method : Syntax.arithmetic -> Well_known.method_ * Well_kn
   | Divide -> (Divide_divide, Divide_output)
   | Remainder -> (Remainder_remainder, Remainder_output)
 
-let infer_integer_result state span type_ ~(describe : string -> string) =
+let infer_integer_result state at type_ ~operator =
   Solver.require_within state type_ Types.integer_types ~reason:(fun excluded ->
-      State.add_diagnostic state No_impl span (describe (State.describe state excluded)))
+      State.add_diagnostic state
+        (Not_an_integer_operand { at; operator; excluded = State.make_shown state excluded }))
 
-let infer_bitwise_result state span type_ =
-  infer_integer_result state span type_
-    ~describe:(Printf.sprintf "Bitwise operators work on built-in integers, not %s.")
+let infer_bitwise_result state at type_ = infer_integer_result state at type_ ~operator:Bitwise
 
-let infer_shift_result state ~left:(left_span, left_type) ~right:(right_span, right_type) =
+let infer_shift_result state ~left:(left_at, left_type) ~right:(right_at, right_type) =
   ignore
     (Solver.require_within state right_type Types.unsigned_integer_types ~reason:(fun excluded ->
-         State.add_diagnostic state Mismatch right_span
-           (Printf.sprintf "A shift amount is an unsigned integer, not %s."
-              (State.describe state excluded))));
-  infer_integer_result state left_span left_type
-    ~describe:(Printf.sprintf "Shifts work on built-in integers, not %s.")
+         State.add_diagnostic state
+           (Shift_amount_not_unsigned { at = right_at; excluded = State.make_shown state excluded })));
+  infer_integer_result state left_at left_type ~operator:Shift
 
 let is_integer_operand state (operand : Syntax.expression) type_ =
   State.is_within state
@@ -29,7 +26,7 @@ let is_integer_operand state (operand : Syntax.expression) type_ =
     (Types.integer_types @ [ Integer ])
 
 let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
-  State.reject_in_formula state env (State.read_span state value.id) "`?`";
+  State.reject_in_formula state env (Written value.id) Try_expression;
   let inner_type = Conversions.read_checked_head state env inner in
   let output =
     match env.output with
@@ -41,21 +38,20 @@ let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
       Some (Types.Named { path = output_path; arguments = [ _; Types.Type output_error ] }) )
     when Well_known.is Result path && Well_known.is Result output_path ->
       if not (State.unify state error output_error) then
-        State.report state Wrong_try (State.read_span state value.id)
-          (Printf.sprintf
-             "`?` returns the error unchanged, so it needs the function's error type `%s`, not \
-              `%s`. Convert it first with `map_error`."
-             (State.show state output_error) (State.show state error));
+        State.report state
+          (Try_error_mismatch
+             {
+               at = Written value.id;
+               output_error = State.zonk state output_error;
+               error = State.zonk state error;
+             });
       ok
   | ( Types.Named { path; arguments = [ Types.Type some ] },
       Some (Types.Named { path = output_path; _ }) )
     when Well_known.is Option path && Well_known.is Option output_path ->
       some
   | (Types.Error _ | Types.Hole), _ -> inner_type
-  | _ ->
-      State.make_error_type state Wrong_try (State.read_span state value.id)
-        "`?` works on a `Result` in a function that returns a `Result`, and on an `Option` in a \
-         function that returns an `Option`. Convert between them with `ok_or` or `ok`."
+  | _ -> State.make_error_type state (Try_misused { at = Written value.id })
 
 and check_prefix state env ?expected (value : Syntax.expression) operator
     (inner : Syntax.expression) =
@@ -65,8 +61,7 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
       Types.bool
   | Complement ->
       let type_ = Hooks.check_expression state env ?expected inner in
-      infer_integer_result state (State.read_span state value.id) type_
-        ~describe:(Printf.sprintf "`~` works on built-in integers, not %s.")
+      infer_integer_result state (Written value.id) type_ ~operator:Complement
   | Negate -> (
       match inner.kind with
       | Integer number ->
@@ -102,7 +97,7 @@ and check_operator_call state call ~method_ ~output ~left:((left : Syntax.expres
       ~arguments:(List.map (fun (_, right_type) -> Types.Type right_type) (Option.to_list right))
       (Well_known.make_path owner)
   in
-  let result = State.make_fresh_type state in
+  let result = Unify.make_fresh_type state.unifier in
   State.elaborate state call
     (Call
        (Tables.make_method_call reference method_ ~self_type:left_type ~result
@@ -111,11 +106,10 @@ and check_operator_call state call ~method_ ~output ~left:((left : Syntax.expres
   Solver.require state
     (Operator
        {
-         at = State.read_span state call;
+         at = Written call;
          operands =
            Option.map
-             (fun ((right : Syntax.expression), _) ->
-               (State.read_span state left.id, State.read_span state right.id))
+             (fun ((right : Syntax.expression), _) -> (Core.Written left.id, Core.Written right.id))
              right;
        })
     ~outputs:[ (Well_known.show_associated output, result) ]
@@ -135,16 +129,14 @@ and check_operands state env (left : Syntax.expression) (right : Syntax.expressi
 
 and is_string state (operand : Syntax.expression) type_ =
   let type_ = Conversions.read_actual_head state operand type_ in
-  Types.is_well_known String type_ || Types.is_well_known String_slice type_
+  Types.is_well_known String (Types.strip_view type_)
 
 and check_binary state (env : State.env) ?expected (value : Syntax.expression) operator
     (left : Syntax.expression) (right : Syntax.expression) =
   match operator with
   | Syntax.Connective connective ->
       if connective = Implies && not env.specification then
-        State.report state Specification_only (State.read_span state value.id)
-          "`==>` is only for specifications and the bodies of functions for specifications only; \
-           in code, write `!a || b`.";
+        State.report state (Implies_in_code { at = Written value.id });
       Hooks.check state env left Types.bool;
       Hooks.check state env right Types.bool;
       Types.bool
@@ -153,15 +145,13 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
       let right_type = Hooks.check_expression state env ~expected:left_type right in
       check_literal_operands state ~left:left_type ~right:right_type;
       if not (State.unify state left_type right_type) then
-        Failures.report_mismatch state (State.read_span state right.id) ~expected:left_type
-          ~actual:right_type;
-      infer_bitwise_result state (State.read_span state value.id) left_type
+        Failures.report_mismatch state (Written right.id) ~expected:left_type ~actual:right_type;
+      infer_bitwise_result state (Written value.id) left_type
   | Operation (Shift _) ->
       let left_type = Hooks.check_expression state env ?expected left in
       let right_type = Hooks.check_expression state env right in
-      infer_shift_result state
-        ~left:(State.read_span state left.id, left_type)
-        ~right:(State.read_span state right.id, right_type)
+      infer_shift_result state ~left:(Core.Written left.id, left_type)
+        ~right:(Core.Written right.id, right_type)
   | Comparison comparison -> (
       match check_operands state env left right with
       | None -> Types.bool
@@ -177,27 +167,29 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           else begin
             let left_head = Conversions.read_actual_head state left left_type in
             let right_head = Conversions.read_actual_head state right right_type in
+            let left_self = Types.strip_view left_head
+            and right_self = Types.strip_view right_head in
+            let is_array type_ = Option.is_some (Types.find_list_of_array type_) in
             let compared_type =
-              match
-                ( Conversions.find_view_as ~owned:right_head ~view:left_head,
-                  Conversions.find_view_as ~owned:left_head ~view:right_head )
-              with
-              | Some _, _ ->
-                  Conversions.coerce state env ~argument:Language.Mode.Read right ~actual:right_type
-                    ~expected:left_type;
-                  left_type
-              | None, Some _ ->
-                  Conversions.coerce state env ~argument:Language.Mode.Read left ~actual:left_type
-                    ~expected:right_type;
-                  right_type
-              | None, None ->
-                  if not (State.unify state left_type right_type) then
-                    ignore
-                      (Failures.add_operand_mismatch state ~at:(State.read_span state value.id)
-                         ~left:(State.read_span state left.id, left_type)
-                         ~right:(State.read_span state right.id, right_type));
-                  left_type
+              if is_array left_self && Types.is_well_known List right_self then right_self
+              else if Types.is_view left_head then left_self
+              else left_type
             in
+            let compares_as_list = Types.is_well_known List (State.normalize state compared_type) in
+            let view_as_compared (operand : Syntax.expression) self_type actual =
+              if is_array self_type && compares_as_list then begin
+                Conversions.coerce state env ~argument:Language.Mode.Read operand ~actual
+                  ~expected:compared_type;
+                true
+              end
+              else State.unify ~modulo_views:true state actual compared_type
+            in
+            let left_fits = view_as_compared left left_self left_type in
+            if not (left_fits && view_as_compared right right_self right_type) then
+              ignore
+                (Failures.add_operand_mismatch state ~at:(Written value.id)
+                   ~left:(Core.Written left.id, left_type)
+                   ~right:(Core.Written right.id, right_type));
             let method_, result =
               match comparison with
               | Equal | Not_equal -> (Well_known.Equal_equal, Types.bool)
@@ -210,7 +202,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
               (Call
                  (Tables.make_method_call trait method_ ~self_type:compared_type ~result
                     [ (left, Read); (right, Read) ]));
-            Solver.require state (Method_call (State.read_span state value.id)) compared_type trait;
+            Solver.require state (Method_call (Written value.id)) compared_type trait;
             Types.bool
           end)
   | Operation (Arithmetic arithmetic) -> (
@@ -220,27 +212,22 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           check_literal_operands state ~left:left_type ~right:right_type;
           if arithmetic = Add && (is_string state left left_type || is_string state right right_type)
           then begin
-            let spell_piece (side : Syntax.expression) =
+            let find_piece (side : Syntax.expression) : Catalog.Inference.joined_piece option =
               match side.kind with
               | String { tag = None; form = Ordinary; first; rest = []; _ } ->
-                  Some (State.quote_span state (State.read_span state first.id))
+                  Some (Fragment (Written first.id))
               | String _ -> None
-              | _ -> Some ("${" ^ State.quote_span state (State.read_span state side.id) ^ "}")
+              | _ -> Some (Interpolated (Written side.id))
             in
-            let fixes =
-              match (spell_piece left, spell_piece right) with
-              | Some left, Some right ->
-                  [
-                    State.fix "Join them with interpolation."
-                      [
-                        State.replace (State.read_span state value.id)
-                          (Printf.sprintf "\"%s%s\"" left right);
-                      ];
-                  ]
-              | _ -> []
-            in
-            State.make_error_type state String_addition (State.read_span state value.id) ~fixes
-              "Strings have no `+`. Join them with interpolation, or with methods such as `push`."
+            State.make_error_type state
+              (String_addition
+                 {
+                   at = Written value.id;
+                   join =
+                     (match (find_piece left, find_piece right) with
+                     | Some left, Some right -> Some (left, right)
+                     | _ -> None);
+                 })
           end
           else
             begin if
@@ -255,50 +242,3 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
               check_operator_call state value.id ~method_ ~output ~left:(left, left_type)
                 ~right:(Some (right, right_type))
             end)
-
-and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.expression) =
-  match Option.map (Conversions.read_expected_head state) expected with
-  | Some (Types.Any trait as any_type) ->
-      let inner_type = Hooks.check_expression state env inner in
-      Solver.require state
-        (Any_conversion { at = State.read_span state value.id; any_type })
-        inner_type trait;
-      Instantiation.check_grants_when_final state (State.read_span state value.id) inner_type trait;
-      State.check_when_final state (fun () ->
-          let inner_type = State.finalize_type state inner_type in
-          if Option.is_some (State.find_evidence state inner_type trait) then
-            List.iter
-              (fun (bound : Types.trait_reference) ->
-                match
-                  Interface.Definition.find_trait_interface state.lookups.interface bound.trait
-                with
-                | Some interface ->
-                    List.iter
-                      (fun name ->
-                        match
-                          Types.list_capabilities
-                            (Interface.Impls.project_capability_set state.lookups.interface
-                               ~list_bounds:(State.lookup_bounds state) inner_type
-                               { bound with associated = [] } name)
-                        with
-                        | [] -> ()
-                        | set ->
-                            State.report state No_impl (State.read_span state value.id)
-                              (Printf.sprintf
-                                 "`%s` cannot be an `%s`: its `%s` is %s, and code that holds an \
-                                  `any` value has no capability to give to its methods."
-                                 (Types.show inner_type) (Types.show any_type) name
-                                 (String.concat ", "
-                                    (List.map
-                                       (fun capability ->
-                                         "`" ^ Types.show_capability capability ^ "`")
-                                       set))))
-                      interface.associated_capabilities
-                | None -> ())
-              (Interface.Properties.list_bound_closure state.lookups.interface ~self:inner_type
-                 trait));
-      any_type
-  | _ ->
-      ignore (Hooks.check_expression state env inner);
-      State.make_error_type state Cannot_infer (State.read_span state value.id)
-        "`any value` needs an expected type `any Trait`, from an annotation or a parameter."

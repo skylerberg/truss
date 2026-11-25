@@ -7,8 +7,8 @@ fn f(
   names: Set[String],
   listed: List[String],
   tables: Map[List[UInt8], Int64],
-  word: StringSlice,
-  bytes: Slice[UInt8],
+  word: String,
+  bytes: List[UInt8],
 ) -> Bool {
   mut counts.remove(word)
   counts.get(word) is Some(_) && counts.contains(word) && counts[word] == 0 && names.contains(word)

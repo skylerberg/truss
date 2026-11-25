@@ -154,96 +154,7 @@ and match_arguments ~variables substitution patterns arguments =
             | _ -> None))
       (Some substitution) patterns arguments
 
-type evidence =
-  | From_impl of { impl : Path.t; substitution : Types.substitution }
-  | From_bound
-  | From_any
-  | Built_in
-  | Accepted of Types.ty
-
-type through_any = Callable | Has_generics | Names_self
-
-type dispatched = {
-  declared_by : Types.trait_reference;
-  trait_method : Types.trait_method;
-  through_any : through_any;
-}
-
-let classify_dispatched_signature ~self (signature : Types.signature) =
-  let names_self type_ =
-    let mentions_self = ref false in
-    ignore
-      (Types.map
-         (function
-           | Types.Projection { base = Types.Parameter base; _ } as projected when base = self ->
-               Some projected
-           | Types.Parameter parameter as named when parameter = self ->
-               mentions_self := true;
-               Some named
-           | _ -> None)
-         type_);
-    !mentions_self
-  in
-  if signature.generics <> [] || signature.capability_parameters <> [] then Has_generics
-  else if
-    List.exists (fun (info : Types.parameter_info) -> names_self info.type_) signature.parameters
-    || names_self (Types.extract_result_type signature.output)
-  then Names_self
-  else Callable
-
-let list_dispatched_methods lookups (any : Types.trait_reference) =
-  let self = Types.make_self_parameter any.trait in
-  let traits =
-    List.fold_left
-      (fun traits (bound : Types.trait_reference) ->
-        if
-          List.exists
-            (fun (listed : Types.trait_reference) -> Path.equal listed.trait bound.trait)
-            traits
-        then traits
-        else traits @ [ bound ])
-      []
-      (Properties.list_bound_closure lookups ~self:(Types.Parameter self) any)
-  in
-  List.concat_map
-    (fun (declared_by : Types.trait_reference) ->
-      match Definition.find_trait_interface lookups declared_by.trait with
-      | None -> []
-      | Some interface ->
-          let substitution =
-            Types.make_trait_substitution interface.trait_generics ~self:(Types.Parameter self)
-              declared_by
-          in
-          List.filter_map
-            (fun (trait_method : Types.trait_method) ->
-              if trait_method.method_receiver = Static then None
-              else
-                Some
-                  {
-                    declared_by;
-                    trait_method;
-                    through_any =
-                      classify_dispatched_signature ~self
-                        (Types.substitute_signature substitution
-                           (Definition.read_method_signature lookups ~owner:declared_by.trait
-                              trait_method));
-                  })
-            interface.methods)
-    traits
-
-let classify_through_any lookups ~(any : Types.trait_reference) ~(trait : Path.t)
-    (trait_method : Types.trait_method) =
-  match
-    List.find_opt
-      (fun (dispatched : dispatched) ->
-        Path.equal dispatched.declared_by.trait trait && dispatched.trait_method = trait_method)
-      (list_dispatched_methods lookups any)
-  with
-  | Some dispatched -> dispatched.through_any
-  | None ->
-      raise_bug "`any %s` dispatches no method %s of %s" (Types.show_trait any)
-        trait_method.method_name (Path.show trait)
-
+type solution = Evidence of Types.evidence | Built_in | Accepted of Types.ty
 type bounds = Properties.Bounds.t
 
 let list_no_bounds = Properties.Bounds.none
@@ -307,7 +218,7 @@ let rename_as_written (declared : Types.signature) (written : Types.signature) =
         renamed.capability_parameters;
   }
 
-let find_built_in_evidence : Properties.decision -> evidence option = function
+let find_built_in_solution : Properties.decision -> solution option = function
   | Holds -> Some Built_in
   | Fails -> None
   | Depends_on open_type -> Some (Accepted open_type)
@@ -353,13 +264,59 @@ let check_recursion_depth ~depth type_ trait =
   if depth > Properties.recursion_limit then
     raise
       (Properties.Recursion_limit
-         (Printf.sprintf
-            "Deciding whether `%s` implements `%s` needs more than %d nested impls. The compiler \
-             stops there: bounds that ask for ever larger types never finish."
-            (Types.show type_) (Types.show_trait trait) Properties.recursion_limit))
+         (Recursion_limit
+            { limit = Properties.recursion_limit; recursion = Evidence { type_; trait } }))
+
+let inherits_method (trait : Types.trait_interface) (impl : Types.impl_interface)
+    (declared : Types.trait_method) =
+  declared.provided && Option.is_none (Types.find_implementing_receiver trait impl declared)
+
+type method_code =
+  | Method_of_impl of { impl : Path.t; substitution : Types.substitution }
+  | Declaration_for_view
+
+let locate_method lookups (evidence : Types.evidence) ~name ~receiver =
+  match evidence with
+  | Impl { impl; substitution } -> Some (Method_of_impl { impl; substitution })
+  | Derived_for_view { viewed; substitution } -> (
+      let viewed_impl = Definition.read_impl_interface lookups viewed in
+      let trait = Definition.read_trait_interface lookups viewed_impl.implements.trait in
+      match Definition.find_method_of_trait trait ~name ~receiver with
+      | Some declared when inherits_method trait viewed_impl declared -> Some Declaration_for_view
+      | Some _ -> Some (Method_of_impl { impl = viewed; substitution })
+      | None ->
+          raise_bug "`%s` declares no method `%s`" (Path.show viewed_impl.implements.trait) name)
+  | Bound -> None
+
+type obligation =
+  | Provides of Types.trait_method
+  | Bounds_associated_type of { name : string; chosen : Types.ty; bound : Types.trait_reference }
+  | Requires of Types.trait_reference
+
+let list_obligations (trait : Types.trait_interface) (impl : Types.impl_interface) ~self =
+  let substitution = Types.make_trait_substitution trait.trait_generics ~self impl.implements in
+  List.map (fun declared -> Provides declared) trait.methods
+  @ List.concat_map
+      (fun (associated : Types.associated_type) ->
+        match List.assoc_opt associated.associated_name impl.implements.associated with
+        | None -> []
+        | Some chosen ->
+            List.map
+              (fun bound ->
+                Bounds_associated_type
+                  {
+                    name = associated.associated_name;
+                    chosen;
+                    bound = Types.substitute_trait substitution bound;
+                  })
+              associated.associated_bounds)
+      trait.associated_types
+  @ List.map
+      (fun required -> Requires (Types.substitute_trait substitution required))
+      trait.requires
 
 let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_conditions = true)
-    (type_ : Types.ty) (wanted : Types.trait_reference) : evidence option =
+    (type_ : Types.ty) (wanted : Types.trait_reference) : solution option =
   let broken_trait =
     match Definition.find_interface lookups wanted.trait with
     | Some (Error_interface report) -> Some report
@@ -371,17 +328,25 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
   else
     match decide_property_trait lookups ~list_bounds wanted.trait type_ with
     | Some _ when not checks_conditions -> Some Built_in
-    | Some decision -> find_built_in_evidence decision
+    | Some decision -> find_built_in_solution decision
     | None -> (
         match type_ with
         | Types.Error _ | Types.Hole | Types.Variable _ -> Some (Accepted type_)
         | Types.Never | Types.Integer | Types.Function _ -> None
         | Types.Parameter _ | Types.Projection _ ->
-            if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then Some From_bound
+            if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then
+              Some (Evidence Bound)
             else None
-        | Types.Any _ ->
-            if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then Some From_any
-            else None
+        | Types.Named _ when Types.is_view type_ -> (
+            match
+              find_evidence lookups ~list_bounds ~depth ~checks_conditions (Types.strip_view type_)
+                wanted
+            with
+            | Some (Evidence (Impl { impl = viewed; substitution }))
+              when derives_impl_for_view lookups ~list_bounds ~depth ~checks_conditions ~view:type_
+                     viewed substitution ->
+                Some (Evidence (Derived_for_view { viewed; substitution }))
+            | Some _ | None -> None)
         | Types.Named _ ->
             List.find_map
               (fun { impl_path; impl; substitution } ->
@@ -415,9 +380,68 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
                 if
                   conditions_hold
                   && has_matching_associated_types lookups ~list_bounds wanted ~base:None associated
-                then Some (From_impl { impl = impl_path; substitution })
+                then Some (Evidence (Impl { impl = impl_path; substitution }))
                 else None)
               (list_matching_impls lookups type_ wanted))
+
+and derives_impl_for_view lookups ~list_bounds ~depth ~checks_conditions ~(view : Types.ty)
+    (impl : Path.t) impl_substitution =
+  match Definition.find_impl_interface lookups impl with
+  | None -> false
+  | Some viewed_impl -> (
+      match Definition.find_trait_interface lookups viewed_impl.implements.trait with
+      | Some trait when not trait.is_capability ->
+          let implements type_ bound =
+            Option.is_some
+              (find_evidence lookups ~list_bounds ~depth:(depth + 1) ~checks_conditions
+                 (Types.substitute impl_substitution type_)
+                 (Types.substitute_trait impl_substitution bound))
+          in
+          List.for_all
+            (function
+              | Provides declared ->
+                  inherits_method trait viewed_impl declared
+                  || forwards_to_viewed_method lookups trait viewed_impl declared
+              | Bounds_associated_type { chosen; bound; _ } -> implements chosen bound
+              | Requires required -> implements view required)
+            (list_obligations trait viewed_impl ~self:(Types.make_view viewed_impl.for_type))
+      | Some _ | None -> false)
+
+and forwards_to_viewed_method lookups (trait : Types.trait_interface)
+    (viewed_impl : Types.impl_interface) (declared : Types.trait_method) =
+  let declared_signature =
+    Definition.read_method_signature lookups ~owner:viewed_impl.implements.trait declared
+  in
+  let list_bounds =
+    Properties.Bounds.close lookups
+      (Types.list_bounds (viewed_impl.impl_generics @ declared_signature.generics))
+  in
+  let instantiate ~self : Types.signature =
+    normalize_signature_in_impl lookups ~list_bounds
+      {
+        impl = { viewed_impl with for_type = self };
+        trait;
+        substitution =
+          Types.make_trait_substitution trait.trait_generics ~self viewed_impl.implements;
+      }
+      declared_signature
+  in
+  let of_view = instantiate ~self:(Types.make_view viewed_impl.for_type)
+  and of_viewed = instantiate ~self:viewed_impl.for_type in
+  let passes (mode : Language.Mode.t) argument parameter =
+    mode = Read || Types.equal argument parameter
+  in
+  (match (of_view.receiver, of_viewed.receiver) with
+    | Some (mode, argument), Some (_, parameter) -> passes mode argument parameter
+    | None, None -> true
+    | Some _, None | None, Some _ -> false)
+  && List.for_all2
+       (fun (argument : Types.parameter_info) (parameter : Types.parameter_info) ->
+         passes parameter.mode argument.type_ parameter.type_)
+       of_view.parameters of_viewed.parameters
+  && Types.equal
+       (Types.extract_result_type of_view.output)
+       (Types.extract_result_type of_viewed.output)
 
 and decide_property_trait lookups ~list_bounds trait type_ =
   let normalize = normalize lookups ~list_bounds in
@@ -445,25 +469,13 @@ and list_matching_bounds lookups ~list_bounds (type_ : Types.ty) (wanted : Types
            | _ -> false)
          wanted.trait_arguments actual_arguments
   in
-  let matches ~base ~associated (bound : Types.trait_reference) =
-    Path.equal bound.trait wanted.trait
-    && arguments_match bound.trait_arguments
-    && has_matching_associated_types lookups ~list_bounds wanted ~base associated
-  in
-  match type_ with
-  | Types.Any trait ->
-      List.filter
-        (fun (bound : Types.trait_reference) ->
-          matches ~base:None
-            ~associated:
-              (if Path.equal bound.trait trait.trait then trait.associated else bound.associated)
-            bound)
-        (Properties.list_bound_closure lookups ~self:type_ trait)
-  | _ ->
-      List.filter
-        (fun (bound : Types.trait_reference) ->
-          matches ~base:(Some type_) ~associated:bound.associated bound)
-        (Properties.list_known_bounds lookups ~list_bounds type_)
+  List.filter
+    (fun (bound : Types.trait_reference) ->
+      Path.equal bound.trait wanted.trait
+      && arguments_match bound.trait_arguments
+      && has_matching_associated_types lookups ~list_bounds wanted ~base:(Some type_)
+           bound.associated)
+    (Properties.list_known_bounds lookups ~list_bounds type_)
 
 and has_matching_associated_types lookups ~list_bounds (wanted : Types.trait_reference) ~base fixed
     =
@@ -495,14 +507,16 @@ and project_declared_type lookups ~list_bounds ?defining type_ (trait : Types.tr
   | Some fixed -> Some fixed
   | None -> (
       match find_evidence lookups ~list_bounds ~checks_conditions:false type_ trait with
-      | Some (From_impl { impl; substitution }) -> (
+      | Some
+          (Evidence (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }))
+        -> (
           match Definition.find_impl_interface lookups impl with
           | Some interface ->
               Option.iter (fun defining -> defining := impl :: !defining) defining;
               Option.map (Types.substitute substitution)
                 (List.assoc_opt name interface.implements.associated)
           | None -> None)
-      | Some From_bound -> (
+      | Some (Evidence Bound) -> (
           match
             List.find_map
               (fun (bound : Types.trait_reference) ->
@@ -512,13 +526,6 @@ and project_declared_type lookups ~list_bounds ?defining type_ (trait : Types.tr
           with
           | Some fixed -> Some fixed
           | None -> Some (Types.Projection { base = type_; trait; name }))
-      | Some From_any -> (
-          match type_ with
-          | Types.Any any ->
-              List.find_map
-                (fun (bound : Types.trait_reference) -> List.assoc_opt name bound.associated)
-                (any :: Properties.list_bound_closure lookups ~self:type_ any)
-          | _ -> None)
       | Some Built_in -> None
       | Some (Accepted unknown) -> Some unknown
       | None -> None)
@@ -532,14 +539,16 @@ and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Type
   if depth > Properties.recursion_limit then
     raise
       (Properties.Recursion_limit
-         (Printf.sprintf
-            "Finding the capabilities in `%s` needs more than %d nested capability sets. The \
-             compiler stops there: capability sets defined from each other never finish."
-            (Types.show_capability (Capability_projection { base = type_; trait; name }))
-            Properties.recursion_limit))
+         (Recursion_limit
+            {
+              limit = Properties.recursion_limit;
+              recursion = Capability_set (Capability_projection { base = type_; trait; name });
+            }))
   else
     match find_evidence lookups ~list_bounds ~checks_conditions:false type_ trait with
-    | Some (From_impl { impl; substitution }) -> (
+    | Some
+        (Evidence (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }))
+      -> (
         match Definition.find_impl_interface lookups impl with
         | Some interface ->
             normalize_capabilities lookups ~list_bounds ~depth:(depth + 1)
@@ -547,8 +556,8 @@ and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Type
                  (Option.value ~default:Types.no_capabilities
                     (List.assoc_opt name interface.capability_sets)))
         | None -> Types.no_capabilities)
-    | Some From_bound | Some (Accepted (Types.Variable _)) | None -> projection
-    | Some (From_any | Built_in | Accepted _) -> Types.no_capabilities
+    | Some (Evidence Bound) | Some (Accepted (Types.Variable _)) | None -> projection
+    | Some (Built_in | Accepted _) -> Types.no_capabilities
 
 and normalize_capabilities lookups ~list_bounds ?depth (capabilities : Types.capability_set) =
   let reads_an_impl : Types.capability -> bool = function
@@ -626,7 +635,10 @@ and decide_bound_condition lookups ~list_bounds ~depth (bound : Types.bound_cond
         match
           find_evidence lookups ~list_bounds ~depth ~checks_conditions:false subject bound.bound
         with
-        | Some (From_impl { impl; substitution }) -> (
+        | Some
+            (Evidence
+               (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }))
+          -> (
             match Definition.find_impl_interface lookups impl with
             | Some interface ->
                 decide_condition lookups ~list_bounds ~depth:(depth + 1)
@@ -635,8 +647,7 @@ and decide_bound_condition lookups ~list_bounds ~depth (bound : Types.bound_cond
                      (list_required_bounds interface.impl_generics substitution))
             | None -> None)
         | _ -> None)
-  | Types.Any _ | Types.Function _ | Types.Never | Types.Integer ->
-      if holds () then Some [] else None
+  | Types.Function _ | Types.Never | Types.Integer -> if holds () then Some [] else None
 
 and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
   let normalize = normalize lookups ~list_bounds ?defining in
@@ -671,7 +682,7 @@ and normalize_in_impl lookups ~list_bounds (impl : Types.impl_interface) type_ =
           if Path.equal projected.trait impl.implements.trait then
             match List.assoc_opt name impl.implements.associated with
             | Some chosen -> Some chosen
-            | None -> Some (Types.Error Diagnostic.reported_elsewhere)
+            | None -> Some (Types.Error Catalog.reported_elsewhere)
           else
             project_associated_type lookups
               ~list_bounds:(list_impl_bounds lookups impl ~list_bounds)
@@ -721,16 +732,27 @@ and make_expected_signature lookups ?written (implemented : implemented_method) 
       implementation declared
   in
   match written with
-  | Some written when implementation.trait.is_capability ->
+  | Some written ->
       {
         expected with
-        receiver = written.receiver;
+        receiver =
+          (if implementation.trait.is_capability then written.receiver else expected.receiver);
         parameters =
           List.map
             (fun (parameter : Types.parameter_info) -> { parameter with has_default = false })
             expected.parameters;
       }
-  | Some _ | None -> expected
+  | None -> expected
+
+and combine_modifies ~(declared : Types.signature option) ~(stated : Types.signature) =
+  let is_stated position =
+    List.exists (fun (part : Types.modified) -> part.position = position) stated.modifies
+  in
+  match declared with
+  | Some declared ->
+      stated.modifies
+      @ List.filter (fun (part : Types.modified) -> not (is_stated part.position)) declared.modifies
+  | None -> stated.modifies
 
 and read_signature lookups (path : Path.t) =
   let ( let* ) = Option.bind in
@@ -748,7 +770,12 @@ and read_signature lookups (path : Path.t) =
       let* stated = if Option.is_some written then written else declared in
       let signature =
         Types.add_impl_generics_and_uses ~impl_generics:impl.impl_generics ~impl_uses:impl.impl_uses
-          { (Option.value declared ~default:stated) with uses = stated.uses; costs = stated.costs }
+          {
+            (Option.value declared ~default:stated) with
+            uses = stated.uses;
+            costs = stated.costs;
+            modifies = combine_modifies ~declared ~stated;
+          }
       in
       let uses =
         normalize_capabilities_in_impl lookups
@@ -775,6 +802,20 @@ module Conformance = struct
   let normalize_signature_in_impl = normalize_signature_in_impl
   let make_expected_signature = make_expected_signature
 end
+
+let resolve_evidence lookups substitution ~self_type ~trait (evidence : Types.evidence) :
+    Types.evidence =
+  match Types.substitute_evidence substitution evidence with
+  | Bound -> (
+      let normalize type_ = normalize lookups ~list_bounds:list_no_bounds type_ in
+      match
+        find_evidence lookups ~list_bounds:list_no_bounds ~checks_conditions:false
+          (normalize (Types.substitute substitution self_type))
+          (Types.map_trait normalize (Types.substitute_trait substitution trait))
+      with
+      | Some (Evidence evidence) -> evidence
+      | Some (Built_in | Accepted _) | None -> Bound)
+  | (Impl _ | Derived_for_view _) as evidence -> evidence
 
 let read_scope (lookups : Lookups.t) (key : Resolve.Names.key) :
     Environment.known_bounds Environment.scope =
@@ -806,12 +847,12 @@ let read_scope (lookups : Lookups.t) (key : Resolve.Names.key) :
     ->
       scope
 
-type declaring_clause =
+type declaring_clause = Catalog.Capabilities.declaring_clause =
   | Own_uses
   | Impl_uses
   | Associated_capability_set of { name : string; is_defined : bool; is_named : bool }
 
-type capability_declaration =
+type capability_declaration = Catalog.Capabilities.declaration =
   | Declared_by of declaring_clause
   | Fixed_by_trait of { trait : Types.trait_reference; method_name : string }
 
@@ -872,17 +913,6 @@ let find_capability_declaration lookups (path : Path.t) (capability : Types.capa
   | Member_constant _ | Impl _ | Derived _ | Law_proof _ | Unresolved _ ->
       raise_bug "%s declares no capabilities" (Path.show path)
 
-let show_declaring_clause clause capability =
-  match clause with
-  | Own_uses -> Printf.sprintf "`uses %s`" capability
-  | Impl_uses -> Printf.sprintf "`uses %s` on the `impl`" capability
-  | Associated_capability_set { name; is_defined; is_named } ->
-      let set =
-        if is_defined then Printf.sprintf "`%s` in the `impl`'s `capability %s`" capability name
-        else Printf.sprintf "`capability %s = %s` in the `impl`" name capability
-      in
-      if is_named then set else Printf.sprintf "%s and `uses Self.%s` on the method" set name
-
 let decide_property property lookups ~list_bounds type_ =
   Properties.decide_property lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds)
     property type_
@@ -894,7 +924,7 @@ let has_property property lookups ~list_bounds type_ =
   | Depends_on open_type ->
       raise_bug "whether `%s` %s depends on the open type `%s`, so it has no bool answer"
         (Types.show type_)
-        (Properties.show_property property)
+        (Catalog.Typing_description.show_property property)
         (Types.show open_type)
 
 let is_copyable = has_property Copyable

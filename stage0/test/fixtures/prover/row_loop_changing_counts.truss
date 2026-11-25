@@ -1,17 +1,29 @@
 type Row(size: UInt64, value: Int64)
 
-fn Row.count(self) -> UInt64
-  ensures result == self.size
-  cost time O(1)
-{
-  self.size
+impl Iterable for Row {
+  type Element = Int64
+
+  fn count(self) -> UInt64
+    ensures result == self.size
+    cost time O(1)
+  {
+    self.size
+  }
+
+  fn element(self, position: UInt64) lends Int64
+    cost time O(1)
+  {
+    self.value
+  }
 }
 
-fn Row.element(mut self, position: UInt64) lends mut Int64
-  requires position < self.size
-  cost time O(1)
-{
-  mut self.value
+impl IterableMut for Row {
+  fn element(mut self, position: UInt64) lends mut Int64
+    cost time O(1)
+  {
+    self.size = 0
+    mut self.value
+  }
 }
 
 fn reset(row: mut Row) {

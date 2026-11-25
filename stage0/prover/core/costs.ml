@@ -70,27 +70,43 @@ let larger left right =
 
 let units amount = plus (at_least_zero amount) (Logic.int 1)
 
-let rec normalize term =
-  let rec linearize coefficient term (sums, constant) =
+let combine (sums, constant) =
+  let scale (atom, sum_coefficient) = times (Logic.Integer sum_coefficient) atom in
+  let positive = List.filter (fun (_, sum_coefficient) -> Z.sign sum_coefficient > 0) sums in
+  let negative =
+    List.filter_map
+      (fun (atom, sum_coefficient) ->
+        if Z.sign sum_coefficient < 0 then Some (atom, Z.neg sum_coefficient) else None)
+      sums
+  in
+  let total = List.fold_left (fun total entry -> plus total (scale entry)) zero positive in
+  let total =
+    if Z.sign constant >= 0 then plus total (Logic.Integer constant)
+    else minus total (Logic.Integer (Z.neg constant))
+  in
+  List.fold_left (fun total entry -> minus total (scale entry)) total negative
+
+let rec linearize term =
+  let rec add_scaled coefficient term (sums, constant) =
     match term with
     | Logic.Integer value -> (sums, Z.add constant (Z.mul coefficient value))
     | Logic.Operation (Add, arguments) ->
         List.fold_left
-          (fun sums_and_constant argument -> linearize coefficient argument sums_and_constant)
+          (fun sums_and_constant argument -> add_scaled coefficient argument sums_and_constant)
           (sums, constant) arguments
-    | Logic.Operation (Negate, [ inner ]) -> linearize (Z.neg coefficient) inner (sums, constant)
+    | Logic.Operation (Negate, [ inner ]) -> add_scaled (Z.neg coefficient) inner (sums, constant)
     | Logic.Operation (Subtract, first :: rest) ->
         List.fold_left
           (fun sums_and_constant argument ->
-            linearize (Z.neg coefficient) argument sums_and_constant)
-          (linearize coefficient first (sums, constant))
+            add_scaled (Z.neg coefficient) argument sums_and_constant)
+          (add_scaled coefficient first (sums, constant))
           rest
     | Logic.Operation (Multiply, [ Logic.Integer factor; inner ])
     | Logic.Operation (Multiply, [ inner; Logic.Integer factor ]) ->
-        linearize (Z.mul coefficient factor) inner (sums, constant)
+        add_scaled (Z.mul coefficient factor) inner (sums, constant)
     | other -> (
         match normalize_node other with
-        | Logic.Operation (Add, _) as sum -> linearize coefficient sum (sums, constant)
+        | Logic.Operation (Add, _) as sum -> add_scaled coefficient sum (sums, constant)
         | other -> add_atom coefficient other (sums, constant))
   and add_atom coefficient other (sums, constant) =
     let rec add = function
@@ -137,22 +153,21 @@ let rec normalize term =
         Logic.Operation (operator, List.map normalize arguments)
     | other -> other
   in
-  let sums, constant = linearize Z.one term ([], Z.zero) in
-  let sums = List.filter (fun (_, sum_coefficient) -> not (Z.equal sum_coefficient Z.zero)) sums in
-  let scale (atom, sum_coefficient) = times (Logic.Integer sum_coefficient) atom in
-  let positive = List.filter (fun (_, sum_coefficient) -> Z.sign sum_coefficient > 0) sums in
-  let negative =
-    List.filter_map
-      (fun (atom, sum_coefficient) ->
-        if Z.sign sum_coefficient < 0 then Some (atom, Z.neg sum_coefficient) else None)
-      sums
+  let sums, constant = add_scaled Z.one term ([], Z.zero) in
+  (List.filter (fun (_, sum_coefficient) -> not (Z.equal sum_coefficient Z.zero)) sums, constant)
+
+and normalize term = combine (linearize term)
+
+let reduce_constants amount =
+  let sums, constant = linearize amount in
+  let factor =
+    List.fold_left (fun factor (_, coefficient) -> Z.gcd factor coefficient) Z.zero sums
   in
-  let total = List.fold_left (fun total entry -> plus total (scale entry)) zero positive in
-  let total =
-    if Z.sign constant >= 0 then plus total (Logic.Integer constant)
-    else minus total (Logic.Integer (Z.neg constant))
-  in
-  List.fold_left (fun total entry -> minus total (scale entry)) total negative
+  if Z.leq factor Z.one && Z.leq (Z.abs constant) Z.one then amount
+  else
+    combine
+      ( List.map (fun (atom, coefficient) -> (atom, Z.divexact coefficient factor)) sums,
+        Z.of_int (Z.sign constant) )
 
 let rec since ~start total =
   match total with
@@ -283,6 +298,34 @@ let find_cost_bound ~varies ~facts cost =
   in
   Option.map rewrite_most_as_choices
     (find_bound_within_depth 12 (normalize (rewrite_choices_as_most cost)))
+
+let list_unbounded_parts ~varies ~facts cost =
+  let rec list_within_depth depth cost =
+    List.concat_map
+      (fun (part, polarity) ->
+        let bound =
+          if depth = 0 || polarity = Both then None
+          else
+            Option.map
+              (fun bound -> if polarity = Shrinks then Logic.negate bound else bound)
+              (find_part_bound ~varies ~facts part polarity)
+        in
+        match bound with
+        | None -> [ part ]
+        | Some bound -> (
+            match list_within_depth (depth - 1) (normalize (rewrite_choices_as_most bound)) with
+            | [] -> []
+            | parts -> part :: parts))
+      (list_varying_parts varies cost)
+  in
+  List.fold_left
+    (fun parts part -> if List.mem part parts then parts else parts @ [ part ])
+    []
+    (list_within_depth 12 (normalize (rewrite_choices_as_most cost)))
+
+let mentions_part ~part amount =
+  let rec holds term = term = part || List.exists holds (Logic.list_arguments term) in
+  holds (normalize (rewrite_choices_as_most amount))
 
 let list_upper_bounds ~varies ~facts term =
   List.filter_map

@@ -1,3 +1,11 @@
 (library
  (name project)
- (libraries structural_key compiler_bug file_system path manifest registry))
+ (libraries
+  structural_key
+  compiler_bug
+  file_system
+  path
+  manifest
+  registry
+  project_catalog
+  x86_64_level))

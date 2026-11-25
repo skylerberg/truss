@@ -19,25 +19,30 @@ let apply_machine_fixes text =
 let () =
   Harness.test "an unused binding with a constant's name and type offers the constant's path first"
     (fun () ->
-      let text = Fixtures.Usage.is_test_of_a_name_like_a_constant in
-      expect_one_diagnostic text "usage.unused_variable"
+      expect_one_diagnostic Fixtures.Usage.is_test_of_a_name_like_a_constant "usage.unused_variable"
+        ~at:("lucky", 2)
         ~says:
           "`lucky` is never used. A bare name in a pattern binds a variable, which matches every \
-           value. To match the constant, write `app.main.lucky`.";
-      Support.expect_error ~list_diagnostics text ~code:(Usage Unused_variable) ~at:"lucky"
-        ~occurrence:2 ~fixed:Fixtures.Usage.is_test_of_a_name_like_a_constant_fixed
-        ~alternatives:[ Fixtures.Usage.is_test_of_a_name_like_a_constant_as_wildcard ]);
+           value. To match the constant, write `app.main.lucky`."
+        ~fixed:("value is lucky", "value is app.main.lucky")
+        ~alternatives:[ ("value is lucky", "value is _") ]);
   Harness.test "an unused binding with a constant's name and another type is replaced with _"
     (fun () ->
       expect_one_diagnostic Fixtures.Usage.is_test_of_a_name_like_a_constant_of_another_type
-        "usage.unused_variable" ~says:"`lucky` is never used. Replace it with `_`.");
+        "usage.unused_variable" ~says:"`lucky` is never used. Replace it with `_`."
+        ~fixed:("value is lucky", "value is _"));
   Harness.test "an unused let binding with a constant's name is replaced with _" (fun () ->
       expect_one_diagnostic Fixtures.Usage.let_named_like_a_constant "usage.unused_variable"
+        ~fixed:("let lucky = value", "let _ = value")
         ~says:"`lucky` is never used. Replace it with `_`.");
   Harness.test "the machine-applicable fixes of an arm with a constant's name write its path"
     (fun () ->
       let fixed = apply_machine_fixes Fixtures.Usage.arm_named_like_a_constant in
-      Harness.expect_string ~expected:Fixtures.Usage.arm_named_like_a_constant_fixed fixed;
+      Harness.expect_string
+        ~expected:
+          (Support.apply_edit Fixtures.Usage.arm_named_like_a_constant
+             ("lucky => 1", "app.main.lucky => 1"))
+        fixed;
       match list_diagnostics fixed with
       | [] -> ()
       | left -> Harness.fail "after the fixes: %s" (String.concat "; " (Support.list_codes left)))
@@ -45,57 +50,57 @@ let () =
 let () =
   Harness.test "a variable nothing reads is an error with a fix that renames it _" (fun () ->
       expect_one_diagnostic Fixtures.Usage.unused_let "usage.unused_variable"
-        ~says:"`count` is never used. Replace it with `_`." ~fixed:Fixtures.Usage.unused_let_fixed);
+        ~says:"`count` is never used. Replace it with `_`." ~fixed:("count", "_"));
   Harness.test "an unused var is replaced with _" (fun () ->
-      expect_one_diagnostic Fixtures.Usage.unused_var "usage.unused_variable"
-        ~fixed:Fixtures.Usage.unused_var_fixed);
+      expect_one_diagnostic Fixtures.Usage.unused_var "usage.unused_variable" ~fixed:("count", "_"));
   Harness.test "a parameter nothing reads is not an error" (fun () ->
       expect_fine "fn f(count: Int64) {}\n");
   Harness.test "an unused lambda parameter is replaced with _" (fun () ->
       expect_one_diagnostic Fixtures.Usage.unused_lambda_parameter "usage.unused_variable"
-        ~fixed:Fixtures.Usage.unused_lambda_parameter_fixed);
+        ~fixed:("items.map(fn(item) { 0 })", "items.map(fn(_) { 0 })"));
   Harness.test "an unused loop variable is replaced with _" (fun () ->
       expect_one_diagnostic Fixtures.Usage.unused_loop_variable "usage.unused_variable"
-        ~fixed:Fixtures.Usage.unused_loop_variable_fixed);
+        ~fixed:("for item in items {", "for _ in items {"));
   Harness.test "an unused binding of is is replaced with _" (fun () ->
       expect_one_diagnostic Fixtures.Usage.unused_binding_of_is "usage.unused_variable"
-        ~fixed:Fixtures.Usage.unused_binding_of_is_fixed);
+        ~fixed:("value", "_"));
   Harness.test "an unused quantified variable is replaced with _" (fun () ->
       expect_one_diagnostic Fixtures.Usage.unused_quantified_variable "usage.unused_variable"
-        ~fixed:Fixtures.Usage.unused_quantified_variable_fixed);
+        ~fixed:("requires forall item in items => true", "requires forall _ in items => true"));
   Harness.test "an unused field of a record pattern is fixed by name" (fun () ->
       expect_one_diagnostic Fixtures.Usage.record_pattern_with_unused_field "usage.unused_variable"
         ~says:"`second` is never used. Match its field with `second: _`."
-        ~fixed:Fixtures.Usage.record_pattern_with_unused_field_fixed);
+        ~fixed:("let (first, second) = pair", "let (first, second: _) = pair"));
   Harness.test "an unused name in a tuple pattern is replaced with _" (fun () ->
       expect_one_diagnostic Fixtures.Usage.tuple_pattern_with_an_unused_name "usage.unused_variable"
-        ~says:"`name` is never used. Replace it with `_`."
-        ~fixed:Fixtures.Usage.tuple_pattern_with_an_unused_name_fixed);
+        ~says:"`name` is never used. Replace it with `_`." ~fixed:("name", "_"));
   Harness.test "a binding of the only field of a variant is replaced with _" (fun () ->
       expect_one_diagnostic Fixtures.Usage.match_arm_with_unused_binding "usage.unused_variable"
-        ~says:"`value` is never used. Replace it with `_`."
-        ~fixed:Fixtures.Usage.match_arm_with_unused_binding_fixed);
+        ~says:"`value` is never used. Replace it with `_`." ~fixed:("value", "_"));
   Harness.test "an unused field beside .. is deleted" (fun () ->
       expect_one_diagnostic Fixtures.Usage.unused_field_beside_rest "usage.unused_variable"
         ~says:"`second` is never used. Delete it, since `..` matches its field."
-        ~fixed:Fixtures.Usage.unused_field_beside_rest_fixed);
+        ~fixed:("let (first, second, ..) = triple", "let (first, ..) = triple"));
   Harness.test "the only written field beside .. is deleted" (fun () ->
       expect_one_diagnostic Fixtures.Usage.unused_only_written_field_beside_rest
-        "usage.unused_variable" ~fixed:Fixtures.Usage.unused_only_written_field_beside_rest_fixed);
+        "usage.unused_variable"
+        ~fixed:("let (second, ..) = pair", "let (..) = pair"));
   Harness.test "a field matched by position beside .. is deleted" (fun () ->
       expect_one_diagnostic Fixtures.Usage.unused_positional_field_beside_rest
-        "usage.unused_variable" ~fixed:Fixtures.Usage.unused_positional_field_beside_rest_fixed);
+        "usage.unused_variable"
+        ~fixed:("Some(item, ..) => 1", "Some(..) => 1"));
   Harness.test "an unused binding of an or-pattern is removed from every alternative" (fun () ->
       expect_one_diagnostic Fixtures.Usage.unused_binding_of_an_or_pattern "usage.unused_variable"
         ~says:"`code` is never used. Remove it from every alternative of the pattern."
-        ~fixed:Fixtures.Usage.unused_binding_of_an_or_pattern_fixed);
+        ~fixed:("Ok(code) | Err(code) => 1", "Ok(_) | Err(_) => 1"));
   Harness.test "a binding of an or-pattern that its arm reads is not an error" (fun () ->
       expect_fine Fixtures.Usage.or_pattern_binding_read_by_its_arm);
   Harness.test "code after a return is unreachable, with a fix that deletes it" (fun () ->
       expect_one_diagnostic Fixtures.Usage.statement_after_return "usage.unreachable_code"
-        ~fixed:Fixtures.Usage.statement_after_return_fixed);
+        ~fixed:("  2\n}", "}"));
   Harness.test "code after a loop that is never left is unreachable" (fun () ->
-      expect_one_diagnostic Fixtures.Usage.statement_after_endless_loop "usage.unreachable_code");
+      expect_one_diagnostic Fixtures.Usage.statement_after_endless_loop "usage.unreachable_code"
+        ~fixed:("  1\n}", "}"));
   Harness.test "code after a loop that breaks is reachable" (fun () ->
       expect_fine Fixtures.Usage.statement_after_loop_that_breaks);
   Harness.test "code after todo is not unreachable" (fun () ->
@@ -106,17 +111,17 @@ let () =
       expect_fine Fixtures.Usage.concurrent_branches_that_both_return);
   Harness.test "code after a block whose branch never finishes is unreachable" (fun () ->
       expect_one_diagnostic Fixtures.Usage.statement_after_concurrent_branches_that_return
-        "usage.unreachable_code");
+        "usage.unreachable_code" ~fixed:("  3\n}", "}"));
   Harness.test "a float compared with itself by != is an error with a fix that calls is_nan"
     (fun () ->
       expect_one_diagnostic Fixtures.Usage.self_comparison_of_a_float "usage.self_comparison"
         ~says:
           "`value != value` compares a value with itself, so it is always false. `==` treats every \
            NaN as equal to itself, so a test for NaN calls `value.is_nan()`."
-        ~fixed:Fixtures.Usage.self_comparison_of_a_float_fixed);
+        ~fixed:("value != value", "value.is_nan()"));
   Harness.test "a float compared with itself by == is fixed to a negated is_nan" (fun () ->
       expect_one_diagnostic Fixtures.Usage.self_equality_of_a_float "usage.self_comparison"
-        ~fixed:Fixtures.Usage.self_equality_of_a_float_fixed);
+        ~fixed:("value == value", "!value.is_nan()"));
   Harness.test "an integer compared with itself is always true, and has no fix" (fun () ->
       expect_one_diagnostic "fn f(count: Int64) -> Bool {\n  count <= count\n}\n"
         "usage.self_comparison"
@@ -149,3 +154,40 @@ let () =
       expect_fine Fixtures.Usage.var_assigned_and_read);
   Harness.test "writing through a mut binding changes the place it is bound to" (fun () ->
       expect_fine Fixtures.Usage.mut_bindings_written_through)
+
+let () =
+  let expect_removed text fixed = expect_one_diagnostic ~fixed text "usage.unused_run_forever" in
+  Harness.test "a RunForever that nothing uses is reported, and removing it joins the brace"
+    (fun () ->
+      expect_removed Fixtures.Usage.run_forever_that_nothing_uses
+        ( "fn f(values: List[UInt64]) -> UInt64\n  uses RunForever\n{",
+          "fn f(values: List[UInt64]) -> UInt64 {" ));
+  Harness.test "removing a RunForever listed after another capability keeps that capability"
+    (fun () ->
+      expect_removed Fixtures.Usage.run_forever_listed_after_another_capability
+        ("Panic, RunForever", "Panic"));
+  Harness.test "removing a RunForever listed before another capability keeps that capability"
+    (fun () ->
+      expect_removed Fixtures.Usage.run_forever_listed_before_another_capability
+        ("RunForever, Panic", "Panic"));
+  Harness.test "removing a RunForever before another clause keeps the brace on its own line"
+    (fun () ->
+      expect_removed Fixtures.Usage.run_forever_before_an_ensures
+        ("uses RunForever\n  ensures result == values.length()", "ensures result == values.length()"));
+  Harness.test "a RunForever is used by a recursion, which it leaves unchecked" (fun () ->
+      expect_fine Fixtures.Usage.run_forever_of_a_recursion);
+  Harness.test "a RunForever is used by a lambda passed to a generic callee that may run forever"
+    (fun () -> expect_fine Fixtures.Usage.run_forever_of_a_lambda_passed_to_a_generic_callee);
+  Harness.test "a RunForever is used by a call of a function that may run forever" (fun () ->
+      expect_fine Fixtures.Usage.run_forever_of_a_callee_that_runs_forever);
+  Harness.test "a RunForever is used by a while loop whose measure is its condition" (fun () ->
+      expect_fine
+        Fixtures.Prover.while_loop_toward_a_bound_it_does_not_approach_where_it_may_run_forever);
+  Harness.test "a RunForever is used by a while loop whose written measure has a condition"
+    (fun () ->
+      expect_fine Fixtures.Usage.run_forever_of_a_while_loop_whose_written_measure_has_a_condition);
+  Harness.test "a while loop in a lambda does not use its enclosing function's RunForever"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Usage.run_forever_beside_a_while_loop_in_a_lambda
+        "usage.unused_run_forever"
+        ~fixed:("fn f(count: UInt32)\n  uses RunForever\n{", "fn f(count: UInt32) {"))

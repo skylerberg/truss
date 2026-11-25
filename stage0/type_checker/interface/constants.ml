@@ -47,15 +47,9 @@ let is_uint64 (lookups : Lookups.t) path =
       = Some (Definition (Type, Well_known.make_builtin_type_path UInt64))
   | _ -> false
 
-let evaluate_count (lookups : Lookups.t) path ~written =
-  if not (is_uint64 lookups path) then
-    Error (Printf.sprintf "`%s` in a type argument must be a constant of type `UInt64`." written)
+let evaluate_count (lookups : Lookups.t) path : (Z.t, Catalog.Typing.count_error) result =
+  if not (is_uint64 lookups path) then Error Not_uint64
   else
     match lookups.find_constant_value path with
     | Some value -> Ok value
-    | None ->
-        Error
-          (Printf.sprintf
-             "The value of `%s` cannot be computed: a constant used in a type cannot refer to \
-              itself, and is made of literals, arithmetic, and other such constants."
-             written)
+    | None -> Error Uncomputable

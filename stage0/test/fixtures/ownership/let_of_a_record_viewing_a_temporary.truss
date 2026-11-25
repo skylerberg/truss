@@ -1,0 +1,6 @@
+type Sized(viewed: view List[Int64], count: UInt64)
+
+fn f() -> UInt64 {
+  let sized = Sized(viewed: make()[..], count: 0)
+  sized.viewed.length()
+}

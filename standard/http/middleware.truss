@@ -13,19 +13,19 @@ public type CorsPolicy(
 )
   derives Equal
 
-fn allowed_origin(policy: CorsPolicy, origin: StringSlice) -> Option[String] {
+fn allowed_origin(policy: CorsPolicy, origin: String) -> Option[String] {
   for allowed in policy.origins {
     if allowed == "*" {
-      return Some(if policy.allow_credentials { origin.to_string() } else { "*" })
+      return Some(if policy.allow_credentials { origin.copy() } else { "*" })
     }
     if allowed == origin {
-      return Some(origin.to_string())
+      return Some(origin.copy())
     }
   }
   None
 }
 
-fn joined(parts: Slice[String]) -> String {
+fn joined(parts: List[String]) -> String {
   var text = ""
   for part in parts {
     if !text.is_empty() {
@@ -45,7 +45,7 @@ public fn cors(
   uses Tasks, generic Granted, RunForever
 {
   let origin = match request.header("Origin") {
-    Some(origin) => origin.to_string()
+    Some(origin) => origin.copy()
     None => {
       next(own request, mut responder)
       return
@@ -65,14 +65,14 @@ public fn cors(
         for method in policy.methods {
           mut methods.push("${method}")
         }
-        mut responder.set_header("Access-Control-Allow-Methods", value: joined(methods.slice()))
-        mut responder.set_header("Access-Control-Allow-Headers", value: joined(policy.headers.slice()))
+        mut responder.set_header("Access-Control-Allow-Methods", value: joined(methods))
+        mut responder.set_header("Access-Control-Allow-Headers", value: joined(policy.headers))
         mut responder.set_header("Access-Control-Max-Age", value: "${policy.max_age_seconds}")
         let _ = mut responder.send(Response.new(status: Status.no_content))
         return
       }
       if !policy.exposed.is_empty() {
-        mut responder.set_header("Access-Control-Expose-Headers", value: joined(policy.exposed.slice()))
+        mut responder.set_header("Access-Control-Expose-Headers", value: joined(policy.exposed))
       }
     }
     None => {
@@ -126,7 +126,7 @@ public fn secure_headers(
   next(own request, mut responder)
 }
 
-fn is_request_id(text: StringSlice) -> Bool {
+fn is_request_id(text: String) -> Bool {
   if text.is_empty() || text.length() > 128 {
     return false
   }
@@ -148,7 +148,7 @@ public fn request_id(
 {
   var incoming = own request
   let id = match incoming.header("X-Request-ID") {
-    Some(given) => if is_request_id(given) { given.to_string() } else { Random.next().format(radix: 16, minimum_digits: 16) }
+    Some(given) => if is_request_id(given) { given.copy() } else { Random.next().format(radix: 16, minimum_digits: 16) }
     None => Random.next().format(radix: 16, minimum_digits: 16)
   }
   mut incoming.headers.set("X-Request-ID", value: id)
@@ -165,9 +165,9 @@ public fn log_requests(
 {
   let started = Clock.monotonic()
   let method = "${request.method}"
-  let path = request.path().to_string()
+  let path = request.path().copy()
   let id = match request.header("X-Request-ID") {
-    Some(given) => given.to_string()
+    Some(given) => given.copy()
     None => ""
   }
   next(own request, mut responder)
@@ -258,12 +258,12 @@ fn wait_seconds(milli_tokens: Int64, policy: RateLimit) -> Int64 {
   wait_milliseconds.saturating_add(999) / 1000
 }
 
-public fn RateLimiter.take(self, key: StringSlice) -> Decision
+public fn RateLimiter.take(self, key: String) -> Decision
   uses Tasks, Clock
 {
   let now = Clock.monotonic().total_milliseconds()
   let policy = self.policy
-  let name = key.to_string()
+  let name = key.copy()
   self.buckets.update(fn(buckets) {
     let current = match mut buckets.get(name.copy()) {
       Some(bucket) => refilled(bucket, policy: policy, now: now)
@@ -317,7 +317,7 @@ fn is_safe_method(method: Method) -> Bool {
   method == Method.Get || method == Method.Head || method == Method.Options
 }
 
-fn is_trusted_origin(policy: CsrfPolicy, origin: StringSlice) -> Bool {
+fn is_trusted_origin(policy: CsrfPolicy, origin: String) -> Bool {
   for trusted in policy.trusted_origins {
     if trusted.equal_ignoring_ascii_case(origin) {
       return true
@@ -326,7 +326,7 @@ fn is_trusted_origin(policy: CsrfPolicy, origin: StringSlice) -> Bool {
   false
 }
 
-fn host_of_origin(origin: StringSlice) -> Option[StringSlice] {
+fn host_of_origin(origin: String) -> Option[view String] {
   let rest = match origin.find("://") {
     Some(at) => origin.split_at(at).second.strip_prefix("://").unwrap_or("")
     None => return None

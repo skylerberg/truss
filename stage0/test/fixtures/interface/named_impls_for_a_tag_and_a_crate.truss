@@ -1,0 +1,23 @@
+trait Named {
+  fn name(self) -> String
+}
+
+type Tag(value: Int64)
+
+impl Named for Tag {
+  fn name(self) -> String {
+    "tag"
+  }
+}
+
+type Crate[Item](item: Item)
+
+impl Named for Crate[Item: Named] {
+  fn name(self) -> String {
+    self.item.name()
+  }
+}
+
+fn show[Value: Named](value: Value) -> String {
+  value.name()
+}

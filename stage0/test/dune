@@ -37,6 +37,10 @@
   compiler_bug
   source
   diagnostic
+  description
+  catalog
+  syntax_catalog
+  project_catalog
   token
   lexer
   zarith
@@ -46,6 +50,7 @@
   syntax_print
   core
   core_lint
+  mir_lint
   core_walk
   mir
   moves
@@ -67,6 +72,8 @@
   prover
   database
   lowered
+  lowering
+  profile
   types
   intrinsic
   interface
@@ -75,14 +82,11 @@
   manifest
   registry
   backend
-  evaluations
-  c_compiler)
+  c_compiler
+  x86_64_level)
  (deps
   served_length/served_length.exe
-  (glob_files %{workspace_root}/*.md)
-  (glob_files_rec %{workspace_root}/standard/*.md)
-  (glob_files_rec %{workspace_root}/standard/*.truss)
-  (glob_files_rec fixtures/*.truss)))
+  (glob_files %{workspace_root}/*.md)))
 
 (rule
  (target fixtures.ml)

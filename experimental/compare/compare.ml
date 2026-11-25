@@ -81,13 +81,17 @@ and show_literal (literal : Token.string_literal) =
             literal.rest))
 
 let print_tokens path =
-  let tokens, diagnostics = Lexer.lex (Source.create ~path (read_file path)) in
+  let text = read_file path in
+  let tokens, diagnostics = Lexer.lex (Source.create ~path text) in
+  let diagnostics = List.map (Syntax_catalog.Lexing_description.render ~text) diagnostics in
   print_string ("== " ^ path ^ "\n");
   Array.iter (fun token -> print_string (show_token token ^ "\n")) tokens;
   List.iter (fun diagnostic -> print_string (show_diagnostic diagnostic ^ "\n")) diagnostics
 
 let print_file path =
-  let file, diagnostics = Parser.parse_source (Source.create ~path (read_file path)) in
+  let text = read_file path in
+  let file, diagnostics = Parser.parse_source (Source.create ~path text) in
+  let diagnostics = List.map (Syntax_catalog.Syntax_diagnostic.render ~text) diagnostics in
   print_string ("== " ^ path ^ "\n");
   let tree = Syntax_print.show_file file in
   if tree <> "" then print_string (tree ^ "\n");

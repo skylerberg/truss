@@ -13,7 +13,7 @@ fn counted_up(count: UInt64) -> UInt64
   reached
 }
 
-theorem each_counted(items: List[UInt64])
+theorem each_counted(items: view List[UInt64])
   requires forall i in 0..items.length() => items[i] < 1000
   ensures forall i in 0..items.length() => counted_up(items[i]) == items[i]
 {

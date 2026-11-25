@@ -1,4 +1,4 @@
-test "a string interpolates its parts" {
+test "a string displays each interpolated value" {
   let count = 3
   let name = "apples"
   assert "${count} ${name}" == "3 apples"

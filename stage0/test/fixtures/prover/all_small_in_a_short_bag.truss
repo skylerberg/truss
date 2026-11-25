@@ -1,13 +1,17 @@
 type Bag(items: List[UInt8])
 
-fn Bag.count(self) -> UInt64 {
-  self.items.length()
-}
+impl Iterable for Bag {
+  type Element = UInt8
 
-fn Bag.element(self, position: UInt64) lends UInt8
-  requires position < 3 && position < self.items.length()
-{
-  self.items[position]
+  fn count(self) -> UInt64 {
+    self.items.length()
+  }
+
+  fn element(self, position: UInt64) lends UInt8
+    requires position < 3 && position < self.items.length()
+  {
+    self.items[position]
+  }
 }
 
 fn all_small(bag: Bag) -> Bool {

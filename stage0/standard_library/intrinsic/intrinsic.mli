@@ -44,6 +44,7 @@ type scalar =
 
 type buffer =
   | Compare_bytes
+  | Find_byte
   | Storage_empty
   | Storage_with_capacity
   | Storage_length
@@ -58,17 +59,13 @@ type buffer =
   | Storage_swap
   | Storage_from_array
   | Array_from_storage
-  | Array_view
-  | Storage_view
-  | View_length
-  | View_swap
-  | View_slice
+  | Storage_range
+  | Storage_as
   | Storage_model
-  | View_model
   | Array_model
-  | View_address
+  | Storage_address
 
-type lend = Storage_at | View_at
+type lend = Storage_at
 
 type runtime =
   | Crash

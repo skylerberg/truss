@@ -86,7 +86,7 @@ let () =
       expect_one_diagnostic "fn f() {\n  Panic.crash(\"no\")\n}\n" "capabilities.not_available"
         ~says:"This call uses `Panic`, which is not available here. Declare it with `uses Panic`.");
   Harness.test "a call that a `for` loop makes is named by the loop" (fun () ->
-      expect_one_diagnostic Fixtures.Capabilities.panicking_bag_in_a_for_loop
+      expect_one_diagnostic Fixtures.Capabilities.panicking_cursor_in_a_for_loop
         "capabilities.not_available" ~at:("bag", 2)
         ~says:"The call that this `for` loop makes uses `Panic`, which is not available here.");
   Harness.test "a `concurrent` block needs `Tasks`" (fun () ->
@@ -150,11 +150,6 @@ let () =
   Harness.test "a lambda's uses must fit the function type it is passed as" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.lambda_using_clock_passed_as_plain
         "capabilities.lambda_uses");
-  Harness.test "a loop over a value needs the capabilities that its `element` uses" (fun () ->
-      expect_one_diagnostic Fixtures.Capabilities.loop_over_a_ticker_without_uses
-        "capabilities.not_available");
-  Harness.test "a loop over a value can use the function's capabilities" (fun () ->
-      expect_fine Fixtures.Capabilities.loop_over_a_ticker_using_clock);
   Harness.test
     "a capability parameter is instantiated with the capabilities of the lambdas passed for it"
     (fun () -> expect_fine Fixtures.Capabilities.for_each_of_lambdas);
@@ -180,7 +175,8 @@ let () =
       expect_fine Fixtures.Capabilities.test_declaring_run_forever);
   Harness.test "a place whose implementation mutates state is provided mut" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.counter_provided_as_tally
-        "capabilities.provide_mode")
+        "capabilities.provide_mode"
+        ~fixed:("provide counter {", "provide mut counter {"))
 
 let first_or_crash = Fixtures.Capabilities.first_or_crash
 let run = first_or_crash ^ Fixtures.Capabilities.run
@@ -357,15 +353,6 @@ let () =
            [
              ({ owner = None; name = "framework" }, [ Grant.Prelude "Clock" ]);
              ({ owner = None; name = "plugins" }, [ Grant.Prelude "Clock" ]);
-           ]));
-  Harness.test "an impl of a dependency behind an `any` value can use only the granted capabilities"
-    (fun () ->
-      expect_codes ~expected:[ "capabilities.not_granted" ]
-        (list_codes_with_grants
-           [ ("app.main", Fixtures.Capabilities.any_timer_from_plugins); sources; timers ]
-           [
-             ({ owner = None; name = "framework" }, [ Grant.Prelude "Clock" ]);
-             ({ owner = None; name = "plugins" }, []);
            ]))
 
 let ledger = ("store.ledger", Fixtures.Capabilities.ledger_ledger)
@@ -413,13 +400,14 @@ let () =
       | [ Unused_dependency { Path.owner = None; name = "clock_library" } ] -> ()
       | _ -> Harness.fail "not reported");
   Harness.test "a dependency named in a path is used" (fun () ->
-      let packages, _ =
+      let ((packages, _) as checked) =
         list_codes_with_grants [ pays; ledger ]
           [
             ( { Path.owner = None; name = "store" },
               [ Grant.Full_path { module_names = [ "store"; "ledger" ]; name = "Ledger" } ] );
           ]
       in
+      expect_codes ~expected:[] checked;
       if list_problems packages <> [] then Harness.fail "reported");
   Harness.test "a dependency whose trait's method is called with a dot is used" (fun () ->
       let packages, actual =
@@ -446,7 +434,7 @@ let () =
   Harness.test "an unused dependency is not reported for a package with an error" (fun () ->
       let packages, _ =
         list_codes_with_grants
-          [ ("app.main", Fixtures.Capabilities.function_returning_true_as_int64); time ]
+          [ ("app.main", Fixtures.Infer.body_returning_bool_as_int64); time ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
       if list_problems packages <> [] then Harness.fail "reported");
@@ -601,7 +589,7 @@ let () =
     (fun () -> expect_fine Fixtures.Capabilities.quick_bound_with_its_time_clause);
   Harness.test "function types inside a type must promise the same costs" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.list_of_actions_gaining_a_cost "types.mismatch"
-        ~says:"Expected `List[(fn() -> Int64 cost time O(1))]`, found `List[fn() -> Int64]`.")
+        ~says:"Expected `view List[(fn() -> Int64 cost time O(1))]`, found `List[fn() -> Int64]`.")
 
 let readings = Fixtures.Capabilities.readings
 
@@ -634,11 +622,7 @@ let () =
   Harness.test "a method that Cursor provides runs where the cursor's `Uses` are available"
     (fun () -> expect_fine (readings ^ Fixtures.Capabilities.count_of_readings_using_meter));
   Harness.test "a cursor whose `next` uses no capability needs none" (fun () ->
-      expect_fine Fixtures.Capabilities.counted_cursor);
-  Harness.test "a cursor whose `next` uses a capability cannot be an any value" (fun () ->
-      expect_one_diagnostic
-        (readings ^ Fixtures.Capabilities.any_cursor_of_readings)
-        "types.no_impl")
+      expect_fine Fixtures.Capabilities.counted_cursor)
 
 let feed = Fixtures.Capabilities.feed
 
@@ -702,14 +686,7 @@ let () =
       expect_fine (feed ^ folded ^ Fixtures.Capabilities.fold_of_a_counter_using_meter);
       expect_one_diagnostic
         (feed ^ folded ^ Fixtures.Capabilities.fold_of_a_gauge_without_uses)
-        "capabilities.not_available");
-  Harness.test "an any value hides only a type whose associated capability sets are empty"
-    (fun () ->
-      expect_fine (feed ^ Fixtures.Capabilities.any_feed_of_a_counter);
-      expect_one_diagnostic (feed ^ Fixtures.Capabilities.any_feed_of_a_gauge) "types.no_impl";
-      expect_one_diagnostic
-        (feed ^ Fixtures.Capabilities.any_feed_of_a_generic_source)
-        "types.no_impl")
+        "capabilities.not_available")
 
 let () =
   Harness.test "an impl cannot take only the callbacks that terminate where its trait takes any"
@@ -847,7 +824,7 @@ let () =
   Harness.test "a function that uses RunForever unless C states its time clause when C" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.time_of_a_function_that_runs_forever_unless_finite
         "types.unbounded_time" ~says:"`when` a condition that implies `Source: FiniteCursor`"
-        ~fixed:Fixtures.Capabilities.time_when_a_function_terminates;
+        ~fixed:("cost time O(1)", "cost time O(1) when Source: FiniteCursor");
       expect_fine Fixtures.Capabilities.time_when_a_function_terminates);
   Harness.test "a loop over a cursor that may not end uses RunForever unless it is finite"
     (fun () ->
@@ -896,7 +873,7 @@ let () =
       expect_fine Fixtures.Capabilities.time_when_a_subtrait;
       expect_one_diagnostic Fixtures.Capabilities.time_when_an_unrelated_condition
         "types.unbounded_time" ~says:"`when` a condition that implies `Source: FiniteCursor`"
-        ~fixed:Fixtures.Capabilities.time_when_an_unrelated_condition_fixed;
+        ~fixed:("Display", "Display && Source: FiniteCursor");
       expect_fine Fixtures.Capabilities.time_when_an_unrelated_condition_fixed);
   Harness.test "a call of a function that panics unless a condition on values needs no `Panic`"
     (fun () ->
@@ -905,11 +882,6 @@ let () =
     (fun () ->
       expect_one_diagnostic
         Fixtures.Capabilities.function_value_of_a_function_that_panics_unless_a_condition_on_values
-        "capabilities.not_available" ~says:"This call uses `Panic`");
-  Harness.test "a call through `any` of a method that panics unless a condition uses `Panic`"
-    (fun () ->
-      expect_one_diagnostic
-        Fixtures.Capabilities.call_through_any_of_a_method_that_panics_unless_a_condition_on_values
         "capabilities.not_available" ~says:"This call uses `Panic`");
   Harness.test "a bound names the time of no callback that may run forever" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.time_of_a_callback_that_runs_forever

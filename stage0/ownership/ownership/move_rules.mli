@@ -1,7 +1,4 @@
-type verdict =
-  | Moves
-  | Reads
-  | Refused of (Context.context -> Source.Definition_span.t -> Types.ty -> unit)
+type verdict = Moves | Reads | Refused of (Context.context -> Core.origin -> Types.ty -> unit)
 
 val decide_move :
   Context.context ->

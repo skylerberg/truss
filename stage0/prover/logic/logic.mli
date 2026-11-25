@@ -24,7 +24,7 @@ module Symbol : sig
     | Valid of Types.ty
     | Rank of Types.ty
     | Capacity of Types.ty
-    | Owner_of_view of Types.ty
+    | Range_of of Types.ty
     | Model of Types.ty
     | Sequence_range of Types.ty
     | Slack of Types.ty
@@ -148,6 +148,7 @@ val truncated_divide : term -> term -> term
 val truncated_remainder : term -> term -> term
 val integer_of_bits : is_signed:bool -> width:int -> term -> term
 val mentions : symbol list -> term -> bool
+val is_refuted : term -> bool
 val list_free_constants : term -> symbol list
 val has_quantifier : term -> bool
 val remove_quantified_facts : query -> query
@@ -166,5 +167,4 @@ val rendered_text : rendering -> string
 val render_term : rendering -> term -> string option
 val list_symbols : rendering -> (symbol * string) list
 val list_members : query -> (string * (symbol * symbol list)) list
-val hash : string -> string
 val show_symbol : symbol -> string

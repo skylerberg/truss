@@ -22,8 +22,8 @@ fn main(arguments: List[String]) -> ExitCode
 {
   let either = [processes.Signal.User1, processes.Signal.Terminate]
   Console.print_line("sent ${send("USR1")}")
-  Console.print_line("first ${name_of(Signals.wait(either.slice()))}")
+  Console.print_line("first ${name_of(Signals.wait(either))}")
   Console.print_line("sent ${send("TERM")}")
-  Console.print_line("second ${name_of(Signals.wait(either.slice()))}")
+  Console.print_line("second ${name_of(Signals.wait(either))}")
   ExitCode(0)
 }

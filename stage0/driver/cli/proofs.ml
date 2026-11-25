@@ -14,33 +14,31 @@ let make_solver () =
 
 type t = { database : Database.t; proofs : Database.proofs; decided : unit Lazy.t }
 
-let list_runs database snapshot packages proofs =
+let evaluate database snapshot packages proofs =
   match Database.list_evaluations proofs with
-  | [] -> []
-  | evaluations ->
-      Evaluations.run
-        (Workspace_backend.create snapshot
-           (Workspace_backend.require_lowered_lookups database packages)
-           Development)
-        evaluations
+  | [] -> ()
+  | evaluated ->
+      ignore
+        (Backend.evaluate
+           (Workspace_backend.create snapshot
+              (Workspace_backend.require_lowered_lookups database packages)
+              Development)
+           evaluated)
 
-let check database snapshot packages files =
-  let proofs = Database.prove database files in
+let check database snapshot packages scope =
+  let proofs = Database.prove database scope in
   {
     database;
     proofs;
     decided =
       lazy
-        (Database.decide proofs
-           ~runs:(list_runs database snapshot packages proofs)
-           (lazy (make_solver ())));
+        (evaluate database snapshot packages proofs;
+         Database.decide proofs (lazy (make_solver ())));
   }
 
 let list_diagnostics checked file =
   Lazy.force checked.decided;
   Database.list_proof_diagnostics checked.database file
-
-let list_warnings checked file = Database.list_proof_warnings checked.database file
 
 let list_states checked file =
   Lazy.force checked.decided;

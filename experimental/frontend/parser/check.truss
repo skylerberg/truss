@@ -35,14 +35,14 @@ fn may_be_specification(context: CheckContext) -> Bool {
   context.is_specification || context.is_function_body
 }
 
-fn show_quantifier(quantifier: syntax.Quantifier) -> StringSlice {
+fn show_quantifier(quantifier: syntax.Quantifier) -> view String {
   match quantifier {
     Forall => "forall"
     Exists => "exists"
   }
 }
 
-fn report_at(cursor: mut TokenCursor, code: StringSlice, id: UInt64, message: StringSlice)
+fn report_at(cursor: mut TokenCursor, code: String, id: UInt64, message: String)
   uses Panic
 {
   let span = cursor.read_file_span(id)
@@ -177,7 +177,8 @@ fn check_placement(cursor: mut TokenCursor, written: syntax.TypeExpression, is_t
         check_placement(mut cursor, written: output, is_top: false)
       }
     }
-    PathType(path_type) | AnyType(path_type) => check_path_placement(mut cursor, path_type)
+    PathType(path_type) => check_path_placement(mut cursor, path_type)
+    ViewType(viewed) => check_placement(mut cursor, written: viewed, is_top: false)
     SelfType(_) | Associated(..) | TypeError => {}
   }
 }
@@ -193,7 +194,7 @@ fn check_path_placement(cursor: mut TokenCursor, path_type: syntax.PathType)
   }
 }
 
-fn check_loop_clauses(cursor: mut TokenCursor, context: CheckContext, clauses: Slice[syntax.LoopClause])
+fn check_loop_clauses(cursor: mut TokenCursor, context: CheckContext, clauses: List[syntax.LoopClause])
   uses Panic, RunForever
 {
   for clause in clauses {
@@ -252,7 +253,7 @@ fn check_statement(cursor: mut TokenCursor, context: CheckContext, statement: sy
   }
 }
 
-fn check_parameters(cursor: mut TokenCursor, parameters: Slice[syntax.Parameter], is_lending: Bool = false)
+fn check_parameters(cursor: mut TokenCursor, parameters: List[syntax.Parameter], is_lending: Bool = false)
   uses Panic, RunForever
 {
   for parameter in parameters {
@@ -292,7 +293,7 @@ fn check_trait_arguments(cursor: mut TokenCursor, implemented_trait: syntax.Path
   }
 }
 
-fn report_associated_type(cursor: mut TokenCursor, id: UInt64, written: StringSlice, is_law_proof: Bool)
+fn report_associated_type(cursor: mut TokenCursor, id: UInt64, written: String, is_law_proof: Bool)
   uses Panic
 {
   let message = if is_law_proof {
@@ -307,7 +308,7 @@ fn check_trait_argument(cursor: mut TokenCursor, written: syntax.TypeExpression,
   uses Panic, RunForever
 {
   match written.kind {
-    PathType(path_type) | AnyType(path_type) => check_trait_arguments(mut cursor, implemented_trait: path_type, is_law_proof: is_law_proof)
+    PathType(path_type) => check_trait_arguments(mut cursor, implemented_trait: path_type, is_law_proof: is_law_proof)
     FunctionType(_) => {
       let message = if is_law_proof {
         "A function type cannot be a trait argument of a law proof, since no `impl` can have one."
@@ -320,6 +321,7 @@ fn check_trait_argument(cursor: mut TokenCursor, written: syntax.TypeExpression,
     SelfType(name) => if name is Some(associated) {
       report_associated_type(mut cursor, id: written.id, written: "Self.${associated.text}", is_law_proof: is_law_proof)
     }
+    ViewType(viewed) => check_trait_argument(mut cursor, written: viewed, is_law_proof: is_law_proof)
     TypeError => {}
   }
 }
@@ -349,7 +351,7 @@ fn check_header_trait(cursor: mut TokenCursor, implemented_trait: syntax.PathTyp
   check_trait_arguments(mut cursor, implemented_trait, is_law_proof)
 }
 
-fn check_clauses(cursor: mut TokenCursor, clauses: Slice[syntax.Clause])
+fn check_clauses(cursor: mut TokenCursor, clauses: List[syntax.Clause])
   uses Panic, RunForever
 {
   for clause in clauses {
@@ -357,7 +359,7 @@ fn check_clauses(cursor: mut TokenCursor, clauses: Slice[syntax.Clause])
   }
 }
 
-fn check_generic_parameters(cursor: mut TokenCursor, generics: Slice[syntax.GenericParameter])
+fn check_generic_parameters(cursor: mut TokenCursor, generics: List[syntax.GenericParameter])
   uses Panic, RunForever
 {
   for parameter in generics {
@@ -368,10 +370,7 @@ fn check_generic_parameters(cursor: mut TokenCursor, generics: Slice[syntax.Gene
 fn check_function_name(cursor: mut TokenCursor, name: syntax.DefinitionName)
   uses Panic
 {
-  let written = match name {
-    PlainName(plain) => plain.copy()
-    MemberName(name: member, ..) => member.copy()
-  }
+  let PlainName(written) | MemberName(name: written, ..) = name
   if written.text == "old" {
     report_at(
       mut cursor,
@@ -408,7 +407,7 @@ fn check_signature(cursor: mut TokenCursor, signature: syntax.Signature)
   check_clauses(mut cursor, clauses: signature.clauses)
 }
 
-fn check_fields(cursor: mut TokenCursor, fields: Slice[syntax.Field])
+fn check_fields(cursor: mut TokenCursor, fields: List[syntax.Field])
   uses Panic, RunForever
 {
   for field in fields {

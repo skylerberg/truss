@@ -11,9 +11,9 @@ let lower (context : Context.t) (runtime : Intrinsic.runtime) =
   | Crash ->
       let message = Context.read (read_argument 0) in
       let bytes =
-        match (Memory_layout.of_type env context.types.string_slice).form with
+        match (Memory_layout.of_type env context.types.string).form with
         | Struct [ only ] -> Lowered.project message (Field only.name)
-        | _ -> Context.raise_bug "a StringSlice that is not a record of one field"
+        | _ -> Context.raise_bug "a String that is not a record of one field"
       in
       Context.panic_with_message context
         ~message:(Copy (Storage.project_buffer bytes))
@@ -34,7 +34,7 @@ let lower (context : Context.t) (runtime : Intrinsic.runtime) =
         Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place block))));
         Emit_c.Ir_builder.emit builder
-          (Assign ({ root = Local typed; projections = [ Deref ] }, Use (read_operand 0)))
+          (Assign (Lowered.make_deref_place typed, Use (read_operand 0)))
       end;
       set (Builtin_records.Shared.build ty ~value:(Copy (Lowered.make_local_place block)))
   | Shared_key ->

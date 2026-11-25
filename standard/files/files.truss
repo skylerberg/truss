@@ -8,8 +8,8 @@ use standard.text
 public opaque type Path(text: String)
   derives Copyable
 
-public fn Path.new(text: StringSlice) -> Path {
-  Path(text: text.to_string())
+public fn Path.new(text: String) -> Path {
+  Path(text: text.copy())
 }
 
 public fn Path.from_bytes(bytes: own List[UInt8]) -> Option[Path]
@@ -21,13 +21,13 @@ public fn Path.from_bytes(bytes: own List[UInt8]) -> Option[Path]
   }
 }
 
-public fn Path.text(self) -> Option[StringSlice]
+public fn Path.text(self) -> Option[view String]
   cost time O(1)
 {
-  Some(self.text.slice())
+  Some(self.text)
 }
 
-public fn Path.bytes(self) -> Slice[UInt8]
+public fn Path.bytes(self) -> view List[UInt8]
   cost time O(1)
 {
   self.text.bytes()
@@ -42,7 +42,7 @@ internal fn Span.is_empty(self) -> Bool
   self.start == self.end
 }
 
-internal fn next_component(text: StringSlice, from: UInt64) -> Span
+internal fn next_component(text: String, from: UInt64) -> Span
   requires from <= text.length()
   ensures from <= result.start
   ensures result.start <= result.end
@@ -75,7 +75,7 @@ internal fn next_component(text: StringSlice, from: UInt64) -> Span
   Span(start: start, end: end)
 }
 
-internal fn last_component(text: StringSlice) -> Span
+internal fn last_component(text: String) -> Span
   ensures result.start <= result.end
   ensures result.end <= text.length()
   cost time O(text.length())
@@ -102,7 +102,7 @@ internal fn last_component(text: StringSlice) -> Span
   Span(start: start, end: end)
 }
 
-internal fn is_dot_or_dot_dot(text: StringSlice, span: Span) -> Bool
+internal fn is_dot_or_dot_dot(text: String, span: Span) -> Bool
   requires span.start <= span.end
   requires span.end <= text.length()
   cost time O(1)
@@ -113,7 +113,7 @@ internal fn is_dot_or_dot_dot(text: StringSlice, span: Span) -> Bool
     || (length == 2 && text.byte(span.start) == 46 && text.byte(span.start + 1) == 46)
 }
 
-internal fn extension_start(text: StringSlice, name: Span) -> UInt64
+internal fn extension_start(text: String, name: Span) -> UInt64
   requires name.start <= name.end
   requires name.end <= text.length()
   ensures name.start <= result
@@ -137,15 +137,15 @@ internal fn extension_start(text: StringSlice, name: Span) -> UInt64
   name.end
 }
 
-internal fn join_paths(first: StringSlice, second: StringSlice) -> Path
+internal fn join_paths(first: String, second: String) -> Path
   ensures result.text.length() <= first.length() + second.length() + 1
   cost time O(first.length() + second.length())
 {
   if second.length() > 0 && second.byte(0) == 47 {
-    return Path(text: second.to_string())
+    return Path(text: second.copy())
   }
   if first.length() == 0 {
-    return Path(text: second.to_string())
+    return Path(text: second.copy())
   }
   if first.length() > UInt64.maximum / 4 || second.length() > UInt64.maximum / 4 {
     intrinsic.crash("a path cannot hold that many bytes")
@@ -160,13 +160,13 @@ internal fn join_paths(first: StringSlice, second: StringSlice) -> Path
 }
 
 public fn Path.is_absolute(self) -> Bool
-  ensures result == (self.text.length() > 0 && self.text.slice().byte(0) == 47)
+  ensures result == (self.text.length() > 0 && self.text.byte(0) == 47)
   cost time O(1)
 {
-  self.text.length() > 0 && self.text.slice().byte(0) == 47
+  self.text.length() > 0 && self.text.byte(0) == 47
 }
 
-public fn Path.join(self, part: StringSlice) -> Path
+public fn Path.join(self, part: String) -> Path
   cost time O(self.text.length() + part.length())
 {
   join_paths(self.text, second: part)
@@ -176,7 +176,7 @@ public fn Path.join_path(self, other: Path) -> Path
   ensures identical(result, join_paths(self.text, second: other.text))
   cost time O(self.text.length() + other.text.length())
 {
-  join_paths(self.text.slice(), second: other.text.slice())
+  join_paths(self.text, second: other.text)
 }
 
 public fn Path.join_confined(self, part: Path) -> Result[Path, SystemError]
@@ -190,12 +190,12 @@ public fn Path.join_confined(self, part: Path) -> Result[Path, SystemError]
     return Err(SystemError.PermissionDenied)
   }
   let inner = part.normalized()
-  let part_text = inner.text.slice()
+  let part_text = inner.text
   if part_text.length() >= 2 && part_text.byte(0) == 46 && part_text.byte(1) == 46 && (part_text.length() == 2 || part_text.byte(2) == 47) {
     return Err(SystemError.PermissionDenied)
   }
   let joined = if part_text.length() == 1 && part_text.byte(0) == 46 {
-    Path(text: self.text.slice().to_string())
+    Path(text: self.text.copy())
   } else {
     self.join_path(inner)
   }
@@ -205,7 +205,7 @@ public fn Path.join_confined(self, part: Path) -> Result[Path, SystemError]
 public fn Path.parent(self) -> Option[Path]
   cost time O(self.text.length())
 {
-  let text = self.text.slice()
+  let text = self.text
   let name = last_component(text)
   if name.is_empty() {
     return None
@@ -218,13 +218,13 @@ public fn Path.parent(self) -> Option[Path]
   {
     end -= 1
   }
-  Some(Path(text: text.part(0, to: end).to_string()))
+  Some(Path(text: text.part(0, to: end).copy()))
 }
 
-public fn Path.file_name(self) -> Option[StringSlice]
+public fn Path.file_name(self) -> Option[view String]
   cost time O(self.text.length())
 {
-  let text = self.text.slice()
+  let text = self.text
   let name = last_component(text)
   if name.is_empty() || is_dot_or_dot_dot(text, span: name) {
     None
@@ -233,10 +233,10 @@ public fn Path.file_name(self) -> Option[StringSlice]
   }
 }
 
-public fn Path.stem(self) -> Option[StringSlice]
+public fn Path.stem(self) -> Option[view String]
   cost time O(self.text.length())
 {
-  let text = self.text.slice()
+  let text = self.text
   let name = last_component(text)
   if name.is_empty() || is_dot_or_dot_dot(text, span: name) {
     None
@@ -245,10 +245,10 @@ public fn Path.stem(self) -> Option[StringSlice]
   }
 }
 
-public fn Path.extension(self) -> Option[StringSlice]
+public fn Path.extension(self) -> Option[view String]
   cost time O(self.text.length())
 {
-  let text = self.text.slice()
+  let text = self.text
   let name = last_component(text)
   if name.is_empty() || is_dot_or_dot_dot(text, span: name) {
     return None
@@ -257,13 +257,13 @@ public fn Path.extension(self) -> Option[StringSlice]
   if dot == name.end { None } else { Some(text.part(dot + 1, to: name.end)) }
 }
 
-public fn Path.with_extension(self, extension: StringSlice) -> Path
+public fn Path.with_extension(self, extension: String) -> Path
   cost time O(self.text.length() + extension.length())
 {
-  let text = self.text.slice()
+  let text = self.text
   let name = last_component(text)
   if name.is_empty() || is_dot_or_dot_dot(text, span: name) {
-    return Path(text: text.to_string())
+    return Path(text: text.copy())
   }
   let stem = text.part(0, to: extension_start(text, name: name))
   if stem.length() > UInt64.maximum / 4 || extension.length() > UInt64.maximum / 4 {
@@ -278,10 +278,10 @@ public fn Path.with_extension(self, extension: StringSlice) -> Path
   Path(text: String(storage: own output))
 }
 
-public fn Path.with_file_name(self, name: StringSlice) -> Path
+public fn Path.with_file_name(self, name: String) -> Path
   cost time O(self.text.length() + name.length())
 {
-  let text = self.text.slice()
+  let text = self.text
   let last = last_component(text)
   if last.is_empty() || is_dot_or_dot_dot(text, span: last) {
     return join_paths(text, second: name)
@@ -296,12 +296,12 @@ public fn Path.with_file_name(self, name: StringSlice) -> Path
   Path(text: String(storage: own output))
 }
 
-public fn Path.components(self) -> List[StringSlice]
+public fn Path.components(self) -> List[view String]
   ensures result.length() <= self.text.length()
   cost time O(self.text.length())
 {
-  var parts: List[StringSlice] = []
-  let text = self.text.slice()
+  var parts: List[view String] = []
+  let text = self.text
   var from: UInt64 = 0
   while from < text.length()
     invariant from <= text.length()
@@ -343,7 +343,7 @@ public fn Path.normalized(self) -> Path
   ensures result.text.length() <= self.text.length() + 1
   cost time O(self.text.length())
 {
-  let text = self.text.slice()
+  let text = self.text
   let absolute = self.is_absolute()
   if text.length() > UInt64.maximum / 4 {
     intrinsic.crash("a path cannot hold that many bytes")
@@ -405,8 +405,8 @@ public fn Path.starts_with(self, base: Path) -> Bool
   if self.is_absolute() != base.is_absolute() {
     return false
   }
-  let text = self.text.slice()
-  let prefix = base.text.slice()
+  let text = self.text
+  let prefix = base.text
   var mine: UInt64 = 0
   var theirs: UInt64 = 0
   while theirs < prefix.length()
@@ -438,8 +438,8 @@ public fn Path.relative_to(self, base: Path) -> Option[Path]
   if self.is_absolute() != base.is_absolute() {
     return None
   }
-  let text = self.text.slice()
-  let prefix = base.text.slice()
+  let text = self.text
+  let prefix = base.text
   var mine: UInt64 = 0
   var theirs: UInt64 = 0
   while theirs < prefix.length()
@@ -464,7 +464,7 @@ public fn Path.relative_to(self, base: Path) -> Option[Path]
     }
   }
   let rest = next_component(text, from: mine)
-  Some(Path(text: text.part(rest.start, to: text.length()).to_string()))
+  Some(Path(text: text.part(rest.start, to: text.length()).copy()))
 }
 
 impl Equal for Path {
@@ -622,20 +622,20 @@ impl streams.Seek for FileReader {
 
 public opaque type FileWriter(file: File)
 
-public fn FileWriter.write(mut self, text: StringSlice) -> Result[Unit, SystemError]
+public fn FileWriter.write(mut self, text: String) -> Result[Unit, SystemError]
   uses Handles
 {
   mut self.file.write_text(text)
 }
 
-public fn FileWriter.write_line(mut self, text: StringSlice) -> Result[Unit, SystemError]
+public fn FileWriter.write_line(mut self, text: String) -> Result[Unit, SystemError]
   uses Handles
 {
   mut self.file.write_text(text)?
   mut self.file.write_text("\n")
 }
 
-public fn FileWriter.write_bytes(mut self, bytes: Slice[UInt8]) -> Result[Unit, SystemError]
+public fn FileWriter.write_bytes(mut self, bytes: List[UInt8]) -> Result[Unit, SystemError]
   uses Handles
 {
   mut self.file.write_all(bytes)
@@ -659,7 +659,7 @@ public fn File.read_at(mut self, offset: UInt64, buffer: mut List[UInt8], limit:
   Handles.read_at(self.handle, offset: offset, buffer: mut buffer, limit: limit)
 }
 
-public fn File.write_at(mut self, offset: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
+public fn File.write_at(mut self, offset: UInt64, bytes: List[UInt8]) -> Result[UInt64, SystemError]
   uses Handles
 {
   Handles.write_at(self.handle, offset: offset, bytes: bytes)
@@ -698,7 +698,7 @@ impl streams.Reader for File {
 }
 
 impl streams.Writer for File {
-  fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
+  fn write(mut self, bytes: List[UInt8]) -> Result[UInt64, SystemError]
     uses Handles
   {
     Handles.write(self.handle, bytes: bytes)
@@ -739,7 +739,7 @@ public fn write_with[Output](
   Ok(own output)
 }
 
-fn write_new_file(file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError]
+fn write_new_file(file: Path, contents: List[UInt8]) -> Result[Unit, SystemError]
   uses FileWrite, Handles
 {
   var opened = FileWrite.open(file, mode: WriteMode.CreateNew)?
@@ -754,14 +754,14 @@ fn write_new_file(file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemErro
   }
 }
 
-public fn write_atomically(file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError]
+public fn write_atomically(file: Path, contents: List[UInt8]) -> Result[Unit, SystemError]
   uses FileWrite, Handles, Random
 {
   let name = match file.file_name() {
     Some(name) => name
     None => return Err(SystemError.InvalidInput)
   }
-  var temporary_name = name.to_string()
+  var temporary_name = name.copy()
   mut temporary_name.push(".")
   mut temporary_name.push(Random.next().format(radix: 16, minimum_digits: 16))
   mut temporary_name.push(".tmp")
@@ -777,7 +777,7 @@ public fn write_atomically(file: Path, contents: Slice[UInt8]) -> Result[Unit, S
   renamed
 }
 
-public fn append(file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError]
+public fn append(file: Path, contents: List[UInt8]) -> Result[Unit, SystemError]
   uses FileWrite, Handles
 {
   var opened = FileWrite.open(file, mode: WriteMode.Append)?
@@ -789,7 +789,7 @@ public fn append(file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError
   }
 }
 
-public fn append_text(file: Path, contents: StringSlice) -> Result[Unit, SystemError]
+public fn append_text(file: Path, contents: String) -> Result[Unit, SystemError]
   uses FileWrite, Handles
 {
   append(file, contents: contents.bytes())
@@ -849,12 +849,12 @@ public fn remove_all(path: Path) -> Result[Unit, SystemError]
   FileWrite.remove(path)
 }
 
-public fn create_temporary_directory(parent: Path, prefix: StringSlice) -> Result[Path, SystemError]
+public fn create_temporary_directory(parent: Path, prefix: String) -> Result[Path, SystemError]
   uses FileWrite, Random
 {
   var failure = SystemError.AlreadyExists
   for _ in 0..16 {
-    var name = prefix.to_string()
+    var name = prefix.copy()
     mut name.push(Random.next().format(radix: 16, minimum_digits: 16))
     let directory = parent.join(name)
     match FileWrite.create_directory(directory) {
@@ -873,7 +873,7 @@ public fn temporary_root() -> Path
   uses Environment
 {
   match Environment.variable("TMPDIR") {
-    Some(directory) => if directory.slice().trim().is_empty() { Path.new("/tmp") } else { Path.new(directory) }
+    Some(directory) => if directory.trim().is_empty() { Path.new("/tmp") } else { Path.new(directory) }
     None => Path.new("/tmp")
   }
 }
@@ -1025,7 +1025,7 @@ fn GlobToken.matches(self, character: Character) -> Bool
   }
 }
 
-fn name_matches(tokens: Slice[GlobToken], name: StringSlice) -> Bool
+fn name_matches(tokens: List[GlobToken], name: String) -> Bool
 {
   var characters: List[Character] = []
   for character in name.characters() {
@@ -1039,7 +1039,7 @@ fn name_matches(tokens: Slice[GlobToken], name: StringSlice) -> Bool
   )
 }
 
-fn parse_class(pattern: StringSlice, from: UInt64) -> Result[ParsedClass, GlobError]
+fn parse_class(pattern: String, from: UInt64) -> Result[ParsedClass, GlobError]
   requires from < pattern.length()
   ensures !(result is Ok(parsed) && (parsed.end <= from || parsed.end > pattern.length()))
 {
@@ -1085,7 +1085,7 @@ fn parse_class(pattern: StringSlice, from: UInt64) -> Result[ParsedClass, GlobEr
 }
 
 impl FromTemplate for Glob {
-  type Part = Never
+  type Interpolation = Never
 
   fn is_valid_template(literals: List[text.Literal]) -> Bool
     ensures result ==> literals.length() == 1
@@ -1102,7 +1102,7 @@ impl FromTemplate for Glob {
   }
 }
 
-public fn Glob.parse(pattern: StringSlice) -> Result[Glob, GlobError]
+public fn Glob.parse(pattern: String) -> Result[Glob, GlobError]
 {
   var components: List[GlobComponent] = []
   var tokens: List[GlobToken] = []
@@ -1163,7 +1163,7 @@ public fn Glob.matches(self, path: Path) -> Bool
   }
   var names: List[String] = []
   for name in path.components() {
-    mut names.push(name.to_string())
+    mut names.push(name.copy())
   }
   wildcard_matches(
     self.components.length(),
@@ -1172,7 +1172,7 @@ public fn Glob.matches(self, path: Path) -> Bool
     matches_one: fn(index, position) {
       match self.components[index] {
         AnyDirectories => false
-        Name(tokens) => name_matches(tokens.slice(), name: names[position])
+        Name(tokens) => name_matches(tokens, name: names[position])
       }
     },
   )
@@ -1250,11 +1250,11 @@ impl FileRead for FilesWithin
 impl FileWrite for FilesWithin
   uses FileWrite
 {
-  fn write(self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
+  fn write(self, file: Path, contents: List[UInt8]) -> Result[Unit, SystemError] {
     FileWrite.write(self.root.join_confined(file)?, contents: contents)
   }
 
-  fn write_text(self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
+  fn write_text(self, file: Path, contents: String) -> Result[Unit, SystemError] {
     FileWrite.write_text(self.root.join_confined(file)?, contents: contents)
   }
 
@@ -1290,11 +1290,11 @@ impl FileWrite for FilesWithin
 public type ReadOnlyFiles()
 
 impl FileWrite for ReadOnlyFiles {
-  fn write(self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
+  fn write(self, file: Path, contents: List[UInt8]) -> Result[Unit, SystemError] {
     Err(SystemError.PermissionDenied)
   }
 
-  fn write_text(self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
+  fn write_text(self, file: Path, contents: String) -> Result[Unit, SystemError] {
     Err(SystemError.PermissionDenied)
   }
 
@@ -1371,13 +1371,13 @@ public fn MemoryFiles.new() -> MemoryFiles {
   files
 }
 
-public fn MemoryFiles.with_text(own self, file: Path, contents: StringSlice) -> MemoryFiles
+public fn MemoryFiles.with_text(own self, file: Path, contents: String) -> MemoryFiles
   uses RunForever
 {
   own self.with_bytes(file, contents: contents.bytes())
 }
 
-public fn MemoryFiles.with_bytes(own self, file: Path, contents: Slice[UInt8]) -> MemoryFiles
+public fn MemoryFiles.with_bytes(own self, file: Path, contents: List[UInt8]) -> MemoryFiles
   uses RunForever
 {
   var changed = own self
@@ -1388,7 +1388,7 @@ public fn MemoryFiles.with_bytes(own self, file: Path, contents: Slice[UInt8]) -
     mut changed.remove_tree(path, keep_directory: !components.is_empty())
     if components.is_empty() {
       let inode = mut changed.add_inode(
-        InodeKind.Bytes(contents: contents.to_list()),
+        InodeKind.Bytes(contents: contents.copy()),
         permissions: Permissions.from_mode(0o644),
       )
       mut changed.names.insert(own path, value: inode)
@@ -1441,7 +1441,7 @@ internal fn MemoryFiles.set_time(mut self, now: Instant) {
 fn reversed_components(path: Path) -> List[String] {
   var components: List[String] = []
   for component in path.components() {
-    mut components.push(component.to_string())
+    mut components.push(component.copy())
   }
   mut components.reverse()
   components
@@ -1455,7 +1455,7 @@ fn offset_from(base: UInt64, by: Int64) -> Option[UInt64] {
   }
 }
 
-fn overwrite(contents: mut List[UInt8], at: UInt64, bytes: Slice[UInt8]) -> Result[Unit, SystemError] {
+fn overwrite(contents: mut List[UInt8], at: UInt64, bytes: List[UInt8]) -> Result[Unit, SystemError] {
   if at > largest_file || bytes.length() > largest_file {
     return Err(SystemError.OutOfStorage)
   }
@@ -1743,7 +1743,7 @@ internal fn MemoryFiles.open_file_index(self, handle: streams.Handle) -> Option[
   ensures !(result is Some(index) && index >= self.open_files.length())
 {
   let number = handle.number()
-  self.open_files.slice().find_index(fn(open) { open.handle == number })
+  self.open_files.find_index(fn(open) { open.handle == number })
 }
 
 internal fn MemoryFiles.length_of(self, inode: UInt64) -> UInt64 {
@@ -1769,7 +1769,7 @@ internal fn MemoryFiles.copy_out(self, inode: UInt64, from: UInt64, buffer: mut 
         }
         let available = contents.length() - from
         let count = if limit < available { limit } else { available }
-        mut buffer.append_slice(contents[from..from + count])
+        mut buffer.append_items(contents[from..from + count])
         Ok(count)
       }
       Directory => Err(SystemError.IsADirectory)
@@ -1779,7 +1779,7 @@ internal fn MemoryFiles.copy_out(self, inode: UInt64, from: UInt64, buffer: mut 
   }
 }
 
-internal fn MemoryFiles.copy_in(mut self, inode: UInt64, at: UInt64, bytes: Slice[UInt8]) -> Result[Unit, SystemError]
+internal fn MemoryFiles.copy_in(mut self, inode: UInt64, at: UInt64, bytes: List[UInt8]) -> Result[Unit, SystemError]
   ensures self.open_files.length() == old(self.open_files.length())
 {
   match mut self.inodes.take(inode) {
@@ -1909,7 +1909,7 @@ impl FileRead for MemoryFiles
     for entry in self.names {
       if entry.key.parent() is Some(parent) && parent == located.path {
         if entry.key.file_name() is Some(name) && self.kind_of(entry.value) is Some(kind) {
-          mut entries.push(DirectoryEntry(name: name.to_string(), kind: kind))
+          mut entries.push(DirectoryEntry(name: name.copy(), kind: kind))
         }
       }
     }
@@ -1939,11 +1939,11 @@ impl FileRead for MemoryFiles
 impl FileWrite for MemoryFiles
   uses RunForever
 {
-  fn write(mut self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
-    mut self.write_bytes(file, contents: contents.to_list())
+  fn write(mut self, file: Path, contents: List[UInt8]) -> Result[Unit, SystemError] {
+    mut self.write_bytes(file, contents: contents.copy())
   }
 
-  fn write_text(mut self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
+  fn write_text(mut self, file: Path, contents: String) -> Result[Unit, SystemError] {
     mut self.write_bytes(file, contents: contents.to_bytes())
   }
 
@@ -2077,7 +2077,7 @@ impl Handles for MemoryFiles {
     Ok(count)
   }
 
-  fn write(mut self, handle: streams.Handle, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
+  fn write(mut self, handle: streams.Handle, bytes: List[UInt8]) -> Result[UInt64, SystemError] {
     let index = match self.open_file_index(handle) {
       Some(index) => index
       None => return Err(SystemError.Closed)
@@ -2109,7 +2109,7 @@ impl Handles for MemoryFiles {
     self.copy_out(self.open_files[index].inode, from: offset, buffer: mut buffer, limit: limit)
   }
 
-  fn write_at(mut self, handle: streams.Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
+  fn write_at(mut self, handle: streams.Handle, offset: UInt64, bytes: List[UInt8]) -> Result[UInt64, SystemError] {
     let index = match self.open_file_index(handle) {
       Some(index) => index
       None => return Err(SystemError.Closed)
@@ -2205,7 +2205,7 @@ impl Handles for MemoryFiles {
   fn send_to(
     mut self,
     socket: streams.Handle,
-    bytes: Slice[UInt8],
+    bytes: List[UInt8],
     address: network.SocketAddress,
   ) -> Result[UInt64, SystemError] {
     Err(SystemError.Unsupported)

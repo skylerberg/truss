@@ -1,0 +1,30 @@
+type Score(points: Int64, rank: UInt8)
+  derives Equal, Ordered
+
+type Box[Item](item: Item)
+  derives Equal, Ordered
+
+fn rank_all(scores: mut List[Score])
+  cost time O(scores.length() * log(scores.length()))
+{
+  mut scores.sort()
+}
+
+fn precedes(first: Score, second: Score) -> Bool
+  cost time O(1)
+  cost allocations == 0
+{
+  first < second
+}
+
+fn order_boxes[Item: Ordered](boxes: mut List[Box[Item]])
+  cost time O(boxes.length() * log(boxes.length()) * time(Item.compare))
+{
+  mut boxes.sort()
+}
+
+fn order_keys(keys: mut List[Array[Int64, 4]])
+  cost time O(keys.length() * log(keys.length()))
+{
+  mut keys.sort()
+}

@@ -8,7 +8,7 @@ fn make_pattern_node(cursor: mut TokenCursor, start: UInt64, kind: own syntax.Pa
   syntax.Pattern(own kind, id: allocate_id_from(mut cursor, start_index: start))
 }
 
-fn range_bound() -> StringSlice {
+fn range_bound() -> view String {
   "a literal or a constant with its module or type, such as `http.last`"
 }
 
@@ -83,12 +83,7 @@ fn parse_variant_or_constant(cursor: mut TokenCursor, start: UInt64, path: own s
     advance(mut cursor)
     let name = lower_name(mut cursor, expected: "the name of a constant after `.`")?
     let constant = syntax.Constant.TypeConstant(owner: own path, own name)
-    return parse_range_or_single(
-      mut cursor,
-      start,
-      end_kind: syntax.RangeEndKind.EndConstant(constant.copy()),
-      kind: syntax.PatternKind.QualifiedConstant(own constant),
-    )
+    return parse_range_or_single(mut cursor, start, end_kind: syntax.RangeEndKind.EndConstant(own constant))
   }
   let fields = if cursor.is_punctuation(token.Punctuation.Open(token.Bracket.Paren)) {
     Some(parse_pattern_fields(mut cursor))
@@ -98,18 +93,17 @@ fn parse_variant_or_constant(cursor: mut TokenCursor, start: UInt64, path: own s
   Ok(make_pattern_node(mut cursor, start, kind: syntax.PatternKind.Variant(name: own path.last, own fields)))
 }
 
-fn parse_range_or_single(
-  cursor: mut TokenCursor,
-  start: UInt64,
-  end_kind: own syntax.RangeEndKind,
-  kind: own syntax.PatternKind,
-) -> Result[syntax.Pattern, Failure]
+fn parse_range_or_single(cursor: mut TokenCursor, start: UInt64, end_kind: own syntax.RangeEndKind) -> Result[syntax.Pattern, Failure]
   uses Panic, RunForever
 {
   let first = syntax.RangeEnd(kind: own end_kind, id: allocate_id_from(mut cursor, start_index: start))
   let operator = cursor.peek_kind()
   let is_inclusive = operator == token.Kind.Punctuation(token.Punctuation.DotDotEqual)
   if !is_inclusive && operator != token.Kind.Punctuation(token.Punctuation.DotDot) {
+    let kind = match own first.kind {
+      EndLiteral(literal) => syntax.PatternKind.Literal(own literal)
+      EndConstant(constant) => syntax.PatternKind.QualifiedConstant(own constant)
+    }
     return Ok(make_pattern_node(mut cursor, start, own kind))
   }
   advance(mut cursor)
@@ -154,12 +148,7 @@ fn parse_primary_pattern(cursor: mut TokenCursor) -> Result[syntax.Pattern, Fail
 {
   let start = cursor.index
   if parse_literal(mut cursor)? is Some(literal) {
-    return parse_range_or_single(
-      mut cursor,
-      start,
-      end_kind: syntax.RangeEndKind.EndLiteral(literal.copy()),
-      kind: syntax.PatternKind.Literal(literal.copy()),
-    )
+    return parse_range_or_single(mut cursor, start, end_kind: syntax.RangeEndKind.EndLiteral(own literal))
   }
   match cursor.peek_kind() {
     Underscore => {
@@ -195,12 +184,7 @@ fn parse_name_pattern(cursor: mut TokenCursor, start: UInt64) -> Result[syntax.P
         return Ok(make_pattern_node(mut cursor, start, kind: syntax.PatternKind.Binding(own name)))
       }
       let constant = syntax.Constant.ModuleConstant(syntax.NamePath(own modules, last: take_name(mut cursor)))
-      parse_range_or_single(
-        mut cursor,
-        start,
-        end_kind: syntax.RangeEndKind.EndConstant(constant.copy()),
-        kind: syntax.PatternKind.QualifiedConstant(own constant),
-      )
+      parse_range_or_single(mut cursor, start, end_kind: syntax.RangeEndKind.EndConstant(own constant))
     }
     Upper(_) => {
       let path = syntax.NamePath(own modules, last: take_name(mut cursor))
@@ -213,12 +197,7 @@ fn parse_name_pattern(cursor: mut TokenCursor, start: UInt64) -> Result[syntax.P
         return Err(fail(mut cursor, expected: "a name after `.`"))
       }
       let parsed = syntax.Literal.LiteralString(parse_pattern_string(mut cursor, start, own modules, literal)?)
-      parse_range_or_single(
-        mut cursor,
-        start,
-        end_kind: syntax.RangeEndKind.EndLiteral(parsed.copy()),
-        kind: syntax.PatternKind.Literal(own parsed),
-      )
+      parse_range_or_single(mut cursor, start, end_kind: syntax.RangeEndKind.EndLiteral(own parsed))
     }
     _ => Err(fail(mut cursor, expected: "a name after `.`"))
   }

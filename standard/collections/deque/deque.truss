@@ -1,5 +1,4 @@
 use standard.collections
-use standard.intrinsic
 use standard.map
 use standard.list
 
@@ -37,9 +36,6 @@ public fn collections.Deque[Element].push_front(mut self, item: own Element)
   ensures self.length() == old(self.length()) + 1
   cost amortized time O(1)
 {
-  if self.back.length() == UInt64.maximum - self.front.length() {
-    intrinsic.crash("a deque cannot hold that many items")
-  }
   mut self.front.push(own item)
 }
 
@@ -47,9 +43,6 @@ public fn collections.Deque[Element].push_back(mut self, item: own Element)
   ensures self.length() == old(self.length()) + 1
   cost amortized time O(1)
 {
-  if self.back.length() == UInt64.maximum - self.front.length() {
-    intrinsic.crash("a deque cannot hold that many items")
-  }
   mut self.back.push(own item)
 }
 
@@ -256,30 +249,33 @@ impl Iterable for collections.Deque[Element] {
   }
 }
 
-public fn collections.Deque[Element].element(mut self, position: UInt64) lends mut Element
-  uses Panic unless position < self.count()
-  ensures self.front.length() == old(self.front.length())
-  ensures self.back.length() == old(self.back.length())
-  cost time O(1)
-{
-  if position >= self.count() {
-    Panic.crash("index out of bounds")
-  }
-  if position < self.front.length() {
-    mut self.front[self.front.length() - 1 - position]
-  } else {
-    mut self.back[position - self.front.length()]
+impl IterableMut for collections.Deque[Element] {
+  fn element(mut self, position: UInt64) lends mut Element
+    requires position < self.count()
+    ensures self.front.length() == old(self.front.length())
+    ensures self.back.length() == old(self.back.length())
+    cost time O(1)
+  {
+    if position < self.front.length() {
+      mut self.front[self.front.length() - 1 - position]
+    } else {
+      mut self.back[position - self.front.length()]
+    }
   }
 }
 
-public fn collections.Deque[Element].cursor(own self) -> list.ListCursor[Element]
-  cost time O(self.length())
-  cost amortized time O(self.length())
-{
-  var items = own self.front
-  mut items.reverse()
-  mut items.append(own self.back)
-  own items.cursor()
+impl IntoCursor for collections.Deque[Element] {
+  type Cursor = list.ListCursor[Element]
+
+  fn cursor(own self) -> list.ListCursor[Element]
+    cost time O(self.length())
+    cost amortized time O(self.length())
+  {
+    var items = own self.front
+    mut items.reverse()
+    mut items.append(own self.back)
+    own items.cursor()
+  }
 }
 
 impl Equal for collections.Deque[Element: Equal] {
@@ -365,7 +361,11 @@ proof Hash.agrees_with_equal for collections.Deque[Element: Hash] {
 }
 
 impl Default for collections.Deque[Element] {
-  fn default() -> collections.Deque[Element] {
+  fn default() -> collections.Deque[Element]
+    ensures result.length() == 0
+    cost time O(1)
+    cost allocations == 0
+  {
     []
   }
 }

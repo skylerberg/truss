@@ -153,6 +153,7 @@ let () =
     (fun () ->
       let root = make_package_served_by_other_build () in
       let status, output = run_truss [ "check"; "-C"; root ] in
+      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "-C"; root ]));
       if status <> 0 then fail "exited with %d: %s" status output);
   test "stop ends the background process of another build" (fun () ->
       let root = make_package_served_by_other_build () in
@@ -303,9 +304,10 @@ let () =
       let ended = Filename.concat servers "0123456789abcdef-0123456789abcdef" in
       let paths = List.map (fun suffix -> ended ^ suffix) [ ".key"; ".lock"; ".start" ] in
       List.iter (fun path -> Out_channel.with_open_bin path ignore) paths;
-      ignore (make_package_served_by_other_build ());
+      let root = make_package_served_by_other_build () in
       let is_removed () = not (List.exists Sys.file_exists paths) in
       wait_until_deadline ~is_done:is_removed;
+      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "-C"; root ]));
       if not (is_removed ()) then fail "the ended process's files are still there");
   test "a background process does its periodic work while its project keeps changing" (fun () ->
       let servers = Filename.concat (Sys.getenv "TRUSS_CACHE") "servers" in
@@ -325,6 +327,7 @@ let () =
         end
       in
       change_until_removed 0;
+      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "-C"; root ]));
       if not (is_removed ()) then fail "the ended process's files are still there")
 
 let () =
@@ -436,7 +439,8 @@ let () =
         not
           (List.exists
              (fun (problem : Project.problem) ->
-               String.includes ~affix:"`two` is not a package of this project" problem.message)
+               String.includes ~affix:"`two` is not a package of this project"
+                 (Project.show_problem problem))
              problems)
       then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems));
       match Cli.Command_packages.load root with
@@ -547,7 +551,7 @@ let report_problems report =
 let expect_problem ?file files message =
   let problems_reported = list_problems files in
   let is_expected (problem : Project.problem) =
-    String.includes ~affix:message problem.message
+    String.includes ~affix:message (Project.show_problem problem)
     && match file with Some file -> problem.file = file | None -> true
   in
   if not (List.exists is_expected problems_reported) then
@@ -702,7 +706,8 @@ let () =
           (List.exists
              (fun (problem : Project.problem) ->
                problem.file = "one/truss.toml"
-               && String.includes ~affix:"A test's time limit is its project's" problem.message)
+               && String.includes ~affix:"A test's time limit is its project's"
+                    (Project.show_problem problem))
              problems)
       then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems)));
   test "a time limit of 0 is malformed, at its line" (fun () ->
@@ -710,23 +715,94 @@ let () =
       | exception Manifest.Malformed { line = 4; _ } -> ()
       | _ -> fail "accepted")
 
+let () =
+  test "the project's [build] x86_64_level gives the level its programs are built for" (fun () ->
+      let root =
+        make_directory
+          [
+            ("truss.toml", "[project]\n[build]\nx86_64_level = \"v1\"\n");
+            ("one/truss.toml", make_manifest "one");
+          ]
+      in
+      let project = Cli.Command_packages.load (Filename.concat root "one") in
+      if Workspace.x86_64_level (fst project) <> V1 then fail "read another level");
+  test "a project without an x86-64 level builds its programs for v3" (fun () ->
+      if Workspace.x86_64_level (fst (Cli.Command_packages.load (make_package []))) <> V3 then
+        fail "read another level");
+  test "an x86-64 level in a package's manifest that is not its project's is a problem" (fun () ->
+      let root =
+        make_directory
+          [
+            ("truss.toml", "[project]\n");
+            ("one/truss.toml", make_manifest "one" ^ "[build]\nx86_64_level = \"v1\"\n");
+          ]
+      in
+      let project = Cli.Command_packages.load root in
+      let problems = Workspace.problems (fst project) in
+      if
+        not
+          (List.exists
+             (fun (problem : Project.problem) ->
+               problem.file = "one/truss.toml"
+               && String.includes ~affix:"A build's x86-64 level is its project's"
+                    (Project.show_problem problem))
+             problems)
+      then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems));
+      if Workspace.x86_64_level (fst project) <> V3 then fail "read the package's level");
+  List.iter
+    (fun (written, expected) ->
+      test (Printf.sprintf "an x86-64 level written as %s is malformed, at its line" written)
+        (fun () ->
+          match
+            Manifest.parse (Printf.sprintf "[project]\n[build]\nx86_64_level = %s\n" written)
+          with
+          | exception Manifest.Malformed { line = 3; problem }
+            when String.includes ~affix:expected (Project_catalog.describe_manifest_problem problem)
+            ->
+              ()
+          | exception Manifest.Malformed { line; problem } ->
+              fail "line %d: %s" line (Project_catalog.describe_manifest_problem problem)
+          | _ -> fail "accepted"))
+    [ ({|"v5"|}, {|`"v1"`, `"v2"`, `"v3"`, `"v4"`|}); ("3", "is a string in quotes") ];
+  test "a key of [build] other than x86_64_level is malformed, at its line" (fun () ->
+      match Manifest.parse "[project]\n[build]\nlevel = \"v1\"\n" with
+      | exception Manifest.Malformed { line = 3; _ } -> ()
+      | _ -> fail "accepted")
+
 let edit start stop replacement = Diagnostic.replace (Source.make_span start stop) replacement
 
 let make_diagnostic ~fixes start stop =
-  Diagnostic.make ~fixes ~code:(Usage Unused_variable) (Source.make_span start stop) "x."
+  Diagnostic.For_rendering.make ~fixes ~code:(Usage Unused_variable) (Source.make_span start stop)
+    "x."
+
+let expect_checks_cleanly root =
+  let status, output = run_truss [ "check"; "-C"; root ] in
+  if
+    status <> 0
+    || String.includes ~affix:"error[" output
+    || String.includes ~affix:"warning[" output
+  then fail "after the fix, check exited with %d: %s" status output
 
 let () =
   test "edits apply at the offsets of the text they were made for" (fun () ->
       expect_string ~expected:"A bb C"
         (Diagnostic.apply_edits "a bb c" [ edit 0 1 "A"; edit 5 6 "C" ]));
   test "a fix that overlaps an earlier one waits for the next round" (fun () ->
-      let first = make_diagnostic ~fixes:[ Diagnostic.fix "one" [ edit 0 3 "x" ] ] 0 3 in
-      let second = make_diagnostic ~fixes:[ Diagnostic.fix "two" [ edit 2 4 "y" ] ] 2 4 in
+      let first =
+        make_diagnostic ~fixes:[ Diagnostic.For_rendering.fix "one" [ edit 0 3 "x" ] ] 0 3
+      in
+      let second =
+        make_diagnostic ~fixes:[ Diagnostic.For_rendering.fix "two" [ edit 2 4 "y" ] ] 2 4
+      in
       if Diagnostic.list_machine_applicable [ first; second ] <> [ first ] then fail "chose both");
   test "a diagnostic with several fixes is left for the person or agent to choose" (fun () ->
       let choice =
         make_diagnostic
-          ~fixes:[ Diagnostic.fix "one" [ edit 0 1 "x" ]; Diagnostic.fix "two" [ edit 0 1 "y" ] ]
+          ~fixes:
+            [
+              Diagnostic.For_rendering.fix "one" [ edit 0 1 "x" ];
+              Diagnostic.For_rendering.fix "two" [ edit 0 1 "y" ];
+            ]
           0 1
       in
       if Diagnostic.list_machine_applicable [ choice ] <> [] then fail "chose one");
@@ -735,7 +811,8 @@ let () =
       let status = run_quietly [ "check"; "-C"; root; "--fix" ] in
       if status <> 0 then fail "status %d" status;
       if not (String.includes ~affix:"let _ = value" (read root "main.truss")) then
-        fail "wrote %s" (read root "main.truss"));
+        fail "wrote %s" (read root "main.truss");
+      expect_checks_cleanly root);
   test "check's summary counts the diagnostics that --fix fixes" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.twice_with_one_fix) ] in
       let _, output = run_truss [ "check"; "-C"; root ] in
@@ -753,7 +830,8 @@ let () =
       let status = run_quietly [ "check"; "-C"; root; "--fix" ] in
       if status <> 0 then fail "status %d" status;
       if String.includes ~affix:"RunForever" (read root "main.truss") then
-        fail "wrote %s" (read root "main.truss"))
+        fail "wrote %s" (read root "main.truss");
+      expect_checks_cleanly root)
 
 let () =
   test "check proves, and reports each unproven obligation" (fun () ->
@@ -1107,18 +1185,18 @@ let () =
   test "a method written in an impl is shown through the implementing type" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.square_area) ] in
       expect_strings ~expected:[ "fn area(self) -> Int64" ] (run_show root "demo.Square.area"));
-  test "a view's method is shown through each type that has the view" (fun () ->
+  test "a method of `List` is shown through `List` and through `Array`" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
       expect_strings
-        ~expected:[ "public fn Slice[Element: Ordered].sort(mut self)" ]
+        ~expected:[ "public fn List[Element: Ordered].sort(mut self)" ]
         (list_headers (run_show root "List.sort"));
       expect_strings
-        ~expected:[ "public fn Slice[Element: Ordered].sort(mut self)" ]
+        ~expected:[ "public fn List[Element: Ordered].sort(mut self)" ]
         (list_headers (run_show root "Array.sort"));
       expect_strings
-        ~expected:[ "public fn StringSlice.trim(self) -> StringSlice" ]
+        ~expected:[ "public fn String.trim(self) -> view String" ]
         (list_headers (run_show root "String.trim")));
-  test "a type's own method hides its view's method of the same name and mode" (fun () ->
+  test "the overloads of a method by its receiver's mode are shown together" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
       expect_strings
         ~expected:[ "public fn List[Element].reverse(mut self)" ]
@@ -1126,19 +1204,17 @@ let () =
       expect_strings
         ~expected:
           [
-            "public fn List[Element].cursor(own self) -> ListCursor[Element]";
-            "public fn Slice[Element: Plain].cursor(self) -> SliceCursor[Element]";
+            "public fn String.to_bytes(self) -> List[UInt8]";
+            "public fn String.to_bytes(own self) -> List[UInt8]";
           ]
-        (list_headers (run_show root "List.cursor")));
-  test "a type is shown with its view's methods and without its view's impls" (fun () ->
+        (list_headers (run_show root "String.to_bytes")));
+  test "a type is shown with its methods and its impls" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
       let headers = list_headers (run_show root "List") in
-      if not (List.mem "public fn Slice[Element: Ordered].sort(mut self)" headers) then
-        fail "`Slice.sort` is missing from %s" (String.concat "; " headers);
-      if List.mem "public fn Slice[Element].reverse(mut self)" headers then
-        fail "the hidden `Slice.reverse` is shown in %s" (String.concat "; " headers);
-      if List.exists (String.starts_with ~prefix:"impl Equal for Slice") headers then
-        fail "an impl for `Slice` is shown in %s" (String.concat "; " headers));
+      if not (List.mem "public fn List[Element: Ordered].sort(mut self)" headers) then
+        fail "`List.sort` is missing from %s" (String.concat "; " headers);
+      if not (List.exists (String.starts_with ~prefix:"impl Equal for List") headers) then
+        fail "the impl of `Equal` for `List` is missing from %s" (String.concat "; " headers));
   test "a module is shown without repeating the methods written in its traits and impls" (fun () ->
       let root =
         make_package
@@ -1150,6 +1226,51 @@ let () =
       expect_strings
         ~expected:[ "trait Shape {"; "type Square(side: Int64)"; "impl Shape for Square {" ]
         (list_headers (run_show root "demo.shapes")));
+  test "a trait's method is shown through a type that implements the trait" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
+      let status, output = run_truss [ "show"; "-C"; root; "Int64.checked_add" ] in
+      if
+        status <> 0
+        || not
+             (String.includes
+                ~affix:
+                  "`Int64` has `checked_add` from its impl of `FixedWidthInteger`.\n\
+                   standard/numbers/integers/integers.truss:"
+                output)
+      then fail "status %d: %s" status output;
+      match list_shown root "Int64.checked_add" with
+      | [ shown ] ->
+          expect_string ~expected:"fn checked_add(self, other: Self) -> Option[Self]"
+            (read_header (read_string_field "text" shown));
+          expect_string
+            ~expected:
+              "standard.numbers.signed.impl standard.numbers.integers.FixedWidthInteger for \
+               standard.intrinsic.Int64"
+            (read_string_field "impl" shown)
+      | shown -> fail "found %d" (List.length shown));
+  test "a derived trait's method is shown through the type that derives it" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.interval_deriving_an_ordering) ] in
+      let status, output = run_truss [ "show"; "-C"; root; "demo.Interval.compare" ] in
+      if
+        status <> 0
+        || not
+             (String.includes ~affix:"`Interval` has `compare` because it derives `Ordered`." output)
+      then fail "status %d: %s" status output;
+      expect_strings
+        ~expected:[ "fn compare(self, other: Self) -> Ordering" ]
+        (list_headers (run_show root "demo.Interval.compare")));
+  test "a missing member is reported with the type's listing" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
+      let status, output = run_truss [ "show"; "-C"; root; "demo.Point.scale" ] in
+      if
+        status <> 2
+        || not
+             (String.includes
+                ~affix:
+                  "`Point` has no member `scale`. `truss show demo.Point` lists its methods and \
+                   its impls."
+                output)
+      then fail "status %d: %s" status output);
   test "a built-in type that no definition names is shown as having nothing to show" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
       let status, output = run_truss [ "show"; "-C"; root; "Never" ] in
@@ -1168,13 +1289,13 @@ let make_speaker_calling called =
       ( "main.truss",
         Printf.sprintf
           "capability Speaker {\n\
-          \  fn say(text: StringSlice)\n\
-          \  fn shout(text: StringSlice)\n\
+          \  fn say(text: String)\n\
+          \  fn shout(text: String)\n\
            }\n\n\
            type Quiet()\n\n\
            impl Speaker for Quiet {\n\
-          \  fn say(self, text: StringSlice) {}\n\n\
-          \  fn shout(self, text: StringSlice) {\n\
+          \  fn say(self, text: String) {}\n\n\
+          \  fn shout(self, text: String) {\n\
           \    todo\n\
           \  }\n\
            }\n\n\
@@ -1536,18 +1657,22 @@ let () =
       if not (List.exists writes_the_file (String.split_on_char '\n' output)) then
         fail "no row counts the statement that writes the file, run once: %s" output);
   test "a second release build of an unchanged package computes no body, proof, or code" (fun () ->
-      let root = make_package [ ("main.truss", Fixtures.Cli.main_with_a_todo_proof) ] in
-      Unix.putenv "TRUSS_DATABASE_COUNTS" "";
-      ignore (run_truss [ "build"; "-C"; root ]);
+      let root = make_package [ ("main.truss", Fixtures.Cli.main_returning_success) ] in
       Unix.putenv "TRUSS_DATABASE_COUNTS" "1";
-      let _, output = run_truss [ "build"; "-C"; root ] in
+      let first_status, first = run_truss [ "build"; "-C"; root ] in
+      let second_status, second = run_truss [ "build"; "-C"; root ] in
       Unix.putenv "TRUSS_DATABASE_COUNTS" "";
+      if first_status <> 0 || second_status <> 0 then
+        fail "the builds exited with %d and %d: %s" first_status second_status second;
       List.iter
         (fun kind ->
-          match find_counts output kind with
+          (match find_counts first kind with
+          | Some (count :: _) when count <> "0" -> ()
+          | _ -> fail "the first build computed no parts of kind %s: %s" kind first);
+          match find_counts second kind with
           | None | Some ("0" :: _) -> ()
-          | Some _ -> fail "the second build computed parts of kind %s: %s" kind output)
-        [ "parsed file"; "checked body"; "proof"; "lowered code"; "test key" ])
+          | Some _ -> fail "the second build computed parts of kind %s: %s" kind second)
+        [ "parsed file"; "checked body"; "proof"; "lowered code" ])
 
 let list_holes root =
   list_objects (Cli.Json.lookup_field "holes" (run_json [ "holes"; "-C"; root ]))
@@ -1829,11 +1954,11 @@ let () =
       match
         List.filter
           (fun (problem : Project.problem) ->
-            String.includes ~affix:"not a package of this project" problem.message)
+            String.includes ~affix:"not a package of this project" (Project.show_problem problem))
           problems
       with
-      | [ { file = "truss.lock"; message; _ } ]
-        when String.includes ~affix:"Run `truss add acme.units`" message ->
+      | [ ({ file = "truss.lock"; _ } as problem) ]
+        when String.includes ~affix:"Run `truss add acme.units`" (Project.show_problem problem) ->
           ()
       | _ -> fail "problems: [%s]" (String.concat "; " (List.map Project.show_problem problems)));
   test "registry packages that depend on each other in a cycle are a problem, and none is built"

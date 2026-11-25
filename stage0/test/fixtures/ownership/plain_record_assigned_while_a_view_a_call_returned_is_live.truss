@@ -1,6 +1,6 @@
 type Point(x: Int64, y: Int64)
 
-fn rest(values: Slice[Int64], from: Point) -> Slice[Int64] {
+fn rest(values: List[Int64], from: Point) -> view List[Int64] {
   values
 }
 

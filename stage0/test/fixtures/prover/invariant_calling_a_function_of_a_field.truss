@@ -1,0 +1,15 @@
+type Span(low: UInt64, high: UInt64)
+  invariant low <= high
+
+fn Span.width(self) -> UInt64
+  ensures result == self.high - self.low
+{
+  self.high - self.low
+}
+
+type Window(span: Span, used: UInt64)
+  invariant used <= span.width()
+
+fn Window.free(self) -> UInt64 {
+  self.span.width() - self.used
+}

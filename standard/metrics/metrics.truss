@@ -42,12 +42,12 @@ public fn Registry.copy(self) -> Registry {
   Registry(entries: self.entries.copy())
 }
 
-fn index_of(entries: tasks.Cell[List[Entry]], name: StringSlice, labels: Slice[Label], kind: Kind, bounds: Slice[Float64]) -> UInt64
+fn index_of(entries: tasks.Cell[List[Entry]], name: String, labels: List[Label], kind: Kind, bounds: List[Float64]) -> UInt64
   uses Tasks
 {
-  let wanted = name.to_string()
-  let wanted_labels = labels.to_list()
-  let wanted_bounds = bounds.to_list()
+  let wanted = name.copy()
+  let wanted_labels = labels.copy()
+  let wanted_bounds = bounds.copy()
   entries.update(fn(listed) {
     for index in 0..listed.length() {
       if listed[index].name == wanted && listed[index].labels == wanted_labels && listed[index].kind == kind {
@@ -68,26 +68,26 @@ fn index_of(entries: tasks.Cell[List[Entry]], name: StringSlice, labels: Slice[L
   })
 }
 
-public fn Registry.counter(self, name: StringSlice, labels: List[Label] = []) -> Counter
+public fn Registry.counter(self, name: String, labels: List[Label] = []) -> Counter
   uses Tasks
 {
-  Counter(entries: self.entries.copy(), index: index_of(self.entries, name: name, labels: labels.slice(), kind: Kind.Counting, bounds: []))
+  Counter(entries: self.entries.copy(), index: index_of(self.entries, name: name, labels: labels, kind: Kind.Counting, bounds: []))
 }
 
-public fn Registry.gauge(self, name: StringSlice, labels: List[Label] = []) -> Gauge
+public fn Registry.gauge(self, name: String, labels: List[Label] = []) -> Gauge
   uses Tasks
 {
-  Gauge(entries: self.entries.copy(), index: index_of(self.entries, name: name, labels: labels.slice(), kind: Kind.Gauging, bounds: []))
+  Gauge(entries: self.entries.copy(), index: index_of(self.entries, name: name, labels: labels, kind: Kind.Gauging, bounds: []))
 }
 
-public fn Registry.histogram(self, name: StringSlice, labels: List[Label] = [], buckets: List[Float64] = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]) -> Histogram
+public fn Registry.histogram(self, name: String, labels: List[Label] = [], buckets: List[Float64] = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]) -> Histogram
   uses Tasks
 {
-  let bounds = ascending(buckets.slice())
-  Histogram(entries: self.entries.copy(), index: index_of(self.entries, name: name, labels: labels.slice(), kind: Kind.Distributing, bounds: bounds.slice()))
+  let bounds = ascending(buckets)
+  Histogram(entries: self.entries.copy(), index: index_of(self.entries, name: name, labels: labels, kind: Kind.Distributing, bounds: bounds))
 }
 
-fn ascending(values: Slice[Float64]) -> List[Float64] {
+fn ascending(values: List[Float64]) -> List[Float64] {
   var sorted: List[Float64] = []
   for value in values {
     var at = sorted.length()

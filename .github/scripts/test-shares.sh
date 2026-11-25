@@ -1,32 +1,34 @@
 #!/bin/sh
 set -eu
 
-count=$1
-shift
+runner=$1
+runners=$2
+executable=$3
+processes=$(nproc)
+shares=$((runners * processes))
 logs=$(mktemp -d)
 
 pids=""
-for executable in "$@"; do
-  share=0
-  while [ "$share" -lt "$count" ]; do
-    TRUSS_TEST_SHARE="$share/$count" "$executable" >"$logs/$(basename "$executable")-$share" 2>&1 &
-    pids="$pids $!:$(basename "$executable")-$share"
-    share=$((share + 1))
-  done
+process=0
+while [ "$process" -lt "$processes" ]; do
+  share=$((runner * processes + process))
+  TRUSS_TEST_SHARE="$share/$shares" "$executable" >"$logs/$share" 2>&1 &
+  pids="$pids $!:$share"
+  process=$((process + 1))
 done
 
 status=0
 for entry in $pids; do
   pid=${entry%%:*}
-  log=${entry#*:}
+  share=${entry#*:}
   if wait "$pid"; then
-    echo "::group::$log"
-    cat "$logs/$log"
+    echo "::group::Share $share of $shares"
+    cat "$logs/$share"
     echo "::endgroup::"
   else
     status=1
-    echo "$log failed:"
-    cat "$logs/$log"
+    echo "Share $share of $shares failed:"
+    cat "$logs/$share"
   fi
 done
 exit "$status"

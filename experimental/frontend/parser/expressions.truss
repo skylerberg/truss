@@ -154,12 +154,12 @@ fn parse_range_stop(cursor: mut TokenCursor, open_range: Bool, is_inclusive: Boo
   Err(open_range_error(mut cursor, operator, part: "end"))
 }
 
-fn open_range_message(part: StringSlice) -> String {
+fn open_range_message(part: String) -> String {
   let article = if part == "end" { "n" } else { "" }
   "A range without a${article} ${part} is only allowed directly in brackets, as in `items[2..]`."
 }
 
-fn open_range_error(cursor: mut TokenCursor, operator: token.Token, part: StringSlice) -> Failure
+fn open_range_error(cursor: mut TokenCursor, operator: token.Token, part: String) -> Failure
   uses Panic
 {
   report(mut cursor, code: "parser.open_range", span: operator.span, message: open_range_message(part))
@@ -204,11 +204,6 @@ fn parse_prefix(cursor: mut TokenCursor) -> Result[syntax.Expression, Failure]
         advance(mut cursor)
         let inner = parse_postfix(mut cursor)?
         make_expression_node(mut cursor, start, kind: syntax.ExpressionKind.Mode(mode: syntax.Mode.Own, own inner))
-      }
-      Any => {
-        advance(mut cursor)
-        let inner = parse_postfix(mut cursor)?
-        make_expression_node(mut cursor, start, kind: syntax.ExpressionKind.Any(own inner))
       }
       Forall | Exists => parse_quantified(mut cursor)?
       Echo => {
@@ -485,15 +480,15 @@ fn parse_argument(cursor: mut TokenCursor) -> Result[syntax.Argument, Failure]
   Ok(syntax.Argument(label: None, value: parse_expression(mut cursor)?))
 }
 
-fn read_update_path(written: syntax.Expression) -> Option[List[syntax.Name]]
+fn find_update_path(written: own syntax.Expression) -> Option[List[syntax.Name]]
   uses RunForever
 {
-  match written.kind {
-    Name(name) => Some([name.copy()])
-    Member(base, name: field) => match read_update_path(base) {
+  match own written.kind {
+    Name(name) => Some([own name])
+    Member(base, name: field) => match find_update_path(own base) {
       Some(path) => {
         var extended = own path
-        mut extended.push(field.copy())
+        mut extended.push(own field)
         Some(own extended)
       }
       None => None
@@ -508,10 +503,11 @@ fn parse_update(cursor: mut TokenCursor) -> Result[syntax.Update, Failure]
   let start = cursor.index
   let first = parse_expression(mut cursor)?
   let kind = if accept_punctuation(mut cursor, punctuation: token.Punctuation.Colon) {
-    match read_update_path(first) {
+    let label_id = first.id
+    match find_update_path(own first) {
       Some(path) => syntax.UpdateKind.FieldUpdate(own path, value: parse_expression(mut cursor)?)
       None => {
-        let span = cursor.read_file_span(first.id)
+        let span = cursor.read_file_span(label_id)
         report(
           mut cursor,
           code: "parser.unexpected_token",
@@ -770,7 +766,10 @@ fn parse_string_literal(cursor: mut TokenCursor, start: UInt64, modules: own Lis
 fn parse_interpolation(cursor: mut TokenCursor, inner: token.Interpolation) -> syntax.Expression
   uses Panic, RunForever
 {
-  let saved = enter_interpolation(mut cursor, inner)
+  let enclosing = cursor.region
+  let resume_index = cursor.index
+  cursor.region = make_region(first: inner.first, stop: inner.stop - 1, is_unterminated_interpolation: !inner.is_closed)
+  cursor.index = inner.first
   let result = if cursor.is_at_end() {
     Err(Failure.Failed)
   } else {
@@ -779,7 +778,8 @@ fn parse_interpolation(cursor: mut TokenCursor, inner: token.Interpolation) -> s
       Err(failure) => Err(failure)
     }
   }
-  leave_interpolation(mut cursor, own saved)
+  cursor.region = enclosing
+  cursor.index = resume_index
   match own result {
     Ok(value) => value
     Err(_) => syntax.Expression(kind: syntax.ExpressionKind.ExpressionError, id: allocate_token_id(mut cursor, span: inner.span))
@@ -997,9 +997,9 @@ fn parse_body(cursor: mut TokenCursor) -> Result[syntax.Block, Failure]
 fn parse_block_statement(cursor: mut TokenCursor) -> Result[syntax.Statement, Failure]
   uses Panic, RunForever
 {
-  let previous = cursor.previous_if
+  let previous = cursor.region.previous_if
   let statement = parse_statement_line(mut cursor, previous)?
-  cursor.previous_if = match statement.kind {
+  cursor.region.previous_if = match statement.kind {
     Expression(value) => match value.kind {
       If(..) => Some(statement.id)
       _ => None
@@ -1010,7 +1010,7 @@ fn parse_block_statement(cursor: mut TokenCursor) -> Result[syntax.Statement, Fa
 }
 
 fn recover_block_statement(cursor: mut TokenCursor, span: source.Span) -> syntax.Statement {
-  cursor.previous_if = None
+  cursor.region.previous_if = None
   syntax.Statement(kind: syntax.StatementKind.StatementError, id: allocate_id(mut cursor, span))
 }
 
@@ -1019,10 +1019,10 @@ fn parse_block(cursor: mut TokenCursor) -> Result[syntax.Block, Failure]
 {
   enter_nested(mut cursor)?
   let start = cursor.index
-  let enclosing_previous = cursor.previous_if
-  cursor.previous_if = None
+  let enclosing_previous = cursor.region.previous_if
+  cursor.region.previous_if = None
   let statements = parse_lines(mut cursor, parse_item: parse_block_statement, recover: recover_block_statement)
-  cursor.previous_if = enclosing_previous
+  cursor.region.previous_if = enclosing_previous
   let block = syntax.Block(own statements, id: allocate_id_from(mut cursor, start_index: start))
   leave_nested(mut cursor)
   Ok(own block)
@@ -1091,7 +1091,7 @@ fn find_rightmost(value: syntax.Expression) -> Option[syntax.Expression]
       Some(inner) => find_rightmost(inner)
       None => None
     }
-    Echo(inner) | Mode(inner, ..) | Any(inner) => find_rightmost(inner)
+    Echo(inner) | Mode(inner, ..) => find_rightmost(inner)
     _ => None
   }
 }

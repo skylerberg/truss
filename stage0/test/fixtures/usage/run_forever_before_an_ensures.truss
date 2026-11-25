@@ -1,0 +1,6 @@
+fn f(values: List[UInt64]) -> UInt64
+  uses RunForever
+  ensures result == values.length()
+{
+  values.length()
+}

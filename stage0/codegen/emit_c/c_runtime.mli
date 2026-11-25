@@ -4,6 +4,7 @@ type failure = Echo | Todo
 type helper =
   | Lend
   | Compare_bytes
+  | Find_byte
   | Float64_bits
   | Float32_bits
   | Float64_from_bits

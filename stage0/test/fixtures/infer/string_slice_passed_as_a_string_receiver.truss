@@ -1,3 +1,0 @@
-fn f(word: StringSlice) -> UInt64 {
-  String.capacity(word)
-}

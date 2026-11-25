@@ -1,0 +1,23 @@
+trait Grows {
+  fn grow(mut self)
+}
+
+trait Doubles: Grows {
+  fn twice(own self, other: own Self) -> Self {
+    var mine = own other
+    mut mine.grow()
+    mine
+  }
+}
+
+impl Grows for String {
+  fn grow(mut self) {
+    mut self.push("!")
+  }
+}
+
+impl Doubles for String {}
+
+fn f(first: view String, second: view String) -> view String {
+  first.twice(second)
+}

@@ -1,5 +1,0 @@
-fn f(items: mut List[Int64]) -> UInt64 {
-  let runner: any Runner = any Window(view: items[..])
-  mut items.push(4)
-  runner.run()
-}

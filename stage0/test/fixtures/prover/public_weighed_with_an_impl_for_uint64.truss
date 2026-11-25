@@ -1,0 +1,17 @@
+public trait Weighed {
+  fn weight(self) -> UInt64
+}
+
+impl Weighed for UInt64 {
+  fn weight(self) -> UInt64
+    cost time O(1)
+  {
+    self
+  }
+}
+
+public fn weigh[Item: Weighed](item: Item) -> UInt64
+  cost time O(time(Item.weight))
+{
+  item.weight()
+}

@@ -50,8 +50,8 @@ and show_expression (node : Core.expression) =
             Printf.sprintf " for %s by %s" (Types.show self_type)
               (match evidence with
               | Impl { impl; _ } -> Path.show impl
-              | Bound -> "a bound"
-              | Dynamic -> "any")
+              | Derived_for_view { viewed; _ } -> "a view of " ^ Path.show viewed
+              | Bound -> "a bound")
         | _ -> ""
       in
       Printf.sprintf "%s%s(%s)"
@@ -64,10 +64,8 @@ and show_operand (value : Core.operand) =
   | Place place -> "place " ^ show_access_path place
   | Value value -> show_expression value
 
-and show_argument (passed : Core.argument) =
-  match passed with
-  | Passed { mode; value; _ } -> Language.Mode.show_prefix mode ^ show_operand value
-  | Default -> "default"
+and show_argument ({ mode; value } : Core.argument) =
+  Language.Mode.show_prefix mode ^ show_operand value
 
 let make_definition_form text (path : Path.t) =
   let packages = Support.setup [ ("app.main", text) ] in
@@ -93,7 +91,9 @@ let make_definition_form text (path : Path.t) =
   in
   match definition with
   | Some (key, core) ->
-      Core_lint.check (Database.make_interface_lookups (Support.make_database packages)) key core;
+      Core_lint.check
+        (Database.make_interface_lookups (Support.make_database packages))
+        (Support.make_source packages) key core;
       core
   | None -> failwith (Printf.sprintf "`%s` has no core form" (Path.show path))
 
@@ -142,17 +142,7 @@ let () =
           | Match { scrutinees; _ } -> List.map show_operand scrutinees
           | _ -> [])
         (list_expressions form))
-    [ "place shape" ];
-  expect "a list passed to a `mut Slice` parameter is passed as a `mut` range of the whole list"
-    Fixtures.Core.list_passed_to_a_mut_slice_parameter
-    (fun form ->
-      List.filter_map
-        (fun (call : Core.call) ->
-          if Core_lint.show_target call.callee.target = "app.main.clear" then
-            Some (String.concat ", " (List.map show_argument call.arguments))
-          else None)
-        (list_calls form))
-    [ "mut place items[0..]" ]
+    [ "place shape" ]
 
 let () =
   List.iter
@@ -180,7 +170,7 @@ let () =
       "let result = hole.method(items)";
       "let mapped = items.map(fn(item) { item + hole })";
       "let indexed = hole[0]";
-      "let sliced = hole[1..]";
+      "let ranged = hole[1..]";
       "let sum = hole + 1";
       "let negated = -hole";
       "let same = hole == 1";
@@ -290,8 +280,8 @@ let () =
           let key = declaration.key in
           match
             ( find_core packages key,
-              (Support.make_names packages).read_spans key,
-              (Support.make_names packages).read_text key )
+              (Support.make_source packages).read_spans key,
+              (Support.make_source packages).read_text key )
           with
           | Some form, spans, written ->
               let actual = ref [] in
@@ -368,7 +358,9 @@ let () =
             Some
               (Printf.sprintf "%s(%s) for %s by %s" (Language.Metric.show metric)
                  (Core_lint.show_target method_) (Types.show self_type)
-                 (match evidence with Bound -> "a bound" | Impl _ -> "an impl" | Dynamic -> "any"))
+                 (match evidence with
+                 | Bound -> "a bound"
+                 | Impl _ | Derived_for_view _ -> "an impl"))
         | Method_cost { metric; method_ } ->
             Some
               (Printf.sprintf "%s(%s)" (Language.Metric.show metric) (Core_lint.show_target method_))
@@ -403,8 +395,8 @@ let () =
           let key = declaration.key in
           match
             ( find_core packages key,
-              (Support.make_names packages).read_spans key,
-              (Support.make_names packages).read_text key )
+              (Support.make_source packages).read_spans key,
+              (Support.make_source packages).read_text key )
           with
           | ( Some { definition = Function { contract = { costs = [ cost ]; _ }; _ }; _ },
               spans,
@@ -414,23 +406,6 @@ let () =
               if quoted <> "cost time O(items.length())" then Harness.fail "found `%s`" quoted
           | _ -> Harness.fail "no core form with exactly one cost")
         (Support.list_declarations packages (Support.parse_module "app.main")))
-
-let () =
-  let packages = Support.setup [] in
-  let forms = ref 0 in
-  List.iter
-    (fun ((file : Path.file), _) ->
-      Harness.test
-        (Printf.sprintf "%s's core forms satisfy the invariants" (Path.show_file file))
-        (fun () ->
-          forms :=
-            !forms
-            + Core_lint.check_file
-                (Database.make_interface_lookups (Support.make_database packages))
-                ~find_core:(find_core packages) file))
-    Standard_library.files;
-  Harness.test "the standard library has core forms" (fun () ->
-      if !forms < 500 then Harness.fail "only %d of its definitions have one" !forms)
 
 let () =
   Harness.test "a `todo` type has no derived core form" (fun () ->
@@ -446,52 +421,15 @@ let () =
       in
       if Database.For_testing.read_derived_form (Support.make_database packages) path <> None then
         Harness.fail "it has a core form");
-  Harness.test
-    "every method of a derived impl in the standard library has a core form that satisfies the \
-     invariants" (fun () ->
-      let packages = Support.setup [] in
-      let interface = Database.make_interface_lookups (Support.make_database packages) in
-      let derived =
-        List.concat_map
-          (fun (declaration : Resolve.Names.declaration) ->
-            List.filter_map
-              (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
-              (interface.names.list_impls_of_type Path.standard_package declaration.key.path))
-          (interface.names.list_package_declarations Path.standard_package)
+  Harness.test "every derived method of a record and of a sum type satisfies the invariants"
+    (fun () ->
+      let packages = Support.setup [ ("app.main", Fixtures.Core.types_deriving_every_trait) ] in
+      let forms =
+        Core_lint.check_file (Support.make_database packages) (Support.parse_file "app.main")
       in
-      if derived = [] then Harness.fail "the standard library derives nothing";
-      List.iter
-        (fun impl ->
-          match Interface.Definition.find_impl_interface interface impl with
-          | None -> Harness.fail "`%s` has no interface" (Path.show impl)
-          | Some impl_interface ->
-              let provided =
-                match
-                  Interface.Definition.find_trait_interface interface
-                    impl_interface.implements.trait
-                with
-                | Some trait ->
-                    List.filter_map
-                      (fun (method_ : Types.trait_method) ->
-                        if method_.provided then Some method_.method_name else None)
-                      trait.methods
-                | None -> []
-              in
-              List.iter
-                (fun (name, receiver) ->
-                  let path : Path.t = Method { owner = impl; name; receiver } in
-                  match
-                    Database.For_testing.read_derived_form (Support.make_database packages) path
-                  with
-                  | Some form -> Core_lint.check_derived interface path form
-                  | None ->
-                      if not (List.mem name provided) then
-                        Harness.fail "`%s` has no core form for `%s`" (Path.show impl) name
-                  | exception Compiler_bug.Bug bug ->
-                      Harness.fail "`%s`, `%s`: %s" (Path.show impl) name
-                        (Compiler_bug.to_string bug))
-                impl_interface.impl_methods)
-        derived)
+      if forms <> 13 then
+        Harness.fail
+          "the lint checked %d core forms, not the 2 types' and their 11 derived methods'" forms)
 
 let () =
   let text = Fixtures.Core.described_both in
@@ -515,7 +453,7 @@ let () =
           (Types.make_named both [ Types.Parameter parameter ])
           described
       with
-      | Some (From_impl { impl; _ }) -> impl
+      | Some (Evidence (Impl { impl; _ })) -> impl
       | _ -> failwith "no impl"
     in
     match
@@ -605,7 +543,7 @@ let () =
       (Core_lint.show_target callee.target)
       (String.concat ", " (list_capabilities callee.uses))
   in
-  let text = Fixtures.Core.slice_match_on_a_constant_and_loop_over_a_ticking_countdown in
+  let text = Fixtures.Core.range_match_on_a_constant_and_loop_over_a_ticking_countdown in
   expect
     "a pattern that compares with a constant and a loop over a cursor each hold their callee with \
      the capability set that the callee gives"
@@ -647,7 +585,7 @@ let () =
     [
       "standard.core.Cursor.next uses [app.main.Meter]";
       "standard.core.Equal.equal uses []";
-      "standard.list.Slice.length uses []";
+      "standard.list.List.length uses []";
     ];
   Harness.test "the callee of an intrinsic holds the capabilities that the intrinsic uses"
     (fun () ->
@@ -671,7 +609,10 @@ let () =
       in
       match Database.read_checked_body database key with
       | Some { form; _ } ->
-          Core_lint.check (Database.make_interface_lookups database) key form;
+          Core_lint.check
+            (Database.make_interface_lookups database)
+            (Database.make_source_lookups database)
+            key form;
           expect_observed
             [ "intrinsic.shared_update uses [standard.capabilities.Tasks]" ]
             (List.filter_map

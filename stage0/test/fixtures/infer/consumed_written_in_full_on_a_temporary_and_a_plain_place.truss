@@ -1,0 +1,16 @@
+trait Consumed {
+  fn take(own self) -> Int64
+}
+
+type Counter(count: Int64)
+
+impl Consumed for Counter {
+  fn take(own self) -> Int64 {
+    self.count
+  }
+}
+
+fn f() -> Int64 {
+  let counter = Counter(count: 3)
+  Consumed.take(Counter(count: 4)) + Consumed.take(counter)
+}

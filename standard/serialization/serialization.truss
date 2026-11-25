@@ -15,16 +15,16 @@ public trait Serializer {
   fn integer(mut self, value: Int64)
   fn unsigned(mut self, value: UInt64)
   fn float(mut self, value: Float64)
-  fn text(mut self, value: StringSlice)
+  fn text(mut self, value: String)
   fn begin_list(mut self, length: UInt64)
   fn end_list(mut self)
   fn begin_record(mut self, length: UInt64)
-  fn field(mut self, name: StringSlice)
+  fn field(mut self, name: String)
   fn end_record(mut self)
   fn begin_map(mut self, length: UInt64)
-  fn key(mut self, key: StringSlice)
+  fn key(mut self, key: String)
   fn end_map(mut self)
-  fn begin_variant(mut self, name: StringSlice, length: UInt64)
+  fn begin_variant(mut self, name: String, length: UInt64)
   fn end_variant(mut self)
 }
 
@@ -43,14 +43,14 @@ public trait Deserializer {
   fn next_element(mut self) -> Bool
   fn end_list(mut self)
   fn begin_record(mut self) -> Result[Unit, Error]
-  fn field(mut self, name: StringSlice) -> Bool
+  fn field(mut self, name: String) -> Bool
   fn end_record(mut self)
   fn begin_map(mut self) -> Result[Unit, Error]
   fn next_key(mut self) -> Option[String]
   fn end_map(mut self)
   fn variant(mut self) -> Result[String, Error]
   fn end_variant(mut self)
-  fn error(self, message: StringSlice) -> Error
+  fn error(self, message: String) -> Error
 }
 
 public type Error(path: String, message: String)
@@ -68,7 +68,7 @@ impl Display for Error {
   }
 }
 
-public fn required[Field: Deserialize, Source: Deserializer](source: mut Source, name: StringSlice) -> Result[Field, Error]
+public fn required[Field: Deserialize, Source: Deserializer](source: mut Source, name: String) -> Result[Field, Error]
   uses RunForever
 {
   let _ = mut source.field(name)
@@ -77,7 +77,7 @@ public fn required[Field: Deserialize, Source: Deserializer](source: mut Source,
 
 public fn optional[Field: Deserialize, Source: Deserializer](
   source: mut Source,
-  name: StringSlice,
+  name: String,
 ) -> Result[Option[Field], Error]
   uses RunForever
 {
@@ -97,7 +97,7 @@ public fn unknown_variant[Source: Deserializer](source: Source, name: String) ->
   source.error(message)
 }
 
-fn out_of_range[Source: Deserializer](source: Source, type_name: StringSlice) -> Error {
+fn out_of_range[Source: Deserializer](source: Source, type_name: String) -> Error {
   var message = "expected a number that fits `"
   mut message.push(type_name)
   mut message.push("`")
@@ -355,7 +355,7 @@ public fn serialize_text[Item: Display, Sink: Serializer](item: Item, sink: mut 
 
 public fn deserialize_text[Item: text.Parse, Source: Deserializer](
   source: mut Source,
-  expected: StringSlice,
+  expected: String,
 ) -> Result[Item, Error] {
   let text = mut source.text()?
   match Item.parse(text) {
@@ -389,9 +389,9 @@ public trait Tree: Storable {
 public type Names = AsWritten | CamelCase
   derives Equal
 
-public fn Names.apply(self, name: StringSlice) -> String {
+public fn Names.apply(self, name: String) -> String {
   match self {
-    AsWritten => name.to_string()
+    AsWritten => name.copy()
     CamelCase => {
       var text = String.with_capacity(name.length())
       var upper = false
@@ -438,9 +438,9 @@ public fn TreeWriter[Node: Tree].finish(own self) -> Result[Node, Error] {
   }
 }
 
-fn fail_writing[Node: Tree](writer: mut TreeWriter[Node], message: StringSlice) {
+fn fail_writing[Node: Tree](writer: mut TreeWriter[Node], message: String) {
   if writer.failure is None {
-    writer.failure = Some(message.to_string())
+    writer.failure = Some(message.copy())
   }
 }
 
@@ -541,8 +541,8 @@ impl Serializer for TreeWriter[Node: Tree] {
     put(mut self, node: Node.from_float(value))
   }
 
-  fn text(mut self, value: StringSlice) {
-    put(mut self, node: Node.from_text(value.to_string()))
+  fn text(mut self, value: String) {
+    put(mut self, node: Node.from_text(value.copy()))
   }
 
   fn begin_list(mut self, length: UInt64) {
@@ -562,7 +562,7 @@ impl Serializer for TreeWriter[Node: Tree] {
     open_members(mut self, open: Open.Members)
   }
 
-  fn field(mut self, name: StringSlice) {
+  fn field(mut self, name: String) {
     name_next(mut self, name: self.names.apply(name))
   }
 
@@ -575,8 +575,8 @@ impl Serializer for TreeWriter[Node: Tree] {
     open_members(mut self, open: Open.Members)
   }
 
-  fn key(mut self, key: StringSlice) {
-    name_next(mut self, name: key.to_string())
+  fn key(mut self, key: String) {
+    name_next(mut self, name: key.copy())
   }
 
   fn end_map(mut self) {
@@ -584,12 +584,12 @@ impl Serializer for TreeWriter[Node: Tree] {
     put(mut self, node: Node.from_members(own members))
   }
 
-  fn begin_variant(mut self, name: StringSlice, length: UInt64) {
+  fn begin_variant(mut self, name: String, length: UInt64) {
     if length == 0 {
-      put(mut self, node: Node.from_text(name.to_string()))
+      put(mut self, node: Node.from_text(name.copy()))
       mut self.open.push(Open.UnitVariant)
     } else {
-      mut self.variants.push(name.to_string())
+      mut self.variants.push(name.copy())
       open_members(mut self, open: Open.Variant)
     }
   }
@@ -631,13 +631,13 @@ fn name_top[Node: Tree](reader: mut TreeReader[Node], name: own String) {
   mut reader.path.push(own name)
 }
 
-fn expected_error[Node: Tree](reader: TreeReader[Node], expected: StringSlice) -> Error {
+fn expected_error[Node: Tree](reader: TreeReader[Node], expected: String) -> Error {
   var message = "expected "
   mut message.push(expected)
   reader.error(message)
 }
 
-fn mismatch_error[Node: Tree](reader: TreeReader[Node], expected: StringSlice) -> Error {
+fn mismatch_error[Node: Tree](reader: TreeReader[Node], expected: String) -> Error {
   match reader.current {
     None => reader.error("is missing")
     Some(_) => expected_error(reader, expected: expected)
@@ -798,7 +798,7 @@ impl Deserializer for TreeReader[Node: Tree] {
     }
   }
 
-  fn field(mut self, name: StringSlice) -> Bool {
+  fn field(mut self, name: String) -> Bool {
     let key = self.names.apply(name)
     match mut self.frames.pop() {
       Some(frame) => match own frame {
@@ -942,7 +942,7 @@ impl Deserializer for TreeReader[Node: Tree] {
     self.current = None
   }
 
-  fn error(self, message: StringSlice) -> Error {
+  fn error(self, message: String) -> Error {
     var path = ""
     for segment in self.path {
       if segment.length() > 0 {
@@ -950,6 +950,6 @@ impl Deserializer for TreeReader[Node: Tree] {
         mut path.push(segment)
       }
     }
-    Error(path: own path, message: message.to_string())
+    Error(path: own path, message: message.copy())
   }
 }

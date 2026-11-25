@@ -367,7 +367,6 @@ let list_target_operands : Lowered.target -> Lowered.operand list = function
   | Direct _ | Intrinsic _ | Foreign _ -> []
   | Indirect { code; environment; _ } -> [ code; environment ]
   | Evidence_call { evidence; _ } -> [ evidence ]
-  | Table_call { table; value; _ } -> [ table; value ]
 
 let list_failure_operands ~message ~length ~reported ~trace =
   message :: length :: (Option.to_list reported @ Option.to_list trace)

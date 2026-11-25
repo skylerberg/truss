@@ -1,3 +1,0 @@
-fn f(items: List[Int64]) -> Slice[Int64] {
-  items[0..5]
-}

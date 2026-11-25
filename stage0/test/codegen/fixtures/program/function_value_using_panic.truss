@@ -1,4 +1,4 @@
-fn fail(message: StringSlice)
+fn fail(message: String)
   uses Panic
 {
   Panic.crash(message)

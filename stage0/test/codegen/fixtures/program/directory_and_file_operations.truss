@@ -1,24 +1,24 @@
 use standard.files
 
 fn say(text: String) uses Console {
-  Console.print_line(text.slice())
+  Console.print_line(text)
 }
 
 fn main(arguments: List[String]) -> ExitCode
   uses Console, FileRead, FileWrite, Handles, Clock
 {
-  let directory = Path.new("${arguments[1]}/made".slice())
-  let file = Path.new("${arguments[1]}/made/first.txt".slice())
-  let renamed = Path.new("${arguments[1]}/made/second.txt".slice())
-  let symbolic = Path.new("${arguments[1]}/made/link".slice())
-  let hard = Path.new("${arguments[1]}/made/hard.txt".slice())
+  let directory = Path.new("${arguments[1]}/made")
+  let file = Path.new("${arguments[1]}/made/first.txt")
+  let renamed = Path.new("${arguments[1]}/made/second.txt")
+  let symbolic = Path.new("${arguments[1]}/made/link")
+  let hard = Path.new("${arguments[1]}/made/hard.txt")
   if FileWrite.create_directory(directory) is Ok(_) {
     say("made")
   }
   if FileWrite.create_directory(directory) is Err(AlreadyExists) {
     say("exists")
   }
-  if FileWrite.write_text(file, contents: "contents".slice()) is Err(_) {
+  if FileWrite.write_text(file, contents: "contents") is Err(_) {
     return ExitCode(1)
   }
   if FileWrite.rename(file, to: renamed) is Ok(_) && FileRead.metadata(file) is Err(NotFound) {

@@ -1,0 +1,5 @@
+use standard.intrinsic
+
+fn tail(elements: intrinsic.Storage[UInt8]) -> view intrinsic.Storage[UInt8] {
+  intrinsic.storage_range(elements, start: 1, stop: intrinsic.storage_length(elements))
+}

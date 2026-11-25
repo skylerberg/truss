@@ -73,7 +73,7 @@ let build_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.impl
     (Lowered.Item.make_code path { Ground.no_instantiation with type_arguments })
     ~signature:method_signature ~substitution
     ~arguments:
-      ((self_mode, self_ty, { Lowered.root = Local implementation; projections = [ Deref ] })
+      ((self_mode, self_ty, Lowered.make_deref_place implementation)
       :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(choose_result_place state result_ty)
     ~site:None ();
@@ -161,7 +161,7 @@ let build_locked_table (context : Definitions.context) (item : Lowered.Item.t) ~
   let interface = Definitions.read_trait_interface context capability in
   {
     table_item = item;
-    capability = Some capability;
+    capability;
     entries =
       List.map
         (fun (trait_method : Types.trait_method) ->
@@ -193,7 +193,7 @@ let build_impl_table context (item : Lowered.Item.t) ~impl ~type_arguments : Low
                   ~owner:capability trait_method)) ))
       capability_interface.methods
   in
-  { table_item = item; capability = Some capability; entries }
+  { table_item = item; capability; entries }
 
 let build_real_implementation (state : Lowering.state) ~user capability =
   let impl =
@@ -213,13 +213,14 @@ let build_real_implementation (state : Lowering.state) ~user capability =
       let value = Lowering.allocate_binding state ty in
       let default =
         match
-          Interface.Impls.find_evidence state.context.lookups.interface
-            ~list_bounds:Interface.Impls.list_no_bounds for_type
-            { trait = Well_known.make_path Default; trait_arguments = []; associated = [] }
+          Interface.Impls.resolve_evidence state.context.lookups.interface Types.no_substitution
+            ~self_type:for_type
+            ~trait:{ trait = Well_known.make_path Default; trait_arguments = []; associated = [] }
+            Bound
         with
-        | Some (From_impl { impl = default_impl; _ }) ->
+        | Impl { impl = default_impl; _ } ->
             Well_known.make_impl_method_path Default_default ~impl:default_impl
-        | _ ->
+        | Derived_for_view _ | Bound ->
             Definitions.raise_bug "%s implements %s and has no impl of Default"
               (Types.show for_type) (Path.show capability)
       in
@@ -252,13 +253,17 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
   Lowering.set_result_slot state (Returned (Raw (Integer Int32)));
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let signature = Definitions.read_signature context main_path in
-  let list_ty, list_mode =
+  let list_ty =
     match signature.parameters with
-    | [ info ] ->
-        (Monomorphic.ground context.monomorphic Types.no_substitution info.type_, info.mode)
+    | [ info ] -> Monomorphic.ground context.monomorphic Types.no_substitution info.type_
     | _ -> Definitions.raise_bug "main takes its arguments"
   in
-  let storage_field, _, string_ty = Targets.read_list_parts context.monomorphic list_ty in
+  let string_ty =
+    match list_ty with
+    | Named { arguments = [ Type string_ty ]; _ } -> string_ty
+    | _ -> Definitions.raise_bug "main takes a list of %s" (Ground.to_string list_ty)
+  in
+  let storage_field, _, _ = Targets.read_list_parts context.monomorphic list_ty in
   let list = Lowering.allocate_temporary state list_ty in
   let lower operation type_arguments arguments destination =
     ignore
@@ -293,12 +298,12 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
         [ Copy (Lowered.make_local_place arguments_pointer); Copy (Lowered.make_local_place index) ]
         bytes;
       call Terminated_length [ Copy (Lowered.make_local_place bytes) ] length;
-      let view_ty = Storage.make_view_type (Ground.make_builtin UInt8) in
-      let view = Lowering.allocate_temporary state view_ty in
+      let bytes_ty = Storage.make_storage_type (Ground.make_builtin UInt8) in
+      let borrowed = Lowering.allocate_local state (Value bytes_ty) in
       Emit_c.Ir_builder.emit builder
         (Assign
-           ( view,
-             Storage.build_view view_ty
+           ( borrowed,
+             Storage.build_borrowed bytes_ty
                ~buffer:(Copy (Lowered.make_local_place bytes))
                ~length:(Copy (Lowered.make_local_place length)) ));
       let text = Lowering.allocate_temporary state string_ty in
@@ -306,7 +311,7 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
         (Lowered.Item.make_code text_copied_from Ground.no_instantiation)
         ~signature:(Definitions.read_signature context text_copied_from)
         ~substitution:Types.no_substitution
-        ~arguments:[ (Read, view_ty, view) ]
+        ~arguments:[ (Read, bytes_ty, borrowed) ]
         ~destination:text ~site:None ();
       lower (Buffer Storage_push) [ string_ty ]
         [
@@ -325,7 +330,7 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
   Targets.lower_item_call state
     (Lowered.Item.make_code main_path Ground.no_instantiation)
     ~signature ~substitution:Types.no_substitution
-    ~arguments:[ (list_mode, list_ty, list) ]
+    ~arguments:[ (Read, list_ty, list) ]
     ~destination:exit ~site:None ();
   (match
      (Monomorphic.compute_shape context.monomorphic exit_ty, Lowering.find_result_place state)
@@ -358,7 +363,9 @@ let build_test_main context (item : Lowered.Item.t) test_path : Emit_c.fragment 
 let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instantiation
     ~(ty : Ground.function_type) : Emit_c.fragment =
   let signature = Definitions.read_signature context function_ in
-  let substitution = Monomorphic.make_signature_substitution signature instantiation in
+  let substitution =
+    Instances.make_substitution context.lookups.interface function_ signature instantiation
+  in
   let state = make_generated_state context ~item ~definition:function_ ~substitution in
   let builder = state.builder in
   let environment = Emit_c.Ir_builder.allocate_local builder (Raw (Nullable_pointer Opaque)) in
@@ -384,158 +391,10 @@ let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instant
          (List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ [ capabilities ])
        ())
 
-let build_any_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.impl_method) :
-    Emit_c.fragment =
-  let { Lowered.Item.impl; name; receiver; type_arguments } = impl_method in
-  let path = Lowered.Item.make_method_path impl_method in
-  let interface = Definitions.read_impl_interface context impl in
-  let trait = interface.implements.trait in
-  let trait_signature =
-    match
-      Interface.Definition.find_trait_method context.lookups.interface trait ~name ~receiver
-    with
-    | Some trait_method ->
-        Interface.Definition.read_method_signature context.lookups.interface ~owner:trait
-          trait_method
-    | None -> Definitions.raise_bug "%s declares no %s" (Path.show trait) name
-  in
-  let method_signature = Definitions.read_signature context path in
-  let substitution = Definitions.bind method_signature.generics type_arguments in
-  let any = Types.substitute_trait substitution interface.implements in
-  let _, result, capabilities =
-    Targets.make_any_entry_signature context ~any ~trait trait_signature
-  in
-  let state = make_generated_state context ~item ~definition:impl ~substitution in
-  let builder = state.builder in
-  let value = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
-  Lowering.set_result_slot state result;
-  let parameter_places = allocate_parameters state substitution method_signature.parameters in
-  let evidence = Lowering.list_evidence_parameters state capabilities in
-  let lending =
-    List.map
-      (fun ty -> Emit_c.Ir_builder.allocate_local builder ty)
-      (Definitions.list_lending_parameters context substitution method_signature.output)
-  in
-  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
-  let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
-  let typed =
-    Emit_c.Ir_builder.allocate_local builder (Pointer { target = Value self_ty; writable = true })
-  in
-  if not (Lowering.is_zero_size state self_ty) then
-    Emit_c.Ir_builder.emit builder
-      (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place value))));
-  let self_mode : Language.Mode.t = match receiver with Instance mode -> mode | Static -> Read in
-  let destination =
-    match (method_signature.output, Lowering.find_result_place state) with
-    | _, Some place -> place
-    | Returns result_type, None ->
-        Lowering.allocate_temporary state
-          (Monomorphic.ground context.monomorphic substitution result_type)
-    | Lends _, None -> Lowering.allocate_temporary state (Ground.make_builtin Unit)
-  in
-  Targets.lower_item_call state
-    (Lowered.Item.make_code path { Ground.no_instantiation with type_arguments })
-    ~signature:method_signature ~substitution
-    ~arguments:
-      ((self_mode, self_ty, { Lowered.root = Local typed; projections = [ Deref ] })
-      :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
-    ~lending:(List.map (fun local -> Lowered.Copy (Lowered.make_local_place local)) lending)
-    ~destination ~site:None ();
-  if self_mode = Own then
-    Emit_c.Ir_builder.emit builder
-      (Call
-         {
-           target = Intrinsic Free;
-           arguments = [ Copy (Lowered.make_local_place value) ];
-           result = Discarded;
-         });
-  Emit_c.Ir_builder.build state.builder
-    (Lowering.finish_function state
-       ~returns:(method_signature.output <> Returns Never)
-       ~first:[ value ]
-       ~rest:
-         (List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places
-         @ evidence @ lending)
-       ())
-
-let build_any_table context (item : Lowered.Item.t) ~impl ~type_arguments : Lowered.table =
-  let interface = Definitions.read_impl_interface context impl in
-  let substitution = Definitions.bind interface.impl_generics type_arguments in
-  let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
-  let slots = Targets.list_any_slots context ~self:interface.for_type interface.implements in
-  let any =
-    let implements = Types.substitute_trait substitution interface.implements in
-    let for_type = Types.substitute substitution interface.for_type in
-    let required =
-      List.concat_map
-        (fun (bound : Types.trait_reference) ->
-          List.filter_map
-            (fun (associated : Types.associated_type) ->
-              if List.mem_assoc associated.associated_name implements.associated then None
-              else
-                Some
-                  ( associated.associated_name,
-                    context.monomorphic.normalize
-                      (Types.Projection
-                         {
-                           base = for_type;
-                           trait = Types.substitute_trait substitution bound;
-                           name = associated.associated_name;
-                         }) ))
-            (Definitions.read_trait_interface context bound.trait).associated_types)
-        (List.sort_uniq compare (List.map fst slots))
-    in
-    { implements with associated = implements.associated @ required }
-  in
-  let entries =
-    List.map
-      (fun ((bound : Types.trait_reference), (trait_method : Types.trait_method)) ->
-        let trait = bound.trait in
-        let implementing, implementing_arguments =
-          if Path.equal trait interface.implements.trait then (impl, type_arguments)
-          else
-            Targets.resolve_impl context substitution ~trait:bound ~self_type:interface.for_type
-              ~evidence:Bound
-        in
-        let receiver =
-          match
-            Types.find_implementing_receiver
-              (Definitions.read_trait_interface context trait)
-              (Definitions.read_impl_interface context implementing)
-              trait_method
-          with
-          | Some receiver -> receiver
-          | None -> trait_method.method_receiver
-        in
-        ( Lowered.Item.Generated
-            (Any_entry
-               {
-                 impl = implementing;
-                 name = trait_method.method_name;
-                 receiver;
-                 type_arguments = implementing_arguments;
-               }),
-          let signature, _, _ =
-            Targets.make_any_entry_signature context ~any ~trait
-              (Interface.Definition.read_method_signature context.lookups.interface ~owner:trait
-                 trait_method)
-          in
-          signature ))
-      slots
-  in
-  {
-    table_item = item;
-    capability = None;
-    entries =
-      Drop_and_copy.list_any_entries self_ty ~is_copyable:(Targets.is_copyable_any context any)
-      @ entries;
-  }
-
 let lower context (generated : Lowered.Item.generated) : Emit_c.fragment =
   let item = Lowered.Item.Generated generated in
   match generated with
   | Entry impl_method -> build_entry context item impl_method
-  | Any_entry impl_method -> build_any_entry context item impl_method
   | Locked_entry { capability; name } -> build_locked_entry context item ~capability ~name
   | Adapter { function_; instantiation; ty } ->
       build_adapter context item ~function_ ~instantiation ~ty
@@ -546,5 +405,4 @@ let lower_table context (table : Lowered.Item.table) : Lowered.table =
   let item = Lowered.Item.Table table in
   match table with
   | Impl_table { impl; type_arguments } -> build_impl_table context item ~impl ~type_arguments
-  | Any_table { impl; type_arguments } -> build_any_table context item ~impl ~type_arguments
   | Locked_table capability -> build_locked_table context item ~capability

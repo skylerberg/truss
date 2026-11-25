@@ -1,0 +1,14 @@
+fn reverse_all(part: mut List[Int64])
+  modifies part[..]
+{
+  mut part[..].reverse()
+}
+
+fn f(items: mut List[Int64]) -> UInt64 {
+  reverse_all(mut items[1..])
+  mut items[..].reverse()
+  mut items.reverse()
+  var window: view List[Int64] = items[..]
+  window = items[1..]
+  window.length()
+}

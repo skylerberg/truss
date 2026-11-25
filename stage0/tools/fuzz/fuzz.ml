@@ -7,7 +7,9 @@ let fail format =
       if !failures <= 50 then print_endline message)
     format
 
-let lex text = Lexer.lex (Source.create ~path:"fuzz.truss" text)
+let lex text =
+  let tokens, diagnostics = Lexer.lex (Source.create ~path:"fuzz.truss" text) in
+  (tokens, List.map (Syntax_catalog.Lexing_description.render ~text) diagnostics)
 
 let rec check_tokens text ~start ~stop (tokens : Token.t array) =
   let quoted = Diagnostic.quote text in
@@ -73,7 +75,10 @@ let parse text =
   let source = Source.create ~path:"fuzz.truss" text in
   let tokens, lexer_diagnostics = Lexer.lex source in
   let file, parser_diagnostics = Parser.parse tokens ~lexer_diagnostics in
-  (tokens, file, lexer_diagnostics @ parser_diagnostics)
+  ( tokens,
+    file,
+    List.map (Syntax_catalog.Lexing_description.render ~text) lexer_diagnostics
+    @ List.map (Syntax_catalog.Parsing_description.render ~text) parser_diagnostics )
 
 let check_tree text (item : Syntax.definition Syntax.item) =
   let quoted = Diagnostic.quote text in
@@ -179,7 +184,7 @@ let check_parsers_agree text =
         else
           match token.kind with
           | Keyword Cost -> true
-          | Keyword (Uses | Requires | Ensures | Decreases | Invariant | Derives)
+          | Keyword (Uses | Requires | Ensures | Decreases | Modifies | Invariant | Derives)
           | Punctuation (Open Curly)
           | Newline ->
               false
@@ -605,6 +610,7 @@ let () =
     String.sub text 0 at ^ " " ^ String.concat " " run ^ " "
     ^ String.sub text at (String.length text - at)
   in
+  Array.iter check_parsers_agree examples;
   for _ = 1 to !count do
     check_robust (make_random_text ());
     let several = ref (pick_example ()) in

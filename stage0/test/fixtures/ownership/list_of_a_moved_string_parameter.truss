@@ -1,3 +1,0 @@
-fn f(name: String) -> List[String] {
-  [own name]
-}

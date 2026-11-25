@@ -3,9 +3,10 @@
  (modules_without_implementation lookups)
  (libraries
   language
-  diagnostic
+  compiler_bug
+  catalog
+  core
   path
-  source
   resolve
   syntax
   syntax_walk

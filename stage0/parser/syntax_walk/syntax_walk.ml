@@ -1,13 +1,13 @@
 let rec visit_type_expression on_expression (type_ : Syntax.type_expression) =
   match type_.kind with
   | Path_type path -> visit_path_type on_expression path
-  | Any_type path -> visit_path_type on_expression path
   | Function_type { inputs; output; clauses; _ } ->
       List.iter
         (fun (input : Syntax.function_input) -> visit_type_expression on_expression input.type_)
         inputs;
       Option.iter (visit_type_expression on_expression) output;
       List.iter (visit_clause on_expression) clauses
+  | View_type viewed -> visit_type_expression on_expression viewed
   | Self_type _ | Associated _ | Type_error -> ()
 
 and visit_path_type on_expression (path : Syntax.path_type) =
@@ -40,6 +40,7 @@ and visit_clause on_expression (clause : Syntax.clause) =
   | Uses uses -> List.iter (visit_capability_use on_expression) uses
   | Requires value | Ensures value -> on_expression value
   | Decreases measures -> List.iter on_expression measures
+  | Modifies parts -> List.iter on_expression parts
   | Cost cost -> (
       match cost.bound with Big_o value | At_most value | Exactly value -> on_expression value)
   | Clause_error -> ()
@@ -66,7 +67,6 @@ let visit_expression_parts ~on_expression ~on_statement (value : Syntax.expressi
   | Try inner
   | Prefix (_, inner)
   | Mode (_, inner)
-  | Any inner
   | Echo inner
   | Parenthesized inner ->
       on_expression inner
@@ -295,7 +295,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
   in
   let rec walk_type (type_ : Syntax.type_expression) =
     match type_.kind with
-    | Path_type path | Any_type path -> walk_path_type path
+    | Path_type path -> walk_path_type path
     | Self_type key -> Option.iter on_name key
     | Associated (base, key) ->
         on_name base;
@@ -308,6 +308,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
           inputs;
         Option.iter walk_type output;
         List.iter walk_clause clauses
+    | View_type viewed -> walk_type viewed
     | Type_error -> ()
   and walk_path_type (path_type : Syntax.path_type) =
     walk_path path_type.path;
@@ -346,6 +347,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
     | Uses uses -> List.iter walk_capability_use uses
     | Requires value | Ensures value -> walk_expression value
     | Decreases measures -> List.iter walk_expression measures
+    | Modifies parts -> List.iter walk_expression parts
     | Cost cost -> (
         (match cost.resource with
         | Calls (Call_parameter name) -> on_name name

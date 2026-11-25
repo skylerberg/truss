@@ -28,9 +28,9 @@ impl FileRead for SystemFileRead
 
   fn metadata(self, path: Path, follow_links: Bool) -> Result[files.Metadata, SystemError] {
     let status = handles.with_file_error(
-      calls.status_of_path(path.text.slice().bytes, follow_links: follow_links),
+      calls.status_of_path(path.text.storage, follow_links: follow_links),
     )?
-    Ok(handles.metadata_from(intrinsic.storage_view(status)))
+    Ok(handles.metadata_from(status))
   }
 
   fn list(self, directory: Path) -> Result[List[files.DirectoryEntry], SystemError] {
@@ -38,12 +38,12 @@ impl FileRead for SystemFileRead
   }
 
   fn read_link(self, link: Path) -> Result[Path, SystemError] {
-    let target = handles.with_file_error(calls.read_link(link.text.slice().bytes))?
+    let target = handles.with_file_error(calls.read_link(link.text.storage))?
     Ok(Path(text: String.from_bytes(own target)))
   }
 
   fn resolve(self, path: Path) -> Result[Path, SystemError] {
-    let resolved = handles.with_file_error(calls.resolve(path.text.slice().bytes))?
+    let resolved = handles.with_file_error(calls.resolve(path.text.storage))?
     Ok(Path(text: String.from_bytes(own resolved)))
   }
 }

@@ -4,10 +4,10 @@ impl Cursor for Countdown {
   type Element = UInt8
 
   fn next(mut self) -> Option[UInt8]
+    modifies self.left
     ensures (result is None) == (old(self.left) == 0)
     ensures result is Some(_) ==> self.left + 1 == old(self.left)
     ensures result is None ==> self.left == old(self.left)
-    ensures self.weight == old(self.weight)
     cost time O(self.weight)
   {
     for _ in 0..self.weight {

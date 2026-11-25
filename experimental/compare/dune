@@ -1,3 +1,12 @@
 (executable
  (name compare)
- (libraries source diagnostic token lexer parser syntax_print unix zarith))
+ (libraries
+  source
+  diagnostic
+  token
+  lexer
+  parser
+  syntax_catalog
+  syntax_print
+  unix
+  zarith))

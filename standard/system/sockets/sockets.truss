@@ -35,7 +35,7 @@ internal fn listen_local(path: Path) -> Result[network.LocalListener, SystemErro
     calls.done(
       intrinsic.libc_bind(
         descriptor,
-        address: intrinsic.storage_view(bytes),
+        address: bytes,
         length: intrinsic.storage_length(bytes),
       ),
     ),
@@ -184,7 +184,7 @@ fn level_option(descriptor: Int32, level: Int32, name: Int32, number: UInt64) ->
       descriptor,
       level: level,
       option: name,
-      value: intrinsic.storage_view(value),
+      value: value,
       length: intrinsic.storage_length(value),
     ),
   )
@@ -195,7 +195,7 @@ internal fn accept(listener: Int32) -> Result[network.Accepted, Int32]
 {
   var from = room_for_an_address()
   let handle = accepted(listener, from: mut from)?
-  match address_from(intrinsic.storage_view(from)) {
+  match address_from(from) {
     Some(peer) => Ok(network.Accepted(handle: own handle, peer: plain(peer)))
     None => Err(intrinsic.libc_einval())
   }
@@ -230,17 +230,17 @@ internal fn set_timeout(
   calls.add_number(mut time, number: intrinsic.convert(nanoseconds / 1000000000), size: 8)
   calls.add_number(mut time, number: intrinsic.convert(nanoseconds % 1000000000 / 1000), size: 8)
   if direction != network.Direction.Sending {
-    socket_option(descriptor, name: intrinsic.libc_so_rcvtimeo(), value: intrinsic.storage_view(time))?
+    socket_option(descriptor, name: intrinsic.libc_so_rcvtimeo(), value: time)?
   }
   if direction != network.Direction.Receiving {
-    socket_option(descriptor, name: intrinsic.libc_so_sndtimeo(), value: intrinsic.storage_view(time))?
+    socket_option(descriptor, name: intrinsic.libc_so_sndtimeo(), value: time)?
   }
   Ok(Unit)
 }
 
 internal fn send_to(
   descriptor: Int32,
-  bytes: intrinsic.View[UInt8],
+  bytes: intrinsic.Storage[UInt8],
   address: network.SocketAddress,
 ) -> Result[UInt64, Int32]
   uses RunForever, capabilities.System
@@ -250,9 +250,9 @@ internal fn send_to(
   var sent = intrinsic.libc_sendto(
     descriptor,
     bytes: bytes,
-    count: intrinsic.view_length(bytes),
+    count: intrinsic.storage_length(bytes),
     flags: 0,
-    address: intrinsic.storage_view(to),
+    address: to,
     length: intrinsic.storage_length(to),
   )
   while sent < 0 && calls.retry_when_ready(descriptor, writing: true, ticket: ticket) {
@@ -260,9 +260,9 @@ internal fn send_to(
     sent = intrinsic.libc_sendto(
       descriptor,
       bytes: bytes,
-      count: intrinsic.view_length(bytes),
+      count: intrinsic.storage_length(bytes),
       flags: 0,
-      address: intrinsic.storage_view(to),
+      address: to,
       length: intrinsic.storage_length(to),
     )
   }
@@ -316,19 +316,19 @@ internal fn receive_from(
   }
   let received: UInt64 = intrinsic.convert(got)
   intrinsic.storage_lengthen(mut buffer, by: received)
-  match address_from(intrinsic.storage_view(from)) {
+  match address_from(from) {
     Some(sender) => Ok(network.Datagram(length: received, from: plain(sender)))
     None => Err(intrinsic.libc_einval())
   }
 }
 
-internal fn addresses_of(host: StringSlice) -> Result[List[network.IpAddress], SystemError]
+internal fn addresses_of(host: String) -> Result[List[network.IpAddress], SystemError]
   uses capabilities.System
 {
-  let name = handles.with_file_error(calls.ended_with_zero_byte(host.bytes))?
+  let name = handles.with_file_error(calls.ended_with_zero_byte(host.storage))?
   let room: UInt64 = 4096
   var resolved_bytes: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(room)
-  let wrote = intrinsic.runtime_addresses_of_host(intrinsic.storage_view(name), addresses: mut resolved_bytes, room: room)
+  let wrote = intrinsic.runtime_addresses_of_host(name, addresses: mut resolved_bytes, room: room)
   if wrote == -1 {
     return Err(SystemError.HostNotFound)
   }
@@ -337,21 +337,21 @@ internal fn addresses_of(host: StringSlice) -> Result[List[network.IpAddress], S
   }
   let filled: UInt64 = intrinsic.convert(wrote)
   intrinsic.storage_lengthen(mut resolved_bytes, by: filled)
-  let bytes = intrinsic.storage_view(resolved_bytes)
+  let bytes = resolved_bytes
   var addresses: List[network.IpAddress] = []
   var start: UInt64 = 0
   while start < filled
     invariant start <= filled
   {
-    let version = intrinsic.view_at(bytes, index: start)
+    let version = intrinsic.storage_at(bytes, index: start)
     if version == 4 && filled - start >= 5 {
       add_once(
         mut addresses,
         address: network.IpAddress.Version4([
-          intrinsic.view_at(bytes, index: start + 1),
-          intrinsic.view_at(bytes, index: start + 2),
-          intrinsic.view_at(bytes, index: start + 3),
-          intrinsic.view_at(bytes, index: start + 4),
+          intrinsic.storage_at(bytes, index: start + 1),
+          intrinsic.storage_at(bytes, index: start + 2),
+          intrinsic.storage_at(bytes, index: start + 3),
+          intrinsic.storage_at(bytes, index: start + 4),
         ]),
       )
       start += 5
@@ -359,22 +359,22 @@ internal fn addresses_of(host: StringSlice) -> Result[List[network.IpAddress], S
       add_once(
         mut addresses,
         address: network.IpAddress.Version6([
-          intrinsic.view_at(bytes, index: start + 1),
-          intrinsic.view_at(bytes, index: start + 2),
-          intrinsic.view_at(bytes, index: start + 3),
-          intrinsic.view_at(bytes, index: start + 4),
-          intrinsic.view_at(bytes, index: start + 5),
-          intrinsic.view_at(bytes, index: start + 6),
-          intrinsic.view_at(bytes, index: start + 7),
-          intrinsic.view_at(bytes, index: start + 8),
-          intrinsic.view_at(bytes, index: start + 9),
-          intrinsic.view_at(bytes, index: start + 10),
-          intrinsic.view_at(bytes, index: start + 11),
-          intrinsic.view_at(bytes, index: start + 12),
-          intrinsic.view_at(bytes, index: start + 13),
-          intrinsic.view_at(bytes, index: start + 14),
-          intrinsic.view_at(bytes, index: start + 15),
-          intrinsic.view_at(bytes, index: start + 16),
+          intrinsic.storage_at(bytes, index: start + 1),
+          intrinsic.storage_at(bytes, index: start + 2),
+          intrinsic.storage_at(bytes, index: start + 3),
+          intrinsic.storage_at(bytes, index: start + 4),
+          intrinsic.storage_at(bytes, index: start + 5),
+          intrinsic.storage_at(bytes, index: start + 6),
+          intrinsic.storage_at(bytes, index: start + 7),
+          intrinsic.storage_at(bytes, index: start + 8),
+          intrinsic.storage_at(bytes, index: start + 9),
+          intrinsic.storage_at(bytes, index: start + 10),
+          intrinsic.storage_at(bytes, index: start + 11),
+          intrinsic.storage_at(bytes, index: start + 12),
+          intrinsic.storage_at(bytes, index: start + 13),
+          intrinsic.storage_at(bytes, index: start + 14),
+          intrinsic.storage_at(bytes, index: start + 15),
+          intrinsic.storage_at(bytes, index: start + 16),
         ]),
       )
       start += 17
@@ -416,16 +416,16 @@ fn bound(address: network.SocketAddress, kind: Int32, reuse_port: Bool) -> Resul
   calls.add_number(mut on, number: 1, size: 4)
   var off: intrinsic.Storage[UInt8] = intrinsic.storage_empty()
   calls.add_number(mut off, number: 0, size: 4)
-  socket_option(descriptor, name: intrinsic.libc_so_reuseaddr(), value: intrinsic.storage_view(on))?
+  socket_option(descriptor, name: intrinsic.libc_so_reuseaddr(), value: on)?
   if reuse_port {
-    socket_option(descriptor, name: intrinsic.libc_so_reuseport(), value: intrinsic.storage_view(on))?
+    socket_option(descriptor, name: intrinsic.libc_so_reuseport(), value: on)?
   }
   if address.address is Version6(_) {
     let _ = intrinsic.libc_setsockopt(
       descriptor,
       level: intrinsic.libc_ipproto_ipv6(),
       option: intrinsic.libc_ipv6_v6only(),
-      value: intrinsic.storage_view(off),
+      value: off,
       length: 4,
     )
   }
@@ -433,14 +433,14 @@ fn bound(address: network.SocketAddress, kind: Int32, reuse_port: Bool) -> Resul
   calls.done(
     intrinsic.libc_bind(
       descriptor,
-      address: intrinsic.storage_view(bytes),
+      address: bytes,
       length: intrinsic.storage_length(bytes),
     ),
   )?
   Ok(own handle)
 }
 
-fn socket_option(descriptor: Int32, name: Int32, value: intrinsic.View[UInt8]) -> Result[Unit, Int32]
+fn socket_option(descriptor: Int32, name: Int32, value: intrinsic.Storage[UInt8]) -> Result[Unit, Int32]
   uses capabilities.System
 {
   calls.done(
@@ -449,7 +449,7 @@ fn socket_option(descriptor: Int32, name: Int32, value: intrinsic.View[UInt8]) -
       level: intrinsic.libc_sol_socket(),
       option: name,
       value: value,
-      length: intrinsic.view_length(value),
+      length: intrinsic.storage_length(value),
     ),
   )
 }
@@ -459,7 +459,7 @@ fn connected(descriptor: Int32, address: intrinsic.Storage[UInt8]) -> Result[Uni
 {
   let started = intrinsic.libc_connect(
     descriptor,
-    address: intrinsic.storage_view(address),
+    address: address,
     length: intrinsic.storage_length(address),
   )
   if started == 0 {
@@ -498,7 +498,7 @@ fn connected(descriptor: Int32, address: intrinsic.Storage[UInt8]) -> Result[Uni
       length: mut length,
     ),
   )?
-  let error = calls.number_at(intrinsic.storage_view(failed), offset: 0, size: 4)
+  let error = calls.number_at(failed, offset: 0, size: 4)
   if error == 0 {
     Ok(Unit)
   } else if error > 2147483647 {
@@ -514,7 +514,7 @@ fn local_address(descriptor: Int32) -> Result[network.SocketAddress, Int32]
   var named = room_for_an_address()
   var length: UInt32 = 28
   calls.done(intrinsic.libc_getsockname(descriptor, address: mut named, length: mut length))?
-  match address_from(intrinsic.storage_view(named)) {
+  match address_from(named) {
     Some(address) => Ok(address)
     None => Err(intrinsic.libc_einval())
   }
@@ -574,8 +574,8 @@ fn address_bytes(address: network.SocketAddress) -> intrinsic.Storage[UInt8] {
   bytes
 }
 
-fn address_from(bytes: intrinsic.View[UInt8]) -> Option[network.SocketAddress] {
-  if intrinsic.view_length(bytes) < 28 {
+fn address_from(bytes: intrinsic.Storage[UInt8]) -> Option[network.SocketAddress] {
+  if intrinsic.storage_length(bytes) < 28 {
     return None
   }
   let family_at = intrinsic.libc_sockaddr_family_offset()
@@ -592,32 +592,32 @@ fn address_from(bytes: intrinsic.View[UInt8]) -> Option[network.SocketAddress] {
   if family == unsigned(intrinsic.libc_af_inet()) {
     Some(network.SocketAddress(
       address: network.IpAddress.Version4([
-        intrinsic.view_at(bytes, index: 4),
-        intrinsic.view_at(bytes, index: 5),
-        intrinsic.view_at(bytes, index: 6),
-        intrinsic.view_at(bytes, index: 7),
+        intrinsic.storage_at(bytes, index: 4),
+        intrinsic.storage_at(bytes, index: 5),
+        intrinsic.storage_at(bytes, index: 6),
+        intrinsic.storage_at(bytes, index: 7),
       ]),
       port: port,
     ))
   } else if family == unsigned(intrinsic.libc_af_inet6()) {
     Some(network.SocketAddress(
       address: network.IpAddress.Version6([
-        intrinsic.view_at(bytes, index: 8),
-        intrinsic.view_at(bytes, index: 9),
-        intrinsic.view_at(bytes, index: 10),
-        intrinsic.view_at(bytes, index: 11),
-        intrinsic.view_at(bytes, index: 12),
-        intrinsic.view_at(bytes, index: 13),
-        intrinsic.view_at(bytes, index: 14),
-        intrinsic.view_at(bytes, index: 15),
-        intrinsic.view_at(bytes, index: 16),
-        intrinsic.view_at(bytes, index: 17),
-        intrinsic.view_at(bytes, index: 18),
-        intrinsic.view_at(bytes, index: 19),
-        intrinsic.view_at(bytes, index: 20),
-        intrinsic.view_at(bytes, index: 21),
-        intrinsic.view_at(bytes, index: 22),
-        intrinsic.view_at(bytes, index: 23),
+        intrinsic.storage_at(bytes, index: 8),
+        intrinsic.storage_at(bytes, index: 9),
+        intrinsic.storage_at(bytes, index: 10),
+        intrinsic.storage_at(bytes, index: 11),
+        intrinsic.storage_at(bytes, index: 12),
+        intrinsic.storage_at(bytes, index: 13),
+        intrinsic.storage_at(bytes, index: 14),
+        intrinsic.storage_at(bytes, index: 15),
+        intrinsic.storage_at(bytes, index: 16),
+        intrinsic.storage_at(bytes, index: 17),
+        intrinsic.storage_at(bytes, index: 18),
+        intrinsic.storage_at(bytes, index: 19),
+        intrinsic.storage_at(bytes, index: 20),
+        intrinsic.storage_at(bytes, index: 21),
+        intrinsic.storage_at(bytes, index: 22),
+        intrinsic.storage_at(bytes, index: 23),
       ]),
       port: port,
     ))

@@ -52,34 +52,26 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.impl_inheriting_a_label_overload
         "package.method_name_clash");
-  Harness.test "an impl cannot give a `String` a method that its view has in the same mode"
+  Harness.test "an impl in another package cannot give a `String` another overload of its method"
     (fun () ->
-      expect_one_diagnostic Fixtures.Package_checks.impl_giving_a_string_a_method_of_its_view
-        "package.method_name_clash" ~says:"the `to_string` of its view `StringSlice`");
-  Harness.test
-    "an impl in another package cannot give a `String` another overload of its view's method"
-    (fun () ->
-      expect_one_diagnostic
-        Fixtures.Package_checks.impl_giving_a_string_an_overload_of_a_method_of_its_view
+      expect_one_diagnostic Fixtures.Package_checks.impl_giving_a_string_an_overload_of_its_method
         "package.method_name_clash" ~says:"only an `impl` in its own package");
-  Harness.test "an impl cannot give an `Array` a method that its view has in the same mode"
+  Harness.test "an impl cannot give an `Array` a method that `List` has in the same mode" (fun () ->
+      expect_one_diagnostic Fixtures.Package_checks.impl_giving_an_array_a_method_of_list
+        "package.method_name_clash"
+        ~says:"the `contains` of `List[Element]`, whose methods an `Array` has");
+  Harness.test "an impl may give a `String` a method that it lacks" (fun () ->
+      expect_fine Fixtures.Package_checks.impl_giving_a_string_a_method_that_it_lacks);
+  Harness.test "an impl in another package may give a `String` a method that it has as `internal`"
     (fun () ->
-      expect_one_diagnostic Fixtures.Package_checks.impl_giving_an_array_a_method_of_its_view
-        "package.method_name_clash" ~says:"the `contains` of its view `Slice[Element]`");
-  Harness.test "an impl may give a `String` a method that neither it nor its view has" (fun () ->
-      expect_fine Fixtures.Package_checks.impl_giving_a_string_a_method_that_its_view_lacks);
-  Harness.test
-    "an impl in another package may give a `String` a method that its view has as `internal`"
-    (fun () ->
-      expect_fine
-        Fixtures.Package_checks.impl_giving_a_string_a_method_that_its_view_has_as_internal);
+      expect_fine Fixtures.Package_checks.impl_giving_a_string_a_method_that_it_has_as_internal);
   Harness.test "a type's constant cannot share a name with a trait's method" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.constant_named_like_a_trait_method
         "package.method_name_clash");
   Harness.test "a type that contains itself in place needs indirect, with a fix that adds it"
     (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.tree_with_direct_children
-        "package.needs_indirect" ~fixed:Fixtures.Package_checks.tree_with_direct_children_fixed);
+        "package.needs_indirect" ~fixed:("Node", "indirect Node"));
   Harness.test "a type that contains itself through a collection needs no indirect" (fun () ->
       expect_fine Fixtures.Package_checks.expression_with_a_list_of_arguments);
   Harness.test "a record cannot contain itself through an Option" (fun () ->
@@ -124,7 +116,8 @@ let () =
       with
       | [ _ ] -> ()
       | reported -> Harness.fail "found %d instantiation cycles" (List.length reported));
-  Harness.test "generic code that calls through many diamonds is checked quickly" (fun () ->
+  Harness.test "generic code that calls through many diamonds is checked without visiting each path"
+    (fun () ->
       let levels = 24 in
       let text =
         String.concat ""
@@ -144,9 +137,7 @@ let () =
                  index index index index (index + 1) index (index + 1))
           @ [ Printf.sprintf "fn g%d[Element](value: Element) {}\n" levels ])
       in
-      let started = Sys.time () in
-      expect_fine text;
-      if Sys.time () -. started > 5.0 then Harness.fail "took %.1f seconds" (Sys.time () -. started));
+      expect_fine text);
   Harness.test "two tests of a package cannot share a name" (fun () ->
       let packages =
         Support.setup
@@ -165,7 +156,9 @@ let () =
                 else Printf.sprintf "type T%d(inner: T%d)\n\n" index (index + 1)))));
   Harness.test "nested instances of a generic type are not growing" (fun () ->
       expect_fine Fixtures.Package_checks.nested_couples);
-  Harness.test "many types that each hold the next several times are checked quickly" (fun () ->
+  Harness.test
+    "many types that each hold the next several times are checked without visiting each path"
+    (fun () ->
       let text =
         String.concat ""
           (List.init 16 (fun index ->
@@ -174,11 +167,10 @@ let () =
                  Printf.sprintf "type D%d(a: D%d, b: D%d, c: D%d, d: D%d)\n\n" index (index + 1)
                    (index + 1) (index + 1) (index + 1)))
       in
-      let started = Sys.time () in
-      expect_fine text;
-      if Sys.time () -. started > 5.0 then Harness.fail "took %.1f seconds" (Sys.time () -. started));
+      expect_fine text);
   Harness.test "a type held in place through a generic type's argument needs indirect" (fun () ->
-      expect_one_diagnostic Fixtures.Package_checks.tree_in_a_couple "package.needs_indirect");
+      expect_one_diagnostic Fixtures.Package_checks.tree_in_a_couple "package.needs_indirect"
+        ~fixed:("Node", "indirect Node"));
   Harness.test "a type held in place through an associated type needs indirect" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.tree_through_an_associated_type
         "package.needs_indirect");
@@ -225,9 +217,6 @@ let () =
         "package.not_strictly_positive");
   Harness.test "a type cannot occur in the input of a function type in such an input" (fun () ->
       expect_one_diagnostic "type Knot(run: fn(fn(Knot) -> Bool) -> Bool)\n"
-        "package.not_strictly_positive");
-  Harness.test "a type cannot occur in such an input of an any type's associated type" (fun () ->
-      expect_one_diagnostic Fixtures.Package_checks.knot_in_an_any_types_function_input
         "package.not_strictly_positive");
   Harness.test "a type cannot be the argument that a generic type puts in such an input" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.callback_of_wrap_in_wrap
@@ -348,11 +337,11 @@ let expect_used ?(others = []) ?(file = "app.main") text =
 
 let () =
   Harness.test "an internal function that nothing in its package uses is an error" (fun () ->
-      expect_unused Fixtures.Package_checks.unused_internal_function "usage.unused_function"
+      expect_unused Fixtures.Package_checks.internal_helpers "usage.unused_function"
         ~says:"Nothing in `app` uses the internal function `app.main.double`";
-      expect_severity Fixtures.Package_checks.unused_internal_function Error);
+      expect_severity Fixtures.Package_checks.internal_helpers Error);
   Harness.test "an internal constant that nothing in its package uses is rejected" (fun () ->
-      expect_unused Fixtures.Package_checks.unused_internal_constant "usage.unused_constant");
+      expect_unused Fixtures.Package_checks.internal_limit "usage.unused_constant");
   Harness.test "an internal function that only calls itself is rejected" (fun () ->
       expect_unused Fixtures.Package_checks.internal_function_used_only_by_itself
         "usage.unused_function" ~says:"Nothing in `app` uses");

@@ -92,7 +92,7 @@ grants none, so the package can only do pure computation.
   named.** A call of a dependency's function is checked against the
   dependency's grant, from the callee's `uses`, and so is every other way of
   using its code: taking its function as a value, using its `impl` where a
-  bound or an `any` needs one, and a `provide` of its type. The build fails
+  bound needs one, and a `provide` of its type. The build fails
   where code names something of a dependency that uses a capability the
   dependency was not granted, and the error names the function and the
   capability.
@@ -115,12 +115,21 @@ manifest above it is a project by itself.
 
 [test]
 time_limit = 10
+
+[build]
+x86_64_level = "v2"
 ```
 
 - The project's manifest may also hold a `[package]`, when the project's
   root is itself a package.
 - `time_limit` is the time each test of the project may take, in seconds. It
   is 10 unless the manifest says otherwise.
+- `x86_64_level` is the microarchitecture level of x86-64 that the project's
+  programs are built for: `"v1"`, which is the baseline, `"v2"`, `"v3"`, or
+  `"v4"`. It is `"v3"` unless the manifest says otherwise. Before `main`
+  runs, a program checks the CPU for each feature of its level. Where one is
+  missing, the program names it and the level to write here, and exits with
+  status 126. The level changes no result of a program.
 - Two packages of a project cannot have the same name.
 - A project's package takes the place of the registry's package of the same
   name, for every package of the build.

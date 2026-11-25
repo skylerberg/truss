@@ -5,8 +5,10 @@ let list_definitions snapshot database argument =
   let names = Database.make_name_lookups database in
   List.filter_map
     (function
-      | Path_argument.Definition path when Option.is_some (names.find_key path) -> Some path
-      | Package _ | Module _ | Definition _ -> None)
+      | (Path_argument.Definition path | Trait_member { member = path; _ })
+        when Option.is_some (names.find_key path) ->
+          Some path
+      | Package _ | Module _ | Definition _ | Trait_member _ -> None)
     (Path_argument.resolve names packages argument)
 
 type line = { reader : Path.t; read_kinds : string list; read : Path.t; reader_kinds : string list }
@@ -76,10 +78,7 @@ let run ~direction ~name =
   | [] -> Outcome.raise_cannot_run "No definition named %s is visible here." name
   | targets ->
       ignore
-        (Database.prove database
-           (List.concat_map
-              (Workspace.list_package_files snapshot)
-              (List.map snd (Workspace.list_packages snapshot))));
+        (Database.prove database (In_packages (List.map snd (Workspace.list_packages snapshot))));
       let lines =
         list_lines
           (match direction with

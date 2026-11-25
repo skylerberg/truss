@@ -3,6 +3,7 @@ let make_source text = Source.create ~path:"test.truss" text
 
 let parse text =
   let file, diagnostics = Parser.parse_source (make_source text) in
+  let diagnostics = List.map (Syntax_catalog.Syntax_diagnostic.render ~text) diagnostics in
   if
     diagnostics = []
     && List.exists
@@ -50,16 +51,15 @@ let expect_statements text expected =
 
 let expect_statement text expected = expect_statements text [ expected ]
 
-let expect_error ?fixed ?alternatives ?occurrence text ~code ~at =
-  Support.expect_error
+let expect_error ?fixed ?alternatives ?(occurrence = 1) text ~code ~at =
+  Support.expect_diagnostic
     ~list_diagnostics:(fun text -> snd (parse text))
-    ?fixed ?alternatives ?occurrence text ~code:(Parser code) ~at
+    ?fixed ?alternatives ~at:(at, occurrence) text
+    (Diagnostic.Code.name (Parser code))
 
 let expect_body_error ?fixed ?alternatives ?occurrence text ~code ~at =
   let wrap text = "fn example() {\n" ^ text ^ "\n}" in
-  expect_error ?fixed:(Option.map wrap fixed)
-    ?alternatives:(Option.map (List.map wrap) alternatives)
-    ?occurrence (wrap text) ~code ~at
+  expect_error ?fixed ?alternatives ?occurrence (wrap text) ~code ~at
 
 let expect_codes expected diagnostics =
   Option.iter

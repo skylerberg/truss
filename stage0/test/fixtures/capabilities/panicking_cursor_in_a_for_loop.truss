@@ -1,0 +1,29 @@
+type Draws(left: UInt8)
+
+impl Cursor for Draws {
+  type Element = UInt8
+  capability Uses = Panic
+
+  fn next(mut self) -> Option[UInt8]
+    uses Self.Uses
+  {
+    if self.left > 100 {
+      Panic.crash("too many draws")
+    }
+    if self.left == 0 {
+      return None
+    }
+    self.left -= 1
+    Some(self.left)
+  }
+}
+
+fn total(bag: own Draws) -> UInt8
+  uses RunForever
+{
+  var sum: UInt8 = 0
+  for value in own bag {
+    sum = sum.wrapping_add(value)
+  }
+  sum
+}

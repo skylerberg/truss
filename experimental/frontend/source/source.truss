@@ -28,7 +28,7 @@ internal fn of_file(base: UInt64, span: Span) -> Span
 
 internal type Source(path: String, text: String, line_starts: List[UInt64])
 
-internal fn Source.create(path: StringSlice, text: own String) -> Source
+internal fn Source.create(path: String, text: own String) -> Source
   uses Panic
 {
   var line_starts: List[UInt64] = []
@@ -46,7 +46,7 @@ internal fn Source.create(path: StringSlice, text: own String) -> Source
       mut line_starts.push(index + 1)
     }
   }
-  Source(path: path.to_string(), own text, own line_starts)
+  Source(path: path.copy(), own text, own line_starts)
 }
 
 internal fn Source.compute_line_index(self, offset: UInt64) -> UInt64
@@ -90,25 +90,25 @@ internal type Diagnostic(code: String, span: Span, message: String, notes: List[
   derives Equal
 
 internal fn make_diagnostic(
-  code: StringSlice,
+  code: String,
   span: Span,
-  message: StringSlice,
+  message: String,
   notes: own List[Note] = [],
   fixes: own List[Fix] = [],
 ) -> Diagnostic {
-  Diagnostic(code: code.to_string(), span, message: message.to_string(), own notes, own fixes)
+  Diagnostic(code: code.copy(), span, message: message.copy(), own notes, own fixes)
 }
 
-internal fn make_fix(title: StringSlice, edits: own List[Edit]) -> Fix {
-  Fix(title: title.to_string(), own edits)
+internal fn make_fix(title: String, edits: own List[Edit]) -> Fix {
+  Fix(title: title.copy(), own edits)
 }
 
-internal fn replace(span: Span, replacement: StringSlice) -> Edit {
-  Edit(span, replacement: replacement.to_string())
+internal fn replace(span: Span, replacement: String) -> Edit {
+  Edit(span, replacement: replacement.copy())
 }
 
-internal fn insert(at: Span, replacement: StringSlice) -> Edit {
-  Edit(span: at, replacement: replacement.to_string())
+internal fn insert(at: Span, replacement: String) -> Edit {
+  Edit(span: at, replacement: replacement.copy())
 }
 
 internal fn delete(span: Span) -> Edit {
@@ -118,24 +118,39 @@ internal fn delete(span: Span) -> Edit {
 type Ranked(start: UInt64, sequence: UInt64)
   derives Equal, Ordered
 
-internal fn sort_by_start(diagnostics: own List[Diagnostic]) -> List[Diagnostic]
+fn sort_stably[Item](items: own List[Item], read_start: fn(Item) -> UInt64) -> List[Item]
   uses Panic
 {
   var ranked: List[Ranked] = []
-  for entry in diagnostics.enumerate() {
-    mut ranked.push(Ranked(start: entry.element.span.start, sequence: entry.index))
+  for entry in items.enumerate() {
+    mut ranked.push(Ranked(start: read_start(entry.element), sequence: entry.index))
   }
   mut ranked.sort()
-  var slots: List[Option[Diagnostic]] = []
-  for diagnostic in own diagnostics {
-    mut slots.push(Some(own diagnostic))
+  var slots: List[Option[Item]] = []
+  for item in own items {
+    mut slots.push(Some(own item))
   }
-  var sorted: List[Diagnostic] = []
+  var sorted: List[Item] = []
   for rank in ranked {
-    let Some(diagnostic) = mut slots.element(rank.sequence).take() else {
-      Panic.crash("each diagnostic is taken once")
+    if rank.sequence >= slots.length() {
+      Panic.crash("each rank is the sequence number of an item")
     }
-    mut sorted.push(own diagnostic)
+    let Some(item) = mut slots[rank.sequence].take() else {
+      Panic.crash("each item is taken once")
+    }
+    mut sorted.push(own item)
   }
   sorted
+}
+
+internal fn sort_by_start(diagnostics: own List[Diagnostic]) -> List[Diagnostic]
+  uses Panic
+{
+  sort_stably(own diagnostics, read_start: fn(diagnostic) { diagnostic.span.start })
+}
+
+internal fn sort_edits_by_start(edits: own List[Edit]) -> List[Edit]
+  uses Panic
+{
+  sort_stably(own edits, read_start: fn(edit) { edit.span.start })
 }

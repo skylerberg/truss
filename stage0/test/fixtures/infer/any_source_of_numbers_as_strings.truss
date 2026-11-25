@@ -1,4 +1,0 @@
-fn f(numbers: own Numbers) -> String {
-  let source: any Source[Item = String] = any numbers
-  source.first()
-}

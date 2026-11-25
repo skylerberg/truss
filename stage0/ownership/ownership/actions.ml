@@ -38,10 +38,10 @@ type action =
 
 type position = { block : Mir.Graph.block; index : int }
 type step = { action : action; origin : Core.origin }
-type fork_join_block = { keyword : string; branches : position list list }
+type fork_join_block = { schedule : Language.Loop_mode.t; branches : position list list }
 
 type fork_join_loop = {
-  keyword : string;
+  schedule : Language.Loop_mode.t;
   body : position list;
   pattern_locals : Core.local list;
   temporaries : Mir.local list;
@@ -178,11 +178,22 @@ let is_temporary builder (place : Mir.place) =
   | Local local -> (lookup_local_info builder local).kind = Temporary
   | Constant _ | Literal _ -> false
 
+let is_inside_view builder (place : Mir.place) =
+  (match place.root with
+    | Local local -> Types.is_view (lookup_local_info builder local).type_
+    | Constant _ | Literal _ -> false)
+  || List.exists
+       (fun (projection : Mir.projection) ->
+         match projection with
+         | Element { sequence; _ } | Range { sequence; _ } -> Types.is_view sequence
+         | Field _ | Variant_field _ -> false)
+       place.projections
+
 let access_place builder (place : Mir.place) ~(borrowed_as : Types.ty option) =
   let place = resolve_alias builder place in
   let ranges_an_owner =
     match List.rev place.projections with
-    | Range { sequence; _ } :: _ -> not (Context.is_view builder.context sequence)
+    | Range { sequence; _ } :: _ -> not (Types.is_view sequence)
     | (Element _ | Field _ | Variant_field _) :: _ | [] -> false
   in
   match (track_place builder place, borrowed_as) with
@@ -190,8 +201,10 @@ let access_place builder (place : Mir.place) ~(borrowed_as : Types.ty option) =
   | Some tracked, None -> Views [ Copy_of_view_in tracked ]
   | Some tracked, Some type_ ->
       Place_of
-        (if Context.lends_nothing builder.context type_ && not ranges_an_owner then
-           Copy_of_view_in tracked
+        (if
+           is_inside_view builder place
+           || (Context.lends_nothing builder.context type_ && not ranges_an_owner)
+         then Copy_of_view_in tracked
          else Borrow_of tracked)
   | None, _ -> (
       match place.root with
@@ -265,12 +278,9 @@ let find_lent_place builder (mode : Language.Mode.t) operand =
   | Views _ -> None
 
 let find_stored_type builder (mode : Language.Mode.t) operand =
-  match (access_argument builder mode operand, find_operand_type operand) with
-  | Place_of _, Some (Named { path; arguments = Type element :: _ }) when Well_known.is Slice path
-    ->
-      Some element
-  | Place_of _, type_ -> type_
-  | Views _, _ -> None
+  match access_argument builder mode operand with
+  | Place_of _ -> find_operand_type operand
+  | Views _ -> None
 
 let list_lent_places builder (operand : Mir.operand) =
   match (access_value builder operand, operand) with
@@ -283,13 +293,10 @@ let result_may_view builder (mode : Language.Mode.t) type_ =
   (mode <> Own && not (Context.lends_nothing builder.context type_))
   || Context.is_view builder.context type_
 
-let find_viewable_argument builder (argument : Mir.argument) =
-  match argument with
-  | Passed { mode; value; _ } -> (
-      match find_operand_type value with
-      | Some type_ when result_may_view builder mode type_ -> Some (mode, value)
-      | _ -> None)
-  | Default -> None
+let find_viewable_argument builder ({ mode; value; _ } : Mir.argument) =
+  match find_operand_type value with
+  | Some type_ when result_may_view builder mode type_ -> Some (mode, value)
+  | _ -> None
 
 let list_viewable_arguments builder (call : Mir.call) =
   List.filter_map (find_viewable_argument builder) call.arguments
@@ -332,37 +339,32 @@ let borrow_mut builder (operand : Mir.operand) =
 
 let emit_call builder (call : Mir.call) origin =
   List.iter
-    (function
-      | Mir.Passed { mode = Mut; value; _ } -> borrow_mut builder value | Passed _ | Default -> ())
+    (fun ({ mode; value; _ } : Mir.argument) -> if mode = Mut then borrow_mut builder value)
     call.arguments;
   let borrowed_arguments =
     List.concat
       (List.mapi
-         (fun position (argument : Mir.argument) ->
-           match argument with
-           | Passed { mode; value; _ } -> (
-               match (find_lent_place builder mode value, find_operand_origin value) with
-               | Some place, Some origin -> [ { place; mode; origin; position } ]
-               | _ -> [])
-           | Default -> [])
+         (fun position ({ mode; value; _ } : Mir.argument) ->
+           match (find_lent_place builder mode value, find_operand_origin value) with
+           | Some place, Some origin -> [ { place; mode; origin; position } ]
+           | _ -> [])
          call.arguments)
   in
   let view_arguments =
     List.concat
       (List.mapi
-         (fun position (argument : Mir.argument) ->
-           match argument with
-           | Passed { mode; value; _ } when is_view_operand builder value -> (
-               let lent = find_lent_place builder mode value in
-               match
-                 ( find_operand_origin value,
-                   List.filter
-                     (fun view -> Some view <> Option.map (fun place -> Borrow_of place) lent)
-                     (list_argument_views builder mode value) )
-               with
-               | Some _, [] | None, _ -> []
-               | Some origin, views -> [ { position; views; origin } ])
-           | Passed _ | Default -> [])
+         (fun position ({ mode; value; _ } : Mir.argument) ->
+           if is_view_operand builder value then
+             let lent = find_lent_place builder mode value in
+             match
+               ( find_operand_origin value,
+                 List.filter
+                   (fun view -> Some view <> Option.map (fun place -> Borrow_of place) lent)
+                   (list_argument_views builder mode value) )
+             with
+             | Some _, [] | None, _ -> []
+             | Some origin, views -> [ { position; views; origin } ]
+           else [])
          call.arguments)
   in
   if List.length borrowed_arguments > 1 || (borrowed_arguments <> [] && view_arguments <> []) then
@@ -376,7 +378,7 @@ let emit_call builder (call : Mir.call) origin =
   List.iter
     (fun (argument : Mir.argument) ->
       match argument with
-      | Passed { mode = Mut; value = target; _ } -> (
+      | { mode = Mut; value = target; _ } -> (
           match (find_lent_place builder Mut target, find_stored_type builder Mut target) with
           | Some place, Some stored_type when Context.is_view builder.context stored_type ->
               let others =
@@ -403,7 +405,7 @@ let emit_call builder (call : Mir.call) origin =
   List.iteri
     (fun position (argument : Mir.argument) ->
       match argument with
-      | Passed { mode = Own; value = Use { type_ = Types.Function _; origin; _ } as value; _ }
+      | { mode = Own; value = Use { type_ = Types.Function _; origin; _ } as value; _ }
         when Context.stores_function builder.context call.callee position ->
           emit builder (Pass_owned_function (list_argument_views builder Own value)) origin
       | _ -> ())
@@ -436,10 +438,10 @@ let compute_rvalue_held builder (value : Mir.rvalue) : held =
       | Some copied, _ -> copied
       | None, _ -> make_value [])
   | Operand operand -> make_value (list_operand_views builder operand)
-  | Operation _ | Compare _ | Is_variant _ | Function_value _ | Value_parameter _ | Specification _
-    ->
+  | Operation _ | Compare _ | Is_variant _ | Function_value _ | Value_parameter _
+  | Parameter_default _ | Specification _ ->
       make_value []
-  | Not operand | Convert { value = operand; _ } | To_any { value = operand; _ } | Copy operand ->
+  | Not operand | Convert { value = operand; _ } | Copy operand ->
       make_value (list_operand_views builder operand)
   | Construct { fields; _ } ->
       let supplied = List.filter_map snd fields in
@@ -494,7 +496,11 @@ let emit_bound_value builder (local : Mir.local) (core : Core.local) (value : Mi
       List.map (fun view -> Copy_of_view_in (extract_viewed_place view)) views
     else views
   in
-  if holds_views || views <> [] then emit builder (Bind_views { locals = [ core ]; views }) origin
+  let aliases_literal =
+    match value with Operand (Borrow { place = { root = Literal _; _ }; _ }) -> true | _ -> false
+  in
+  if holds_views || aliases_literal || views <> [] then
+    emit builder (Bind_views { locals = [ core ]; views }) origin
 
 let list_returned_temporaries (body : Mir.Graph.body) =
   let returned = ref [] in
@@ -616,9 +622,7 @@ let emit_statement builder (statement : Mir.Graph.statement) =
               read_uses builder uses;
               match value with
               | Operand (Borrow { place; _ }) -> hold builder target (Alias place)
-              | Convert { conversion = View_to_owned; _ } ->
-                  hold builder target (compute_rvalue_held builder value)
-              | _ -> raise_bug "a lent local that holds neither a borrow nor the owner of a view")
+              | _ -> raise_bug "a lent local that holds no borrow")
           | Source { local = core; _ } ->
               read_uses builder uses;
               emit_bound_value builder local core value origin
@@ -820,7 +824,7 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
         | Fork { concurrent; branches; _ } ->
             Some
               {
-                keyword = (if concurrent then "concurrent" else "parallel");
+                schedule = (if concurrent then Concurrent else Parallel);
                 branches =
                   List.map
                     (fun (branch : Mir.Graph.branch) -> list_positions branch.blocks)
@@ -836,7 +840,7 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
           ->
             Some
               {
-                keyword = (if loop.schedule = Parallel then "parallel" else "concurrent");
+                schedule = loop.schedule;
                 body =
                   List.filter
                     (fun position ->

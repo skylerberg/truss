@@ -1,7 +1,6 @@
 type ty =
   | Named of { path : Path.t; arguments : argument list }
   | Function of function_type
-  | Any of { trait : Path.t; arguments : argument list; associated : (string * ty) list }
   | Never
 
 and argument = Type of ty | Value of Z.t
@@ -18,7 +17,33 @@ let compare = Stdlib.compare
 let make_builtin ?(arguments = []) builtin =
   Named { path = Well_known.make_builtin_type_path builtin; arguments }
 
+let find_viewed = function
+  | Named { path; arguments = [ Type viewed ] } when Well_known.find_builtin_type path = Some View
+    ->
+      Some viewed
+  | Named _ | Function _ | Never -> None
+
+let rec erase_views ty =
+  match find_viewed ty with
+  | Some viewed -> erase_views viewed
+  | None -> (
+      match ty with
+      | Named { path; arguments } ->
+          Named
+            {
+              path;
+              arguments =
+                List.map
+                  (function
+                    | Type argument -> Type (erase_views argument) | Value _ as value -> value)
+                  arguments;
+            }
+      | Function _ | Never -> ty)
+
 let rec to_string = function
+  | Named { path; arguments = [ Type viewed ] } when Well_known.find_builtin_type path = Some View
+    ->
+      "view " ^ to_string viewed
   | Named { path; arguments = [] } -> Path.show_name path
   | Named { path; arguments } -> Path.show_name path ^ show_arguments arguments
   | Function function_type ->
@@ -38,13 +63,6 @@ let rec to_string = function
         "(" ^ text ^ " uses "
         ^ String.concat ", " (List.map Path.show_name function_type.uses)
         ^ ")"
-  | Any { trait; arguments; associated } ->
-      let items =
-        List.map show_argument arguments
-        @ List.map (fun (name, ty) -> name ^ " = " ^ to_string ty) associated
-      in
-      "any " ^ Path.show_name trait
-      ^ if items = [] then "" else "[" ^ String.concat ", " items ^ "]"
   | Never -> "Never"
 
 and show_argument = function Type ty -> to_string ty | Value value -> Z.to_string value

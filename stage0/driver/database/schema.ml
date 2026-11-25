@@ -1,15 +1,28 @@
-type table = {
-  name : string;
-  columns : string;
-  without_rowid : bool;
-  indexes : (string * string) list;
-}
+type index = { index_name : string; indexed : string; condition : string option }
+type table = { name : string; columns : string; without_rowid : bool; indexes : index list }
 
-let keyed_by_id name columns indexes = { name; columns; without_rowid = false; indexes }
-let keyed_by_columns name columns indexes = { name; columns; without_rowid = true; indexes }
+let index_every_row (index_name, indexed) = { index_name; indexed; condition = None }
 
-let fact_of_definition name columns =
-  keyed_by_id name ("definition INTEGER PRIMARY KEY, " ^ columns) []
+let keyed_by_id name columns indexes =
+  { name; columns; without_rowid = false; indexes = List.map index_every_row indexes }
+
+let keyed_by_columns name columns indexes =
+  { name; columns; without_rowid = true; indexes = List.map index_every_row indexes }
+
+let fact_of_definition ?(has_index_without_value = false) name columns =
+  {
+    (keyed_by_id name ("definition INTEGER PRIMARY KEY, " ^ columns) []) with
+    indexes =
+      (if has_index_without_value then
+         [
+           {
+             index_name = name ^ "_without_value";
+             indexed = "definition";
+             condition = Some "state != 0";
+           };
+         ]
+       else []);
+  }
 
 let state = "state INTEGER NOT NULL"
 
@@ -80,48 +93,56 @@ let tables =
     keyed_by_id "constant_value" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value TEXT") [];
     keyed_by_id "derived_interface" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value BLOB") [];
     fact_of_definition "contract" (state ^ ", form BLOB");
-    fact_of_definition "body"
+    fact_of_definition ~has_index_without_value:true "body"
       (state
-     ^ ", form BLOB, tables BLOB, requires_run_forever INTEGER, places_without_keyword BLOB, \
+     ^ ", form BLOB, tables BLOB, uses_run_forever INTEGER, places_without_keyword BLOB, \
         mode_keywords BLOB");
     fact_of_definition "body_mir" (state ^ ", graph BLOB");
     fact_of_definition "contract_mir" (state ^ ", graph BLOB");
     keyed_by_id "generated_mir"
       ("path INTEGER PRIMARY KEY, " ^ state ^ ", body BLOB, contract BLOB")
       [];
-    keyed_by_id "call_node"
-      ("path INTEGER PRIMARY KEY, " ^ state ^ ", kind INTEGER, callees BLOB")
-      [];
+    keyed_by_id "call_node" ("path INTEGER PRIMARY KEY, " ^ state ^ ", callees BLOB") [];
     keyed_by_id "recursion_group"
       ("path INTEGER PRIMARY KEY, " ^ state ^ ", representative INTEGER, members BLOB")
       [ ("recursion_group_representative", "representative") ];
+    keyed_by_id "proof_group"
+      ("path INTEGER PRIMARY KEY, " ^ state ^ ", representative INTEGER, members BLOB")
+      [ ("proof_group_representative", "representative") ];
     fact_of_definition "usage_check" state;
     fact_of_definition "ownership" (state ^ ", must_be_disjoint BLOB");
-    fact_of_definition "proof" (state ^ ", value BLOB");
+    fact_of_definition ~has_index_without_value:true "proof" (state ^ ", value BLOB");
     keyed_by_columns "hole"
-      "definition INTEGER NOT NULL, position INTEGER NOT NULL, home INTEGER NOT NULL, start \
-       INTEGER NOT NULL, stop INTEGER NOT NULL, PRIMARY KEY (definition, position)"
+      "definition INTEGER NOT NULL, position INTEGER NOT NULL, home INTEGER NOT NULL, location \
+       BLOB NOT NULL, PRIMARY KEY (definition, position)"
       [];
     keyed_by_columns "verdict"
-      "definition INTEGER NOT NULL, position INTEGER NOT NULL, code TEXT NOT NULL, start INTEGER \
-       NOT NULL, stop INTEGER NOT NULL, shows TEXT NOT NULL, proven INTEGER NOT NULL, \
-       trusts_compiled_code INTEGER NOT NULL, failure BLOB, cited INTEGER, cited_start INTEGER, \
-       cited_stop INTEGER, PRIMARY KEY (definition, position)"
+      "definition INTEGER NOT NULL, position INTEGER NOT NULL, code TEXT NOT NULL, site BLOB NOT \
+       NULL, proven INTEGER NOT NULL, trusts_compiled_code INTEGER NOT NULL, failure BLOB, PRIMARY \
+       KEY (definition, position)"
       [];
     keyed_by_id "grant"
       ("dependency INTEGER PRIMARY KEY, " ^ state ^ ", capabilities BLOB, unknown BLOB")
       [];
-    keyed_by_id "dependency_use" ("package INTEGER PRIMARY KEY, " ^ state ^ ", unused BLOB") [];
+    keyed_by_id "dependency_use"
+      ("dependency INTEGER PRIMARY KEY, " ^ state ^ ", is_used INTEGER")
+      [];
     keyed_by_id "item"
       "id INTEGER PRIMARY KEY, definition INTEGER, key BLOB NOT NULL, label TEXT NOT NULL"
       [ ("item_definition", "definition") ];
-    keyed_by_id "lowered" ("item INTEGER PRIMARY KEY, " ^ state ^ ", code BLOB") [];
+    keyed_by_id "lowered"
+      ("item INTEGER PRIMARY KEY, " ^ state ^ ", code BLOB, is_evaluated INTEGER, sites BLOB")
+      [];
     keyed_by_id "test_key" ("item INTEGER PRIMARY KEY, " ^ state ^ ", key BLOB") [];
+    keyed_by_id "evaluation" ("item INTEGER PRIMARY KEY, " ^ state ^ ", value BLOB") [];
+    keyed_by_columns "unit"
+      ("item INTEGER NOT NULL, profile INTEGER NOT NULL, " ^ state
+     ^ ", text_hash BLOB, PRIMARY KEY (item, profile)")
+      [];
     keyed_by_columns "diagnostic"
       "stage INTEGER NOT NULL, unit INTEGER NOT NULL, position INTEGER NOT NULL, package TEXT NOT \
-       NULL, definition INTEGER, file INTEGER, severity TEXT NOT NULL, code TEXT NOT NULL, start \
-       INTEGER NOT NULL, stop INTEGER NOT NULL, message TEXT NOT NULL, detail BLOB NOT NULL, \
-       PRIMARY KEY (stage, unit, position)"
+       NULL, definition INTEGER, file INTEGER, severity TEXT NOT NULL, code TEXT NOT NULL, detail \
+       BLOB NOT NULL, PRIMARY KEY (stage, unit, position)"
       [
         ("diagnostic_definition", "definition");
         ("diagnostic_file", "file");
@@ -143,8 +164,10 @@ let make_script ~schema =
          Printf.sprintf "CREATE TABLE %s.\"%s\" (%s)%s;" schema name columns
            (if without_rowid then " WITHOUT ROWID" else "")
          :: List.map
-              (fun (index, indexed) ->
-                Printf.sprintf "CREATE INDEX %s.\"%s\" ON \"%s\" (%s);" schema index name indexed)
+              (fun { index_name; indexed; condition } ->
+                Printf.sprintf "CREATE INDEX %s.\"%s\" ON \"%s\" (%s)%s;" schema index_name name
+                  indexed
+                  (match condition with Some condition -> " WHERE " ^ condition | None -> ""))
               indexes)
        tables)
 

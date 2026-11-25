@@ -19,7 +19,7 @@ fn sized(value: Int64) -> String {
   }
 }
 
-fn word(text: StringSlice) -> Bool {
+fn word(text: String) -> Bool {
   text is "yes" | "y"
 }
 
@@ -30,6 +30,6 @@ test "strings, constants, and ranges of constants are patterns" {
   assert sized(0) == "origin"
   assert sized(5) == "small"
   assert sized(10) == "large"
-  assert word("y".slice())
-  assert !word("no".slice())
+  assert word("y")
+  assert !word("no")
 }

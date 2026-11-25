@@ -13,7 +13,7 @@ fn echoed(through: mut processes.Child, count: UInt64) -> UInt64
       }
       var written: UInt64 = 0
       while written < count {
-        written += mut input.write(block.slice()).expect("the pipe to the child accepts writes")
+        written += mut input.write(block).expect("the pipe to the child accepts writes")
       }
       let _ = own input.close()
     }

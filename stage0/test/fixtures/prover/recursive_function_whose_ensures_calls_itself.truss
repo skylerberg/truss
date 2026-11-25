@@ -1,0 +1,6 @@
+fn count_down(n: UInt64) -> UInt64
+  ensures result == (if n == 0 { 0 } else { count_down(n - 1) })
+  decreases n
+{
+  if n == 0 { 0 } else { count_down(n - 1) }
+}

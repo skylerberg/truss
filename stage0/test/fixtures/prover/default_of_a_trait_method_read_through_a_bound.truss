@@ -1,0 +1,23 @@
+trait Scaled {
+  fn scaled(self, factor: Int64 = 2) -> Int64
+    ensures result == factor
+  {
+    factor
+  }
+}
+
+type Box()
+
+impl Scaled for Box {}
+
+fn through_a_bound[Shape: Scaled](shape: Shape) -> Int64
+  ensures result == 2
+{
+  shape.scaled()
+}
+
+fn on_a_known_type(box: Box) -> Int64
+  ensures result == 2
+{
+  box.scaled()
+}

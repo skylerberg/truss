@@ -40,6 +40,8 @@ val check_if :
   Syntax.else_branch option ->
   Types.ty
 
+val check_block : State.state -> State.env -> ?expected:Types.ty -> Syntax.block -> Types.ty
+
 val match_ :
   State.state ->
   State.env ->

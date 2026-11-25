@@ -8,13 +8,6 @@ let read_mir_graph (context : Definitions.context) path : Mir.Graph.t =
   | Some { form; _ } -> form
   | None -> Definitions.raise_bug "%s has no MIR" (Path.show path)
 
-let read_parameter_defaults (context : Definitions.context) path :
-    (int * Mir.Graph.t) list Mir.sourced =
-  match Mir.read_default_graphs context.lookups.mir path with
-  | Some { source; form = Parameter_defaults defaults } -> { source; form = defaults }
-  | Some { form = Field_defaults _; _ } | None ->
-      Definitions.raise_bug "%s is not a function" (Path.show path)
-
 let extract_parameter (body : Mir.Graph.body) local =
   match body.locals.(local) with
   | { kind = Source { local = core; mode; _ }; type_; _ } -> (mode, Mir.find_local_name core, type_)
@@ -101,8 +94,12 @@ type sequence =
   | Buffer of { buffer : Lowered.place; element : Ground.ty }
   | Inline_array of { array : Lowered.place; element : Ground.ty; count : Z.t; is_empty : bool }
 
+let ground_sequence state (sequence : Types.ty) =
+  let ty = Lowering.ground state sequence in
+  Option.value ~default:ty (Ground.find_viewed ty)
+
 let find_sequence state (place : Lowered.place) (sequence : Types.ty) =
-  match Lowering.ground state sequence with
+  match ground_sequence state sequence with
   | Named { path; arguments = [ Type element; Value count ] } as ty
     when Well_known.find_builtin_type path = Some Array ->
       Inline_array
@@ -112,15 +109,9 @@ let find_sequence state (place : Lowered.place) (sequence : Types.ty) =
           count;
           is_empty = Memory_layout.has_zero_size state.context.env ty;
         }
-  | Named { path; arguments = Type element :: _ } as ty when Well_known.is_buffer_sequence path -> (
-      match (Memory_layout.of_type state.context.env ty).form with
-      | Struct [ field ] -> Buffer { buffer = Lowered.project place (Field field.name); element }
-      | _ ->
-          Definitions.raise_bug "the sequence `%s` holds more than one built-in buffer"
-            (Ground.to_string ty))
   | ty ->
-      Definitions.raise_bug "an element or a range of `%s`, which is not a sequence"
-        (Ground.to_string ty)
+      let field, _, element = Targets.read_list_parts state.context.monomorphic ty in
+      Buffer { buffer = Lowered.project place (Field field); element }
 
 let lower_element state place index ~sequence ~origin =
   match find_sequence state place sequence with
@@ -152,27 +143,19 @@ let lower_range state place start stop ~sequence ~origin =
   in
   Option.iter
     (fun stop ->
-      fail_out_of_bounds state ~origin (Test (Greater, stop, length)) "slice out of bounds")
+      fail_out_of_bounds state ~origin (Test (Greater, stop, length)) "range out of bounds")
     stop;
   let stop = Option.value stop ~default:length in
-  fail_out_of_bounds state ~origin (Test (Greater, start, stop)) "slice out of bounds";
-  let view_type = Storage.make_view_type element in
-  let view = Lowering.allocate_temporary state view_type in
+  fail_out_of_bounds state ~origin (Test (Greater, start, stop)) "range out of bounds";
   let count = Lowering.allocate_temporary state (Ground.make_builtin UInt64) in
   Emit_c.Ir_builder.emit state.builder (Assign (count, Binary (Subtract, stop, start)));
-  Emit_c.Ir_builder.emit state.builder
-    (Assign (view, Storage.build_view view_type ~buffer:first_element ~length:(Copy count)));
-  let slice_type : Ground.ty =
-    Named { path = Well_known.make_path Slice; arguments = [ Type element ] }
+  let range_type : Ground.ty =
+    match ground_sequence state sequence with
+    | Named { path; _ } as text when Well_known.is String path -> text
+    | Named _ | Function _ | Never ->
+        Named { path = Well_known.make_path List; arguments = [ Type element ] }
   in
-  let slice = Lowering.allocate_temporary state slice_type in
-  (match (Memory_layout.of_type state.context.env slice_type).form with
-  | Struct [ field ] ->
-      Emit_c.Ir_builder.emit state.builder
-        (Assign
-           (slice, Build { ty = slice_type; variant = None; fields = [ (field.name, Copy view) ] }))
-  | _ -> Definitions.raise_bug "a `Slice` that is not one view");
-  slice
+  Targets.lower_borrowed_sequence state range_type ~buffer:first_element ~length:(Copy count)
 
 let rec lower_place state (written : Mir.place) : Lowered.place =
   let root =
@@ -300,6 +283,8 @@ let make_body_frame (state : Lowering.state) ?owner ?returns_into ?lending
               (Emit_c.Ir_builder.allocate_local state.builder ~is_zeroed:true (Raw Bool)) ))
         (Moves.list_flagged moves);
     move_state = Moves.copy_entry_state moves 0;
+    move_state_at_return = None;
+    applied_defaults = Hashtbl.create 1;
     lending;
     called_parts =
       list_statements_where
@@ -408,13 +393,13 @@ let reads (value : Mir.rvalue) local =
   in
   match value with
   | Operand operand | Not operand | Copy operand -> is_in_operand operand
-  | Convert { value; _ } | To_any { value; _ } -> is_in_operand value
+  | Convert { value; _ } -> is_in_operand value
   | Operation { operands; _ } | Array operands -> List.exists is_in_operand operands
   | Compare { left; right; _ } -> is_in_operand left || is_in_operand right
   | Construct { fields; _ } ->
       List.exists (fun (_, field) -> Option.fold ~none:false ~some:is_in_operand field) fields
   | Is_variant { place; _ } -> is_in_place place
-  | Function_value _ | Lambda _ | Value_parameter _ | Specification _ -> false
+  | Function_value _ | Lambda _ | Value_parameter _ | Parameter_default _ | Specification _ -> false
 
 let alias state local (source : Lowered.place) ~writable =
   let info = lookup_local_info state local in

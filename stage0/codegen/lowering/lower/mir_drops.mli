@@ -24,4 +24,5 @@ val break_loop : Lowering.state -> unit
 val update_flags : Lowering.state -> before:Moves.state -> unit
 val drop_overwritten : Lowering.state -> Mir.place -> Lowered.place -> Ground.ty -> unit
 val return_from_frame : Lowering.state -> unit
+val list_default_temporaries : Lowering.mir_frame -> Mir.local list
 val end_local : Lowering.state -> Mir.local -> unit

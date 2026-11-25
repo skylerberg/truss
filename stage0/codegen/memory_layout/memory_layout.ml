@@ -378,6 +378,20 @@ let rec to_string layout =
 
 let has_zero_size env ty = (of_type env ty).size = 0
 
+let is_indirect env ty variant =
+  let is_block (payload : t) =
+    match payload.form with Scalar (Pointer (Block _)) -> true | _ -> false
+  in
+  match (of_type env ty).form with
+  | Tagged { variants; _ } ->
+      List.exists
+        (fun (candidate : variant) -> candidate.name = variant && is_block candidate.payload)
+        variants
+  | Niche_encoded { dataful; _ } -> dataful.name = variant && is_block dataful.payload
+  | Zero_size | Tag_only _ -> false
+  | Scalar _ | Struct _ | Array _ ->
+      raise_bug "the variant %s of %s, which is not a sum type" variant (Ground.to_string ty)
+
 module For_testing = struct
   let to_string = to_string
 end

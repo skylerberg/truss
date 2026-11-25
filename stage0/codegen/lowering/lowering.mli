@@ -1,4 +1,5 @@
 module Lookups = Lookups
+module Positions = Positions
 
 type unsupported = { construct : string; at : Lowered.site option }
 
@@ -7,21 +8,47 @@ type lowered =
   | Folded of Lowered.data * Emit_c.fragment
   | Evaluate of Lowered.Item.t * Ground.ty
 
+type unbuildable = Unsupported of unsupported | Todo_types of Path.t list
+type 'value ran = Ran of 'value | Unfinished of string | Stopped of string
+type evaluation = string ran
+
+type linked =
+  | Unit of { item : Lowered.Item.t; text_hash : string; sites : Lowered.site list }
+  | Evaluated of { item : Lowered.Item.t; evaluator : Lowered.Item.t }
+  | Unbuildable of unbuildable
+
 type lowered_lookups = {
   system : Libc.system;
   read_source : Path.file -> Source.t;
+  source : Resolve.Names.source;
   interface : Interface.Lookups.t;
-  find_lowered : Lowered.Item.t -> (lowered, unsupported) result option;
-  read_test_key : Lowered.Item.t -> (string, unsupported) result;
-  list_reached_todo_types : Lowered.Item.t -> Path.t list;
+  find_lowered : Lowered.Item.t -> (lowered, unbuildable) result option;
+  find_evaluation : Lowered.Item.t -> evaluation option;
+  record_evaluation : Lowered.Item.t -> evaluation -> unit;
+  read_test_key : Lowered.Item.t -> (string, unbuildable) result;
+  list_linked : Profile.t -> Lowered.Item.t list -> linked list;
+  render_unit : Profile.t -> Lowered.Item.t -> string;
 }
 
-exception Todo_type of Ground.ty
 exception Infinite_size of Ground.ty
 
-val make_monomorphic_context : Interface.Lookups.t -> Monomorphic.context
-val lower : Libc.system -> Lookups.t -> Lowered.Item.t -> (lowered, unsupported) result
+val make_env : Libc.system -> Interface.Lookups.t -> Memory_layout.env
+val lower : Libc.system -> Lookups.t -> Lowered.Item.t -> (lowered, unbuildable) result
 val list_references : lowered -> Lowered.Item.t list
+val list_sites : lowered -> Lowered.site list
+val make_data : Memory_layout.env -> Lowered.Item.t -> Ground.ty -> string -> Emit_c.fragment
+val is_evaluated : lowered -> bool
+
+val render_unit :
+  Libc.system ->
+  Interface.Lookups.t ->
+  source:Resolve.Names.source ->
+  Profile.t ->
+  read_source:(Path.file -> Source.t) ->
+  is_worked_on:(Path.package -> bool) ->
+  find_lowered:(Lowered.Item.t -> lowered option) ->
+  Emit_c.fragment ->
+  string
 
 val check_calls :
   Interface.Lookups.t ->
@@ -31,10 +58,10 @@ val check_calls :
   unit
 
 val derive_test_keys :
-  read_lowered:(Lowered.Item.t -> lowered) ->
-  read_known_key:(Lowered.Item.t -> string) ->
+  read_lowered:(Lowered.Item.t -> (lowered, unbuildable) result) ->
+  read_known_key:(Lowered.Item.t -> (string, unbuildable) result) ->
   Lowered.Item.t list ->
-  (Lowered.Item.t * string) list
+  ((Lowered.Item.t * string) list, unbuildable) result
 
 val test_runner : Lowered.Item.t
 val make_root : Path.t -> Lowered.Item.t
@@ -47,7 +74,7 @@ end
 module For_testing : sig
   module Intrinsics : sig
     type argument = Intrinsics.argument = Place of Lowered.place | Value of Lowered.operand
-    type types = Intrinsics.types = { uint64 : Ground.ty; string_slice : Ground.ty }
+    type types = Intrinsics.types = { uint64 : Ground.ty; string : Ground.ty }
 
     val lower :
       ?value_arguments:Z.t list ->

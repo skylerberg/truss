@@ -5,7 +5,6 @@ type ty =
   | Parameter of parameter
   | Projection of { base : ty; trait : trait_reference; name : string }
   | Function of function_type
-  | Any of trait_reference
   | Never
   | Integer
   | Variable of int
@@ -213,12 +212,20 @@ let find_builtin = function
 let is_builtin wanted type_ = find_builtin type_ = Some wanted
 let is_well_known wanted = function Named { path; _ } -> Well_known.is wanted path | _ -> false
 
-let find_view = function
-  | Named { path; arguments } ->
-      Option.map
-        (fun view -> Named { path = view; arguments = List.take 1 arguments })
-        (Well_known.find_view path)
+let find_viewed = function
+  | Named { path; arguments = [ Type viewed ] } when Well_known.find_builtin_type path = Some View
+    ->
+      Some viewed
   | _ -> None
+
+let strip_view type_ = Option.value ~default:type_ (find_viewed type_)
+let is_view type_ = Option.is_some (find_viewed type_)
+
+let make_view viewed =
+  if is_view viewed then viewed else make_builtin View ~arguments:[ Type viewed ]
+
+let is_viewable type_ =
+  is_well_known List type_ || is_well_known String type_ || is_builtin Storage type_
 
 let signed_integer_types : Language.Builtin_type.t list = [ Int8; Int16; Int32; Int64 ]
 let unsigned_integer_types : Language.Builtin_type.t list = [ UInt8; UInt16; UInt32; UInt64 ]
@@ -288,6 +295,8 @@ let list_fitting_integer_types number =
 let is_float_type type_ =
   match find_builtin type_ with Some builtin -> List.mem builtin float_types | None -> false
 
+type property = Copyable | Plain | View | Holds_function
+
 type substitution = {
   arguments : (parameter * argument) list;
   capability_arguments : (parameter * capability_set) list;
@@ -328,7 +337,6 @@ let rec substitute substitution type_ =
         | Some fixed -> fixed
         | None -> Projection { base; trait; name })
     | Function function_type -> Function (substitute_function substitution function_type)
-    | Any trait -> Any (substitute_trait substitution trait)
     | Never | Integer | Variable _ | Hole | Error _ -> type_
 
 and substitute_argument substitution = function
@@ -398,6 +406,18 @@ let substitute_substitution outer =
   map_substitution ~argument:(substitute_argument outer)
     ~capabilities:(substitute_capabilities outer)
 
+type evidence =
+  | Impl of { impl : Path.t; substitution : substitution }
+  | Derived_for_view of { viewed : Path.t; substitution : substitution }
+  | Bound
+
+let substitute_evidence outer = function
+  | Impl { impl; substitution } ->
+      Impl { impl; substitution = substitute_substitution outer substitution }
+  | Derived_for_view { viewed; substitution } ->
+      Derived_for_view { viewed; substitution = substitute_substitution outer substitution }
+  | Bound -> Bound
+
 let extract_result_type = function Returns type_ | Lends (_, type_) -> type_
 let find_lent_mode = function Lends (mode, _) -> Some mode | Returns _ -> None
 let map_argument map = function Type type_ -> Type (map type_) | Value _ as value -> value
@@ -435,8 +455,18 @@ let rec map ?(map_capabilities = Fun.id) transform type_ =
               output = map function_type.output;
               uses = map_capabilities function_type.uses;
             }
-      | Any reference -> Any (map_trait map reference)
       | Parameter _ | Never | Integer | Variable _ | Hole | Error _ -> type_)
+
+let rec erase_views type_ = map (fun type_ -> Option.map erase_views (find_viewed type_)) type_
+let erase_argument_views argument = map_argument erase_views argument
+let erase_trait_views (trait : trait_reference) = map_trait erase_views trait
+let substitute_erased substitution type_ = erase_views (substitute substitution type_)
+
+let substitute_argument_erased substitution argument =
+  erase_argument_views (substitute_argument substitution argument)
+
+let substitute_trait_erased substitution trait =
+  erase_trait_views (substitute_trait substitution trait)
 
 let rec exists ?(resolve = Fun.id) transform type_ =
   let type_ = resolve type_ in
@@ -453,7 +483,6 @@ let rec exists ?(resolve = Fun.id) transform type_ =
   | Projection { base; trait = reference; _ } -> exists base || trait_exists reference
   | Function { inputs; output; _ } ->
       List.exists (fun (_, type_) -> exists type_) inputs || exists output
-  | Any reference -> trait_exists reference
   | Parameter _ | Never | Integer | Variable _ | Hole | Error _ -> false
 
 let is_specification_only = function
@@ -486,7 +515,6 @@ let rec contains_unsolved = function
   | Projection { base; trait; _ } -> contains_unsolved base || is_unsolved_trait trait
   | Function { inputs; output; _ } ->
       List.exists (fun (_, type_) -> contains_unsolved type_) inputs || contains_unsolved output
-  | Any trait -> is_unsolved_trait trait
   | Parameter _ | Never | Integer | Error _ -> false
 
 and is_unsolved_argument = function
@@ -558,6 +586,9 @@ and show_condition condition =
        condition)
 
 and show = function
+  | Named { path; arguments = [ Type viewed ] } when Well_known.find_builtin_type path = Some View
+    ->
+      "view " ^ show viewed
   | Named { path; arguments = [] } -> Path.show_name path
   | Named { path; arguments } ->
       Printf.sprintf "%s[%s]" (Path.show_name path)
@@ -565,7 +596,6 @@ and show = function
   | Parameter { name; _ } -> name
   | Projection { base; name; _ } -> show base ^ "." ^ name
   | Function function_type -> show_function function_type
-  | Any trait -> "any " ^ show_trait trait
   | Never -> "Never"
   | Integer -> "Integer"
   | Variable _ | Hole | Error _ -> "_"
@@ -688,6 +718,8 @@ let mentions_specification_only_type parameters output =
     (fun type_ -> Option.is_some (find_specification_only_type type_))
     (extract_result_type output :: List.map (fun parameter -> parameter.type_) parameters)
 
+type modified = { position : int; field_path : string list; is_elements : bool }
+
 type signature = {
   generics : generic list;
   capability_parameters : parameter list;
@@ -696,10 +728,53 @@ type signature = {
   output : result;
   uses : capability_set;
   costs : cost list;
+  modifies : modified list;
   specification_only : bool;
   is_update_step : bool;
   capture_free_parameters : string list;
 }
+
+let rec is_field_path_prefix prefix fields =
+  match (prefix, fields) with
+  | [], _ -> true
+  | field :: prefix, other :: fields -> field = other && is_field_path_prefix prefix fields
+  | _ :: _, [] -> false
+
+let find_parameter_position (signature : signature) name =
+  match signature.receiver with
+  | Some _ when name = "self" -> Some 0
+  | _ ->
+      let offset = match signature.receiver with Some _ -> 1 | None -> 0 in
+      Option.map
+        (fun index -> index + offset)
+        (List.find_index
+           (fun (parameter : parameter_info) -> parameter.name = name)
+           signature.parameters)
+
+let read_parameter_at (signature : signature) position =
+  match signature.receiver with
+  | Some (mode, type_) when position = 0 -> { name = "self"; mode; type_; has_default = false }
+  | _ -> (
+      let offset = match signature.receiver with Some _ -> 1 | None -> 0 in
+      match List.nth_opt signature.parameters (position - offset) with
+      | Some parameter -> parameter
+      | None ->
+          Compiler_bug.raise_bug ~stage:"Types" "a parameter at position %d of a signature of %d"
+            position
+            (List.length signature.parameters))
+
+let list_modified_parts (signature : signature) position =
+  match List.filter (fun modified -> modified.position = position) signature.modifies with
+  | [] -> None
+  | entries -> Some entries
+
+let is_part_within ~(container : modified) (part : modified) =
+  container.position = part.position
+  && is_field_path_prefix container.field_path part.field_path
+  && ((not container.is_elements) || (part.is_elements && container.field_path = part.field_path))
+
+let show_modified_part ~root (part : modified) =
+  String.concat "." (root :: part.field_path) ^ if part.is_elements then "[..]" else ""
 
 type instantiation = {
   type_arguments : argument list;
@@ -892,10 +967,16 @@ let make_trait_reference ~arguments trait : trait_reference =
 let string_type = Named { path = Well_known.make_path String; arguments = [] }
 
 let find_sequence_element (sequence : ty) =
-  match sequence with
+  match strip_view sequence with
   | Named { path; arguments = Type element :: _ }
-    when Well_known.is_buffer_sequence path || Well_known.find_builtin_type path = Some Array ->
+    when Well_known.is List path || Well_known.find_builtin_type path = Some Array ->
       Some element
+  | _ -> None
+
+let find_list_of_array = function
+  | Named { path; arguments = Type element :: _ }
+    when Well_known.find_builtin_type path = Some Array ->
+      Some (make_named (Well_known.make_path List) [ element ])
   | _ -> None
 
 let find_specification_sequence_element (sequence : ty) =

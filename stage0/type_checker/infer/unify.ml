@@ -44,6 +44,11 @@ let make_fresh_number unifier domain =
 
 let make_fresh_value unifier = Types.Value_variable (allocate_unknown unifier)
 
+let make_fresh_argument unifier (generic : Types.generic) =
+  match generic.kind with
+  | Value_generic -> Types.Value (make_fresh_value unifier)
+  | Type_generic _ -> Types.Type (make_fresh_type unifier)
+
 let make_fresh_capability_variable unifier =
   unifier.capability_variable_count <- unifier.capability_variable_count + 1;
   Types.make_capability_set [ Types.Capability_variable unifier.capability_variable_count ]
@@ -66,8 +71,10 @@ let rec resolve unifier (type_ : Types.ty) =
   | _ -> type_
 
 let rec read_root unifier index =
-  match Hashtbl.find_opt unifier.type_solutions index with
-  | Some (Types.Variable next) -> read_root unifier next
+  match
+    (Hashtbl.find_opt unifier.type_solutions index, Hashtbl.find_opt unifier.value_solutions index)
+  with
+  | Some (Types.Variable next), _ | _, Some (Types.Value_variable next) -> read_root unifier next
   | _ -> index
 
 let rec resolve_value unifier (value : Types.value) =
@@ -86,7 +93,6 @@ let rec zonk unifier (type_ : Types.ty) : Types.ty =
   | Projection { base; trait; name } ->
       Projection { base = zonk base; trait = zonk_trait unifier trait; name }
   | Function function_type -> Function (zonk_function unifier function_type)
-  | Any trait -> Any (zonk_trait unifier trait)
   | type_ -> type_
 
 and zonk_argument unifier = function
@@ -193,7 +199,6 @@ let list_unknowns unifier (type_ : Types.ty) =
     | Function { inputs; output; _ } ->
         List.iter (fun (_, type_) -> collect type_) inputs;
         collect output
-    | Any reference -> collect_trait reference
     | Parameter _ | Never | Integer | Hole | Error _ -> ()
   and collect_argument = function
     | Types.Type type_ -> collect type_
@@ -215,9 +220,20 @@ let list_argument_unknowns unifier = function
       | Value_variable index -> [ Unknown_value index ]
       | _ -> [])
 
-let rec unify unifier (left : Types.ty) (right : Types.ty) =
+let rec unify ?(modulo_views = false) unifier (left : Types.ty) (right : Types.ty) =
   unifier.refused_code_unknown <- None;
   let left = resolve unifier left and right = resolve unifier right in
+  let is_known : Types.ty -> bool = function
+    | Variable _ | Error _ | Hole -> false
+    | Named _ | Parameter _ | Projection _ | Function _ | Never | Integer -> true
+  in
+  let left, right, modulo_views =
+    match (Types.find_viewed left, Types.find_viewed right) with
+    | Some left, Some right -> (resolve unifier left, resolve unifier right, true)
+    | Some viewed, None when modulo_views && is_known right -> (resolve unifier viewed, right, true)
+    | None, Some viewed when modulo_views && is_known left -> (left, resolve unifier viewed, true)
+    | _ -> (left, right, modulo_views)
+  in
   match (left, right) with
   | Types.Variable index, ((Types.Error _ | Types.Hole) as unknown)
   | ((Types.Error _ | Types.Hole) as unknown), Types.Variable index ->
@@ -237,7 +253,8 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
       Option.fold ~none:true ~some:(is_within unifier other) (find_domain unifier index)
       && bind unifier index other
   | Named left, Named right ->
-      Path.equal left.path right.path && unify_arguments unifier left.arguments right.arguments
+      Path.equal left.path right.path
+      && unify_arguments ~modulo_views unifier left.arguments right.arguments
   | Parameter left, Parameter right -> left = right
   | Function left, Function right ->
       List.sort_uniq compare left.costs = List.sort_uniq compare right.costs
@@ -248,7 +265,6 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
            left.inputs right.inputs
       && unify unifier left.output right.output
       && unify_capabilities unifier left.uses right.uses
-  | Any left, Any right -> unify_trait unifier left right
   | Projection left, Projection right ->
       left.name = right.name
       && Path.equal left.trait.trait right.trait.trait
@@ -257,13 +273,13 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
   | Never, Never | Integer, Integer -> true
   | _ -> false
 
-and unify_arguments unifier left right =
+and unify_arguments ?(modulo_views = false) unifier left right =
   unifier.refused_code_unknown <- None;
   List.length left = List.length right
   && List.for_all2
        (fun left right ->
          match (left, right) with
-         | Types.Type left, Types.Type right -> unify unifier left right
+         | Types.Type left, Types.Type right -> unify ~modulo_views unifier left right
          | Types.Value left, Types.Value right -> unify_value unifier left right
          | Types.Type (Types.Error _), _ | _, Types.Type (Types.Error _) -> true
          | _ -> false)
@@ -283,12 +299,3 @@ and unify_value unifier left right =
       || bind_value (max left_index right_index) (Value_variable (min left_index right_index))
   | Value_variable index, other | other, Value_variable index -> bind_value index other
   | left, right -> left = right
-
-and unify_trait unifier (left : Types.trait_reference) (right : Types.trait_reference) =
-  Path.equal left.trait right.trait
-  && unify_arguments unifier left.trait_arguments right.trait_arguments
-  && List.length left.associated = List.length right.associated
-  && List.for_all2
-       (fun (left_name, left) (right_name, right) ->
-         left_name = right_name && unify unifier left right)
-       left.associated right.associated

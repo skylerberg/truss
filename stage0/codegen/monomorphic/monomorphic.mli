@@ -1,4 +1,4 @@
-exception Todo_type of Ground.ty
+exception Todo_type of Path.t
 
 type context = {
   find_type_interface : Path.t -> Types.type_interface option;
@@ -12,6 +12,13 @@ val list_capabilities : context -> Types.substitution -> Types.capability_set ->
 val convert_capability_arguments : Ground.instantiation -> (string * Types.capability_set) list
 val make_substitution : Types.generic list -> Ground.argument list -> Types.substitution
 val make_signature_substitution : Types.signature -> Ground.instantiation -> Types.substitution
+
+val make_declaration_substitution :
+  trait:Path.t ->
+  trait_generics:Types.generic list ->
+  Types.signature ->
+  Ground.instantiation ->
+  Types.substitution
 
 val ground_instantiation :
   context -> Types.substitution -> Types.instantiation -> Ground.instantiation

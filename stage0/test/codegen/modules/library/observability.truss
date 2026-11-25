@@ -24,7 +24,7 @@ test "a traceparent header parses, round-trips, and refuses the forms the W3C fo
 test "a started trace parses back, and a child keeps the trace and takes a new span" uses Panic, RunForever {
   provide simulation.World.new() {
     let root = trace.Context.start()
-    assert trace.Context.parse(root.header().slice()) == Some(root.copy())
+    assert trace.Context.parse(root.header()) == Some(root.copy())
     let child = root.child()
     assert child.trace_id == root.trace_id && child.span_id != root.span_id && child.is_sampled
   }

@@ -19,11 +19,11 @@ internal fn Field.zero(self) -> List[UInt64] {
   List.filled(0, count: self.modulus.length())
 }
 
-internal fn limb_at(limbs: Slice[UInt64], index: UInt64) -> UInt64 {
+internal fn limb_at(limbs: List[UInt64], index: UInt64) -> UInt64 {
   if index < limbs.length() { limbs[index] } else { 0 }
 }
 
-internal fn limbs_from_bytes(bytes: Slice[UInt8], count: UInt64) -> List[UInt64] {
+internal fn limbs_from_bytes(bytes: List[UInt8], count: UInt64) -> List[UInt64] {
   var limbs: List[UInt64] = List.filled(0, count: count)
   for index in 0..bytes.length() {
     let from_end = bytes.length() - 1 - index
@@ -36,7 +36,7 @@ internal fn limbs_from_bytes(bytes: Slice[UInt8], count: UInt64) -> List[UInt64]
   limbs
 }
 
-internal fn limbs_to_bytes(limbs: Slice[UInt64], length: UInt64) -> List[UInt8] {
+internal fn limbs_to_bytes(limbs: List[UInt64], length: UInt64) -> List[UInt8] {
   var bytes: List[UInt8] = List.with_capacity(length)
   for index in 0..length {
     let from_end = length - 1 - index
@@ -57,7 +57,7 @@ fn negated_inverse(low: UInt64) -> UInt64 {
   zero.wrapping_subtract(inverse) & low_mask
 }
 
-internal fn is_less(first: Slice[UInt64], second: Slice[UInt64]) -> Bool {
+internal fn is_less(first: List[UInt64], second: List[UInt64]) -> Bool {
   var less = false
   var decided = false
   var index = first.length()
@@ -73,7 +73,7 @@ internal fn is_less(first: Slice[UInt64], second: Slice[UInt64]) -> Bool {
   less
 }
 
-fn subtract_in_place(value: mut List[UInt64], amount: Slice[UInt64]) -> UInt64
+fn subtract_in_place(value: mut List[UInt64], amount: List[UInt64]) -> UInt64
   ensures value.length() == old(value.length())
 {
   var borrow: UInt64 = 0
@@ -88,7 +88,7 @@ fn subtract_in_place(value: mut List[UInt64], amount: Slice[UInt64]) -> UInt64
   borrow
 }
 
-fn add_in_place(value: mut List[UInt64], amount: Slice[UInt64]) -> UInt64
+fn add_in_place(value: mut List[UInt64], amount: List[UInt64]) -> UInt64
   ensures value.length() == old(value.length())
 {
   var carry: UInt64 = 0
@@ -103,7 +103,7 @@ fn add_in_place(value: mut List[UInt64], amount: Slice[UInt64]) -> UInt64
   carry
 }
 
-internal fn select(choose_second: Bool, first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt64] {
+internal fn select(choose_second: Bool, first: List[UInt64], second: List[UInt64]) -> List[UInt64] {
   let mask: UInt64 = if choose_second { UInt64.maximum } else { 0 }
   var chosen: List[UInt64] = List.with_capacity(first.length())
   for index in 0..first.length() {
@@ -116,8 +116,8 @@ internal fn select(choose_second: Bool, first: Slice[UInt64], second: Slice[UInt
 
 fn reduce_once(field: Field, value: own List[UInt64], carry: UInt64) -> List[UInt64] {
   var reduced = value.copy()
-  let borrow = subtract_in_place(mut reduced, amount: field.modulus.slice())
-  select(carry == 0 && borrow == 1, first: reduced.slice(), second: value.slice())
+  let borrow = subtract_in_place(mut reduced, amount: field.modulus)
+  select(carry == 0 && borrow == 1, first: reduced, second: value)
 }
 
 internal fn Field.new(modulus: own List[UInt64]) -> Option[Field] {
@@ -136,9 +136,9 @@ internal fn Field.new(modulus: own List[UInt64]) -> Option[Field] {
     invariant square.length() == count
   {
     let doubled = square.copy()
-    let carry = add_in_place(mut square, amount: doubled.slice())
+    let carry = add_in_place(mut square, amount: doubled)
     var reduced = square.copy()
-    let borrow = subtract_in_place(mut reduced, amount: modulus.slice())
+    let borrow = subtract_in_place(mut reduced, amount: modulus)
     if carry == 1 || borrow == 0 {
       square = own reduced
     }
@@ -146,14 +146,14 @@ internal fn Field.new(modulus: own List[UInt64]) -> Option[Field] {
   var field = Field(modulus: own modulus, inverse: inverse, r_squared: own square, one: List.filled(0, count: count))
   var plain_one: List[UInt64] = List.filled(0, count: count)
   plain_one[0] = 1
-  let one = field.multiply(field.r_squared.slice(), second: plain_one.slice())
+  let one = field.multiply(field.r_squared, second: plain_one)
   if one.length() == count {
     field.one = own one
   }
   Some(own field)
 }
 
-internal fn Field.multiply(self, first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt64] {
+internal fn Field.multiply(self, first: List[UInt64], second: List[UInt64]) -> List[UInt64] {
   let count = self.modulus.length()
   var total: List[UInt64] = List.filled(0, count: count + 2)
   for outer in 0..count
@@ -189,35 +189,35 @@ internal fn Field.multiply(self, first: Slice[UInt64], second: Slice[UInt64]) ->
   reduce_once(self, value: own total, carry: carry)
 }
 
-internal fn Field.square(self, value: Slice[UInt64]) -> List[UInt64] {
+internal fn Field.square(self, value: List[UInt64]) -> List[UInt64] {
   self.multiply(value, second: value)
 }
 
-internal fn Field.add(self, first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt64] {
-  var sum = first.to_list()
+internal fn Field.add(self, first: List[UInt64], second: List[UInt64]) -> List[UInt64] {
+  var sum = first.copy()
   let carry = add_in_place(mut sum, amount: second)
   reduce_once(self, value: own sum, carry: carry)
 }
 
-internal fn Field.subtract(self, first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt64] {
-  var difference = first.to_list()
+internal fn Field.subtract(self, first: List[UInt64], second: List[UInt64]) -> List[UInt64] {
+  var difference = first.copy()
   let borrow = subtract_in_place(mut difference, amount: second)
   var wrapped = difference.copy()
-  let _ = add_in_place(mut wrapped, amount: self.modulus.slice())
-  select(borrow == 1, first: difference.slice(), second: wrapped.slice())
+  let _ = add_in_place(mut wrapped, amount: self.modulus)
+  select(borrow == 1, first: difference, second: wrapped)
 }
 
-internal fn Field.to_montgomery(self, value: Slice[UInt64]) -> List[UInt64] {
-  self.multiply(value, second: self.r_squared.slice())
+internal fn Field.to_montgomery(self, value: List[UInt64]) -> List[UInt64] {
+  self.multiply(value, second: self.r_squared)
 }
 
-internal fn Field.from_montgomery(self, value: Slice[UInt64]) -> List[UInt64] {
+internal fn Field.from_montgomery(self, value: List[UInt64]) -> List[UInt64] {
   var plain_one: List[UInt64] = List.filled(0, count: self.modulus.length())
   plain_one[0] = 1
-  self.multiply(value, second: plain_one.slice())
+  self.multiply(value, second: plain_one)
 }
 
-internal fn Field.power(self, base: Slice[UInt64], exponent: Slice[UInt64]) -> List[UInt64] {
+internal fn Field.power(self, base: List[UInt64], exponent: List[UInt64]) -> List[UInt64] {
   var result = self.one.copy()
   var index = exponent.length()
   while index > 0
@@ -230,24 +230,24 @@ internal fn Field.power(self, base: Slice[UInt64], exponent: Slice[UInt64]) -> L
       invariant bit <= 32
     {
       bit -= 1
-      result = self.square(result.slice())
+      result = self.square(result)
       if ((limb >> bit) & 1) == 1 {
-        result = self.multiply(result.slice(), second: base)
+        result = self.multiply(result, second: base)
       }
     }
   }
   result
 }
 
-internal fn Field.invert(self, value: Slice[UInt64]) -> List[UInt64] {
+internal fn Field.invert(self, value: List[UInt64]) -> List[UInt64] {
   var exponent = self.modulus.copy()
   var two: List[UInt64] = List.filled(0, count: exponent.length())
   two[0] = 2
-  let _ = subtract_in_place(mut exponent, amount: two.slice())
-  self.power(value, exponent: exponent.slice())
+  let _ = subtract_in_place(mut exponent, amount: two)
+  self.power(value, exponent: exponent)
 }
 
-internal fn Field.is_zero(self, value: Slice[UInt64]) -> Bool {
+internal fn Field.is_zero(self, value: List[UInt64]) -> Bool {
   var bits: UInt64 = 0
   for limb in value {
     bits = bits | limb
@@ -255,7 +255,7 @@ internal fn Field.is_zero(self, value: Slice[UInt64]) -> Bool {
   bits == 0
 }
 
-internal fn Field.equal(self, first: Slice[UInt64], second: Slice[UInt64]) -> Bool {
+internal fn Field.equal(self, first: List[UInt64], second: List[UInt64]) -> Bool {
   var difference: UInt64 = 0
   for index in 0..first.length() {
     difference = difference | (first[index] ^ limb_at(second, index: index))
@@ -263,20 +263,20 @@ internal fn Field.equal(self, first: Slice[UInt64], second: Slice[UInt64]) -> Bo
   difference == 0
 }
 
-internal fn Field.modulus_limbs(self) -> Slice[UInt64] {
-  self.modulus.slice()
+internal fn Field.modulus_limbs(self) -> view List[UInt64] {
+  self.modulus
 }
 
 fn swap_values(first: mut List[UInt64], second: mut List[UInt64], bit: Bool) {
-  let chosen_first = select(bit, first: first.slice(), second: second.slice())
-  let chosen_second = select(bit, first: second.slice(), second: first.slice())
+  let chosen_first = select(bit, first: first, second: second)
+  let chosen_second = select(bit, first: second, second: first)
   first = own chosen_first
   second = own chosen_second
 }
 
-internal fn Field.power_secret(self, base: Slice[UInt64], exponent: Slice[UInt8]) -> List[UInt64] {
+internal fn Field.power_secret(self, base: List[UInt64], exponent: List[UInt8]) -> List[UInt64] {
   var low = self.one.copy()
-  var high = base.to_list()
+  var high = base.copy()
   for byte in exponent {
     var bit: UInt8 = 8
     while bit > 0
@@ -285,15 +285,15 @@ internal fn Field.power_secret(self, base: Slice[UInt64], exponent: Slice[UInt8]
       bit -= 1
       let set = ((byte >> bit) & 1) == 1
       swap_values(mut low, second: mut high, bit: set)
-      high = self.multiply(low.slice(), second: high.slice())
-      low = self.square(low.slice())
+      high = self.multiply(low, second: high)
+      low = self.square(low)
       swap_values(mut low, second: mut high, bit: set)
     }
   }
   low
 }
 
-internal fn Field.reduce(self, value: Slice[UInt64]) -> List[UInt64] {
+internal fn Field.reduce(self, value: List[UInt64]) -> List[UInt64] {
   let count = self.modulus.length()
   var reduced = self.zero()
   var end = value.length()
@@ -310,14 +310,14 @@ internal fn Field.reduce(self, value: Slice[UInt64]) -> List[UInt64] {
     end = start
   }
   for index in 0..chunks.length() {
-    let shifted = self.multiply(reduced.slice(), second: self.r_squared.slice())
-    let part = self.multiply(chunks[index].slice(), second: self.r_squared.slice())
-    reduced = self.add(shifted.slice(), second: part.slice())
+    let shifted = self.multiply(reduced, second: self.r_squared)
+    let part = self.multiply(chunks[index], second: self.r_squared)
+    reduced = self.add(shifted, second: part)
   }
   reduced
 }
 
-internal fn multiply_plain(first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt64] {
+internal fn multiply_plain(first: List[UInt64], second: List[UInt64]) -> List[UInt64] {
   var product: List[UInt64] = List.filled(0, count: first.length() + second.length())
   for outer in 0..second.length() {
     var carry: UInt64 = 0
@@ -337,11 +337,11 @@ internal fn multiply_plain(first: Slice[UInt64], second: Slice[UInt64]) -> List[
   product
 }
 
-internal fn add_plain(value: mut List[UInt64], amount: Slice[UInt64]) {
+internal fn add_plain(value: mut List[UInt64], amount: List[UInt64]) {
   let _ = add_in_place(mut value, amount: amount)
 }
 
-internal fn bit_length(limbs: Slice[UInt64]) -> UInt64 {
+internal fn bit_length(limbs: List[UInt64]) -> UInt64 {
   var index = limbs.length()
   while index > 0
     invariant index <= limbs.length()

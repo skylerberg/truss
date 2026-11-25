@@ -59,8 +59,8 @@ internal type TypeKind =
   | PathType(path_type: PathType)
   | SelfType(name: Option[Name])
   | Associated(parameter: Name, name: Name)
-  | AnyType(path_type: PathType)
   | indirect FunctionType(function_type: FunctionType)
+  | indirect ViewType(viewed: TypeExpression)
   | TypeError
   derives Equal
 
@@ -107,6 +107,7 @@ internal type ClauseKind =
   | Requires(value: Expression)
   | Ensures(value: Expression)
   | Decreases(measures: List[Expression])
+  | Modifies(parts: List[Expression])
   | Cost(clause: CostClause)
   | ClauseError
   derives Equal
@@ -155,7 +156,6 @@ internal type ExpressionKind =
   | indirect With(base: Expression, updates: List[Update])
   | indirect Prefix(operator: PrefixOperator, operand: Expression)
   | indirect Mode(mode: Mode, inner: Expression)
-  | indirect Any(inner: Expression)
   | indirect Binary(operator: Binary, operator_id: UInt64, left: Expression, right: Expression)
   | indirect Is(value: Expression, operator_id: UInt64, pattern: Pattern)
   | indirect Range(start: Option[Expression], operator_id: UInt64, stop: Option[Expression], is_inclusive: Bool)

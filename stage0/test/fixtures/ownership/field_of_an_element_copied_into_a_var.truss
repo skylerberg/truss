@@ -1,6 +1,0 @@
-type Labeled(label: String)
-
-fn f(rows: own List[Labeled]) -> String {
-  var label = rows[0].label.copy()
-  label
-}

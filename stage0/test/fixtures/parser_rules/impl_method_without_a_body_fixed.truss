@@ -1,3 +1,0 @@
-impl Clock for Fixed {
-  fn now(self) -> Instant { todo }
-}

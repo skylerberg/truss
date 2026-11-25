@@ -1,4 +1,4 @@
-fn head(values: Array[Int64, 4]) -> Slice[Int64] {
+fn head(values: Array[Int64, 4]) -> view List[Int64] {
   values[..2]
 }
 

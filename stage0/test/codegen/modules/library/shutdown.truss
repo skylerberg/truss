@@ -21,14 +21,14 @@ fn loopback(port: UInt16) -> network.SocketAddress {
   network.SocketAddress(address: network.IpAddress.loopback, port: port)
 }
 
-fn exchange(port: UInt16, raw: StringSlice) -> String
+fn exchange(port: UInt16, raw: String) -> String
   uses NetworkClient, Handles, Panic, RunForever
 {
   var connection = network.connect("localhost", port: port).expect("the server accepts")
   let _ = mut connection.write_all(raw.bytes())
   var reply: List[UInt8] = []
   let _ = mut connection.read_to_end(mut reply)
-  String.from_utf8_lossy(reply.slice())
+  String.from_utf8_lossy(reply)
 }
 
 fn drained_over_http_one() -> List[String]
@@ -51,7 +51,7 @@ fn drained_over_http_one() -> List[String]
       }
       var reply: List[UInt8] = []
       let _ = mut idle.read_to_end(mut reply)
-      mut seen.push(String.from_utf8_lossy(reply.slice()))
+      mut seen.push(String.from_utf8_lossy(reply))
     }
   }
   seen
@@ -61,9 +61,9 @@ test "a shutdown over HTTP/1.1 finishes the request in flight, closes an idle co
   provide simulation.World.new() {
     let seen = drained_over_http_one()
     assert seen.length() == 2
-    assert seen[0].slice().starts_with("HTTP/1.1 200 OK") && seen[0].slice().ends_with("done")
-    assert seen[0].slice().contains("Connection: close")
-    assert seen[1].slice().occurrences("HTTP/1.1 200 OK") == 1 && seen[1].slice().ends_with("ok")
+    assert seen[0].starts_with("HTTP/1.1 200 OK") && seen[0].ends_with("done")
+    assert seen[0].contains("Connection: close")
+    assert seen[1].occurrences("HTTP/1.1 200 OK") == 1 && seen[1].ends_with("ok")
   }
 }
 
@@ -96,13 +96,13 @@ test "a shutdown cancels a request that outlasts the grace period" uses Panic, R
   }
 }
 
-fn frame(kind: UInt8, flags: UInt8, stream: UInt8, payload: Slice[UInt8]) -> List[UInt8] {
+fn frame(kind: UInt8, flags: UInt8, stream: UInt8, payload: List[UInt8]) -> List[UInt8] {
   var bytes: List[UInt8] = [0, 0, UInt8.try_from_integer(payload.length()).unwrap_or(0), kind, flags, 0, 0, 0, stream]
-  mut bytes.append(payload.to_list())
+  mut bytes.append(payload.copy())
   bytes
 }
 
-fn frame_kinds(bytes: Slice[UInt8]) -> List[String] {
+fn frame_kinds(bytes: List[UInt8]) -> List[String] {
   var kinds: List[String] = []
   var at: UInt64 = 0
   while at + 9 <= bytes.length() {
@@ -135,11 +135,11 @@ fn drained_over_http_two() -> List[String]
     http.serve(mut listener, handler: patient, options: http.ServerOptions(grace_seconds: 10), shutdown: Some(shutdown.copy()))
     {
       var connection = network.connect("localhost", port: 8096).expect("the server accepts")
-      var opening: List[UInt8] = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".bytes().to_list()
+      var opening: List[UInt8] = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".bytes().copy()
       mut opening.append(frame(4, flags: 0, stream: 0, payload: []))
       let block: List[UInt8] = [130, 134, 65, 1, 120, 68, 5, 47, 115, 108, 111, 119]
-      mut opening.append(frame(1, flags: 5, stream: 1, payload: block.slice()))
-      let _ = mut connection.write_all(opening.slice())
+      mut opening.append(frame(1, flags: 5, stream: 1, payload: block))
+      let _ = mut connection.write_all(opening)
       concurrent {
         let _ = mut connection.read_to_end(mut reply)
         {
@@ -149,7 +149,7 @@ fn drained_over_http_two() -> List[String]
       }
     }
   }
-  frame_kinds(reply.slice())
+  frame_kinds(reply)
 }
 
 test "a shutdown over HTTP/2 sends GOAWAY naming the stream in flight, finishes it, and closes" uses Panic, RunForever {

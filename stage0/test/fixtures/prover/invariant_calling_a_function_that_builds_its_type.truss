@@ -1,0 +1,22 @@
+public opaque type Counter(count: UInt64)
+  invariant through(count) >= 0
+
+public fn Counter.make(count: UInt64) -> Counter
+  ensures result.count == count
+{
+  Counter(count: count)
+}
+
+public fn Counter.value(self) -> UInt64
+  ensures result == self.count
+  ensures result <= 3
+{
+  self.count
+}
+
+fn through(count: UInt64) -> UInt64
+  ensures result == count
+  ensures result <= 3
+{
+  Counter.make(count).value()
+}

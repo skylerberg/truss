@@ -19,7 +19,7 @@ fn magnitude(value: Int64) -> Int64
 fn main(arguments: List[String]) -> ExitCode
   uses Console, Panic
 {
-  match arguments[1].slice() {
+  match arguments[1] {
     "addition" => Console.print_line("${total(UInt8.maximum, second: 1)}")
     "conversion" => Console.print_line("${narrowed(300)}")
     "absolute" => Console.print_line("${magnitude(Int64.minimum)}")

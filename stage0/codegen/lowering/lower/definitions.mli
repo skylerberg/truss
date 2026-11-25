@@ -21,12 +21,14 @@ type code = {
   result : Types.result;
   substitution : Types.substitution;
   uses : Types.capability_set;
-  has_defaults : bool;
   assumes_condition : bool;
 }
 
 val make_unwritten_code :
   definition:Path.t -> substitution:Types.substitution -> result:Types.result -> code
+
+val make_default_code :
+  context -> code -> source:Resolve.Names.key -> substitution:Types.substitution -> code
 
 val read_written : context -> Resolve.Names.key -> written
 val bind : Types.generic list -> Ground.argument list -> Types.substitution
@@ -45,10 +47,8 @@ val make_c_signature :
   context ->
   Types.substitution ->
   parameters:(Language.Mode.t * Types.ty) list ->
-  has_defaults:bool ->
   ?uses:Types.capability_set ->
   Types.result ->
   Lowered.signature * Convention.result
 
-val has_defaults : Types.signature -> bool
 val list_interface_parameters : Types.signature -> (Language.Mode.t * Types.ty) list

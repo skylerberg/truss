@@ -20,7 +20,7 @@ let computed: Int64 = compute()
 let length: UInt64 = "four".length()
 let numbers: List[Int64] = [1, 2]
 let first: Int64 = numbers[0]
-let rest: Slice[Int64] = numbers[1..2]
+let rest: view List[Int64] = numbers[1..2]
 let greeting: String = "a"
 let same: Bool = greeting == greeting
 let total: Money = Money(cents: 1) + Money(cents: compute())

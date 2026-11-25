@@ -1,19 +1,42 @@
+let constrain_declared_types (associated_types : Types.associated_type list)
+    ~(by : Types.trait_reference) (reference : Types.trait_reference) =
+  let is_declared name =
+    List.exists
+      (fun (associated : Types.associated_type) -> associated.associated_name = name)
+      associated_types
+  in
+  {
+    reference with
+    associated =
+      reference.associated
+      @ List.filter
+          (fun (name, _) -> is_declared name && not (List.mem_assoc name reference.associated))
+          by.associated;
+  }
+
 let list_bound_closure_over ~find_requirements ~self (bound : Types.trait_reference) =
   let closure = ref [] in
-  let rec visit ancestors (bound : Types.trait_reference) =
-    if not (List.exists (Path.equal bound.trait) ancestors || List.mem bound !closure) then begin
-      closure := bound :: !closure;
-      match find_requirements bound.trait with
-      | Some (trait_generics, requires) ->
+  let rec visit ancestors (reference : Types.trait_reference) =
+    let requirements = find_requirements reference.trait in
+    let reference =
+      match requirements with
+      | Some (_, _, associated_types) ->
+          constrain_declared_types associated_types ~by:bound reference
+      | None -> reference
+    in
+    if not (List.exists (Path.equal reference.trait) ancestors || List.mem reference !closure) then begin
+      closure := reference :: !closure;
+      match requirements with
+      | Some (trait_generics, requires, _) ->
           let substitution =
             Types.bind_argument
-              (Types.make_self_parameter bound.trait)
+              (Types.make_self_parameter reference.trait)
               (Types.Type self)
-              (Types.make_substitution trait_generics bound.trait_arguments)
+              (Types.make_substitution trait_generics reference.trait_arguments)
           in
           List.iter
             (fun required ->
-              visit (bound.trait :: ancestors) (Types.substitute_trait substitution required))
+              visit (reference.trait :: ancestors) (Types.substitute_trait substitution required))
             requires
       | None -> ()
     end
@@ -33,6 +56,12 @@ let list_bound_closure lookups ~self (bound : Types.trait_reference) =
       List.fold_left
         (fun closure supertrait ->
           let supertrait = Types.substitute_trait substitution supertrait in
+          let supertrait =
+            match Definition.find_trait_interface lookups supertrait.trait with
+            | Some declaring ->
+                constrain_declared_types declaring.associated_types ~by:bound supertrait
+            | None -> supertrait
+          in
           if List.mem supertrait closure then closure else closure @ [ supertrait ])
         [ bound ] interface.supertraits
   | None -> [ bound ]
@@ -116,7 +145,7 @@ let has_bound lookups ~list_bounds type_ trait =
     (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait)
     (list_known_bounds lookups ~list_bounds type_)
 
-type property = Copyable | Plain | View | Holds_function
+type property = Types.property = Copyable | Plain | View | Holds_function
 type occurrence = Environment.occurrence = In_place | Indirect | Function_input
 type requirement = Environment.requirement = Never | Requires of Types.ty list
 type exposure = Environment.exposure = Always | If_any of Types.ty list
@@ -163,24 +192,13 @@ let combine_conditions find_conditions types =
       | _ -> None)
     (Some []) types
 
-exception Recursion_limit of string
+exception Recursion_limit of Catalog.Typing.t
 
 let recursion_limit = 64
 let largest_condition = 64
 
-let show_property = function
-  | Copyable -> "is `Copyable`"
-  | Plain -> "is `Plain`"
-  | View -> "is a view"
-  | Holds_function -> "holds a function"
-
-let fail_at_recursion_limit query =
-  raise
-    (Recursion_limit
-       (Printf.sprintf
-          "%s needs more than %d nested types. The compiler stops there: an associated type that \
-           holds a larger type can grow a type forever."
-          query recursion_limit))
+let fail_at_recursion_limit recursion =
+  raise (Recursion_limit (Recursion_limit { limit = recursion_limit; recursion }))
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Interface" format
 
@@ -203,19 +221,6 @@ let rec compute_conditions lookups ~facts_of ~resolve ~compute_leaf ?(in_progres
       match strip_projections type_ with
       | root when Types.is_open_type root -> Some [ root ]
       | _ -> compute_leaf type_)
-  | Types.Any trait -> (
-      let requires traits =
-        List.exists
-          (fun (bound : Types.trait_reference) -> List.exists (Path.equal bound.trait) traits)
-          (list_bound_closure lookups ~self:type_ trait)
-      in
-      match property with
-      | Copyable ->
-          if requires [ Well_known.make_path Copyable; Well_known.make_path Plain ] then Some []
-          else None
-      | Plain -> None
-      | View -> if requires [ Well_known.make_path Storable ] then Some [] else None
-      | Holds_function -> None)
   | Types.Named { path; arguments } -> (
       match (Well_known.find_builtin_type path, property) with
       | Some Storage, Plain | Some View, View | Some Handle, (Copyable | Plain) -> None
@@ -228,8 +233,7 @@ let rec compute_conditions lookups ~facts_of ~resolve ~compute_leaf ?(in_progres
       | None, _ ->
           if List.exists (Types.equal type_) in_progress then Some []
           else if List.length in_progress > recursion_limit then
-            fail_at_recursion_limit
-              (Printf.sprintf "Deciding whether `%s` %s" (Types.show type_) (show_property property))
+            fail_at_recursion_limit (Property { type_; property })
           else
             let (facts : Environment.type_facts) = facts_of path in
             Option.bind (find_stored_conditions facts property) (fun arguments_conditions ->
@@ -263,9 +267,6 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
             step_inside (if Types.terminates function_.uses then Function_input else Indirect) input)
           inputs;
         step_inside Indirect output
-    | Types.Any { trait_arguments; associated; _ } ->
-        List.iter (step_inside Indirect)
-          (list_type_arguments trait_arguments @ List.map snd associated)
     | Types.Named { path; arguments } -> (
         match Well_known.find_builtin_type path with
         | Some Array -> List.iter (step_inside In_place) (list_type_arguments arguments)
@@ -280,8 +281,7 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
                 recursions := { recursive = type_; occurrence; defining } :: !recursions
             | None, Some ({ shape = Record _ | Sum _; _ } as interface) ->
                 if List.length enclosing > recursion_limit then
-                  fail_at_recursion_limit
-                    (Printf.sprintf "Listing the types that `%s` holds" (Types.show type_));
+                  fail_at_recursion_limit (Contents { type_ });
                 let substitution = Types.make_substitution interface.type_generics arguments in
                 List.iter
                   (fun (condition, step) ->

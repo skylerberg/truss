@@ -18,8 +18,6 @@ type local =
   | Self
   | Synthetic of int
 
-type evidence = Impl of { impl : Path.t; substitution : Types.substitution } | Bound | Dynamic
-
 type pattern_constant =
   | Boolean_constant of bool
   | Integer_constant of Z.t
@@ -36,7 +34,7 @@ type 'indirect target =
       receiver : Path.receiver;
       self_type : Types.ty;
       instantiation : Types.instantiation;
-      evidence : evidence;
+      evidence : Types.evidence;
     }
   | Capability_method of { capability : Path.t; name : string }
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
@@ -51,7 +49,7 @@ and call = {
   lends : Language.Mode.t option;
 }
 
-and argument = Passed of { mode : Language.Mode.t; value : operand } | Default
+and argument = { mode : Language.Mode.t; value : operand }
 and operand = Place of place | Value of expression
 
 and place =
@@ -81,6 +79,7 @@ and kind =
   | Copy of operand
   | Function_value of { path : Path.t; instantiation : Types.instantiation }
   | Value_parameter of Types.parameter
+  | Parameter_default of { definition : Path.t; position : int; substitution : Types.substitution }
   | Lambda of {
       parameters : pattern list;
       captures : capture list;
@@ -98,7 +97,6 @@ and kind =
   | Connective of { connective : Language.Connective.t; left : expression; right : expression }
   | Matches of { value : operand; pattern : pattern }
   | Convert of { conversion : conversion; value : expression }
-  | To_any of { value : expression; trait : Types.trait_reference; evidence : evidence }
   | If of { condition : expression; then_ : block; else_ : block option }
   | Match of { scrutinees : operand list; arms : arm list }
   | Block of block
@@ -128,7 +126,7 @@ and specification_function =
   | Calls
 
 and construction = Array | Specification_only
-and conversion = Widen | To_integer | From_integer | View_to_owned
+and conversion = Widen | To_integer | From_integer | To_view
 
 and binder =
   | Over_type of { local : local; type_ : Types.ty }

@@ -6,27 +6,27 @@ fn letters(count: UInt64) -> List[UInt8] {
   List.filled(97, count: count)
 }
 
-fn sha256_of(bytes: Slice[UInt8]) -> String {
+fn sha256_of(bytes: List[UInt8]) -> String {
   let digest = cryptography.sha256(bytes)
   hex.encode(digest[..])
 }
 
-fn sha512_of(bytes: Slice[UInt8]) -> String {
+fn sha512_of(bytes: List[UInt8]) -> String {
   let digest = cryptography.sha512(bytes)
   hex.encode(digest[..])
 }
 
-fn sha384_of(bytes: Slice[UInt8]) -> String {
+fn sha384_of(bytes: List[UInt8]) -> String {
   let digest = cryptography.sha384(bytes)
   hex.encode(digest[..])
 }
 
-fn md5_of(bytes: Slice[UInt8]) -> String {
+fn md5_of(bytes: List[UInt8]) -> String {
   let digest = cryptography.md5(bytes)
   hex.encode(digest[..])
 }
 
-fn sha1_of(bytes: Slice[UInt8]) -> String {
+fn sha1_of(bytes: List[UInt8]) -> String {
   let digest = cryptography.sha1(bytes)
   hex.encode(digest[..])
 }
@@ -115,12 +115,12 @@ test "SHA-1 of the standard's examples and around the padding's edges" {
   assert sha1_of(letters(200)) == "e61cfffe0d9195a525fc6cf06ca2d77119c24a40"
 }
 
-fn hmac256_of(key: Slice[UInt8], message: Slice[UInt8]) -> String {
+fn hmac256_of(key: List[UInt8], message: List[UInt8]) -> String {
   let code = cryptography.hmac_sha256(key, message: message)
   hex.encode(code[..])
 }
 
-fn hmac512_of(key: Slice[UInt8], message: Slice[UInt8]) -> String {
+fn hmac512_of(key: List[UInt8], message: List[UInt8]) -> String {
   let code = cryptography.hmac_sha512(key, message: message)
   hex.encode(code[..])
 }
@@ -212,7 +212,7 @@ fn pattern_byte(index: UInt64) -> UInt8
   }
 }
 
-fn blake3_of(bytes: Slice[UInt8]) -> String {
+fn blake3_of(bytes: List[UInt8]) -> String {
   let digest = cryptography.blake3(bytes)
   hex.encode(digest[..])
 }
@@ -238,7 +238,7 @@ test "BLAKE3 at block and chunk boundaries" {
   assert blake3_of(pattern(16384)) == "f875d6646de28985646f34ee13be9a576fd515f76b5b0a26bb324735041ddde4"
 }
 
-fn keyed_blake3_of(bytes: Slice[UInt8]) -> String {
+fn keyed_blake3_of(bytes: List[UInt8]) -> String {
   let key = "whats the Elvish word for friend".to_bytes()
   var words: Array[UInt8, 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -353,7 +353,7 @@ test "AES-256-GCM seals to the bytes OpenSSL produces" {
   assert sealed_digest(cipher, plain: 300, data: 0) == "f07eb869e75d33553f8185ebeedbb018f3df2b0e078a4bc128b87cd01713007c"
 }
 
-fn opens(cipher: cryptography.Cipher, sealed: Slice[UInt8], data: UInt64) -> Option[List[UInt8]] {
+fn opens(cipher: cryptography.Cipher, sealed: List[UInt8], data: UInt64) -> Option[List[UInt8]] {
   match cryptography.open(
     sealing_key(),
     nonce: sealing_nonce(),
@@ -474,7 +474,7 @@ test "X25519 refuses a public key of low order" {
   assert shared_hex(stepped_32(1, step: 3), their: cryptography.AgreementPublicKey(bytes: one)) == "none"
 }
 
-fn signature_hex(seed: Array[UInt8, 32], message: Slice[UInt8]) -> String {
+fn signature_hex(seed: Array[UInt8, 32], message: List[UInt8]) -> String {
   let signature = cryptography.SigningKey.from_seed(seed).sign(message)
   hex.encode(signature.bytes[..])
 }

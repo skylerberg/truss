@@ -1,6 +1,6 @@
 type Shelf(books: List[String])
 
-type First(title: String, rest: Slice[String])
+type First(title: String, rest: view List[String])
 
 type Numbered(index: UInt64, title: String)
 

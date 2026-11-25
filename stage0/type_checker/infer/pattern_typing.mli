@@ -14,7 +14,7 @@ val check_pattern :
 val check_parameter_pattern :
   State.state -> State.env -> Syntax.pattern -> Types.ty -> mode:Language.Mode.t -> unit
 
-val report_negated_unsigned : State.state -> Syntax.expression -> Types.ty -> Diagnostic.reported
+val report_negated_unsigned : State.state -> Syntax.expression -> Types.ty -> Catalog.reported
 
 val check_integer_literal :
   State.state -> State.env -> ?expected:Types.ty -> Syntax.expression -> Z.t -> Types.ty

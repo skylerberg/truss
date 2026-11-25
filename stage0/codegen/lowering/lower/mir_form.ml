@@ -208,12 +208,6 @@ and assign state (target : Mir.place) (value : Mir.rvalue) ~origin =
   match (target, value) with
   | { root = Local local; projections = [] }, Operand (Borrow { place = source; mode; _ }) ->
       Mir_places.alias state local (Mir_places.lower_place state source) ~writable:(mode = Mut)
-  | { root = Local local; projections = [] }, Convert { conversion = View_to_owned; value; _ } ->
-      Targets.lower_owner_of_view state
-        ~owner:(Lowering.ground state (Mir_places.lookup_local_info state local).type_)
-        ~view:(Mir_places.compute_operand_type state value)
-        (Mir_places.lower_operand_place state value)
-        (Mir_places.lower_place state target)
   | _ -> (
       let ty = Mir_places.compute_target_type state target value in
       let types_ty =
@@ -240,11 +234,44 @@ and assign state (target : Mir.place) (value : Mir.rvalue) ~origin =
       if List.mem target frame.taken then
         frame.taken <- List.filter (fun taken -> taken <> target) frame.taken
       else Mir_drops.drop_overwritten state target destination ty;
-      match evaluated with
-      | Some fresh ->
+      match (evaluated, value, target) with
+      | Some fresh, _, _ ->
           Emit_c.Ir_builder.emit state.builder
             (Assign (destination, Use (Lowering.make_owned_operand state fresh ty)))
-      | None -> lower_rvalue_into ?types_ty state value destination ty ~origin)
+      | ( None,
+          Parameter_default { definition; position; substitution },
+          { root = Local local; projections = [] } ) ->
+          let default =
+            Mir.read_parameter_default_graph state.context.lookups.mir ~definition ~position
+          in
+          let caller = state.frame in
+          state.frame <-
+            {
+              caller with
+              code =
+                Definitions.make_default_code state.context caller.code ~source:default.source
+                  ~substitution;
+              self_place = None;
+            };
+          let default_frame = inline_mir state default.form destination in
+          state.frame <- caller;
+          Option.iter
+            (fun (inlined : Lowering.mir_frame) ->
+              Option.iter
+                (fun at_return -> inlined.move_state <- at_return)
+                inlined.move_state_at_return;
+              if Mir_drops.list_default_temporaries inlined <> [] then begin
+                let is_applied =
+                  Lowered.make_local_place
+                    (Emit_c.Ir_builder.allocate_local state.builder ~is_zeroed:true (Raw Bool))
+                in
+                Emit_c.Ir_builder.emit state.builder
+                  (Assign (is_applied, Use (Constant (Bool true))));
+                Hashtbl.replace (Mir_places.require_mir_frame state).applied_defaults local
+                  { default_frame; is_applied }
+              end)
+            default_frame.mir
+      | None, _, _ -> lower_rvalue_into ?types_ty state value destination ty ~origin)
 
 and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~origin
     =
@@ -261,10 +288,8 @@ and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lower
            (List.map
               (fun operand ->
                 let operand_ty = Mir_places.compute_operand_type state operand in
-                if
-                  Storage.find_storage_element operand_ty <> None
-                  || Storage.find_view_element operand_ty <> None
-                then Intrinsics.Place (Mir_places.lower_operand_place state operand)
+                if Storage.find_storage_element operand_ty <> None then
+                  Intrinsics.Place (Mir_places.lower_operand_place state operand)
                 else Intrinsics.Value (Mir_places.lower_operand state operand))
               operands)
            ~destination:(Some destination)
@@ -314,18 +339,9 @@ and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lower
       | _ -> Mir_places.write_operand state inner destination)
   | Convert { conversion = To_integer | From_integer; _ } ->
       Definitions.raise_bug "a conversion that exists only in specifications"
-  | Convert { conversion = View_to_owned; _ } ->
-      Definitions.raise_bug "the owner of a view written outside its lent local"
-  | To_any { value = inner; trait; evidence } ->
-      let impl, type_arguments =
-        Targets.resolve_impl state.context state.frame.code.substitution ~trait
-          ~self_type:(Mir.extract_operand_type inner) ~evidence
-      in
-      Targets.lower_any_into state ~any_ty:ty
-        ~inner_ty:(Mir_places.compute_operand_type state inner)
-        ~impl ~type_arguments
-        ~value:(Mir_places.lower_operand_place state inner)
-        destination
+  | Convert { conversion = To_view; value; _ } ->
+      Emit_c.Ir_builder.emit state.builder
+        (Assign (destination, Use (Copy (Mir_places.lower_operand_place state value))))
   | Copy source ->
       Drop_and_copy.copy_into state.context.drop_and_copy state.builder ~destination
         ~source:(Mir_places.lower_operand_place state source)
@@ -347,6 +363,8 @@ and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lower
       match Mir_places.ground_argument state (Value (Value_parameter parameter)) with
       | Value number -> assign (Use (Targets.lower_literal state ty (Integer_value number)))
       | _ -> Definitions.raise_bug "the value parameter %s is not a number" parameter.name)
+  | Parameter_default _ ->
+      Definitions.raise_bug "a default assigned to a place that is no temporary of its own"
   | Lambda { body = index; captures; _ } ->
       let function_type =
         match ty with
@@ -393,8 +411,8 @@ and lower_field_default_place state ty ~variant ~field =
       lower_mir_into state default.value place;
       (place, default_ty))
 
-and lower_mir_into ?(arguments = []) state (expression_mir : Mir.Graph.t)
-    (destination : Lowered.place) =
+and inline_mir ?(arguments = []) state (expression_mir : Mir.Graph.t) (destination : Lowered.place)
+    : Lowering.frame =
   let expression_mir = Loop_parts.end_parts expression_mir in
   let caller = state.frame in
   let exit = Emit_c.Ir_builder.allocate_block state.builder in
@@ -402,33 +420,37 @@ and lower_mir_into ?(arguments = []) state (expression_mir : Mir.Graph.t)
     Mir_places.make_body_frame state ~returns_into:destination ~lambdas:expression_mir.lambdas
       expression_mir.body
   in
-  state.frame <- { caller with exit = Some (exit, List.length state.scopes); mir = Some frame };
+  let inlined = { caller with exit = Some (exit, List.length state.scopes); mir = Some frame } in
+  state.frame <- inlined;
   List.iter2 (Mir_places.bind_local state) expression_mir.body.parameters arguments;
   lower_body state frame;
   Emit_c.Ir_builder.finish state.builder Unreachable;
   Emit_c.Ir_builder.start state.builder exit;
-  state.frame <- caller
+  state.frame <- caller;
+  inlined
+
+and lower_mir_into ?arguments state expression_mir destination =
+  ignore (inline_mir ?arguments state expression_mir destination)
 
 and lower_call_into state (call : Mir.call) destination ~origin =
-  match (Mir_calls.resolve_callee state call.callee, call.callee.target) with
-  | Some (path, instantiation), _ -> (
+  match call.callee.target with
+  | Function _ | Trait_method _ -> (
+      let path, instantiation = Mir_calls.resolve_item state call.callee in
       let signature, substitution = Mir_calls.read_callee_signature state path instantiation in
-      let arguments, mask =
-        Mir_calls.evaluate_arguments state signature substitution call.arguments
-      in
+      let arguments = Mir_calls.evaluate_arguments state signature substitution call.arguments in
       match signature.output with
       | Returns _ ->
           Targets.lower_item_call state
             (Lowered.Item.make_code path instantiation)
-            ~signature ~substitution ~arguments ~mask ~destination
+            ~signature ~substitution ~arguments ~destination
             ~site:(Some (Mir_places.locate_site state origin))
             ()
       | Lends _ -> Definitions.raise_bug "a lending call that lends no part")
-  | None, Intrinsic { operation = Runtime Holds_invariant; _ } -> (
+  | Intrinsic { operation = Runtime Holds_invariant; _ } -> (
       match call.arguments with
       | [ value; clause ] -> check_invariant state ~value ~clause ~destination
       | _ -> Definitions.raise_bug "holds_invariant takes a value and a clause")
-  | None, Intrinsic { operation; type_arguments } -> (
+  | Intrinsic { operation; type_arguments } -> (
       match
         Mir_calls.lower_intrinsic state operation ~type_arguments call.arguments
           ~destination:(Some destination)
@@ -436,14 +458,13 @@ and lower_call_into state (call : Mir.call) destination ~origin =
       with
       | Some _ -> Definitions.raise_bug "a lending intrinsic that lends no part"
       | None -> ())
-  | None, Capability_method { capability; name } ->
+  | Capability_method { capability; name } ->
       let slot, signature = Targets.lookup_capability_method state.context capability name in
-      let arguments, _ =
+      let arguments =
         Mir_calls.evaluate_arguments state
           { signature with receiver = None }
           Types.no_substitution call.arguments
       in
-      lower_capability_defaults state ~capability ~name call.arguments arguments;
       if Path.equal capability Definitions.panic_path then
         match (arguments, Lowering.find_panic_trace state) with
         | [ (_, _, message) ], Some trace ->
@@ -479,20 +500,7 @@ and lower_call_into state (call : Mir.call) destination ~origin =
              });
         if not c_signature.returns then Lowering.emit_unreachable_block state
       end
-  | None, Trait_method { trait; name; receiver; self_type; _ } -> (
-      let any_type =
-        match Types.substitute state.frame.code.substitution self_type with
-        | Types.Any reference -> reference
-        | receiver -> Definitions.raise_bug "a call through any on %s" (Types.show receiver)
-      in
-      match List.map (Mir_calls.lower_argument_place state) call.arguments with
-      | (_, _, any) :: arguments ->
-          Targets.lower_call_through_any state ~any_type ~trait:trait.trait ~name ~receiver ~any
-            ~arguments
-            ~site:(Some (Mir_places.locate_site state origin))
-            destination
-      | [] -> Definitions.raise_bug "a call through any with no receiver")
-  | None, Indirect function_value ->
+  | Indirect function_value ->
       let function_type =
         match Mir_places.compute_operand_type state function_value with
         | Function function_type -> function_type
@@ -507,49 +515,12 @@ and lower_call_into state (call : Mir.call) destination ~origin =
              place)
            call.arguments)
         destination
-  | None, Function _ -> Definitions.raise_bug "a function that does not resolve"
-
-and lower_capability_defaults state ~capability ~name (arguments : Mir.argument list) evaluated =
-  if List.mem Mir.Default arguments then begin
-    let defaults =
-      Mir_places.read_parameter_defaults state.context (Path.make_capability_method capability name)
-    in
-    let caller = state.frame in
-    state.frame <-
-      {
-        caller with
-        code =
-          {
-            caller.code with
-            definition = defaults.source.path;
-            written = Some (Definitions.read_written state.context defaults.source);
-            enclosing_impl = None;
-            substitution = Types.no_substitution;
-          };
-        self_place = None;
-      };
-    List.iteri
-      (fun position ((argument : Mir.argument), (_, ty, place)) ->
-        match (argument, List.assoc_opt position defaults.form) with
-        | Default, Some default ->
-            lower_mir_into state default place;
-            if not (Lowering.is_trivial state ty) then
-              (Lowering.lookup_innermost_scope state).owned <-
-                Drop_value place :: (Lowering.lookup_innermost_scope state).owned
-        | Default, None ->
-            Definitions.raise_bug
-              "the argument at position %d of `%s.%s` is omitted and has no default" position
-              (Path.show capability) name
-        | Passed _, _ -> ())
-      (List.combine arguments evaluated);
-    state.frame <- caller
-  end
 
 and check_invariant state ~value ~clause ~destination =
   let _, value_ty, value_place = Mir_calls.lower_argument_place state value in
   let index =
     match clause with
-    | Passed { value = Immediate { value = Integer index; _ }; _ } -> Z.to_int index
+    | { value = Immediate { value = Integer index; _ }; _ } -> Z.to_int index
     | _ -> Definitions.raise_bug "holds_invariant with a clause that is not a literal"
   in
   let path =
@@ -643,45 +614,26 @@ and lend ?(forwards = 0) state part (call : Mir.call) ~origin =
         end
       in
       let place =
-        match (Mir_calls.resolve_callee state call.callee, callee) with
-        | Some (path, instantiation), _ ->
+        match callee with
+        | Function _ | Trait_method _ ->
+            let path, instantiation = Mir_calls.resolve_item state call.callee in
             let signature, substitution =
               Mir_calls.read_callee_signature state path instantiation
             in
-            let arguments, mask =
+            let arguments =
               Mir_calls.evaluate_arguments state signature substitution call.arguments
             in
             compute_lent_place signature.output substitution (fun ~lending destination ->
                 Targets.lower_item_call state
                   (Lowered.Item.make_code path instantiation)
-                  ~signature ~substitution ~arguments ~mask ~lending ~destination
+                  ~signature ~substitution ~arguments ~lending ~destination
                   ~site:(Some (Mir_places.locate_site state origin))
                   ())
-        | None, Trait_method { trait; name; receiver; self_type; _ } -> (
-            let any_type =
-              match Types.substitute state.frame.code.substitution self_type with
-              | Types.Any reference -> reference
-              | receiver -> Definitions.raise_bug "a call through any on %s" (Types.show receiver)
-            in
-            let _, signature =
-              Targets.lookup_dynamic_method state.context ~any:any_type trait.trait name receiver
-            in
-            match List.map (Mir_calls.lower_argument_place state) call.arguments with
-            | (_, _, any) :: arguments ->
-                compute_lent_place signature.output
-                  (Targets.make_any_substitution state.context ~any:any_type trait.trait)
-                  (fun ~lending destination ->
-                    Targets.lower_call_through_any state ~any_type ~trait:trait.trait ~name
-                      ~receiver ~any ~arguments ~lending
-                      ~site:(Some (Mir_places.locate_site state origin))
-                      destination)
-            | [] -> Definitions.raise_bug "a call through any with no receiver")
-        | None, Capability_method { capability; name } ->
+        | Capability_method { capability; name } ->
             Targets.raise_lending_capability_method capability name
-        | None, Indirect _ ->
+        | Indirect _ ->
             Definitions.raise_bug "a lending call of a function value, whose type cannot lend"
-        | None, (Function _ | Intrinsic _) ->
-            Definitions.raise_bug "a lending call that does not resolve"
+        | Intrinsic _ -> Definitions.raise_bug "a lending call of an intrinsic that lends no part"
       in
       Mir_lends.emit_mark state Lend_called lent;
       Mir_places.bind_local state part place
@@ -764,15 +716,9 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
         in
         Emit_c.Ir_builder.emit state.builder
           (Assign (destination, Build { ty; variant; fields = List.map fst built }));
-        let is_indirect variant =
-          List.exists
-            (fun (shape : Memory_layout.variant_shape) -> shape.name = variant && shape.indirect)
-            (match Memory_layout.compute_shape state.context.env ty with
-            | Sum shapes -> shapes
-            | _ -> [])
-        in
         (match variant with
-          | Some variant when is_indirect variant -> [ ([], Deferred_free variant) ]
+          | Some variant when Memory_layout.is_indirect state.context.env ty variant ->
+              [ ([], Deferred_free variant) ]
           | _ -> [])
         @ List.concat_map snd built
   in
@@ -790,7 +736,8 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
     let target = List.fold_left Lowered.project slot inside in
     match deferred with
     | Deferred_drop ty ->
-        defer_call Lend_defer_drop [ Constant (Symbol_address (Any_drop ty)); take_address target ]
+        defer_call Lend_defer_drop
+          [ Constant (Symbol_address (Untyped_drop ty)); take_address target ]
     | Deferred_write_back { source; ty } ->
         defer_call Lend_defer_write_back
           [ take_address source; take_address target; Constant (Size_of ty) ]
@@ -855,6 +802,8 @@ and lower_terminator state (region : Mir_drops.region) (ending : Mir.Graph.termi
            });
       Emit_c.Ir_builder.start state.builder (Emit_c.Ir_builder.allocate_block state.builder)
   | Return returned ->
+      (let frame = Mir_places.require_mir_frame state in
+       frame.move_state_at_return <- Some (Moves.copy frame.move_state));
       (match (Mir_places.find_result_slot state, returned) with
       | Some _, Some (Use { place = { root = Local local; projections = [] }; _ })
         when List.mem local (Mir_places.require_mir_frame state).returned ->
@@ -971,80 +920,6 @@ and lower_for_loop state (region : Mir_drops.region) ~(iteration : Mir.iteration
   | Parallel -> Mir_loops.lower_for_each state ~schedule:Chunked ~iteration ~each ~origin
   | Language.Loop_mode.Sequential ->
       Mir_loops.lower_for_each state ~schedule:Sequential ~iteration ~each ~origin
-
-let fill_defaults (state : Lowering.state) (mask : Lowered.place) (body : Mir.Graph.body)
-    ~(defaults : (int * Mir.Graph.t) list) (places : Lowered.place list) =
-  let builder = state.builder in
-  let bit = ref (-1) in
-  List.mapi
-    (fun position (parameter, arrived) ->
-      let mode, name, type_ = Mir_places.extract_parameter body parameter in
-      match List.assoc_opt position defaults with
-      | None -> arrived
-      | Some default ->
-          incr bit;
-          let bit = !bit in
-          let ty = Lowering.ground state type_ in
-          let passed_bit =
-            Emit_c.Ir_builder.emit_value builder (Raw (Integer UInt64))
-              (Binary
-                 (Bit_and, Copy mask, Lowering.make_int_constant UInt64 (Z.shift_left Z.one bit)))
-          in
-          let is_omitted = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-          Emit_c.Ir_builder.emit builder
-            (Assign
-               ( Lowered.make_local_place is_omitted,
-                 Compare (Equal, passed_bit, Lowering.make_int_constant UInt64 Z.zero) ));
-          let fill = Emit_c.Ir_builder.allocate_block builder
-          and after = Emit_c.Ir_builder.allocate_block builder in
-          let fill_unless_passed other =
-            Emit_c.Ir_builder.branch builder
-              (Holds (Copy (Lowered.make_local_place is_omitted)))
-              ~yes:fill ~no:other
-          in
-          let place =
-            if mode = Own && not (Lowering.is_trivial state ty) then begin
-              let owned_here =
-                Lowered.make_local_place (Emit_c.Ir_builder.allocate_local builder ?name (Value ty))
-              in
-              let passed_block = Emit_c.Ir_builder.allocate_block builder in
-              fill_unless_passed passed_block;
-              Emit_c.Ir_builder.start builder passed_block;
-              Emit_c.Ir_builder.emit builder (Assign (owned_here, Use (Move arrived)));
-              Emit_c.Ir_builder.finish builder (Goto after);
-              Emit_c.Ir_builder.start builder fill;
-              Lowering.run_in_statement state (fun () -> lower_mir_into state default owned_here);
-              owned_here
-            end
-            else begin
-              let make_default_value () =
-                Lowering.allocate_flagged_binding state ty
-                  ~flag:(Lowered.make_local_place is_omitted)
-              in
-              fill_unless_passed after;
-              Emit_c.Ir_builder.start builder fill;
-              Lowering.run_in_statement state (fun () ->
-                  match arrived with
-                  | { projections = [ Deref ]; root = Local pointer } ->
-                      let value = make_default_value () in
-                      lower_mir_into state default value;
-                      Emit_c.Ir_builder.emit builder
-                        (Assign
-                           ( Lowered.make_local_place pointer,
-                             Use (Address { place = value; writable = true }) ))
-                  | place when mode = Own || Lowering.is_trivial state ty ->
-                      lower_mir_into state default place
-                  | place ->
-                      let value = make_default_value () in
-                      lower_mir_into state default value;
-                      Emit_c.Ir_builder.emit builder (Assign (place, Use (Copy value))));
-              arrived
-            end
-          in
-          Emit_c.Ir_builder.finish builder (Goto after);
-          Emit_c.Ir_builder.start builder after;
-          place)
-    (List.combine body.parameters places)
 
 let lower_code (state : Lowering.state) path ~parameters ?lending () =
   let code_mir = Loop_parts.end_parts (Mir_places.read_mir_graph state.context path) in

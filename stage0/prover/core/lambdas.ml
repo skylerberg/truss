@@ -124,16 +124,17 @@ let add_quantified_fact (context : State.context) (frame : State.frame) ~capture
     | Some closed -> Facts.add_fact context closed
     | None -> ()
 
-let make_input_variables context label (function_type : Types.function_type) =
+let make_input_variables context ~start_fresh (function_type : Types.function_type) =
   List.mapi
     (fun index (_, input) ->
-      (Facts.make_variable label ~numbers:[ index ], Facts.declare_sort context input))
+      ( Facts.make_variable "lambda.argument" ~numbers:[ start_fresh; index ],
+        Facts.declare_sort context input ))
     function_type.inputs
 
 let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_free
     (function_type : Types.function_type) term ~called ~arguments ~start_fresh ~end_fresh
     ~start_declarations ~premises ~shown ~ended =
-  let parameters = make_input_variables context "lambda.argument" function_type in
+  let parameters = make_input_variables context ~start_fresh function_type in
   let lift =
     make_lifting context frame ~called ~arguments ~start_fresh ~end_fresh ~start_declarations
       parameters
@@ -162,7 +163,7 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
 let add_lambda_relation (context : State.context) (frame : State.frame) ~capture_free
     (function_type : Types.function_type) term ~called ~arguments ~start_fresh ~end_fresh
     ~start_declarations ~premises ~shown ~ended ~read_exits =
-  let inputs = make_input_variables context "lambda.argument" function_type in
+  let inputs = make_input_variables context ~start_fresh function_type in
   let changed =
     List.filter_map
       (fun (index, ((mode : Language.Mode.t), input)) ->
@@ -170,7 +171,7 @@ let add_lambda_relation (context : State.context) (frame : State.frame) ~capture
         | Mut ->
             Some
               ( index,
-                ( Facts.make_variable "lambda.changed" ~numbers:[ index ],
+                ( Facts.make_variable "lambda.changed" ~numbers:[ start_fresh; index ],
                   Facts.declare_sort context input ) )
         | Read | Own -> None)
       (List.mapi (fun index input -> (index, input)) function_type.inputs)
@@ -178,7 +179,7 @@ let add_lambda_relation (context : State.context) (frame : State.frame) ~capture
   let returned =
     if returns_value function_type then
       [
-        ( Facts.make_variable "lambda.result" ~numbers:[],
+        ( Facts.make_variable "lambda.result" ~numbers:[ start_fresh ],
           Facts.declare_sort context function_type.output );
       ]
     else []
@@ -240,8 +241,14 @@ let add_lambda_relation (context : State.context) (frame : State.frame) ~capture
 let add_logic_relation (context : State.context) (frame : State.frame) ~capture_free
     (function_type : Types.function_type) term =
   if returns_value function_type then begin
-    let inputs = make_input_variables context "lambda.argument" function_type in
-    let returned = Facts.make_variable "lambda.result" ~numbers:[] in
+    let inputs =
+      List.mapi
+        (fun index (_, input) ->
+          ( Facts.make_variable "relation.argument" ~numbers:[ index ],
+            Facts.declare_sort context input ))
+        function_type.inputs
+    in
+    let returned = Facts.make_variable "relation.result" ~numbers:[] in
     let entries = List.map (fun (name, _) -> Logic.Symbol name) inputs in
     let holds =
       make_callback_ensures context function_type term ~entries ~exits:entries
@@ -435,29 +442,33 @@ let find_lambda_definition context frame (function_type : Types.function_type)
       | _ -> None)
   | _ -> None
 
-let check_valid context frame location ty term ~deep ~when_ =
+let check_valid context frame location ty term ~deep ~moment =
   match Validity.make_validity context frame ~assuming:false ~deep ty term with
   | Logic.Boolean true -> ()
-  | valid ->
-      Facts.oblige context frame Invariant location
-        [ Text (Printf.sprintf "The invariant of `%s` may not hold %s." (Types.show ty) when_) ]
-        valid
+  | valid -> Facts.oblige context frame location (Invariant_may_fail { type_ = ty; moment }) valid
 
 let classify_counting (cost : Mir.cost) : Costs.counting =
   match cost.bound with Order_of _ -> Units | At_most _ -> At_most | Exactly _ -> Exactly
 
-let list_loop_counters locals (body : Mir.body) =
+let list_loop_counters context locals (body : Mir.body) =
   let counters = ref [] in
   let note (loop : Mir.loop) =
     List.iter
       (function
         | Mir.Cost cost -> (
-            match Contracts.find_resource cost ~locals with
-            | Some resource ->
-                counters :=
-                  { Costs.resource; counting = classify_counting cost; amortized = false }
-                  :: !counters
-            | None -> Facts.raise_unsupported Whole_definition "this `calls` target")
+            match
+              Conditions.find_obligation_condition
+                (Conditions.decide context ~substitution:Types.no_substitution cost.holds_when)
+            with
+            | None -> ()
+            | Some condition -> (
+                match Contracts.find_resource cost ~locals with
+                | Some resource ->
+                    counters :=
+                      ( { Costs.resource; counting = classify_counting cost; amortized = false },
+                        condition )
+                      :: !counters
+                | None -> Facts.raise_unsupported Whole_definition Calls_target))
         | Invariant _ | Decreases _ -> ())
       loop.clauses
   in
@@ -474,6 +485,12 @@ let list_loop_counters locals (body : Mir.body) =
   in
   visit body.code;
   List.rev !counters
+
+let assign_counters (context : State.context) (sources : (Costs.counter * Types.condition) list) =
+  let counters = Contracts.deduplicate_counters (List.map fst sources) in
+  context.counters <- counters;
+  context.conditional_counters <-
+    List.filter (fun counter -> not (List.mem (counter, []) sources)) counters
 
 let list_facts_since (context : State.context) count =
   let rec take count list =
@@ -540,11 +557,22 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         else None)
       Language.Metric.all
   in
-  let saved_counters = context.counters in
-  context.counters <-
-    Contracts.deduplicate_counters
-      (List.map snd operand_counters @ List.map fst promised
-      @ list_loop_counters inside.locals written.code);
+  let saved_counters = context.counters
+  and saved_conditional_counters = context.conditional_counters in
+  assign_counters context
+    (List.map
+       (fun (_, (counter : Costs.counter)) ->
+         let is_conditional =
+           List.for_all
+             (fun (enclosing : Costs.counter) ->
+               enclosing.resource <> counter.resource
+               || List.mem enclosing context.conditional_counters)
+             context.counters
+         in
+         (counter, if is_conditional then context.condition else []))
+       operand_counters
+    @ List.map (fun (counter, _) -> (counter, [])) promised
+    @ list_loop_counters context inside.locals written.code);
   let inside =
     { inside with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
   in
@@ -581,7 +609,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         context.terminates <- saved_terminates;
         context.panics <- saved_panics;
         context.can_declare_panic <- saved_can_declare_panic;
-        context.counters <- saved_counters)
+        context.counters <- saved_counters;
+        context.conditional_counters <- saved_conditional_counters)
       (fun () ->
         let finished =
           let inside = { inside with locals = remove_temporaries inside.locals } in
@@ -611,7 +640,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
               (fun term ->
                 check_valid context exit_ location
                   (Facts.substitute_type context frame function_type.output)
-                  term ~deep:true ~when_:"for the value this lambda returns")
+                  term ~deep:true ~moment:Lambda_result)
               returned;
             List.iter2
               (fun parameter (mode, input) ->
@@ -621,7 +650,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                     | Some term ->
                         check_valid context exit_ location
                           (Facts.substitute_type context frame input)
-                          term ~deep:true ~when_:"for a `mut` parameter when this lambda ends"
+                          term ~deep:true ~moment:Lambda_mut_parameter
                     | None -> ())
                 | _ -> ())
               written.code.parameters function_type.inputs)
@@ -645,14 +674,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
               (fun result ->
                 List.iter
                   (fun (quoted, promise) ->
-                    Facts.oblige context exit_ Ensures location
-                      [
-                        Text "`";
-                        quoted;
-                        Text
-                          "` may not hold of a result of this lambda, and the type of the \
-                           parameter it is passed for promises it.";
-                      ]
+                    Facts.oblige context exit_ location
+                      (Lambda_promise { promise = quoted })
                       promise)
                   (list_promises ~entries:arguments ~exits ~result))
               result)
@@ -671,17 +694,15 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                   | No_more_than limit -> Logic.less_equal spent (Logic.Integer limit)
                   | Exactly_cost limit -> Logic.equal spent (Logic.Integer limit)
                 in
-                let difference, verb =
-                  match counter.counting with
-                  | Units | At_most -> ("more than", "allows")
-                  | Exactly -> ("more or less than", "states")
-                in
-                Facts.oblige context exit_ Cost location
-                  [
-                    Text
-                      (Printf.sprintf "This lambda may spend %s its type, `%s`, %s." difference
-                         (Types.show ty) verb);
-                  ]
+                Facts.oblige context exit_ location
+                  (Lambda_cost
+                     {
+                       counting =
+                         (match counter.counting with
+                         | Units | At_most -> Upper_bound
+                         | Exactly -> Exact);
+                       type_ = ty;
+                     })
                   goal)
               promised)
           exits;
@@ -703,17 +724,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                   ( bound,
                     List.filter_map
                       (fun ((exit_ : State.frame), spent) ->
-                        Facts.make_closed_obligation context exit_ Cost location
-                          [
-                            Text
-                              (Printf.sprintf
-                                 "The prover cannot show that a call of this lambda %s than the \
-                                  bound it found for every call, which a cost here relies on."
-                                 (match metric with
-                                 | Time -> "takes no more time"
-                                 | Allocations -> "makes no more allocations"
-                                 | Allocated_bytes -> "allocates no more bytes"));
-                          ]
+                        Facts.make_closed_obligation context exit_ location
+                          (Lambda_call_above_bound { metric })
                           (Logic.less_equal spent bound))
                       (List.combine exits spent) ) ))
               (Costs.find_cost_bound ~varies:(Facts.mentions_fresh_after context mark) ~facts most))
@@ -790,6 +802,7 @@ let make_passed_values context frame (invocation : Invocation.t)
             origin = Some site.origin;
             passed_place = None;
             type_ = Facts.substitute_type context frame site.type_;
+            declared_type = Facts.substitute_declared_type context frame site.type_;
             term;
           })
     arguments

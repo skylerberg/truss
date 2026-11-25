@@ -13,8 +13,12 @@
   syntax
   types
   diagnostic
+  catalog
+  description
+  renderer
   strongly_connected
   core
+  core_walk
   manifest
   project
   parser
@@ -27,6 +31,8 @@
   package_checks
   lowering
   lowered
+  c_compiler
+  profile
   ground
   libc
   prover

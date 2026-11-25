@@ -33,7 +33,7 @@ fn Catalog.label_or_first(self, index: UInt64) lends String {
 fn Catalog.first_matching(self, prefix: String) lends Option[String] {
   for index in 0..self.bigs.length() {
     if self.label(index) is Some(label) {
-      if label.slice().starts_with(prefix.slice()) {
+      if label.starts_with(prefix) {
         return Some(label)
       }
     }

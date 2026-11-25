@@ -59,7 +59,7 @@ impl Tasks for Flag {
     0
   }
 
-  fn wait(self, key: UInt64, ticket: UInt64, reason: StringSlice) {}
+  fn wait(self, key: UInt64, ticket: UInt64, reason: String) {}
 
   fn wake(self, key: UInt64) {}
 
@@ -80,7 +80,7 @@ fn without_tasks(ticks: intrinsic.Shared[Int64]) -> UInt64 {
   intrinsic.shared_key(ticks)
 }
 
-fn of_a_view(numbers: intrinsic.Shared[Slice[Int64]]) -> UInt64
+fn of_a_view(numbers: intrinsic.Shared[view List[Int64]]) -> UInt64
   uses Tasks
 {
   intrinsic.shared_key(numbers)

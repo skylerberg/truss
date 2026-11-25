@@ -1,8 +1,8 @@
-type Sized(view: Slice[Int64], count: UInt64)
+type Sized(viewed: view List[Int64], count: UInt64)
 
 fn f(items: mut List[Int64], other: List[Int64]) -> UInt64 {
-  let sized = Sized(view: other[..], count: 0)
-  let changed = sized with (view: items[..])
+  let sized = Sized(viewed: other[..], count: 0)
+  let changed = sized with (viewed: items[..])
   mut items.push(1)
-  changed.view.length()
+  changed.viewed.length()
 }

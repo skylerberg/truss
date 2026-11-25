@@ -1,7 +1,9 @@
 type t = {
   interface : Interface.Lookups.t;
-  read_core : Resolve.Names.key -> Core.t;
-  list_uses : Path.package -> (Resolve.Names.key * Path.t) list;
-  list_instantiations : Path.package -> (Path.t * Path.t * bool) list;
-  list_used_packages : Path.package -> Path.package list;
+  list_tests : Path.package -> string -> Resolve.Names.key list;
+  list_instantiations : Resolve.Names.key -> (Resolve.Names.key * bool) list;
+  list_users : Path.t -> Resolve.Names.declaration Seq.t;
+  list_used : Resolve.Names.key -> Resolve.Names.declaration list;
+  was_unused : Path.t -> bool;
+  is_package_used : by:Path.package -> Path.package -> bool;
 }

@@ -24,7 +24,7 @@ module Symbol = struct
     | Valid of Types.ty
     | Rank of Types.ty
     | Capacity of Types.ty
-    | Owner_of_view of Types.ty
+    | Range_of of Types.ty
     | Model of Types.ty
     | Sequence_range of Types.ty
     | Slack of Types.ty
@@ -251,7 +251,7 @@ let rec show_symbol : symbol -> string = function
   | Valid ty -> "valid." ^ Types.show ty
   | Rank ty -> "rank." ^ Types.show ty
   | Capacity ty -> "capacity." ^ Types.show ty
-  | Owner_of_view owner -> "owner_of_view." ^ Types.show owner
+  | Range_of sequence -> "range_of." ^ Types.show sequence
   | Model ty -> "model." ^ Types.show ty
   | Sequence_range element -> "sequence.range." ^ Types.show element
   | Slack ty -> "slack." ^ Types.show ty
@@ -385,6 +385,47 @@ let integer_of_bits ~is_signed ~width bits =
       (subtract unsigned (Integer (Z.shift_left Z.one width)))
       unsigned
   else unsigned
+
+let find_constant_difference left right =
+  let rec collect coefficient term ((constant, atoms) as sums) =
+    match term with
+    | Integer value -> (Z.add constant (Z.mul coefficient value), atoms)
+    | Operation (Add, parts) ->
+        List.fold_left (fun sums part -> collect coefficient part sums) sums parts
+    | Operation (Subtract, [ minuend; subtrahend ]) ->
+        collect (Z.neg coefficient) subtrahend (collect coefficient minuend sums)
+    | Operation (Negate, [ inner ]) -> collect (Z.neg coefficient) inner sums
+    | Operation (Multiply, [ Integer factor; inner ])
+    | Operation (Multiply, [ inner; Integer factor ]) ->
+        collect (Z.mul coefficient factor) inner sums
+    | atom ->
+        let existing = Option.value (List.assoc_opt atom atoms) ~default:Z.zero in
+        (constant, (atom, Z.add existing coefficient) :: List.remove_assoc atom atoms)
+  in
+  let constant, atoms = collect Z.minus_one right (collect Z.one left (Z.zero, [])) in
+  if List.for_all (fun (_, coefficient) -> Z.equal coefficient Z.zero) atoms then Some constant
+  else None
+
+let has_difference_sign left right ~fails =
+  match find_constant_difference left right with
+  | Some difference -> fails (Z.sign difference)
+  | None -> false
+
+let rec is_refuted = function
+  | Boolean value -> not value
+  | Operation (Less, [ left; right ]) ->
+      has_difference_sign left right ~fails:(fun sign -> sign >= 0)
+  | Operation (Less_equal, [ left; right ]) ->
+      has_difference_sign left right ~fails:(fun sign -> sign > 0)
+  | Operation (Greater, [ left; right ]) ->
+      has_difference_sign left right ~fails:(fun sign -> sign <= 0)
+  | Operation (Greater_equal, [ left; right ]) ->
+      has_difference_sign left right ~fails:(fun sign -> sign < 0)
+  | Operation (Equal, [ left; right ]) ->
+      has_difference_sign left right ~fails:(fun sign -> sign <> 0)
+  | Operation (And, parts) -> List.exists is_refuted parts
+  | Operation (Or, parts) -> List.for_all is_refuted parts
+  | _ -> false
 
 let rec mentions symbols = function
   | Symbol name -> List.mem name symbols
@@ -1014,5 +1055,3 @@ let list_members query =
       | None -> entries)
     numbering.datatypes []
   |> List.sort compare
-
-let hash text = "smt1-blake3-" ^ Blake3.hash_to_hex text

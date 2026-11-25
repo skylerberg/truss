@@ -15,8 +15,10 @@ type t =
   | Index_mut
   | Index_assign
   | Iterable
+  | Iterable_mut
   | Cursor
   | Finite_cursor
+  | Into_cursor
   | Model
   | Add
   | Subtract
@@ -33,9 +35,7 @@ type t =
   | Option
   | Result
   | List
-  | Slice
   | String
-  | String_slice
   | Literal
   | Template
   | From_template
@@ -93,8 +93,12 @@ type method_ =
   | Index_at
   | Index_mut_at
   | Index_assign_assign
+  | Iterable_count
+  | Iterable_element
+  | Iterable_mut_element
   | Cursor_next
   | Finite_cursor_remaining
+  | Into_cursor_cursor
   | Fixed_width_integer_minimum_value
   | Fixed_width_integer_maximum_value
   | Fixed_width_integer_bit_width
@@ -139,9 +143,11 @@ type associated =
   | Negate_output
   | Index_key
   | Index_output
+  | Iterable_element_type
   | Cursor_element
+  | Into_cursor_cursor_type
   | Model_value
-  | From_template_part
+  | From_template_interpolation
   | From_elements_element
   | From_entries_key
   | From_entries_value
@@ -160,7 +166,7 @@ type field =
   | Range_stop
   | Range_inclusive
   | Template_literals
-  | Template_parts
+  | Template_interpolations
   | Entry_key
   | Entry_value
   | Option_some_value
@@ -172,7 +178,6 @@ type method_location = { owner : t; name : string; receiver : Path.receiver }
 val make_path : t -> Path.t
 val of_path : Path.t -> t option
 val is : t -> Path.t -> bool
-val is_buffer_sequence : Path.t -> bool
 val locate_method : method_ -> method_location
 val make_method_path : method_ -> Path.t
 val make_impl_method_path : method_ -> impl:Path.t -> Path.t
@@ -186,7 +191,6 @@ val specification : Path.module_
 val intrinsic_module : Path.module_
 val make_builtin_type_path : Language.Builtin_type.t -> Path.t
 val find_builtin_type : Path.t -> Language.Builtin_type.t option
-val find_view : Path.t -> Path.t option
 val make_builtin_capability_path : Language.Builtin_capability.t -> Path.t
 val find_builtin_capability : Path.t -> Language.Builtin_capability.t option
 val is_system_module : Path.module_ -> bool

@@ -38,7 +38,13 @@ val compute_capability_amount :
   Logic.term
 
 val compute_step_amount :
-  State.context -> State.frame -> Invocation.t -> State.passed list -> Costs.counter -> Logic.term
+  ?result:Logic.term ->
+  State.context ->
+  State.frame ->
+  Invocation.t ->
+  State.passed list ->
+  Costs.counter ->
+  Logic.term
 
 val has_potential : State.context -> ?seen:Types.ty list -> Types.ty -> bool
 
@@ -56,6 +62,8 @@ val assume_element_potential_change :
   replaced:Logic.term ->
   written:Logic.term ->
   unit
+
+val find_buffer : State.context -> Types.ty -> State.buffer option
 
 val declare_method_cost :
   State.context ->

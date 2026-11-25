@@ -128,6 +128,9 @@ and list_extended_by (value : Core.expression) =
       List.concat_map (fun (_, update) -> list_extended_by update) updates
   | Collection_literal { elements; construction = Array } ->
       List.concat_map list_extended_by elements
+  | Convert { conversion = To_view; value = { kind = Use viewed; _ } } ->
+      list_extended_by_base viewed
+  | Convert { conversion = To_view; value = viewed } -> viewed.id :: list_extended_by viewed
   | _ -> []
 
 and list_extended_by_base (base : Core.place) =
@@ -215,6 +218,8 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
     | Function_value _ | Lambda _ ->
         Option.map fst (lower_function_expression builder node ~is_argument:false)
     | Value_parameter parameter -> hold (Value_parameter parameter)
+    | Parameter_default { definition; position; substitution } ->
+        hold (Parameter_default { definition; position; substitution })
     | Construct { variant; fields } ->
         let* fields = construct_fields builder fields in
         hold (Construct { variant; fields; type_ = node.type_ })
@@ -262,22 +267,20 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
     | Connective _ | Matches _ -> lower_truth builder node
     | Convert { conversion = Widen; value = converted } when is_function_expression converted ->
         Option.map fst (lower_function_expression builder node ~is_argument:false)
-    | Convert { conversion = View_to_owned as conversion; value = view } ->
-        let* value = lower_expression builder view in
-        let owner = Emitter.allocate_local builder (Lent Read) node.type_ origin in
-        Emitter.add_temporary builder owner;
-        Emitter.assign builder (Emitter.make_local_place owner)
-          (Convert { conversion; value; converts_function_expression = false })
-          origin;
-        Some
-          (Tree.Borrow
-             { place = Emitter.make_local_place owner; type_ = node.type_; mode = Read; origin })
+    | Convert { conversion = To_view as conversion; value = viewed } ->
+        let* place =
+          lower_place builder (match viewed.kind with Use place -> place | _ -> Temporary viewed)
+        in
+        hold
+          (Convert
+             {
+               conversion;
+               value = Borrow { place; type_ = viewed.type_; mode = Read; origin = viewed.origin };
+               converts_function_expression = false;
+             })
     | Convert { conversion; value = converted } ->
         let* value = lower_expression builder converted in
         hold (Convert { conversion; value; converts_function_expression = false })
-    | To_any { value; trait; evidence } ->
-        let* value = lower_expression builder value in
-        hold (To_any { value; trait; evidence })
     | If { condition = tested; then_; else_ } ->
         let scope = Emitter.make_block_scope () in
         let* condition = lower_condition builder scope tested in
@@ -595,7 +598,7 @@ and lower_lent builder (lending : Core.expression) ~duration : Tree.place option
       Emitter.add_lent_part builder part;
       Emitter.emit builder (Basic (Lend { part; call })) lending.origin;
       (match call.arguments with
-      | Passed { mode; value = (Borrow _ | Use _) as receiver; _ } :: _ ->
+      | { mode; value = (Borrow _ | Use _) as receiver; _ } :: _ ->
           ignore
             (Emitter.start_loan builder receiver
                (if mode = Mut then Mut else Read)
@@ -664,31 +667,27 @@ and lower_call builder (called : Core.call) ~node ~origin : Tree.call option =
   let* arguments = In_order.run_arguments builder called (plan_argument builder) in
   Some { Tree.callee; arguments; node; origin }
 
-and plan_argument builder (argument : Core.argument) =
-  match argument with
-  | Default -> In_order.pure Tree.Default
-  | Passed { mode; value } ->
-      In_order.map
-        (fun (value, function_) -> Tree.Passed { mode; value; function_ })
-        (In_order.evaluate_operand_with builder
-           (fun () ->
-             match value with
-             | Value written when is_function_expression written ->
-                 Option.map
-                   (fun (passed, function_) -> (passed, Some function_))
-                   (lower_function_expression builder written ~is_argument:true)
-             | Place _ | Value _ ->
-                 Option.map (fun passed -> (passed, None)) (lower_operand builder mode value))
-           (compute_core_operand_type value) (compute_operand_origin value))
+and plan_argument builder ({ mode; value } : Core.argument) =
+  In_order.map
+    (fun (value, function_) : Tree.argument -> { mode; value; function_ })
+    (In_order.evaluate_operand_with builder
+       (fun () ->
+         match value with
+         | Value written when is_function_expression written ->
+             Option.map
+               (fun (passed, function_) -> (passed, Some function_))
+               (lower_function_expression builder written ~is_argument:true)
+         | Place _ | Value _ ->
+             Option.map (fun passed -> (passed, None)) (lower_operand builder mode value))
+       (compute_core_operand_type value) (compute_operand_origin value))
 
 and lower_call_value builder (node : Core.expression) (called : Core.call) =
   let origin = node.origin in
   match called.callee.target with
   | Intrinsic { operation = Scalar operation; type_arguments } ->
       let* operands =
-        In_order.run_arguments builder called (function
-          | Core.Passed { value; mode; _ } -> plan_operand builder mode value
-          | Default -> raise_bug "a primitive operation with a default argument")
+        In_order.run_arguments builder called (fun ({ mode; value } : Core.argument) ->
+            plan_operand builder mode value)
       in
       Emitter.hold builder node.type_ origin (Operation { operation; type_arguments; operands })
   | _ ->
@@ -969,25 +968,23 @@ and test builder (pattern : Core.pattern) (scrutinee : Tree.place) ~branch_on =
                         callee;
                         arguments =
                           [
-                            Passed
-                              {
-                                mode = Read;
-                                value =
-                                  Borrow
-                                    {
-                                      place = scrutinee;
-                                      type_ = pattern.type_;
-                                      mode = Read;
-                                      origin = pattern.origin;
-                                    };
-                                function_ = None;
-                              };
-                            Passed
-                              {
-                                mode = Read;
-                                value = lower_pattern_constant pattern value;
-                                function_ = None;
-                              };
+                            {
+                              mode = Read;
+                              value =
+                                Borrow
+                                  {
+                                    place = scrutinee;
+                                    type_ = pattern.type_;
+                                    mode = Read;
+                                    origin = pattern.origin;
+                                  };
+                              function_ = None;
+                            };
+                            {
+                              mode = Read;
+                              value = lower_pattern_constant pattern value;
+                              function_ = None;
+                            };
                           ];
                         node = pattern.id;
                         origin = pattern.origin;
@@ -1426,11 +1423,7 @@ and find_lent_place builder part =
           (Lend
              {
                part = lent;
-               call =
-                 {
-                   arguments = Passed { value = Borrow { place; _ } | Use { place; _ }; _ } :: _;
-                   _;
-                 };
+               call = { arguments = { value = Borrow { place; _ } | Use { place; _ }; _ } :: _; _ };
              })
         when lent = part ->
           Some (Emitter.borrow_place builder place)
@@ -1637,15 +1630,21 @@ and lower_loop_clauses builder (clauses : Core.loop_clause Core.conditional list
           Cost { origin; amortized; resource; bound = lower_bound written; holds_when })
     clauses
 
-and of_expression (written : Core.expression) =
+and build_expression_body (written : Core.expression) ~return =
   let builder = Emitter.create ~entry_locals:[] () in
   Emitter.run_in_scope builder written.origin (fun () ->
       Emitter.run_in_statement builder written.origin (fun () ->
-          Option.iter
-            (fun value -> Emitter.return_ builder (Some value) written.origin)
-            (lower_expression builder written)));
+          Option.iter (return builder) (lower_expression builder written)));
   let body = Emitter.finish builder ~parameters:[] in
   { Tree.body; lambdas = Emitter.lambdas builder }
+
+and of_expression (written : Core.expression) =
+  build_expression_body written ~return:(fun builder value ->
+      Emitter.return_ builder (Some value) written.origin)
+
+and of_default (written : Core.expression) =
+  build_expression_body written ~return:(fun builder value ->
+      Emitter.jump builder (Return (Some value)) written.origin)
 
 let compute_parameter_origin ~(enclosing : Core.origin) (parameter : Core.parameter) : Core.origin =
   match parameter.local with

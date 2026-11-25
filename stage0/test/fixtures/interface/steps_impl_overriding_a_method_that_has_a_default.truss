@@ -1,0 +1,13 @@
+trait Steps {
+  fn step(self, by: Int64 = 3) -> Int64 {
+    by
+  }
+}
+
+type Walker()
+
+impl Steps for Walker {
+  fn step(self, by: Int64) -> Int64 {
+    by + 1
+  }
+}

@@ -9,7 +9,7 @@ internal type SystemEnvironment()
 impl Environment for SystemEnvironment
   uses RunForever, capabilities.System
 {
-  fn variable(self, name: StringSlice) -> Option[String] {
+  fn variable(self, name: String) -> Option[String] {
     variable(name)
   }
 
@@ -20,7 +20,7 @@ impl Environment for SystemEnvironment
     while is_present {
       let entry = intrinsic.environment_entry(index, is_present: mut is_present)
       proof {
-        assert forall k in 0..intrinsic.view_length(entry) => intrinsic.view_at(entry, index: k) != 0
+        assert forall k in 0..intrinsic.storage_length(entry) => intrinsic.storage_at(entry, index: k) != 0
       }
       if is_present {
         mut all.push(variable_from(entry))
@@ -75,18 +75,18 @@ impl Environment for SystemEnvironment
 
   fn local_zone(self) -> Option[String] {
     if variable("TZ") is Some(zone) && !zone.is_empty() {
-      let bytes = zone.slice().bytes
-      let start: UInt64 = if intrinsic.view_at(bytes, index: 0) == 58 { 1 } else { 0 }
-      return Some(calls.text_copied_from(intrinsic.view_slice(bytes, start: start, stop: intrinsic.view_length(bytes))))
+      let bytes = zone.storage
+      let start: UInt64 = if intrinsic.storage_at(bytes, index: 0) == 58 { 1 } else { 0 }
+      return Some(calls.text_copied_from(intrinsic.storage_range(bytes, start: start, stop: intrinsic.storage_length(bytes))))
     }
-    match calls.read_link("/etc/localtime".slice().bytes) {
-      Ok(target) => after_last(intrinsic.storage_view(target), marker: "zoneinfo/".slice().bytes)
+    match calls.read_link("/etc/localtime".storage) {
+      Ok(target) => after_last(target, marker: "zoneinfo/".storage)
       Err(_) => None
     }
   }
 
-  fn zone_rules(self, name: StringSlice) -> Option[List[UInt8]] {
-    if !names_a_zone(name.bytes) {
+  fn zone_rules(self, name: String) -> Option[List[UInt8]] {
+    if !names_a_zone(name.storage) {
       return None
     }
     match zone_file(name) {
@@ -96,33 +96,33 @@ impl Environment for SystemEnvironment
   }
 }
 
-fn variable(name: StringSlice) -> Option[String]
+fn variable(name: String) -> Option[String]
   uses capabilities.System
 {
-  match calls.ended_with_zero_byte(name.bytes) {
+  match calls.ended_with_zero_byte(name.storage) {
     Ok(name_for_c) => {
       var is_present = false
-      let value = intrinsic.libc_getenv(intrinsic.storage_view(name_for_c), is_present: mut is_present)
+      let value = intrinsic.libc_getenv(name_for_c, is_present: mut is_present)
       if is_present { Some(calls.text_copied_from(value)) } else { None }
     }
     Err(_) => None
   }
 }
 
-fn variable_from(entry: intrinsic.View[UInt8]) -> environment.Variable
+fn variable_from(entry: intrinsic.Storage[UInt8]) -> environment.Variable
   uses RunForever
 {
-  let length = intrinsic.view_length(entry)
+  let length = intrinsic.storage_length(entry)
   var split: UInt64 = 0
-  while split < length && intrinsic.view_at(entry, index: split) != 61
+  while split < length && intrinsic.storage_at(entry, index: split) != 61
     invariant split <= length
   {
     split += 1
   }
   let value_start = if split < length { split + 1 } else { length }
   environment.Variable(
-    name: calls.text_copied_from(intrinsic.view_slice(entry, start: 0, stop: split)),
-    value: calls.text_copied_from(intrinsic.view_slice(entry, start: value_start, stop: length)),
+    name: calls.text_copied_from(intrinsic.storage_range(entry, start: 0, stop: split)),
+    value: calls.text_copied_from(intrinsic.storage_range(entry, start: value_start, stop: length)),
   )
 }
 
@@ -158,7 +158,7 @@ fn architecture() -> environment.Architecture {
   }
 }
 
-fn set_or(value: Option[String], otherwise: StringSlice) -> Path {
+fn set_or(value: Option[String], otherwise: String) -> Path {
   if value is Some(text) && !text.is_empty() {
     Path.new(text)
   } else {
@@ -176,7 +176,7 @@ fn home() -> Option[Path]
   }
 }
 
-fn for_this_user(name: StringSlice, on_linux: StringSlice, on_macos: StringSlice) -> Option[Path]
+fn for_this_user(name: String, on_linux: String, on_macos: String) -> Option[Path]
   uses capabilities.System
 {
   if intrinsic.system_is_linux() && variable(name) is Some(text) && !text.is_empty() {
@@ -189,11 +189,11 @@ fn for_this_user(name: StringSlice, on_linux: StringSlice, on_macos: StringSlice
   }
 }
 
-fn after_last(bytes: intrinsic.View[UInt8], marker: intrinsic.View[UInt8]) -> Option[String]
+fn after_last(bytes: intrinsic.Storage[UInt8], marker: intrinsic.Storage[UInt8]) -> Option[String]
   uses RunForever
 {
-  let length = intrinsic.view_length(bytes)
-  let size = intrinsic.view_length(marker)
+  let length = intrinsic.storage_length(bytes)
+  let size = intrinsic.storage_length(marker)
   if size > length {
     return None
   }
@@ -202,8 +202,8 @@ fn after_last(bytes: intrinsic.View[UInt8], marker: intrinsic.View[UInt8]) -> Op
   while looking
     invariant start + size <= length
   {
-    if intrinsic.compare_bytes(intrinsic.view_slice(bytes, start: start, stop: start + size), right: marker) == 0 {
-      return Some(calls.text_copied_from(intrinsic.view_slice(bytes, start: start + size, stop: length)))
+    if intrinsic.compare_bytes(intrinsic.storage_range(bytes, start: start, stop: start + size), right: marker) == 0 {
+      return Some(calls.text_copied_from(intrinsic.storage_range(bytes, start: start + size, stop: length)))
     }
     if start == 0 {
       looking = false
@@ -214,14 +214,14 @@ fn after_last(bytes: intrinsic.View[UInt8], marker: intrinsic.View[UInt8]) -> Op
   None
 }
 
-fn names_a_zone(name: intrinsic.View[UInt8]) -> Bool {
-  let length = intrinsic.view_length(name)
-  if length == 0 || intrinsic.view_at(name, index: 0) == 47 {
+fn names_a_zone(name: intrinsic.Storage[UInt8]) -> Bool {
+  let length = intrinsic.storage_length(name)
+  if length == 0 || intrinsic.storage_at(name, index: 0) == 47 {
     return false
   }
   var before: UInt8 = 0
   for index in 0..length {
-    let byte = intrinsic.view_at(name, index: index)
+    let byte = intrinsic.storage_at(name, index: index)
     if byte == 0 || (byte == 46 && before == 46) {
       return false
     }
@@ -230,7 +230,7 @@ fn names_a_zone(name: intrinsic.View[UInt8]) -> Bool {
   true
 }
 
-fn zone_file(name: StringSlice) -> Result[List[UInt8], SystemError]
+fn zone_file(name: String) -> Result[List[UInt8], SystemError]
   uses RunForever, capabilities.System
 {
   var handle = handles.open_to_read(Path(text: "/usr/share/zoneinfo/${name}"))?

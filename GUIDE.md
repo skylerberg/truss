@@ -16,9 +16,7 @@ have proven a program correct. Each chapter builds on the ones before it,
 so read them in order the first time. The appendices at the end are for
 looking things up.
 
-[SPECIFICATION.md](SPECIFICATION.md) is the reference: it defines every rule
-precisely, and the guide links to it where a rule has details the guide
-leaves out. [DESIGN.md](DESIGN.md) gives the reason for each rule.
+[DESIGN.md](DESIGN.md) gives the reason for each rule.
 
 ### What makes Truss different
 
@@ -96,12 +94,16 @@ runs Truss code. It needs two other programs on your `PATH`:
 | A C compiler, `clang` or `cc` | Building programs | `TRUSS_CC` |
 | Z3 5.3.3, as `z3` | Proving programs correct | `TRUSS_Z3` |
 
-Truss builds programs for Linux and macOS. [README.md](README.md) says how
-to build `truss` from this repository. Check that the toolchain runs:
+Truss builds programs for Linux and macOS, on x86-64 and ARM64. A program
+built on x86-64 needs a CPU of the x86-64-v3 level, which Intel's CPUs have
+had since Haswell (2013) and AMD's since Excavator (2015). A project's
+manifest can name another level ([Projects](#projects)).
+[README.md](README.md) says how to build `truss` from this repository. Check
+that the toolchain runs:
 
 ```text
 $ truss --version
-stage0 (Truss 0.1, code generation 28, Unicode 18.0.0)
+stage0 (Truss 0.1, code generation 29, Unicode 18.0.0)
 ```
 
 ### Hello, world
@@ -613,8 +615,8 @@ test "constants that call functions" {
   `Character`, and the fields of a record or a variant that it can see. It
   knows a collection, and a type whose fields are hidden from it, by the
   contracts of the calls that build it.
-- **A constant is data,** so its type holds no function, no `any` value, and
-  nothing that exists only while the program runs, such as an open file.
+- **A constant is data,** so its type holds no function and nothing that
+  exists only while the program runs, such as an open file.
 - **A constant cannot depend on itself,** through another constant or
   through a function that it calls.
 
@@ -847,7 +849,7 @@ fn area(width: UInt64, height: UInt64) -> UInt64
   width * height
 }
 
-fn greeting(name: StringSlice, punctuation: StringSlice = "!") -> String {
+fn greeting(name: String, punctuation: String = "!") -> String {
   "Hello, ${name}${punctuation}"
 }
 
@@ -1115,8 +1117,15 @@ every place it passes:
 | `items: mut List[Int64]` | `clear(mut items)` | Change the caller's value, which the caller sees afterward |
 | `item: own String` | `keep(own item)` | Keep the value: the caller gives it up |
 
+A read-only parameter copies nothing, so a `List`, a list literal, an
+`Array`, and a range of a list such as `numbers[1..]` all pass to a
+parameter declared `List`. A `mut` parameter takes a whole `List`. It takes
+a range such as `mut numbers[1..]` too when its function declares
+`modifies numbers[..]`: the function then changes elements and never the
+length, as `sort` does and `push` does not.
+
 ```truss
-fn total(numbers: Slice[Int64]) -> Int64 {
+fn total(numbers: List[Int64]) -> Int64 {
   var sum: Int64 = 0
   for number in numbers {
     sum = sum.saturating_add(number)
@@ -1133,6 +1142,7 @@ fn reset(numbers: mut List[Int64]) {
 test "parameter modes" {
   var numbers = [3, 4, 5]
   assert total(numbers) == 12
+  assert total(numbers[1..]) == 9
   reset(mut numbers)
   assert numbers == [0, 0, 0]
 }
@@ -1151,16 +1161,16 @@ after it. `mut config.servers.sort()` passes `config.servers` as `mut`.
 
 A read-only parameter does not copy its argument. It is a *view* of the
 caller's value. So is a `let` bound to a place, the variable of a `for` loop,
-and a slice:
+and a range of a list:
 
 ```truss
-fn tail(items: Slice[Int64]) -> Slice[Int64]
+fn tail(items: List[Int64]) -> view List[Int64]
   requires items.length() > 0
 {
   items[1..]
 }
 
-test "a slice views part of a list" {
+test "a range views part of a list" {
   let items = [1, 2, 3, 4]
   let middle = items[1..3]
   assert middle == [2, 3]
@@ -1168,9 +1178,13 @@ test "a slice views part of a list" {
 }
 ```
 
-`Slice[Int64]` is a view of a run of elements, and `StringSlice` is a view
-of a `String`'s text. A `List` passes to a `Slice` parameter, and a `String`
-to a `StringSlice` parameter, as a view: this is Truss's one implicit
+`items[1..3]` is a `List[Int64]` that owns nothing: it views two elements of
+`items`. A view has every read-only method of the type that it views, and
+`middle.copy()` makes a list that owns copies of the elements.
+
+A view that a function returns, or that a field or a `var` holds, says so in
+its type: `view List[Int64]` and `view String`. A `List` or a `String`
+becomes a view wherever one is expected. This is Truss's one implicit
 conversion.
 
 Views come with two rules, which are what let Truss do without stored
@@ -1204,16 +1218,17 @@ what its parameters view, as `tail` does. Returning a view of a local is an
 error, because the local is freed when the function returns:
 
 ```text
-main.truss:1:4: error[ownership.view_escapes]: This returns a view of `items`, which is dropped when the function returns, so the view would dangle. A function returns a view only of its parameters.
-  | fn numbers() -> Slice[Int64] {
-  |    ^^^^^^^
+main.truss:3:3: error[ownership.view_escapes]: This returns a view of `items`, which is dropped when the function returns, so the view would dangle. A function returns a view only of its parameters.
+  |   items[1..]
+  |   ^^^^^^^^^^
 
 1 error
 ```
 
-A view cannot be stored where an owned value goes, such as a field of a
-type that outlives the function. A view held in a local record or list makes
-that record or list a view too.
+A view cannot be stored where an owned value goes, such as a field declared
+`String` of a type that outlives the function. A field declared
+`view String` holds one, and a view held in a record or a list makes that
+record or list a view too.
 
 ### Lending methods
 
@@ -1221,7 +1236,7 @@ Some methods hand back a part of their receiver instead of a new value. A
 *lending* method declares `lends` where a result type would go:
 
 ```text
-public fn Slice[Element].get(self, index: UInt64) lends Option[Element]
+public fn List[Element].get(self, index: UInt64) lends Option[Element]
 ```
 
 The lent part is the caller's to use **for the rest of the statement**, not
@@ -1240,7 +1255,7 @@ main.truss:2:7: error[ownership.lent_part_escapes]: This part is lent only until
 Use the part within the statement, or copy it:
 
 ```truss
-fn first_name(names: Slice[String]) -> Option[String] {
+fn first_name(names: List[String]) -> Option[String] {
   names.get(0).map(fn(name) { name.copy() })
 }
 
@@ -1590,7 +1605,7 @@ Both have many methods, which `truss show Option` and `truss show Result`
 list:
 
 ```truss
-fn parse_port(text: StringSlice) -> Option[UInt16] {
+fn parse_port(text: String) -> Option[UInt16] {
   UInt16.parse(text).ok()
 }
 
@@ -1716,7 +1731,7 @@ chain, and in the block of the `if` or `while`:
 ```truss
 use standard.console
 
-fn first_long_word(words: Slice[String]) -> Option[UInt64] {
+fn first_long_word(words: List[String]) -> Option[UInt64] {
   if words.get(0) is Some(word) && word.length() > 3 {
     return Some(word.length())
   }
@@ -1754,7 +1769,7 @@ the block, and runs the `else` block when the value does not match. The
 program.
 
 ```truss
-fn double_first(numbers: Slice[Int64]) -> Option[Int64] {
+fn double_first(numbers: List[Int64]) -> Option[Int64] {
   let Some(first) = numbers.get(0) else {
     return None
   }
@@ -1855,8 +1870,7 @@ from it, so a reader always sees where a name comes from.
 - The modules of a package may use each other in a cycle.
 
 The *prelude* is in scope everywhere with no `use`. It holds the built-in
-types, `Option`, `Result`, `List`, `Slice`, `Map`, `Set`, `String`,
-`StringSlice`, `ExitCode`, `Path`, the core traits such as `Equal` and
+types, `Option`, `Result`, `List`, `Map`, `Set`, `String`, `ExitCode`, `Path`, the core traits such as `Equal` and
 `Ordered`, and the standard capabilities such as `Console`. No definition can
 take a prelude name.
 
@@ -1998,6 +2012,27 @@ project. A project's manifest can also set how long each test may run:
 time_limit = 10
 ```
 
+It can also set the level of x86-64 CPU that its programs are built for:
+
+```toml
+[build]
+x86_64_level = "v2"
+```
+
+The levels are `"v1"`, which every x86-64 CPU has, to `"v4"`, and a program
+is built for `"v3"` unless the manifest says otherwise. A higher level gives
+the C compiler more instructions to use and runs on fewer machines. An
+emulator or a virtual machine can provide a lower level than the CPU it runs
+on. A program built for a level that its machine lacks says so when it
+starts:
+
+```text
+This program needs a CPU with AVX, which this machine lacks. To build it for this machine, set x86_64_level = "v2" under [build] in the project's truss.toml.
+```
+
+The level changes no result of a program, so a test's cached result holds
+at every level.
+
 A package that is not inside a project is a project of its own, as every
 package in the earlier chapters was.
 
@@ -2019,15 +2054,14 @@ registry in full.
 
 ## 7. Collections
 
-The prelude has four collections, `List`, `Map`, `Set`, and `String`, and
-the views `Slice` and `StringSlice`. The standard library's `collections`
-module has more.
+The prelude has four collections, `List`, `Map`, `Set`, and `String`. The
+standard library's `collections` module has more.
 
 ### Lists
 
-A `List` is a growable sequence of elements of one type. A `Slice` is a view
-of a run of a list's elements, and every read-only method of a slice works
-on a list.
+A `List` is a growable sequence of elements of one type. A range of a list,
+such as `numbers[1..3]`, views a run of its elements, and every read-only
+method of a list works on a range.
 
 ```truss
 test "building a list" {
@@ -2051,9 +2085,9 @@ An empty literal does not say what it holds, so its `let` or `var` states the
 type:
 
 ```text
-main.truss:2:3: error[types.cannot_infer]: The types in this statement cannot be inferred from it alone. Give the `let` a type, or the call type arguments, such as `var names: List[String] = []`.
+main.truss:2:7: error[types.cannot_infer]: The type of `names` cannot be inferred from this statement alone. Declare `names` with a type.
   |   var names = []
-  |   ^^^^^^^^^^^^^^
+  |       ^^^^^
 
 1 error
 ```
@@ -2061,7 +2095,7 @@ main.truss:2:3: error[types.cannot_infer]: The types in this statement cannot be
 #### Reading elements
 
 ```truss
-fn second(numbers: Slice[Int64]) -> Option[Int64] {
+fn second(numbers: List[Int64]) -> Option[Int64] {
   if numbers.length() < 2 {
     return None
   }
@@ -2084,10 +2118,9 @@ test "reading elements" {
   bounds.** In `second`, the `if` above establishes it. When no fact shows
   that an index is in bounds, check it first with an `if`, or read the
   element with `get`, which returns `None` for an index out of bounds.
-- `numbers[1..3]` is a slice of the elements at 1 and 2. A slice's bounds are
-  proven too. `numbers[..2]` and `numbers[1..]` leave out an end.
-- `truss show List` lists every method of a list, including those of its
-  view `Slice`.
+- `numbers[1..3]` is the range of the elements at 1 and 2. A range's bounds
+  are proven too. `numbers[..2]` and `numbers[1..]` leave out an end.
+- `truss show List` lists every method of a list.
 
 #### Changing elements
 
@@ -2151,24 +2184,24 @@ always visits each position once.
 
 #### Transforming a list
 
-A list, a slice, an array, a range, and a map are *iterable*: each
+A list, an array, a range, and a map are *iterable*: each
 implements the prelude trait `Iterable`, which gives them methods that
 transform every element at once:
 
 ```truss
-fn evens(numbers: Slice[Int64]) -> List[Int64] {
+fn evens(numbers: List[Int64]) -> List[Int64] {
   numbers.filter(fn(number) { number % 2 == 0 })
 }
 
-fn lengths(words: Slice[String]) -> List[UInt64] {
+fn lengths(words: List[String]) -> List[UInt64] {
   words.map(fn(word) { word.length() })
 }
 
-fn parsed(texts: Slice[String]) -> List[Int64] {
+fn parsed(texts: List[String]) -> List[Int64] {
   texts.filter_map(fn(text) { Int64.parse(text).ok() })
 }
 
-fn total_length(words: Slice[String]) -> UInt64 {
+fn total_length(words: List[String]) -> UInt64 {
   words.fold[UInt64](0, combine: fn(total, word) { total.saturating_add(word.length()) })
 }
 
@@ -2199,18 +2232,12 @@ test "transforming" {
 
 ### Strings
 
-Truss has two text types:
-
-| Type | What it is |
-|---|---|
-| `String` | Owned, growable UTF-8 text |
-| `StringSlice` | A view of a `String`'s text |
-
-A string literal is a `String`, or a `StringSlice` where one is expected. A
-function that only reads text takes a `StringSlice`, and a `String` passes
-to it as a view. A `String` and a `StringSlice` compare with `==` directly,
-as a `List` and a `Slice` do. `viewed.to_string()` copies a `StringSlice`
-into a new `String`, and `owned.slice()` views a whole `String`.
+Truss has one text type, `String`: growable UTF-8 text. A function that only
+reads text takes a `String`, which copies nothing. A method that gives part
+of a text, such as `trim` or `split`, returns a `view String`: a view of the
+receiver's bytes, with every read-only method of a `String`. A `String` and
+a `view String` compare with `==` directly, and `viewed.copy()` copies
+a view into a new `String`.
 
 **A string literal is a constant,** so reading it and binding it with `let`
 cost nothing: the `let` views the constant's text. Where an owned `String`
@@ -2252,7 +2279,7 @@ Strings have no `+` operator. Build text with interpolation, or by pushing
 onto a `var`:
 
 ```truss
-fn label(name: StringSlice, count: UInt64) -> String {
+fn label(name: String, count: UInt64) -> String {
   var text = "${name}: "
   mut text.push("${count}")
   mut text.push_character(Character"!")
@@ -2311,7 +2338,7 @@ main.truss:2:3: error[types.not_indexable]: Strings cannot be indexed: say which
 
 `characters()` gives the characters one at a time, `bytes()` gives the
 bytes, and `graphemes()` gives the units a reader sees as one character.
-`truss show StringSlice` lists the rest.
+`truss show String` lists the rest.
 
 #### Parsing
 
@@ -2332,17 +2359,17 @@ which keys were first inserted, so a program that walks a map gives the same
 output every run.
 
 ```truss
-fn count_words(text: StringSlice) -> Map[String, UInt64] {
+fn count_words(text: String) -> Map[String, UInt64] {
   var counts: Map[String, UInt64] = [:]
   for word in text.split_whitespace() {
-    mut counts.update(word.to_string(), default: 0, change: fn(count) {
+    mut counts.update(word.copy(), default: 0, change: fn(count) {
       count = count.saturating_add(1)
     })
   }
   counts
 }
 
-fn group_by_lowercase(words: Slice[String]) -> Map[String, List[String]] {
+fn group_by_lowercase(words: List[String]) -> Map[String, List[String]] {
   var groups: Map[String, List[String]] = [:]
   for word in words {
     let key = word.to_lowercase()
@@ -2475,20 +2502,20 @@ impl Display for SettingError {
 type Setting(name: String, value: UInt64)
   derives Equal
 
-fn parse_setting(line: StringSlice) -> Result[Setting, SettingError] {
+fn parse_setting(line: String) -> Result[Setting, SettingError] {
   let parts = line.split_at_most("=", parts: 2)
   if parts.length() != 2 {
-    return Err(SettingError.MissingEquals(line.to_string()))
+    return Err(SettingError.MissingEquals(line.copy()))
   }
   let name = parts[0].trim()
   let text = parts[1].trim()
   let value = UInt64.parse(text).map_error(fn(_) {
-    SettingError.BadNumber(name: name.to_string(), text: text.to_string())
+    SettingError.BadNumber(name: name.copy(), text: text.copy())
   })?
-  Ok(Setting(name: name.to_string(), value))
+  Ok(Setting(name: name.copy(), value))
 }
 
-fn parse_settings(text: StringSlice) -> Result[List[Setting], SettingError] {
+fn parse_settings(text: String) -> Result[List[Setting], SettingError] {
   var settings: List[Setting] = []
   for line in text.lines() {
     if line.trim().is_empty() {
@@ -2577,7 +2604,7 @@ combine results without a `match`:
 
 Some operations fail not because the input was bad but because the program
 has a bug: an integer overflows, a divisor is zero, an index is out of
-bounds, a slice runs past the end of its list, or a shift amount is at least
+bounds, a range runs past the end of its list, or a shift amount is at least
 the width of its type. In Truss, **each of these is a proof obligation, in
 every function and every test.** The compiler proves the operation is safe,
 or the code is an error.
@@ -2621,13 +2648,13 @@ that should stop on a missing element writes the stop, with the checked
 form of the operation:
 
 ```truss
-fn third(items: Slice[Int64]) -> Int64
+fn third(items: List[Int64]) -> Int64
   uses Panic
 {
   items.get(2).expect("the list holds at least three items")
 }
 
-fn parse_known_port(text: StringSlice) -> UInt16
+fn parse_known_port(text: String) -> UInt16
   uses Panic
 {
   UInt16.parse(text).expect("the port is a constant of this program")
@@ -2708,7 +2735,7 @@ A function's type parameters go in brackets after its name. A *bound* after
 a colon says what the type must support:
 
 ```truss
-fn largest[Element: Ordered + Copyable](items: Slice[Element]) -> Option[Element] {
+fn largest[Element: Ordered + Copyable](items: List[Element]) -> Option[Element] {
   var best: Option[Element] = None
   for item in items {
     if best is Some(current) && current >= item {
@@ -2781,7 +2808,9 @@ test "a generic type" {
 
 A trait declares methods that types implement. A method with a body is
 *provided*: every implementation has it, and an implementation can replace
-it.
+it. Only a provided method can give a parameter a default, and no
+implementation replaces a method that has one, so every call reads the
+default from the trait.
 
 ```truss
 trait Summary {
@@ -2919,6 +2948,12 @@ too.
 A derived trait needs every field to have it, and `Ordered` and `Hash` need
 a derived `Equal` too.
 
+A derived method costs what its fields' methods cost, plus a constant. A
+record of numbers compares in constant time, so sorting a list of them
+proves `cost time O(n * log(n))`. A `String` field compares in time that
+grows with its text, so a record that holds one has no constant bound on
+`compare`.
+
 #### Display
 
 `Display` is the trait that interpolation uses. Its one method pushes the
@@ -3048,7 +3083,7 @@ impl Combine for Maximum {
   }
 }
 
-fn combine_all[Item: Combine + Copyable](items: Slice[Item]) -> Item {
+fn combine_all[Item: Combine + Copyable](items: List[Item]) -> Item {
   var total = Item.empty()
   for item in items {
     total = total.combine(item.copy())
@@ -3080,11 +3115,11 @@ When the prover cannot prove a law from the contracts alone, a *law proof*
 gives the steps: `proof Combine.left_identity for Maximum { ... }`.
 [Chapter 13](#theorems-and-proof-blocks) shows proofs.
 
-### Dynamic dispatch with any
+### Values of several types in one list
 
-Generic code is compiled for each type. When one list must hold values of
-different types, `any Trait` holds a value of any type that implements the
-trait, and calls its methods through the trait:
+Generic code is compiled for each type, and a list holds values of one type.
+When one list must hold values of different types, a sum type names them,
+and implements the trait by passing each call on to the value it holds:
 
 ```truss
 trait Shape {
@@ -3108,7 +3143,21 @@ impl Shape for Circle {
   }
 }
 
-fn total_area(shapes: Slice[any Shape]) -> Float64 {
+type Figure =
+  | Squared(square: Square)
+  | Round(circle: Circle)
+
+impl Shape for Figure {
+  fn area(self) -> Float64
+  {
+    match self {
+      Squared(square) => square.area()
+      Round(circle) => circle.area()
+    }
+  }
+}
+
+fn total_area[Item: Shape](shapes: List[Item]) -> Float64 {
   var total = 0.0
   for shape in shapes {
     total = total + shape.area()
@@ -3117,15 +3166,18 @@ fn total_area(shapes: Slice[any Shape]) -> Float64 {
 }
 
 test "values of different types in one list" {
-  let shapes: List[any Shape] = [any Square(side: 2.0), any Circle(radius: 1.0)]
+  let shapes: List[Figure] = [
+    Figure.Squared(square: Square(side: 2.0)),
+    Figure.Round(circle: Circle(radius: 1.0)),
+  ]
   assert total_area(shapes) > 7.0
 }
 ```
 
-- `any Square(side: 2.0)` takes ownership of the value and allocates once.
-- A method can be called through `any` if it takes `self`, has no type
-  parameters of its own, and neither takes nor returns `Self`.
-- An `any` value cannot be turned back into its original type.
+- The `match` names every type the list can hold, so a new variant is an
+  error at each `match` that does not handle it.
+- Truss has no type that stands for "any type with this trait", such as an
+  interface value in Go or `dyn Trait` in Rust.
 
 ### Method names
 
@@ -3146,7 +3198,7 @@ fn apply_twice(value: Int64, step: fn(Int64) -> Int64) -> Int64 {
   step(step(value))
 }
 
-fn above(numbers: Slice[Int64], threshold: Int64) -> List[Int64] {
+fn above(numbers: List[Int64], threshold: Int64) -> List[Int64] {
   numbers.filter(fn(number) { number > threshold })
 }
 
@@ -3167,7 +3219,7 @@ test "lambdas" {
   it types is an error:
 
   ```text
-  main.truss:2:15: error[types.lambda_needs_type]: A lambda's parameter types come from where it is used, and nothing here gives them. Give the `let` a function type, or the call type arguments.
+  main.truss:2:15: error[types.lambda_needs_type]: A lambda's parameter types come from where it is used, and nothing here gives them. Bind it with a typed `let`, such as `let double: fn(Int64) -> Int64 = fn(x) { x * 2 }`.
     |   let twice = fn(value) { value * 2 }
     |               ^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -3227,13 +3279,13 @@ test "a named function as a value" {
 
 `truss show` tells you what a callback may do and what it is told. `filter`'s
 callback may use whatever its caller can, and may rely on receiving an
-element of the slice. The result holds the elements for which it answered
+element of the list. The result holds the elements for which it answered
 `true` ([Callback contracts](#callback-contracts)):
 
 ```text
-$ truss show Slice.filter
-standard/list/slice/slice.truss:533
-public fn Slice[Element: Copyable].filter(
+$ truss show List.filter
+standard/list/elements.truss:532
+public fn List[Element: Copyable].filter(
   self,
   keep: (fn(element: Element) -> Bool uses generic Granted requires self.model().contains(element)),
 ) -> List[Element]
@@ -3252,7 +3304,7 @@ parameter*:
 ```truss
 use standard.console
 
-fn visit_all[Item](items: Slice[Item], visit: (fn(Item) uses generic Granted))
+fn visit_all[Item](items: List[Item], visit: (fn(Item) uses generic Granted))
   uses generic Granted
 {
   for item in items {
@@ -3260,13 +3312,13 @@ fn visit_all[Item](items: Slice[Item], visit: (fn(Item) uses generic Granted))
   }
 }
 
-fn print_all(names: Slice[String])
+fn print_all(names: List[String])
   uses Console
 {
   visit_all(names, visit: fn(name) { Console.print_line(name) })
 }
 
-fn wait_for_each(names: Slice[String])
+fn wait_for_each(names: List[String])
   uses Console, RunForever
 {
   visit_all(names, visit: fn(name) {
@@ -3327,7 +3379,7 @@ result, and a callee's contract can say what the function passed returned:
 
 ```truss
 fn pick(
-  items: Slice[UInt8],
+  items: List[UInt8],
   choose: (fn(count: UInt64) -> UInt64 uses generic Granted requires count > 0 ensures result < count),
 ) -> UInt8
   uses generic Granted
@@ -3432,7 +3484,7 @@ A capability's methods are called through its name:
 use standard.console
 use standard.files
 
-fn archive(name: StringSlice) -> Result[UInt64, SystemError]
+fn archive(name: String) -> Result[UInt64, SystemError]
   uses FileRead, FileWrite, Console
 {
   let text = FileRead.read_text(Path.new(name))?
@@ -3507,7 +3559,7 @@ capability's methods.
 ```truss
 use standard.time
 
-fn stamp(message: StringSlice) -> String
+fn stamp(message: String) -> String
   uses Clock
 {
   "${Clock.now().unix_seconds()} ${message}"
@@ -3531,7 +3583,7 @@ needs `Handles`:
 ```truss
 use standard.files
 
-fn count_lines(name: StringSlice) -> Result[UInt64, SystemError]
+fn count_lines(name: String) -> Result[UInt64, SystemError]
   uses FileRead, Handles, RunForever
 {
   var reader = FileRead.open(Path.new(name))?
@@ -3594,19 +3646,19 @@ A capability of your own declares its methods without bodies and without
 
 ```truss
 capability Inventory {
-  fn count(item: StringSlice) -> UInt64
-  fn take(item: StringSlice) -> Bool
+  fn count(item: String) -> UInt64
+  fn take(item: String) -> Bool
 }
 
 type StockRoom(counts: Map[String, UInt64])
 
 impl Inventory for StockRoom {
-  fn count(self, item: StringSlice) -> UInt64 {
-    self.counts.get(item.to_string()).unwrap_or(0)
+  fn count(self, item: String) -> UInt64 {
+    self.counts.get(item.copy()).unwrap_or(0)
   }
 
-  fn take(mut self, item: StringSlice) -> Bool {
-    let key = item.to_string()
+  fn take(mut self, item: String) -> Bool {
+    let key = item.copy()
     if self.counts.get(key) is Some(count) && count > 0 {
       self.counts[own key] = count - 1
       true
@@ -3621,16 +3673,16 @@ type ReadOnly()
 impl Inventory for ReadOnly
   uses Inventory
 {
-  fn count(self, item: StringSlice) -> UInt64 {
+  fn count(self, item: String) -> UInt64 {
     Inventory.count(item)
   }
 
-  fn take(self, item: StringSlice) -> Bool {
+  fn take(self, item: String) -> Bool {
     false
   }
 }
 
-fn restock_report(item: StringSlice) -> String
+fn restock_report(item: String) -> String
   uses Inventory
 {
   if Inventory.take(item) { "took one ${item}" } else { "none taken, ${Inventory.count(item)} left" }
@@ -3755,7 +3807,7 @@ test whose code prints must provide a console:
 ```truss
 use standard.console
 
-fn greet(name: StringSlice)
+fn greet(name: String)
   uses Console
 {
   Console.print_line("Hello, ${name}!")
@@ -3992,6 +4044,37 @@ test "old values" {
 }
 ```
 
+A call with a `mut` argument may change every part of it, so after the call
+a proof knows of the argument only what the contract states. `modifies`
+names the parts that a function changes, and every other part keeps its
+value:
+
+```truss
+type Tally(count: UInt64, limit: UInt64)
+
+fn Tally.increment(mut self)
+  modifies self.count
+  requires self.count < self.limit
+  ensures self.count == old(self.count) + 1
+{
+  self.count += 1
+}
+
+fn add_two_to(tally: mut Tally)
+  requires tally.count + 2 <= tally.limit
+  ensures tally.count == old(tally.count) + 2
+{
+  mut tally.increment()
+  mut tally.increment()
+}
+```
+
+The second call's `requires` holds because the first call keeps `limit`.
+Without `modifies`, nothing would say so. A body that changes a part the
+clause does not name is an error, and `truss check --fix` adds the part to
+the clause. A part that the clause names and the body never changes is a
+warning, whose fix removes the part.
+
 ### Invariants
 
 An `invariant` on a type is a fact about every value of the type:
@@ -4061,7 +4144,7 @@ specification can say more than code can:
   `==>`, appear only in specifications.
 
 ```truss
-fn contains_zero(numbers: Slice[Int64]) -> Bool
+fn contains_zero(numbers: List[Int64]) -> Bool
   ensures result == (exists index in 0..numbers.length() => numbers[index] == 0)
   cost allocations == 0
 {
@@ -4108,7 +4191,7 @@ fn sum_below(limit: UInt64) -> UInt64
   total
 }
 
-fn all_positive(numbers: Slice[Int64]) -> Bool
+fn all_positive(numbers: List[Int64]) -> Bool
   ensures result == (forall index in 0..numbers.length() => numbers[index] > 0)
 {
   for index in 0..numbers.length()
@@ -4137,8 +4220,9 @@ test "loops with invariants" {
 - `all_positive`'s invariant says every element before `index` is positive.
   When the loop ends, `index` is the length, so the invariant is the
   `ensures`.
-- In the clauses of a loop over a collection, `visited` is the `Sequence` of
-  the elements the loop has visited.
+- In the clauses of a `for` loop, `visited` is the `Sequence` of the values
+  of the iterations before: the elements of a collection, or the indexes of
+  a range.
 
 ### Termination
 
@@ -4250,20 +4334,31 @@ A `cost` clause bounds a resource that a call uses, and the compiler proves
 it from the body and from the cost clauses of the calls the body makes:
 
 ```truss
-fn total(numbers: Slice[Int64]) -> Int64
-  cost time O(numbers.length())
+fn gain(change: Int64) -> Int64
+  cost time O(1)
 {
-  var sum: Int64 = 0
-  for number in numbers {
-    sum = sum.saturating_add(number)
+  if change > 0 { change } else { 0 }
+}
+
+fn total_gain(changes: List[Int64]) -> Int64
+  cost time O(changes.length())
+{
+  var total: Int64 = 0
+  for change in changes {
+    total = total.saturating_add(gain(change))
   }
-  sum
+  total
 }
 
 test "a cost bound" {
-  assert total([1, 2, 3]) == 6
+  assert total_gain([3, -2, 4]) == 7
 }
 ```
+
+**A function that a cost-bounded function calls states a cost too.** The
+prover bounds a call only by the callee's `cost` clause, as it knows the
+callee's result only by its `ensures`. Without `cost time O(1)` on `gain`,
+`total_gain` proves no bound.
 
 | Clause | Promises |
 |---|---|
@@ -4273,10 +4368,103 @@ test "a cost bound" {
 | `cost calls(visit) == items.length()` | Exactly one call of the parameter `visit` per item |
 | `cost amortized time O(1)` | Constant time on average over a sequence of calls, as `List.push` promises |
 
-A bound can use the parameters, their fields, pure methods, `log(n)`, `power(base, exponent)`, and `time(visit)`, the bound of a
-function parameter. The standard library states costs for every function,
-which is what lets you prove your own: `truss show List.push` shows `cost
+A bound can use the parameters, their fields, pure methods, `log(n)`,
+`power(base, exponent)`, and `time(visit)`, the bound of a function
+parameter. `log(n)` is the smallest integer at least log₂(n + 1), so
+`log(0)` is 0. The standard library states costs for every function, which
+is what lets you prove your own: `truss show List.push` shows `cost
 amortized time O(1)`.
+
+#### Costs of loops
+
+A loop needs no `cost` clause of its own where the prover can count its
+cost. The prover counts each call at the callee's stated cost, amortized
+calls such as `List.push` and `List.pop` included, so this loop needs no
+clause:
+
+```truss
+fn recorded_entries(entries: List[Int64]) -> List[Int64]
+  cost amortized time O(entries.length())
+{
+  var recorded: List[Int64] = []
+  for entry in entries {
+    if entry == 0 {
+      let _ = mut recorded.pop()
+    } else {
+      mut recorded.push(entry)
+    }
+  }
+  recorded
+}
+
+test "a zero undoes the entry before it" {
+  assert recorded_entries([3, 4, 0, 5]) == [3, 5]
+}
+```
+
+- **Without a `cost` clause, the prover counts a loop's cost as its
+  iterations times a bound on one iteration.** The loop's measure bounds
+  the iterations, and the values the loop does not mutate bound one
+  iteration. Here the loop runs `entries.length()` times, and each
+  iteration costs `O(1)`.
+- `recorded_entries` states `cost amortized` because `push` states only
+  `cost amortized time O(1)`. A function whose `cost` is `amortized` counts
+  each call at the callee's amortized cost.
+
+A loop needs a `cost` clause where that count fails: where it is too large,
+or where one iteration's cost depends on a value the loop mutates. A loop
+that halves a value is the first case. It runs `O(log(value))` times, but
+its measure, `remaining`, allows `value` iterations. The loop's `cost`
+clause states the loop's cost so far:
+
+```truss
+fn halvings(value: UInt64) -> UInt64
+  cost time O(log(value))
+{
+  var remaining = value
+  var count: UInt64 = 0
+  while remaining > 0
+    invariant count + remaining <= value
+    decreases remaining
+    cost time O(log(value) - log(remaining))
+  {
+    remaining = remaining / 2
+    count += 1
+  }
+  count
+}
+
+test "a value halves once for each bit" {
+  assert halvings(0) == 0
+  assert halvings(12) == 4
+}
+```
+
+- **A loop's `cost` holds at the start of every iteration and where the
+  loop ends,** as an invariant does. On entry, `remaining` is `value`, so
+  the bound is 0. Each iteration halves `remaining`, which lowers
+  `log(remaining)` by 1 and so raises the bound by 1, enough for the
+  iteration's constant cost. Where the loop ends, `remaining` is 0, so the
+  bound is `log(value)`, the function's own bound.
+- Without the clause, the prover counts up to `value` iterations, and
+  `halvings` proves no `O(log(value))` bound. The invariant keeps
+  `count += 1` from overflowing.
+- The clause's bound can name the variables in scope at the loop, a
+  range's index, and `visited`. In a range loop, `visited` is a `Sequence`
+  too, so the number of iterations so far is `visited.length()`.
+- **An inner loop that pops what earlier iterations pushed is the second
+  case.** One iteration's cost depends on the length of the stack, which
+  the outer loop mutates, so the prover cannot bound one iteration. The
+  loops' clauses state the totals instead. Where each outer iteration
+  pushes once onto a stack that starts empty, the pops so far number
+  `visited.length() - stack.length()`, so the outer loop states
+  `cost time O(2 * visited.length() - stack.length())`.
+  The inner loop states `cost time O(depth - stack.length())`, with
+  `let depth = stack.length()` before it.
+- **A loop's `cost` is never `amortized`.** The compiler rejects
+  `cost amortized` on a loop as `parser.loop_cost_bound`. The function's
+  own `cost` accounts for potential: in a function whose `cost` is
+  `amortized`, a loop's clause counts each call at its amortized cost.
 
 ### Theorems and proof blocks
 
@@ -4305,7 +4493,7 @@ theorem doubling_is_even(value: Int64)
 {
 }
 
-theorem doubles_are_even(values: List[Int64])
+theorem doubles_are_even(values: view List[Int64])
   requires forall i in 0..values.length() => values[i] >= -1000 && values[i] <= 1000
   ensures forall i in 0..values.length() => double(values[i]) % 2 == 0
 {
@@ -4446,7 +4634,7 @@ A `parallel` block runs each statement directly inside it, a *branch*, at
 the same time, and ends when every branch has ended:
 
 ```truss
-fn sum(numbers: Slice[Int64]) -> Int64 {
+fn sum(numbers: List[Int64]) -> Int64 {
   var total: Int64 = 0
   for number in numbers {
     total = total.saturating_add(number)
@@ -4454,7 +4642,7 @@ fn sum(numbers: Slice[Int64]) -> Int64 {
   total
 }
 
-fn parallel_sum(numbers: Slice[Int64]) -> Int64 {
+fn parallel_sum(numbers: List[Int64]) -> Int64 {
   let halves = numbers.split_at(numbers.length() / 2)
   parallel {
     let left = sum(halves.first)
@@ -4501,10 +4689,9 @@ main.truss:4:9: error[ownership.data_race]: Data race: one branch of this `paral
 2 errors
 ```
 
-`parallel for` can change the elements of a `List`, a `Slice`, or an
-`Array` in place because each iteration gets a different element. The
-compiler proves two slices disjoint before it lets two branches change
-them, as in `sort(mut items[..middle])` beside `sort(mut items[middle..])`.
+`parallel for` can change the elements of a `List` or an `Array` in place
+because each iteration gets a different element. The compiler proves two
+ranges disjoint before it lets two branches change them, as in `sort(mut items[..middle])` beside `sort(mut items[middle..])`.
 
 ### Concurrent code
 
@@ -4516,7 +4703,7 @@ function declares `uses Tasks`:
 use standard.files
 use standard.tasks
 
-fn total_size(first: StringSlice, second: StringSlice) -> Result[UInt64, SystemError]
+fn total_size(first: String, second: String) -> Result[UInt64, SystemError]
   uses Tasks, FileRead
 {
   concurrent {
@@ -4708,6 +4895,23 @@ test "a cursor's provided methods" {
   `uses Self.Uses, RunForever unless Self: FiniteCursor`, so the second
   test, over a `Countdown`, needs no `RunForever`. A call over a channel's
   `Messages`, which may never end, uses it.
+- **Over a `FiniteCursor`, the same methods state their costs.** `to_list`
+  declares
+  `cost amortized time O((self.remaining() + 1) * time(Self.next)) when Self: FiniteCursor`
+  and `ensures result.length() <= old(self.remaining())` under the same
+  condition. `text.characters()` starts with `remaining()` equal to
+  `text.length()`, and its `next` costs `O(1)`, so
+  `text.characters().to_list()` costs `O(text.length())`, and a loop over
+  the list it returns runs at most `text.length()` times. `count`, `last`,
+  and `find` state the same bound, and `find` adds the time of its
+  predicate. The bounds are `amortized`, so the function that calls them
+  states `cost amortized`. `fold` states no cost: its total may hold
+  potential that no bound counts.
+- `time(Self.next)` has a value only where the cursor's `next` states a
+  bound that reads no parameter, and the cursor holds no potential.
+  `Characters` qualifies. A list's cursor holds the list, and `skip`'s
+  `next` reads how many values it has left to skip, so `to_list` over
+  either proves no bound.
 - `take` gives a `FiniteCursor` over any cursor, and `skip`, `step_by`,
   `enumerate`, and `zip` give one where their source does, `zip` where its
   first cursor does. `chain` and `peekable` give a plain `Cursor`: their
@@ -4725,15 +4929,21 @@ test "a cursor's provided methods" {
   Source: FiniteCursor` and measures the loop
   `decreases self.source.remaining() when Source: FiniteCursor`. Over a
   list's cursor it then ends, and its callers need no `RunForever`.
-- `items.cursor()` makes a cursor that owns a collection's elements, which
-  is what `for item in own items` pulls. It measures itself, as
-  `text.characters()` does.
+- `items.cursor()`, the method of the prelude trait `IntoCursor`, makes a
+  cursor that owns a collection's elements, which is what
+  `for item in own items` pulls. It measures itself, as `text.characters()`
+  does.
 
 ### Loops over your own types
 
-A `for` loop over a value that is not a cursor reads it by position. A type
-supports this with two methods: `count(self) -> UInt64`, and
-`element(self, position: UInt64)`, which lends the element at a position.
+A `for` loop over a value that is not a cursor reads it by position,
+through the methods of a prelude trait:
+
+| Loop | Trait | Methods |
+|---|---|---|
+| `for item in items` | `Iterable` | `count(self) -> UInt64`, and `element(self, position: UInt64)`, which lends the element at a position |
+| `for item in mut items` | `IterableMut` | `element(mut self, position: UInt64)`, which lends the element `mut` |
+| `for item in own items` | `IntoCursor` | `cursor(own self)`, which returns a cursor that owns the elements |
 
 ### Indexing your own types
 
@@ -4761,16 +4971,18 @@ impl Index for Board {
   }
 }
 
-fn Board.count(self) -> UInt64
-  ensures result == self.cells.length()
-{
-  self.cells.length()
-}
+impl Iterable for Board {
+  type Element = Bool
 
-fn Board.element(self, position: UInt64) lends Bool
-  requires position < self.cells.length()
-{
-  self.cells[position]
+  fn count(self) -> UInt64
+    ensures result == self.cells.length()
+  {
+    self.cells.length()
+  }
+
+  fn element(self, position: UInt64) lends Bool {
+    self.cells[position]
+  }
 }
 
 fn filled(board: Board) -> UInt64 {
@@ -4793,9 +5005,10 @@ test "indexing and looping over a board" {
 - `contains_key` says which keys the board has. `at`'s `requires` must
   follow from the trait's `requires self.contains_key(key)`, and the
   `ensures` on `contains_key` is what lets the prover see that it does.
-- `count`'s `ensures` lets the loop prove that each position it passes to
-  `element` is in bounds. Without it, the prover knows nothing about what
-  `count` returns.
+- `Iterable` declares `element` with `requires position < self.count()`,
+  and `count`'s `ensures` turns that into a bound on `cells`. Without it,
+  the prover knows nothing about what `count` returns.
+- `Board` also gets `Iterable`'s `map`, `filter`, and `fold`.
 - `IndexAssign` gives `collection[key] = value` its meaning for a type, such
   as a `Map`, that inserts keys rather than lending a place for them.
 
@@ -4880,8 +5093,12 @@ test "tagged templates" {
 A type becomes a tag by implementing the prelude trait `FromTemplate`. Its
 `is_valid_template` method states which literal text is valid, and the
 compiler runs it on each template's text when it checks the code, as it
-runs the condition of an `assert ... by evaluation`. See
-[Tagged templates](SPECIFICATION.md#tagged-templates).
+runs the condition of an `assert ... by evaluation`. The trait's associated
+type `Interpolation` is the type that each interpolated value is converted
+to. Its `from_template` method builds the value from a
+`Template[Interpolation]`: the literal text and the converted values.
+`from_template` requires `is_valid_template`, so it never receives invalid
+text. `truss show FromTemplate` prints the trait.
 
 ### Overloads by receiver mode
 
@@ -4902,10 +5119,11 @@ copied.
 These words are reserved everywhere and cannot be names:
 
 ```text
-any assert break capability concurrent continue cost decreases derives echo else
+assert break capability concurrent continue cost decreases derives echo else
 ensures exists false fn for forall if impl in indirect internal invariant is law
-lends let match mut opaque own parallel proof provide public requires return self
-Self test theorem todo trait true type unreachable use uses var while with
+lends let match modifies mut opaque own parallel proof provide public requires
+return self Self test theorem todo trait true type unless unreachable use uses
+var when while with
 ```
 
 These are reserved for later use, and are an error if written:
@@ -4936,7 +5154,7 @@ From the tightest binding to the loosest:
 | Operators | Meaning |
 |---|---|
 | `.field`, `.method()`, `[index]`, `(arguments)`, `?`, `with (...)` | Access, call, and propagate an error |
-| `-a`, `!a`, `~a`, `mut place`, `own place`, `any value` | Negation, logical not, bitwise not, modes, dynamic dispatch |
+| `-a`, `!a`, `~a`, `mut place`, `own place` | Negation, logical not, bitwise not, modes |
 | `*`, `/`, `%` | Multiplication, division rounding toward zero, remainder with the sign of the left side |
 | `+`, `-` | Addition and subtraction |
 | `..`, `..=` | Ranges, excluding and including the end |
@@ -4994,6 +5212,11 @@ From the tightest binding to the loosest:
   a minute, or at once with `truss stop`. `--no-server`, or
   `TRUSS_NO_SERVER=1`, runs a command in its own process.
 - **`TRUSS_CC`** names the C compiler, and **`TRUSS_Z3`** the Z3 executable.
+- **An x86-64 program is built for the x86-64-v3 level** unless the
+  project's manifest names another ([Projects](#projects)). Before `main`
+  runs, the program checks the CPU for each feature of its level. Where one
+  is missing, it prints the feature's name and the level to write in the
+  manifest, and exits with status 126.
 - **A release build has a line table,** so a profiler, a debugger, and
   `objdump -S` attribute machine code to the Truss line it came from. Run
   `objdump -S` in the project's directory, where the table's file names
@@ -5009,16 +5232,18 @@ library's, and a prelude name alone:
 | To find | Run |
 |---|---|
 | A prelude type and its methods | `truss show String`, `truss show List`, `truss show Map` |
-| One method | `truss show StringSlice.split` |
+| One method | `truss show String.split` |
 | A capability's methods | `truss show Console` |
 | A module's public definitions | `truss show standard.json` |
 | A whole definition, body and all | `truss show standard.console.strip_styles --body` |
 
 The methods of the built-in integer types belong to the traits
 `FixedWidthInteger`, `SignedInteger`, and `UnsignedInteger`: `truss show
-FixedWidthInteger` lists them. `truss show standard` prints every public
-definition of the standard library, over ten thousand lines, so show one
-module at a time.
+FixedWidthInteger` lists them. `truss show Int64.checked_add` shows one of
+them and names the impl that gives it to `Int64`, and a derived trait's
+method is shown through its type the same way. `truss show standard` prints
+every public definition of the standard library, over ten thousand lines,
+so show one module at a time.
 
 ## Appendix D: The Standard Library
 
@@ -5043,7 +5268,7 @@ Every module is used as `use standard.name`, then `name.Item`.
 | `html` | The `Html` template, escaping, and sanitizing |
 | `http` | An HTTP client and server, routes, cookies, forms, and CORS and CSRF policies |
 | `json` | Parsing, encoding, and decoding JSON, and the `json.Value` template |
-| `list`, `map`, `set` | `List`, `Slice`, `Map`, and `Set`, which are in the prelude |
+| `list`, `map`, `set` | `List`, `Map`, and `Set`, which are in the prelude |
 | `log` | Logging, with levels, fields, `ConsoleLog`, and `DiscardLog` |
 | `mail` | Sending mail over SMTP |
 | `math` | `BigInteger`, `Decimal`, and statistics such as `mean` and `median` |
@@ -5058,7 +5283,7 @@ Every module is used as `use standard.name`, then `name.Item`.
 | `specification` | `Sequence`, `FiniteSet`, and `FiniteMap`, the types of specifications |
 | `streams` | Buffered readers and writers over handles |
 | `tasks` | `Channel`, `Cell`, `Counter`, `Limiter`, `Pool`, `SeededTasks`, and `with_timeout` |
-| `text` | `String`, `StringSlice`, `Parse`, and `FromTemplate` |
+| `text` | `String`, `Parse`, and `FromTemplate` |
 | `time` | `Instant`, `Duration`, dates, time zones, layouts, `FixedClock`, and `ManualClock` |
 | `tls` | TLS clients and servers |
 | `toml` | Parsing, encoding, and decoding TOML |
