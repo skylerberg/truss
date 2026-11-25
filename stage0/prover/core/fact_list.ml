@@ -48,6 +48,4 @@ let is_held facts ~under conjunct =
         alike
   | None -> false
 
-let remove_held facts ~under goal =
-  Logic.conjunction
-    (List.filter (fun conjunct -> not (is_held facts ~under conjunct)) (list_conjuncts goal))
+let holds facts ~under goal = List.for_all (is_held facts ~under) (list_conjuncts goal)

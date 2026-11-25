@@ -383,41 +383,40 @@ let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?(is_proven_by_evaluat
          || (is_panic_obligation code && context.keeps_failures))
   then assume context frame goal
   else
-    let unproven =
+    let is_held =
       match goal with
-      | Logic.Boolean _ -> Some goal
-      | _ when is_proven_by_evaluation -> Some goal
-      | _ -> (
-          match Fact_list.remove_held context.facts ~under:frame.condition goal with
-          | Logic.Boolean true -> None
-          | unproven -> Some unproven)
+      | Logic.Boolean _ -> false
+      | _ ->
+          (not is_proven_by_evaluation) && frame.binders = []
+          && Fact_list.holds context.facts ~under:frame.condition goal
     in
-    match
-      Option.bind unproven (fun unproven ->
-          make_closed_obligation context frame location obligation
-            (add_quantifier_facts
-               ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
-               context unproven))
-    with
-    | Some obligation ->
-        let is_home_body = is_home context frame.source && frame.makes_obligations in
-        let fixes =
-          match fixes with
-          | [] when is_home_body && can_be_required -> (
-              match find_goal_code context goal with
-              | Some _ when Logic.is_refuted goal -> []
-              | Some required -> add_requires context frame [ Clause required ]
-              | None -> [])
-          | fixes -> fixes
-        in
-        let fixes =
-          if is_panic_obligation code && context.can_declare_panic && is_home_body then
-            fixes @ make_panic_fix context
-          else fixes
-        in
-        context.obligations <- { obligation with cited; fixes } :: context.obligations;
-        assume context frame goal
-    | None -> ()
+    if is_held then assume context frame goal
+    else
+      match
+        make_closed_obligation context frame location obligation
+          (add_quantifier_facts
+             ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
+             context goal)
+      with
+      | Some obligation ->
+          let is_home_body = is_home context frame.source && frame.makes_obligations in
+          let fixes =
+            match fixes with
+            | [] when is_home_body && can_be_required -> (
+                match find_goal_code context goal with
+                | Some _ when Logic.is_refuted goal -> []
+                | Some required -> add_requires context frame [ Clause required ]
+                | None -> [])
+            | fixes -> fixes
+          in
+          let fixes =
+            if is_panic_obligation code && context.can_declare_panic && is_home_body then
+              fixes @ make_panic_fix context
+            else fixes
+          in
+          context.obligations <- { obligation with cited; fixes } :: context.obligations;
+          assume context frame goal
+      | None -> ()
 
 let reject_recursion_through_supplied_code (context : State.context) (frame : State.frame) location
     (statement : Mir.statement) =
