@@ -1764,6 +1764,44 @@ let () =
     (fun () -> expect_not_proven Fixtures.Prover.large_constant_loop_of_linear_calls "prover.cost");
   Harness.test "a loop with a constant count of recursive calls counts every call" (fun () ->
       expect_not_proven Fixtures.Prover.two_recursive_calls_in_a_constant_loop "prover.cost");
+  Harness.test "a loop's cost clause around two recursive calls does not make them linear"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.two_recursive_calls_in_a_range_loop_with_a_cost_clause
+        "prover.cost";
+      expect_not_proven Fixtures.Prover.two_recursive_calls_in_a_while_loop_with_a_cost_clause
+        "prover.cost";
+      expect_not_proven Fixtures.Prover.two_recursive_calls_in_a_cursor_loop_with_a_cost_clause
+        "prover.cost");
+  Harness.test "nested loops' cost clauses around two recursive calls do not make them linear"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.two_recursive_calls_in_nested_loops_with_cost_clauses
+        "prover.cost");
+  Harness.test
+    "a loop's cost clause in a lambda around two recursive calls does not make them linear"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.two_recursive_calls_in_a_loop_with_a_cost_clause_in_a_lambda
+        "prover.cost");
+  Harness.test "a loop's cost clause around one recursive call is linear" (fun () ->
+      expect_proven Fixtures.Prover.one_recursive_call_in_a_range_loop_with_a_cost_clause;
+      expect_proven Fixtures.Prover.one_recursive_call_in_a_while_loop_with_a_cost_clause);
+  Harness.test "a loop's cost clause beside a recursive call counts the loop as its clause's order"
+    (fun () -> expect_proven Fixtures.Prover.loop_with_a_cost_clause_beside_a_recursive_call);
+  Harness.test "a callee that runs a lambda with a recursive call twice is not linear" (fun () ->
+      expect_not_proven Fixtures.Prover.recursive_call_in_a_lambda_that_its_callee_runs_twice
+        "prover.cost");
+  Harness.test
+    "a callee that runs a constant-time lambda with a recursive call twice is not constant"
+    (fun () ->
+      expect_not_proven
+        Fixtures.Prover.recursive_call_in_a_constant_time_lambda_that_its_callee_runs_twice
+        "prover.cost");
+  Harness.test "a function value that runs a lambda with a recursive call twice is not constant"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.recursive_call_in_a_lambda_that_a_function_value_runs_twice
+        "prover.cost");
+  Harness.test "two recursive calls in a lambda under an amortized bound are not linear" (fun () ->
+      expect_not_proven Fixtures.Prover.two_recursive_calls_in_a_lambda_under_an_amortized_bound
+        "prover.cost");
   Harness.test "nested loops over ranges are quadratic" (fun () ->
       expect_proven (constant_step ^ Fixtures.Prover.nested_range_loops_of_quadratic_time));
   Harness.test "a loop whose iterations cost their index is quadratic" (fun () ->
@@ -1964,6 +2002,49 @@ let () =
       if actual <> [ "prover.cost" ] then Harness.fail "%s" (String.concat ", " actual));
   Harness.test "a caller that lowers a lent part's potential is paid by it" (fun () ->
       expect_proven (meter ^ bag ^ Fixtures.Prover.meter_credit_spent_through_a_lent_part));
+  Harness.test "a write that raises a declared potential pays for it" (fun () ->
+      expect_not_proven Fixtures.Prover.credit_set_by_a_write "prover.cost");
+  Harness.test "a value that a provided capability changes pays for its potential" (fun () ->
+      expect_not_proven
+        (meter ^ Fixtures.Prover.meter_credit_raised_by_a_provided_capability)
+        "prover.cost");
+  Harness.test "a callee with only a plain bound pays for the potential of its result" (fun () ->
+      expect_not_proven
+        (meter ^ Fixtures.Prover.meter_built_by_a_plain_callee_then_spent)
+        "prover.cost");
+  Harness.test "a construction pays for the potential its type declares" (fun () ->
+      expect_proven (meter ^ Fixtures.Prover.meter_built_with_its_credit));
+  Harness.test "a construction whose potential exceeds the bound is not amortized constant"
+    (fun () ->
+      expect_not_proven (meter ^ Fixtures.Prover.meter_built_in_constant_time) "prover.cost");
+  Harness.test "a type that declares a potential is not `Plain`" (fun () ->
+      expect_not_proven
+        (meter ^ Fixtures.Prover.meter_copied_implicitly)
+        "ownership.not_owned"
+        ~fixed:("var copy = meter", "var copy = meter.copy()")
+        ~left_after_fix:[ "prover.cost" ];
+      expect_not_proven Fixtures.Prover.plain_credit_declared "types.cannot_derive");
+  Harness.test "a type parameter bounded by `Plain` holds no potential" (fun () ->
+      expect_proven Fixtures.Prover.plain_values_read_twice);
+  Harness.test "a view holds no potential of the elements it reaches" (fun () ->
+      expect_not_proven (meter ^ Fixtures.Prover.meters_held_then_spent) "prover.cost";
+      expect_not_proven (meter ^ Fixtures.Prover.meter_packed_with_a_view) "prover.cost");
+  Harness.test "a function with a plain bound does not convert to an amortized function type"
+    (fun () ->
+      expect_not_proven
+        (meter ^ Fixtures.Prover.plain_function_passed_as_an_amortized_callback)
+        "types.mismatch");
+  Harness.test "a capability method's bound counts the change in its provider's potential"
+    (fun () ->
+      expect_not_proven (meter ^ Fixtures.Prover.meter_deposit_provided) "prover.cost";
+      expect_proven (meter ^ Fixtures.Prover.meter_ticked_by_a_provided_capability);
+      expect_proven Fixtures.Prover.values_collected_by_a_provided_capability);
+  Harness.test "a cancelled branch's change to a value pays for its potential" (fun () ->
+      expect_not_proven (meter ^ Fixtures.Prover.meter_raised_in_a_cancelled_branch) "prover.cost");
+  Harness.test "an amortized loop over an owned list is linear" (fun () ->
+      expect_proven Fixtures.Prover.amortized_loop_over_an_owned_list);
+  Harness.test "a string's bytes move in amortized constant time" (fun () ->
+      expect_proven Fixtures.Prover.amortized_length_of_owned_bytes);
   Harness.test "a potential below zero" (fun () ->
       expect_not_proven "type Debt(owed: Int64)\n  cost potential owed\n" "prover.cost");
   Harness.test "a potential its invariant keeps at or above zero" (fun () ->
@@ -2405,6 +2486,11 @@ let () =
     (fun () ->
       expect_not_proven Fixtures.Prover.loop_pushing_values_of_a_type_parameter_within_a_small_bound
         "prover.cost");
+  Harness.test
+    "an amortized push onto a list that a callback returned pays for the list's potential"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.amortized_push_onto_a_list_that_a_callback_returns
+        "prover.cost");
   Harness.test "a push onto a list that a callback returned spends the list's potential" (fun () ->
       expect_not_proven Fixtures.Prover.loop_pushing_onto_a_list_that_a_callback_returns
         "prover.cost");
@@ -2561,7 +2647,15 @@ let () =
   Harness.test "a loop that pushes on one path onto a `mut` parameter is amortized linear"
     (fun () -> expect_proven Fixtures.Prover.loop_pushing_onto_a_parameter_in_one_branch);
   Harness.test "a loop that pushes on one path is counted by its cost clause" (fun () ->
-      expect_proven Fixtures.Prover.loop_pushing_in_one_branch_with_a_cost_clause)
+      expect_proven Fixtures.Prover.loop_pushing_in_one_branch_with_a_cost_clause);
+  Harness.test "an amortized loop names a mutating callee that states no amortized bound" (fun () ->
+      expect_a_message_saying
+        ~says:
+          "`drop_last` states no `cost amortized time`, so the prover counts `drop_last(mut kept)` \
+           at its plain cost plus the change in potential of the values it mutates or returns. The \
+           prover cannot bound that change by the values this loop does not mutate. Give \
+           `drop_last` a `cost amortized time` clause."
+        (list_diagnostics Fixtures.Prover.loop_calling_a_mutating_callee_without_an_amortized_bound))
 
 let () =
   Harness.test
@@ -3173,75 +3267,40 @@ let () =
       goal = Logic.Operation (operator, [ Logic.Symbol symbol; Logic.Symbol symbol ]);
     }
   in
-  Harness.test "an answer in the cache is read, and the solver is not run" (fun () ->
-      let query = make_self_comparison Logic.Greater_equal in
-      let request = Solver.make_request query in
-      let cache =
-        {
-          Solver.find =
-            (fun key ->
-              if key = Solver.For_testing.hash_query query then Some Solver.For_testing.proven_entry
-              else None);
-          add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
-        }
-      in
-      match Solver.find ~cache () with
-      | Error message -> Harness.fail "%s" message
-      | Ok solver ->
-          if List.hd (Solver.solve_all solver [ (request, query) ]) <> Solver.Proven then
-            Harness.fail "expected the cached answer";
-          if Solver.For_testing.count_queries_run solver <> 0 then Harness.fail "ran the solver");
-  Harness.test "a proven answer in the cache is read whatever values the request asks for"
+  let find_solver () =
+    match Solver.find () with Ok solver -> solver | Error message -> Harness.fail "%s" message
+  in
+  let solve_one ?find_output solver request =
+    List.hd (Solver.solve_all ?find_output solver [ request ])
+  in
+  let find_stored_output (solved : Solver.solved) input =
+    List.find_map
+      (fun (run : Solver.run) -> if run.input = input then Some run.output else None)
+      solved.runs
+  in
+  Harness.test "a stored run is read by its input, and Z3 is not run" (fun () ->
+      let request = Solver.make_request (make_self_comparison Logic.Greater_equal) in
+      let solver = find_solver () in
+      let find_output input = if input = Solver.show_input request then Some "unsat\n" else None in
+      if (solve_one ~find_output solver request).answer <> Solver.Proven then
+        Harness.fail "expected the stored answer";
+      if Solver.For_testing.count_queries_run solver <> 0 then Harness.fail "ran Z3");
+  Harness.test "each run that answers a request is reported with its input and Z3's output"
     (fun () ->
-      let query = make_self_comparison Logic.Greater_equal in
-      let request =
-        Solver.make_request
-          ~symbols:[ Logic.Symbol.Variable { label = "compared"; numbers = [] } ]
-          query
-      in
-      let cache =
-        {
-          Solver.find =
-            (fun key ->
-              if key = Solver.For_testing.hash_query query then Some Solver.For_testing.proven_entry
-              else None);
-          add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
-        }
-      in
-      match Solver.find ~cache () with
-      | Error message -> Harness.fail "%s" message
-      | Ok solver ->
-          if List.hd (Solver.solve_all solver [ (request, query) ]) <> Solver.Proven then
-            Harness.fail "expected the cached answer";
-          if Solver.For_testing.count_queries_run solver <> 0 then Harness.fail "ran the solver");
-  Harness.test "each solver keeps its own answers" (fun () ->
-      let query = make_self_comparison Logic.Less in
-      let request = Solver.make_request query in
-      match (Solver.find (), Solver.find ()) with
-      | Ok first, Ok second ->
-          ignore (Solver.solve_all first [ (request, query) ]);
-          ignore (Solver.solve_all second [ (request, query) ]);
-          if Solver.For_testing.count_queries_run second <> 1 then
-            Harness.fail "the second solver ran %d queries"
-              (Solver.For_testing.count_queries_run second)
-      | Error message, _ | _, Error message -> Harness.fail "%s" message);
-  Harness.test "a solved answer is added to the cache under its query's key" (fun () ->
-      let query = make_self_comparison Logic.Less_equal in
-      let request = Solver.make_request query in
-      let cached_answers = Hashtbl.create 1 in
-      let cache =
-        { Solver.find = Hashtbl.find_opt cached_answers; add = Hashtbl.replace cached_answers }
-      in
-      match Solver.find ~cache () with
-      | Error message -> Harness.fail "%s" message
-      | Ok solver ->
-          ignore (Solver.solve_all solver [ (request, query) ]);
-          if Solver.For_testing.count_queries_run solver <> 1 then
-            Harness.fail "did not run the solver";
-          if
-            Hashtbl.find_opt cached_answers (Solver.For_testing.hash_query query)
-            <> Some Solver.For_testing.proven_entry
-          then Harness.fail "the cache does not have the answer");
+      let request = Solver.make_request (make_self_comparison Logic.Less_equal) in
+      let solver = find_solver () in
+      match (solve_one solver request).runs with
+      | [ { input; output } ] ->
+          if input <> Solver.show_input request then Harness.fail "reported the input %S" input;
+          if not (String.starts_with ~prefix:"unsat" output) then
+            Harness.fail "reported the output %S" output
+      | runs -> Harness.fail "reported %d runs" (List.length runs));
+  Harness.test "requests with the same input are answered by one run" (fun () ->
+      let request = Solver.make_request (make_self_comparison Logic.Less) in
+      let solver = find_solver () in
+      ignore (Solver.solve_all solver [ request; request ]);
+      if Solver.For_testing.count_queries_run solver <> 1 then
+        Harness.fail "ran %d queries" (Solver.For_testing.count_queries_run solver));
   let find_obligation_query text code =
     let packages = Support.setup [ ("app.main", text) ] in
     let key = List.hd (Support.list_declarations packages (Support.parse_module "app.main")) in
@@ -3262,8 +3321,7 @@ let () =
       | None, _ -> Harness.fail "no obligation of the `ensures`"
       | _, Error message -> Harness.fail "%s" message
       | Some query, Ok solver ->
-          let request = Solver.make_request query in
-          if List.hd (Solver.solve_all solver [ (request, query) ]) <> Unknown Out_of_steps then
+          if (solve_one solver (Solver.make_request query)).answer <> Unknown Out_of_steps then
             Harness.fail "expected an unknown answer from the step limit";
           if Solver.For_testing.count_queries_run solver <> 1 then
             Harness.fail "ran %d queries" (Solver.For_testing.count_queries_run solver));
@@ -3284,91 +3342,71 @@ let () =
       match Solver.find () with
       | Error message -> Harness.fail "%s" message
       | Ok solver -> (
-          match Solver.solve_all solver [ (Solver.make_request query, query) ] with
-          | [ Unknown (Incomplete reason) ] ->
+          match (solve_one solver (Solver.make_request query)).answer with
+          | Unknown (Incomplete reason) ->
               if not (String.includes ~affix:"incomplete (theory arithmetic)" reason) then
                 Harness.fail "reason %S" reason
           | _ -> Harness.fail "expected an unknown answer with Z3's reason"));
-  Harness.test "an unknown answer's reason is read back from the cache" (fun () ->
-      let query = power_of_itself_is_three in
-      let request = Solver.make_request query in
-      let cached_answers = Hashtbl.create 1 in
-      let cache =
-        { Solver.find = Hashtbl.find_opt cached_answers; add = Hashtbl.replace cached_answers }
-      in
-      match (Solver.find ~cache (), Solver.find ~cache ()) with
-      | Ok first, Ok second ->
-          let solved = Solver.solve_all first [ (request, query) ] in
-          if Solver.solve_all second [ (request, query) ] <> solved then
-            Harness.fail "the cache gave another answer";
-          if Solver.For_testing.count_queries_run second <> 0 then
-            Harness.fail "ran the solver again"
-      | Error message, _ | _, Error message -> Harness.fail "%s" message);
-  Harness.test "a counterexample's values are read back from the cache" (fun () ->
-      let query = make_self_comparison Logic.Less in
-      let request =
-        Solver.make_request
-          ~symbols:[ Logic.Symbol.Variable { label = "compared"; numbers = [] } ]
-          ~terms:[ (Logic.Symbol.Reached 0, Logic.int (-1)) ]
-          query
-      in
-      let cached_answers = Hashtbl.create 2 in
-      let cache =
-        { Solver.find = Hashtbl.find_opt cached_answers; add = Hashtbl.replace cached_answers }
-      in
-      match (Solver.find ~cache (), Solver.find ~cache ()) with
-      | Ok first, Ok second -> (
-          match Solver.solve_all first [ (request, query) ] with
-          | [ Counterexample (_ :: _ :: _) ] as solved ->
-              if Solver.solve_all second [ (request, query) ] <> solved then
-                Harness.fail "the cache gave other values";
-              if Solver.For_testing.count_queries_run second <> 0 then
-                Harness.fail "ran the solver again"
-          | _ -> Harness.fail "expected a counterexample with both values")
-      | Error message, _ | _, Error message -> Harness.fail "%s" message);
+  let expect_answered_from_runs request =
+    let first = find_solver () and second = find_solver () in
+    let solved = solve_one first request in
+    if (solve_one ~find_output:(find_stored_output solved) second request).answer <> solved.answer
+    then Harness.fail "the stored runs gave another answer";
+    if Solver.For_testing.count_queries_run second <> 0 then Harness.fail "ran Z3 again";
+    solved.answer
+  in
+  Harness.test "an unknown answer's reason is read back from its stored runs" (fun () ->
+      match expect_answered_from_runs (Solver.make_request power_of_itself_is_three) with
+      | Unknown (Incomplete _) -> ()
+      | _ -> Harness.fail "expected an unknown answer with Z3's reason");
+  Harness.test "a counterexample's values are read back from its stored runs" (fun () ->
+      match
+        expect_answered_from_runs
+          (Solver.make_request
+             ~symbols:[ Logic.Symbol.Variable { label = "compared"; numbers = [] } ]
+             ~terms:[ (Logic.Symbol.Reached 0, Logic.int (-1)) ]
+             (make_self_comparison Logic.Less))
+      with
+      | Counterexample (_ :: _ :: _) -> ()
+      | _ -> Harness.fail "expected a counterexample with both values");
   Harness.test "an obligation that the solver stops on before the step limit names Z3's reason"
     (fun () ->
-      let cache =
-        {
-          Solver.find =
-            (fun _ -> Some (Solver.For_testing.make_incomplete_entry "(incomplete quantifiers)"));
-          add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
-        }
+      let solver =
+        Solver.For_testing.make ~run_z3:(fun _ ->
+            "unknown\n(:reason-unknown \"(incomplete quantifiers)\")\n(:rlimit 1)\n")
       in
-      match Solver.find ~cache () with
-      | Error message -> Harness.fail "%s" message
-      | Ok solver -> (
-          let database =
-            Support.make_database
-              (Support.setup [ ("app.main", Fixtures.Prover.addition_that_can_overflow) ])
-          in
-          let file = Support.parse_file "app.main" in
-          Database.decide (Support.prove database file) (Lazy.from_val solver);
-          match Database.list_proof_diagnostics database file with
-          | [ diagnostic ] ->
-              if
-                not
-                  (String.includes ~affix:"Z3 gives the reason `(incomplete quantifiers)`"
-                     diagnostic.message)
-              then Harness.fail "message %S" diagnostic.message
-          | diagnostics -> Harness.fail "%d diagnostics" (List.length diagnostics)));
-  Harness.test "a second request for a query solved in a small model runs one query" (fun () ->
-      match
-        ( find_obligation_query Fixtures.Prover.addition_under_an_exists_in_a_forall Overflow,
-          Solver.find () )
-      with
-      | None, _ -> Harness.fail "no obligation of the addition"
-      | _, Error message -> Harness.fail "%s" message
-      | Some query, Ok solver -> (
-          let first = Solver.make_request query
-          and second = Solver.make_request ~terms:[ (Logic.Symbol.Reached 0, Logic.int 1) ] query in
-          match List.hd (Solver.solve_all solver [ (first, query) ]) with
-          | Proven | Unknown _ -> Harness.fail "expected a counterexample"
-          | Counterexample _ ->
-              let queries_before = Solver.For_testing.count_queries_run solver in
-              ignore (Solver.solve_all solver [ (second, query) ]);
-              let queries_run = Solver.For_testing.count_queries_run solver - queries_before in
-              if queries_run <> 1 then Harness.fail "ran %d queries" queries_run));
+      let database =
+        Support.make_database
+          (Support.setup [ ("app.main", Fixtures.Prover.addition_that_can_overflow) ])
+      in
+      let file = Support.parse_file "app.main" in
+      Database.decide (Support.prove database file) (Lazy.from_val solver);
+      match Database.list_proof_diagnostics database file with
+      | [ diagnostic ] ->
+          if
+            not
+              (String.includes ~affix:"Z3 gives the reason `(incomplete quantifiers)`"
+                 diagnostic.message)
+          then Harness.fail "message %S" diagnostic.message
+      | diagnostics -> Harness.fail "%d diagnostics" (List.length diagnostics));
+  Harness.test "deciding an edited body runs Z3 only for the queries that changed" (fun () ->
+      let file = Support.parse_file "app.main" in
+      let database =
+        Support.make_database
+          (Support.setup [ ("app.main", Fixtures.Prover.two_bounded_additions) ])
+      in
+      let decide () =
+        let solver = find_solver () in
+        Database.decide (Support.prove database file) (Lazy.from_val solver);
+        Solver.For_testing.count_queries_run solver
+      in
+      let from_nothing = decide () in
+      Database.update database
+        [ (file, Some Fixtures.Prover.two_bounded_additions_with_the_second_changed) ];
+      let after_the_edit = decide () in
+      if after_the_edit <> 1 then
+        Harness.fail "ran %d queries after the edit, and %d from nothing" after_the_edit
+          from_nothing);
   Harness.test "a function defined by a quantified formula reaches the solver as a definition"
     (fun () ->
       match find_obligation_query Fixtures.Prover.increment_of_a_word_count Overflow with
@@ -3394,8 +3432,7 @@ let () =
           Support.read_proofs (Support.make_database packages) (Support.parse_file "app.main")
             key.key
         with
-        | Obligations { obligations = [ obligation ]; _ } ->
-            Solver.For_testing.hash_query obligation.query
+        | Obligations { obligations = [ obligation ]; _ } -> Logic.show_query obligation.query
         | _ -> "none"
       in
       let first = key_of Fixtures.Prover.addition_that_can_overflow in
@@ -3803,11 +3840,7 @@ let () =
         "prover.cost");
   Harness.test "a callback passed on spends its own allocations" (fun () ->
       expect_proven
-        (callbacks ^ Fixtures.Prover.apply_forwarding_a_callback_bounded_by_its_allocations));
-  Harness.test "a plain bound does not take a named function's amortized allocations" (fun () ->
-      expect_not_proven
-        (callbacks ^ Fixtures.Prover.apply_of_a_named_function_with_an_amortized_allocation_bound)
-        "prover.cost")
+        (callbacks ^ Fixtures.Prover.apply_forwarding_a_callback_bounded_by_its_allocations))
 
 let () =
   Harness.test "the allocations of a callback are within the bound that its type states" (fun () ->
@@ -3816,10 +3849,6 @@ let () =
     (fun () ->
       expect_not_proven
         Fixtures.Prover.callback_whose_type_states_its_allocations_counted_below_its_bound
-        "prover.cost");
-  Harness.test "a plain bound does not take the amortized allocations that a callback's type states"
-    (fun () ->
-      expect_not_proven Fixtures.Prover.callback_whose_type_states_amortized_allocations
         "prover.cost");
   Harness.test "a plain bound does not take the amortized time that a callback's type states"
     (fun () ->

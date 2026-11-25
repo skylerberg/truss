@@ -15,6 +15,8 @@ val make_conditional_amount : Logic.term -> Logic.term -> Logic.term
 val compute_amount_within :
   State.context -> State.frame -> Costs.counter -> Logic.term -> Logic.term
 
+val passes_lambda_assuming_recursive_costs : State.context -> State.passed list -> bool
+
 val compute_callee_amount :
   ?method_cost:(Language.Metric.t -> Logic.term) ->
   State.context ->
@@ -24,9 +26,9 @@ val compute_callee_amount :
   bind_frame:(State.clauses -> State.frame) ->
   uses:Types.capability_set ->
   values:State.passed list ->
-  change:(unit -> Logic.term) option ->
+  counts_provider_potential:bool ->
   Costs.counter ->
-  Logic.term
+  Costs.charge
 
 val compute_capability_amount :
   State.context ->
@@ -44,12 +46,35 @@ val compute_step_amount :
   Invocation.t ->
   State.passed list ->
   Costs.counter ->
-  Logic.term
+  Costs.charge
 
 val has_potential : State.context -> ?seen:Types.ty list -> Types.ty -> bool
 
 val compute_potential :
   State.context -> State.frame -> ?seen:Types.ty list -> Types.ty -> Logic.term -> Logic.term
+
+val has_declared_potential : State.context -> Types.ty -> bool
+
+val compute_declared_potential :
+  State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term
+
+val compute_arguments_potential_change :
+  State.context ->
+  before:State.frame ->
+  after:State.frame ->
+  State.passed list ->
+  changed:(int * Logic.term) list ->
+  Logic.term
+
+val compute_call_potential_change :
+  State.context ->
+  before:State.frame ->
+  after:State.frame ->
+  State.passed list ->
+  changed:(int * Logic.term) list ->
+  result_type:Types.ty ->
+  result:Logic.term ->
+  Logic.term
 
 val compute_elements_potential : State.context -> Types.ty -> Logic.term -> Logic.term
 

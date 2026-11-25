@@ -1,0 +1,6 @@
+fn spends_a_copy(meter: Meter)
+  cost amortized time O(1)
+{
+  var copy = meter
+  mut copy.spend()
+}

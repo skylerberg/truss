@@ -103,7 +103,7 @@ that the toolchain runs:
 
 ```text
 $ truss --version
-stage0 (Truss 0.1, code generation 29, Unicode 18.0.0)
+stage0 (Truss 0.1, Unicode 18.0.0)
 ```
 
 ### Hello, world
@@ -3208,6 +3208,8 @@ test "lambdas" {
   var scores = [10, 20, 30]
   mut scores.update_each(fn(score) { score = score / 2 })
   assert scores == [5, 10, 15]
+  let halve = fn(score: Int64) { score / 2 }
+  assert halve(10) == 5
 }
 ```
 
@@ -3215,16 +3217,23 @@ test "lambdas" {
   result.
 - **A lambda's types come from where it is used.** `apply_twice` declares
   `step: fn(Int64) -> Int64`, so `value` is an `Int64`. The types flow from
-  outside in, never from the lambda's body, so a lambda with nothing to give
-  it types is an error:
+  outside in, never from the lambda's body, so a parameter that nothing
+  gives a type is an error:
 
   ```text
-  main.truss:2:15: error[types.lambda_needs_type]: A lambda's parameter types come from where it is used, and nothing here gives them. Bind it with a typed `let`, such as `let double: fn(Int64) -> Int64 = fn(x) { x * 2 }`.
+  main.truss:2:18: error[types.cannot_infer]: The type of `value` cannot be inferred from where this lambda is used. Declare `value` with a type.
     |   let twice = fn(value) { value * 2 }
-    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |                  ^^^^^
 
   1 error
   ```
+
+- **A parameter can declare its type,** as a function's parameter does.
+  `halve` is passed nowhere, so its annotation gives it the type
+  `fn(Int64) -> Int64`. Where a lambda is passed, its annotation must state
+  the type and the mode that the function type gives, as `score: mut Int64`
+  would for `update_each`. A lambda declares no result type: its result is
+  its body's value.
 
 - **A lambda reads the variables around it,** as the lambda in `above` reads
   `threshold`, but it cannot change them:
@@ -4140,8 +4149,8 @@ specification can say more than code can:
   terminates. A function whose `uses` is a capability parameter, such as
   `map`, can be called in one with a pure lambda.
 - A quantifier over a range is also an expression in code, which runs as a
-  loop that stops when it knows the answer. A quantifier over a type, and
-  `==>`, appear only in specifications.
+  loop that stops when it knows the answer. A quantifier over a type appears
+  only in specifications.
 
 ```truss
 fn contains_zero(numbers: List[Int64]) -> Bool
@@ -4407,9 +4416,11 @@ test "a zero undoes the entry before it" {
   the iterations, and the values the loop does not mutate bound one
   iteration. Here the loop runs `entries.length()` times, and each
   iteration costs `O(1)`.
-- `recorded_entries` states `cost amortized` because `push` states only
-  `cost amortized time O(1)`. A function whose `cost` is `amortized` counts
-  each call at the callee's amortized cost.
+- `recorded_entries` states `cost amortized`, so the prover counts each
+  call at the callee's amortized cost and never reads the potential of
+  `recorded`. A function with a plain `cost` can call `push` too. The
+  prover then counts the potential that `push` may spend, which is none for
+  a list the function creates empty.
 
 A loop needs a `cost` clause where that count fails: where it is too large,
 or where one iteration's cost depends on a value the loop mutates. A loop
@@ -5160,7 +5171,7 @@ From the tightest binding to the loosest:
 | `..`, `..=` | Ranges, excluding and including the end |
 | `==`, `!=`, `<`, `<=`, `>`, `>=`, `is` | Comparison and pattern test |
 | `&&`, `\|\|` | Logical and and or, which evaluate the right side only when needed and do not mix |
-| `==>` | Implication, in specifications |
+| `==>` | Implication |
 
 - **Precedence is a partial order.** Bitwise operators `&`, `|`, `^`, `<<`,
   and `>>` combine only with themselves, `&&` and `||` do not mix, and
@@ -5211,6 +5222,15 @@ From the tightest binding to the loosest:
   `truss` executable was rebuilt while the old process ran. It exits within
   a minute, or at once with `truss stop`. `--no-server`, or
   `TRUSS_NO_SERVER=1`, runs a command in its own process.
+- **A project's checked state is `.truss/database.sqlite`** in its root.
+  It holds the proofs and the passing tests, so a new checkout of the
+  project, such as a git worktree, proves and tests everything once. Copy
+  the database from another checkout, here `../main`, to start from its
+  state. Use SQLite's backup, since a background process may have the file
+  open:
+  `mkdir -p .truss && sqlite3 ../main/.truss/database.sqlite ".backup .truss/database.sqlite"`.
+  The first command then checks only the files that differ between the two
+  checkouts. A database made by another build of `truss` is ignored.
 - **`TRUSS_CC`** names the C compiler, and **`TRUSS_Z3`** the Z3 executable.
 - **An x86-64 program is built for the x86-64-v3 level** unless the
   project's manifest names another ([Projects](#projects)). Before `main`

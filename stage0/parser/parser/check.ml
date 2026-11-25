@@ -19,8 +19,6 @@ let plain =
 
 let enter_specification context = { context with is_specification = true }
 let enter_proof context = { context with is_specification = true; allows_assert = true }
-let may_be_specification context = context.is_specification || context.is_function_body
-let show_quantifier = function Language.Quantifier.Forall -> "forall" | Exists -> "exists"
 let report cursor id problem = Cursor.report cursor (Cursor.read_file_span cursor id) problem
 
 let try_operator_span cursor id =
@@ -30,11 +28,6 @@ let try_operator_span cursor id =
 
 let rec check_expression cursor context (value : Syntax.expression) =
   (match value.kind with
-  | Quantified { quantifier; binder = Binder_type _; _ } when not (may_be_specification context) ->
-      report cursor value.id (Whole_type_quantifier { quantifier = show_quantifier quantifier })
-  | Binary { operator = Connective Implies; operator_id; _ } when not (may_be_specification context)
-    ->
-      report cursor operator_id Implies_in_code
   | Echo _ when context.is_specification -> report cursor value.id Echo_in_specification
   | Try _ when context.is_in_parallel ->
       Cursor.report cursor (try_operator_span cursor value.id) Try_in_parallel
@@ -42,7 +35,14 @@ let rec check_expression cursor context (value : Syntax.expression) =
   | Break | Continue -> check_loop_exit cursor context value
   | _ -> ());
   match value.kind with
-  | Lambda { body; _ } ->
+  | Lambda { parameters; body } ->
+      List.iter
+        (fun (parameter : Syntax.lambda_parameter) ->
+          Option.iter
+            (fun (annotation : Syntax.parameter_annotation) ->
+              check_types cursor context annotation.type_)
+            parameter.annotation)
+        parameters;
       let enclosing_loop =
         match context.enclosing_loop with No_loop -> No_loop | _ -> Across_lambda
       in

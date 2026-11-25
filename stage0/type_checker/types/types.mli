@@ -12,7 +12,12 @@ type ty =
   | Error of Diagnostic.reported
 
 and argument = Type of ty | Value of value
-and value = Known of Z.t | Value_parameter of parameter | Value_variable of int
+
+and value =
+  | Known of Z.t
+  | Value_parameter of parameter
+  | Value_variable of int
+  | Value_error of Diagnostic.reported
 
 and trait_reference = {
   trait : Path.t;
@@ -246,6 +251,7 @@ type type_interface = {
   opaque : bool;
   is_tuple : bool;
   derives : Path.t list;
+  declares_potential : bool;
 }
 
 val instantiate_fields : type_interface -> argument list -> field list option

@@ -116,6 +116,11 @@ let describe_mismatch :
         Printf.sprintf "Each element of this loop is %s, not %s." (show_shown element)
           (show_shown annotated),
         [] )
+  | Lambda_parameter_type { passed; annotated } ->
+      ( Mismatch,
+        Printf.sprintf "This lambda's function type gives this parameter %s, not %s."
+          (show_shown passed) (show_shown annotated),
+        [] )
   | Mismatched_integers { left; right; widening } ->
       ( Mismatched_integers,
         Printf.sprintf
@@ -182,6 +187,14 @@ let describe_undetermined at = function
         Text "Nothing here determines the key and value types of `";
         Build.quote at;
         Text "`. Bind the map with a typed `let`, such as `let ages: Map[String, UInt8] = [:]`.";
+      ]
+  | Lambda_parameter ->
+      [
+        Text "The type of `";
+        Build.quote at;
+        Text "` cannot be inferred from where this lambda is used. Declare `";
+        Build.quote at;
+        Text "` with a type.";
       ]
 
 let show_construct = function
@@ -562,11 +575,15 @@ let describe : Inference.t -> Nodes.description = function
   | Self_type_as_value { at = origin } ->
       make Not_a_value (Build.at origin)
         (say "`Self` is a type. Build a value of it, or call one of its methods.")
-  | Quantifier_over_type_in_code { at = origin } ->
+  | Quantifier_over_type_in_code { at = origin; quantifier } ->
+      let keyword = match quantifier with Forall -> "forall" | Exists -> "exists" in
       make Specification_only (Build.at origin)
         (say
-           "A quantifier over a whole type cannot run, so it is only for specifications and the \
-            bodies of functions for specifications only. Quantify over a range or a collection.")
+           (Printf.sprintf
+              "`%s` over a whole type cannot run, so it is only for specifications and the bodies \
+               of functions for specifications only. Quantify over a range or a collection, as in \
+               `%s i in 0..count => ...`."
+              keyword keyword))
   | Static_method_as_value { at = origin; name } ->
       make Not_a_value (Build.at origin)
         (say (Printf.sprintf "`%s` is a method; call it with `(...)`." name))
@@ -848,6 +865,28 @@ let describe : Inference.t -> Nodes.description = function
         (say
            (Printf.sprintf "`%s` takes ownership of its argument, so it is passed `own`, not `mut`."
               parameter))
+  | Lambda_parameter_mode { at = origin; type_expression; passed; annotated } ->
+      let show_passing : Language.Mode.t -> string = function
+        | Read -> "read-only"
+        | Mut -> "`mut`"
+        | Own -> "`own`"
+      in
+      make Wrong_mode (Build.at origin)
+        ~fixes:
+          [
+            fix
+              (match passed with
+              | Read -> "Remove the mode."
+              | Mut -> "Annotate it `mut`."
+              | Own -> "Annotate it `own`.")
+              [
+                Build.replace origin
+                  [ Text (Language.Mode.show_prefix passed); Build.quote type_expression ];
+              ];
+          ]
+        (say
+           (Printf.sprintf "This lambda's function type passes this parameter %s, not %s."
+              (show_passing passed) (show_passing annotated)))
   | Type_parameter_as_value { at = origin; name } ->
       make Not_a_value (Build.at origin) (say (Printf.sprintf "`%s` is a type, not a value." name))
   | Theorem_as_value { at = origin; name } ->
@@ -971,11 +1010,6 @@ let describe : Inference.t -> Nodes.description = function
         (say
            "`?` works on a `Result` in a function that returns a `Result`, and on an `Option` in a \
             function that returns an `Option`. Convert between them with `ok_or` or `ok`.")
-  | Implies_in_code { at = origin } ->
-      make Specification_only (Build.at origin)
-        (say
-           "`==>` is only for specifications and the bodies of functions for specifications only; \
-            in code, write `!a || b`.")
   | String_addition { at = origin; join } ->
       let write_piece = function
         | Inference.Fragment fragment -> [ Build.quote fragment ]
@@ -1153,16 +1187,6 @@ let describe : Inference.t -> Nodes.description = function
               "This call does not determine the arguments of `%s`. Write the call in full with \
                them."
               (show_trait_name trait)))
-  | Lambda_needs_type { at = origin; remedy } ->
-      make Lambda_needs_type (Build.at origin)
-        (say
-           ("A lambda's parameter types come from where it is used, and nothing here gives them. "
-           ^
-           match remedy with
-           | Bracket_arguments { declared_on; is_type } -> write_bracket_remedy declared_on ~is_type
-           | Typed_let ->
-               "Bind it with a typed `let`, such as `let double: fn(Int64) -> Int64 = fn(x) { x * \
-                2 }`."))
   | Range_not_integer { at = origin; owner; element } ->
       make Not_iterable (Build.at origin)
         (say

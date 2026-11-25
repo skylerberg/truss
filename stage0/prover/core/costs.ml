@@ -4,6 +4,11 @@ type target = Through of Logic.term | Capability of Path.t | Capability_method o
 type resource = Metric of Language.Metric.t | Calls of target
 type counting = Units | At_most | Exactly
 type counter = { resource : resource; counting : counting; amortized : bool }
+type counted = No_potential | Potential_change | Potential_growth
+type charge = { amount : Logic.term; counted : counted }
+
+let make_counted_charge (counter : counter) amount =
+  { amount; counted = (if counter.amortized then Potential_change else No_potential) }
 
 let least_amount = function
   | Metric Time -> Logic.Integer Z.one
@@ -16,10 +21,11 @@ let make_operand_counter (metric : Language.Metric.t) =
     amortized = false;
   }
 
-let list_stated_bounds (costs : Types.cost list) (metric : Language.Metric.t) =
+let list_stated_bounds (costs : Types.cost list) (metric : Language.Metric.t) ~amortized =
   List.filter_map
     (fun (cost : Types.cost) ->
-      if cost.resource = Types.Metric metric && not cost.amortized then Some cost.bound else None)
+      if cost.resource = Types.Metric metric && cost.amortized = amortized then Some cost.bound
+      else None)
     costs
 
 let find_stated_operand costs metric =
@@ -30,7 +36,7 @@ let find_stated_operand costs metric =
       | Units, Order_of -> Some (Logic.Integer Z.one)
       | At_most, (No_more_than limit | Exactly_cost limit) -> Some (Logic.Integer limit)
       | (Units | At_most | Exactly), (Order_of | No_more_than _ | Exactly_cost _) -> None)
-    (list_stated_bounds costs metric)
+    (list_stated_bounds costs metric ~amortized:false)
 
 let bound bound_function =
   Logic.add

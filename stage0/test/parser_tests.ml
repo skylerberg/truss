@@ -703,6 +703,9 @@ let () =
   Harness.test "a lambda" (fun () ->
       expect_expression "fn(sum, (value, ..)) { sum + value }"
         "(fn (sum (record value ..)) (block (+ sum value)))");
+  Harness.test "a lambda's parameters with annotations" (fun () ->
+      expect_expression "fn(sum: Int64, Point(x, ..): mut Point) { sum + x }"
+        "(fn ((sum: Int64) ((Point x ..): mut Point)) (block (+ sum x)))");
   Harness.test "if, else if, and else" (fun () ->
       expect_expression "if a { 1 } else if b { 2 } else { 3 }"
         "(if a (block 1) (if b (block 2) (block 3)))");

@@ -64,6 +64,5 @@ val copy_value :
   State.context ->
   State.frame ->
   declared:Types.ty ->
-  Types.ty ->
   Logic.term ->
   State.frame

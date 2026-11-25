@@ -396,11 +396,10 @@ let make_request ({ obligation; query; _ } : posed_obligation) =
            (fun index (_, reached) -> [ (Logic.Symbol.Reached index, reached) ])
            obligation.path_notes)
   in
-  (Solver.make_request ~symbols:(List.map fst obligation.values) ~terms query, query)
+  Solver.make_request ~symbols:(List.map fst obligation.values) ~terms query
 
 let make_refutation_request ({ query; _ } : posed_obligation) =
-  let refutation = { query with goal = Logic.not_ query.goal } in
-  (Solver.make_request refutation, refutation)
+  Solver.make_request { query with goal = Logic.not_ query.goal }
 
 type posed =
   | Unreadable of Catalog.Prover.t

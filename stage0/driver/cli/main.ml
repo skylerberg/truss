@@ -572,9 +572,7 @@ let lsp =
           In_client (fun () -> run_language_server ~has_no_server_flag))
       $ no_server_flag)
 
-let version =
-  Printf.sprintf "stage0 (Truss %s, code generation %d, Unicode %s)" Manifest.truss_version
-    Emit_c.version Unicode.version
+let version = Printf.sprintf "stage0 (Truss %s, Unicode %s)" Manifest.truss_version Unicode.version
 
 let truss =
   Cmdliner.Cmd.group

@@ -378,8 +378,8 @@ let is_panic_obligation : Diagnostic.Code.prover -> bool = function
 let find_counter_condition (context : State.context) counter =
   if List.mem counter context.conditional_counters then context.condition else []
 
-let oblige ?cited ?(fixes = []) ?holds_when (context : State.context) (frame : State.frame) location
-    obligation goal =
+let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?holds_when (context : State.context)
+    (frame : State.frame) location obligation goal =
   let code = Catalog.Prover_description.find_code obligation in
   let holds_when = Option.value holds_when ~default:context.obligation_condition in
   if
@@ -401,7 +401,7 @@ let oblige ?cited ?(fixes = []) ?holds_when (context : State.context) (frame : S
         let is_home_body = is_home context frame.source && frame.makes_obligations in
         let fixes =
           match fixes with
-          | [] when is_home_body -> (
+          | [] when is_home_body && can_be_required -> (
               match show_truss_goal context goal with
               | Some _ when Logic.is_refuted goal -> []
               | Some required -> add_requires context frame [ Code required ]

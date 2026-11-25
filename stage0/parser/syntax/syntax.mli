@@ -121,12 +121,15 @@ and expression_kind =
   | Parenthesized of expression
   | List of expression list
   | Map of (expression * expression) list
-  | Lambda of { parameters : pattern list; body : block }
+  | Lambda of { parameters : lambda_parameter list; body : block }
   | If of { condition : expression; then_ : block; else_ : else_branch option }
   | Match of { scrutinees : expression list; arms : arm list }
   | Provide of { implementations : expression list; body : block }
   | Block of block
   | Expression_error
+
+and lambda_parameter = { pattern : pattern; annotation : parameter_annotation option }
+and parameter_annotation = { mode : mode option; type_ : type_expression; id : id }
 
 and string_literal = {
   tag : path option;

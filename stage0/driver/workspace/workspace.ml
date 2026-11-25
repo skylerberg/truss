@@ -16,16 +16,11 @@ let open_cache () =
   | None -> (
       match Result.bind (Cache.locate_default_directory ()) Cache.open_ with
       | Ok cache ->
-          Cache.compact cache;
           opened_cache := Some cache;
           cache
       | Error message -> raise (Unusable_cache message))
 
-let flush_cache () = Option.iter Cache.flush !opened_cache
-
-let reset () =
-  Option.iter Cache.close !opened_cache;
-  opened_cache := None
+let reset () = opened_cache := None
 
 let read_cache_budget () =
   match Option.bind (Sys.getenv_opt "TRUSS_CACHE_SIZE") int_of_string_opt with
@@ -34,7 +29,6 @@ let read_cache_budget () =
 
 let collect () =
   let cache = open_cache () in
-  Cache.compact cache;
   match Lock_file.acquire_if_free (Filename.concat (Cache.directory cache) "collect.lock") with
   | None -> ()
   | Some lock ->
@@ -730,16 +724,8 @@ let close_all () =
       close worktree)
     (Hashtbl.fold (fun _ worktree worktrees -> worktree :: worktrees) worktrees [])
 
-let save () =
-  Hashtbl.iter (fun _ worktree -> commit worktree) worktrees;
-  flush_cache ()
-
-let flush () =
-  if !is_serving then save ()
-  else begin
-    close_all ();
-    flush_cache ()
-  end
+let save () = Hashtbl.iter (fun _ worktree -> commit worktree) worktrees
+let flush () = if !is_serving then save () else close_all ()
 
 let serve ~key ~handle =
   is_serving := true;
@@ -775,11 +761,9 @@ module For_testing = struct
           (Filename.concat
              (Cache.make_package_databases_directory cache)
              (Filename.basename standard))
-          (File_system.read standard);
-        Cache.close cache
+          (File_system.read standard)
 
   let build_cold_database = build_cold_database
-  let collect_cache = collect
   let save = save
   let listen = Server.listen
   let call_starting = Server.For_testing.call_starting

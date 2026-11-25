@@ -92,6 +92,10 @@ and show_function_type { inputs; output; clauses } =
     @ [ show_optional (fun output -> "-> " ^ show_type_expression output) output ]
     @ list show_clause clauses)
 
+and show_moded written type_ =
+  (match written with Some written -> show_mode written ^ " " | None -> "")
+  ^ show_type_expression type_
+
 and show_generic (parameter : Syntax.generic_parameter) =
   match parameter.kind with
   | Type_parameter (name, []) -> name.text
@@ -225,7 +229,7 @@ and show_expression (value : Syntax.expression) =
            (fun (key, value) -> make_form "" [ show_expression key; show_expression value ])
            entries)
   | Lambda { parameters; body } ->
-      make_form "fn" [ make_form "" (list show_pattern parameters); show_block body ]
+      make_form "fn" [ make_form "" (list show_lambda_parameter parameters); show_block body ]
   | If { condition; then_; else_ } ->
       let else_ =
         match else_ with
@@ -350,6 +354,11 @@ and show_pattern (written : Syntax.pattern) =
   | Alternatives alternatives -> make_form "|" (list show_pattern alternatives)
   | Pattern_error -> "error"
 
+and show_lambda_parameter ({ pattern; annotation } : Syntax.lambda_parameter) =
+  match annotation with
+  | None -> show_pattern pattern
+  | Some { mode; type_; _ } -> make_form (show_pattern pattern ^ ":") [ show_moded mode type_ ]
+
 and show_pattern_field (field : Syntax.pattern_field) =
   match field.kind with
   | Named_field (name, inner) -> make_form (name.text ^ ":") [ show_pattern inner ]
@@ -380,10 +389,6 @@ let show_parameter (parameter : Syntax.parameter) =
           show_optional (fun value -> make_form "=" [ show_expression value ]) default;
         ]
   | Parameter_error -> "error"
-
-let show_moded written type_ =
-  (match written with Some written -> show_mode written ^ " " | None -> "")
-  ^ show_type_expression type_
 
 let show_signature (signature : Syntax.signature) =
   [

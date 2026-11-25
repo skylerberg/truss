@@ -386,16 +386,16 @@ fn pipe_operator(cursor: mut TokenCursor, value: syntax.Expression, operator: to
   report(mut cursor, code: "parser.pipe_operator", span: operator.span, message: message)
 }
 
-fn report_lambda_annotation(cursor: mut TokenCursor, from: UInt64, stop: UInt64)
+fn report_lambda_result_type(cursor: mut TokenCursor, from: UInt64, stop: UInt64)
   uses Panic, RunForever
 {
   let span = source.make_span(from, stop)
   report_habit(
     mut cursor,
-    code: "parser.lambda_annotation",
+    code: "parser.lambda_result_type",
     span: span,
-    message: "A lambda's parameters and result have no annotations. Their types are inferred from where the lambda is passed.",
-    fix_title: "Remove the annotation",
+    message: "A lambda declares no result type. Its result type is the type of its body's value.",
+    fix_title: "Remove the result type",
     edits: [source.delete(span)],
   )
 }

@@ -5,6 +5,7 @@ val list_impls_of_trait_for_type :
   Lookups.t -> trait:Path.t -> type_:Path.t -> Path.package -> Path.t list
 
 val list_impls_of_trait : Lookups.t -> trait:Path.t -> Path.package -> Path.t list
+val derived_generics : Types.generic list -> Types.trait_reference -> Types.generic list
 val derive_interface : Lookups.t -> type_:Path.t -> trait:Path.t -> Types.impl_interface option
 
 type implementation = {

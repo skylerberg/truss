@@ -4,10 +4,16 @@ type target = Through of Logic.term | Capability of Path.t | Capability_method o
 type resource = Metric of Language.Metric.t | Calls of target
 type counting = Units | At_most | Exactly
 type counter = { resource : resource; counting : counting; amortized : bool }
+type counted = No_potential | Potential_change | Potential_growth
+type charge = { amount : Logic.term; counted : counted }
 
+val make_counted_charge : counter -> Logic.term -> charge
 val least_amount : resource -> Logic.term
 val make_operand_counter : Language.Metric.t -> counter
-val list_stated_bounds : Types.cost list -> Language.Metric.t -> Types.cost_bound list
+
+val list_stated_bounds :
+  Types.cost list -> Language.Metric.t -> amortized:bool -> Types.cost_bound list
+
 val find_stated_operand : Types.cost list -> Language.Metric.t -> Logic.term option
 val bound : Logic.term -> Logic.term
 val plus : Logic.term -> Logic.term -> Logic.term
