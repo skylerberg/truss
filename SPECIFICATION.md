@@ -2692,6 +2692,11 @@ let pattern = Regex"[a-z]+@${domain}"
   and its method `from_template` takes a `Template[Part]`, which holds the
   literal text as `text.Literal` values, which only the compiler makes, and
   the converted values.
+- An interpolated value of a type other than `Part` is converted with the
+  `Part`'s impl of `From` for that type. A place of a `List` or a `String`
+  that is not passed `own` is converted from a view of it where `Part`
+  implements `From` for the view, as `Regex"^${name}"` converts from
+  `view String`: the place is read, not moved.
 - A tag's `is_valid_template` states the rules for valid literal text, and
   `from_template` requires it.
 - The literal text of a template is a `List[text.Literal]` constant without
