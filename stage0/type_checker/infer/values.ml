@@ -189,11 +189,14 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
       | Some (Unknown report) -> Types.Error report
       | _ -> State.make_error_type state (Tag_not_a_type { at = Written tag.last.id }))
 
+and check_owned state env (value : Syntax.expression) expected =
+  let actual = Hooks.check_expression state env ~expected value in
+  Modes.infer_view_of_borrowed_place state env value ~actual ~expected;
+  Conversions.coerce state env value ~actual ~expected;
+  Modes.note_owned_value state env value
+
 and check_list_literal state env ?expected (value : Syntax.expression) items =
-  let check_items element =
-    List.iter (fun item -> Hooks.check state env item element) items;
-    List.iter (Modes.note_owned_value state env) items
-  in
+  let check_items element = List.iter (fun item -> check_owned state env item element) items in
   let from_elements =
     Types.make_trait_reference ~arguments:[] (Well_known.make_path From_elements)
   in
@@ -230,10 +233,8 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
   let check_entries key value_type =
     List.iter
       (fun (entry_key, entry_value) ->
-        Hooks.check state env entry_key key;
-        Hooks.check state env entry_value value_type;
-        Modes.note_owned_value state env entry_key;
-        Modes.note_owned_value state env entry_value)
+        check_owned state env entry_key key;
+        check_owned state env entry_value value_type)
       entries
   in
   let from_entries = Types.make_trait_reference ~arguments:[] (Well_known.make_path From_entries) in

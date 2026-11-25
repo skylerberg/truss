@@ -137,6 +137,7 @@ and check_passed state env (value : Syntax.expression) ~recipient ~(mode : Langu
     State.record state value actual
   end;
   let mode = Option.value (Modes.find_lent_field_mode state value actual) ~default:mode in
+  if mode = Own then Modes.infer_view_of_borrowed_place state env value ~actual ~expected:type_;
   Conversions.coerce state env ~argument:mode value ~actual ~expected:type_;
   Modes.check_mode state env value ~recipient mode actual;
   mode

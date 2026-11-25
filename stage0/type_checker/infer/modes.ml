@@ -209,6 +209,26 @@ let check_mode state env (value : Syntax.expression) ~recipient (mode : Language
   | Own, With_mode (Mut, _) -> State.report state (Mut_for_own { at = Written value.id; recipient })
   | (Mut | Own), With_mode (Read, _) -> ()
 
+let infer_view_of_borrowed_place (state : State.state) env (value : Syntax.expression) ~actual
+    ~expected =
+  if State.runs env then
+    match (classify_argument state value, Hashtbl.find_opt state.yielded value.id) with
+    | (Place | Lent Read), (None | Some Read) -> (
+        match (Conversions.read_expected_head state expected, State.normalize state actual) with
+        | Types.Variable undecided, viewed when Types.is_viewable viewed ->
+            let view = Types.make_view viewed in
+            let is_met_by_the_view (goal : State.goal) =
+              match (State.normalize state goal.subject, goal.requirement) with
+              | Types.Variable subject, Implements bound when subject = undecided ->
+                  Option.is_some (State.find_evidence state view bound)
+              | Types.Variable subject, Within _ -> subject <> undecided
+              | _ -> true
+            in
+            if List.for_all is_met_by_the_view state.goals then
+              ignore (State.unify state expected view)
+        | _ -> ())
+    | _ -> ()
+
 let note_owned_value state env (value : Syntax.expression) =
   match classify_argument state value with
   | Place -> note_place_without_keyword state env value ~needs:Own

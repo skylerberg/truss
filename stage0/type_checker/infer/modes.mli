@@ -16,4 +16,7 @@ val check_mode :
 val note_place_without_keyword :
   State.state -> State.env -> Syntax.expression -> needs:Language.Mode.t -> unit
 
+val infer_view_of_borrowed_place :
+  State.state -> State.env -> Syntax.expression -> actual:Types.ty -> expected:Types.ty -> unit
+
 val note_owned_value : State.state -> State.env -> Syntax.expression -> unit

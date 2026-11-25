@@ -1,0 +1,59 @@
+type Boxed[Value](value: Value)
+
+fn pick[Value](first: own Value, second: own Value) -> Value {
+  second
+}
+
+fn greatest[Value: Ordered](first: own Value, second: own Value) -> Value {
+  own first.max(own second)
+}
+
+fn through_a_bound_that_a_view_meets(names: view List[String]) -> view String {
+  let chosen = greatest(names[0], second: names[1])
+  chosen
+}
+
+fn in_a_variant(names: view List[String]) -> Option[view String] {
+  let found = Some(names[0])
+  found
+}
+
+fn in_a_record(names: view List[String]) -> Boxed[view String] {
+  let box = Boxed(value: names[0])
+  box
+}
+
+fn in_a_list_literal(names: view List[String]) -> List[view String] {
+  let both = [names[0], names[1]]
+  both
+}
+
+fn in_a_map_literal(names: view List[String]) -> Map[view String, UInt64] {
+  let lengths = [names[0]: names[0].length()]
+  lengths
+}
+
+fn through_a_function(names: view List[String]) -> view String {
+  let chosen = pick(names[0], second: names[1])
+  chosen
+}
+
+fn of_a_range(numbers: view List[Int64]) -> Option[view List[Int64]] {
+  let tail = Some(numbers[1..])
+  tail
+}
+
+fn of_a_lent_part(found: Option[String]) -> Option[view String] {
+  let wrapped = Some(found.expect("present"))
+  wrapped
+}
+
+fn moved(name: own String) -> Option[String] {
+  let found = Some(own name)
+  found
+}
+
+fn copied(names: List[String]) -> Option[String] {
+  let found = Some(names[0].copy())
+  found
+}
