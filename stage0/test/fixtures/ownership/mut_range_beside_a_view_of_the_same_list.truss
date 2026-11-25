@@ -1,0 +1,11 @@
+fn f(first: mut List[Int64], other: List[Int64])
+  modifies first[..]
+{
+  for item in mut first {
+    item = 0
+  }
+}
+
+fn g(items: mut List[Int64]) {
+  f(mut items[0..2], other: items[0..2])
+}

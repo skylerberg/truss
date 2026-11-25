@@ -1,4 +1,4 @@
-fn f(items: Slice[UInt64]) {
-  var view = items[..]
-  view[..][0] = 7
+fn f(items: List[UInt64]) {
+  var viewed: view List[UInt64] = items[..]
+  viewed[..][0] = 7
 }

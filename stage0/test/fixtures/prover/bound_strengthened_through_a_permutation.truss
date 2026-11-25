@@ -1,10 +1,12 @@
-fn keep[Element](items: mut Slice[Element])
+fn keep[Element](items: mut List[Element])
+  modifies items[..]
   ensures items.model().is_permutation_of(old(items.model()))
 {
   todo
 }
 
-fn keep_below[Element: Ordered](items: mut Slice[Element], pivot: Element)
+fn keep_below[Element: Ordered](items: mut List[Element], pivot: Element)
+  modifies items[..]
   requires forall i in 0..items.length() => items[i] <= pivot
   ensures forall i in 0..items.length() => items[i] < pivot
 {

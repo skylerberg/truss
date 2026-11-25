@@ -23,7 +23,7 @@ public fn Output.from_handle(handle: own streams.Handle) -> Output {
 }
 
 impl streams.Writer for Output {
-  fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
+  fn write(mut self, bytes: List[UInt8]) -> Result[UInt64, SystemError]
     uses Handles
   {
     Handles.write(self.handle, bytes: bytes)
@@ -93,11 +93,11 @@ fn hidden_line(terminal: Terminal) -> Result[Option[String], SystemError]
     mut typed.clear()
     let count = Handles.read(terminal.handle, buffer: mut typed, limit: 1)?
     if count == 0 {
-      return Ok(if line.is_empty() { None } else { Some(String.from_utf8_lossy(line.slice())) })
+      return Ok(if line.is_empty() { None } else { Some(String.from_utf8_lossy(line)) })
     }
     let byte = typed[0]
     if byte == 10 || byte == 13 {
-      return Ok(Some(String.from_utf8_lossy(line.slice())))
+      return Ok(Some(String.from_utf8_lossy(line)))
     }
     if byte == 3 {
       return Err(SystemError.Interrupted)
@@ -113,7 +113,7 @@ fn hidden_line(terminal: Terminal) -> Result[Option[String], SystemError]
   }
 }
 
-public fn read_secret(prompt: StringSlice) -> Result[Option[String], SystemError]
+public fn read_secret(prompt: String) -> Result[Option[String], SystemError]
   uses Console, Handles, RunForever
 {
   Console.print(prompt)
@@ -217,7 +217,7 @@ internal fn Color.write_code(self, output: mut String, background: Bool)
   }
 }
 
-public fn Style.apply(self, text: StringSlice) -> String
+public fn Style.apply(self, text: String) -> String
   cost time O(text.length())
 {
   if self.foreground is None && self.background is None && !self.bold && !self.dim && !self.italic && !self.underline {
@@ -251,7 +251,7 @@ public fn Style.apply(self, text: StringSlice) -> String
   output
 }
 
-internal fn sequence_end(text: StringSlice, from: UInt64) -> UInt64
+internal fn sequence_end(text: String, from: UInt64) -> UInt64
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
@@ -269,7 +269,7 @@ internal fn sequence_end(text: StringSlice, from: UInt64) -> UInt64
   if index < text.length() && text.byte(index) >= 64 && text.byte(index) <= 126 { index + 1 } else { index }
 }
 
-public fn strip_styles(text: StringSlice) -> String
+public fn strip_styles(text: String) -> String
   ensures result.length() <= text.length()
   cost time O(text.length())
 {
@@ -292,7 +292,7 @@ public fn strip_styles(text: StringSlice) -> String
   String(storage: own output)
 }
 
-public fn display_width(text: StringSlice) -> UInt64
+public fn display_width(text: String) -> UInt64
   cost time O(text.length())
 {
   var width: UInt64 = 0
@@ -308,29 +308,29 @@ public fn CapturedConsole.new(input: own List[String] = []) -> CapturedConsole {
   CapturedConsole(input: own input, next_line: 0, output: "", errors: "")
 }
 
-public fn CapturedConsole.output(self) -> StringSlice
+public fn CapturedConsole.output(self) -> view String
   cost time O(1)
 {
-  self.output.slice()
+  self.output
 }
 
-public fn CapturedConsole.errors(self) -> StringSlice
+public fn CapturedConsole.errors(self) -> view String
   cost time O(1)
 {
-  self.errors.slice()
+  self.errors
 }
 
 impl Console for CapturedConsole {
-  fn print(mut self, text: StringSlice) {
+  fn print(mut self, text: String) {
     mut self.output.push(text)
   }
 
-  fn print_line(mut self, text: StringSlice) {
+  fn print_line(mut self, text: String) {
     mut self.output.push(text)
     mut self.output.push("\n")
   }
 
-  fn print_error(mut self, text: StringSlice) {
+  fn print_error(mut self, text: String) {
     mut self.errors.push(text)
     mut self.errors.push("\n")
   }

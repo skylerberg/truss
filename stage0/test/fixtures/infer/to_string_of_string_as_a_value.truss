@@ -1,3 +1,0 @@
-fn f(names: Slice[StringSlice]) -> List[String] {
-  names.map(String.to_string)
-}

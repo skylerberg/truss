@@ -1,0 +1,4 @@
+fn f() -> view String {
+  let part = "abc"
+  part
+}

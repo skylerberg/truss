@@ -18,6 +18,7 @@ let create snapshot lookups (profile : Backend.profile) =
     match
       C_compiler.find
         ~debug_prefix_maps:(List.map make_debug_prefix_map (Workspace.list_packages snapshot))
+        ~x86_64_level:(Workspace.x86_64_level snapshot)
         ~objects:(Cache.make_objects_directory cache)
         ()
     with

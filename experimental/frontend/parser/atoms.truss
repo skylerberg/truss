@@ -92,7 +92,7 @@ fn take_name(cursor: mut TokenCursor) -> syntax.Name
   make_name(mut cursor, written)
 }
 
-fn lower_name(cursor: mut TokenCursor, expected: StringSlice) -> Result[syntax.Name, Failure]
+fn lower_name(cursor: mut TokenCursor, expected: String) -> Result[syntax.Name, Failure]
   uses Panic
 {
   match cursor.peek_kind() {
@@ -101,7 +101,7 @@ fn lower_name(cursor: mut TokenCursor, expected: StringSlice) -> Result[syntax.N
   }
 }
 
-fn parse_upper_name(cursor: mut TokenCursor, expected: StringSlice) -> Result[syntax.Name, Failure]
+fn parse_upper_name(cursor: mut TokenCursor, expected: String) -> Result[syntax.Name, Failure]
   uses Panic
 {
   match cursor.peek_kind() {
@@ -121,7 +121,7 @@ fn parse_module_prefix(cursor: mut TokenCursor) -> List[syntax.Name]
   modules
 }
 
-fn parse_upper_path(cursor: mut TokenCursor, expected: StringSlice) -> Result[syntax.NamePath, Failure]
+fn parse_upper_path(cursor: mut TokenCursor, expected: String) -> Result[syntax.NamePath, Failure]
   uses Panic, RunForever
 {
   let modules = parse_module_prefix(mut cursor)
@@ -197,7 +197,7 @@ type ContextualKeyword =
   | Evaluation
   derives Equal
 
-fn spell_contextual(word: ContextualKeyword) -> StringSlice {
+fn spell_contextual(word: ContextualKeyword) -> view String {
   match word {
     Amortized => "amortized"
     Metric(metric) => spell_metric(metric)
@@ -210,7 +210,7 @@ fn spell_contextual(word: ContextualKeyword) -> StringSlice {
   }
 }
 
-fn spell_metric(metric: syntax.Metric) -> StringSlice {
+fn spell_metric(metric: syntax.Metric) -> view String {
   match metric {
     Time => "time"
     Allocations => "allocations"
@@ -218,7 +218,7 @@ fn spell_metric(metric: syntax.Metric) -> StringSlice {
   }
 }
 
-fn find_contextual(text: StringSlice) -> Option[ContextualKeyword] {
+fn find_contextual(text: String) -> Option[ContextualKeyword] {
   match text {
     "amortized" => Some(ContextualKeyword.Amortized)
     "time" => Some(ContextualKeyword.Metric(syntax.Metric.Time))
@@ -252,7 +252,7 @@ fn resources() -> List[ContextualKeyword] {
   ]
 }
 
-fn edit_distance(first: StringSlice, second: StringSlice) -> UInt64
+fn edit_distance(first: String, second: String) -> UInt64
   uses Panic
 {
   let first_bytes = first.bytes()
@@ -284,9 +284,9 @@ fn edit_distance(first: StringSlice, second: StringSlice) -> UInt64
 
 fn expect_contextual(
   cursor: mut TokenCursor,
-  accepted: Slice[ContextualKeyword],
-  category: StringSlice,
-  expected: StringSlice,
+  accepted: List[ContextualKeyword],
+  category: String,
+  expected: String,
   suggested: own Option[List[ContextualKeyword]] = None,
 ) -> Result[ContextualKeyword, Failure]
   uses Panic

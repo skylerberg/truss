@@ -4,7 +4,9 @@ let expect_equal_lists show name expected actual =
       (String.concat "; " (List.map show expected))
       (String.concat "; " (List.map show actual))
 
-let lex text = Lexer.lex (Source.create ~path:"test.truss" text)
+let lex text =
+  let tokens, diagnostics = Lexer.lex (Source.create ~path:"test.truss" text) in
+  (tokens, List.map (Syntax_catalog.Lexing_description.render ~text) diagnostics)
 
 let list_codes text =
   List.map
@@ -112,7 +114,10 @@ let () =
       let source = Source.create ~path:"test.truss" text in
       match snd (Lexer.lex source) with
       | [ diagnostic ] ->
-          let rendered = Diagnostic.render ~is_colored:false source diagnostic in
+          let rendered =
+            Diagnostic.render ~is_colored:false source
+              (Syntax_catalog.Lexing_description.render ~text diagnostic)
+          in
           if not (String.starts_with ~prefix:"test.truss:1:10:" rendered) then
             Harness.fail "expected the position 1:10, got %s" rendered;
           if String.contains rendered '\xEF' then
@@ -142,7 +147,12 @@ let () =
   Harness.test "JSON output is valid UTF-8 when a message is about a bad byte" (fun () ->
       let source = Source.create ~path:"test.truss" "\"\\\xFF\"" in
       let json =
-        String.concat "," (List.map (Diagnostic.to_json_object source) (snd (Lexer.lex source)))
+        String.concat ","
+          (List.map
+             (fun diagnostic ->
+               Diagnostic.to_json_object source
+                 (Syntax_catalog.Lexing_description.render ~text:(Source.text source) diagnostic))
+             (snd (Lexer.lex source)))
       in
       if not (String.is_valid_utf_8 json) then Harness.fail "the JSON is not valid UTF-8: %S" json)
 
@@ -725,10 +735,12 @@ let () =
 let () =
   Harness.test "at most 200 diagnostics are shown, then a count" (fun () ->
       let make_diagnostic offset =
-        Diagnostic.make ~code:(Lexer Semicolon) (Source.make_span offset (offset + 1)) "x"
+        Diagnostic.For_rendering.make ~code:(Lexer Semicolon)
+          (Source.make_span offset (offset + 1))
+          "x"
       in
-      let shown = Diagnostic.select_shown (List.init 250 make_diagnostic) in
-      if List.length shown <> Diagnostic.For_testing.limit + 1 then
+      let shown = Description.select_shown (List.init 250 make_diagnostic) in
+      if List.length shown <> Description.For_testing.limit + 1 then
         Harness.fail "%d shown" (List.length shown);
       match List.rev shown with
       | last :: _ when last.code = Too_many_diagnostics -> ()
@@ -737,12 +749,12 @@ let () =
       let text = String.concat "" (List.init 250 (Printf.sprintf "a%d;\n")) in
       List.iteri
         (fun index (diagnostic : Diagnostic.t) ->
-          if index < Diagnostic.For_testing.limit && diagnostic.fixes = [] then
+          if index < Description.For_testing.limit && diagnostic.fixes = [] then
             Harness.fail "diagnostic %d has no fix" index)
         (snd (lex text)));
   Harness.test "overlapping edits are refused" (fun () ->
       let fix =
-        Diagnostic.fix "x"
+        Diagnostic.For_rendering.fix "x"
           [ Diagnostic.delete (Source.make_span 0 2); Diagnostic.delete (Source.make_span 1 3) ]
       in
       match Diagnostic.apply_edits "abc" fix.edits with
@@ -753,9 +765,9 @@ let semicolon_source = Source.create ~path:"test.truss" "let a = 1;\n"
 
 let make_semicolon_diagnostic severity =
   let semicolon = Source.make_span 9 10 in
-  Diagnostic.make ~severity ~code:(Lexer Semicolon)
+  Diagnostic.For_rendering.make ~severity ~code:(Lexer Semicolon)
     ~notes:[ (Source.make_span 0 3, "The statement starts here.") ]
-    ~fixes:[ Diagnostic.fix "Delete the semicolon." [ Diagnostic.delete semicolon ] ]
+    ~fixes:[ Diagnostic.For_rendering.fix "Delete the semicolon." [ Diagnostic.delete semicolon ] ]
     semicolon "A semicolon ends no statement."
 
 let remove_escapes text =

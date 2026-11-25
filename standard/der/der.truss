@@ -29,7 +29,7 @@ impl Display for Error {
 
 type Header(tag: UInt8, start: UInt64, end: UInt64)
 
-fn read_header(bytes: Slice[UInt8], at: UInt64) -> Result[Header, Error]
+fn read_header(bytes: List[UInt8], at: UInt64) -> Result[Header, Error]
   ensures !(result is Ok(header) && (header.start > header.end || header.end > bytes.length()))
 {
   if at >= bytes.length() || bytes.length() - at < 2 {
@@ -63,7 +63,7 @@ fn read_header(bytes: Slice[UInt8], at: UInt64) -> Result[Header, Error]
   Ok(Header(tag: tag, start: start, end: start + length))
 }
 
-fn read_value(bytes: Slice[UInt8], at: UInt64, depth: UInt64) -> Result[core.Pair[Value, UInt64], Error]
+fn read_value(bytes: List[UInt8], at: UInt64, depth: UInt64) -> Result[core.Pair[Value, UInt64], Error]
   decreases 65 - depth
 {
   if depth > 64 {
@@ -120,7 +120,7 @@ fn read_value(bytes: Slice[UInt8], at: UInt64, depth: UInt64) -> Result[core.Pai
   Ok(core.Pair(first: own value, second: header.end))
 }
 
-public fn parse(bytes: Slice[UInt8]) -> Result[Value, Error] {
+public fn parse(bytes: List[UInt8]) -> Result[Value, Error] {
   let read = read_value(bytes, at: 0, depth: 0)?
   if read.second != bytes.length() {
     return Err(Error(offset: read.second))
@@ -134,7 +134,7 @@ public fn parse_tagged(value: Value) -> Result[Value, Error] {
       if !constructed {
         return Err(Error(offset: 0))
       }
-      parse(bytes.slice())
+      parse(bytes)
     }
     _ => Err(Error(offset: 0))
   }
@@ -156,7 +156,7 @@ fn push_length(output: mut List[UInt8], length: UInt64) {
   mut output.append(own digits)
 }
 
-fn push_element(output: mut List[UInt8], tag: UInt8, content: Slice[UInt8]) {
+fn push_element(output: mut List[UInt8], tag: UInt8, content: List[UInt8]) {
   mut output.push(tag)
   push_length(mut output, length: content.length())
   mut output.append_slice(content)
@@ -165,42 +165,42 @@ fn push_element(output: mut List[UInt8], tag: UInt8, content: Slice[UInt8]) {
 public fn encode(value: Value) -> List[UInt8] {
   var output: List[UInt8] = []
   match value {
-    Boolean(flag) => push_element(mut output, tag: 1, content: (if flag { [255] } else { [0] }).slice())
-    Integer(bytes) => push_element(mut output, tag: 2, content: bytes.slice())
+    Boolean(flag) => push_element(mut output, tag: 1, content: (if flag { [255] } else { [0] }))
+    Integer(bytes) => push_element(mut output, tag: 2, content: bytes)
     BitString(unused_bits, bytes) => {
       var content: List[UInt8] = [unused_bits]
-      mut content.append_slice(bytes.slice())
-      push_element(mut output, tag: 3, content: content.slice())
+      mut content.append_slice(bytes)
+      push_element(mut output, tag: 3, content: content)
     }
-    OctetString(bytes) => push_element(mut output, tag: 4, content: bytes.slice())
+    OctetString(bytes) => push_element(mut output, tag: 4, content: bytes)
     Null => {
       let empty: List[UInt8] = []
-      push_element(mut output, tag: 5, content: empty.slice())
+      push_element(mut output, tag: 5, content: empty)
     }
-    ObjectIdentifier(bytes) => push_element(mut output, tag: 6, content: bytes.slice())
-    Text(tag, bytes) => push_element(mut output, tag: tag, content: bytes.slice())
-    Time(tag, bytes) => push_element(mut output, tag: tag, content: bytes.slice())
+    ObjectIdentifier(bytes) => push_element(mut output, tag: 6, content: bytes)
+    Text(tag, bytes) => push_element(mut output, tag: tag, content: bytes)
+    Time(tag, bytes) => push_element(mut output, tag: tag, content: bytes)
     Sequence(items) => {
       var content: List[UInt8] = []
       for item in items {
         mut content.append(encode(item))
       }
-      push_element(mut output, tag: 48, content: content.slice())
+      push_element(mut output, tag: 48, content: content)
     }
     Set(items) => {
       var content: List[UInt8] = []
       for item in items {
         mut content.append(encode(item))
       }
-      push_element(mut output, tag: 49, content: content.slice())
+      push_element(mut output, tag: 49, content: content)
     }
-    Tagged(number, constructed, bytes) => push_element(mut output, tag: 128 | (if constructed { 32 } else { 0 }) | number, content: bytes.slice())
-    Other(tag, bytes) => push_element(mut output, tag: tag, content: bytes.slice())
+    Tagged(number, constructed, bytes) => push_element(mut output, tag: 128 | (if constructed { 32 } else { 0 }) | number, content: bytes)
+    Other(tag, bytes) => push_element(mut output, tag: tag, content: bytes)
   }
   output
 }
 
-public fn unsigned_integer(bytes: Slice[UInt8]) -> Value {
+public fn unsigned_integer(bytes: List[UInt8]) -> Value {
   var start: UInt64 = 0
   while start < bytes.length() && bytes.length() - start > 1 && bytes[start] == 0
     invariant start <= bytes.length()

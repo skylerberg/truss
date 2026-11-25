@@ -1,0 +1,12 @@
+fn bump(items: mut List[Int64])
+  modifies items[..]
+  requires items.length() > 0
+{
+  items[0] = 9
+}
+
+fn f(items: List[Int64]) -> UInt64 {
+  var part: view List[Int64] = items
+  bump(mut part)
+  items.length()
+}

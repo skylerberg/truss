@@ -18,7 +18,7 @@ let lower (context : Context.t) (scalar : Intrinsic.scalar) =
     | Scalar (Integer integer) -> Some integer
     | _ -> None
   in
-  let lower_checked_arithmetic op overflow =
+  let lower_checked_arithmetic op ~without_overflow overflow =
     match find_integer_argument () with
     | Some _ ->
         let result = Emit_c.Ir_builder.allocate_local builder (Value (read_type_argument 0)) in
@@ -30,7 +30,10 @@ let lower (context : Context.t) (scalar : Intrinsic.scalar) =
             Address { place = Lowered.make_local_place result; writable = true };
           ];
         fail_operation_when (Holds (Copy (Lowered.make_local_place over))) "arithmetic overflow";
-        set (Use (Copy (Lowered.make_local_place result)))
+        set
+          (match context.trace with
+          | Some _ -> Use (Copy (Lowered.make_local_place result))
+          | None -> Binary (without_overflow, read_operand 0, read_operand 1))
     | _ -> set_binary op
   in
   let lower_checked_division op =
@@ -123,9 +126,13 @@ let lower (context : Context.t) (scalar : Intrinsic.scalar) =
     | _ -> Context.raise_bug "fits between these types"
   in
   match scalar with
-  | Add -> lower_checked_arithmetic Add Add_overflow
-  | Subtract -> lower_checked_arithmetic Subtract Subtract_overflow
-  | Multiply -> lower_checked_arithmetic Multiply Multiply_overflow
+  | Add -> lower_checked_arithmetic Add ~without_overflow:Add_without_overflow Add_overflow
+  | Subtract ->
+      lower_checked_arithmetic Subtract ~without_overflow:Subtract_without_overflow
+        Subtract_overflow
+  | Multiply ->
+      lower_checked_arithmetic Multiply ~without_overflow:Multiply_without_overflow
+        Multiply_overflow
   | Divide -> lower_checked_division Divide
   | Remainder -> lower_checked_division Remainder
   | Negate -> (
@@ -136,7 +143,7 @@ let lower (context : Context.t) (scalar : Intrinsic.scalar) =
           fail_operation_when
             (Test (Equal, read_operand 0, Constant (Integer (integer, least))))
             "arithmetic overflow";
-          set_unary Negate
+          set_unary Negate_without_overflow
       | _ -> set_unary Negate)
   | Wrapping_add -> set_binary Add
   | Wrapping_subtract -> set_binary Subtract

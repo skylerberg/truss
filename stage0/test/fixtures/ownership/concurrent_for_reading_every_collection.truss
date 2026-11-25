@@ -24,7 +24,7 @@ impl IterableMut for Pair {
   }
 }
 
-fn f(pair: Pair, names: own List[String], parts: own List[Slice[Int64]])
+fn f(pair: Pair, names: own List[String], parts: own List[List[Int64]])
   uses Tasks
 {
   concurrent for list in pair {

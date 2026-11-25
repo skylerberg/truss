@@ -1,4 +1,4 @@
-fn each(items: Slice[Int64], visit: fn(Int64))
+fn each(items: List[Int64], visit: fn(Int64))
   cost calls(visit) == items.length()
 {
   for item in items {

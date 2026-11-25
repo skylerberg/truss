@@ -1,9 +1,0 @@
-fn count(text: StringSlice) -> UInt64 {
-  var index: UInt64 = 0
-  while index < text.length()
-    decreases text
-  {
-    index = index + 1
-  }
-  index
-}

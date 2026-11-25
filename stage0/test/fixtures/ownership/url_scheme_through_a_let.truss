@@ -1,4 +1,4 @@
-fn Url.scheme(self) -> StringSlice {
+fn Url.scheme(self) -> view String {
   let scheme = self.scheme
-  scheme.slice()
+  scheme
 }

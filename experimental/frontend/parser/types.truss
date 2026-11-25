@@ -239,6 +239,11 @@ fn parse_type_expression_inner(cursor: mut TokenCursor) -> Result[syntax.TypeExp
     let function_type = parse_function_type(mut cursor, with_clauses: false)?
     return Ok(make_type_node(mut cursor, start, kind: syntax.TypeKind.FunctionType(own function_type)))
   }
+  if first == token.Kind.Keyword(token.Keyword.View) {
+    advance(mut cursor)
+    let viewed = parse_type_expression(mut cursor)?
+    return Ok(make_type_node(mut cursor, start, kind: syntax.TypeKind.ViewType(own viewed)))
+  }
   if first == token.Kind.Punctuation(token.Punctuation.Open(token.Bracket.Paren)) {
     return Ok(parse_parenthesized_function_type(mut cursor))
   }

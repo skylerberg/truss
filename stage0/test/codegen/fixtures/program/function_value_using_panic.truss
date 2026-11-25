@@ -1,4 +1,4 @@
-fn fail(message: StringSlice)
+fn fail(message: String)
   uses Panic
 {
   Panic.crash(message)
@@ -14,7 +14,7 @@ fn report(count: UInt64) -> UInt64
   count
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Console, Panic
 {
   let crash = fail

@@ -1,6 +1,6 @@
 capability Tally {
   fn add(amount: Int64 = 5)
-  fn total(scale: Int64 = 1, label: StringSlice = "sum") -> String
+  fn total(scale: Int64 = 1, label: String = "sum") -> String
 }
 
 type Counter(sum: Int64)
@@ -10,7 +10,7 @@ impl Tally for Counter {
     self.sum += amount
   }
 
-  fn total(self, scale: Int64, label: StringSlice) -> String {
+  fn total(self, scale: Int64, label: String) -> String {
     "${label} ${self.sum * scale}"
   }
 }

@@ -93,10 +93,19 @@ let make_interface (database : Tracker.t) (recorder : Tracker.recorder) ~is_chec
 let read_of_key (database : Tracker.t) recorder view (key : Resolve.Names.key) =
   Tracker.read_value database recorder view key.module_.package ~id:(Ids.of_key key)
 
+let make_source (database : Tracker.t) (recorder : Tracker.recorder) =
+  Declarations.make_source database.store ~note:(fun lookup scope name ->
+      recorder.note Reads (Lookup lookup) scope name)
+
 let make_infer database recorder : Infer.Lookups.t =
+  let source = make_source database recorder in
   {
     interface = make_interface database recorder ~is_checked:true;
     read_contract = read_of_key database recorder Facts.contract.whole;
+    read_clause_text =
+      (fun key origin ->
+        Source.Definition_span.quote (source.read_text key)
+          (Source.Definition_span.locate (source.read_spans key) (Core_walk.locate_origin origin)));
   }
 
 let list_recursion_group (database : Tracker.t) recorder path =
@@ -165,7 +174,6 @@ let read_source (database : Tracker.t) (recorder : Tracker.recorder) (file : Pat
 
 let make_proof (database : Tracker.t) (recorder : Tracker.recorder) : Prover.Lookups.t =
   {
-    read_source = read_source database recorder;
     interface = make_interface database recorder ~is_checked:true;
     mir = make_mir database recorder;
     list_must_be_disjoint = read_of_key database recorder Facts.ownership.whole;
@@ -245,4 +253,5 @@ let make_lowering database recorder : Lowering.Lookups.t =
   {
     interface = make_interface database recorder ~is_checked:true;
     mir = make_mir database recorder;
+    source = make_source database recorder;
   }

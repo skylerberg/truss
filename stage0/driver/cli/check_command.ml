@@ -15,7 +15,8 @@ let remove_unused_dependencies snapshot database packages =
                   [
                     ("file", Json.String file);
                     ( "message",
-                      Json.String (Package_checks.describe_unused_dependency ~package dependency) );
+                      Json.String
+                        (Project_catalog.describe (Unused_dependency { package; dependency })) );
                   ]))
       | Not_a_capability _ -> None)
     (Command_packages.list_manifest_problems snapshot database packages)

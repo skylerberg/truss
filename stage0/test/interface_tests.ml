@@ -18,14 +18,14 @@ let () =
       let packages =
         Support.setup
           [
-            ("app.main", "fn count(items: Slice[Int64], limit: own Int64 = 3) -> UInt64 { todo }\n");
+            ("app.main", "fn count(items: List[Int64], limit: own Int64 = 3) -> UInt64 { todo }\n");
           ]
       in
       match
         Interface.Definition.find_declared_signature (make_interface packages) (app "count")
       with
       | Some { parameters = [ items; limit ]; output = Returns output; _ } ->
-          if Types.show items.type_ <> "Slice[Int64]" then
+          if Types.show items.type_ <> "List[Int64]" then
             Harness.fail "items: %s" (Types.show items.type_);
           if limit.mode <> Own || not limit.has_default then Harness.fail "limit";
           if not (Types.is_builtin UInt64 output) then Harness.fail "output %s" (Types.show output)
@@ -60,28 +60,29 @@ let () =
       expect_one_diagnostic ~file:"app" "fn main() -> ExitCode { todo }\n" "types.main_signature");
   Harness.test "main with its fixed signature is accepted" (fun () ->
       expect_no_diagnostics [ ("app", Fixtures.Interface.main_with_arguments_and_exit_code) ]);
-  Harness.test "a read-only `List` parameter is an error with a fix to a slice" (fun () ->
-      expect_one_diagnostic "fn total(items: List[Int64]) -> UInt64 {\n  items.length()\n}\n"
-        "types.read_only_owning_parameter" ~at:("List", 1)
-        ~fixed:"fn total(items: Slice[Int64]) -> UInt64 {\n  items.length()\n}\n");
-  Harness.test "a read-only `String` parameter is an error with a fix to a string slice" (fun () ->
-      expect_one_diagnostic "fn width(name: String) -> UInt64 {\n  name.length()\n}\n"
-        "types.read_only_owning_parameter" ~at:("String", 1)
-        ~fixed:"fn width(name: StringSlice) -> UInt64 {\n  name.length()\n}\n");
-  Harness.test "a trait's read-only `List` parameter is an error" (fun () ->
-      expect_one_diagnostic "trait Summed {\n  fn total(self, items: List[Int64]) -> Int64\n}\n"
-        "types.read_only_owning_parameter" ~at:("List", 1)
-        ~fixed:"trait Summed {\n  fn total(self, items: Slice[Int64]) -> Int64\n}\n");
-  Harness.test "a read-only `List` input of a function type is an error with a fix to a slice"
-    (fun () ->
-      expect_one_diagnostic "fn apply(visit: fn(List[Int64])) {}\n"
-        "types.read_only_owning_parameter" ~at:("List", 1)
-        ~fixed:"fn apply(visit: fn(Slice[Int64])) {}\n");
-  Harness.test "a `mut` or `own` parameter may be a `List` or a `String`" (fun () ->
+  Harness.test "a parameter of any mode may be a `List` or a `String`" (fun () ->
       expect_no_diagnostics
         [
-          ("app.main", "fn f(items: mut List[Int64], name: own String, visit: fn(own String)) {}\n");
+          ( "app.main",
+            "fn f(items: mut List[Int64], name: own String, visit: fn(own String)) {}\n\n\
+             fn total(items: List[Int64], name: String, visit: fn(List[Int64])) {}\n\n\
+             trait Summed {\n\
+            \  fn total(self, items: List[Int64]) -> Int64\n\
+             }\n" );
         ]);
+  Harness.test
+    "`view` applies to a `String` and to a `List`, in a field, a type argument, and a result"
+    (fun () ->
+      expect_no_diagnostics
+        [
+          ( "app.main",
+            "type Reader(bytes: view List[UInt8], name: view String)\n\n\
+             fn words(text: String) -> List[view String] { todo }\n\n\
+             fn first(text: String) -> view String { todo }\n" );
+        ]);
+  Harness.test "`view` of a type that is no `String` and no `List` is an error" (fun () ->
+      expect_one_diagnostic "type Holder(count: view Int64)\n" "types.not_viewable"
+        ~says:"`view` applies to a `String` and to a `List`");
   Harness.test "an impl's method restates its trait's `Self` parameter as a `List`" (fun () ->
       expect_no_diagnostics [ ("app.main", Fixtures.Interface.merged_impl_for_a_list) ]);
   Harness.test "a main outside the root module may have any signature" (fun () ->
@@ -137,7 +138,7 @@ let () =
     "declaring Copyable on a type that is not opaque is an error with a fix that removes it"
     (fun () ->
       expect_one_diagnostic "type Point(x: Int64)\n  derives Copyable\n" "types.derives_inferred"
-        ~fixed:"type Point(x: Int64)\n  \n")
+        ~fixed:"type Point(x: Int64)\n")
 
 let () =
   Harness.test "an opaque type cannot declare Copyable when a field is not Copyable" (fun () ->
@@ -245,7 +246,7 @@ let () =
       expect_no_diagnostics
         [
           ( "app",
-            "fn main(arguments: Slice[String]) -> ExitCode\n\
+            "fn main(arguments: List[String]) -> ExitCode\n\
             \  uses Panic, RunForever, Console, Clock\n\
              {\n\
             \  todo\n\
@@ -255,14 +256,14 @@ let () =
       let scanner =
         "let limit: UInt64 = 4\n\
          type Region(stop: UInt64)\n\
-         type Scanner(position: UInt64, region: Region, last: Option[UInt64])\n"
+         type Scanner(position: UInt64, region: Region, last: Option[UInt64], tokens: List[UInt64])\n"
       in
       expect_no_diagnostics
         [
           ( "app.main",
             scanner
             ^ "fn f(scanner: mut Scanner)\n\
-              \  modifies scanner.position, scanner.region.stop\n\
+              \  modifies scanner.position, scanner.region.stop, scanner.tokens[..]\n\
                { todo }\n" );
         ];
       List.iter
@@ -272,7 +273,8 @@ let () =
            ^ "\n{ todo }\n")
             code ~says)
         [
-          ("scanner.region[0]", "types.not_a_field_path", "An element of a collection");
+          ("scanner.region[0]", "types.not_a_field_path", "One element or a narrower range");
+          ("scanner.position[..]", "types.not_a_field_path", "has no elements");
           ("limit.bits", "types.not_a_field_path", "`limit` is not a parameter");
           ("count.bits", "types.read_only_part", "`count` is not `mut`");
           ("scanner", "types.not_a_field_path", "`scanner` is a whole parameter");
@@ -657,7 +659,7 @@ let expect_property name expected text make_type check =
 
 let option type_ = Types.make_named (make_standard_path [ "option" ] "Option") [ type_ ]
 let list type_ = Types.make_named (make_standard_path [ "list" ] "List") [ type_ ]
-let slice type_ = Types.make_named (make_standard_path [ "list" ] "Slice") [ type_ ]
+let view_of type_ = Types.make_view (list type_)
 let string = Types.make_named (make_standard_path [ "text" ] "String") []
 
 let () =
@@ -679,8 +681,8 @@ let () =
     (fun _ -> option (Types.make_builtin Handle))
     Interface.Impls.is_plain;
   expect_property "a List is not Plain" false "" (fun _ -> list int64) Interface.Impls.is_plain;
-  expect_property "an Option of a Slice is a view" true ""
-    (fun _ -> option (slice int64))
+  expect_property "an Option of a view of a List is a view" true ""
+    (fun _ -> option (view_of int64))
     Interface.Impls.is_view;
   expect_property "a List of integers is not a view" false ""
     (fun _ -> list int64)
@@ -712,8 +714,8 @@ let () =
     "public opaque type Id[Entity](value: UInt64)\n  derives Plain\n"
     (fun _ -> Types.make_named (app "Id") [ string ])
     Interface.Impls.is_plain;
-  expect_property "a Slice is Plain whatever its elements are" true ""
-    (fun _ -> slice string)
+  expect_property "a view of a List is Plain whatever its elements are" true ""
+    (fun _ -> view_of string)
     Interface.Impls.is_plain;
   expect_property "a type defined as todo is not Copyable" false "type Session = todo\n"
     (fun _ -> Types.make_named (app "Session") [])
@@ -740,9 +742,9 @@ let () =
   expect_decision "whether an open type is a view depends on that type" (Depends_on Types.Hole)
     Types.Hole View;
   expect_decision "a List of an open type is not Plain" Fails (list Types.Hole) Plain;
-  expect_decision "a Slice of an open type is Plain" Holds (slice Types.Hole) Plain;
-  expect_decision "an Option of a Slice of an open type is a view" Holds
-    (option (slice Types.Hole))
+  expect_decision "a view of a List of an open type is Plain" Holds (view_of Types.Hole) Plain;
+  expect_decision "an Option of a view of a List of an open type is a view" Holds
+    (option (view_of Types.Hole))
     View;
   Harness.test "is_plain of a type whose decision depends on an open type is a compiler bug"
     (fun () ->
@@ -766,8 +768,8 @@ let () =
   expect_property "an Option of an Option of plain data is Plain" true ""
     (fun _ -> option (option int64))
     Interface.Impls.is_plain;
-  expect_property "a type nested in itself around a Slice is a view" true holder
-    (fun _ -> held (held (slice int64)))
+  expect_property "a type nested in itself around a view of a List is a view" true holder
+    (fun _ -> held (held (view_of int64)))
     Interface.Impls.is_view;
   expect_property "a type nested in itself around a List is not a view" false holder
     (fun _ -> held (held (list int64)))
@@ -776,13 +778,13 @@ let () =
     (fun _ -> held (held (list int64)))
     Interface.Impls.is_plain;
   expect_property "a type that contains itself is a view when its argument is" true chain
-    (fun _ -> Types.make_named (app "Chain") [ slice int64 ])
+    (fun _ -> Types.make_named (app "Chain") [ view_of int64 ])
     Interface.Impls.is_view;
   expect_property "a type that contains itself is not a view when its argument is not" false chain
     (fun _ -> Types.make_named (app "Chain") [ int64 ])
     Interface.Impls.is_view;
-  expect_property "a type that contains itself around a Slice is a view" true
-    Fixtures.Interface.nest_of_growing_slices
+  expect_property "a type that contains itself around a view of a List is a view" true
+    Fixtures.Interface.nest_of_growing_ranges
     (fun _ -> Types.make_named (app "Nest") [ int64 ])
     Interface.Impls.is_view;
   expect_property "types that hold each other are Copyable when nothing in them says otherwise" true
@@ -905,6 +907,7 @@ let () =
             | Some (Value _) | None -> Harness.fail "`Item` is not bound")
         | [], None -> ()
         | _ -> Harness.fail "another number of generic parameters")
+    | Derived_for_view _ -> Harness.fail "a view's derived impl"
     | Bound -> Harness.fail "a bound"
   in
   Harness.test "evidence by a bound is the impl once a substitution makes its type concrete"
@@ -917,7 +920,7 @@ let () =
       let interface, value = read () in
       match resolve interface Types.no_substitution (Parameter value) Bound with
       | Bound -> ()
-      | Impl _ -> Harness.fail "not a bound");
+      | Impl _ | Derived_for_view _ -> Harness.fail "not a bound");
   Harness.test "an impl is selected for a type whose argument has no bound in scope" (fun () ->
       let interface, value = read () in
       expect_impl interface

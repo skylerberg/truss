@@ -12,7 +12,7 @@ impl Iterable for Bag {
   }
 }
 
-fn total_length(words: Slice[String]) -> UInt64
+fn total_length(words: List[String]) -> UInt64
   uses Tasks
 {
   concurrent for word in words {

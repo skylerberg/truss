@@ -59,7 +59,14 @@ val make_named : Path.t -> ty list -> ty
 val is_builtin : Language.Builtin_type.t -> ty -> bool
 val find_builtin : ty -> Language.Builtin_type.t option
 val is_well_known : Well_known.t -> ty -> bool
-val find_view : ty -> ty option
+val find_viewed : ty -> ty option
+val strip_view : ty -> ty
+val is_view : ty -> bool
+val make_view : ty -> ty
+val is_viewable : ty -> bool
+val erase_views : ty -> ty
+val erase_argument_views : argument -> argument
+val erase_trait_views : trait_reference -> trait_reference
 val find_integer_bits : ty -> (int * bool) option
 val find_integer_range : ty -> (Z.t * Z.t) option
 val is_integer_type : ty -> bool
@@ -110,6 +117,7 @@ val compute_missing_capabilities :
 
 val replace_capabilities : (capability -> capability_set option) -> capability_set -> capability_set
 
+type property = Copyable | Plain | View | Holds_function
 type substitution
 
 val no_substitution : substitution
@@ -121,6 +129,9 @@ val list_type_arguments : substitution -> (parameter * ty) list
 val substitute : substitution -> ty -> ty
 val substitute_argument : substitution -> argument -> argument
 val substitute_trait : substitution -> trait_reference -> trait_reference
+val substitute_erased : substitution -> ty -> ty
+val substitute_argument_erased : substitution -> argument -> argument
+val substitute_trait_erased : substitution -> trait_reference -> trait_reference
 val substitute_function : substitution -> function_type -> function_type
 val substitute_capabilities : substitution -> capability_set -> capability_set
 val substitute_condition : substitution -> condition -> condition
@@ -131,7 +142,10 @@ val map_condition_types :
 val map_conditions : (condition -> condition) -> capability_set -> capability_set
 val substitute_substitution : substitution -> substitution -> substitution
 
-type evidence = Impl of { impl : Path.t; substitution : substitution } | Bound
+type evidence =
+  | Impl of { impl : Path.t; substitution : substitution }
+  | Derived_for_view of { viewed : Path.t; substitution : substitution }
+  | Bound
 
 val substitute_evidence : substitution -> evidence -> evidence
 val extract_result_type : result -> ty
@@ -176,7 +190,7 @@ type parameter_info = { name : string; mode : Language.Mode.t; type_ : ty; has_d
 val list_capture_free_parameters : parameter_info list -> string list
 val mentions_specification_only_type : parameter_info list -> result -> bool
 
-type modified = { position : int; field_path : string list }
+type modified = { position : int; field_path : string list; is_elements : bool }
 
 type signature = {
   generics : generic list;
@@ -195,7 +209,9 @@ type signature = {
 val is_field_path_prefix : string list -> string list -> bool
 val find_parameter_position : signature -> string -> int option
 val read_parameter_at : signature -> int -> parameter_info
-val list_modified_fields : signature -> int -> string list list option
+val list_modified_parts : signature -> int -> modified list option
+val is_part_within : container:modified -> modified -> bool
+val show_modified_part : root:string -> modified -> string
 
 type instantiation = {
   type_arguments : argument list;
@@ -277,6 +293,7 @@ type constant_interface = { constant_type : ty }
 val make_trait_reference : arguments:argument list -> Path.t -> trait_reference
 val string_type : ty
 val find_sequence_element : ty -> ty option
+val find_list_of_array : ty -> ty option
 val find_specification_sequence_element : ty -> ty option
 
 module For_testing : sig

@@ -1,4 +1,4 @@
-fn f(items: Slice[Int64])
+fn f(items: List[Int64])
   uses Meter
   cost calls(Meter.tick) == items.length()
 {

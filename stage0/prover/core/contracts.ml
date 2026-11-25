@@ -77,7 +77,9 @@ let list_law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference
           with
           | Some renaming
             when List.equal is_same_argument
-                   (List.map (Types.substitute_argument renaming) proven.trait.trait_arguments)
+                   (List.map
+                      (Types.substitute_argument_erased renaming)
+                      proven.trait.trait_arguments)
                    trait.trait_arguments ->
               Some (proven.law, (read_source_at_key lookups key, renaming))
           | _ -> None)
@@ -134,9 +136,9 @@ let find_callee (context : State.context) path : State.known_callee =
 
 let read_signature context path = Lazy.force (find_callee context path).known_signature
 
-let list_modified_fields context path position =
+let list_modified_parts context path position =
   Option.bind (read_signature context path) (fun signature ->
-      Types.list_modified_fields signature position)
+      Types.list_modified_parts signature position)
 
 let find_callee_clauses context path =
   Option.bind (Lazy.force (find_callee context path).known_clauses) snd
@@ -211,7 +213,9 @@ let list_implemented_traits (lookups : Lookups.t) ~list_bounds (self_type : Type
                 Option.bind
                   (Interface.Impls.match_type ~variables Types.no_substitution interface.for_type
                      self_type) (fun arguments ->
-                    let implemented = Types.substitute_trait arguments interface.implements in
+                    let implemented =
+                      Types.substitute_trait_erased arguments interface.implements
+                    in
                     Option.map
                       (fun _ -> implemented)
                       (Interface.Impls.find_evidence lookups.interface ~list_bounds self_type
@@ -253,7 +257,7 @@ let find_method_contract context (trait : Types.trait_reference) name receiver
     (evidence : Types.evidence) =
   let trait_clauses = find_trait_clauses context trait.trait name receiver in
   match evidence with
-  | Impl { impl; _ } -> (
+  | Impl { impl; _ } | Derived_for_view { viewed = impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
       match Lazy.force (find_callee context path).known_clauses with
       | Some ((Written _ | Derived _), clauses) ->

@@ -22,7 +22,7 @@ fn accept_or_time_out() -> String
   "could not listen"
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Tasks, Clock, Console, NetworkServer, Handles
 {
   Console.print_line(accept_or_time_out())

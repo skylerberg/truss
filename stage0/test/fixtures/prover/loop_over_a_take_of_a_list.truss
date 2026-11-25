@@ -1,4 +1,4 @@
-fn first_two(values: Slice[Int64]) -> Int64 {
+fn first_two(values: List[Int64]) -> Int64 {
   var total: Int64 = 0
   for value in values.cursor().take(2) {
     total = total.saturating_add(value)

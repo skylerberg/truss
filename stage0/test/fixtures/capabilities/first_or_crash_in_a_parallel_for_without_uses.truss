@@ -1,4 +1,4 @@
-fn f(rows: Slice[Slice[Int64]]) {
+fn f(rows: List[List[Int64]]) {
   parallel for row in rows {
     let _ = first_or_crash(row)
   }

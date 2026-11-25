@@ -49,7 +49,7 @@ public fn Setup.new() -> Setup {
   )
 }
 
-public fn Setup.with_file(own self, path: Path, contents: StringSlice) -> Setup
+public fn Setup.with_file(own self, path: Path, contents: String) -> Setup
   uses RunForever
 {
   var changed = own self
@@ -57,7 +57,7 @@ public fn Setup.with_file(own self, path: Path, contents: StringSlice) -> Setup
   changed
 }
 
-public fn Setup.with_variable(own self, name: StringSlice, value: StringSlice) -> Setup {
+public fn Setup.with_variable(own self, name: String, value: String) -> Setup {
   var changed = own self
   changed.environment = own changed.environment.with_variable(name, value: value)
   changed
@@ -69,7 +69,7 @@ public fn Setup.with_input(own self, lines: own List[String]) -> Setup {
   changed
 }
 
-public fn Setup.with_host(own self, name: StringSlice, address: network.IpAddress) -> Setup {
+public fn Setup.with_host(own self, name: String, address: network.IpAddress) -> Setup {
   var changed = own self
   mut changed.hosts.push(Host(name: name.to_string(), address: address))
   changed
@@ -77,7 +77,7 @@ public fn Setup.with_host(own self, name: StringSlice, address: network.IpAddres
 
 public fn Setup.with_program(
   own self,
-  name: StringSlice,
+  name: String,
   arguments: own List[String] = [],
   output: own processes.Output,
 ) -> Setup {
@@ -201,7 +201,7 @@ fn take_unread(stream: mut Stream, limit: UInt64) -> List[UInt8] {
   take_first_bytes(mut stream.unread, limit: limit)
 }
 
-fn deliver(stream: mut Stream, bytes: Slice[UInt8]) {
+fn deliver(stream: mut Stream, bytes: List[UInt8]) {
   mut stream.unread.append(bytes)
 }
 
@@ -257,7 +257,7 @@ internal fn State.claim_address(mut self, address: network.SocketAddress, datagr
   Err(SystemError.AddressNotAvailable)
 }
 
-internal fn State.resolve(mut self, host: StringSlice) -> Result[List[network.IpAddress], SystemError] {
+internal fn State.resolve(mut self, host: String) -> Result[List[network.IpAddress], SystemError] {
   match mut self.next_fault(Operation.Resolve) {
     Some(error) => return Err(error)
     None => {}
@@ -293,7 +293,7 @@ internal fn State.listen_local(mut self, path: own Path) -> Result[UInt64, Syste
 }
 
 internal fn State.local_listener_at(self, path: Path) -> Option[UInt64] {
-  self.listeners.slice().find_index(fn(listener) {
+  self.listeners.find_index(fn(listener) {
     listener.open && listener.path == Some(path.copy())
   })
 }
@@ -320,7 +320,7 @@ internal fn State.bind_datagrams(mut self, address: network.SocketAddress) -> Re
 }
 
 internal fn State.listener_at(self, address: network.SocketAddress) -> Option[UInt64] {
-  self.listeners.slice().find_index(fn(listener) {
+  self.listeners.find_index(fn(listener) {
     listener.open && listener.local.port == address.port && same_host(listener.local.address, second: address.address)
   })
 }
@@ -477,7 +477,7 @@ internal fn State.close(mut self, endpoint: UInt64) -> Result[Unit, SystemError]
   Ok(Unit)
 }
 
-internal fn State.send(mut self, endpoint: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
+internal fn State.send(mut self, endpoint: UInt64, bytes: List[UInt8]) -> Result[UInt64, SystemError] {
   match self.endpoint(endpoint) {
     Connected(stream) => {
       match mut self.next_fault(Operation.Write) {
@@ -512,7 +512,7 @@ internal fn State.send(mut self, endpoint: UInt64, bytes: Slice[UInt8]) -> Resul
 internal fn State.send_to(
   mut self,
   endpoint: UInt64,
-  bytes: Slice[UInt8],
+  bytes: List[UInt8],
   address: network.SocketAddress,
 ) -> Result[UInt64, SystemError] {
   match self.endpoint(endpoint) {
@@ -525,7 +525,7 @@ internal fn State.send_to(
         return Err(SystemError.Closed)
       }
       let from = self.sockets[socket].local
-      let receiver = self.sockets.slice().find_index(fn(other) {
+      let receiver = self.sockets.find_index(fn(other) {
         other.open && other.local.port == address.port && same_host(other.local.address, second: address.address)
       })
       match receiver {
@@ -563,7 +563,7 @@ internal fn State.read_line(mut self) -> Option[String] {
   }
   var line = mut self.unread_input.take_all()
   let _ = mut line.pop()
-  Some(String.from_utf8_lossy(line.slice()))
+  Some(String.from_utf8_lossy(line))
 }
 
 internal fn State.attempt(mut self, blocking: Blocking, cancelled: Bool) -> Attempt {
@@ -649,7 +649,7 @@ internal fn State.attempt(mut self, blocking: Blocking, cancelled: Bool) -> Atte
       _ => return Attempt.Finished(Err(SystemError.InvalidInput))
     }
     Catching(signals) => {
-      match self.pending_signals.slice().find_index(fn(pending) { signals.contains(pending) }) {
+      match self.pending_signals.find_index(fn(pending) { signals.contains(pending) }) {
         Some(index) => return Attempt.Finished(Ok(Completion.Caught(mut self.pending_signals.remove_at(index))))
         None => {}
       }
@@ -663,7 +663,7 @@ internal fn State.program_for(self, command: processes.Command) -> Option[UInt64
   var most: UInt64 = 0
   for index in 0..self.programs.length() {
     if self.programs[index].name == command.program()
-      && command.argument_list().starts_with(self.programs[index].arguments.slice())
+      && command.argument_list().starts_with(self.programs[index].arguments)
       && self.programs[index].arguments.length() >= most
     {
       chosen = Some(index)
@@ -693,7 +693,7 @@ internal fn State.start(mut self, command: processes.Command) -> Result[Started,
       let error_output = self.programs[index].output.error_output.copy()
       match command.output {
         Inherit => {
-          let text = String.from_utf8_lossy(output.slice())
+          let text = String.from_utf8_lossy(output)
           mut self.console.output.push(text)
         }
         Discard => {}
@@ -703,7 +703,7 @@ internal fn State.start(mut self, command: processes.Command) -> Result[Started,
       }
       match command.error_output {
         Inherit => {
-          let text = String.from_utf8_lossy(error_output.slice())
+          let text = String.from_utf8_lossy(error_output)
           mut self.console.errors.push(text)
         }
         Discard => {}
@@ -748,8 +748,8 @@ internal fn State.spawn(mut self, command: processes.Command) -> Result[processe
   ))
 }
 
-internal fn State.take_fault(mut self, operations: Slice[Operation]) -> Option[SystemError] {
-  match self.faults.slice().find_index(fn(fault) { operations.contains(fault.operation) }) {
+internal fn State.take_fault(mut self, operations: List[Operation]) -> Option[SystemError] {
+  match self.faults.find_index(fn(fault) { operations.contains(fault.operation) }) {
     Some(index) => {
       let fault = mut self.faults.remove_at(index)
       Some(fault.error)
@@ -759,7 +759,7 @@ internal fn State.take_fault(mut self, operations: Slice[Operation]) -> Option[S
 }
 
 internal fn State.next_fault(mut self, operation: Operation) -> Option[SystemError] {
-  match self.faults.slice().find_index(fn(fault) { fault.operation == operation }) {
+  match self.faults.find_index(fn(fault) { fault.operation == operation }) {
     Some(index) => {
       let fault = mut self.faults.remove_at(index)
       Some(fault.error)
@@ -768,7 +768,7 @@ internal fn State.next_fault(mut self, operation: Operation) -> Option[SystemErr
   }
 }
 
-internal fn State.begin_file_operation(mut self, now: Instant, operations: Slice[Operation]) -> Option[SystemError] {
+internal fn State.begin_file_operation(mut self, now: Instant, operations: List[Operation]) -> Option[SystemError] {
   mut self.files.set_time(now)
   mut self.take_fault(operations)
 }
@@ -923,7 +923,7 @@ fn World.wake(self)
   }
 }
 
-fn World.wait_until_done(self, blocking: Blocking, reason: StringSlice) -> Result[Completion, SystemError]
+fn World.wait_until_done(self, blocking: Blocking, reason: String) -> Result[Completion, SystemError]
   uses Panic, RunForever
 {
   provide self.tasks {
@@ -944,7 +944,7 @@ fn World.wait_until_done(self, blocking: Blocking, reason: StringSlice) -> Resul
   }
 }
 
-fn World.perform(self, blocking: Blocking, reason: StringSlice) -> Result[Completion, SystemError]
+fn World.perform(self, blocking: Blocking, reason: String) -> Result[Completion, SystemError]
   uses Panic, RunForever
 {
   self.preemption_point()
@@ -970,7 +970,7 @@ fn World.perform(self, blocking: Blocking, reason: StringSlice) -> Result[Comple
 impl Console for World
   uses Panic, RunForever
 {
-  fn print(self, text: StringSlice) {
+  fn print(self, text: String) {
     self.preemption_point()
     intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide mut state.console {
@@ -979,7 +979,7 @@ impl Console for World
     })
   }
 
-  fn print_line(self, text: StringSlice) {
+  fn print_line(self, text: String) {
     self.preemption_point()
     intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide mut state.console {
@@ -988,7 +988,7 @@ impl Console for World
     })
   }
 
-  fn print_error(self, text: StringSlice) {
+  fn print_error(self, text: String) {
     self.preemption_point()
     intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide mut state.console {
@@ -1122,7 +1122,7 @@ impl FileRead for World
 impl FileWrite for World
   uses Panic, RunForever
 {
-  fn write(self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
+  fn write(self, file: Path, contents: List[UInt8]) -> Result[Unit, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
     intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
@@ -1135,7 +1135,7 @@ impl FileWrite for World
     })
   }
 
-  fn write_text(self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
+  fn write_text(self, file: Path, contents: String) -> Result[Unit, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
     intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
@@ -1242,7 +1242,7 @@ impl FileWrite for World
 impl NetworkClient for World
   uses Panic, RunForever
 {
-  fn resolve(self, host: StringSlice) -> Result[List[network.IpAddress], SystemError] {
+  fn resolve(self, host: String) -> Result[List[network.IpAddress], SystemError] {
     self.preemption_point()
     intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       mut state.resolve(host)
@@ -1364,7 +1364,7 @@ impl Handles for World
     Ok(count)
   }
 
-  fn write(self, handle: streams.Handle, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
+  fn write(self, handle: streams.Handle, bytes: List[UInt8]) -> Result[UInt64, SystemError] {
     match endpoint_of(handle) {
       Some(endpoint) => {
         self.preemption_point()
@@ -1417,7 +1417,7 @@ impl Handles for World
     Ok(count)
   }
 
-  fn write_at(self, handle: streams.Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
+  fn write_at(self, handle: streams.Handle, offset: UInt64, bytes: List[UInt8]) -> Result[UInt64, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
     let written = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
@@ -1551,7 +1551,7 @@ impl Handles for World
   fn send_to(
     self,
     socket: streams.Handle,
-    bytes: Slice[UInt8],
+    bytes: List[UInt8],
     address: network.SocketAddress,
   ) -> Result[UInt64, SystemError] {
     self.preemption_point()
@@ -1688,7 +1688,7 @@ impl Random for World
 impl Environment for World
   uses Panic, RunForever
 {
-  fn variable(self, name: StringSlice) -> Option[String] {
+  fn variable(self, name: String) -> Option[String] {
     self.preemption_point()
     intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide state.environment {
@@ -1742,7 +1742,7 @@ impl Environment for World
     })
   }
 
-  fn zone_rules(self, name: StringSlice) -> Option[List[UInt8]] {
+  fn zone_rules(self, name: String) -> Option[List[UInt8]] {
     self.preemption_point()
     intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide state.environment {
@@ -1774,7 +1774,7 @@ impl Processes for World
 impl Signals for World
   uses Panic, RunForever
 {
-  fn wait(self, signals: Slice[processes.Signal]) -> Option[processes.Signal] {
+  fn wait(self, signals: List[processes.Signal]) -> Option[processes.Signal] {
     match self.perform(
       Blocking.Catching(signals: signals.to_list()),
       reason: "waiting for a signal that has not been delivered",
@@ -1824,7 +1824,7 @@ impl Tasks for World
     }
   }
 
-  fn wait(self, key: UInt64, ticket: UInt64, reason: StringSlice) {
+  fn wait(self, key: UInt64, ticket: UInt64, reason: String) {
     provide self.tasks {
       Tasks.wait(key, ticket: ticket, reason: reason)
     }

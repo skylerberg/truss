@@ -141,7 +141,7 @@ let () =
           "test 5 panicked\n";
           "shift amount out of range\n";
           "test 6 panicked\n";
-          "slice out of bounds\n";
+          "range out of bounds\n";
           "test 7 panicked\n";
         ])
 
@@ -239,7 +239,7 @@ let () =
           ("division", "division by zero");
           ("shift", "shift amount out of range");
           ("index", "index out of bounds");
-          ("slice", "slice out of bounds");
+          ("range", "range out of bounds");
           ("key", "index out of bounds");
           ("assignment", "index out of bounds");
           ("inherited", "index out of bounds");
@@ -530,14 +530,14 @@ let () =
         Codegen_support.run_main ~arguments:[ path ]
           {|use standard.network
 
-fn say(text: StringSlice) uses Console {
+fn say(text: String) uses Console {
   Console.print_line(text)
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Console, NetworkServer, NetworkClient, Handles
 {
-  let path = Path.new(arguments[1].slice())
+  let path = Path.new(arguments[1])
   match NetworkServer.listen_local(path) {
     Ok(opened) => {
       var listener = own opened
@@ -559,7 +559,7 @@ fn main(arguments: Slice[String]) -> ExitCode
     }
     Err(error) => say("listening failed: ${error}")
   }
-  if NetworkClient.connect_local(Path.new("${arguments[1]}.missing".slice())) is Err(_) {
+  if NetworkClient.connect_local(Path.new("${arguments[1]}.missing")) is Err(_) {
     say("a missing path is refused")
   }
   let loopback = network.SocketAddress(address: network.IpAddress.loopback, port: 0)

@@ -1,7 +1,7 @@
 use frontend.source
 use frontend.token
 
-type Confusable = SpaceConfusable | Spelled(spelling: StringSlice) | OpeningQuote(closing: StringSlice)
+type Confusable = SpaceConfusable | Spelled(spelling: view String) | OpeningQuote(closing: view String)
   derives Equal
 
 fn find_confusable(code: UInt32) -> Option[Confusable] {
@@ -33,7 +33,7 @@ fn find_confusable(code: UInt32) -> Option[Confusable] {
   }
 }
 
-fn find_punctuation(spelling: StringSlice) -> Option[token.Punctuation] {
+fn find_punctuation(spelling: String) -> Option[token.Punctuation] {
   match spelling {
     "(" => Some(token.Punctuation.Open(token.Bracket.Paren))
     ")" => Some(token.Punctuation.Close(token.Bracket.Paren))
@@ -54,14 +54,14 @@ fn find_punctuation(spelling: StringSlice) -> Option[token.Punctuation] {
   }
 }
 
-fn find_confusable_token(spelling: StringSlice) -> Option[token.Kind] {
+fn find_confusable_token(spelling: String) -> Option[token.Kind] {
   match find_punctuation(spelling) {
     Some(punctuation_kind) => Some(token.Kind.Punctuation(punctuation_kind))
     None => token.find_word(spelling)
   }
 }
 
-fn follows_joining_confusable(scanner: Scanner, start: UInt64, replacement: StringSlice) -> Bool
+fn follows_joining_confusable(scanner: Scanner, start: UInt64, replacement: String) -> Bool
   uses Panic
 {
   if start == 0 {
@@ -80,7 +80,7 @@ fn follows_joining_confusable(scanner: Scanner, start: UInt64, replacement: Stri
   }
 }
 
-fn report_confusable(scanner: mut Scanner, start: UInt64, length: UInt64, replacement: StringSlice, name: StringSlice)
+fn report_confusable(scanner: mut Scanner, start: UInt64, length: UInt64, replacement: String, name: String)
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.line_is_blank
   requires scanner.position <= start + length
@@ -356,7 +356,7 @@ fn find_character_literal_end(scanner: Scanner, start: UInt64, after_prefix: Boo
   }
 }
 
-fn decode_character_escape(content: StringSlice) -> String
+fn decode_character_escape(content: String) -> String
   uses Panic
 {
   match content {
@@ -397,7 +397,7 @@ fn decode_character_escape(content: StringSlice) -> String
   }
 }
 
-fn lex_character_literal(scanner: mut Scanner, tag: StringSlice, literal_start: UInt64, stop: UInt64) -> token.Kind
+fn lex_character_literal(scanner: mut Scanner, tag: String, literal_start: UInt64, stop: UInt64) -> token.Kind
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.tables
   requires scanner.position <= stop
@@ -406,7 +406,7 @@ fn lex_character_literal(scanner: mut Scanner, tag: StringSlice, literal_start: 
 {
   let start = scanner.position
   let content = scanner.text(start + 1, stop: stop - 1)
-  let as_ordinary: StringSlice = if content == "\"" { "\\\"" } else if content == "\\'" { "'" } else { content }
+  let as_ordinary: view String = if content == "\"" { "\\\"" } else if content == "\\'" { "'" } else { content }
   let value = decode_character_escape(content)
   let replacement = "${tag}\"${as_ordinary}\""
   let noun = if tag == "UInt8" { "byte" } else { "character" }
@@ -479,7 +479,7 @@ fn format_field_edits(scanner: Scanner, start: UInt64, stop: UInt64) -> Option[L
 type PrefixKind = FormatPrefix | RawTextPrefix | BytesPrefix
   derives Equal
 
-fn classify_prefix(prefix: StringSlice) -> PrefixKind {
+fn classify_prefix(prefix: String) -> PrefixKind {
   match prefix {
     "f" | "$" => PrefixKind.FormatPrefix
     "r" | "@" => PrefixKind.RawTextPrefix
@@ -755,7 +755,7 @@ fn report_quoted_string(scanner: mut Scanner, start: UInt64, delimiter: UInt8, s
   report(mut scanner, code: "lexer.string_delimiter", span: source.make_span(start, stop: start + 1), message: message, fixes: own fixes)
 }
 
-fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing: StringSlice) -> Option[token.Kind]
+fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing: String) -> Option[token.Kind]
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.tables
   requires 1 <= opening_length

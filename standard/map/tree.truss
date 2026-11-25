@@ -168,7 +168,7 @@ fn join[Key: Ordered](
   left: own Tree,
   position: UInt64,
   right: own Tree,
-  keys: Slice[Key],
+  keys: List[Key],
 ) -> Tree
   requires left.height() < UInt64.maximum && right.height() < UInt64.maximum
   ensures match result {
@@ -193,7 +193,7 @@ fn rotate_left[Key: Ordered](
   left: own Tree,
   position: UInt64,
   right: own Tree,
-  keys: Slice[Key],
+  keys: List[Key],
 ) -> Tree
   requires left.balanced() && right.balanced()
   requires right.height() == left.height() + 2
@@ -230,7 +230,7 @@ fn rotate_right[Key: Ordered](
   left: own Tree,
   position: UInt64,
   right: own Tree,
-  keys: Slice[Key],
+  keys: List[Key],
 ) -> Tree
   requires left.balanced() && right.balanced()
   requires left.height() == right.height() + 2
@@ -289,7 +289,7 @@ fn rotate_right_left[Key: Ordered](
   left: own Tree,
   position: UInt64,
   right: own Tree,
-  keys: Slice[Key],
+  keys: List[Key],
 ) -> Tree
   requires left.balanced() && right.balanced()
   requires right.height() == left.height() + 2
@@ -368,7 +368,7 @@ fn rotate_left_right[Key: Ordered](
   left: own Tree,
   position: UInt64,
   right: own Tree,
-  keys: Slice[Key],
+  keys: List[Key],
 ) -> Tree
   requires left.balanced() && right.balanced()
   requires left.height() == right.height() + 2
@@ -447,7 +447,7 @@ fn balance_right_heavy[Key: Ordered](
   left: own Tree,
   position: UInt64,
   right: own Tree,
-  keys: Slice[Key],
+  keys: List[Key],
 ) -> Tree
   requires left.balanced() && right.balanced()
   requires right.height() == left.height() + 2
@@ -472,7 +472,7 @@ fn balance_left_heavy[Key: Ordered](
   left: own Tree,
   position: UInt64,
   right: own Tree,
-  keys: Slice[Key],
+  keys: List[Key],
 ) -> Tree
   requires left.balanced() && right.balanced()
   requires left.height() == right.height() + 2
@@ -497,7 +497,7 @@ fn balance[Key: Ordered](
   left: own Tree,
   position: UInt64,
   right: own Tree,
-  keys: Slice[Key],
+  keys: List[Key],
 ) -> Tree
   requires left.balanced() && right.balanced()
   requires left.height() <= right.height() + 2 && right.height() <= left.height() + 2
@@ -591,7 +591,7 @@ theorem above_members[Key: Ordered](tree: Tree, keys: Sequence[Key], bound: Key)
   }
 }
 
-fn Tree.find[Key: Ordered](self, keys: Slice[Key], key: Key) -> UInt64
+fn Tree.find[Key: Ordered](self, keys: List[Key], key: Key) -> UInt64
   requires self.balanced() && self.sorted(keys.model())
   ensures result <= keys.length()
   ensures result < keys.length() ==> self.holds(result) && keys.model()[result] == key
@@ -635,7 +635,7 @@ fn balance_after_insertion[Key: Ordered](
   position: UInt64,
   right: own Tree,
   height: UInt64,
-  keys: Slice[Key],
+  keys: List[Key],
 ) -> Tree
   requires left.balanced() && right.balanced()
   requires left.height() <= height && right.height() <= height
@@ -653,7 +653,7 @@ fn balance_after_insertion[Key: Ordered](
 fn Tree.inserted[Key: Ordered](
   own self,
   position: UInt64,
-  keys: Slice[Key],
+  keys: List[Key],
 ) -> Tree
   requires self.balanced() && self.sorted(keys.model())
   requires position < keys.length()
@@ -712,7 +712,7 @@ fn balance_after_removal[Key: Ordered](
   position: UInt64,
   right: own Tree,
   height: UInt64,
-  keys: Slice[Key],
+  keys: List[Key],
 ) -> Tree
   requires left.balanced() && right.balanced()
   requires left.height() + 1 <= height && right.height() + 1 <= height
@@ -730,7 +730,7 @@ fn balance_after_removal[Key: Ordered](
 
 type Split(rest: Tree, position: UInt64)
 
-fn Tree.without_last[Key: Ordered](own self, keys: Slice[Key]) -> Split
+fn Tree.without_last[Key: Ordered](own self, keys: List[Key]) -> Split
   requires self.balanced() && self.sorted(keys.model())
   requires self.height() > 0 && self.height() < UInt64.maximum
   ensures result.rest.balanced() && result.rest.sorted(keys.model())
@@ -778,7 +778,7 @@ fn without_root[Key: Ordered](
   root: UInt64,
   right: own Tree,
   height: UInt64,
-  keys: Slice[Key],
+  keys: List[Key],
 ) -> Tree
   requires left.balanced() && right.balanced()
   requires sorted_around(left, position: root, right: right, keys: keys.model())
@@ -813,7 +813,7 @@ fn without_root[Key: Ordered](
 fn Tree.without[Key: Ordered](
   own self,
   position: UInt64,
-  keys: Slice[Key],
+  keys: List[Key],
 ) -> Tree
   requires self.balanced() && self.sorted(keys.model())
   requires self.holds(position) && position < keys.length()
@@ -829,24 +829,45 @@ fn Tree.without[Key: Ordered](
     Node(left, position: node, right, height) => {
       proof {
         assert left.height() < height && right.height() < height && height == self.height()
+        assert self.size() == left.size() + 1 + right.size()
         members_below(left, keys: keys.model(), bound: keys.model()[node])
         members_above(right, keys: keys.model(), bound: keys.model()[node])
       }
       if node == position {
-        return without_root(own left, root: node, right: own right, height: height, keys: keys)
+        let joined = without_root(own left, root: node, right: own right, height: height, keys: keys)
+        proof {
+          assert forall other: UInt64 => joined.holds(other) == (self.holds(other) && other != position)
+        }
+        return joined
       }
       if keys[position] < keys[node] {
         let shrunk = own left.without(position, keys: keys)
         proof {
           below_members(shrunk, keys: keys.model(), bound: keys.model()[node])
         }
-        balance_after_removal(own shrunk, position: node, right: own right, height: height, keys: keys)
+        let rebalanced =
+          balance_after_removal(own shrunk, position: node, right: own right, height: height, keys: keys)
+        proof {
+          assert rebalanced.sorted(keys.model())
+          assert rebalanced.size() + 1 == self.size()
+          assert rebalanced.height() + 1 >= self.height() && rebalanced.height() <= self.height()
+          assert forall other: UInt64 => rebalanced.holds(other) == (self.holds(other) && other != position)
+        }
+        rebalanced
       } else {
         let shrunk = own right.without(position, keys: keys)
         proof {
           above_members(shrunk, keys: keys.model(), bound: keys.model()[node])
         }
-        balance_after_removal(own left, position: node, right: own shrunk, height: height, keys: keys)
+        let rebalanced =
+          balance_after_removal(own left, position: node, right: own shrunk, height: height, keys: keys)
+        proof {
+          assert rebalanced.sorted(keys.model())
+          assert rebalanced.size() + 1 == self.size()
+          assert rebalanced.height() + 1 >= self.height() && rebalanced.height() <= self.height()
+          assert forall other: UInt64 => rebalanced.holds(other) == (self.holds(other) && other != position)
+        }
+        rebalanced
       }
     }
   }

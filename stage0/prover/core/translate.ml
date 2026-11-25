@@ -123,8 +123,7 @@ let list_promises context (source : State.source) locals (costs : Mir.cost list)
   List.filter_map
     (fun (cost : Mir.cost) ->
       match Contracts.find_resource cost ~locals with
-      | None ->
-          Facts.raise_unsupported (Facts.locate context source cost.origin) "this `calls` target"
+      | None -> Facts.raise_unsupported (Facts.locate context source cost.origin) Calls_target
       | Some resource ->
           let counter =
             {
@@ -142,19 +141,17 @@ let list_promises context (source : State.source) locals (costs : Mir.cost list)
           Some { counter; clause = cost; written_in = source; inherited })
     costs
 
-let show_promiser_kind (lookups : Lookups.t) (source : State.source) =
+let find_promiser (lookups : Lookups.t) (source : State.source) : Catalog.Prover.promiser =
   match source.key with
   | { path = Method { owner; _ }; _ }
     when Resolve.Names.find_kind lookups.interface.names owner = Some Resolve.Names.Capability ->
-      "capability"
-  | _ -> "trait"
+      Capability_promiser
+  | _ -> Trait_promiser
 
-let describe_difference (promise : promise) =
-  match promise.counter.counting with
-  | Units | At_most -> ("more than", "allows")
-  | Exactly -> ("more or less than", "states")
+let classify_counting (promise : promise) : Catalog.Prover.counting =
+  match promise.counter.counting with Units | At_most -> Upper_bound | Exactly -> Exact
 
-let keep_promise ?message context (frame : State.frame) (promise : promise) ~(at : State.frame)
+let keep_promise ?restated context (frame : State.frame) (promise : promise) ~(at : State.frame)
     ~location ~compute_change =
   let spent =
     match List.assoc_opt promise.counter frame.spent with Some term -> term | None -> Costs.zero
@@ -171,20 +168,17 @@ let keep_promise ?message context (frame : State.frame) (promise : promise) ~(at
     | Exactly -> Logic.equal spent amount
     | At_most -> Logic.less_equal spent amount
   in
-  let difference, verb = describe_difference promise in
-  Facts.oblige context frame Cost location ~holds_when:promise.clause.holds_when
-    (match message with
-    | Some message -> message
-    | None ->
-        [
-          Text
-            (if promise.inherited then
-               Printf.sprintf "This method may spend %s its %s's `" difference
-                 (show_promiser_kind context.lookups promise.written_in)
-             else Printf.sprintf "This may spend %s `" difference);
-          Facts.quote promise.written_in promise.clause.origin;
-          Text (Printf.sprintf "` %s." verb);
-        ])
+  let counting = classify_counting promise
+  and clause = Facts.quote promise.written_in promise.clause.origin in
+  Facts.oblige context frame location ~holds_when:promise.clause.holds_when
+    (Cost_promise
+       (match restated with
+       | Some (for_type, name, trait, declared) ->
+           Restated_promise { counting; for_type; name; clause; trait; declared }
+       | None when promise.inherited ->
+           Inherited_promise
+             { counting; promiser = find_promiser context.lookups promise.written_in; clause }
+       | None -> Own_promise { counting; clause }))
     goal
 
 let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_condition
@@ -197,7 +191,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   let parameters = contract.parameters in
   let signature =
     Option.map
-      (Types.map_signature (Types.substitute substitution))
+      (Types.map_signature (Types.substitute_erased substitution))
       (Interface.Impls.read_signature lookups.interface path)
   in
   let is_update_step =
@@ -225,12 +219,9 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   let panic_condition =
     if assumes_panic_condition then
       Some
-        (List.concat
-           (List.mapi
-              (fun index (requirement : Mir.requirement) ->
-                (if index = 0 then [] else [ Obligation.Text " && " ])
-                @ [ Facts.quote source requirement.clause.origin ])
-              contract.panics_unless))
+        (List.map
+           (fun (requirement : Mir.requirement) -> Facts.quote source requirement.clause.origin)
+           contract.panics_unless)
     else None
   in
   let can_declare_panic = not (Types.may_use (Built_in Panic) uses) in
@@ -330,6 +321,11 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   let declared_requires = Facts.list_clauses contract.requires
   and declared_ensures = contract.ensures in
   let output = match signature with Some { output = Returns ty; _ } -> Some ty | _ -> None in
+  let declared_output =
+    match Interface.Impls.read_signature lookups.interface path with
+    | Some { output = Returns ty; _ } -> Some (Types.substitute substitution ty)
+    | _ -> None
+  in
   let start =
     List.fold_left
       (fun frame (parameter : Mir.parameter) ->
@@ -357,6 +353,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
+  let declared_output = Option.map (Facts.substitute_declared_type context start) declared_output in
   let output = Option.map (Facts.substitute_type context start) output in
   let start =
     match signature with
@@ -409,7 +406,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
               old_locals;
               self = Option.map fst self;
               old_self = start.self;
-              self_type = Option.map (fun (_, ty) -> Types.substitute substitution ty) self;
+              self_type = Option.map (fun (_, ty) -> Types.substitute_erased substitution ty) self;
               result;
               makes_obligations = false;
               substitution;
@@ -454,15 +451,9 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                Conditions.with_obligation_condition context requirement.holds_when (fun () ->
                    Validity.read_specification context frame requirement)
              in
-             Facts.oblige context frame Requires ~holds_when:requirement.holds_when
+             Facts.oblige ~holds_when:requirement.holds_when context frame
                (Facts.locate context frame.source requirement.origin)
-               [
-                 Text "`";
-                 Facts.quote source requirement.origin;
-                 Text
-                   "` may not follow from the trait's precondition, which callers through the \
-                    trait show, and an `impl`'s precondition must.";
-               ]
+               (Impl_precondition { clause = Facts.quote source requirement.origin })
                term;
              frame)
            (Facts.restrict start trait_requires)
@@ -481,16 +472,9 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
            (List.fold_left
               (fun frame (requirement : Mir.requirement) ->
                 let frame, term = Validity.read_specification context frame requirement.clause in
-                Facts.oblige context frame Requires
+                Facts.oblige context frame
                   (Facts.locate context frame.source requirement.clause.origin)
-                  [
-                    Text "`";
-                    Facts.quote source requirement.clause.origin;
-                    Text
-                      "` may not follow from the trait's condition after `Panic unless`. A caller \
-                       without `Panic` proves only the trait's condition, so this `impl` could \
-                       panic in code that has no `Panic`.";
-                  ]
+                  (Impl_panic_condition { clause = Facts.quote source requirement.clause.origin })
                   term;
                 frame)
               (Facts.restrict (Facts.restrict start trait_requires) trait_condition)
@@ -546,7 +530,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
       (match (returned, output) with
       | Some term, Some output ->
           Lambdas.check_valid context frame Whole_definition output term ~deep:true
-            ~when_:"for the value returned"
+            ~moment:Returned_value
       | _ -> ());
       List.iter
         (fun (parameter : Mir.parameter) ->
@@ -556,15 +540,13 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
           with
           | Some term, Some ty ->
               Lambdas.check_valid context frame Whole_definition ty term ~deep:true
-                ~when_:
-                  (Printf.sprintf "for `%s` when the function returns"
-                     (Facts.read_parameter_name parameter))
+                ~moment:(Mut_parameter_at_return (Facts.read_parameter_name parameter))
           | _ -> ())
         mut_parameters;
       (match (mut_self, is_update_step, frame.self, frame.self_type) with
       | true, false, Some self, Some self_type ->
           Lambdas.check_valid context frame Whole_definition self_type self ~deep:true
-            ~when_:"for `self` when the method returns"
+            ~moment:Self_at_return
       | _ -> ());
       (match (context.lending, frame.yielded_so_far) with
       | Some { return_postconditions; _ }, Some yielded_so_far ->
@@ -575,13 +557,9 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                   { frame with yielded = Some yielded_so_far }
                   ensured
               in
-              Facts.oblige context frame Ensures ~holds_when:ensured.holds_when
+              Facts.oblige ~holds_when:ensured.holds_when context frame
                 (Facts.locate context frame.source ensured.origin)
-                [
-                  Text "`";
-                  Facts.quote source ensured.origin;
-                  Text "` may not hold when the method ends.";
-                ]
+                (Ensures_at_method_end { clause = Facts.quote source ensured.origin })
                 term)
             return_postconditions
       | _ ->
@@ -591,13 +569,9 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                 Conditions.with_obligation_condition context ensured.holds_when (fun () ->
                     Validity.read_specification context frame ensured)
               in
-              Facts.oblige context frame Ensures ~holds_when:ensured.holds_when
+              Facts.oblige ~holds_when:ensured.holds_when context frame
                 (Facts.locate context frame.source ensured.origin)
-                [
-                  Text "`";
-                  Facts.quote source ensured.origin;
-                  Text "` may not hold when the function returns.";
-                ]
+                (Ensures_at_return { clause = Facts.quote source ensured.origin })
                 term)
             declared_ensures);
       let compute_change () =
@@ -634,9 +608,10 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                    (Amounts.compute_potential context frame ty handed)))
             potential_change context.lent_back
         in
-        match (returned, output) with
-        | Some term, Some output ->
-            Costs.plus potential_change (Amounts.compute_potential context frame output term)
+        match (returned, declared_output) with
+        | Some term, Some declared_output ->
+            Costs.plus potential_change
+              (Amounts.compute_potential context frame declared_output term)
         | _ -> potential_change
       in
       let under_trait = Facts.restrict frame trait_requires in
@@ -660,13 +635,12 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
           List.iter
             (fun (clause : Mir.formula) ->
               let _, term = Validity.read_specification context inside clause in
-              Facts.oblige context under_trait Ensures ~holds_when:clause.holds_when
-                Whole_definition
-                [
-                  Text (Printf.sprintf "The %s's `" (show_promiser_kind lookups clauses.callee));
-                  Facts.quote clauses.callee clause.origin;
-                  Text "` may not hold when this method returns.";
-                ]
+              Facts.oblige ~holds_when:clause.holds_when context under_trait Whole_definition
+                (Promiser_ensures
+                   {
+                     promiser = find_promiser lookups clauses.callee;
+                     clause = Facts.quote clauses.callee clause.origin;
+                   })
                 term)
             clauses.ensures
       | _ -> ())
@@ -760,7 +734,8 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
                 List.fold_left2
                   (fun (locals, types) (local, type_) term ->
                     ( Locals.add (Core_local local) term locals,
-                      Locals.add (Core_local local) (Types.substitute renaming type_) types ))
+                      Locals.add (Core_local local) (Types.substitute_erased renaming type_) types
+                    ))
                   (start.locals, start.types) parameters
                   (List.take (List.length parameters) terms)
               in
@@ -782,13 +757,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
                proofs)
         in
         let _, holds = Validity.read_specification context inside law.states in
-        Facts.oblige context start Law at
-          [
-            Text
-              (Printf.sprintf "The law `%s.%s` may not hold for `%s`." (Types.show_trait trait)
-                 law.name (Types.show for_type));
-          ]
-          holds
+        Facts.oblige context start at (Law_may_fail { trait; law = law.name; for_type }) holds
       end)
     (Laws.list_laws context trait.trait);
   make_outcome context
@@ -814,7 +783,8 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
           (Path.show trait.trait) (Path.show restated.declared_by)
   in
   match Interface.Impls.find_evidence lookups.interface ~list_bounds for_type declared with
-  | Some (Evidence (Impl { impl; substitution })) -> (
+  | Some (Evidence (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }))
+    -> (
       let evidence : Types.evidence = Impl { impl; substitution } in
       let signature =
         match Interface.Impls.read_signature lookups.interface restated_path with
@@ -866,7 +836,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
           let entry =
             List.fold_left
               (fun (frame : State.frame) (parameter : Mir.parameter) ->
-                let ty = Types.substitute subtrait_substitution parameter.type_ in
+                let ty = Types.substitute_erased subtrait_substitution parameter.type_ in
                 let term =
                   Facts.arrive context frame ("parameter." ^ Facts.read_parameter_name parameter) ty
                 in
@@ -893,7 +863,8 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
             { entry with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
           in
           let result_type =
-            Types.substitute subtrait_substitution (Types.extract_result_type signature.output)
+            Types.substitute_erased subtrait_substitution
+              (Types.extract_result_type signature.output)
           in
           let invocation : Invocation.t =
             {
@@ -934,7 +905,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
                                note_changed_in_place = (fun () -> ());
                              }
                        | Read | Own -> None);
-                     type_ = Types.substitute subtrait_substitution parameter.type_;
+                     type_ = Types.substitute_erased subtrait_substitution parameter.type_;
                      term = read_place parameter entry;
                    })
                  clauses.parameters)
@@ -956,26 +927,24 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
           List.iter
             (fun (clause : Mir.formula) ->
               let _, term = Validity.read_specification context ensuring clause in
-              Facts.oblige context after Ensures location
-                [
-                  Text
-                    (Printf.sprintf "The contract of `%s`'s `%s` may not imply `"
-                       (Types.show for_type) name);
-                  Facts.quote clauses.callee clause.origin;
-                  Text
-                    (Printf.sprintf "`, which `%s` adds to `%s.%s`." (Types.show_trait trait)
-                       (Types.show_trait declared) name);
-                ]
+              Facts.oblige context after location
+                (Restated_contract
+                   {
+                     for_type;
+                     name;
+                     clause = Facts.quote clauses.callee clause.origin;
+                     trait;
+                     declared;
+                   })
                 term)
             clauses.ensures;
           List.iter
             (fun promise ->
-              let difference, verb = describe_difference promise in
               keep_promise context after promise ~at:entry_reading ~location
                 ~compute_change:(fun () ->
                   List.fold_left
                     (fun total (parameter : Mir.parameter) ->
-                      let ty = Types.substitute subtrait_substitution parameter.type_ in
+                      let ty = Types.substitute_erased subtrait_substitution parameter.type_ in
                       let before =
                         Amounts.compute_potential context after ty (read_place parameter entry)
                       in
@@ -990,22 +959,12 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
                       | Read -> total)
                     (Amounts.compute_potential context after result_type result)
                     clauses.parameters)
-                ~message:
-                  [
-                    Text
-                      (Printf.sprintf "The contract of `%s`'s `%s` may spend %s `"
-                         (Types.show for_type) name difference);
-                    Facts.quote clauses.callee promise.clause.origin;
-                    Text
-                      (Printf.sprintf "`, which `%s` adds to `%s.%s`, %s." (Types.show_trait trait)
-                         (Types.show_trait declared) name verb);
-                  ])
+                ~restated:(for_type, name, trait, declared))
             promised)
   | Some Built_in ->
       Facts.raise_unsupported
         (Facts.locate context start.source at)
-        "a method that `%s` restates from `%s`, which the compiler implements"
-        (Types.show_trait trait) (Path.show restated.declared_by)
+        (Compiler_restated_method { trait; declared_by = restated.declared_by })
   | Some (Evidence Bound) ->
       Facts.raise_bug "`%s` implements `%s` through a bound" (Types.show for_type)
         (Types.show_trait declared)
@@ -1073,14 +1032,9 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
       Option.iter
         (fun (written : Mir.formula) ->
           let _, potential_term = Validity.read_specification context at_value written in
-          Facts.oblige context at_value Cost
+          Facts.oblige context at_value
             (Facts.locate context at_value.source written.origin)
-            [
-              Text
-                (Printf.sprintf
-                   "The potential of `%s` may be below zero for a value that meets its invariants."
-                   (Types.show ty));
-            ]
+            (Negative_potential { type_ = ty })
             (Logic.less_equal (Logic.int 0) potential_term))
         potential
   | None -> ());

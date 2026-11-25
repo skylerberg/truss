@@ -5,7 +5,7 @@ type Sum(pieces: UInt64, total: Int64)
 impl FromTemplate for Sum {
   type Part = Int64
 
-  fn is_valid_template(literals: Slice[text.Literal]) -> Bool {
+  fn is_valid_template(literals: List[text.Literal]) -> Bool {
     true
   }
 
@@ -18,7 +18,7 @@ impl FromTemplate for Sum {
   }
 }
 
-fn describe(count: Int64, label: StringSlice) -> String {
+fn describe(count: Int64, label: String) -> String {
   "${count} ${label}s, ${count > 1}"
 }
 
@@ -26,7 +26,7 @@ fn sum(first: Int64, second: Int64) -> Sum {
   Sum"a ${first} b ${second} c"
 }
 
-fn twice(text: StringSlice) -> String {
+fn twice(text: String) -> String {
   let again = text.copy()
   "${text}${again}"
 }

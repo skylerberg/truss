@@ -1,5 +1,5 @@
 use standard.intrinsic
-use standard.list.slice
+use standard.list
 
 public fn Array[Element: Copyable, count: UInt64].filled(value: Element) -> Array[Element, count]
   ensures forall i in 0..count => identical(result.model()[i], value)
@@ -41,14 +41,6 @@ public fn Array[Element, count: UInt64].length(self) -> UInt64
   cost allocations == 0
 {
   count
-}
-
-public fn Array[Element, count: UInt64].slice(self) -> Slice[Element]
-  ensures identical(result.model(), self.model())
-  cost time O(1)
-  cost allocations == 0
-{
-  Slice(elements: intrinsic.array_view(self))
 }
 
 impl Model for Array[Element, count: UInt64] {
@@ -162,49 +154,49 @@ impl Equal for Array[Element: Equal, count: UInt64] {
     cost time O(count * time(Element.equal))
     cost allocations <= count * allocations(Element.equal)
   {
-    self.slice() == other.slice()
+    self[..] == other[..]
   }
 }
 
 impl Ordered for Array[Element: Ordered, count: UInt64] {
   fn compare(self, other: Array[Element, count]) -> Ordering
-    ensures result == slice.lexicographic(self.model(), second: other.model(), from: 0)
+    ensures result == list.lexicographic(self.model(), second: other.model(), from: 0)
     cost time O(count * time(Element.compare))
     cost allocations <= count * allocations(Element.compare)
   {
-    self.slice().compare(other.slice())
+    self[..].compare(other[..])
   }
 }
 
 proof Ordered.agrees_with_equal for Array[Element: Ordered, count: UInt64] {
-  slice.lexicographic_agrees_with_equal(first.model(), second: second.model(), from: 0)
+  list.lexicographic_agrees_with_equal(first.model(), second: second.model(), from: 0)
 }
 
 proof Ordered.antisymmetric for Array[Element: Ordered, count: UInt64] {
-  slice.lexicographic_is_antisymmetric(first.model(), second: second.model(), from: 0)
+  list.lexicographic_is_antisymmetric(first.model(), second: second.model(), from: 0)
 }
 
 proof Ordered.transitive for Array[Element: Ordered, count: UInt64] {
-  slice.lexicographic_is_transitive(first.model(), second: second.model(), third: third.model(), from: 0)
+  list.lexicographic_is_transitive(first.model(), second: second.model(), third: third.model(), from: 0)
 }
 
 impl Hash for Array[Element: Hash, count: UInt64] {
   fn hash(self, hasher: Hasher) -> Hasher
-    ensures identical(result, slice.hash_elements(hasher.write(count), items: self.model(), count: count))
+    ensures identical(result, list.hash_elements(hasher.write(count), items: self.model(), count: count))
     cost time O(count * time(Element.hash))
     cost allocations <= count * allocations(Element.hash)
   {
-    self.slice().hash(hasher)
+    self[..].hash(hasher)
   }
 }
 
 proof Hash.agrees_with_equal for Array[Element: Hash, count: UInt64] {
-  slice.elements_hash_alike(hasher.write(count), first: first.model(), second: second.model(), count: count)
+  list.elements_hash_alike(hasher.write(count), first: first.model(), second: second.model(), count: count)
 }
 
 impl Display for Array[Element: Display, count: UInt64] {
   fn display(self, output: mut String)
   {
-    self.slice().display(mut output)
+    self[..].display(mut output)
   }
 }

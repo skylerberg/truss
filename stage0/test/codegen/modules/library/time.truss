@@ -354,21 +354,21 @@ fn at(seconds: Int64) -> time.Instant {
   }
 }
 
-fn local(text: StringSlice) -> time.DateTime {
+fn local(text: String) -> time.DateTime {
   match time.DateTime.parse(text) {
     Ok(parsed) => parsed
     Err(_) => time.TimeZone.utc().to_local(time.Instant.epoch)
   }
 }
 
-fn zone_of(name: StringSlice, rules: Slice[UInt8]) -> time.TimeZone {
+fn zone_of(name: String, rules: List[UInt8]) -> time.TimeZone {
   match time.TimeZone.from_rules(name, rules: rules) {
     Ok(zone) => zone
     Err(_) => time.TimeZone.utc()
   }
 }
 
-fn shows_local(zone: time.TimeZone, seconds: Int64, expected: StringSlice, offset: Int64) -> Bool {
+fn shows_local(zone: time.TimeZone, seconds: Int64, expected: String, offset: Int64) -> Bool {
   "${zone.to_local(at(seconds))}" == expected && zone.offset(at(seconds)) == time.Duration.seconds(offset)
 }
 
@@ -491,31 +491,31 @@ test "a zone of the first version of the format, UTC, and a fixed offset" {
 
 test "rules that are not in the time zone format are refused" {
   let empty: List[UInt8] = []
-  assert time.TimeZone.from_rules("Broken", rules: empty.slice()) is Err(MalformedRules)
+  assert time.TimeZone.from_rules("Broken", rules: empty) is Err(MalformedRules)
   let wrong_magic: List[UInt8] = [84, 90, 105, 88, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 3, 0, 0, 0, 12, 255, 255, 255, 255, 94, 3, 240, 144, 0, 0, 0, 0, 92, 132, 181, 240, 0, 0, 0, 0, 93, 190, 108, 224, 0, 0, 0, 0, 94, 100, 151, 240, 0, 0, 0, 0, 95, 158, 78, 224, 0, 0, 0, 0, 96, 77, 180, 112, 0, 0, 0, 0, 97, 135, 107, 96, 1, 2, 1, 2, 1, 2, 1, 255, 255, 186, 158, 0, 0, 255, 255, 185, 176, 0, 4, 255, 255, 199, 192, 1, 8, 76, 77, 84, 0, 69, 83, 84, 0, 69, 68, 84, 0, 10, 69, 83, 84, 53, 69, 68, 84, 44, 77, 51, 46, 50, 46, 48, 44, 77, 49, 49, 46, 49, 46, 48, 10]
-  assert time.TimeZone.from_rules("Broken", rules: wrong_magic.slice()) is Err(MalformedRules)
+  assert time.TimeZone.from_rules("Broken", rules: wrong_magic) is Err(MalformedRules)
   let truncated: List[UInt8] = [84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 3, 0, 0, 0, 12, 255, 255, 255, 255, 94, 3, 240, 144, 0, 0, 0, 0, 92, 132, 181, 240, 0, 0, 0, 0, 93, 190, 108, 224, 0, 0, 0, 0, 94, 100, 151, 240, 0, 0, 0, 0, 95, 158, 78, 224, 0, 0, 0, 0, 96, 77, 180, 112, 0, 0, 0, 0, 97, 135, 107, 96, 1, 2, 1, 2, 1, 2, 1, 255, 255, 186, 158, 0, 0, 255, 255, 185, 176, 0, 4, 255, 255, 199, 192, 1, 8, 76, 77, 84, 0, 69, 83]
-  assert time.TimeZone.from_rules("Broken", rules: truncated.slice()) is Err(MalformedRules)
+  assert time.TimeZone.from_rules("Broken", rules: truncated) is Err(MalformedRules)
   let no_footer_end: List[UInt8] = [84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 3, 0, 0, 0, 12, 255, 255, 255, 255, 94, 3, 240, 144, 0, 0, 0, 0, 92, 132, 181, 240, 0, 0, 0, 0, 93, 190, 108, 224, 0, 0, 0, 0, 94, 100, 151, 240, 0, 0, 0, 0, 95, 158, 78, 224, 0, 0, 0, 0, 96, 77, 180, 112, 0, 0, 0, 0, 97, 135, 107, 96, 1, 2, 1, 2, 1, 2, 1, 255, 255, 186, 158, 0, 0, 255, 255, 185, 176, 0, 4, 255, 255, 199, 192, 1, 8, 76, 77, 84, 0, 69, 83, 84, 0, 69, 68, 84, 0, 10, 69, 83, 84, 53, 69, 68, 84, 44, 77, 51, 46, 50, 46, 48, 44, 77, 49, 49, 46, 49, 46, 48]
-  assert time.TimeZone.from_rules("Broken", rules: no_footer_end.slice()) is Err(MalformedRules)
+  assert time.TimeZone.from_rules("Broken", rules: no_footer_end) is Err(MalformedRules)
   let descending: List[UInt8] = [84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 50, 0, 0, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 10, 85, 84, 67, 48, 10]
-  assert time.TimeZone.from_rules("Broken", rules: descending.slice()) is Err(MalformedRules)
+  assert time.TimeZone.from_rules("Broken", rules: descending) is Err(MalformedRules)
   let unknown_kind: List[UInt8] = [84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 100, 3, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 10, 85, 84, 67, 48, 10]
-  assert time.TimeZone.from_rules("Broken", rules: unknown_kind.slice()) is Err(MalformedRules)
+  assert time.TimeZone.from_rules("Broken", rules: unknown_kind) is Err(MalformedRules)
   let no_kinds: List[UInt8] = [84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 85, 84, 67, 48, 10]
-  assert time.TimeZone.from_rules("Broken", rules: no_kinds.slice()) is Err(MalformedRules)
+  assert time.TimeZone.from_rules("Broken", rules: no_kinds) is Err(MalformedRules)
   let bad_rule_0: List[UInt8] = [84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 10, 69, 83, 84, 53, 69, 68, 84, 10]
-  assert time.TimeZone.from_rules("Broken", rules: bad_rule_0.slice()) is Err(MalformedRules)
+  assert time.TimeZone.from_rules("Broken", rules: bad_rule_0) is Err(MalformedRules)
   let bad_rule_1: List[UInt8] = [84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 10, 69, 83, 84, 53, 69, 68, 84, 44, 77, 49, 51, 46, 49, 46, 48, 44, 77, 49, 49, 46, 49, 46, 48, 10]
-  assert time.TimeZone.from_rules("Broken", rules: bad_rule_1.slice()) is Err(MalformedRules)
+  assert time.TimeZone.from_rules("Broken", rules: bad_rule_1) is Err(MalformedRules)
   let bad_rule_2: List[UInt8] = [84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 10, 69, 83, 84, 53, 69, 68, 84, 44, 77, 51, 46, 50, 46, 48, 10]
-  assert time.TimeZone.from_rules("Broken", rules: bad_rule_2.slice()) is Err(MalformedRules)
+  assert time.TimeZone.from_rules("Broken", rules: bad_rule_2) is Err(MalformedRules)
   let bad_rule_3: List[UInt8] = [84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 10, 69, 83, 53, 10]
-  assert time.TimeZone.from_rules("Broken", rules: bad_rule_3.slice()) is Err(MalformedRules)
+  assert time.TimeZone.from_rules("Broken", rules: bad_rule_3) is Err(MalformedRules)
   let bad_rule_4: List[UInt8] = [84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 10, 69, 83, 84, 53, 69, 68, 84, 44, 77, 51, 46, 50, 46, 48, 44, 77, 49, 49, 46, 49, 46, 55, 10]
-  assert time.TimeZone.from_rules("Broken", rules: bad_rule_4.slice()) is Err(MalformedRules)
+  assert time.TimeZone.from_rules("Broken", rules: bad_rule_4) is Err(MalformedRules)
   let bad_rule_5: List[UInt8] = [84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 10, 69, 83, 84, 50, 53, 58, 54, 49, 10]
-  assert time.TimeZone.from_rules("Broken", rules: bad_rule_5.slice()) is Err(MalformedRules)
+  assert time.TimeZone.from_rules("Broken", rules: bad_rule_5) is Err(MalformedRules)
   assert "${time.ZoneError.UnknownZone}" == "the time zone is not known"
   assert "${time.ZoneError.MalformedRules}" == "the time zone's rules are malformed"
 }

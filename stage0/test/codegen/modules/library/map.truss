@@ -3,7 +3,7 @@ use standard.map
 fn order(map: Map[String, Int64]) -> String {
   var text = ""
   for key in map.keys() {
-    mut text.push(key.slice())
+    mut text.push(key)
     mut text.push(" ")
   }
   text
@@ -100,7 +100,7 @@ test "a map's entries, keys, and values are walked, and its values changed in pl
   var seen = ""
   var sum: Int64 = 0
   for key, value in table {
-    mut seen.push(key.slice())
+    mut seen.push(key)
     sum += value
   }
   assert seen == "bac" && sum == 6
@@ -108,7 +108,7 @@ test "a map's entries, keys, and values are walked, and its values changed in pl
   assert total(table) == 12 && table.get("c") == Some(6)
   var owned = ""
   for key, _ in own table {
-    mut owned.push(key.slice())
+    mut owned.push(key)
   }
   assert owned == "bac"
 }

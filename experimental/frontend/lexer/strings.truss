@@ -521,7 +521,7 @@ fn scan_escape(scanner: mut Scanner, buffer: mut String) -> EscapeResult
     return EscapeResult.EndOfLine
   }
   let escaped = scanner.lookup(start + 1)
-  let simple: Option[StringSlice] = if escaped == 110 {
+  let simple: Option[view String] = if escaped == 110 {
     Some("\n")
   } else if escaped == 116 {
     Some("\t")
@@ -624,7 +624,7 @@ fn hexadecimal_value(byte: UInt8) -> UInt8
   }
 }
 
-fn report_escape_problem(scanner: mut Scanner, start: UInt64, stop: UInt64, message: StringSlice)
+fn report_escape_problem(scanner: mut Scanner, start: UInt64, stop: UInt64, message: String)
   uses Panic
   modifies scanner.diagnostics, scanner.position
   requires scanner.position <= stop
@@ -846,7 +846,7 @@ fn continue_multi_line_raw(scanner: mut Scanner, builder: mut Builder, text: mut
   }
 }
 
-fn take_blank_prefix(text: StringSlice) -> StringSlice
+fn take_blank_prefix(text: String) -> view String
   uses Panic
 {
   var stop: UInt64 = 0
@@ -856,14 +856,14 @@ fn take_blank_prefix(text: StringSlice) -> StringSlice
   text.substring(0, to: stop)
 }
 
-fn find_leading_whitespace(line: Finished) -> Option[StringSlice]
+fn find_leading_whitespace(line: Finished) -> Option[view String]
   uses Panic
 {
   let whitespace = take_blank_prefix(line.first.value)
   if whitespace == line.first.value && line.rest.is_empty() { None } else { Some(whitespace) }
 }
 
-fn compute_common_prefix(first: StringSlice, second: StringSlice) -> String
+fn compute_common_prefix(first: String, second: String) -> String
   uses Panic
 {
   let length = if first.length() < second.length() { first.length() } else { second.length() }
@@ -874,7 +874,7 @@ fn compute_common_prefix(first: StringSlice, second: StringSlice) -> String
   first.substring(0, to: index).to_string()
 }
 
-fn compute_common_indentation(lines: Slice[Finished]) -> String
+fn compute_common_indentation(lines: List[Finished]) -> String
   uses Panic
 {
   var common: Option[String] = None
@@ -913,7 +913,7 @@ fn guess_raw_string_end(scanner: Scanner, literal_start: UInt64, line_end: UInt6
   None
 }
 
-fn describe_whitespace(whitespace: StringSlice) -> String
+fn describe_whitespace(whitespace: String) -> String
   uses Panic
 {
   if whitespace.is_empty() {
@@ -945,7 +945,7 @@ fn build_multi_line(
   form: token.Form,
   quotes: UInt64,
   delimiter_stop: UInt64,
-  lines: Slice[Finished],
+  lines: List[Finished],
   closing: own Closing,
 ) -> token.Kind
   uses Panic
@@ -986,7 +986,7 @@ fn build_multi_line(
     if entry.index > 0 {
       mut joined.buffer.push("\n")
     }
-    let value = line.first.value.slice()
+    let value = line.first.value
     if value.starts_with(indentation) {
       mut joined.buffer.push(value.substring(indentation.length(), to: value.length()))
     } else if find_leading_whitespace(line).is_some() {

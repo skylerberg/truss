@@ -5,10 +5,10 @@ fn find[Key: Hash + Ordered](key: Key, counts: Map[Key, Int64]) -> Bool {
 fn f(
   counts: mut Map[String, Int64],
   names: Set[String],
-  listed: Slice[String],
+  listed: List[String],
   tables: Map[List[UInt8], Int64],
-  word: StringSlice,
-  bytes: Slice[UInt8],
+  word: String,
+  bytes: List[UInt8],
 ) -> Bool {
   mut counts.remove(word)
   counts.get(word) is Some(_) && counts.contains(word) && counts[word] == 0 && names.contains(word)

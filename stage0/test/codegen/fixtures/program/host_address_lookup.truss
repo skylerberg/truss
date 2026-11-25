@@ -1,6 +1,6 @@
 use standard.network
 
-fn say(text: StringSlice) uses Console {
+fn say(text: String) uses Console {
   Console.print_line(text)
 }
 
@@ -9,7 +9,7 @@ fn loops_back(address: network.IpAddress) -> Bool {
     || address == network.IpAddress.Version6([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Console, NetworkClient
 {
   if NetworkClient.resolve("127.0.0.1") is Ok(addresses) {

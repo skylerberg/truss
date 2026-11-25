@@ -35,7 +35,10 @@ let parse_snippet text =
   let source = Parse_support.make_source text in
   let tokens, lexer_diagnostics = Lexer.lex source in
   let items, parser_diagnostics = Reference_parser.Snippet.parse tokens in
-  (tokens, items, lexer_diagnostics @ parser_diagnostics)
+  ( tokens,
+    items,
+    List.map (Syntax_catalog.Lexing_description.render ~text) lexer_diagnostics
+    @ List.map (Syntax_catalog.Parsing_description.render ~text) parser_diagnostics )
 
 let () =
   List.iter

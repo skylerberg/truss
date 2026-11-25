@@ -28,7 +28,7 @@ fn search(count: UInt64, compare: (fn(row: UInt64) -> Ordering requires row < co
   None
 }
 
-fn ranges_contain(ranges: Slice[UInt32], code: UInt32) -> Bool
+fn ranges_contain(ranges: List[UInt32], code: UInt32) -> Bool
   cost time O(1)
 {
   search(ranges.length() / 2, compare: fn(row) {
@@ -42,7 +42,7 @@ fn ranges_contain(ranges: Slice[UInt32], code: UInt32) -> Bool
   }) is Some(_)
 }
 
-fn mapping_of(mappings: Slice[UInt32], code: UInt32) -> UInt32
+fn mapping_of(mappings: List[UInt32], code: UInt32) -> UInt32
   cost time O(1)
 {
   match search(mappings.length() / 2, compare: fn(row) { code.compare(mappings[2 * row]) }) {
@@ -53,7 +53,7 @@ fn mapping_of(mappings: Slice[UInt32], code: UInt32) -> UInt32
 
 internal type Expansion(first: UInt32, second: UInt32, third: UInt32)
 
-fn expansion_of(expansions: Slice[UInt32], code: UInt32) -> Option[Expansion]
+fn expansion_of(expansions: List[UInt32], code: UInt32) -> Option[Expansion]
   cost time O(1)
 {
   match search(expansions.length() / 4, compare: fn(row) { code.compare(expansions[4 * row]) }) {
@@ -148,7 +148,7 @@ internal fn fold_expansion_of(code: UInt32) -> Option[Expansion]
   expansion_of(unicode_data.fold_expansions[..], code: code)
 }
 
-fn range_value(ranges: Slice[UInt32], code: UInt32) -> Option[UInt32]
+fn range_value(ranges: List[UInt32], code: UInt32) -> Option[UInt32]
   cost time O(1)
 {
   let matching_row = search(ranges.length() / 3, compare: fn(row) {
@@ -186,7 +186,7 @@ internal fn combining_class_of(code: UInt32) -> UInt32
 
 internal type PoolRange(start: UInt32, length: UInt32)
 
-fn pool_range_of(index: Slice[UInt32], code: UInt32) -> Option[PoolRange]
+fn pool_range_of(index: List[UInt32], code: UInt32) -> Option[PoolRange]
   cost time O(1)
 {
   match search(index.length() / 3, compare: fn(row) { code.compare(index[3 * row]) }) {
@@ -195,7 +195,7 @@ fn pool_range_of(index: Slice[UInt32], code: UInt32) -> Option[PoolRange]
   }
 }
 
-fn append_pool_range(output: mut List[UInt32], pool: Slice[UInt32], range: PoolRange)
+fn append_pool_range(output: mut List[UInt32], pool: List[UInt32], range: PoolRange)
 {
   var at: UInt64 = intrinsic.convert(range.start)
   var remaining = range.length
@@ -230,7 +230,7 @@ internal fn append_compatibility_decomposition(output: mut List[UInt32], code: U
   }
 }
 
-fn pair_value(pairs: Slice[UInt32], first: UInt32, second: UInt32) -> Option[UInt32]
+fn pair_value(pairs: List[UInt32], first: UInt32, second: UInt32) -> Option[UInt32]
   cost time O(1)
 {
   let matching_row = search(pairs.length() / 3, compare: fn(row) {

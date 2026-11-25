@@ -1,6 +1,6 @@
-type Held[View](view: View)
+type Held[View](viewed: View)
 
-type Window(view: Slice[Int64])
+type Window(viewed: view List[Int64])
 
 type Holder(items: List[Int64], count: Int64)
 
@@ -8,7 +8,7 @@ fn Holder.reset(mut self) {
   self.items = []
 }
 
-fn first_of(items: Slice[Int64]) -> Slice[Int64] {
+fn first_of(items: List[Int64]) -> view List[Int64] {
   items[0..1]
 }
 

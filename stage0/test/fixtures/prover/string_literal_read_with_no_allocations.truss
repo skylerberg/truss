@@ -2,5 +2,5 @@ fn f() -> UInt64
   cost allocations == 0
 {
   let text = "abc"
-  text.length() + "de".slice().length()
+  text.length() + "de".length()
 }

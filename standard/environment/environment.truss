@@ -39,7 +39,7 @@ public fn FixedEnvironment.new(platform: own Platform, current_directory: own Pa
   )
 }
 
-public fn FixedEnvironment.with_variable(own self, name: StringSlice, value: StringSlice) -> FixedEnvironment {
+public fn FixedEnvironment.with_variable(own self, name: String, value: String) -> FixedEnvironment {
   var changed = own self
   mut changed.variables.insert(name.to_string(), value: value.to_string())
   changed
@@ -51,7 +51,7 @@ public fn FixedEnvironment.with_location(own self, location: Location, path: own
   changed
 }
 
-public fn FixedEnvironment.with_zone(own self, name: StringSlice, rules: own List[UInt8], local: Bool = false) -> FixedEnvironment {
+public fn FixedEnvironment.with_zone(own self, name: String, rules: own List[UInt8], local: Bool = false) -> FixedEnvironment {
   var changed = own self
   mut changed.zones.insert(name.to_string(), value: own rules)
   if local {
@@ -61,7 +61,7 @@ public fn FixedEnvironment.with_zone(own self, name: StringSlice, rules: own Lis
 }
 
 impl Environment for FixedEnvironment {
-  fn variable(self, name: StringSlice) -> Option[String]
+  fn variable(self, name: String) -> Option[String]
   {
     self.variables.get(name).map(fn(value) { value.copy() })
   }
@@ -92,7 +92,7 @@ impl Environment for FixedEnvironment {
     self.local_zone.copy()
   }
 
-  fn zone_rules(self, name: StringSlice) -> Option[List[UInt8]]
+  fn zone_rules(self, name: String) -> Option[List[UInt8]]
   {
     self.zones.get(name).map(fn(value) { value.copy() })
   }

@@ -206,12 +206,32 @@ let list_mut_provided_places (provided : Tree.provided list) =
       | Mut, (Use _ | Take _ | Immediate _) | (Read | Own), _ -> None)
     provided
 
+type changed = { origin : Core.origin; place : Tree.place; is_elements : bool }
+
+let classify_changed_part (changed : changed) =
+  let fields = list_leading_fields changed.place.projections in
+  ( fields,
+    match List.drop (List.length fields) changed.place.projections with
+    | [] -> changed.is_elements
+    | (Element _ | Range _) :: _ -> true
+    | (Field _ | Variant_field _) :: _ -> false )
+
 let list_changed_places ~list_modified (blocks : Tree.block list) =
   let changed = ref [] in
-  let note origin place = changed := (origin, place) :: !changed in
+  let note origin place = changed := { origin; place; is_elements = false } :: !changed in
   let note_passed origin callee position place =
     match list_modified callee position with
-    | Some modified -> List.iter (fun fields -> note origin (append_fields place fields)) modified
+    | Some modified ->
+        List.iter
+          (fun (part : Types.modified) ->
+            changed :=
+              {
+                origin;
+                place = append_fields place part.field_path;
+                is_elements = part.is_elements;
+              }
+              :: !changed)
+          modified
     | None -> note origin place
   in
   let note_arguments origin (call : Tree.call) =

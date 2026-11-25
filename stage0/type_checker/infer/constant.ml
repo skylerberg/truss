@@ -120,13 +120,11 @@ let rec check_arithmetic (state : State.state) (value : Syntax.expression) =
   | (Prefix _ | Binary _), Some type_ -> (
       match (Types.find_integer_range type_, evaluate value, value.kind) with
       | Some (low, high), Some constant, _ when Z.lt constant low || Z.gt constant high ->
-          State.report state Constant_overflow (State.read_span state value.id)
-            (Printf.sprintf "This is %s, which does not fit in `%s`, which holds %s to %s."
-               (Z.to_string constant) (Types.show type_) (Z.to_string low) (Z.to_string high))
+          State.report state
+            (Constant_out_of_range { at = Written value.id; constant; type_; low; high })
       | Some _, None, Binary { operator = Operation (Arithmetic (Divide | Remainder)); right; _ }
         when evaluate right = Some Z.zero ->
-          State.report state Constant_overflow (State.read_span state right.id)
-            "This divides by zero."
+          State.report state (Division_by_zero { at = Written right.id })
       | _ -> ())
   | _ -> ());
   Syntax_walk.visit_expression_parts ~on_expression:(check_arithmetic state) ~on_statement:ignore
@@ -136,38 +134,22 @@ let check state (site : site) (value : Syntax.expression) =
   State.check_when_final state @@ fun () ->
   (match find_offending_expression state ~may_call:(site <> Default) ~bound:[] value with
   | Some part -> (
-      let span = State.read_span state part.id in
+      let at : Core.origin = Written part.id in
       match site with
-      | Default ->
-          State.report state Default_not_constant span
-            "A default must be a constant expression: literals, arithmetic, constants, and \
-             records, variants, and collections built from them. It cannot call a function or name \
-             a parameter."
-      | Value ->
-          State.report state Not_constant span
-            "The value of a constant is made of literals, other constants, operators, calls, \
-             quantifiers over ranges and collections, and the records, variants, collections, and \
-             strings built from them. Move this into a function, and call the function here."
-      | Evaluated_condition ->
-          State.report state Condition_not_constant span
-            "An assertion `by evaluation` is evaluated when the code is checked, before any \
-             variable has a value. Its condition is made of literals, constants, operators, calls, \
-             quantifiers over ranges and collections, and the records, variants, collections, and \
-             strings built from them. Move this into a function, and call the function here.")
+      | Default -> State.report state (Default_not_constant { at })
+      | Value -> State.report state (Not_constant { at })
+      | Evaluated_condition -> State.report state (Condition_not_constant { at }))
   | None ->
       if site = Evaluated_condition then
         Option.iter
           (fun (part : Syntax.expression) ->
-            State.report state Condition_not_constant (State.read_span state part.id)
-              "An assertion `by evaluation` is evaluated once, when the code is checked, so its \
-               condition cannot mention a type parameter or a value parameter of the code around \
-               it.")
+            State.report state (Condition_names_parameter { at = Written part.id }))
           (find_use_of_a_type_parameter state value));
   check_arithmetic state value
 
 let rec find_part_that_is_not_data (state : State.state) ~visited (type_ : Types.ty) =
   match State.normalize state type_ with
-  | Function _ -> Some "a function type"
+  | Function _ -> Some Catalog.Inference.Function_type
   | Named { path; arguments } as named -> (
       let find_in_arguments () =
         List.find_map
@@ -177,8 +159,8 @@ let rec find_part_that_is_not_data (state : State.state) ~visited (type_ : Types
           arguments
       in
       match Well_known.find_builtin_type path with
-      | Some Handle -> Some "a handle"
-      | Some Shared -> Some "state that tasks share"
+      | Some Handle -> Some Catalog.Inference.Handle
+      | Some Shared -> Some Shared_state
       | Some _ -> find_in_arguments ()
       | None when List.exists (Types.equal named) visited -> None
       | None ->
@@ -193,10 +175,5 @@ let rec find_part_that_is_not_data (state : State.state) ~visited (type_ : Types
 
 let check_type (state : State.state) (written : Syntax.type_expression) type_ =
   Option.iter
-    (fun part ->
-      State.report state Constant_not_data
-        (State.read_span state written.id)
-        (Printf.sprintf
-           "A constant is stored in the compiled program as data, so its type cannot be or hold %s."
-           part))
+    (fun part -> State.report state (Constant_not_data { at = Written written.id; part }))
     (find_part_that_is_not_data state ~visited:[] type_)

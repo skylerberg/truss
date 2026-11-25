@@ -24,6 +24,9 @@ jobs:
       - name: Check that only tests and tools use For_testing
         run: .github/scripts/for_testing.sh
 
+      - name: Check that only the renderer builds a rendered diagnostic
+        run: .github/scripts/for_rendering.sh
+
       - id: opam
         uses: ./.github/actions/opam
         with:

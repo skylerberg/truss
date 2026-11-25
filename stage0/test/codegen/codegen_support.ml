@@ -135,7 +135,11 @@ let scratch = lazy (Harness.make_scratch_directory "codegen")
 
 let c_compiler =
   lazy
-    (match C_compiler.find ~objects:(Cache.make_objects_directory (Workspace.open_cache ())) () with
+    (match
+       C_compiler.find ~x86_64_level:X86_64_level.default
+         ~objects:(Cache.make_objects_directory (Workspace.open_cache ()))
+         ()
+     with
     | Ok c_compiler -> C_compiler.For_testing.reject_warnings c_compiler
     | Error message -> failwith message)
 

@@ -7,7 +7,7 @@ fn kind(value: Int64) -> String {
   }
 }
 
-fn greeting(word: StringSlice) -> Int64 {
+fn greeting(word: String) -> Int64 {
   match word {
     "hello" => 1
     "bye" => 2

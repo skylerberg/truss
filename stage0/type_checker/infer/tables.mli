@@ -68,8 +68,8 @@ type template =
 
 type conversion =
   | From_never
-  | Owned_to_view
-  | View_to_owned
+  | Array_as_list
+  | To_view
   | Function_widening
   | To_integer
   | From_integer

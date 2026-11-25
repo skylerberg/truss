@@ -1,0 +1,4 @@
+fn f(items: List[Int64]) {
+  let boxed: Boxed[view List[Int64]] = Boxed(value: items[..])
+  keep(boxed)
+}

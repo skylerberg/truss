@@ -1,6 +1,6 @@
 use standard.log
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Log
 {
   log.debug("left out")

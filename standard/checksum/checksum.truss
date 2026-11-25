@@ -70,7 +70,7 @@ let crc32c_table: Array[UInt32, 256] = [
   0x79B737BA, 0x8BDCB4B9, 0x988C474D, 0x6AE7C44E, 0xBE2DA0A5, 0x4C4623A6, 0x5F16D052, 0xAD7D5351,
 ]
 
-internal fn crc_update(state: UInt32, bytes: Slice[UInt8], table: Array[UInt32, 256]) -> UInt32
+internal fn crc_update(state: UInt32, bytes: List[UInt8], table: Array[UInt32, 256]) -> UInt32
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -85,21 +85,21 @@ internal fn crc_update(state: UInt32, bytes: Slice[UInt8], table: Array[UInt32, 
   crc ^ 0xFFFFFFFF
 }
 
-public fn crc32(bytes: Slice[UInt8]) -> UInt32
+public fn crc32(bytes: List[UInt8]) -> UInt32
   cost time O(bytes.length())
   cost allocations == 0
 {
   crc_update(0, bytes: bytes, table: crc32_table)
 }
 
-public fn crc32c(bytes: Slice[UInt8]) -> UInt32
+public fn crc32c(bytes: List[UInt8]) -> UInt32
   cost time O(bytes.length())
   cost allocations == 0
 {
   crc_update(0, bytes: bytes, table: crc32c_table)
 }
 
-public fn adler32(bytes: Slice[UInt8]) -> UInt32
+public fn adler32(bytes: List[UInt8]) -> UInt32
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -124,7 +124,7 @@ public fn Crc32.new() -> Crc32
   Crc32(state: 0)
 }
 
-public fn Crc32.update(mut self, bytes: Slice[UInt8])
+public fn Crc32.update(mut self, bytes: List[UInt8])
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -143,7 +143,7 @@ let xxh_prime_3: UInt64 = 1609587929392839161
 let xxh_prime_4: UInt64 = 9650029242287828579
 let xxh_prime_5: UInt64 = 2870177450012600261
 
-fn little_endian_64(bytes: Slice[UInt8], at: UInt64) -> UInt64
+fn little_endian_64(bytes: List[UInt8], at: UInt64) -> UInt64
   requires at <= bytes.length() && bytes.length() - at >= 8
   cost time O(1)
 {
@@ -169,7 +169,7 @@ fn xxh_merge(hash: UInt64, value: UInt64) -> UInt64
   intrinsic.wrapping_add(intrinsic.wrapping_multiply(hash ^ xxh_round(0, input: value), right: xxh_prime_1), right: xxh_prime_4)
 }
 
-public fn xxh64(bytes: Slice[UInt8], seed: UInt64 = 0) -> UInt64
+public fn xxh64(bytes: List[UInt8], seed: UInt64 = 0) -> UInt64
   cost time O(bytes.length())
 {
   let length = bytes.length()

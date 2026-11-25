@@ -1,9 +1,9 @@
-fn built(name: StringSlice) -> Map[String, Int64]
+fn built(name: String) -> Map[String, Int64]
   ensures result.contains(name)
   ensures result.length() == 1
 {
   var table: Map[String, Int64] = [:]
-  mut table.insert(name.to_string(), value: 1)
+  mut table.insert(name.copy(), value: 1)
   table
 }
 

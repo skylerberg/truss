@@ -1,7 +1,7 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Intrinsics" format
 
 type argument = Place of Lowered.place | Value of Lowered.operand
-type types = { uint64 : Ground.ty; string_slice : Ground.ty }
+type types = { uint64 : Ground.ty; string : Ground.ty }
 
 type t = {
   env : Memory_layout.env;

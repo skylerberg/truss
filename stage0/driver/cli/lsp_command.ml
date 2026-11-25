@@ -112,7 +112,7 @@ let check ~root encoding (buffers : (string * string) list) =
                let diagnostics, states =
                  match file with
                  | Some file ->
-                     ( Diagnostic.select_shown
+                     ( Description.select_shown
                          (Database.list_file_diagnostics database file
                          @ Proofs.list_diagnostics proofs file),
                        Proofs.list_states proofs file )
