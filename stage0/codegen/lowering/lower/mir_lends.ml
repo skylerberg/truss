@@ -5,9 +5,7 @@ let lend_record (state : Lowering.state) : Lowered.operand =
       let record : Lowered.operand =
         Address
           {
-            place =
-              Lowered.make_local_place
-                (Emit_c.Ir_builder.allocate_local state.builder ~is_zeroed:true Lend);
+            place = Lowered.make_local_place (Emit_c.Ir_builder.allocate_local state.builder Lend);
             writable = true;
           }
       in
@@ -22,8 +20,7 @@ let obtain_lent_call state part : Lowering.lent_call =
       let call =
         {
           Lowering.mark =
-            Lowered.make_local_place
-              (Emit_c.Ir_builder.allocate_local state.builder ~is_zeroed:true Lend_mark);
+            Lowered.make_local_place (Emit_c.Ir_builder.allocate_local state.builder Lend_mark);
           record = lend_record state;
         }
       in

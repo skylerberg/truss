@@ -1,6 +1,6 @@
 val test : string -> (unit -> unit) -> unit
 val test_always : string -> (unit -> unit) -> unit
-val share : (int * int) option
+val is_in_share : string -> bool
 val is_wanted : string -> bool
 val fail : ('a, unit, string, 'b) format4 -> 'a
 val make_scratch_directory : string -> string

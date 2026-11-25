@@ -48,7 +48,11 @@ let collect_bindings (definition : Syntax.definition) =
   let rec visit_expression (value : Syntax.expression) =
     (match value.kind with
     | Is { pattern = written; _ } -> visit_pattern ~site:refutable written
-    | Lambda { parameters; _ } -> List.iter (visit_pattern ~site:irrefutable) parameters
+    | Lambda { parameters; _ } ->
+        List.iter
+          (fun (parameter : Syntax.lambda_parameter) ->
+            visit_pattern ~site:irrefutable parameter.pattern)
+          parameters
     | Match { arms; _ } ->
         List.iter
           (fun (arm : Syntax.arm) -> List.iter (visit_pattern ~site:refutable) arm.patterns)

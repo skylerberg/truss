@@ -792,21 +792,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         (Tables.Symbol_table.find_all context.axioms_of symbol)
   | _ -> ());
   let compute_change () =
-    List.fold_left
-      (fun total (passed : State.passed) ->
-        let ty = passed.declared_type in
-        match passed.mode with
-        | Language.Mode.Mut -> (
-            match List.assoc_opt passed.position changed with
-            | Some later ->
-                Costs.plus total
-                  (Costs.minus
-                     (Amounts.compute_potential context after ty later)
-                     (Amounts.compute_potential context frame ty passed.term))
-            | None -> total)
-        | Language.Mode.Own ->
-            Costs.minus total (Amounts.compute_potential context frame ty passed.term)
-        | Language.Mode.Read -> total)
+    Costs.plus
+      (Amounts.compute_arguments_potential_change context ~before:frame ~after values ~changed)
       (match contract.result_kind with
       | `Lends -> (
           match lent_final with
@@ -816,7 +803,6 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                 (Amounts.compute_potential context after declared_result_type (leave result))
           | None -> Costs.zero)
       | `Returns -> Amounts.compute_potential context after declared_result_type result)
-      values
   in
   let declared_clauses = Contracts.list_declared_clauses contract in
   let method_cost =
@@ -825,43 +811,51 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
          Some (fun metric -> Amounts.compute_method_cost context frame metric invocation.callee)
        else None)
   in
-  let states_cost metric =
-    Option.is_some (Lazy.force method_cost)
-    || List.exists
-         (fun (clauses : State.clauses) ->
-           List.exists (fun (cost : Mir.cost) -> cost.resource = Metric metric) clauses.costs)
-         declared_clauses
+  let list_metric_costs metric =
+    List.concat_map
+      (fun (clauses : State.clauses) ->
+        List.filter (fun (cost : Mir.cost) -> cost.resource = Metric metric) clauses.costs)
+      declared_clauses
+  in
+  let counts_provider_potential =
+    match invocation.callee with
+    | Capability_method _ -> true
+    | Function _ | Trait_method _ | Indirect () | Intrinsic _ -> false
+  in
+  let note_amount (counter : Costs.counter) amount =
+    match counter.resource with
+    | Metric metric when Facts.is_home context frame.source ->
+        context.call_amounts <-
+          {
+            call = Facts.quote frame.source site.origin;
+            callee = path;
+            states_cost = Option.is_some (Lazy.force method_cost) || list_metric_costs metric <> [];
+            counts_potential =
+              counts_provider_potential
+              || (metric = Time && Option.is_some (Lazy.force method_cost))
+              || List.exists (fun (cost : Mir.cost) -> cost.amortized) (list_metric_costs metric);
+            counter;
+            amount;
+          }
+          :: context.call_amounts
+    | Metric _ | Calls _ -> ()
   in
   let after =
-    Operations.spend context after (fun counter ->
-        let amount =
-          match (invocation.callee, counter.resource) with
-          | Capability_method _, Calls _ ->
-              Amounts.compute_step_amount context after invocation values counter
-          | _ ->
-              Amounts.compute_callee_amount ?method_cost:(Lazy.force method_cost) context after
-                ~is_recursive:(Option.is_some recursive_callee) ~clauses:declared_clauses
-                ~bind_frame:(fun clauses ->
-                  {
-                    (read_entry_frame clauses) with
-                    result = Some result;
-                    condition = after.condition;
-                  })
-                ~uses:invocation.uses ~values ~change:(Some compute_change) counter
-        in
-        (match counter.resource with
-        | Metric metric when Facts.is_home context frame.source ->
-            context.call_amounts <-
-              {
-                call = Facts.quote frame.source site.origin;
-                callee = path;
-                states_cost = states_cost metric;
-                counter;
-                amount;
-              }
-              :: context.call_amounts
-        | Metric _ | Calls _ -> ());
-        amount)
+    Operations.spend_operation context after ~potential_change:(Some compute_change)
+      ~note:note_amount (fun counter ->
+        match (invocation.callee, counter.resource) with
+        | Capability_method _, Calls _ ->
+            Amounts.compute_step_amount context after invocation values counter
+        | _ ->
+            Amounts.compute_callee_amount ?method_cost:(Lazy.force method_cost) context after
+              ~is_recursive:(Option.is_some recursive_callee) ~clauses:declared_clauses
+              ~bind_frame:(fun clauses ->
+                {
+                  (read_entry_frame clauses) with
+                  result = Some result;
+                  condition = after.condition;
+                })
+              ~uses:invocation.uses ~values ~counts_provider_potential counter)
   in
   (after, Option.value !definition ~default:result)
 
@@ -901,39 +895,54 @@ let make_callback_cost (context : State.context) frame (metric : Language.Metric
 
 let compute_function_value_amount context frame ~location (function_type : Types.function_type)
     callee_term ~values (counter : Costs.counter) =
+  let make_counted amount = Costs.make_counted_charge counter amount in
   let compute_call_amount metric =
     let make_cost () =
       make_callback_cost context frame metric (Types.Function function_type) callee_term
     in
-    match (Costs.list_stated_bounds function_type.costs metric, counter.counting) with
-    | Order_of :: _, Units -> Logic.int 1
-    | Exactly_cost amount :: _, (At_most | Exactly) -> Logic.Integer amount
-    | _, (Units | At_most) -> Amounts.compute_amount_within context frame counter (make_cost ())
-    | _, Exactly ->
-        let cost = make_cost () in
-        if cost <> Costs.zero then
-          Facts.oblige
-            ~holds_when:(Facts.find_counter_condition context counter)
-            context frame location
-            (Upper_bound_in_exact_cost { metric; call = { at = location; callee = None } })
-            (Logic.equal cost Costs.zero);
-        cost
+    let make_plain amount = { Costs.amount; counted = No_potential } in
+    match
+      ( counter.amortized,
+        Costs.list_stated_bounds function_type.costs metric ~amortized:true,
+        counter.counting )
+    with
+    | true, Order_of :: _, Units -> { Costs.amount = Logic.int 1; counted = Potential_change }
+    | _ -> (
+        match
+          (Costs.list_stated_bounds function_type.costs metric ~amortized:false, counter.counting)
+        with
+        | Order_of :: _, Units -> make_plain (Logic.int 1)
+        | Exactly_cost amount :: _, (At_most | Exactly) -> make_plain (Logic.Integer amount)
+        | _, (Units | At_most) ->
+            make_plain (Amounts.compute_amount_within context frame counter (make_cost ()))
+        | _, Exactly ->
+            let cost = make_cost () in
+            if cost <> Costs.zero then
+              Facts.oblige
+                ~holds_when:(Facts.find_counter_condition context counter)
+                context frame location
+                (Upper_bound_in_exact_cost { metric; call = { at = location; callee = None } })
+                (Logic.equal cost Costs.zero);
+            make_plain cost)
   in
   match counter.resource with
   | _ when counter.counting = Units && Amounts.passes_lambda_assuming_recursive_costs context values
     ->
-      Operations.declare_unknown_amount context frame counter
+      make_counted (Operations.declare_unknown_amount context frame counter)
   | Metric metric -> compute_call_amount metric
   | Calls (Through term) ->
-      if Amounts.lambda_captures_target context callee_term term then
-        Operations.declare_unknown_amount context frame counter
-      else
-        Amounts.make_conditional_amount
-          (Amounts.make_may_be_target context frame callee_term (Types.Function function_type) term)
-          (Logic.int 1)
+      make_counted
+        (if Amounts.lambda_captures_target context callee_term term then
+           Operations.declare_unknown_amount context frame counter
+         else
+           Amounts.make_conditional_amount
+             (Amounts.make_may_be_target context frame callee_term (Types.Function function_type)
+                term)
+             (Logic.int 1))
   | Calls (Capability capability | Capability_method (capability, _)) ->
-      Amounts.compute_capability_amount context frame ~uses:function_type.uses capability counter
-        ~direct:(fun () -> Operations.declare_unknown_amount context frame counter)
+      make_counted
+        (Amounts.compute_capability_amount context frame ~uses:function_type.uses capability counter
+           ~direct:(fun () -> Operations.declare_unknown_amount context frame counter))
 
 type modelled =
   | By_contract of (State.frame * Logic.term)
@@ -966,7 +975,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             ~unpromised:Nothing_promises ~assume:Validity.assume_nothing values
       | Lambda -> ())
     values;
-  let result_type = Facts.substitute_type context frame site.type_ in
+  let declared_result_type = Facts.substitute_declared_type context frame site.type_ in
+  let result_type = Types.erase_views declared_result_type in
   let is_update_step = calls_update_step context invocation in
   (match invocation.callee with
   | Intrinsic _ -> ()
@@ -1028,7 +1038,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             ~list_modified:(Contracts.list_modified_parts context path)
         in
         let frame =
-          Operations.spend context frame
+          Operations.spend_operation context frame ~potential_change:None
             (Amounts.compute_step_amount context frame invocation values)
         in
         Without_contract (Some (frame, Facts.arrive context frame "result" result_type))
@@ -1082,13 +1092,19 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             (Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ }),
             [ left; right ] ) ->
             let spent =
-              Operations.spend context frame (fun counter ->
-                  Amounts.compute_callee_amount
-                    ~method_cost:(fun metric ->
-                      Amounts.compute_method_cost context frame metric invocation.callee)
-                    context frame ~is_recursive:false ~clauses:[]
-                    ~bind_frame:(fun _ -> frame)
-                    ~uses:invocation.uses ~values ~change:None counter)
+              Operations.spend_operation context frame
+                ~potential_change:
+                  (Some
+                     (fun () ->
+                       Amounts.compute_call_potential_change context ~before:frame ~after:frame
+                         values ~changed:[] ~result_type:declared_result_type
+                         ~result:(Logic.equal left right)))
+                (Amounts.compute_callee_amount
+                   ~method_cost:(fun metric ->
+                     Amounts.compute_method_cost context frame metric invocation.callee)
+                   context frame ~is_recursive:false ~clauses:[]
+                   ~bind_frame:(fun _ -> frame)
+                   ~uses:invocation.uses ~values ~counts_provider_potential:false)
             in
             Without_contract
               (Some (spent, Operations.make_equality context frame self_type left right))
@@ -1120,16 +1136,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                  (Contracts.find_method_contract context trait name receiver evidence)))
     | Indirect () ->
         Laws.check_callback_requires context frame site through values;
+        let before = frame in
         let frame = havoc_whole_arguments frame in
-        let frame =
-          match through with
-          | _ when context.counters = [] -> frame
-          | Some (Types.Function function_type, callee_term, _) ->
-              Operations.spend context frame
-                (compute_function_value_amount context frame ~location function_type callee_term
-                   ~values)
-          | _ -> Operations.spend context frame (Operations.declare_unknown_amount context frame)
-        in
         let result =
           match through with
           | Some (Types.Function function_type, callee_term, _)
@@ -1143,6 +1151,28 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           | _ -> Facts.arrive context frame "result" result_type
         in
         Validity.assume_valid context frame result_type result;
+        let frame =
+          match through with
+          | _ when context.counters = [] -> frame
+          | Some (Types.Function function_type, callee_term, _) ->
+              Operations.spend_operation context frame
+                ~potential_change:
+                  (Some
+                     (fun () ->
+                       Amounts.compute_call_potential_change context ~before ~after:frame values
+                         ~changed:
+                           (List.filter_map
+                              (fun (passed : State.passed) ->
+                                match (passed.mode, passed.passed_place) with
+                                | Language.Mode.Mut, Some place ->
+                                    Some (passed.position, place.read frame)
+                                | _ -> None)
+                              values)
+                         ~result_type:declared_result_type ~result))
+                (compute_function_value_amount context frame ~location function_type callee_term
+                   ~values)
+          | _ -> Operations.spend context frame (Operations.declare_unknown_amount context frame)
+        in
         (match through with
         | Some (Types.Function function_type, callee_term, shape)
           when List.length function_type.inputs = List.length values -> (
@@ -1200,8 +1230,19 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           Intrinsics.translate_intrinsic context frame ~site operation types values ~changed
             result_type
         in
+        let potential_change () =
+          if Intrinsics.keeps_potential operation then Costs.zero
+          else
+            Amounts.compute_call_potential_change context ~before:frame ~after:frame values
+              ~changed:
+                (List.filter_map
+                   (fun ((passed : State.passed), later) ->
+                     if passed.mode = Language.Mode.Mut then Some (passed.position, later) else None)
+                   (List.combine values changed))
+              ~result_type:declared_result_type ~result
+        in
         let frame =
-          Operations.spend context frame
+          Operations.spend_operation context frame ~potential_change:(Some potential_change)
             (Amounts.compute_step_amount ~result context frame invocation values)
         in
         Without_contract (Some (frame, result))

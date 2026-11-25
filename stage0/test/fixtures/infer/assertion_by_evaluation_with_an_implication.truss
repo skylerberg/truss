@@ -1,7 +1,0 @@
-fn is_small(value: UInt64) -> Bool {
-  value < 10
-}
-
-theorem small_things() {
-  assert (is_small(1) ==> is_small(2)) by evaluation
-}

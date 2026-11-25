@@ -12,7 +12,12 @@ type ty =
   | Error of Diagnostic.reported
 
 and argument = Type of ty | Value of value
-and value = Known of Z.t | Value_parameter of parameter | Value_variable of int
+
+and value =
+  | Known of Z.t
+  | Value_parameter of parameter
+  | Value_variable of int
+  | Value_error of Diagnostic.reported
 
 and trait_reference = {
   trait : Path.t;
@@ -557,7 +562,7 @@ let costs_imply ~(provided : cost list) ~(required : cost list) =
       List.exists
         (fun (provided : cost) ->
           provided.resource = required.resource
-          && (required.amortized || not provided.amortized)
+          && provided.amortized = required.amortized
           && bound_implies provided.bound required.bound)
         provided)
     required
@@ -604,7 +609,7 @@ and show_argument = function
   | Type type_ -> show type_
   | Value (Known value) -> Z.to_string value
   | Value (Value_parameter { name; _ }) -> name
-  | Value (Value_variable _) -> "_"
+  | Value (Value_variable _ | Value_error _) -> "_"
 
 and show_capabilities capabilities =
   let names =
@@ -884,6 +889,7 @@ type type_interface = {
   opaque : bool;
   is_tuple : bool;
   derives : Path.t list;
+  declares_potential : bool;
 }
 
 let substitute_fields interface arguments fields =

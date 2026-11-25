@@ -27,7 +27,7 @@ val check_lambda :
   State.env ->
   ?expected:Types.ty ->
   Syntax.expression ->
-  Syntax.pattern list ->
+  Syntax.lambda_parameter list ->
   Syntax.block ->
   Types.ty
 

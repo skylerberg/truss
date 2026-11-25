@@ -1,4 +1,4 @@
-type gain = No_gain | Whole_potential | Potential_without_elements
+type gain = No_gain | Whole_potential | Potential_without_elements | Whole_potential_deducted
 type one_iteration_bound = { spent_at_head : Logic.term; bound : Logic.term }
 
 type loop_rule =
@@ -83,6 +83,16 @@ let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause lis
   List.map
     (fun (counter : Costs.counter) ->
       let gains, measure_gained = Lazy.force held_gains in
+      let gains =
+        if counter.amortized then
+          List.filter_map
+            (function
+              | Whole_potential -> Some Whole_potential_deducted
+              | No_gain -> Some No_gain
+              | Potential_without_elements | Whole_potential_deducted -> None)
+            gains
+        else gains
+      in
       let entry =
         match List.assoc_opt counter frame.spent with Some term -> term | None -> Costs.zero
       in
@@ -107,7 +117,7 @@ let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause lis
             in
             Clause_bound { written; gained_at_head; gain = No_gain }
         | None ->
-            let needs_whole_potential = counter.amortized || counter.counting = Exactly in
+            let needs_whole_potential = counter.counting = Exactly in
             Per_iteration
               {
                 rules =
@@ -244,6 +254,16 @@ let is_written_in_home_package (context : State.context) callee =
       = 0
   | Some ((Derived _ | Inherited _), _) | None -> false
 
+let explain_uncounted_potential context (call : State.call_amount) metric : Catalog.Prover.unbounded
+    =
+  Uncounted_potential
+    {
+      metric;
+      callee = call.callee;
+      call = call.call;
+      is_editable = is_written_in_home_package context call.callee;
+    }
+
 let explain_changing_cost context (head : State.frame) (call : State.call_amount)
     ~(changed : State.changed_part list) ~parts : Catalog.Prover.unbounded =
   let is_mentioned = function
@@ -289,6 +309,10 @@ let explain_unbounded_iteration (context : State.context) (head : State.frame)
           editable = List.filter (is_written_in_home_package context) unstated;
           counts_units = counter.counting = Units;
         }
+  | Metric metric, [], call :: _
+    when counter.amortized && (not call.counts_potential)
+         && List.exists Facts.mentions_potential (list_call_parts call) ->
+      explain_uncounted_potential context call metric
   | Metric _, [], call :: _ ->
       explain_changing_cost context head call ~changed ~parts:(list_call_parts call)
   | (Metric _ | Calls _), _, _ -> Unbounded_iteration
@@ -330,8 +354,7 @@ let check_loop_iterations context loop_at (head : State.frame) (start : loop_sta
           in
           clause.gain <-
             (if Option.is_none clause.gained_at_head || not spends_potential then No_gain
-             else if (not cost.counter.amortized) && moves_in_potential () then
-               Potential_without_elements
+             else if moves_in_potential () then Potential_without_elements
              else Whole_potential);
           Option.iter
             (fun gained ->
@@ -379,7 +402,10 @@ let check_loop_iterations context loop_at (head : State.frame) (start : loop_sta
                 let per, spent, most = measure_most rule in
                 match Costs.find_cost_bound ~varies ~facts most with
                 | Some bound -> Ok (gain, per, spent, bound)
-                | None -> find_bounded (most :: unbounded) rules)
+                | None ->
+                    find_bounded
+                      (if gain = Whole_potential_deducted then unbounded else most :: unbounded)
+                      rules)
           in
           match find_bounded [] per_iteration.rules with
           | Ok (gain, per, spent, bound) ->
@@ -496,6 +522,7 @@ let measure_held_gains context (entry : State.frame) (changed : State.changed_pa
        match gain with
        | No_gain -> Costs.zero
        | Whole_potential -> Costs.minus (measure_whole at) whole_on_entry
+       | Whole_potential_deducted -> Costs.minus whole_on_entry (measure_whole at)
        | Potential_without_elements ->
            Costs.minus
              (measure_gained Whole_potential at)
@@ -865,14 +892,23 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       measures
   in
   let entry_measure = match find_measured frame with Some [ entry ] -> Some entry | _ -> None in
-  let is_amortized =
-    List.exists
-      (fun (next_clauses : State.clauses) ->
-        List.exists (fun (cost : Mir.cost) -> cost.amortized) next_clauses.costs)
+  let next_costs =
+    List.concat_map
+      (fun (next_clauses : State.clauses) -> next_clauses.costs)
       (Contracts.list_declared_clauses contract)
   in
+  let states_only_amortized_cost =
+    List.exists
+      (fun (cost : Mir.cost) ->
+        cost.amortized
+        && not
+             (List.exists
+                (fun (other : Mir.cost) -> (not other.amortized) && other.resource = cost.resource)
+                next_costs))
+      next_costs
+  in
   let holds =
-    if is_amortized then for_loop.compute_changed_in frame
+    if states_only_amortized_cost then for_loop.compute_changed_in frame
     else for_loop.compute_changed_by_body frame
   in
   prove_receiving_loop ~for_loop context frame ~element_type

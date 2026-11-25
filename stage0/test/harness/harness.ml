@@ -85,16 +85,10 @@ let test_always name body =
   current_test := enclosing_test;
   restore_environment environment
 
-let ordinal = ref 0
+let is_in_share name =
+  match share with Some (index, count) -> Hashtbl.hash name mod count = index | None -> true
 
-let test name body =
-  if is_wanted name then begin
-    let is_mine =
-      match share with Some (index, count) -> !ordinal mod count = index | None -> true
-    in
-    incr ordinal;
-    if is_mine then test_always name body
-  end
+let test name body = if is_wanted name && is_in_share name then test_always name body
 
 let workspace_root =
   lazy

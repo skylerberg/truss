@@ -114,8 +114,6 @@ type problem =
       found : string;
       correction : string option;
     }
-  | Whole_type_quantifier of { quantifier : string }
-  | Implies_in_code
   | Echo_in_specification
   | Try_in_parallel
   | Return_in_parallel
@@ -163,7 +161,7 @@ type problem =
   | Power_operator
   | Short_declaration of { name : Source.span option }
   | Pipe_operator of { call : pipe option }
-  | Lambda_annotation
+  | Lambda_result_type
   | Impl_parameters of { parameters : Source.span option }
   | Null_coalescing of {
       written : string;
@@ -216,6 +214,7 @@ type problem =
   | Tuple_pattern_annotation
   | Let_else_brace of { value : Source.span }
   | Amortized_loop_cost
+  | Amortized_bound
   | Interpolated_pattern
   | Float_pattern
   | Rest_not_last

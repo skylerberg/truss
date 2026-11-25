@@ -196,14 +196,10 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
     resolved =
   let field_types = Types.list_field_types interface in
   let list_derived_bounds trait =
-    Properties.Bounds.append (Checking.list_bounds state)
-      (Properties.Bounds.close state.lookups (fun parameter ->
-           if
-             List.exists
-               (fun (generic : Types.generic) -> generic.generic = parameter)
-               interface.type_generics
-           then [ { Types.trait; trait_arguments = []; associated = [] } ]
-           else []))
+    Properties.Bounds.close state.Checking.lookups
+      (Types.list_bounds
+         (Impls.derived_generics interface.type_generics
+            { Types.trait; trait_arguments = []; associated = [] }))
   in
   List.iter
     (fun ((clause : Syntax.type_clause), (written : Syntax.path_type), trait) ->
@@ -242,7 +238,9 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
             if Well_known.is Plain trait then Impls.is_plain state.lookups ~list_bounds self
             else Impls.is_copyable state.lookups ~list_bounds self
           in
-          if not holds then
+          if Well_known.is Plain trait && interface.declares_potential then
+            Checking.report state (Potential_not_plain { at = Written written.id })
+          else if not holds then
             Checking.report state (Field_not_derivable { at = Written written.id; written = shown })
         end
       else begin

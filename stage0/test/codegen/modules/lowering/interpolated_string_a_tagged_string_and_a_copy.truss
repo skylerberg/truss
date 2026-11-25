@@ -3,7 +3,7 @@ use standard.text
 type Sum(pieces: UInt64, total: Int64)
 
 impl FromTemplate for Sum {
-  type Part = Int64
+  type Interpolation = Int64
 
   fn is_valid_template(literals: List[text.Literal]) -> Bool {
     true
@@ -11,8 +11,8 @@ impl FromTemplate for Sum {
 
   fn from_template(template: Template[Int64]) -> Sum {
     var total = 0
-    for part in template.parts {
-      total += part
+    for interpolation in template.interpolations {
+      total += interpolation
     }
     Sum(pieces: template.literals.length(), total: total)
   }

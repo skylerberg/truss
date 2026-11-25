@@ -27,6 +27,14 @@ let list_impls_of_trait_for_type lookups ~trait ~type_ package =
 let list_impls_of_trait (lookups : Lookups.t) ~trait package =
   List.sort_uniq Path.compare (lookups.names.list_impls_of_trait package trait)
 
+let derived_generics (generics : Types.generic list) (trait_reference : Types.trait_reference) =
+  List.map
+    (fun (generic : Types.generic) ->
+      match generic.kind with
+      | Type_generic bounds -> { generic with kind = Type_generic (bounds @ [ trait_reference ]) }
+      | Value_generic -> generic)
+    generics
+
 let derive_interface lookups ~type_ ~trait =
   match
     (Definition.find_type_interface lookups type_, Definition.find_trait_interface lookups trait)
@@ -35,15 +43,7 @@ let derive_interface lookups ~type_ ~trait =
       let trait_reference : Types.trait_reference =
         { trait; trait_arguments = []; associated = [] }
       in
-      let impl_generics =
-        List.map
-          (fun (generic : Types.generic) ->
-            match generic.kind with
-            | Type_generic bounds ->
-                { generic with kind = Type_generic (bounds @ [ trait_reference ]) }
-            | Value_generic -> generic)
-          type_interface.type_generics
-      in
+      let impl_generics = derived_generics type_interface.type_generics trait_reference in
       let for_type =
         Types.Named
           { path = type_; arguments = Types.list_generic_arguments type_interface.type_generics }
@@ -113,7 +113,7 @@ let find_implemented_method lookups (path : Path.t) =
       None
 
 let is_open_value = function
-  | Types.Value_variable _ -> true
+  | Types.Value_variable _ | Value_error _ -> true
   | Types.Known _ | Value_parameter _ -> false
 
 let rec match_type ~variables (substitution : Types.substitution) pattern type_ =
@@ -148,9 +148,8 @@ and match_arguments ~variables substitution patterns arguments =
                 match Types.find_argument parameter substitution with
                 | Some (Types.Value bound) -> if bound = value then Some substitution else None
                 | _ -> Some (Types.bind_argument parameter (Types.Value value) substitution))
-            | Types.Value left, Types.Value right -> (
-                if left = right then Some substitution
-                else match right with Types.Value_variable _ -> Some substitution | _ -> None)
+            | Types.Value left, Types.Value right ->
+                if left = right || is_open_value right then Some substitution else None
             | _ -> None))
       (Some substitution) patterns arguments
 

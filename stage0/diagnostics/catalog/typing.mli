@@ -134,6 +134,7 @@ type t =
       siblings : Core.origin Description.siblings;
     }
   | Field_not_derivable of { at : Core.origin; written : string }
+  | Potential_not_plain of { at : Core.origin }
   | Default_of_sum of { at : Core.origin }
   | Derived_without_equal of { at : Core.origin; written : string }
   | Field_lacks_impl of { at : Core.origin; type_ : Types.ty; written : string }

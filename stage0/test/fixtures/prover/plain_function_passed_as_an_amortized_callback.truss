@@ -1,0 +1,18 @@
+fn charged(credit: UInt32) -> Meter
+  cost time O(1)
+{
+  Meter(credit: credit)
+}
+
+fn build_and_spend(credit: UInt32, make: (fn(UInt32) -> Meter cost amortized time O(1)))
+  cost amortized time O(1)
+{
+  var meter = make(credit)
+  mut meter.spend()
+}
+
+fn spends_through_a_callback(credit: UInt32)
+  cost amortized time O(1)
+{
+  build_and_spend(credit, make: charged)
+}

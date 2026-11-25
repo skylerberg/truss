@@ -5,7 +5,7 @@ type Shout[Tone](text: String)
 type Loud()
 
 impl FromTemplate for Shout[Tone] {
-  type Part = String
+  type Interpolation = String
 
   fn is_valid_template(literals: List[text.Literal]) -> Bool {
     literals.length() == 1

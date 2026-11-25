@@ -156,8 +156,8 @@ and check_type_argument state (value : Syntax.expression) : Types.argument =
       match Interface.Constants.evaluate_count state.lookups.interface path with
       | Ok value -> Types.Value (Known value)
       | Error error ->
-          Types.Type
-            (Types.Error
+          Types.Value
+            (Value_error
                (State.record_diagnostic state
                   (Catalog.Typing
                      (Count_error { at = Written value.id; written = name.text; error })))))

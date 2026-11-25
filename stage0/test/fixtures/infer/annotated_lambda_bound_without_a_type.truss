@@ -1,0 +1,4 @@
+fn f(amount: Int64) -> Int64 {
+  let add = fn(value: Int64) { value.saturating_add(amount) }
+  add(2)
+}
