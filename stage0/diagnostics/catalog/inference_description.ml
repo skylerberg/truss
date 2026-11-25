@@ -146,8 +146,10 @@ let describe_mismatch :
         (match unmet with
           | Does_not_hold_for_view ->
               needs
-              ^ ", which does not hold: a view implements a trait only where each method that an \
-                 `impl` writes takes `Self` through read-only parameters alone."
+              ^ ", which does not hold: a view implements a trait only where an `impl` that \
+                 forwards each method to its viewed type would be accepted. A view passes to no \
+                 `own` or `mut` parameter of its viewed type, and it must implement each trait \
+                 that the trait requires."
           | Does_not_hold -> needs ^ ", which does not hold."
           | Associated_differs { name; found } ->
               Printf.sprintf "%s, and its `%s` is `%s`." needs name (Types.show found))

@@ -5,7 +5,7 @@ let nothing: view String = ""
 let words: List[view String] = ["one", "two"]
 let alias: view String = greeting
 let label: Label = Label(name: "first", rank: 1)
-let ranks: Map[String, UInt64] = ["one": 1, "two": 2]
+let ranks: Map[view String, UInt64] = ["one": 1, "two": 2]
 
 test "a view String constant reads its literal's bytes" {
   assert greeting == "hello"

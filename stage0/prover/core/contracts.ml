@@ -257,7 +257,7 @@ let find_method_contract context (trait : Types.trait_reference) name receiver
     (evidence : Types.evidence) =
   let trait_clauses = find_trait_clauses context trait.trait name receiver in
   match evidence with
-  | Impl { impl; _ } -> (
+  | Impl { impl; _ } | Derived_for_view { viewed = impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
       match Lazy.force (find_callee context path).known_clauses with
       | Some ((Written _ | Derived _), clauses) ->

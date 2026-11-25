@@ -584,7 +584,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                 | local ->
                     ( Locals.find_opt (Core_local local) start.locals,
                       Locals.find_opt (Core_local local) frame.locals,
-                      Facts.find_local_type context frame (Core_local local) )
+                      Some (Facts.substitute_declared_type context frame parameter.type_) )
               in
               match (parameter.mode, entry, ty) with
               | (Language.Mode.Mut | Language.Mode.Own), Some entry, Some ty ->
@@ -783,7 +783,8 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
           (Path.show trait.trait) (Path.show restated.declared_by)
   in
   match Interface.Impls.find_evidence lookups.interface ~list_bounds for_type declared with
-  | Some (Evidence (Impl { impl; substitution })) -> (
+  | Some (Evidence (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }))
+    -> (
       let evidence : Types.evidence = Impl { impl; substitution } in
       let signature =
         match Interface.Impls.read_signature lookups.interface restated_path with
@@ -905,6 +906,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
                              }
                        | Read | Own -> None);
                      type_ = Types.substitute_erased subtrait_substitution parameter.type_;
+                     declared_type = Types.substitute subtrait_substitution parameter.type_;
                      term = read_place parameter entry;
                    })
                  clauses.parameters)
@@ -943,7 +945,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
                 ~compute_change:(fun () ->
                   List.fold_left
                     (fun total (parameter : Mir.parameter) ->
-                      let ty = Types.substitute_erased subtrait_substitution parameter.type_ in
+                      let ty = Types.substitute subtrait_substitution parameter.type_ in
                       let before =
                         Amounts.compute_potential context after ty (read_place parameter entry)
                       in

@@ -13,7 +13,8 @@ let resolve_item state (callee : Mir.callee) : Path.t * Ground.instantiation =
 
 let read_callee_signature (state : Lowering.state) path instantiation =
   let signature = Definitions.read_signature state.context path in
-  (signature, Monomorphic.make_signature_substitution signature instantiation)
+  ( signature,
+    Instances.make_substitution state.context.lookups.interface path signature instantiation )
 
 let resolve_call_signature state (callee : Mir.callee) =
   let path, instantiation = resolve_item state callee in

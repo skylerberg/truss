@@ -906,6 +906,7 @@ let () =
             | Some (Value _) | None -> Harness.fail "`Item` is not bound")
         | [], None -> ()
         | _ -> Harness.fail "another number of generic parameters")
+    | Derived_for_view _ -> Harness.fail "a view's derived impl"
     | Bound -> Harness.fail "a bound"
   in
   Harness.test "evidence by a bound is the impl once a substitution makes its type concrete"
@@ -918,7 +919,7 @@ let () =
       let interface, value = read () in
       match resolve interface Types.no_substitution (Parameter value) Bound with
       | Bound -> ()
-      | Impl _ -> Harness.fail "not a bound");
+      | Impl _ | Derived_for_view _ -> Harness.fail "not a bound");
   Harness.test "an impl is selected for a type whose argument has no bound in scope" (fun () ->
       let interface, value = read () in
       expect_impl interface

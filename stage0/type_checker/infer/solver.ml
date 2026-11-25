@@ -258,9 +258,11 @@ let decide_implements state (goal : State.goal) trait =
       if has_unknowns state wanted.trait_arguments then Waits
       else
         match Types.find_viewed subject with
-        | Some viewed when Interface.Impls.reads_self_only state.lookups.interface wanted.trait ->
-            select state goal trait ~subject:(State.normalize state viewed) ~wanted
-        | Some _ -> Fails Unmet
+        | Some viewed -> (
+            match State.find_evidence state subject wanted with
+            | Some _ -> select state goal trait ~subject:(State.normalize state viewed) ~wanted
+            | None when has_unknowns state [ Types.Type subject ] -> Waits
+            | None -> Fails Unmet)
         | None -> select state goal trait ~subject ~wanted)
   | (Types.Parameter _ | Projection _), None, _, None ->
       decide_by_bounds state goal trait ~subject ~wanted

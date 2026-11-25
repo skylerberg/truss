@@ -637,7 +637,7 @@ test "graphemes join an Indic linker to the consonant after it" {
   assert joined_graphemes("\u{1CF5}\u{915}") == "\u{1CF5}\u{915}"
 }
 
-test "a String gives the graphemes of its slice" {
+test "a String gives the graphemes of a view of it" {
   var count: UInt64 = 0
   let text = "e\u{301}\u{1F1FA}\u{1F1F8}!"
   for _ in text.graphemes() {

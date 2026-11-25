@@ -406,11 +406,16 @@ let substitute_substitution outer =
   map_substitution ~argument:(substitute_argument outer)
     ~capabilities:(substitute_capabilities outer)
 
-type evidence = Impl of { impl : Path.t; substitution : substitution } | Bound
+type evidence =
+  | Impl of { impl : Path.t; substitution : substitution }
+  | Derived_for_view of { viewed : Path.t; substitution : substitution }
+  | Bound
 
 let substitute_evidence outer = function
   | Impl { impl; substitution } ->
       Impl { impl; substitution = substitute_substitution outer substitution }
+  | Derived_for_view { viewed; substitution } ->
+      Derived_for_view { viewed; substitution = substitute_substitution outer substitution }
   | Bound -> Bound
 
 let extract_result_type = function Returns type_ | Lends (_, type_) -> type_

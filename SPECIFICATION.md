@@ -716,11 +716,18 @@ var longest: view String = words[0]
   is `Plain` lends nothing, unless it holds an `Array`: an array is stored
   in place, so a view of its elements views the argument. A value cannot
   hold a view of a part of itself.
-- **A view implements a trait that its viewed type implements** when every
-  method of the trait takes `self` read-only and takes `Self` only in
-  read-only parameters. So a `view String` is `Equal`, `Hash`, and
-  `Display`, and is a key that looks up a `Map[String, Int64]`. It
-  implements no trait with a `mut self` or `own self` method.
+- **A view implements a trait through the `impl` of its viewed type.**
+  `view T` implements `Trait` when this `impl` would be accepted: each
+  method that the `impl` of `Trait` for `T` writes is forwarded, as
+  `T.method(self, other)`, and each method that it inherits from the trait
+  is inherited again, with the view as `Self`. Every rule for an `impl`
+  applies to it. The view implements each trait that `Trait` requires, and
+  a forwarded call passes its arguments as any call does: a view passes to a
+  read-only parameter of its viewed type, and to no `own` or `mut` one. So a
+  `view String` is `Equal`, `Hash`, `Display`, and `Ordered`: a
+  `List[view String]` is sorted in place, and a `Map[view String, Int64]` is
+  keyed by views. A view implements no trait whose `impl` writes a method
+  that takes `self` by `mut` or `own`, or that returns `Self`.
 - **`mut` access is never stored.** It has a name only as a `mut` parameter,
   a `mut` loop's variable, or a lambda's `mut` parameter, and lasts for that
   call, iteration, or `provide mut` block. Disjoint ranges of one `List` or
@@ -1338,7 +1345,8 @@ fn List[Element].push(mut self, item: own Element)
 - A `cost potential` is an integer expression over a type's fields that never
   goes below zero. A value's potential is its type's potential plus its
   parts' potentials, and belongs to that value alone; `copy()` pays for the
-  new one.
+  new one. A view holds no potential: the potential of the elements that it
+  views belongs to their owner, so a `List[view String]` holds only its own.
 - `cost amortized time O(f)` promises that the actual cost, plus the change
   in the potential of the values the function mutates or returns, is within
   `O(f)`. `amortized` works with every resource that takes an `O(...)` bound.
@@ -2682,6 +2690,11 @@ let pattern = Regex"[a-z]+@${domain}"
   and its method `from_template` takes a `Template[Part]`, which holds the
   literal text as `text.Literal` values, which only the compiler makes, and
   the converted values.
+- An interpolated value of a type other than `Part` is converted with the
+  `Part`'s impl of `From` for that type. A place of a `List` or a `String`
+  that is not passed `own` is converted from a view of it where `Part`
+  implements `From` for the view, as `Regex"^${name}"` converts from
+  `view String`: the place is read, not moved.
 - A tag's `is_valid_template` states the rules for valid literal text, and
   `from_template` requires it.
 - The literal text of a template is a `List[text.Literal]` constant without

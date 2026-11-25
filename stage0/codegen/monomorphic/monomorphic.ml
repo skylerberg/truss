@@ -98,6 +98,19 @@ let make_signature_substitution (signature : Types.signature) (instantiation : G
     (Types.make_capability_substitution signature.capability_parameters
        (convert_capability_arguments instantiation))
 
+let make_declaration_substitution ~(trait : Path.t) ~(trait_generics : Types.generic list)
+    (signature : Types.signature) (instantiation : Ground.instantiation) =
+  match instantiation.type_arguments with
+  | Type self :: arguments ->
+      let count = List.length trait_generics in
+      Types.bind_argument (Types.make_self_parameter trait)
+        (Types.Type (convert_ty self))
+        (Types.combine_substitutions
+           (make_substitution trait_generics (List.take count arguments))
+           (make_signature_substitution signature
+              { instantiation with type_arguments = List.drop count arguments }))
+  | Value _ :: _ | [] -> raise_bug "%s is compiled for no `Self`" (Path.show trait)
+
 let ground_instantiation context substitution (instantiation : Types.instantiation) :
     Ground.instantiation =
   {

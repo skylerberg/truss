@@ -135,12 +135,12 @@ internal fn encode(opcode: UInt8, payload: List[UInt8], is_final: Bool, mask: Op
   }
   match mask {
     Some(key) => {
-      mut bytes.append_slice(key[..])
+      mut bytes.append_items(key[..])
       for index in 0..length {
         mut bytes.push(payload[index] ^ key[index % 4])
       }
     }
-    None => mut bytes.append_slice(payload)
+    None => mut bytes.append_items(payload)
   }
   bytes
 }
@@ -149,7 +149,7 @@ internal fn close_payload(code: UInt16, reason: String) -> List[UInt8] {
   var payload: List[UInt8] = [intrinsic.convert((code >> 8) & 255), intrinsic.convert(code & 255)]
   let bytes = reason.bytes()
   let kept = if bytes.length() > 123 { 123 } else { bytes.length() }
-  mut payload.append_slice(bytes[0..kept])
+  mut payload.append_items(bytes[0..kept])
   payload
 }
 

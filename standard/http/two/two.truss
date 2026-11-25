@@ -168,7 +168,7 @@ fn frame_bytes(output: mut List[UInt8], kind: UInt8, flags: UInt8, stream: UInt3
   mut output.push(kind)
   mut output.push(flags)
   push_u32(mut output, value: stream & 2147483647)
-  mut output.append_slice(payload)
+  mut output.append_items(payload)
 }
 
 fn send_frame[Stream: streams.Duplex](stream: Stream, kind: UInt8, flags: UInt8, id: UInt32, payload: List[UInt8]) -> Result[Unit, Failure]
@@ -196,7 +196,7 @@ fn open_connection[Stream: streams.Duplex](stream: Stream, is_server: Bool, head
 {
   var bytes: List[UInt8] = []
   if !is_server {
-    mut bytes.append_slice(preface.bytes())
+    mut bytes.append_items(preface.bytes())
   }
   var settings: List[UInt8] = []
   if is_server {
