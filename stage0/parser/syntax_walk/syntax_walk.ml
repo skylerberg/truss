@@ -1,14 +1,18 @@
 let rec visit_type_expression on_expression (type_ : Syntax.type_expression) =
   match type_.kind with
   | Path_type path -> visit_path_type on_expression path
-  | Function_type { inputs; output; clauses; _ } ->
+  | Function_type { inputs; result; clauses; _ } ->
       List.iter
         (fun (input : Syntax.function_input) -> visit_type_expression on_expression input.type_)
         inputs;
-      Option.iter (visit_type_expression on_expression) output;
+      visit_result on_expression result;
       List.iter (visit_clause on_expression) clauses
   | View_type viewed -> visit_type_expression on_expression viewed
   | Self_type _ | Associated _ | Type_error -> ()
+
+and visit_result on_expression = function
+  | Some (Syntax.Returns type_ | Lends (_, type_)) -> visit_type_expression on_expression type_
+  | None -> ()
 
 and visit_path_type on_expression (path : Syntax.path_type) =
   List.iter (visit_type_argument on_expression) path.arguments
@@ -200,9 +204,7 @@ let visit_signature on_expression (signature : Syntax.signature) =
   visit_definition_name on_expression signature.name;
   List.iter (visit_generic_parameter on_expression) signature.generics;
   List.iter (visit_parameter on_expression) signature.parameters;
-  (match signature.result with
-  | Some (Returns type_ | Lends (_, type_)) -> visit_type_expression on_expression type_
-  | None -> ());
+  visit_result on_expression signature.result;
   List.iter (visit_clause on_expression) signature.clauses
 
 let visit_function_definition ?on_statement:visit on_expression
@@ -300,13 +302,13 @@ let walk_names ~on_name (definition : Syntax.definition) =
     | Associated (base, key) ->
         on_name base;
         on_name key
-    | Function_type { inputs; output; clauses; _ } ->
+    | Function_type { inputs; result; clauses; _ } ->
         List.iter
           (fun (input : Syntax.function_input) ->
             Option.iter on_name input.name;
             walk_type input.type_)
           inputs;
-        Option.iter walk_type output;
+        Option.iter (function Syntax.Returns type_ | Lends (_, type_) -> walk_type type_) result;
         List.iter walk_clause clauses
     | View_type viewed -> walk_type viewed
     | Type_error -> ()
@@ -605,3 +607,24 @@ let collect_names (spans : Source.Definition_span.t array) (definition : Syntax.
     (fun (left : Syntax.name) (right : Syntax.name) ->
       compare spans.(left.id).start spans.(right.id).start)
     !names
+
+let is_literal_bound (bound : Syntax.bound) =
+  match bound with
+  | Big_o amount | At_most amount | Exactly amount -> (
+      match amount.kind with Integer _ -> true | _ -> false)
+
+let is_callback_contract_clause (clause : Syntax.clause) =
+  match clause.kind with
+  | Requires _ | Ensures _ -> true
+  | Uses uses -> List.exists (fun (use : Syntax.capability_use) -> use.unless_values <> []) uses
+  | Cost cost -> not (is_literal_bound cost.bound)
+  | Modifies _ | Decreases _ | Clause_error -> false
+
+let can_mention_inputs (clause : Syntax.clause) =
+  match clause.kind with Modifies _ -> true | _ -> is_callback_contract_clause clause
+
+let has_callback_contract (function_type : Syntax.function_type) =
+  List.for_all
+    (fun (input : Syntax.function_input) -> Option.is_some input.name)
+    function_type.inputs
+  && List.exists is_callback_contract_clause function_type.clauses

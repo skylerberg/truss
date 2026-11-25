@@ -49,7 +49,7 @@ let rec list_mentioned_paths = function
   | Types.Named { path; arguments } -> path :: List.concat_map list_argument_paths arguments
   | Types.Function { inputs; output; _ } ->
       List.concat_map (fun (_, type_) -> list_mentioned_paths type_) inputs
-      @ list_mentioned_paths output
+      @ list_mentioned_paths (Types.extract_result_type output)
   | Types.Projection { base; _ } -> list_mentioned_paths base
   | _ -> []
 
@@ -472,69 +472,70 @@ let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
       (List.combine generics impl.impl_generics)
   end
 
+let check_modified_parts (state : Checking.state) =
+  Elaborator.check_modified_parts state.lookups
+    ~package:(Path.locate_package state.key.path)
+    ~report:(Checking.report state)
+
+let rec check_function_types (state : Checking.state) (written : Syntax.type_expression)
+    (elaborated : Types.ty) =
+  match (written.kind, elaborated) with
+  | Function_type written_type, Function function_type
+    when List.length written_type.inputs = List.length function_type.inputs ->
+      check_modified_parts state
+        ~parameters:
+          (List.map2
+             (fun (input : Syntax.function_input) (_, type_) ->
+               (Option.map (fun (name : Syntax.name) -> name.text) input.name, type_))
+             written_type.inputs function_type.inputs)
+        function_type.modifies written_type.clauses;
+      List.iter2
+        (fun (input : Syntax.function_input) (_, type_) ->
+          check_function_types state input.type_ type_)
+        written_type.inputs function_type.inputs;
+      Option.iter
+        (function
+          | Syntax.Returns type_ | Lends (_, type_) ->
+              check_function_types state type_ (Types.extract_result_type function_type.output))
+        written_type.result
+  | Path_type path, Named { arguments; _ } when List.length path.arguments = List.length arguments
+    ->
+      List.iter2
+        (fun (written : Syntax.type_argument) (argument : Types.argument) ->
+          match (written, argument) with
+          | (Type_argument type_ | Constraint (_, type_)), Type elaborated ->
+              check_function_types state type_ elaborated
+          | _ -> ())
+        path.arguments arguments
+  | View_type viewed, _ ->
+      Option.iter (check_function_types state viewed) (Types.find_viewed elaborated)
+  | _ -> ()
+
 let check_modifies (state : Checking.state) (written : Syntax.signature)
     (signature : Types.signature) =
-  let package = Path.locate_package state.key.path in
-  let check_entry (value : Syntax.expression) =
-    match Elaborator.split_part value with
-    | None -> ()
-    | Some (parameter, names, is_elements) -> (
-        let fields = List.map (fun (name : Syntax.name) -> name.text) names in
-        match Types.find_parameter_position signature parameter with
-        | Some position
-          when List.mem { Types.position; field_path = fields; is_elements } signature.modifies -> (
-            match
-              Definition.find_field_path_type state.lookups ~package
-                (Types.read_parameter_at signature position).type_ fields
-            with
-            | Ok type_
-              when is_elements
-                   && not
-                        (Types.is_error type_
-                        || Option.is_some (Types.find_sequence_element type_)
-                        || Types.is_builtin Storage type_) ->
-                Checking.report state
-                  (Part_without_elements { at = Written value.id; parameter; fields; type_ })
-            | Ok _ | Error Broken_type -> ()
-            | Error (No_fields { type_; prefix }) ->
-                Checking.report state
-                  (Fieldless_part
-                     {
-                       at = Written value.id;
-                       parameter;
-                       prefix;
-                       fields;
-                       type_;
-                       has_variants = false;
-                     })
-            | Error (Variant_fields { type_; prefix }) ->
-                Checking.report state
-                  (Fieldless_part
-                     {
-                       at = Written value.id;
-                       parameter;
-                       prefix;
-                       fields;
-                       type_;
-                       has_variants = true;
-                     })
-            | Error (Hidden_fields type_) ->
-                Checking.report state (Opaque_part { at = Written value.id; type_ })
-            | Error (Unknown_field { type_; field; candidates }) ->
-                let at : Core.origin =
-                  match List.find_opt (fun (name : Syntax.name) -> name.text = field) names with
-                  | Some name -> Written name.id
-                  | None -> Written value.id
-                in
-                Checking.report state (Unknown_part_field { at; type_; field; candidates }))
-        | Some _ | None -> ())
-  in
+  check_modified_parts state
+    ~parameters:
+      (Option.to_list (Option.map (fun (_, type_) -> (Some "self", type_)) signature.receiver)
+      @ List.map
+          (fun (parameter : Types.parameter_info) -> (Some parameter.name, parameter.type_))
+          signature.parameters)
+    signature.modifies written.clauses;
   List.iter
-    (fun (clause : Syntax.clause) ->
-      match clause.kind with
-      | Modifies entries -> List.iter check_entry entries
-      | Uses _ | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> ())
-    written.clauses
+    (fun (parameter : Syntax.parameter) ->
+      match parameter.kind with
+      | Named_parameter { name; type_; _ } ->
+          Option.iter
+            (fun (info : Types.parameter_info) -> check_function_types state type_ info.type_)
+            (List.find_opt
+               (fun (info : Types.parameter_info) -> info.name = name.text)
+               signature.parameters)
+      | Self_parameter _ | Parameter_error -> ())
+    written.parameters;
+  Option.iter
+    (function
+      | Syntax.Returns type_ | Lends (_, type_) ->
+          check_function_types state type_ (Types.extract_result_type signature.output))
+    written.result
 
 let check (state : Checking.state) =
   let lookups = state.lookups in
@@ -608,6 +609,36 @@ let check (state : Checking.state) =
                 (Definition.find_impl_interface lookups impl)
           | Some _ -> ())
     | None, Type_definition { name; body; clauses; _ }, Type_interface interface ->
+        let check_field_types (written : Syntax.field list) (fields : Types.field list) =
+          List.iter
+            (fun (field : Syntax.field) ->
+              match field.kind with
+              | Field_declaration { name; type_; _ } ->
+                  Option.iter
+                    (fun (elaborated : Types.field) ->
+                      check_function_types state type_ elaborated.field_type)
+                    (List.find_opt
+                       (fun (elaborated : Types.field) -> elaborated.field_name = name.text)
+                       fields)
+              | Field_error -> ())
+            written
+        in
+        (match (body, interface.shape) with
+        | Fields written, Record fields -> check_field_types written fields
+        | Variants written, Sum variants ->
+            List.iter
+              (fun (variant : Syntax.variant) ->
+                match
+                  List.find_opt
+                    (fun (elaborated : Types.variant) ->
+                      elaborated.variant_name = variant.name.text)
+                    variants
+                with
+                | Some { fields = Some fields; _ } ->
+                    Option.iter (fun written -> check_field_types written fields) variant.fields
+                | Some { fields = None; _ } | None -> ())
+              written
+        | _ -> ());
         (match body with
         | Fields fields -> check_duplicates state "field" (list_field_names fields)
         | Variants variants ->

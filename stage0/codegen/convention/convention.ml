@@ -48,17 +48,37 @@ let make_destination result place : Lowered.destination =
 let evidence = Lowered.Raw (Pointer Opaque)
 let capabilities = Lowered.Raw (Nullable_pointer Opaque)
 
+let classify_lent_part env (mode : Language.Mode.t) part =
+  if Memory_layout.has_zero_size env part then Nothing
+  else Returned (Pointer { target = Value part; writable = mode = Mut })
+
+let list_lending_parameters env part : Lowered.ty list =
+  (if Memory_layout.has_zero_size env part then []
+   else [ Lowered.Pointer { target = Value part; writable = true } ])
+  @ [ Pointer { target = Lend; writable = true }; Raw (Pointer Opaque) ]
+
+let classify_function_value_result env (function_type : Ground.function_type) =
+  match (function_type.lends, function_type.result) with
+  | Some mode, part -> (classify_lent_part env mode part, true)
+  | None, Never -> (Nothing, false)
+  | None, ty -> (classify_result env ty, true)
+
+let list_function_value_lending_parameters env (function_type : Ground.function_type) =
+  match function_type.lends with
+  | Some _ -> list_lending_parameters env function_type.result
+  | None -> []
+
 let make_function_value_signature env (function_type : Ground.function_type) : Lowered.signature =
-  let result_ty, returns =
-    match function_type.result with
-    | Never -> (Nothing, false)
-    | ty -> (classify_result env ty, true)
-  in
+  let result_ty, returns = classify_function_value_result env function_type in
   let written =
     List.filter_map (fun (mode, ty) -> classify_parameter env mode ty) function_type.parameters
   in
   let environment = Lowered.Raw (Nullable_pointer Opaque) in
-  let signature = make_signature ~returns (written @ [ capabilities ]) result_ty in
+  let signature =
+    make_signature ~returns
+      ((written @ [ capabilities ]) @ list_function_value_lending_parameters env function_type)
+      result_ty
+  in
   { signature with parameters = environment :: signature.parameters }
 
 let drop_signature ty : Lowered.signature =

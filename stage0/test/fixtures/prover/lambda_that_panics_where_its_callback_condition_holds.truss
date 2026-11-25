@@ -1,0 +1,7 @@
+fn bump(byte: UInt8, step: (fn(value: UInt8) -> UInt8 uses Panic unless value < 255)) -> UInt8 {
+  if byte < 255 { step(byte) } else { byte }
+}
+
+fn by_two(byte: UInt8) -> UInt8 {
+  bump(byte, fn(value) { value + 2 })
+}

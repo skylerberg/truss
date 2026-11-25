@@ -9,8 +9,8 @@ let expand_formula = Expansion.expand_formula
 let list_callee_modified_parts ~read_signature (lookups : Interface.Lookups.t) substitution
     (callee : Tree.callee) position : Types.modified list option =
   let list_parts_of path =
-    Option.bind (read_signature path) (fun signature ->
-        Types.list_modified_parts signature position)
+    Option.bind (read_signature path) (fun (signature : Types.signature) ->
+        Types.list_modified_parts signature.modifies position)
   in
   match callee.target with
   | Function { path; _ } -> list_parts_of path
@@ -27,7 +27,11 @@ let list_callee_modified_parts ~read_signature (lookups : Interface.Lookups.t) s
       list_parts_of (Path.make_capability_method capability name)
   | Intrinsic { operation = Buffer Storage_swap | Lend Storage_at; _ } when position = 0 ->
       Some [ { position; field_path = []; is_elements = true } ]
-  | Intrinsic _ | Indirect _ -> None
+  | Indirect function_value -> (
+      match extract_operand_type function_value with
+      | Types.Function function_type -> Types.list_modified_parts function_type.modifies position
+      | _ -> None)
+  | Intrinsic _ -> None
 
 let make_code tree : Parts.code = { tree; graph = Expansion.expand tree }
 
@@ -71,6 +75,40 @@ let make_parameter ({ local; mode; type_; _ } : Core.parameter) : parameter = { 
 
 let of_conditional_clause ~parameters ({ holds_when; clause } : Core.expression Core.conditional) =
   { (Builder.of_clause ~parameters clause) with holds_when }
+
+let make_callback_contract ~entry_locals inputs (function_type : Types.function_type)
+    (contract : Core.contract) : contract =
+  let of_formula = Builder.of_specification ~entry_locals:(entry_locals @ inputs) in
+  let of_requirement value =
+    { clause = of_formula value; is_executable = false; names = Builder.list_names value }
+  in
+  {
+    parameters =
+      List.map2 (fun local (mode, type_) -> { local; mode; type_ }) inputs function_type.inputs;
+    panics_unless = List.map of_requirement contract.panics_unless;
+    requires =
+      List.map
+        (fun ({ clause; _ } : Core.condition Core.conditional) -> of_requirement clause.value)
+        contract.requires;
+    ensures =
+      List.map
+        (fun ({ clause; _ } : Core.expression Core.conditional) -> of_formula clause)
+        contract.ensures;
+    decreases = [];
+    costs =
+      List.map
+        (fun ({ clause = { origin; amortized; resource; bound }; _ } : Core.cost Core.conditional) :
+             cost ->
+          let bound : bound =
+            match bound with
+            | Order_of amount -> Order_of (of_formula amount)
+            | At_most amount -> At_most (of_formula amount)
+            | Exactly amount -> Exactly (of_formula amount)
+          in
+          { origin; amortized; resource; bound; holds_when = [] })
+        contract.costs;
+    callbacks = [];
+  }
 
 let find_contract (definition : Core.definition) =
   match definition with
@@ -122,20 +160,14 @@ let find_contract (definition : Core.definition) =
              List.concat
                (List.mapi
                   (fun position (parameter : Core.parameter) ->
-                    match parameter.callback_contract with
-                    | Some { inputs; requires; ensures } ->
+                    match (parameter.callback_contract, parameter.type_) with
+                    | Some { inputs; contract }, Types.Function function_type
+                      when List.length inputs = List.length function_type.inputs ->
                         [
                           ( position,
-                            {
-                              inputs;
-                              requires = List.map (Builder.of_specification ~entry_locals) requires;
-                              ensures =
-                                List.map
-                                  (Builder.of_specification ~entry_locals:(entry_locals @ inputs))
-                                  ensures;
-                            } );
+                            make_callback_contract ~entry_locals inputs function_type contract );
                         ]
-                    | None -> [])
+                    | _ -> [])
                   parameters));
         }
   | Test _ ->

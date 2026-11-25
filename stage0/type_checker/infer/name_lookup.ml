@@ -52,7 +52,7 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
           | Ok () ->
               state.tables.resolutions.(value.id) <-
                 Some (Global { path; instantiation = instance.instantiation });
-              check_function_value state value instance)
+              check_function_value instance)
       | None -> State.raise_bug "`%s` has no signature" (Path.show path))
   | Definition (Constant, path) ->
       state.tables.resolutions.(value.id) <-
@@ -115,9 +115,10 @@ and check_variant_value state (value : Syntax.expression) type_path variant ~arg
             (Types.Function
                {
                  inputs = [ (Language.Mode.Own, field.field_type) ];
-                 output = type_;
+                 output = Returns type_;
                  uses = Types.no_capabilities;
                  costs = [ { amortized = false; resource = Metric Time; bound = Order_of } ];
+                 modifies = [];
                })
       | Some { fields = Some fields; _ } ->
           State.make_error_type state
@@ -178,10 +179,8 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
           else report_unknown [])
   | _ -> report_unknown []
 
-and check_function_value state (value : Syntax.expression) (instance : Instantiation.instance) =
-  match Types.make_function_type instance.signature with
-  | Some function_type -> instance.flatten (Types.Function function_type)
-  | None -> State.make_error_type state (Lending_function_value { at = Written value.id })
+and check_function_value (instance : Instantiation.instance) =
+  instance.flatten (Types.Function (Types.make_function_type instance.signature))
 
 and check_static_member state (value : Syntax.expression) type_ (member : Syntax.name) =
   match type_ with
@@ -213,7 +212,7 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
                 | None -> ());
                 state.tables.resolutions.(value.id) <-
                   Some (Global { path = method_path; instantiation = instance.instantiation });
-                check_function_value state value instance
+                check_function_value instance
             | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path))
         | Hidden hidden -> Members.make_hidden_error state (Written member.id) hidden
         | Absent ->

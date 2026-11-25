@@ -35,12 +35,8 @@ and type_argument =
   | Count_name of name
   | Constraint of name * type_expression
 
-and function_type = {
-  inputs : function_input list;
-  output : type_expression option;
-  clauses : clause list;
-}
-
+and function_type = { inputs : function_input list; result : result option; clauses : clause list }
+and result = Returns of type_expression | Lends of mode option * type_expression
 and function_input = { name : name option; mode : mode option; type_ : type_expression }
 and generic_parameter = generic_kind node
 
@@ -221,8 +217,6 @@ and parameter_kind =
       default : expression option;
     }
   | Parameter_error
-
-type result = Returns of type_expression | Lends of mode option * type_expression
 
 type signature = {
   name : definition_name;

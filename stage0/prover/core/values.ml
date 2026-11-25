@@ -378,7 +378,7 @@ let translate_named_function (context : State.context) (frame : State.frame)
         (Logic.Function
            ( function_symbol,
              List.map snd parameters,
-             Facts.declare_sort context function_type.output ));
+             Facts.declare_sort context (Lambdas.read_output function_type) ));
       let value = Logic.Apply (function_symbol, inputs) in
       if type_arguments = [] then
         assume_contract_for_every_argument context frame contract parameters value;

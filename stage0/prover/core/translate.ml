@@ -220,9 +220,10 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   let panic_condition =
     if assumes_panic_condition then
       Some
-        (List.map
-           (fun (requirement : Mir.requirement) -> Facts.quote source requirement.clause.origin)
-           contract.panics_unless)
+        ( List.map
+            (fun (requirement : Mir.requirement) -> Facts.quote source requirement.clause.origin)
+            contract.panics_unless,
+          Catalog.Prover.Function_clause )
     else None
   in
   let can_declare_panic = not (Types.may_use (Built_in Panic) uses) in

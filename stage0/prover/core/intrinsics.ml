@@ -249,9 +249,10 @@ let call_libc context frame ~(site : Invocation.site) (function_ : Libc.function
 let measure_type element : Types.function_type =
   {
     inputs = [ (Language.Mode.Read, element) ];
-    output = Types.Integer;
+    output = Returns Types.Integer;
     uses = Types.no_capabilities;
     costs = [];
+    modifies = [];
   }
 
 let make_sequence_sum context element term measure =

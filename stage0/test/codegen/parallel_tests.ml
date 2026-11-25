@@ -233,6 +233,7 @@ let () =
         {
           parameters = [ (Read, Codegen_support.uint64) ];
           result = Codegen_support.unit;
+          lends = None;
           uses = [];
         }
       in

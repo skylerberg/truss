@@ -277,7 +277,6 @@ type t =
   | Unknown_field of { at : Core.origin; base : shown; name : string; candidates : string list }
   | Opaque_field_read of { at : Core.origin; type_ : Types.ty }
   | Method_as_field of { at : Core.origin; name : string }
-  | Lending_function_value of { at : Core.origin }
   | View_passed_mut of { at : Core.origin }
   | View_receiver of { at : Core.origin; name : string; receivers : Path.receiver list }
   | No_member of { at : Core.origin; type_ : Types.ty; name : string; list : string option }

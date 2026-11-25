@@ -891,15 +891,6 @@ let describe : Inference.t -> Nodes.description = function
   | Method_as_field { at = origin; name } ->
       make Not_a_value (Build.at origin)
         (say (Printf.sprintf "`%s` is a method, so it is called: `%s()`." name name))
-  | Lending_function_value { at = origin } ->
-      make Not_a_value (Build.at origin)
-        [
-          Text "`";
-          Build.quote origin;
-          Text
-            "` lends a part, and a function value cannot lend. Call it where the part is used, or \
-             write a lambda that returns a copy of the part.";
-        ]
   | View_passed_mut { at = origin } ->
       make Wrong_mode (Build.at origin)
         (say

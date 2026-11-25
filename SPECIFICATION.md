@@ -1010,8 +1010,9 @@ condition holds for the instantiations that meet it.
   implies the code's. A trait implies the traits it requires, so
   `RunForever unless Items: Short`, where `Short: FiniteCursor`, covers
   `RunForever unless Items: FiniteCursor`.
-- A written function type takes no condition. The type of a function named
-  as a value keeps each condition that its type arguments do not decide.
+- A written function type takes no `when` condition and no condition on
+  types after `unless`. The type of a function named as a value keeps each
+  condition that its type arguments do not decide.
 - A condition that names neither a type parameter nor `Self` is an error,
   since it is decided where it is written, and so is a clause whose
   condition no instantiation meets.
@@ -1043,10 +1044,17 @@ public fn Option[Value].expect(own self, message: String) -> Value
   own `uses Panic unless` a condition, which the trait's must imply, or uses
   no `Panic`. A call known to reach an `impl` proves that `impl`'s
   condition, and a call through a bound proves the trait's.
-- A function named as a value uses `Panic`, since the code that a call of
-  the value reaches is chosen when the program runs. A capability's method,
-  a written function type, and a `when` condition take no condition on
-  values.
+- **The type of a parameter can state `uses Panic unless` a condition on its
+  inputs,** as in `(fn(index: UInt64) -> Int64 uses Panic unless index < 8)`.
+  The condition is part of the parameter's callback contract (see
+  [Callback contracts](#callback-contracts)): a call through the parameter
+  proves it, as a call of a function proves the condition of the function's
+  own clause, and the function passed does not panic where it holds.
+- A function named as a value uses `Panic` with no condition, since a type
+  holds no expression. Its condition is still known where it is passed for a
+  parameter whose type states one.
+- A capability's method, a function type that is not the type of a
+  parameter, and a `when` condition take no condition on values.
 
 ### Changed parts
 
@@ -1110,8 +1118,16 @@ fn Reader.start_word(mut self) -> UInt64
 - **An `impl`'s method changes only the parts that its trait's method names
   for each parameter.** Its own `modifies` can name fewer, and without one
   it has the trait's.
-- A function type has no `modifies`, so a call through a function value
-  changes every part of its `mut` arguments.
+- **A function type names the parts that a call through its values changes**
+  with `modifies`, as a signature does, and the type then names its inputs:
+  `(fn(reader: mut Reader) modifies reader.position)`. The clause is part of
+  the type, so a field and a type argument can state it. A call through the
+  value keeps every other part of its `mut` arguments, and one through a
+  value of a type without `modifies` changes every part.
+- **A function is a value of such a type only where it changes no other
+  part.** A named function or a function value converts to the type where its
+  own `modifies` names parts within the type's, and a lambda's body changes
+  only the parts that the type names.
 
 ### Termination
 
@@ -1367,9 +1383,10 @@ fn List[Element].push(mut self, item: own Element)
 ### Function types
 
 ```ebnf
-function_type        = "fn" "(" list([ LOWER_NAME ":" ] [ mode ] type) ")" [ "->" type ] ;
-function_type_clause = "uses" capability_list | "cost" cost
-                     | "requires" expression | "ensures" expression ;
+function_type        = "fn" "(" list([ LOWER_NAME ":" ] [ mode ] type) ")" [ result ] ;
+function_type_clause = "uses" capability_use { "," capability_use } | "cost" cost
+                     | "requires" expression | "ensures" expression
+                     | "modifies" field_path { "," field_path } ;
 ```
 
 ```truss
@@ -1378,17 +1395,26 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log))
 ```
 
 - A function type without `uses` uses no capability. Its `uses` clause
-  cannot mention its inputs.
+  mentions its inputs only in a `Panic unless` condition, which only the type
+  of a parameter states (see [Conditions on values](#conditions-on-values)).
+- **A function type has the clauses of a signature,** except `decreases`,
+  and a result that lends as a signature's does (see
+  [Lending methods](#lending-methods)). It names its inputs where a clause
+  can mention them: with `requires`, `ensures`, `modifies`, a `Panic unless`
+  condition, or a bound that is not an integer literal.
 - An `O(...)`, `<=`, or `==` bound in a function type is an integer
-  literal, as in `(fn(Item) cost time O(1) cost allocations <= 2)`. A bound
-  that depends on a value, such as a parameter of the enclosing function,
-  goes in that function's own `cost` clause, which names the callback's cost
-  as `time(visit)`.
+  literal, as in `(fn(Item) cost time O(1) cost allocations <= 2)`, except
+  in the type of a parameter. There a bound is part of the callback contract
+  and can mention the inputs and the parameters before that parameter, as in
+  `(fn(limit: UInt64) -> UInt64 cost time O(limit))`. A bound elsewhere
+  would make a type hold an expression, and two types would then compare
+  only with a proof.
 - **A function type takes only functions whose capabilities its `uses`
   names,** so one without `RunForever` takes only functions that terminate
   (see [Termination](#termination)).
 - Clauses after a definition's result type belong to the definition.
-- A function type's `requires` and `ensures` are a callback's contract (see
+- A function type's `requires`, `ensures`, `Panic unless` condition, and
+  bounds that are not integer literals are a callback's contract (see
   [Callback contracts](#callback-contracts)).
 - A function-typed parameter can be called but not stored. One declared
   `own` can be stored, and accepts only functions that capture no local
@@ -1492,24 +1518,40 @@ fn halved(value: Option[Int64]) -> Option[Int64]
 ```
 
 A *callback contract* is what a function knows of the function passed for
-one of its parameters: the `requires` and `ensures` of the parameter's
+one of its parameters: the `requires`, `ensures`, `uses Panic unless`
+condition, and cost bounds that are not integer literals of the parameter's
 type, and the terms `time(visit)`, `allocations(visit)`,
 `allocated_bytes(visit)`, and `visit.ensures(...)`.
 
-- **A `requires` or an `ensures` in a function type appears only on the type
-  of a definition's parameter,** at the top level of that type, and the type
-  then names its inputs. Each can mention the inputs and the parameters
-  before that parameter. In the `ensures`, `result` is the callback's result,
-  and `old(input)` is a `mut` input's value when the callback was called.
+- **The clauses of a callback contract appear only on the type of a
+  function's or a theorem's parameter,** at the top level of that type, and
+  the type then names its inputs. A law's parameter takes none, since a law
+  states a fact of every value of its parameters' types. Each can mention the inputs and the parameters before
+  that parameter. In the `ensures`, `result` is the callback's result, and
+  `old(input)` is a `mut` input's value when the callback was called. A type
+  that values are stored in or compared by holds no clause that needs a
+  proof to compare.
 - **The definition proves the `requires` at every call through the
-  parameter, and each such call meets the `ensures`.**
-- **At a call of the definition, the function passed is proven against both
-  clauses.** A lambda's body may rely on the `requires`, and proves the
+  parameter, and each such call meets the `ensures`.** It proves the `Panic
+  unless` condition at each call too unless it uses `Panic` itself, and each
+  call spends what the cost bounds state at the call's arguments.
+- **At a call of the definition, the function passed is proven against every
+  clause.** A lambda's body may rely on the `requires`, and proves the
   `ensures`, as `deal`'s lambda relies on `count > 0` and proves
   `result < count`. A named function accepts every argument that the
   `requires` allows, and its own `ensures` implies the type's there. A
   parameter of the caller is accepted where its type's clauses imply the
   callee's. Any other function value promises nothing of its results.
+- **The function passed does not panic where the `Panic unless` condition
+  holds.** A lambda's body is proven twice, as a function's with its own
+  condition is (see [Conditions on values](#conditions-on-values)). A named
+  function uses no `Panic`, or uses `Panic unless` a condition that the
+  type's condition implies. A function that uses `Panic` with no condition
+  is rejected, since it may panic where the definition relies on it not to.
+- **The function passed spends no more than each bound states,** at every
+  argument that the `requires` allows. A lambda's body is proven within the
+  bound, and a named function's own bound on the resource is at most the
+  type's there.
 - **An `impl`'s method states the callback contracts of its trait's method,**
   clause for clause, since a call through the trait proves and assumes those.
 - **`visit.ensures(...)` holds where the function passed for `visit` may
@@ -1650,9 +1692,12 @@ mut grid.cell(position).visit()
   part is then mutated with no keyword of its own.
 - **A lent part is not the caller's to keep.** It is not moved, returned,
   stored, or bound with `let`, except by copying it.
-- **A lending method is not a value.** A function type has a result and
-  never lends, so its caller could keep the part past the statement, a
-  dangling view.
+- **A lending method is a value of a function type that lends,** as in
+  `Grid.cell`, of type `fn(mut Grid, Position) lends mut Cell`. A call
+  through such a value lends a part of its first argument for the rest of
+  the caller's statement, by the rules of a call of the method. A lambda of
+  such a type lends the value of its body by the rules of a lending method's
+  body, so it lends a part of its first input or a value it made.
 - The part need not be stored in `self`: the method may lend a value it
   made, which is dropped when the lend ends.
 - **A method lends a part of its first parameter, or a whole value that it
@@ -1708,6 +1753,8 @@ impl IterableMut for List[Element] {
 - **Every other clause holds when the lend ends.**
 - **`final(result)` is the part as the caller left it,** as `old(value)` is
   a value when the method was called.
+- The `ensures` of a function type that lends follows the same rules, for
+  each call through a value of the type.
 
 ### Cursors
 
@@ -2780,11 +2827,12 @@ trait Ordered: Equal {
   signature: the generic parameters with their bounds; the parameters with
   their names, modes, and types, and no default; and the result. `Self`, the
   trait's arguments, and the associated types are as the `impl` gives them,
-  and a function type has the trait's `uses` and `cost` clauses. The
-  method's generic parameters may have other names, its capability
-  parameters have the trait's names (see
+  and a function type has the trait's `uses`, `cost`, and `modifies`
+  clauses and its result. The method's generic parameters may have other
+  names, its capability parameters have the trait's names (see
   [Capability parameters](#capability-parameters)), and a type parameter's
-  bounds and a function type's `cost` clauses may come in another order.
+  bounds and a function type's `cost` and `modifies` clauses may come in
+  another order.
   The body of the method and every call of it are checked against this one
   signature. The method states of its own only its `uses`, which stays
   within the trait's, and the contract clauses that the next two rules allow.

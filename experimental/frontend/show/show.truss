@@ -167,7 +167,7 @@ fn show_function_type(function_type: syntax.FunctionType) -> String
     mut text.push(show_type_expression(input.annotation))
     mut inputs.push(own text)
   }
-  var parts: List[String] = [make_form("", parts: inputs), show_optional_type(function_type.output, prefix: "-> ")]
+  var parts: List[String] = [make_form("", parts: inputs), show_output(function_type.output)]
   for clause in function_type.clauses {
     mut parts.push(show_clause(clause))
   }
@@ -704,10 +704,10 @@ fn show_parameters(parameters: List[syntax.Parameter]) -> String
   make_form("", parts: shown)
 }
 
-fn show_signature(signature: syntax.Signature) -> List[String]
+fn show_output(output: Option[syntax.Output]) -> String
   uses RunForever
 {
-  let output = match signature.output {
+  match output {
     Some(written) => match written {
       Returns(annotation) => "-> ${show_type_expression(annotation)}"
       Lends(mode, annotation) => match mode {
@@ -717,10 +717,15 @@ fn show_signature(signature: syntax.Signature) -> List[String]
     }
     None => ""
   }
+}
+
+fn show_signature(signature: syntax.Signature) -> List[String]
+  uses RunForever
+{
   var parts: List[String] = [
     "${show_definition_name(signature.name)}${show_generics(signature.generics)}",
     show_parameters(signature.parameters),
-    own output,
+    show_output(signature.output),
   ]
   for clause in signature.clauses {
     mut parts.push(show_clause(clause))

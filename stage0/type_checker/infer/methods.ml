@@ -127,7 +127,10 @@ and check_callback_ensures state env (value : Syntax.expression) (base : Syntax.
           (fun ((mode : Language.Mode.t), input) ->
             match mode with Mut -> [ input; input ] | Read | Own -> [ input ])
           function_type.inputs
-        @ if Types.equal function_type.output Types.unit then [] else [ function_type.output ]
+        @
+        match function_type.output with
+        | Returns output when Types.equal output Types.unit -> []
+        | Returns output | Lends (_, output) -> [ output ]
       in
       match List.find_map (fun (argument : Syntax.argument) -> argument.label) arguments with
       | _ when not env.specification ->
@@ -146,7 +149,7 @@ and check_callback_ensures state env (value : Syntax.expression) (base : Syntax.
                  at;
                  name = last.text;
                  inputs = List.map fst function_type.inputs;
-                 has_result = not (Types.equal function_type.output Types.unit);
+                 has_result = function_type.output <> Returns Types.unit;
                  given = List.length arguments;
                })
       | None ->

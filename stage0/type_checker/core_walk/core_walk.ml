@@ -220,29 +220,30 @@ let rec make_deep_visitor visit =
 
 let walk_expression visit node = (make_deep_visitor visit).expression node
 
+let walk_contract visit (contract : Core.contract) =
+  List.iter visit.expression contract.panics_unless;
+  List.iter
+    (fun (requirement : Core.condition Core.conditional) ->
+      visit.expression requirement.clause.value)
+    contract.requires;
+  List.iter
+    (fun (promise : Core.expression Core.conditional) -> visit.expression promise.clause)
+    contract.ensures;
+  List.iter
+    (fun (measure : Core.expression Core.conditional) -> visit.expression measure.clause)
+    contract.decreases;
+  List.iter (fun (cost : Core.cost Core.conditional) -> walk_cost visit cost.clause) contract.costs
+
 let walk_parameter visit (parameter : Core.parameter) =
   Option.iter visit.expression parameter.default;
   Option.iter
-    (fun (contract : Core.callback_contract) -> List.iter visit.expression contract.requires)
+    (fun (callback : Core.callback_contract) -> walk_contract visit callback.contract)
     parameter.callback_contract
 
 let walk_definition_children visit : Core.definition -> unit = function
   | Core.Function { parameters; contract; body } ->
       List.iter (walk_parameter visit) parameters;
-      List.iter visit.expression contract.panics_unless;
-      List.iter
-        (fun (requirement : Core.condition Core.conditional) ->
-          visit.expression requirement.clause.value)
-        contract.requires;
-      List.iter
-        (fun (promise : Core.expression Core.conditional) -> visit.expression promise.clause)
-        contract.ensures;
-      List.iter
-        (fun (measure : Core.expression Core.conditional) -> visit.expression measure.clause)
-        contract.decreases;
-      List.iter
-        (fun (cost : Core.cost Core.conditional) -> walk_cost visit cost.clause)
-        contract.costs;
+      walk_contract visit contract;
       Option.iter (walk_block visit) body
   | Type { defaults; invariants; potential } ->
       List.iter (fun (_, _, value) -> visit.expression value) defaults;

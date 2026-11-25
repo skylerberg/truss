@@ -3260,6 +3260,10 @@ type go inside parentheses:
 | `(fn(Int64) -> Bool cost time O(1))` | Takes constant time |
 | `(fn(element: Element) -> Output requires items.contains(element))` | May rely on a precondition, which the caller proves at each call |
 | `(fn(count: UInt64) -> UInt64 ensures result < count)` | Promises a postcondition of each result, which the caller may rely on |
+| `(fn(index: UInt64) -> Int64 uses Panic unless index < count)` | Panics only where the caller breaks the condition, which the caller proves at each call or uses `Panic` |
+| `(fn(limit: UInt64) cost time O(limit))` | Takes time in proportion to its argument |
+| `(fn(reader: mut Reader) modifies reader.position)` | Changes no part of the reader but its position |
+| `fn(mut Grid, Position) lends mut Cell` | Lends a part of its first argument, as a lending method does |
 
 **A function type takes only functions whose capabilities its `uses`
 names,** exactly as a function declaration uses only the capabilities it
@@ -5044,8 +5048,9 @@ test "a lent part" {
   `ensures` here promises that the shelf keeps its length while the caller
   changes the item, so the test can still index it afterward.
 - In an `ensures`, `final(result)` is the part as the caller left it.
-- A lending method is not a value: a function type cannot lend, since its
-  caller could keep the part too long.
+- A lending method is a value too: `Shelf.first_item` has the type
+  `fn(mut Shelf) lends mut Item`. A call through the value lends a part of
+  its first argument for the rest of the statement, as the method does.
 
 ### Tagged templates
 

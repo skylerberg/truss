@@ -125,7 +125,7 @@ and zonk_function unifier (function_type : Types.function_type) =
   {
     function_type with
     inputs = List.map (fun (mode, type_) -> (mode, zonk unifier type_)) function_type.inputs;
-    output = zonk unifier function_type.output;
+    output = Types.map_result (zonk unifier) function_type.output;
     uses = zonk_capabilities unifier function_type.uses;
   }
 
@@ -198,7 +198,7 @@ let list_unknowns unifier (type_ : Types.ty) =
         collect_trait reference
     | Function { inputs; output; _ } ->
         List.iter (fun (_, type_) -> collect type_) inputs;
-        collect output
+        collect (Types.extract_result_type output)
     | Parameter _ | Never | Integer | Hole | Error _ -> ()
   and collect_argument = function
     | Types.Type type_ -> collect type_
@@ -257,13 +257,17 @@ let rec unify ?(modulo_views = false) unifier (left : Types.ty) (right : Types.t
       && unify_arguments ~modulo_views unifier left.arguments right.arguments
   | Parameter left, Parameter right -> left = right
   | Function left, Function right ->
-      List.sort_uniq compare left.costs = List.sort_uniq compare right.costs
+      left.costs = right.costs && left.modifies = right.modifies
       && List.length left.inputs = List.length right.inputs
       && List.for_all2
            (fun (left_mode, left) (right_mode, right) ->
              left_mode = right_mode && unify unifier left right)
            left.inputs right.inputs
-      && unify unifier left.output right.output
+      && (match (left.output, right.output) with
+        | Returns left, Returns right -> unify unifier left right
+        | Lends (left_mode, left), Lends (right_mode, right) ->
+            left_mode = right_mode && unify unifier left right
+        | Returns _, Lends _ | Lends _, Returns _ -> false)
       && unify_capabilities unifier left.uses right.uses
   | Projection left, Projection right ->
       left.name = right.name

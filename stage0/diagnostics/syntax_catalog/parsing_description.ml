@@ -24,7 +24,8 @@ let show_expected = function
   | Impl_member -> "`fn`, `type`, or `capability` to start a member of the `impl`"
   | Potential_word -> "`potential`; a type's only cost clause is `cost potential expression`"
   | Function_type_clause keyword ->
-      Printf.sprintf "`uses`, `cost`, `requires`, or `ensures`; a function type has no `%s`"
+      Printf.sprintf
+        "`uses`, `cost`, `requires`, `ensures`, or `modifies`; a function type has no `%s`"
         (Token.spell_keyword keyword)
   | Body_start -> "`{` to start the body"
   | Cost_bound -> "a bound: `O(...)`, `<=`, or `==`"
@@ -116,7 +117,9 @@ let find_code : Parsing.problem -> Diagnostic.Code.parser = function
     ->
       Exits_parallel
   | Loop_exit_outside_loop _ | Loop_exit_across_lambda _ -> Misplaced_loop_exit
-  | Misplaced_callback_requires | Misplaced_callback_ensures -> Misplaced_callback_contract
+  | Misplaced_callback_requires | Misplaced_callback_ensures | Misplaced_callback_panic_condition
+  | Misplaced_callback_cost ->
+      Misplaced_callback_contract
   | Misplaced_proof -> Misplaced_proof
   | Misplaced_assert -> Misplaced_assert
   | Parameter_named_result | Lending_parameter_named_final | Function_named_old
@@ -161,7 +164,6 @@ let find_code : Parsing.problem -> Diagnostic.Code.parser = function
   | Mixed_collection | Tuple_pattern_annotation | Rest_not_last ->
       Unexpected_token
   | Function_type_condition | Value_condition_in_when -> Misplaced_condition
-  | Function_type_cost_bound -> Function_type_cost_bound
   | Function_type_needs_names | Function_type_extra_names -> Function_type_names
   | Misplaced_potential -> Misplaced_potential
   | Inclusive_range_without_end | Open_range_outside_brackets _ | Open_range_comma
@@ -239,12 +241,21 @@ let describe_problem : Parsing.problem -> Source.span Description.piece list = f
       say (Printf.sprintf "`%s` cannot leave a branch of a `parallel` block." (show_loop_exit word))
   | Misplaced_callback_requires ->
       say
-        "A function type has a `requires` only as the type of a parameter, where it constrains the \
-         arguments the callee passes its callback."
+        "A function type has a `requires` only as the type of a function's parameter, where it \
+         constrains the arguments the callee passes its callback."
   | Misplaced_callback_ensures ->
       say
-        "A function type has an `ensures` only as the type of a parameter, where it constrains the \
-         results the callback returns to the callee."
+        "A function type has an `ensures` only as the type of a function's parameter, where it \
+         constrains the results the callback returns to the callee."
+  | Misplaced_callback_panic_condition ->
+      say
+        "A function type has `uses Panic unless` a condition only as the type of a function's \
+         parameter, where the callee proves the condition at each call it makes or uses `Panic` \
+         itself."
+  | Misplaced_callback_cost ->
+      say
+        "A function type's cost bound is an integer literal, as in `O(1)` or `<= 2`, except as the \
+         type of a function's parameter: elsewhere the type holds a number and not an expression."
   | Misplaced_proof -> say "A `proof` block is only allowed in a function's body."
   | Misplaced_assert -> say "`assert` is only allowed in tests, theorems, and proofs."
   | Parameter_named_result ->
@@ -443,20 +454,15 @@ let describe_problem : Parsing.problem -> Source.span Description.piece list = f
       say
         "A function type's clauses take no condition: a call through a function value has no type \
          arguments to decide one."
-  | Function_type_cost_bound ->
-      say
-        "An `O(...)`, `<=`, or `==` bound in a function type is an integer literal, as in `O(1)` \
-         or `<= 2`, since the type holds a number and not an expression. State a bound that \
-         depends on a value in the enclosing function's own `cost` clause, which names the \
-         callback's cost as `time(visit)`."
   | Function_type_needs_names ->
       say
-        "A function type with `requires` or `ensures` names every input, as in `fn(index: \
-         UInt64)`, so that its clauses can mention them."
+        "A function type with `requires`, `ensures`, `modifies`, a `Panic unless` condition, or a \
+         cost bound that is not an integer literal names every input, as in `fn(index: UInt64)`, \
+         so that its clauses can mention them."
   | Function_type_extra_names ->
       say
-        "A function type names its inputs only when a `requires` or an `ensures` mentions them; \
-         remove the names, since calls through a function value pass arguments by position."
+        "A function type names its inputs only when a clause can mention them; remove the names, \
+         since calls through a function value pass arguments by position."
   | Parenthesized_type ->
       say "Parentheses around a function type are only for its clauses; remove them."
   | Empty_generic_parameters -> say "Generic parameters cannot be empty."

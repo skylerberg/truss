@@ -1,6 +1,7 @@
 val is_clause_keyword : Token.kind -> bool
 val rank_binary : Syntax.binary -> int
 val parse_type_expression : Cursor.t -> Syntax.type_expression
+val parse_result : Cursor.t -> Syntax.result option
 val parse_path_type : Cursor.t -> Syntax.path_type
 val parse_bounds : Cursor.t -> Syntax.path_type list
 val parse_generics : Cursor.t -> Syntax.generic_parameter list

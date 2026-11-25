@@ -1490,10 +1490,29 @@ let () =
       expect_fine Fixtures.Infer.circle_as_a_function);
   Harness.test "a variant with several fields is not a function, because fields have no order"
     (fun () -> expect_one_diagnostic Fixtures.Infer.rectangle_as_a_function "types.not_a_value");
-  Harness.test "a lending method is not a function value, because a function type cannot lend"
-    (fun () ->
-      expect_one_diagnostic Fixtures.Infer.lending_method_as_a_value "types.not_a_value"
-        ~says:"a function value cannot lend");
+  Harness.test "a function is a value of a function type whose modifies names its parts" (fun () ->
+      let passing changed =
+        "type Reader(text: String, position: UInt64, lines: UInt64)\n\
+         fn Reader.change(mut self)\n\
+        \  modifies " ^ changed
+        ^ "\n\
+           {\n\
+          \  todo\n\
+           }\n\
+           fn step(reader: mut Reader, change: (fn(held: mut Reader) modifies held.position, \
+           held.lines)) {\n\
+          \  change(mut reader)\n\
+           }\n\
+           fn f(reader: mut Reader) {\n\
+          \  step(mut reader, Reader.change)\n\
+           }\n"
+      in
+      expect_fine (passing "self.position");
+      expect_one_diagnostic (passing "self.text") "types.mismatch"
+        ~says:"Expected `(fn(input1: mut Reader) modifies input1.lines, input1.position)`");
+  Harness.test "a lending method is a function value whose type lends" (fun () ->
+      expect_type Fixtures.Infer.lending_method_as_a_value "Box.get" ~occurrence:2
+        "fn(Box) lends Int64");
   Harness.test "a variant is looked up under its type" (fun () ->
       expect_fine Fixtures.Infer.shape_variants_built);
   Harness.test "a constant under a type is read by name" (fun () ->

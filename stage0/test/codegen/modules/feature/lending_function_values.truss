@@ -1,0 +1,42 @@
+type Counter(count: UInt64)
+
+fn Counter.increment(mut self) {
+  self.count = self.count.saturating_add(1)
+}
+
+type Pair(left: Counter, right: Counter, label: String)
+
+fn Pair.left_part(mut self) lends mut Counter {
+  mut self.left
+}
+
+fn Pair.read_label(self) lends String {
+  self.label
+}
+
+fn bump(pair: mut Pair, choose: fn(mut Pair) lends mut Counter) {
+  mut choose(mut pair).increment()
+}
+
+fn bump_at(pair: mut Pair, index: UInt64, choose: (fn(held: mut Pair, at: UInt64) lends mut Counter requires at < 2)) {
+  if index < 2 {
+    mut choose(mut pair, index).increment()
+  }
+}
+
+fn measure(pair: Pair, read: fn(Pair) lends String) -> UInt64 {
+  read(pair).length()
+}
+
+test "a lending method and a lending lambda are function values that lend" {
+  var pair = Pair(left: Counter(count: 0), right: Counter(count: 5), label: "four")
+  bump(mut pair, Pair.left_part)
+  bump(mut pair, fn(held) { mut held.right })
+  bump(mut pair, fn(held) { mut held.right })
+  assert pair.left.count == 1
+  assert pair.right.count == 7
+  bump_at(mut pair, 1, fn(held, at) { if at == 0 { mut held.left } else { mut held.right } })
+  assert pair.right.count == 8
+  assert measure(pair, Pair.read_label) == 4
+  assert measure(pair, fn(held) { held.label }) == 4
+}

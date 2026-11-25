@@ -160,7 +160,7 @@ let lookup_evidence (state : Lowering.state) capability =
 let pass_evidence (state : Lowering.state) ~site capability =
   extend_evidence state ~site capability (lookup_evidence state capability)
 
-let pass_capabilities (state : Lowering.state) ~site capabilities =
+let pass_capabilities (state : Lowering.state) ~site ~has_panic_condition capabilities =
   match capabilities with
   | [] -> Lowered.Constant Null
   | _ ->
@@ -177,18 +177,43 @@ let pass_capabilities (state : Lowering.state) ~site capabilities =
                     (fun capability ->
                       [
                         Lowered.Constant (Capability capability);
-                        pass_evidence state ~site capability;
+                        (if
+                           has_panic_condition
+                           && Path.equal capability Definitions.panic_path
+                           && Option.is_none (Lowering.find_panic_trace state)
+                         then Lowered.Constant Null
+                         else pass_evidence state ~site capability);
                       ])
                     capabilities;
              result = Discarded;
            });
       Lowered.Address { place = Lowered.make_local_place table; writable = false }
 
+let allocate_lending_parameters (state : Lowering.state) (function_type : Ground.function_type) =
+  let lending_locals =
+    List.map
+      (Emit_c.Ir_builder.allocate_local state.builder)
+      (Convention.list_function_value_lending_parameters state.context.env function_type)
+  in
+  ( lending_locals,
+    match (function_type.lends, List.rev lending_locals) with
+    | Some _, site :: record :: slot ->
+        Some
+          {
+            Lowering.slot =
+              (match slot with [ slot ] -> Some (Lowered.make_local_place slot) | _ -> None);
+            part = function_type.result;
+            record = Copy (Lowered.make_local_place record);
+            site = Copy (Lowered.make_local_place site);
+          }
+    | _ -> None )
+
 let lower_nested_function (state : Lowering.state) ~(function_type : Ground.function_type)
     ~(output : Types.result option) ~(captures : (Lowered.place * Ground.ty) list)
     ~(body :
        Lowering.state ->
        captures:Lowered.place list ->
+       lending:Lowering.lending option ->
        (Lowered.place * Language.Mode.t * Ground.ty) list ->
        unit) destination =
   let index = !(state.nested) in
@@ -238,7 +263,7 @@ let lower_nested_function (state : Lowering.state) ~(function_type : Ground.func
         Emit_c.Ir_builder.allocate_local builder (Raw (Nullable_pointer Opaque))
       in
       Lowering.set_result_slot inner
-        (Convention.classify_result state.context.env function_type.result);
+        (fst (Convention.classify_function_value_result state.context.env function_type));
       let parameter_places =
         List.map
           (fun ((mode : Language.Mode.t), ty) ->
@@ -246,6 +271,7 @@ let lower_nested_function (state : Lowering.state) ~(function_type : Ground.func
           function_type.parameters
       in
       let capabilities = Emit_c.Ir_builder.allocate_local builder Convention.capabilities in
+      let lending_locals, lending = allocate_lending_parameters inner function_type in
       let environment_pointer =
         Emit_c.Ir_builder.allocate_local builder
           (Pointer { target = Environment index; writable = false })
@@ -267,10 +293,12 @@ let lower_nested_function (state : Lowering.state) ~(function_type : Ground.func
                  projections = [ Deref; Field name; Deref ];
                })
              captured)
+        ~lending
         (List.map (fun ((_, place), mode, ty) -> (place, mode, ty)) parameter_places);
       Lowering.finish_function inner ~first:[ environment_parameter ]
         ~rest:
-          (List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ [ capabilities ])
+          (List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places
+          @ [ capabilities ] @ lending_locals)
         ())
 
 let is_unreachable_panic (state : Lowering.state) capabilities =
@@ -279,15 +307,17 @@ let is_unreachable_panic (state : Lowering.state) capabilities =
   && List.exists (Path.equal Definitions.panic_path) capabilities
 
 let lower_indirect_call state ~(function_type : Ground.function_type) ~(value : Lowered.place) ~site
-    (places : Lowered.place list) destination =
-  if is_unreachable_panic state function_type.uses then Lowering.emit_unreachable_block state
+    ~has_panic_condition ?(lending = []) (places : Lowered.place list) destination =
+  if (not has_panic_condition) && is_unreachable_panic state function_type.uses then
+    Lowering.emit_unreachable_block state
   else
     let passed =
       List.concat
         (List.map2
            (fun ((mode : Language.Mode.t), ty) place -> Option.to_list (pass state mode ty place))
            function_type.parameters places)
-      @ [ pass_capabilities state ~site function_type.uses ]
+      @ [ pass_capabilities state ~site ~has_panic_condition function_type.uses ]
+      @ lending
     in
     let target =
       Lowered.Indirect
@@ -304,10 +334,11 @@ let lower_indirect_call state ~(function_type : Ground.function_type) ~(value : 
            arguments = passed;
            result =
              Convention.make_destination
-               (Convention.classify_result state.context.env function_type.result)
+               (fst (Convention.classify_function_value_result state.context.env function_type))
                destination;
          });
-    if function_type.result = Never then Lowering.emit_unreachable_block state
+    if not (snd (Convention.classify_function_value_result state.context.env function_type)) then
+      Lowering.emit_unreachable_block state
 
 let run_in_type_definition (state : Lowering.state) ~(source : Resolve.Names.key) (ty : Ground.ty)
     nested_function =

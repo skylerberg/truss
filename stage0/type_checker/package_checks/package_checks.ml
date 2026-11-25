@@ -286,7 +286,8 @@ let grows lookups (start : Path.t) =
                    arguments)
               @ List.concat_map list_targets arguments
           | Types.Function { inputs; output; _ } ->
-              List.concat_map (fun (_, type_) -> list_targets type_) inputs @ list_targets output
+              List.concat_map (fun (_, type_) -> list_targets type_) inputs
+              @ list_targets (Types.extract_result_type output)
           | _ -> []
         in
         List.concat_map (fun (_, (field : Types.field)) -> list_targets field.field_type) fields

@@ -26,6 +26,9 @@ val lower_implementation_evidence :
 
 val lookup_evidence : Lowering.state -> Path.t -> Lowered.operand
 
+val allocate_lending_parameters :
+  Lowering.state -> Ground.function_type -> Lowered.local list * Lowering.lending option
+
 val lower_nested_function :
   Lowering.state ->
   function_type:Ground.function_type ->
@@ -34,6 +37,7 @@ val lower_nested_function :
   body:
     (Lowering.state ->
     captures:Lowered.place list ->
+    lending:Lowering.lending option ->
     (Lowered.place * Language.Mode.t * Ground.ty) list ->
     unit) ->
   Lowered.place ->
@@ -44,6 +48,8 @@ val lower_indirect_call :
   function_type:Ground.function_type ->
   value:Lowered.place ->
   site:Lowered.site option ->
+  has_panic_condition:bool ->
+  ?lending:Lowered.operand list ->
   Lowered.place list ->
   Lowered.place ->
   unit

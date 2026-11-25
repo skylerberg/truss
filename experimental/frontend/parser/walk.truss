@@ -39,7 +39,9 @@ fn walk_type_expression(cursor: mut TokenCursor, visitor: Visitor, written: synt
         walk_type_expression(mut cursor, visitor, written: input.annotation)
       }
       if function_type.output is Some(output) {
-        walk_type_expression(mut cursor, visitor, written: output)
+        match output {
+          Returns(annotation) | Lends(annotation, ..) => walk_type_expression(mut cursor, visitor, written: annotation)
+        }
       }
       for clause in function_type.clauses {
         walk_clause(mut cursor, visitor, clause)

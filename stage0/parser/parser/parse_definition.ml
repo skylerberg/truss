@@ -87,19 +87,6 @@ let parse_parameters cursor ~method_ =
     parameters;
   parameters
 
-let parse_result cursor =
-  if Cursor.accept_punctuation cursor Arrow then
-    Some (Syntax.Returns (Parse_expression.parse_type_expression cursor))
-  else if Cursor.accept_keyword cursor Lends then begin
-    let own = Cursor.peek cursor in
-    let mode = Atoms.parse_mode cursor in
-    if mode = Some Own then
-      Cursor.report cursor own.span
-        (Lends_own { removed = Source.make_span own.span.start (Cursor.peek cursor).span.start });
-    Some (Lends (mode, Parse_expression.parse_type_expression cursor))
-  end
-  else None
-
 let parse_clauses cursor =
   let rec gather clauses =
     let start = Cursor.index cursor in
@@ -169,7 +156,7 @@ let parse_body cursor =
 let parse_signature cursor ~name ~method_ : Syntax.signature =
   let generics = Parse_expression.parse_generics cursor in
   let parameters = parse_parameters cursor ~method_ in
-  let result = parse_result cursor in
+  let result = Parse_expression.parse_result cursor in
   let clauses = parse_clauses cursor in
   { name; generics; parameters; result; clauses }
 

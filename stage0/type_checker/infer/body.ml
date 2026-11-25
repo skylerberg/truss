@@ -76,7 +76,8 @@ let declare_parameters state (written : Syntax.parameter list) (signature : Type
 let classify_self_mode (signature : Types.signature) =
   match signature.receiver with Some (mode, _) -> mode | None -> Language.Mode.Read
 
-let check_clauses state env ~uses (clauses : Syntax.clause list) =
+let check_clauses ?(check_cost = Clauses.check_cost) state env ~uses (clauses : Syntax.clause list)
+    =
   List.iter
     (fun (clause : Syntax.clause) ->
       Clauses.check_under_condition state ~id:clause.id clause.condition (fun () ->
@@ -84,7 +85,7 @@ let check_clauses state env ~uses (clauses : Syntax.clause list) =
           | Requires value | Ensures value -> Clauses.check_condition state env value
           | Decreases measures -> Clauses.check_measures state env measures
           | Cost cost ->
-              Clauses.check_cost state env cost;
+              check_cost state env cost;
               if cost.resource = Metric Time then Clauses.check_time_terminates state clause ~uses
           | Uses uses ->
               List.iter
@@ -96,16 +97,11 @@ let check_clauses state env ~uses (clauses : Syntax.clause list) =
 
 let check_callback_contracts state env (written : Syntax.parameter list)
     (signature : Types.signature) =
-  let env = { env with State.specification = true } in
   List.iter
     (fun (parameter : Syntax.parameter) ->
       match parameter.kind with
-      | Named_parameter { name; type_ = { kind = Function_type { inputs; clauses; _ }; _ }; _ }
-        when List.for_all (fun (input : Syntax.function_input) -> Option.is_some input.name) inputs
-             && List.exists
-                  (fun (clause : Syntax.clause) ->
-                    match clause.kind with Requires _ | Ensures _ -> true | _ -> false)
-                  clauses -> (
+      | Named_parameter { name; type_ = { kind = Function_type written_type; _ }; _ }
+        when Syntax_walk.has_callback_contract written_type -> (
           match
             List.find_opt
               (fun (info : Types.parameter_info) -> info.name = name.text)
@@ -117,19 +113,10 @@ let check_callback_contracts state env (written : Syntax.parameter list)
                   Option.iter
                     (fun input_name -> State.declare state input_name type_ ~binding:Let ~mode)
                     input.name)
-                inputs elaborated.inputs;
-              let check_clause env (value : Syntax.expression) =
-                Solver.run_in_statement state env (Written value.id) (fun () ->
-                    Expressions.check state env value Types.bool)
-              in
-              List.iter
-                (fun (clause : Syntax.clause) ->
-                  match clause.kind with
-                  | Requires value -> check_clause env value
-                  | Ensures value ->
-                      check_clause { env with output = Some (Returns elaborated.output) } value
-                  | _ -> ())
-                clauses
+                written_type.inputs elaborated.inputs;
+              check_clauses ~check_cost:Clauses.check_cost_bound state
+                { env with output = Some elaborated.output }
+                ~uses:elaborated.uses written_type.clauses
           | _ -> ())
       | _ -> ())
     written
@@ -402,6 +389,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
   let context =
     Interface.Elaborator.create lookups.interface resolved
       (Interface.Impls.read_scope lookups.interface key)
+      ~package:key.module_.package
   in
   let state : State.state =
     {

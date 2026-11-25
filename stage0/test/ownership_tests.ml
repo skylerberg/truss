@@ -62,6 +62,34 @@ let () =
          \  scanner = own other\n\
           }\n")
         "ownership.undeclared_change" ~says:"All of `scanner` changes here");
+  Harness.test "a lambda changes only the parts that its function type's modifies names" (fun () ->
+      let stepping body =
+        "type Reader(text: String, position: UInt64, lines: UInt64)\n\
+         fn step(reader: mut Reader, change: (fn(held: mut Reader) modifies held.position)) {\n\
+        \  change(mut reader)\n\
+         }\n\
+         fn f(reader: mut Reader) {\n\
+        \  step(mut reader, fn(held) { " ^ body ^ " })\n}\n"
+      in
+      expect_fine (stepping "held.position = 0");
+      expect_one_diagnostic (stepping "held.lines = 0") "ownership.undeclared_change"
+        ~says:
+          "`held.lines` changes here, and the `modifies` clause of this lambda's type, \
+           `(fn(input1: mut Reader) modifies input1.position)`, does not name it.");
+  Harness.test "a lambda of a function type that lends lends a part of its first input" (fun () ->
+      let choosing body =
+        "type Named(name: String, other: String)\n\
+         fn choose(first: mut Named, second: mut Named, pick: fn(mut Named, mut Named) lends mut \
+         String) -> UInt64 {\n\
+        \  pick(mut first, mut second).length()\n\
+         }\n\
+         fn f(first: mut Named, second: mut Named) -> UInt64 {\n\
+        \  choose(mut first, mut second, " ^ body ^ ")\n}\n"
+      in
+      expect_fine (choosing "fn(held, _) { mut held.name }");
+      expect_one_diagnostic
+        (choosing "fn(_, held) { mut held.name }")
+        "ownership.lends_other_parameter" ~says:"This lends a part of `held`");
   Harness.test "a modifies entry that the body never changes is a warning" (fun () ->
       let scanner = "public type Scanner(position: UInt64, count: UInt64)\n" in
       let changing ~parts ~body =

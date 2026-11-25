@@ -42,8 +42,8 @@ let () =
         ~at:"modifies a.c";
       Parse_support.expect_error "fn f(a: mut A) modifies a.b when A: Display {}"
         ~code:Unexpected_token ~at:"when";
-      Parse_support.expect_error "fn f(visit: (fn(mut A) modifies a.b)) {}" ~code:Unexpected_token
-        ~at:"modifies");
+      Parse_support.expect_definition "fn f(visit: (fn(a: mut A) modifies a.b)) {}"
+        "(fn f ((visit: (fn (a: mut A) (modifies (. a b))))) (block))");
   Harness.test "a missing body gets { todo }" (fun () ->
       Parse_support.expect_error "fn f() -> Int64\nfn g() {}" ~code:Missing_body ~at:"\nfn g"
         ~fixed:("Int64", "Int64 { todo }"));

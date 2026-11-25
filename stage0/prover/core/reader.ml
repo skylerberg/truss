@@ -424,6 +424,15 @@ let evaluate_call_values context frame run (invocation : Invocation.t)
                })
        arguments)
 
+let find_function_value context frame run (call : Mir.call) =
+  match call.callee.target with
+  | Indirect callee ->
+      Some
+        ( compute_operand_type context frame callee,
+          Validity.run_reading_callback context (fun () -> read_operand context frame run callee),
+          classify_shape run callee )
+  | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> None
+
 let read_call context frame run (call : Mir.call) ~result_type =
   let invocation = make_invocation call.callee ~lends:None in
   match (invocation.callee, call.arguments) with
@@ -446,16 +455,7 @@ let read_call context frame run (call : Mir.call) ~result_type =
             (read_operand context frame run tested)
             text )
   | _ ->
-      let through =
-        match call.callee.target with
-        | Indirect callee ->
-            Some
-              ( compute_operand_type context frame callee,
-                Validity.run_reading_callback context (fun () ->
-                    read_operand context frame run callee),
-                classify_shape run callee )
-        | _ -> None
-      in
+      let through = find_function_value context frame run call in
       let values = evaluate_call_values context frame run invocation call.arguments in
       Calls.apply_call context frame
         { origin = call.origin; type_ = result_type }
@@ -465,9 +465,10 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
   let mode = match run.infos.(part).kind with Lent mode -> mode | _ -> Language.Mode.Read in
   let invocation = make_invocation call.callee ~lends:(Some mode) in
   let site : Invocation.site = { origin = call.origin; type_ = run.infos.(part).type_ } in
+  let through = find_function_value context frame run call in
   let values = evaluate_call_values context frame run invocation call.arguments in
   let lend ?leave_lent frame =
-    Calls.apply_call ?leave_lent context frame site invocation ~through:None values
+    Calls.apply_call ?leave_lent context frame site invocation ~through values
   in
   let lent, write_back =
     match (invocation.lends, invocation.callee) with
@@ -587,7 +588,12 @@ let lend_part context (frame : State.frame) origin (mode : Language.Mode.t) ~han
     ~write_back =
   let location = Facts.locate context frame.source origin in
   match (context.lending, frame.yielded_so_far) with
-  | Some { part_type; part_postconditions; _ }, Some before ->
+  | Some { part_type; part_postconditions; _ }, yielded_so_far ->
+      let before =
+        match yielded_so_far with
+        | Some before -> before
+        | None -> Intrinsics.make_empty_parts context frame part_type
+      in
       List.iter
         (fun (clause : Mir.formula) ->
           let _, term =
@@ -695,6 +701,8 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       Lambdas.translate_lambda context frame ~site
         { code = run.lambdas.(body); lambdas = run.lambdas }
         ~list_facts:(fun _ -> [])
+        ~list_panic_conditions:(fun _ -> [])
+        ~list_costs:(fun _ -> [])
         ~list_promises:(fun ~entries:_ ~exits:_ ~result:_ -> [])
   | Specification Result -> (
       match frame.result with

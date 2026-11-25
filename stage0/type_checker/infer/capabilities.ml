@@ -518,7 +518,7 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
               State.raise_bug "a capability's base has a condition")
         uses
       || List.exists (fun (_, input) -> can_call_inside input) inputs
-      || can_call_inside output
+      || can_call_inside (Types.extract_result_type output)
   | Types.Parameter parameter ->
       List.exists has_a_method_that_uses (Interface.Properties.Bounds.list list_bounds parameter)
   | Types.Named { path; arguments = type_arguments } -> (
@@ -630,31 +630,18 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
          })
   in
   let check_specification = check_expression checking (make_no_capabilities_scope Specification) in
+  let check_contract =
+    Core_walk.walk_contract { Core_walk.ignore_all with expression = check_specification }
+  in
   (match form.definition with
   | Function { parameters; contract; _ } ->
       List.iter
         (fun (parameter : Core.parameter) ->
           Option.iter
-            (fun (contract : Core.callback_contract) ->
-              List.iter check_specification contract.requires)
+            (fun (callback : Core.callback_contract) -> check_contract callback.contract)
             parameter.callback_contract)
         parameters;
-      List.iter check_specification contract.panics_unless;
-      List.iter
-        (fun (requirement : Core.condition Core.conditional) ->
-          check_specification requirement.clause.value)
-        contract.requires;
-      List.iter
-        (fun (promise : Core.expression Core.conditional) -> check_specification promise.clause)
-        contract.ensures;
-      List.iter
-        (fun (measure : Core.expression Core.conditional) -> check_specification measure.clause)
-        contract.decreases;
-      List.iter
-        (fun (cost : Core.cost Core.conditional) ->
-          match cost.clause.bound with
-          | Order_of value | At_most value | Exactly value -> check_specification value)
-        contract.costs
+      check_contract contract
   | Type { invariants; potential; _ } ->
       List.iter (fun (invariant : Core.condition) -> check_specification invariant.value) invariants;
       Option.iter check_specification potential

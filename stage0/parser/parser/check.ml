@@ -68,19 +68,32 @@ and check_types ?(parameter = false) cursor context type_ =
 
 and check_placement cursor ~top (type_ : Syntax.type_expression) =
   match type_.kind with
-  | Function_type { inputs; output; clauses; _ } ->
+  | Function_type { inputs; result; clauses; _ } ->
       if not top then
         List.iter
           (fun (clause : Syntax.clause) ->
             match clause.kind with
             | Requires _ -> report cursor clause.id Misplaced_callback_requires
             | Ensures _ -> report cursor clause.id Misplaced_callback_ensures
-            | _ -> ())
+            | Uses uses ->
+                List.iter
+                  (fun (use : Syntax.capability_use) ->
+                    match use.unless_values with
+                    | first :: _ -> report cursor first.id Misplaced_callback_panic_condition
+                    | [] -> ())
+                  uses
+            | Cost { bound = (Big_o amount | At_most amount | Exactly amount) as bound; _ }
+              when not (Syntax_walk.is_literal_bound bound) ->
+                report cursor amount.id Misplaced_callback_cost
+            | Cost _ | Decreases _ | Modifies _ | Clause_error -> ())
           clauses;
       List.iter
         (fun (input : Syntax.function_input) -> check_placement cursor ~top:false input.type_)
         inputs;
-      Option.iter (check_placement cursor ~top:false) output
+      Option.iter
+        (function
+          | Syntax.Returns type_ | Lends (_, type_) -> check_placement cursor ~top:false type_)
+        result
   | Path_type path -> check_path_placement cursor path
   | View_type viewed -> check_placement cursor ~top:false viewed
   | Self_type _ | Associated _ | Type_error -> ()
@@ -137,14 +150,15 @@ and check_statement_parts cursor context (parent : Syntax.statement) =
   Syntax_walk.visit_statement_parts ~on_expression:(check_expression cursor context)
     ~on_statement:(check_statement cursor context) parent
 
-let check_parameters ?(lends = false) cursor (parameters : Syntax.parameter list) =
+let check_parameters ?(lends = false) ?(takes_callback_contracts = true) cursor
+    (parameters : Syntax.parameter list) =
   List.iter
     (fun (parameter : Syntax.parameter) ->
       match parameter.kind with
       | Named_parameter { name; type_; default; _ } ->
           if name.text = "result" then report cursor name.id Parameter_named_result;
           if lends && name.text = "final" then report cursor name.id Lending_parameter_named_final;
-          check_types ~parameter:true cursor plain type_;
+          check_types ~parameter:takes_callback_contracts cursor plain type_;
           Option.iter (check_expression cursor plain) default
       | Self_parameter _ | Parameter_error -> ())
     parameters
@@ -256,7 +270,7 @@ let check_definition cursor (definition : Syntax.definition) =
         (fun (member : Syntax.trait_member Syntax.node) ->
           match member.kind with
           | Law law ->
-              check_parameters cursor law.parameters;
+              check_parameters ~takes_callback_contracts:false cursor law.parameters;
               List.iter (check_expression cursor (enter_specification plain)) law.requires;
               check_block cursor (enter_specification plain) law.body
           | Associated_type _ | Associated_capability _ | Trait_member_error -> ())

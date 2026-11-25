@@ -14,11 +14,12 @@ type t = {
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability_set) list;
   is_in_capability : bool;
+  checked_package : Path.package option;
   diagnostics : Catalog.diagnostic list ref;
   named : (Syntax.id * Types.ty) list ref;
 }
 
-let create_with lookups resolved (scope : _ Environment.scope) ~known_bounds =
+let create_with ?checked_package lookups resolved (scope : _ Environment.scope) ~known_bounds =
   let bounds = Parameter_table.create 8 in
   List.iter
     (fun (parameter, traits) -> Parameter_table.replace bounds parameter traits)
@@ -39,6 +40,7 @@ let create_with lookups resolved (scope : _ Environment.scope) ~known_bounds =
     self_associated = scope.self_associated;
     self_capabilities = scope.self_capabilities;
     is_in_capability = false;
+    checked_package;
     diagnostics = ref [];
     named = ref [];
   }
@@ -46,8 +48,9 @@ let create_with lookups resolved (scope : _ Environment.scope) ~known_bounds =
 let create_declared lookups resolved (scope : Environment.declared_bounds Environment.scope) =
   create_with lookups resolved scope ~known_bounds:Properties.Bounds.none
 
-let create lookups resolved (scope : Environment.known_bounds Environment.scope) =
-  create_with lookups resolved scope ~known_bounds:(Properties.Bounds.of_known scope.bounds)
+let create lookups resolved (scope : Environment.known_bounds Environment.scope) ~package =
+  create_with ~checked_package:package lookups resolved scope
+    ~known_bounds:(Properties.Bounds.of_known scope.bounds)
 
 let list_bounds context parameter =
   let declared = Option.value ~default:[] (Parameter_table.find_opt context.bounds parameter) in
@@ -147,6 +150,164 @@ let resolve_parameter context (name : Syntax.name) =
 let show_path (path : Syntax.path) =
   String.concat "."
     (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
+
+let rec split_field_path (value : Syntax.expression) =
+  match value.kind with
+  | Name name -> Some (name.text, [])
+  | Self_value -> Some ("self", [])
+  | Member (base, field) ->
+      Option.map (fun (root, fields) -> (root, fields @ [ field ])) (split_field_path base)
+  | _ -> None
+
+let split_part (value : Syntax.expression) =
+  match value.kind with
+  | Bracket (base, [ Item { kind = Range { start = None; stop = None; _ }; _ } ]) ->
+      Option.map (fun (root, fields) -> (root, fields, true)) (split_field_path base)
+  | _ -> Option.map (fun (root, fields) -> (root, fields, false)) (split_field_path value)
+
+let elaborate_modifies context ~(parameters : (string option * Language.Mode.t) list)
+    (clauses : Syntax.clause list) =
+  let report diagnostic = ignore (record_diagnostic context.diagnostics diagnostic) in
+  let rec has_index (value : Syntax.expression) =
+    match value.kind with
+    | Bracket _ -> true
+    | Member (base, _) | Call (base, _) | Parenthesized base -> has_index base
+    | _ -> false
+  in
+  let rec is_resolved (value : Syntax.expression) =
+    match value.kind with
+    | Name name -> Option.is_some (find_target context name)
+    | Member (base, _) -> is_resolved base
+    | _ -> true
+  in
+  let elaborate_entry (value : Syntax.expression) =
+    let at : Core.origin = Written value.id in
+    match split_part value with
+    | None ->
+        report
+          (if has_index value then Indexed_modified_part { at } else Not_a_modified_part { at });
+        None
+    | Some (parameter, names, is_elements) -> (
+        let fields = List.map (fun (name : Syntax.name) -> name.text) names in
+        let part position : Types.modified = { position; field_path = fields; is_elements } in
+        match List.find_index (fun (name, _) -> name = Some parameter) parameters with
+        | None ->
+            if is_resolved value then report (Modified_non_parameter { at; name = parameter });
+            None
+        | Some position when snd (List.nth parameters position) <> Mut ->
+            report (Read_only_part { at; parameter; part = part position });
+            None
+        | Some _ when fields = [] && not is_elements ->
+            report (Modified_whole_parameter { at; parameter });
+            None
+        | Some position -> Some (value, parameter, part position))
+  in
+  let is_contained ~index (part : Types.modified) ~other_index (other : Types.modified) =
+    other_index <> index
+    && Types.is_part_within ~container:other part
+    && (other <> part || other_index < index)
+  in
+  List.concat_map
+    (fun (clause : Syntax.clause) ->
+      match clause.kind with
+      | Modifies entries -> (
+          let entry_parts = List.map elaborate_entry entries in
+          match List.filter_map Fun.id entry_parts with
+          | parts when List.length parts < List.length entry_parts -> []
+          | parts ->
+              let numbered_parts = List.mapi (fun index part -> (index, part)) parts in
+              List.filter_map
+                (fun (index, ((value : Syntax.expression), parameter, (part : Types.modified))) ->
+                  match
+                    List.find_map
+                      (fun (other_index, (_, _, other)) ->
+                        if is_contained ~index part ~other_index other then Some other else None)
+                      numbered_parts
+                  with
+                  | Some (container : Types.modified) ->
+                      report
+                        (Repeated_part
+                           {
+                             at = Written value.id;
+                             parameter;
+                             part;
+                             container;
+                             siblings =
+                               Catalog.read_entry_siblings
+                                 (List.map
+                                    (fun (entry : Syntax.expression) ->
+                                      { Catalog.covering = [ Core.Written entry.id ] })
+                                    entries)
+                                 index;
+                           });
+                      None
+                  | None -> Some part)
+                numbered_parts)
+      | Uses _ | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> [])
+    clauses
+
+let check_modified_parts lookups ~package ~(report : Catalog.Typing.t -> unit)
+    ~(parameters : (string option * Types.ty) list) (modifies : Types.modified list)
+    (clauses : Syntax.clause list) =
+  let check_entry (value : Syntax.expression) =
+    match split_part value with
+    | None -> ()
+    | Some (parameter, names, is_elements) -> (
+        let fields = List.map (fun (name : Syntax.name) -> name.text) names in
+        match List.find_index (fun (name, _) -> name = Some parameter) parameters with
+        | Some position when List.mem { Types.position; field_path = fields; is_elements } modifies
+          -> (
+            match
+              Definition.find_field_path_type lookups ~package
+                (snd (List.nth parameters position))
+                fields
+            with
+            | Ok type_
+              when is_elements
+                   && not
+                        (Types.is_error type_
+                        || Option.is_some (Types.find_sequence_element type_)
+                        || Types.is_builtin Storage type_) ->
+                report (Part_without_elements { at = Written value.id; parameter; fields; type_ })
+            | Ok _ | Error Broken_type -> ()
+            | Error (No_fields { type_; prefix }) ->
+                report
+                  (Fieldless_part
+                     {
+                       at = Written value.id;
+                       parameter;
+                       prefix;
+                       fields;
+                       type_;
+                       has_variants = false;
+                     })
+            | Error (Variant_fields { type_; prefix }) ->
+                report
+                  (Fieldless_part
+                     {
+                       at = Written value.id;
+                       parameter;
+                       prefix;
+                       fields;
+                       type_;
+                       has_variants = true;
+                     })
+            | Error (Hidden_fields type_) -> report (Opaque_part { at = Written value.id; type_ })
+            | Error (Unknown_field { type_; field; candidates }) ->
+                let at : Core.origin =
+                  match List.find_opt (fun (name : Syntax.name) -> name.text = field) names with
+                  | Some name -> Written name.id
+                  | None -> Written value.id
+                in
+                report (Unknown_part_field { at; type_; field; candidates }))
+        | Some _ | None -> ())
+  in
+  List.iter
+    (fun (clause : Syntax.clause) ->
+      match clause.kind with
+      | Modifies entries -> List.iter check_entry entries
+      | Uses _ | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> ())
+    clauses
 
 let find_literal_bound (bound : Syntax.bound) : Types.cost_bound option =
   match bound with
@@ -492,14 +653,44 @@ and elaborate_function_type context (written : Syntax.function_type) :
         (mode, elaborate_type context input.type_))
       written.inputs
   in
-  let output =
-    match written.output with Some output -> elaborate_type context output | None -> Types.unit
-  in
+  let output = elaborate_result context written.result in
   let uses = elaborate_uses context written.clauses in
   report_time_of_run_forever context ~uses written.clauses;
+  let names =
+    List.map
+      (fun (input : Syntax.function_input) ->
+        Option.map (fun (name : Syntax.name) -> name.text) input.name)
+      written.inputs
+  in
+  let modifies =
+    elaborate_modifies context
+      ~parameters:(List.map2 (fun name (mode, _) -> (name, mode)) names inputs)
+      written.clauses
+  in
+  Option.iter
+    (fun package ->
+      check_modified_parts context.lookups ~package
+        ~report:(fun diagnostic -> ignore (record_diagnostic context.diagnostics diagnostic))
+        ~parameters:(List.map2 (fun name (_, type_) -> (name, type_)) names inputs)
+        modifies written.clauses)
+    context.checked_package;
   match elaborate_costs context written.clauses with
-  | Ok costs -> Ok { inputs; output; uses; costs = List.sort_uniq compare costs }
+  | Ok costs ->
+      Ok
+        {
+          inputs;
+          output;
+          uses;
+          costs = List.sort_uniq compare costs;
+          modifies = List.sort_uniq compare modifies;
+        }
   | Error report -> Error report
+
+and elaborate_result context (written : Syntax.result option) =
+  match written with
+  | None -> Types.Returns Types.unit
+  | Some (Returns result) -> Types.Returns (elaborate_type context result)
+  | Some (Lends (mode, result)) -> Types.Lends (elaborate_mode mode, elaborate_type context result)
 
 and report_time_of_run_forever context ~uses (clauses : Syntax.clause list) =
   if Types.has_capability (Built_in Run_forever) uses then
@@ -580,15 +771,12 @@ and elaborate_costs context clauses : (Types.cost list, Catalog.reported) Stdlib
               | Calls (Call_parameter name) ->
                   report_error (Calls_through_parameter { at = Written name.id; name = name.text })
             in
-            let bound =
-              match find_literal_bound cost.bound with
-              | Some bound -> bound
-              | None -> raise_bug "a function type's cost bound is not an integer literal"
-            in
-            Some
-              (Result.map
-                 (fun resource -> { Types.amortized = cost.amortized; resource; bound })
-                 resource)
+            begin match (resource, find_literal_bound cost.bound) with
+            | Error report, _ -> Some (Error report)
+            | Ok resource, Some bound ->
+                Some (Ok { Types.amortized = cost.amortized; resource; bound })
+            | Ok _, None -> None
+            end
         | _ -> None)
       clauses
   in
@@ -844,100 +1032,6 @@ let report_time_of_parameters_that_run_forever context ~(parameters : Types.para
       | _ -> ())
     clauses
 
-let rec split_field_path (value : Syntax.expression) =
-  match value.kind with
-  | Name name -> Some (name.text, [])
-  | Self_value -> Some ("self", [])
-  | Member (base, field) ->
-      Option.map (fun (root, fields) -> (root, fields @ [ field ])) (split_field_path base)
-  | _ -> None
-
-let split_part (value : Syntax.expression) =
-  match value.kind with
-  | Bracket (base, [ Item { kind = Range { start = None; stop = None; _ }; _ } ]) ->
-      Option.map (fun (root, fields) -> (root, fields, true)) (split_field_path base)
-  | _ -> Option.map (fun (root, fields) -> (root, fields, false)) (split_field_path value)
-
-let elaborate_modifies context (signature : Types.signature) (clauses : Syntax.clause list) =
-  let report diagnostic = ignore (record_diagnostic context.diagnostics diagnostic) in
-  let rec has_index (value : Syntax.expression) =
-    match value.kind with
-    | Bracket _ -> true
-    | Member (base, _) | Call (base, _) | Parenthesized base -> has_index base
-    | _ -> false
-  in
-  let rec is_resolved (value : Syntax.expression) =
-    match value.kind with
-    | Name name -> Option.is_some (find_target context name)
-    | Member (base, _) -> is_resolved base
-    | _ -> true
-  in
-  let elaborate_entry (value : Syntax.expression) =
-    let at : Core.origin = Written value.id in
-    match split_part value with
-    | None ->
-        report
-          (if has_index value then Indexed_modified_part { at } else Not_a_modified_part { at });
-        None
-    | Some (parameter, names, is_elements) -> (
-        let fields = List.map (fun (name : Syntax.name) -> name.text) names in
-        let part position : Types.modified = { position; field_path = fields; is_elements } in
-        match Types.find_parameter_position signature parameter with
-        | None ->
-            if is_resolved value then report (Modified_non_parameter { at; name = parameter });
-            None
-        | Some position when (Types.read_parameter_at signature position).mode <> Mut ->
-            report (Read_only_part { at; parameter; part = part position });
-            None
-        | Some _ when fields = [] && not is_elements ->
-            report (Modified_whole_parameter { at; parameter });
-            None
-        | Some position -> Some (value, parameter, part position))
-  in
-  let is_contained ~index (part : Types.modified) ~other_index (other : Types.modified) =
-    other_index <> index
-    && Types.is_part_within ~container:other part
-    && (other <> part || other_index < index)
-  in
-  List.concat_map
-    (fun (clause : Syntax.clause) ->
-      match clause.kind with
-      | Modifies entries -> (
-          let entry_parts = List.map elaborate_entry entries in
-          match List.filter_map Fun.id entry_parts with
-          | parts when List.length parts < List.length entry_parts -> []
-          | parts ->
-              let numbered_parts = List.mapi (fun index part -> (index, part)) parts in
-              List.filter_map
-                (fun (index, ((value : Syntax.expression), parameter, (part : Types.modified))) ->
-                  match
-                    List.find_map
-                      (fun (other_index, (_, _, other)) ->
-                        if is_contained ~index part ~other_index other then Some other else None)
-                      numbered_parts
-                  with
-                  | Some (container : Types.modified) ->
-                      report
-                        (Repeated_part
-                           {
-                             at = Written value.id;
-                             parameter;
-                             part;
-                             container;
-                             siblings =
-                               Catalog.read_entry_siblings
-                                 (List.map
-                                    (fun (entry : Syntax.expression) ->
-                                      { Catalog.covering = [ Core.Written entry.id ] })
-                                    entries)
-                                 index;
-                           });
-                      None
-                  | None -> Some part)
-                numbered_parts)
-      | Uses _ | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> [])
-    clauses
-
 let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signature) :
     Types.signature =
   let own = elaborate_generics context owner written.generics in
@@ -964,12 +1058,7 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
         | Self_parameter _ | Parameter_error -> None)
       written.parameters
   in
-  let output =
-    match written.result with
-    | None -> Types.Returns Types.unit
-    | Some (Returns result) -> Types.Returns (elaborate_type context result)
-    | Some (Lends (mode, result)) -> Types.Lends (elaborate_mode mode, elaborate_type context result)
-  in
+  let output = elaborate_result context written.result in
   let uses = elaborate_uses context written.clauses in
   report_time_of_run_forever context ~uses written.clauses;
   report_time_of_parameters_that_run_forever context ~parameters written.clauses;
@@ -999,7 +1088,17 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
       capture_free_parameters = Types.list_capture_free_parameters parameters;
     }
   in
-  { signature with modifies = elaborate_modifies context signature written.clauses }
+  {
+    signature with
+    modifies =
+      elaborate_modifies context
+        ~parameters:
+          (Option.to_list (Option.map (fun (mode, _) -> (Some "self", mode)) receiver)
+          @ List.map
+              (fun (parameter : Types.parameter_info) -> (Some parameter.name, parameter.mode))
+              parameters)
+        written.clauses;
+  }
 
 let elaborate_type_head context owner (head : Syntax.type_head) =
   let generics = elaborate_generics context owner head.generics in

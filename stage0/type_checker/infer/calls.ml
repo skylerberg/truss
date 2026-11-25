@@ -67,7 +67,7 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
       match label_errors with
       | error :: _ -> error
       | [] ->
-          let result = function_type.output in
+          let result = Types.extract_result_type function_type.output in
           State.elaborate state value.id
             (Call
                {
@@ -75,7 +75,7 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
                  arguments = checked;
                  omitted_defaults = [];
                  callee_result = result;
-                 lends = None;
+                 lends = Types.find_lent_mode function_type.output;
                });
           result)
   | Types.Error _ | Types.Hole -> check_arguments_alone state env arguments callee_type

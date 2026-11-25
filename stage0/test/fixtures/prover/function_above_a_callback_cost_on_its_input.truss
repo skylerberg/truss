@@ -1,0 +1,13 @@
+fn pick(count: UInt64, choose: (fn(limit: UInt64) -> UInt64 cost time O(limit))) -> UInt64
+  cost time O(count)
+{
+  choose(count)
+}
+
+fn unstated(limit: UInt64) -> UInt64 {
+  limit
+}
+
+fn passes_it(count: UInt64) -> UInt64 {
+  pick(count, unstated)
+}

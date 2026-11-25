@@ -59,7 +59,8 @@ and ground_function context substitution (function_type : Types.function_type) :
       List.map
         (fun (yield_mode, ty) -> (yield_mode, ground context Types.no_substitution ty))
         function_type.inputs;
-    result = ground context Types.no_substitution function_type.output;
+    result = ground context Types.no_substitution (Types.extract_result_type function_type.output);
+    lends = Types.find_lent_mode function_type.output;
     uses = list_capabilities context Types.no_substitution function_type.uses;
   }
 
@@ -71,9 +72,13 @@ let rec convert_ty : Ground.ty -> Types.ty = function
         {
           inputs =
             List.map (fun (yield_mode, ty) -> (yield_mode, convert_ty ty)) function_type.parameters;
-          output = convert_ty function_type.result;
+          output =
+            (match function_type.lends with
+            | Some mode -> Lends (mode, convert_ty function_type.result)
+            | None -> Returns (convert_ty function_type.result));
           uses = Types.make_capability_set (List.map Types.make_capability function_type.uses);
           costs = [];
+          modifies = [];
         }
 
 and convert_argument : Ground.argument -> Types.argument = function

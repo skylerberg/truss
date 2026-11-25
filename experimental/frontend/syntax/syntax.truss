@@ -74,7 +74,7 @@ internal type TypeArgument =
   | Constraint(name: Name, value: TypeExpression)
   derives Equal
 
-internal type FunctionType(inputs: List[FunctionInput], output: Option[TypeExpression], clauses: List[Clause])
+internal type FunctionType(inputs: List[FunctionInput], output: Option[Output], clauses: List[Clause])
   derives Equal
 
 internal type FunctionInput(name: Option[Name], mode: Option[Mode], annotation: TypeExpression)

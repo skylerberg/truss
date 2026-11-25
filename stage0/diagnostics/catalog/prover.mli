@@ -91,6 +91,16 @@ type unpromised =
   | Type_promises_nothing of string
   | Ensures_may_not_promise of Path.t
 
+type panic_ruler = Function_clause | Parameter_type
+
+type passed_function =
+  | Passed_function of Path.t
+  | Passed_parameter of string
+  | Passed_lambda
+  | Passed_value
+
+type panic_condition = { call : call; condition : quoted list; ruled_out_by : panic_ruler }
+
 type obligation =
   | Assertion_may_fail of { clause : quoted }
   | Bit_vector_assertion_may_fail of { clause : quoted }
@@ -105,7 +115,7 @@ type obligation =
   | Circular_proof of circular_proof
   | Precondition_may_fail of { clause : quoted; call : call }
   | Precondition_may_panic of { clause : quoted; call : call }
-  | Panics_where_ruled_out of { call : call; condition : quoted list }
+  | Panics_where_ruled_out of panic_condition
   | Upper_bound_in_exact_cost of { metric : Language.Metric.t; call : call }
   | Out_of_bounds of { at : quoted }
   | Intrinsic_requirement of { at : quoted; requirement : requirement }
@@ -117,6 +127,7 @@ type obligation =
   | Lambda_cost of { counting : counting; type_ : Types.ty }
   | Lambda_call_above_bound of { metric : Language.Metric.t }
   | Callback_precondition of { clause : quoted; call : call; name : string }
+  | Callback_panic_condition of { clause : quoted; call : call; name : string }
   | Parameter_contract of { path : Path.t; clause : quoted }
   | Loop_cost_clause of { clause : quoted; moment : moment }
   | Iteration_above_inferred_bound
@@ -151,6 +162,8 @@ type obligation =
   | May_alias of { first : quoted; second : quoted }
   | Callback_requirement of { name : string; reason : callback_reason; clause : quoted }
   | Callback_promise of { promise : quoted; unpromised : unpromised }
+  | Callback_may_panic of { condition : quoted list; passed : passed_function }
+  | Callback_cost of { clause : quoted; passed : passed_function }
   | Duplicate_key of { key : quoted option }
   | Value_contract of { path : Path.t; type_ : Types.ty; clause : quoted }
 
@@ -180,6 +193,7 @@ type construct =
   | Compiler_restated_method of { trait : Types.trait_reference; declared_by : Path.t }
   | Literal_of of Types.ty
   | Unreadable_function_value
+  | Lending_callback_ensures
   | String_pattern_on of Types.ty
   | Specification_function
 

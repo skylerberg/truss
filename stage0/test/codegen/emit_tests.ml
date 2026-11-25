@@ -286,7 +286,12 @@ let () =
       if not (String.includes ~affix:expected c_file) then
         Codegen_support.fail "no %S in:\n%s" expected c_file);
   let callback =
-    ({ parameters = [ (Read, Codegen_support.int32) ]; result = Codegen_support.int32; uses = [] }
+    ({
+       parameters = [ (Read, Codegen_support.int32) ];
+       result = Codegen_support.int32;
+       lends = None;
+       uses = [];
+     }
       : Ground.function_type)
   in
   Codegen_support.test "a lambda reads a local of its caller through its environment" (fun () ->

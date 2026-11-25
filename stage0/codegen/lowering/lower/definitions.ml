@@ -168,18 +168,15 @@ let classify_result context substitution (result : Types.result) =
           (Monomorphic.ground context.monomorphic substitution ty),
         true )
   | Lends (mode, ty) ->
-      let part = Monomorphic.ground context.monomorphic substitution ty in
-      ( (if Memory_layout.has_zero_size context.env part then Convention.Nothing
-         else Convention.Returned (Pointer { target = Value part; writable = mode = Mut })),
+      ( Convention.classify_lent_part context.env mode
+          (Monomorphic.ground context.monomorphic substitution ty),
         true )
 
 let list_lending_parameters context substitution (result : Types.result) : Lowered.ty list =
   match result with
   | Lends (_, ty) ->
-      let part = Monomorphic.ground context.monomorphic substitution ty in
-      (if Memory_layout.has_zero_size context.env part then []
-       else [ Lowered.Pointer { target = Value part; writable = true } ])
-      @ [ Pointer { target = Lend; writable = true }; Raw (Pointer Opaque) ]
+      Convention.list_lending_parameters context.env
+        (Monomorphic.ground context.monomorphic substitution ty)
   | Returns _ -> []
 
 let make_c_signature context substitution ~(parameters : (Language.Mode.t * Types.ty) list)

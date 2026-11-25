@@ -4,6 +4,7 @@ fn Box.get(self) lends Int64 {
   self.value
 }
 
-fn f() {
-  let _ = Box.get
+fn read(box: Box) -> Int64 {
+  let get = Box.get
+  get(box)
 }

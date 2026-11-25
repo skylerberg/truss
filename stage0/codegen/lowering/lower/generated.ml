@@ -369,7 +369,8 @@ let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instant
   let state = make_generated_state context ~item ~definition:function_ ~substitution in
   let builder = state.builder in
   let environment = Emit_c.Ir_builder.allocate_local builder (Raw (Nullable_pointer Opaque)) in
-  Lowering.set_result_slot state (Convention.classify_result context.env ty.result);
+  let convention, returns = Convention.classify_function_value_result context.env ty in
+  Lowering.set_result_slot state convention;
   let parameter_places =
     List.map
       (fun ((mode : Language.Mode.t), ty) ->
@@ -377,18 +378,21 @@ let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instant
       ty.parameters
   in
   let capabilities = Emit_c.Ir_builder.allocate_local builder Convention.capabilities in
+  let lending_locals, _ = Targets.allocate_lending_parameters state ty in
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   Lowering.look_up_capabilities state ~table:(Copy (Lowered.make_local_place capabilities)) ty.uses;
   Targets.lower_item_call state
     (Lowered.Item.make_code function_ instantiation)
     ~signature ~substitution
     ~arguments:(List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
+    ~lending:(List.map (fun local -> Lowered.Copy (Lowered.make_local_place local)) lending_locals)
     ~destination:(choose_result_place state ty.result)
     ~site:None ();
   Emit_c.Ir_builder.build state.builder
-    (Lowering.finish_function state ~returns:(ty.result <> Never) ~first:[ environment ]
+    (Lowering.finish_function state ~returns ~first:[ environment ]
        ~rest:
-         (List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ [ capabilities ])
+         (List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places
+         @ [ capabilities ] @ lending_locals)
        ())
 
 let lower context (generated : Lowered.Item.generated) : Emit_c.fragment =

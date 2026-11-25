@@ -1,4 +1,5 @@
 type parameter = { owner : Path.t; name : string }
+type modified = { position : int; field_path : string list; is_elements : bool }
 
 type ty =
   | Named of { path : Path.t; arguments : argument list }
@@ -22,9 +23,10 @@ and trait_reference = {
 
 and function_type = {
   inputs : (Language.Mode.t * ty) list;
-  output : ty;
+  output : result;
   uses : capability_set;
   costs : cost list;
+  modifies : modified list;
 }
 
 and result = Returns of ty | Lends of Language.Mode.t * ty
@@ -49,6 +51,9 @@ and resource =
   | Calls of { capability : Path.t; method_ : string option }
 
 and cost_bound = Order_of | No_more_than of Z.t | Exactly_cost of Z.t
+
+let show_modified_part ~root (part : modified) =
+  String.concat "." (root :: part.field_path) ^ if part.is_elements then "[..]" else ""
 
 let make_condition (condition : condition) : condition = List.sort_uniq compare condition
 
@@ -385,12 +390,16 @@ and substitute_trait substitution (trait : trait_reference) =
 
 and substitute_function substitution (function_type : function_type) =
   {
+    function_type with
     inputs =
       List.map (fun (mode, type_) -> (mode, substitute substitution type_)) function_type.inputs;
-    output = substitute substitution function_type.output;
+    output = map_result (substitute substitution) function_type.output;
     uses = substitute_capabilities substitution function_type.uses;
-    costs = function_type.costs;
   }
+
+and map_result transform = function
+  | Returns type_ -> Returns (transform type_)
+  | Lends (mode, type_) -> Lends (mode, transform type_)
 
 let map_substitution ~argument ~capabilities substitution =
   {
@@ -452,7 +461,7 @@ let rec map ?(map_capabilities = Fun.id) transform type_ =
             {
               function_type with
               inputs = List.map (fun (mode, type_) -> (mode, map type_)) function_type.inputs;
-              output = map function_type.output;
+              output = map_result map function_type.output;
               uses = map_capabilities function_type.uses;
             }
       | Parameter _ | Never | Integer | Variable _ | Hole | Error _ -> type_)
@@ -482,7 +491,7 @@ let rec exists ?(resolve = Fun.id) transform type_ =
   | Named { arguments; _ } -> List.exists argument_exists arguments
   | Projection { base; trait = reference; _ } -> exists base || trait_exists reference
   | Function { inputs; output; _ } ->
-      List.exists (fun (_, type_) -> exists type_) inputs || exists output
+      List.exists (fun (_, type_) -> exists type_) inputs || exists (extract_result_type output)
   | Parameter _ | Never | Integer | Variable _ | Hole | Error _ -> false
 
 let is_specification_only = function
@@ -514,7 +523,8 @@ let rec contains_unsolved = function
   | Named { arguments; _ } -> List.exists is_unsolved_argument arguments
   | Projection { base; trait; _ } -> contains_unsolved base || is_unsolved_trait trait
   | Function { inputs; output; _ } ->
-      List.exists (fun (_, type_) -> contains_unsolved type_) inputs || contains_unsolved output
+      List.exists (fun (_, type_) -> contains_unsolved type_) inputs
+      || contains_unsolved (extract_result_type output)
   | Parameter _ | Never | Integer | Error _ -> false
 
 and is_unsolved_argument = function
@@ -541,7 +551,7 @@ let rec is_unsolved_capability = function
 let has_unsolved_capabilities capabilities = List.exists is_unsolved_capability capabilities
 
 let has_same_clauses (left : function_type) (right : function_type) =
-  left.uses = right.uses && List.sort_uniq compare left.costs = List.sort_uniq compare right.costs
+  left.uses = right.uses && left.costs = right.costs && left.modifies = right.modifies
 
 let bound_implies (provided : cost_bound) (required : cost_bound) =
   match (provided, required) with
@@ -628,14 +638,29 @@ and show_output = function
   | Lends (written, type_) -> " lends " ^ Language.Mode.show_prefix written ^ show type_
 
 and show_function (function_type : function_type) =
+  let name_input position = Printf.sprintf "input%d" (position + 1) in
   let inputs =
     String.concat ", "
-      (List.map
-         (fun (written, type_) -> Language.Mode.show_prefix written ^ show type_)
+      (List.mapi
+         (fun position (written, type_) ->
+           (if function_type.modifies = [] then "" else name_input position ^ ": ")
+           ^ Language.Mode.show_prefix written ^ show type_)
          function_type.inputs)
   in
-  let base = Printf.sprintf "fn(%s)%s" inputs (show_output (Returns function_type.output)) in
+  let base = Printf.sprintf "fn(%s)%s" inputs (show_output function_type.output) in
   let uses = List.map show_capability function_type.uses in
+  let modifies =
+    match function_type.modifies with
+    | [] -> []
+    | parts ->
+        [
+          "modifies "
+          ^ String.concat ", "
+              (List.map
+                 (fun part -> show_modified_part ~root:(name_input part.position) part)
+                 parts);
+        ]
+  in
   let costs =
     List.map
       (fun (cost : cost) ->
@@ -650,12 +675,12 @@ and show_function (function_type : function_type) =
           (show_resource cost.resource) bound)
       function_type.costs
   in
-  match (uses, costs) with
+  match (uses, costs @ modifies) with
   | [], [] -> base
-  | _ ->
+  | _, clauses ->
       Printf.sprintf "(%s%s%s)" base
         (if uses = [] then "" else " uses " ^ String.concat ", " uses)
-        (String.concat "" (List.map (fun cost -> " " ^ cost) costs))
+        (String.concat "" (List.map (fun clause -> " " ^ clause) clauses))
 
 type generic_kind = Type_generic of trait_reference list | Value_generic
 type generic = { generic : parameter; kind : generic_kind }
@@ -718,8 +743,6 @@ let mentions_specification_only_type parameters output =
     (fun type_ -> Option.is_some (find_specification_only_type type_))
     (extract_result_type output :: List.map (fun parameter -> parameter.type_) parameters)
 
-type modified = { position : int; field_path : string list; is_elements : bool }
-
 type signature = {
   generics : generic list;
   capability_parameters : parameter list;
@@ -763,8 +786,8 @@ let read_parameter_at (signature : signature) position =
             position
             (List.length signature.parameters))
 
-let list_modified_parts (signature : signature) position =
-  match List.filter (fun modified -> modified.position = position) signature.modifies with
+let list_modified_parts (modifies : modified list) position =
+  match List.filter (fun modified -> modified.position = position) modifies with
   | [] -> None
   | entries -> Some entries
 
@@ -773,8 +796,19 @@ let is_part_within ~(container : modified) (part : modified) =
   && is_field_path_prefix container.field_path part.field_path
   && ((not container.is_elements) || (part.is_elements && container.field_path = part.field_path))
 
-let show_modified_part ~root (part : modified) =
-  String.concat "." (root :: part.field_path) ^ if part.is_elements then "[..]" else ""
+let are_changes_within ~(allowed : modified list) (changed : modified list) =
+  List.for_all
+    (fun (bound : modified) ->
+      match list_modified_parts changed bound.position with
+      | None -> false
+      | Some parts ->
+          List.for_all
+            (fun part ->
+              List.exists
+                (fun container -> is_part_within ~container part)
+                (List.filter (fun container -> container.position = part.position) allowed))
+            parts)
+    allowed
 
 type instantiation = {
   type_arguments : argument list;
@@ -832,10 +866,7 @@ let map_signature transform (signature : signature) =
       List.map
         (fun (parameter : parameter_info) -> { parameter with type_ = transform parameter.type_ })
         signature.parameters;
-    output =
-      (match signature.output with
-      | Returns type_ -> Returns (transform type_)
-      | Lends (mode, type_) -> Lends (mode, transform type_));
+    output = map_result transform signature.output;
   }
 
 let substitute_signature substitution (signature : signature) =
@@ -853,21 +884,18 @@ let add_impl_generics_and_uses ~impl_generics ~impl_uses (signature : signature)
   }
 
 let make_function_type (signature : signature) =
-  match signature.output with
-  | Lends _ -> None
-  | Returns output ->
-      Some
-        {
-          inputs =
-            Option.to_list signature.receiver
-            @ List.map (fun parameter -> (parameter.mode, parameter.type_)) signature.parameters;
-          output;
-          uses =
-            replace_capabilities
-              (function Capability_unless_values capability -> Some [ capability ] | _ -> None)
-              signature.uses;
-          costs = signature.costs;
-        }
+  {
+    inputs =
+      Option.to_list signature.receiver
+      @ List.map (fun parameter -> (parameter.mode, parameter.type_)) signature.parameters;
+    output = signature.output;
+    uses =
+      replace_capabilities
+        (function Capability_unless_values capability -> Some [ capability ] | _ -> None)
+        signature.uses;
+    costs = List.sort_uniq compare signature.costs;
+    modifies = List.sort_uniq compare signature.modifies;
+  }
 
 type field = { field_name : string; field_type : ty; field_has_default : bool }
 type variant = { variant_name : string; fields : field list option; indirect : bool }

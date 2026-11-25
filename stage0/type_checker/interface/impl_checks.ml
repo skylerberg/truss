@@ -39,7 +39,7 @@ let list_types (signature : Types.signature) =
 let find_unallowed_part ~(expected : Types.signature) ~(written : Types.signature) =
   List.find_map
     (fun (part : Types.modified) ->
-      match Types.list_modified_parts expected part.position with
+      match Types.list_modified_parts expected.modifies part.position with
       | Some allowed
         when not (List.exists (fun container -> Types.is_part_within ~container part) allowed) ->
           Some part
@@ -255,14 +255,7 @@ let list_callback_contracts (definition : Syntax.definition) =
     (fun (parameter : Syntax.parameter) ->
       match parameter.kind with
       | Named_parameter { name; type_ = { kind = Function_type { clauses; _ }; _ }; _ } ->
-          Some
-            ( name.text,
-              List.filter
-                (fun (clause : Syntax.clause) ->
-                  match clause.kind with
-                  | Requires _ | Ensures _ -> true
-                  | Uses _ | Cost _ | Decreases _ | Modifies _ | Clause_error -> false)
-                clauses )
+          Some (name.text, List.filter Syntax_walk.is_callback_contract_clause clauses)
       | Named_parameter _ | Self_parameter _ | Parameter_error -> None)
     parameters
 

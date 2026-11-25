@@ -20,6 +20,7 @@ val walk_statement_children : visit -> Core.statement -> unit
 val walk_pattern_children : visit -> Core.pattern -> unit
 val make_deep_visitor : visit -> visit
 val walk_expression : visit -> Core.expression -> unit
+val walk_contract : visit -> Core.contract -> unit
 val walk_definition : visit -> Core.definition -> unit
 val is_functional : (visit -> unit) -> bool
 val find_measure_condition : Core.loop_clause Core.conditional list -> Types.condition option

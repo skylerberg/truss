@@ -262,6 +262,12 @@ let describe_promise = function
              (Types.show_trait declared) name verb);
       ]
 
+let describe_passed_function : Prover.passed_function -> string = function
+  | Passed_function path -> Printf.sprintf "`%s`" (Path.show path)
+  | Passed_parameter name -> Printf.sprintf "`%s`" name
+  | Passed_lambda -> "This lambda"
+  | Passed_value -> "The function passed here"
+
 let describe_obligation = function
   | Prover.Assertion_may_fail { clause } -> tick clause @ [ Text " may not hold." ]
   | Bit_vector_assertion_may_fail { clause } ->
@@ -350,11 +356,17 @@ let describe_obligation = function
       tick clause
       @ (Description.Text " may not hold for " :: describe_call call)
       @ [ Text ", so the call may panic." ]
-  | Panics_where_ruled_out { call; condition } ->
+  | Panics_where_ruled_out { call; condition; ruled_out_by } ->
       capitalize (describe_call call)
       @ Description.Text " may panic where `"
         :: join " && " (List.map (fun part -> [ quote_in part ]) condition)
-      @ [ Text "` holds, which the function's `uses Panic unless` rules out." ]
+      @ [
+          Text
+            (match ruled_out_by with
+            | Function_clause -> "` holds, which the function's `uses Panic unless` rules out."
+            | Parameter_type ->
+                "` holds, which the type of the parameter that this lambda is passed for rules out.");
+        ]
   | Upper_bound_in_exact_cost { metric; call } ->
       Description.Text
         (Printf.sprintf "Only an upper bound is known for the `%s` of "
@@ -411,6 +423,10 @@ let describe_obligation = function
       tick clause
       @ (Description.Text " may not hold for " :: describe_call call)
       @ [ Text (Printf.sprintf " through `%s`." name) ]
+  | Callback_panic_condition { clause; call; name } ->
+      tick clause
+      @ (Description.Text " may not hold for " :: describe_call call)
+      @ [ Text (Printf.sprintf " through `%s`, so the call may panic." name) ]
   | Parameter_contract { path; clause } ->
       [
         Text
@@ -530,6 +546,16 @@ let describe_obligation = function
         quote_in clause;
         Text "` may not hold.";
       ]
+  | Callback_may_panic { condition; passed } ->
+      Description.Text (describe_passed_function passed ^ " may panic where `")
+      :: join " && " (List.map (fun part -> [ quote_in part ]) condition)
+      @ [ Text "` holds, which the parameter it is passed for rules out." ]
+  | Callback_cost { clause; passed } ->
+      [
+        Text (describe_passed_function passed ^ " may spend more than `");
+        quote_in clause;
+        Text "`, which the parameter it is passed for states.";
+      ]
   | Callback_promise { promise; unpromised } ->
       [
         Text "This argument's parameter promises `";
@@ -573,11 +599,11 @@ let find_code : Prover.obligation -> Diagnostic.Code.prover = function
   | Circular_proof _ -> Circular_proof
   | Precondition_may_fail _ | Intrinsic_requirement _ | Callback_precondition _
   | Parameter_contract _ | Float_conversion _ | Not_a_scalar_value _ | Impl_precondition _
-  | Impl_panic_condition _ | Callback_requirement _ | Value_contract _ ->
+  | Impl_panic_condition _ | Callback_requirement _ | Value_contract _ | Callback_may_panic _ ->
       Requires
-  | Precondition_may_panic _ | Panics_where_ruled_out _ -> Panic
+  | Precondition_may_panic _ | Panics_where_ruled_out _ | Callback_panic_condition _ -> Panic
   | Upper_bound_in_exact_cost _ | Lambda_cost _ | Lambda_call_above_bound _ | Loop_cost_clause _
-  | Iteration_above_inferred_bound | Unbounded_iteration_cost _ | Cost_promise _
+  | Callback_cost _ | Iteration_above_inferred_bound | Unbounded_iteration_cost _ | Cost_promise _
   | Negative_potential _ ->
       Cost
   | Out_of_bounds _ -> Out_of_bounds
@@ -750,6 +776,7 @@ let show_construct = function
         (Types.show_trait trait) (Path.show declared_by)
   | Literal_of type_ -> Printf.sprintf "a literal of `%s`" (Types.show type_)
   | Unreadable_function_value -> "a function the prover cannot read, used as a value"
+  | Lending_callback_ensures -> "an `ensures` on the type of a parameter that lends"
   | String_pattern_on type_ -> Printf.sprintf "a string pattern on `%s`" (Types.show type_)
   | Specification_function -> "this specification function"
 

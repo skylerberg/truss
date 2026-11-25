@@ -58,7 +58,6 @@ module Code = struct
     | Repeated_clause
     | Cost_word
     | Loop_cost_bound
-    | Function_type_cost_bound
     | Function_type_names
     | Misplaced_callback_contract
     | Misplaced_condition
@@ -349,7 +348,6 @@ module Code = struct
     | Repeated_clause -> "repeated_clause"
     | Cost_word -> "cost_word"
     | Loop_cost_bound -> "loop_cost_bound"
-    | Function_type_cost_bound -> "function_type_cost_bound"
     | Function_type_names -> "function_type_names"
     | Misplaced_callback_contract -> "misplaced_callback_contract"
     | Misplaced_condition -> "misplaced_condition"

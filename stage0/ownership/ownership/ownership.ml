@@ -95,6 +95,7 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
             | Function_interface _ | Constant_interface _ -> true
             | _ -> false);
         Modified_parts.check context key code.tree;
+        Modified_parts.check_lambdas context key code.tree;
         Modified_parts.check_ranges context code.tree
       end;
       List.iter

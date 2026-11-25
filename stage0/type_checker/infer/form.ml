@@ -267,7 +267,7 @@ let build_function_value form (value : Syntax.expression) : Core.kind =
 
 let build_variant_value form (value : Syntax.expression) type_path variant : Core.kind =
   match read_type form value with
-  | Types.Function { output = Types.Named { arguments; _ } as variant_type; _ } ->
+  | Types.Function { output = Returns (Types.Named { arguments; _ } as variant_type); _ } ->
       let origin = make_rewrite_origin value.id in
       let fields =
         List.map
@@ -301,7 +301,7 @@ let build_variant_value form (value : Syntax.expression) type_path variant : Cor
                               fields;
                         }));
             };
-          result = variant_type;
+          result = Returns variant_type;
         }
   | _ -> Construct { variant = Some variant; fields = [] }
 
@@ -781,7 +781,9 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
                 | _ when was_hole form (fun tables -> tables.local_types) id -> None
                 | _ -> Some { local; type_ = read_local_type form id })
               captures;
-          body = build_block form { env with output = Some (Returns result) } body;
+          body =
+            (let body = build_block form { env with output = Some result } body in
+             match result with Lends (mode, _) -> lend_block form mode body | Returns _ -> body);
           result;
         }
   | If { condition = test; then_; else_ } ->
@@ -1874,20 +1876,8 @@ let build_parameters form env (written : Syntax.parameter list) (signature : Typ
                 default;
                 callback_contract =
                   (match type_.kind with
-                  | Function_type { inputs; clauses; _ }
-                    when List.exists
-                           (fun (clause : Syntax.clause) ->
-                             match clause.kind with Requires _ | Ensures _ -> true | _ -> false)
-                           clauses
-                         && List.for_all
-                              (fun (input : Syntax.function_input) -> Option.is_some input.name)
-                              inputs ->
-                      let list_clauses select =
-                        List.filter_map
-                          (fun (clause : Syntax.clause) ->
-                            Option.map (build_expression form env) (select clause.kind))
-                          clauses
-                      in
+                  | Function_type written_type when Syntax_walk.has_callback_contract written_type
+                    ->
                       Some
                         {
                           inputs =
@@ -1897,13 +1887,17 @@ let build_parameters form env (written : Syntax.parameter list) (signature : Typ
                                   (fun (input_name : Syntax.name) : Core.local ->
                                     Declared { origin = input_name.id; name = input_name.text })
                                   input.name)
-                              inputs;
-                          requires =
-                            list_clauses (function
-                              | Syntax.Requires value -> Some value
-                              | _ -> None);
-                          ensures =
-                            list_clauses (function Syntax.Ensures value -> Some value | _ -> None);
+                              written_type.inputs;
+                          contract =
+                            build_contract form
+                              {
+                                env with
+                                output =
+                                  (match info.type_ with
+                                  | Types.Function elaborated -> Some elaborated.output
+                                  | _ -> env.output);
+                              }
+                              written_type.clauses;
                         }
                   | _ -> None);
               })

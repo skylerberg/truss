@@ -1,0 +1,25 @@
+fn pick(count: UInt64, choose: (fn(limit: UInt64) -> UInt64 cost time O(limit))) -> UInt64
+  cost time O(count)
+{
+  choose(count)
+}
+
+fn constant(limit: UInt64) -> UInt64
+  cost time O(1)
+{
+  limit
+}
+
+fn through_a_named_function(count: UInt64) -> UInt64 {
+  pick(count, constant)
+}
+
+fn through_a_lambda(count: UInt64) -> UInt64 {
+  pick(count, fn(limit) {
+    var total: UInt64 = 0
+    for _ in 0..limit {
+      total = total.saturating_add(1)
+    }
+    total
+  })
+}

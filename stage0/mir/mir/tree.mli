@@ -270,7 +270,6 @@ type requirement = {
   names : (Core.local * Core.origin) list;
 }
 
-type callback = { inputs : Core.local list; requires : formula list; ensures : formula list }
 type parameter = { local : Core.local; mode : Language.Mode.t; type_ : Types.ty }
 
 type contract = {
@@ -280,7 +279,7 @@ type contract = {
   ensures : formula list;
   decreases : formula list;
   costs : cost list;
-  callbacks : (int * callback) list;
+  callbacks : (int * contract) list;
 }
 
 type type_clauses = { invariants : requirement list; potential : formula option }
