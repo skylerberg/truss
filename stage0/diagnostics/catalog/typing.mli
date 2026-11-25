@@ -65,7 +65,7 @@ type t =
       mismatch : kind_mismatch;
     }
   | Arguments_to_parameter of { at : Core.origin; written : Core.origin Description.range }
-  | Constraint_on_type of { at : Core.origin }
+  | Constraint_in_type_arguments of { at : Core.origin }
   | Count_error of { at : Core.origin; error : count_error }
   | Trait_as_type of { at : Core.origin; written : Core.origin Description.range }
   | Capability_as_type of { at : Core.origin; written : Core.origin Description.range }

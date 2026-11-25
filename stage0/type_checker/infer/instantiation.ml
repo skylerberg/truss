@@ -147,7 +147,9 @@ and check_written_arguments state items : (Types.argument list, Types.ty) result
         | Syntax.Item _ | Item_type _ -> None
         | Item_constraint ((name : Syntax.name), _) ->
             Some
-              (State.make_error_type state (Associated_in_type_arguments { at = Written name.id })))
+              (Types.Error
+                 (State.record_diagnostic state
+                    (Catalog.Typing (Constraint_in_type_arguments { at = Written name.id })))))
       items
   in
   match errors with [] -> Ok arguments | error :: _ -> Error error
@@ -165,11 +167,18 @@ and check_type_argument state (value : Syntax.expression) : Types.argument =
                (State.record_diagnostic state
                   (Catalog.Typing (Count_error { at = Written value.id; error })))))
   | _ -> (
+      let report_not_a_type () =
+        Types.Type (make_error_type_at state value (Not_a_type_argument { at = Written value.id }))
+      in
       match find_static state value with
       | Some (Static_type type_) -> Types.Type type_
-      | Some (Static_trait _ | Static_capability _) | None ->
-          Types.Type
-            (make_error_type_at state value (Not_a_type_argument { at = Written value.id })))
+      | Some (Static_trait _ | Static_capability _) -> report_not_a_type ()
+      | None -> (
+          match
+            Interface.Elaborator.elaborate_associated_expression (State.read_context state) value
+          with
+          | Some type_ -> Types.Type type_
+          | None -> report_not_a_type ()))
 
 type instance = {
   declared : Types.signature;

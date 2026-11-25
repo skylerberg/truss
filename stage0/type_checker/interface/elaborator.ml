@@ -196,17 +196,12 @@ and elaborate_self_associated context (at : Core.origin) (key : Syntax.name) =
             (Self_outside_trait
                { at = Written key.id; name = key.text; associated = Associated_type })
       | Ok self, Some trait -> (
-          record_associated context key ~base:self ~bounds:[ trait ] Associated_type;
-          match List.assoc_opt key.text trait.associated with
-          | Some fixed -> fixed
-          | None -> (
-              match find_declaring_trait context trait.trait key.text with
-              | Some _ -> Types.Projection { base = self; trait; name = key.text }
-              | None ->
-                  report_error_type context
-                    (Undeclared_associated
-                       { at = Written key.id; trait; name = key.text; associated = Associated_type })
-              )))
+          match project_associated context ~base:self [ trait ] key with
+          | Some associated_type -> associated_type
+          | None ->
+              report_error_type context
+                (Undeclared_associated
+                   { at = Written key.id; trait; name = key.text; associated = Associated_type })))
 
 and find_declaring_trait ?(capability = false) context trait name =
   List.find_opt
@@ -216,23 +211,21 @@ and find_declaring_trait ?(capability = false) context trait name =
       | None -> false)
     (list_trait_closure context.lookups trait)
 
+and project_associated context ~base bounds (key : Syntax.name) =
+  record_associated context key ~base ~bounds Associated_type;
+  List.find_map
+    (fun (bound : Types.trait_reference) ->
+      match List.assoc_opt key.text bound.associated with
+      | Some fixed -> Some fixed
+      | None ->
+          Option.map
+            (fun _ -> Types.Projection { base; trait = bound; name = key.text })
+            (find_declaring_trait context bound.trait key.text))
+    bounds
+
 and elaborate_associated context base parameter (key : Syntax.name) =
-  let bounds = list_bounds context parameter in
-  let associated_type =
-    List.find_map
-      (fun (bound : Types.trait_reference) ->
-        match List.assoc_opt key.text bound.associated with
-        | Some fixed -> Some fixed
-        | None -> (
-            match find_declaring_trait context bound.trait key.text with
-            | Some _ -> Some (Types.Projection { base; trait = bound; name = key.text })
-            | None -> None))
-      bounds
-  in
-  match associated_type with
-  | Some associated_type ->
-      record_associated context key ~base ~bounds Associated_type;
-      associated_type
+  match project_associated context ~base (list_bounds context parameter) key with
+  | Some associated_type -> associated_type
   | None ->
       report_error_type context
         (Unbounded_associated
@@ -332,7 +325,7 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
             if List.exists (function Syntax.Constraint _ -> true | _ -> false) path.arguments then
               Error
                 (record_diagnostic context.diagnostics
-                   (Constraint_on_type { at = Written path.id }))
+                   (Constraint_in_type_arguments { at = Written path.id }))
             else
               check_arity context path
                 (Resolve.Names.find_generics context.lookups.names definition_path)
@@ -437,6 +430,7 @@ and elaborate_capability_path context (path : Syntax.path_type) : Types.capabili
   | _ -> raise_bug "`%s` is not resolved as a capability" (Syntax_print.show_path path.path)
 
 and find_capability_projection context base traits (key : Syntax.name) =
+  record_associated context key ~base ~bounds:traits Associated_capability_set;
   List.find_map
     (fun (bound : Types.trait_reference) ->
       Option.map
@@ -466,10 +460,7 @@ and elaborate_capability context (written : Syntax.capability_reference) : Types
                    { at = Written key.id; name = key.text; associated = Associated_capability_set })
           | Ok self, Some trait -> (
               match find_capability_projection context self [ trait ] key with
-              | Some projection ->
-                  record_associated context key ~base:self ~bounds:[ trait ]
-                    Associated_capability_set;
-                  [ projection ]
+              | Some projection -> [ projection ]
               | None ->
                   report_error_capability context
                     (Undeclared_associated
@@ -484,11 +475,8 @@ and elaborate_capability context (written : Syntax.capability_reference) : Types
       | Error report -> [ Types.Capability_error report ]
       | Ok parameter -> (
           let bounds = list_bounds context parameter in
-          let base = Types.Parameter parameter in
-          match find_capability_projection context base bounds key with
-          | Some projection ->
-              record_associated context key ~base ~bounds Associated_capability_set;
-              [ projection ]
+          match find_capability_projection context (Types.Parameter parameter) bounds key with
+          | Some projection -> [ projection ]
           | None ->
               report_error_capability context
                 (Unbounded_associated
@@ -773,6 +761,20 @@ let list_direct_bounds context (type_ : Types.ty) =
         (list_bound_closure context.lookups ~self:base trait)
   | _ -> []
 
+let elaborate_associated_expression context (written : Syntax.expression) =
+  match written.kind with
+  | Member ({ kind = Name base; _ }, key) -> (
+      match find_target context base with
+      | Some (Type_parameter _) -> (
+          match resolve_parameter context base with
+          | Ok parameter ->
+              Some (elaborate_associated context (Types.Parameter parameter) parameter key)
+          | Error report -> Some (Types.Error report))
+      | _ -> None)
+  | Member ({ kind = Self_type_value; _ }, key) ->
+      Some (elaborate_self_associated context (Written written.id) key)
+  | _ -> None
+
 let rec find_bounded_type context (written : Syntax.expression) =
   match written.kind with
   | Self_type_value -> (
@@ -785,22 +787,9 @@ let rec find_bounded_type context (written : Syntax.expression) =
       | Some _ | None -> None)
   | Member (base, associated) ->
       Option.bind (find_bounded_type context base) (fun base ->
-          let bounds = list_direct_bounds context base in
-          match
-            List.find_map
-              (fun (bound : Types.trait_reference) ->
-                List.assoc_opt associated.text bound.associated)
-              bounds
-          with
-          | Some ((Types.Parameter _ | Types.Projection _) as fixed) -> Some fixed
-          | Some _ -> None
-          | None ->
-              List.find_map
-                (fun (bound : Types.trait_reference) ->
-                  Option.map
-                    (fun _ -> Types.Projection { base; trait = bound; name = associated.text })
-                    (find_declaring_trait context bound.trait associated.text))
-                bounds)
+          match project_associated context ~base (list_direct_bounds context base) associated with
+          | Some ((Types.Parameter _ | Types.Projection _) as bounded) -> Some bounded
+          | Some _ | None -> None)
   | Parenthesized inner -> find_bounded_type context inner
   | _ -> None
 

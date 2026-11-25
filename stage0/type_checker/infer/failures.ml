@@ -172,12 +172,19 @@ let report_unmet_bound (state : State.state) ~at ~of_type ~sides ~impl_need subj
         match associated with
         | None when Types.is_view subject -> Does_not_hold_for_view
         | None -> Does_not_hold
-        | Some (name, found, _) -> Associated_differs { name; found = State.zonk state found }
+        | Some (name, found, _) ->
+            Associated_differs { name; found = State.normalize_known state found }
       in
       let report =
         add_mismatch_diagnostic state at ~sides
           (Unsatisfied_bound
-             { of_type = Option.map (State.zonk state) of_type; subject; bound; unmet; impl_need })
+             {
+               of_type = Option.map (State.normalize_known state) of_type;
+               subject;
+               bound;
+               unmet;
+               impl_need;
+             })
       in
       frame.reported_unmet_bounds <- (subject, bound, report) :: frame.reported_unmet_bounds;
       report
@@ -213,7 +220,12 @@ let report_requirement (state : State.state) (goal : State.goal) ?associated ~im
         (match associated with
         | Some (_, found, wanted) ->
             Operator_output
-              { at; found = State.zonk state found; wanted = State.zonk state wanted; impl_need }
+              {
+                at;
+                found = State.normalize_known state found;
+                wanted = State.normalize_known state wanted;
+                impl_need;
+              }
         | None ->
             Operator_not_implemented
               { at; subject = shown; trait = Unify.zonk_trait state.unifier trait; impl_need })
@@ -238,7 +250,7 @@ let report_failure (state : State.state) (goal : State.goal) ?associated subject
         ~impl_need:
           (Some
              {
-               needing = State.zonk state subject;
+               needing = State.normalize_known state subject;
                condition = Unify.zonk_trait state.unifier condition;
              })
   | Some _, Within _ -> State.raise_bug "an impl's condition is a set of types"

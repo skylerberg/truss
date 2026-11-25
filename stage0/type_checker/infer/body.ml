@@ -29,7 +29,7 @@ let check_body state (env : State.env) (written : Syntax.block) =
             if not (State.unify state output Types.unit) then
               State.report state
                 (Body_ends_without_value
-                   { body = Written written.id; output = State.zonk state output })
+                   { body = Written written.id; output = State.normalize_known state output })
         | _ -> ())
     | [ (last : Syntax.statement) ] ->
         Solver.run_in_statement state env (Written last.id) (fun () ->
@@ -48,7 +48,7 @@ let check_body state (env : State.env) (written : Syntax.block) =
                 then
                   State.report state
                     (Last_statement_without_value
-                       { statement = Written last.id; output = State.zonk state output })
+                       { statement = Written last.id; output = State.normalize_known state output })
             | _ -> Statements.check_statement state env last ~last:false)
     | (first : Syntax.statement) :: rest ->
         Solver.run_in_statement state env (Written first.id) (fun () ->

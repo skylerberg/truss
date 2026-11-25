@@ -1,0 +1,14 @@
+trait Times[Right] {
+  type Output
+}
+
+trait Matrix: Times[Self.Row, Output = Unit] {
+  type Row
+  type Transpose: Matrix[Row = Self.Row]
+}
+
+fn is_times[Left, Value: Times[Left, Output = Unit]]() {}
+
+fn f[Value: Matrix]() {
+  is_times[Value.Row, Value.Transpose]()
+}

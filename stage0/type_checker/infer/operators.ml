@@ -42,8 +42,8 @@ let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
           (Try_error_mismatch
              {
                at = Written value.id;
-               output_error = State.zonk state output_error;
-               error = State.zonk state error;
+               output_error = State.normalize_known state output_error;
+               error = State.normalize_known state error;
              });
       ok
   | ( Types.Named { path; arguments = [ Types.Type some ] },

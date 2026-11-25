@@ -12,8 +12,10 @@ let classify_receiver_mode (arguments : Syntax.argument list) : Language.Mode.t 
 let make_method_owner state type_ : Catalog.Inference.method_owner =
   Type_owner
     {
-      type_ = State.zonk state type_;
-      list = Option.map (State.zonk state) (Types.find_list_of_array (State.normalize state type_));
+      type_ = State.normalize_known state type_;
+      list =
+        Option.map (State.normalize_known state)
+          (Types.find_list_of_array (State.normalize state type_));
     }
 
 let rec check_name (state : State.state) (env : State.env) (value : Syntax.expression)
@@ -154,7 +156,8 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
           | Some written ->
               if not (Members.are_fields_visible state.lookups ~package:state.package path) then begin
                 State.make_error_type state
-                  (Opaque_field_read { at = Written member.id; type_ = State.zonk state base_type })
+                  (Opaque_field_read
+                     { at = Written member.id; type_ = State.normalize_known state base_type })
               end
               else begin
                 state.tables.resolutions.(value.id) <-
@@ -221,7 +224,7 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
               (No_member
                  {
                    at = Written member.id;
-                   type_ = State.zonk state type_;
+                   type_ = State.normalize_known state type_;
                    name = member.text;
                    list =
                      (match Types.find_list_of_array type_ with
@@ -236,7 +239,7 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
         (No_member
            {
              at = Written member.id;
-             type_ = State.zonk state type_;
+             type_ = State.normalize_known state type_;
              name = member.text;
              list = None;
            })
@@ -339,13 +342,13 @@ and lookup_trait_static_methods (state : State.state) path name =
              })
           name))
 
-and list_implemented_trait_lookups (state : State.state) self_type name =
+and list_implemented_trait_lookups ?checks_conditions (state : State.state) self_type name =
   List.filter_map
     (fun (lookup : Path.t Resolve.Names.lookup) ->
       match lookup with
       | Visible trait | Hidden (trait, _) ->
           let reference = Instantiation.make_fresh_trait_reference state trait in
-          if Option.is_some (State.find_evidence state self_type reference) then
+          if Option.is_some (State.find_evidence ?checks_conditions state self_type reference) then
             Some (Resolve.Names.map_visible (fun _ -> reference) lookup)
           else None
       | Absent -> None)
@@ -372,6 +375,35 @@ and choose_trait_method name receiver (candidate : Types.trait_reference Resolve
   | Hidden (trait, visibility), Some _ ->
       Hidden (Method { owner = trait; name; receiver }, visibility)
   | (Visible _ | Hidden _), None | Absent, _ -> Absent
+
+and find_method_of_an_unmet_impl state receiver_type name receiver =
+  match
+    Resolve.Names.collect_visible
+      (List.map
+         (fun candidate ->
+           choose_trait_method name receiver candidate (list_candidate_methods state name candidate))
+         (list_implemented_trait_lookups ~checks_conditions:false state receiver_type name))
+  with
+  | Visible [ found ] -> Some found
+  | Visible _ | Hidden _ | Absent -> None
+
+and has_method_without_self state receiver_type name =
+  match receiver_type with
+  | Types.Named { path; _ } -> (
+      match
+        (Members.lookup_method state path name Static, lookup_trait_static_methods state path name)
+      with
+      | Visible _, _ | _, Visible (_ :: _) -> true
+      | _ -> false)
+  | Types.Parameter _ | Types.Projection _ ->
+      List.exists
+        (fun (bound : Types.trait_reference) ->
+          Option.is_some
+            (Interface.Definition.find_trait_method state.lookups.interface bound.trait ~name
+               ~receiver:Static))
+        (Interface.Properties.list_known_bounds state.lookups.interface
+           ~list_bounds:(State.lookup_bounds state) receiver_type)
+  | _ -> false
 
 and list_trait_candidates (state : State.state) receiver_type name =
   let list_bound_candidates bounds =

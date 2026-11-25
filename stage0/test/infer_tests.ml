@@ -1996,7 +1996,15 @@ let () =
          fn f(point: Point) -> Point {\n\
         \  point.make()\n\
          }\n"
-        "types.unknown_member");
+        "types.wrong_receiver" ~says:"it has no `self`";
+      expect_one_diagnostic
+        "trait Make {\n\
+        \  fn make() -> Self\n\
+         }\n\n\
+         fn f[Value: Make](value: Value) -> Value {\n\
+        \  value.make()\n\
+         }\n"
+        "types.wrong_receiver" ~says:"it has no `self`");
   Harness.test "a trait's static method written in full takes `Self` from the expected type"
     (fun () ->
       expect_fine
@@ -2015,7 +2023,7 @@ let () =
         "types.cannot_infer" ~says:"`Target`");
   Harness.test "an impl's method applies only where the impl's conditions hold" (fun () ->
       expect_one_diagnostic Fixtures.Infer.total_of_a_holder_whose_measure_needs_order
-        "types.unknown_member");
+        "types.no_impl" ~says:"Its impl needs `Value: Ordered`.");
   Harness.test "a method that bounds its type's parameter applies only where the bound holds"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.sameness_of_holders_of_opaque_values
@@ -2544,6 +2552,25 @@ let () =
       expect_one_diagnostic
         "trait Make {\n  type Value\n  fn make() -> Self.Value {\n    1\n  }\n}\n" "types.mismatch"
         ~says:"Expected `Self.Value`, found an integer.");
+  Harness.test "a mismatch shows the type that an associated type is at a known type" (fun () ->
+      expect_one_diagnostic
+        "trait Get {\n\
+        \  type Value\n\
+         }\n\n\
+         impl Get for Int64 {\n\
+        \  type Value = Bool\n\
+         }\n\n\
+         type Holder[Source: Get](source: Source, value: Source.Value)\n\n\
+         fn build() -> Holder[Int64] {\n\
+        \  Holder(source: 1, value: 2)\n\
+         }\n"
+        "types.mismatch" ~says:"Expected `Bool`, found an integer.");
+  Harness.test "an associated type is a type argument of a call" (fun () ->
+      expect_fine Fixtures.Infer.multiplication_by_the_row_of_a_matrix);
+  Harness.test "an associated type in a cost operand that two traits declare is ambiguous"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.cost_of_comparing_a_part_of_two_traits
+        "types.ambiguous_associated");
   Harness.test "a value with a field of an associated type is built at a type and through a bound"
     (fun () -> expect_fine Fixtures.Infer.holders_of_source_values);
   Harness.test
@@ -2566,7 +2593,7 @@ let () =
          fn read() -> Int64 {\n\
         \  Get[Value = Int64].get()\n\
          }\n"
-        "types.arity" ~says:"not among type arguments in an expression")
+        "types.arity" ~says:"not among type arguments.")
 
 let point = "type Point(x: Int64, y: Int64)\n\n"
 

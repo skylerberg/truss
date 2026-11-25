@@ -28,6 +28,15 @@ val finish_call :
   string list ->
   Types.ty
 
+val find_method_of_an_unmet_impl :
+  State.state ->
+  Types.ty ->
+  string ->
+  Path.receiver ->
+  (Types.trait_reference * Types.trait_method) option
+
+val has_method_without_self : State.state -> Types.ty -> string -> bool
+
 val lookup_trait_static_methods :
   State.state ->
   Path.t ->

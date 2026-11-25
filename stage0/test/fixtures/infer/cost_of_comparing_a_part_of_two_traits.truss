@@ -1,0 +1,13 @@
+trait First {
+  type Part: Equal
+}
+
+trait Second {
+  type Part: Equal
+}
+
+fn same[Value: First + Second](first: Value, second: Value) -> Bool
+  cost time O(time(Value.Part.equal))
+{
+  true
+}

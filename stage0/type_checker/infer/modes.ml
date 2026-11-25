@@ -84,7 +84,12 @@ let use_mutable_index (state : State.state) ~(report_with : mutation option)
               in
               State.report state
                 (Index_not_mutable
-                   { at = Written value.id; by; self_type = State.zonk state self_type; assigns }))
+                   {
+                     at = Written value.id;
+                     by;
+                     self_type = State.normalize_known state self_type;
+                     assigns;
+                   }))
             report_with)
   | _ -> ()
 

@@ -15,6 +15,7 @@ module Elaborator : sig
   val elaborate_condition : t -> Syntax.condition -> Types.condition
   val add_condition : t -> Types.condition -> t
   val find_bounded_type : t -> Syntax.expression -> Types.ty option
+  val elaborate_associated_expression : t -> Syntax.expression -> Types.ty option
 
   type bound_method = Elaborator.bound_method = {
     self_type : Types.ty;

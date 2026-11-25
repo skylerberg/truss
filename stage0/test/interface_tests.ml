@@ -1181,7 +1181,7 @@ let () =
         "types.arity" ~says:"`Holder` takes 1 generic parameter, and this head names 0.");
   Harness.test "a type takes no constraint among its arguments" (fun () ->
       expect_one_diagnostic "fn read(items: List[Element = Int64]) {}\n" "types.arity"
-        ~says:"not among a type's arguments");
+        ~says:"not among type arguments.");
   Harness.test "a trait whose header did not parse satisfies every bound that names it" (fun () ->
       let packages = Support.setup [ ("app.main", Fixtures.Interface.bound_on_a_broken_trait) ] in
       match

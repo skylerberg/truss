@@ -9,6 +9,7 @@ val record_diagnostic : Catalog.diagnostic list ref -> Catalog.Typing.t -> Catal
 val list_trait_closure : Lookups.t -> Path.t -> Path.t list
 val split_part : Syntax.expression -> (string * Syntax.name list * bool) option
 val find_bounded_type : t -> Syntax.expression -> Types.ty option
+val elaborate_associated_expression : t -> Syntax.expression -> Types.ty option
 
 type bound_method = {
   self_type : Types.ty;

@@ -160,11 +160,11 @@ let describe : Typing.t -> Nodes.description = function
                 Printf.sprintf "'s parameter `%s` is a `UInt64` value, not a type." parameter
             | Type_for_value -> Printf.sprintf "'s parameter `%s` is a type, not a value." parameter)
         )
-  | Constraint_on_type { at = origin } ->
+  | Constraint_in_type_arguments { at = origin } ->
       make Arity (Build.at origin)
         (say
            "An associated type is fixed in a bound, as in `Source: Cursor[Element = Int64]`, not \
-            among a type's arguments.")
+            among type arguments.")
   | Arguments_to_parameter { at = origin; written } ->
       make Arity (Build.at origin)
         (tick written @ say " is a generic parameter, which takes no arguments.")

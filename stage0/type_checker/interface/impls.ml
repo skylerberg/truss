@@ -461,9 +461,7 @@ and list_matching_bounds lookups ~list_bounds (type_ : Types.ty) (wanted : Types
            match (wanted, actual) with
            | Types.Type wanted, Types.Type actual ->
                Types.is_open_type wanted || Types.is_open_type actual
-               || Types.equal
-                    (normalize lookups ~list_bounds wanted)
-                    (normalize lookups ~list_bounds actual)
+               || Types.equal (normalize lookups ~list_bounds wanted) actual
            | Types.Value wanted, Types.Value actual ->
                is_open_value wanted || is_open_value actual || wanted = actual
            | _ -> false)
@@ -471,11 +469,22 @@ and list_matching_bounds lookups ~list_bounds (type_ : Types.ty) (wanted : Types
   in
   List.filter
     (fun (bound : Types.trait_reference) ->
-      Path.equal bound.trait wanted.trait
-      && arguments_match bound.trait_arguments
+      arguments_match bound.trait_arguments
       && has_matching_associated_types lookups ~list_bounds wanted ~base:(Some type_)
            bound.associated)
-    (Properties.list_known_bounds lookups ~list_bounds type_)
+    (List.filter_map
+       (fun (bound : Types.trait_reference) ->
+         if Path.equal bound.trait wanted.trait then
+           Some
+             {
+               bound with
+               trait_arguments =
+                 List.map
+                   (Types.map_argument (normalize lookups ~list_bounds))
+                   bound.trait_arguments;
+             }
+         else None)
+       (Properties.list_known_bounds lookups ~list_bounds type_))
 
 and has_matching_associated_types lookups ~list_bounds (wanted : Types.trait_reference) ~base fixed
     =

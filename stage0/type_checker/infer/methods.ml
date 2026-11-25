@@ -182,7 +182,8 @@ and check_callee_cost state env (value : Syntax.expression) (metric : Language.M
       | Some (Unknown _), _ ->
           check_specification_function state env value (Callback_cost metric) arguments
       | Some (Local _), Some other ->
-          report_not_a_callee (Local_of_type { name = last.text; type_ = State.zonk state other })
+          report_not_a_callee
+            (Local_of_type { name = last.text; type_ = State.normalize_known state other })
       | _ -> report_not_a_callee (Name_is_neither last.text))
   | _ -> report_not_a_callee Operand_is_neither
 
@@ -199,11 +200,16 @@ and check_method_cost state (value : Syntax.expression) (metric : Language.Metri
   | None, [] ->
       State.make_error_type state
         (No_bound_method
-           { at = Written member.id; type_ = State.zonk state type_; name = member.text })
+           { at = Written member.id; type_ = State.normalize_known state type_; name = member.text })
   | None, _ ->
       State.make_error_type state
         (Ambiguous_cost_method
-           { at = Written member.id; type_ = State.zonk state type_; name = member.text; metric })
+           {
+             at = Written member.id;
+             type_ = State.normalize_known state type_;
+             name = member.text;
+             metric;
+           })
 
 and report_unknown_static_method state ?expected (value : Syntax.expression) type_
     (member : Syntax.name) (arguments : Syntax.argument list) =
@@ -230,7 +236,7 @@ and report_unknown_static_method state ?expected (value : Syntax.expression) typ
           (New_on_literal_type
              {
                at = Written member.id;
-               type_ = State.zonk state type_;
+               type_ = State.normalize_known state type_;
                literal;
                call = (if is_expected then Some (Written value.id) else None);
              })
@@ -253,7 +259,12 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
     Calls.check_arguments_alone state env arguments
       (State.make_error_type state
          (Ambiguous_static_method
-            { at = Written member.id; type_ = State.zonk state type_; name = member.text; traits }))
+            {
+              at = Written member.id;
+              type_ = State.normalize_known state type_;
+              name = member.text;
+              traits;
+            }))
   in
   let wanted_mode = Name_lookup.classify_receiver_mode arguments in
   let wanted = Path.Instance wanted_mode in
@@ -396,7 +407,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
            (No_method
               {
                 at = Written member.id;
-                owner = Type_owner { type_ = State.zonk state type_; list = None };
+                owner = Type_owner { type_ = State.normalize_known state type_; list = None };
                 name = member.text;
                 candidates = [];
               }))
@@ -655,24 +666,32 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
       | Ok (Hidden hidden) ->
           Calls.check_arguments_alone state env arguments
             (Members.make_hidden_error state (Written member.id) hidden)
-      | Ok Absent ->
-          let candidates =
-            match receiver_type with
-            | Types.Named { path; arguments } -> (
-                match Members.find_fields state.lookups path arguments with
-                | Some fields -> List.map (fun (field : Types.field) -> field.field_name) fields
-                | None -> [])
-            | _ -> []
-          in
-          Calls.check_arguments_alone state env arguments
-            (State.make_error_type state
-               (No_method
-                  {
-                    at = Written member.id;
-                    owner = Name_lookup.make_method_owner state receiver_type;
-                    name = member.text;
-                    candidates;
-                  }))
+      | Ok Absent -> (
+          match Name_lookup.find_method_of_an_unmet_impl state receiver_type member.text wanted with
+          | Some (trait, method_) ->
+              check_trait_method_with_receiver state env value ~receiver:base ~receiver_type trait
+                method_ ~type_arguments arguments
+          | None when Name_lookup.has_method_without_self state receiver_type member.text ->
+              Calls.check_arguments_alone state env arguments
+                (report_wrong_receiver [ (Path.Static, ()) ])
+          | None ->
+              let candidates =
+                match receiver_type with
+                | Types.Named { path; arguments } -> (
+                    match Members.find_fields state.lookups path arguments with
+                    | Some fields -> List.map (fun (field : Types.field) -> field.field_name) fields
+                    | None -> [])
+                | _ -> []
+              in
+              Calls.check_arguments_alone state env arguments
+                (State.make_error_type state
+                   (No_method
+                      {
+                        at = Written member.id;
+                        owner = Name_lookup.make_method_owner state receiver_type;
+                        name = member.text;
+                        candidates;
+                      })))
       | Ok (Visible overloads) -> (
           match
             choose_temporary
@@ -729,7 +748,7 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
                {
                  at = Written member.id;
                  call = Written value.id;
-                 type_ = State.zonk state receiver_type;
+                 type_ = State.normalize_known state receiver_type;
                  name = member.text;
                  receiver = Written base.id;
                  arguments =
