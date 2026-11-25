@@ -286,7 +286,7 @@ let make_empty_parts context frame element =
   Facts.assume context frame
     (Logic.equal (Models.make_sequence_length context element parts) (Logic.int 0));
   Facts.assume context frame
-    (make_each_sum context element (fun sum _ -> Logic.equal (sum parts) Costs.zero));
+    (make_each_sum context element (fun sum _ -> Logic.equal (sum parts) (Logic.int 0)));
   parts
 
 let append_part context frame element parts part =
@@ -614,7 +614,13 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       known
   | Storage_as ->
       ignore (Facts.declare_sort context result_type);
-      Logic.Apply (Facts.make_constructor_symbol result_type None, [ read_operand 0 ])
+      let built =
+        Logic.Apply (Facts.make_constructor_symbol result_type None, [ read_operand 0 ])
+      in
+      Lambdas.check_valid context frame
+        (Facts.locate context frame.source site.origin)
+        result_type built ~deep:false ~moment:Built_here;
+      built
   | Storage_address -> (
       match find_scalar_bytes element with
       | Some bytes ->

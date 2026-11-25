@@ -609,6 +609,12 @@ fn read_hash_raw_text(scanner: mut Scanner, text_start: UInt64, text_stop: UInt6
   buffer
 }
 
+fn can_write_as_raw(scanner: Scanner, start: UInt64, written: StringSlice) -> Bool
+  uses Panic
+{
+  !written.contains("\${") && !quote_joins_before(scanner, index: start) && !written.starts_with("\"") && !written.ends_with("\"")
+}
+
 fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token.Kind]
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.tables
@@ -644,11 +650,8 @@ fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token.Kind]
   }
   let quotes = if longest + 1 > 3 { longest + 1 } else { 3 }
   let delimiter = "\"".repeated(quotes)
-  let interpolates = written.contains("\${")
   let stop = text_stop + 1 + hashes
-  let fixes = if interpolates || quote_joins_before(scanner, index: start) || written.starts_with("\"") || written.ends_with("\"") {
-    []
-  } else {
+  let fixes = if can_write_as_raw(scanner, start, written) {
     [
       source.make_fix(
         "Write a raw string",
@@ -658,6 +661,8 @@ fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token.Kind]
         ],
       ),
     ]
+  } else {
+    []
   }
   report(
     mut scanner,

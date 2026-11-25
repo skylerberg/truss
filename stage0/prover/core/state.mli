@@ -109,6 +109,25 @@ type buffer = {
   model_of : Logic.term -> Logic.term;
 }
 
+type cost_state = {
+  mutable counters : Costs.counter list;
+  mutable conditional_counters : Costs.counter list;
+  mutable bounded_counters : Costs.counter list;
+  checks_without_potential : bool;
+  mutable has_counted_potential : bool;
+  mutable enclosing_loops : Core.origin list;
+  mutable loops_counting_potential : (Core.origin * Costs.counter) list;
+  mutable recursive_costs_assumed : int;
+  mutable lambdas_assuming_recursive_costs : Logic.term list;
+  mutable lambda_costs : ((Logic.term * Language.Metric.t) * (Logic.term * Obligation.t list)) list;
+  mutable lambda_captures : (Logic.term * Core.local list) list;
+  mutable call_targets : (Logic.term * Core.local) list;
+  mutable call_amounts : call_amount list;
+  mutable potentials : Logic.term list;
+  holds_potential : bool Tables.Type_table.t;
+  buffers : buffer option Tables.Type_table.t;
+}
+
 type lending = {
   part_type : Types.ty;
   part_postconditions : Mir.formula list;
@@ -130,7 +149,7 @@ type context = {
   type_clauses : (source * Mir.type_clauses option Lazy.t) option Tables.Path_table.t;
   callees : known_callee Tables.Path_table.t;
   stated : unit Tables.Stated_table.t;
-  mutable facts : Logic.term list;
+  mutable facts : Fact_list.t;
   mutable obligations : Obligation.t list;
   mutable fresh : int;
   mutable values : (Logic.symbol * string) list;
@@ -149,33 +168,18 @@ type context = {
   mutable lending : lending option;
   home : Resolve.Names.key;
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
-  mutable counters : Costs.counter list;
-  mutable conditional_counters : Costs.counter list;
-  mutable bounded_counters : Costs.counter list;
-  checks_without_potential : bool;
-  mutable has_counted_potential : bool;
-  mutable enclosing_loops : Core.origin list;
-  mutable loops_counting_potential : (Core.origin * Costs.counter) list;
-  mutable recursive_costs_assumed : int;
-  mutable lambdas_assuming_recursive_costs : Logic.term list;
+  cost : cost_state;
   fresh_order : int Tables.Symbol_table.t;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;
-  mutable lambda_costs : ((Logic.term * Language.Metric.t) * (Logic.term * Obligation.t list)) list;
-  mutable lambda_captures : (Logic.term * Core.local list) list;
-  mutable call_amounts : call_amount list;
   lambda_definitions : Logic.term Tables.Symbol_table.t;
-  mutable potentials : Logic.term list;
   models : (Logic.term -> Logic.term) option Tables.Model_table.t;
-  holds_potential : bool Tables.Type_table.t;
-  buffers : buffer option Tables.Type_table.t;
   mutable equalities : Logic.term list;
   mutable path_notes : (Catalog.Prover.path_note * Logic.term) list;
   mutable entry : Logic.symbol list;
   inherits_precondition : bool;
   mutable holes : (Resolve.Names.key * Obligation.location) list;
   mutable unfinished : Logic.term list;
-  mutable call_targets : (Logic.term * Core.local) list;
   mutable reading_callback : bool;
   ranking : bool;
   mutable scopes : (Logic.symbol * Logic.term list ref) list;

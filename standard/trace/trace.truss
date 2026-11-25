@@ -26,7 +26,7 @@ fn field(text: String, from: UInt64, length: UInt64) -> Option[view String] {
   if from > text.length() || text.length() - from < length {
     return None
   }
-  let part = text.part(from, to: from + length)
+  let part = text.get_substring(from, to: from + length)?
   if is_lower_hex(part) { Some(part) } else { None }
 }
 

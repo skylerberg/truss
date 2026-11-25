@@ -1,41 +1,40 @@
 use standard.growth
 use standard.intrinsic
-
-internal fn byte(output: mut intrinsic.Storage[UInt8], value: UInt8)
-{
-  if intrinsic.storage_length(output) >= intrinsic.storage_capacity(output) {
-    growth.reserve(mut output, additional: 1)
-  }
-  intrinsic.storage_push(mut output, value: value)
-}
+use standard.text.utf8
 
 internal fn append(output: mut intrinsic.Storage[UInt8], bytes: intrinsic.Storage[UInt8])
+  ensures identical(intrinsic.storage_model(output), old(intrinsic.storage_model(output)).concatenate(intrinsic.storage_model(bytes)))
 {
   let count = intrinsic.storage_length(bytes)
-  let start = intrinsic.storage_length(output)
   growth.reserve(mut output, additional: count)
   for index in 0..count
-    invariant intrinsic.storage_length(output) == start + index
-    invariant intrinsic.storage_capacity(output) >= start + count
+    invariant intrinsic.storage_length(output) == old(intrinsic.storage_length(output)) + index
+    invariant intrinsic.storage_capacity(output) >= old(intrinsic.storage_length(output)) + count
+    invariant forall i in 0..old(intrinsic.storage_length(output)) =>
+      intrinsic.storage_model(output)[i] == old(intrinsic.storage_model(output))[i]
+    invariant forall i in 0..index =>
+      intrinsic.storage_model(output)[old(intrinsic.storage_length(output)) + i] == intrinsic.storage_model(bytes)[i]
   {
     intrinsic.storage_push(mut output, value: intrinsic.storage_at(bytes, index: index))
   }
 }
 
 internal fn unsigned(output: mut intrinsic.Storage[UInt8], value: UInt64)
+  ensures utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
   decreases value
 {
   if value >= 10 {
     unsigned(mut output, value: value / 10)
   }
   let digit: UInt8 = intrinsic.convert(value % 10)
-  byte(mut output, value: digit + 48)
+  growth.push(mut output, value: digit + 48)
 }
 
 internal fn signed(output: mut intrinsic.Storage[UInt8], value: Int64)
+  ensures utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
 {
   if value < 0 {
-    byte(mut output, value: 45)
+    growth.push(mut output, value: 45)
     let magnitude: UInt64 = intrinsic.convert(intrinsic.negate(value + 1))
     unsigned(mut output, value: magnitude + 1)
   } else {
@@ -59,14 +58,14 @@ fn upper_hexadecimal(output: mut intrinsic.Storage[UInt8], value: UInt32)
     upper_hexadecimal(mut output, value: value / 16)
   }
   let digit: UInt8 = intrinsic.convert(value % 16)
-  byte(mut output, value: digit.digit_byte(uppercase: true))
+  growth.push(mut output, value: digit.digit_byte(uppercase: true))
 }
 
 fn escaped_code(output: mut intrinsic.Storage[UInt8], code: UInt32)
 {
   append(mut output, bytes: "\\u{".storage)
   upper_hexadecimal(mut output, value: code)
-  byte(mut output, value: 125)
+  growth.push(mut output, value: 125)
 }
 
 fn escaped(output: mut intrinsic.Storage[UInt8], character: Character, quote: UInt8)
@@ -76,8 +75,8 @@ fn escaped(output: mut intrinsic.Storage[UInt8], character: Character, quote: UI
   if code == 92 {
     append(mut output, bytes: "\\\\".storage)
   } else if code == quote_code {
-    byte(mut output, value: 92)
-    byte(mut output, value: quote)
+    growth.push(mut output, value: 92)
+    growth.push(mut output, value: quote)
   } else if code == 10 {
     append(mut output, bytes: "\\n".storage)
   } else if code == 9 {
@@ -98,11 +97,11 @@ internal fn quoted_character(output: mut intrinsic.Storage[UInt8], value: Charac
 {
   append(mut output, bytes: "Character\"".storage)
   escaped(mut output, character: value, quote: 34)
-  byte(mut output, value: 34)
+  growth.push(mut output, value: 34)
 }
 
 internal fn quoted_text(output: mut intrinsic.Storage[UInt8], text: intrinsic.Storage[UInt8]) {
-  byte(mut output, value: 34)
+  growth.push(mut output, value: 34)
   let count = intrinsic.storage_length(text)
   var at: UInt64 = 0
   while at < count {
@@ -137,5 +136,5 @@ internal fn quoted_text(output: mut intrinsic.Storage[UInt8], text: intrinsic.St
     }
     at += length
   }
-  byte(mut output, value: 34)
+  growth.push(mut output, value: 34)
 }

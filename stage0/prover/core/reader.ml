@@ -6,13 +6,15 @@ type loop_exits = {
   mutable ends : State.frame list;
 }
 
+type branch_exit = { exited : State.frame; exit_locals : Locals.local list }
+
 type run = {
   infos : Mir.local_info array;
   changed_in_place : (Mir.local, unit) Hashtbl.t;
   held_callbacks : (Mir.local, Core.local) Hashtbl.t;
   lambdas : Mir.body array;
   mutable loops : loop_exits list;
-  mutable cancelled : (Mir.task * State.frame list ref) list;
+  mutable cancelled : (Mir.task * branch_exit list ref) list;
 }
 
 let make_unit_callee : _ Core.target -> Invocation.callee = function
@@ -232,7 +234,7 @@ let write_resolved context frame run (place : Mir.place) new_value =
             let after =
               Intrinsics.write_sequence_element context frame base_type whole index element
             in
-            Amounts.assume_element_potential_change context frame base_type ~before:whole ~after
+            Potentials.assume_element_potential_change context frame base_type ~before:whole ~after
               ~replaced ~written:element;
             after
         | Range { node; start; stop; origin; _ } ->
@@ -259,51 +261,6 @@ let write_resolved context frame run (place : Mir.place) new_value =
       | Core_local Self -> { frame with self = Some whole }
       | key ->
           Facts.bind frame key (Facts.substitute_type context frame run.infos.(local).type_) whole)
-
-let compute_enclosing_potential_change context ~(before : State.frame) ~(after : State.frame) run
-    (place : Mir.place) =
-  let measure_declared (at : State.frame) prefix =
-    let ty = compute_place_type context at run prefix in
-    if Amounts.has_declared_potential context ty then
-      Amounts.compute_declared_potential context at ty
-        (read_resolved context { at with makes_obligations = false } run prefix)
-    else Costs.zero
-  in
-  snd
-    (List.fold_left
-       (fun (prefix, total) (projection : Mir.projection) ->
-         let base = { place with Mir.projections = prefix } in
-         ( prefix @ [ projection ],
-           match projection with
-           | Field _ | Variant_field _ ->
-               Costs.plus total
-                 (Costs.minus (measure_declared after base) (measure_declared before base))
-           | Element _ | Range _ -> total ))
-       ([], Costs.zero) place.Mir.projections)
-
-let spend_enclosing_potential_change context ~before ~after run alternatives =
-  let parts =
-    List.filter
-      (fun (_, (place : Mir.place)) ->
-        place.projections <> [] && match place.root with Local _ -> true | _ -> false)
-      alternatives
-  in
-  if
-    parts = []
-    || not (List.exists (fun (counter : Costs.counter) -> counter.amortized) context.State.counters)
-  then after
-  else
-    let change =
-      lazy
-        (List.fold_left
-           (fun total (condition, place) ->
-             Costs.plus total
-               (Amounts.make_conditional_amount condition
-                  (compute_enclosing_potential_change context ~before ~after run place)))
-           Costs.zero parts)
-    in
-    Operations.spend context after (fun counter ->
-        Operations.charge_potential context counter change)
 
 let write_alternatives context frame run alternatives new_value =
   match alternatives with
@@ -332,8 +289,11 @@ let write_alternatives context frame run alternatives new_value =
 
 let write_place context frame run (place : Mir.place) new_value =
   let alternatives = resolve_aliases frame run place in
-  spend_enclosing_potential_change context ~before:frame run alternatives
+  Potentials.spend_enclosing_change context ~before:frame
     ~after:(write_alternatives context frame run alternatives new_value)
+    alternatives
+    ~place_type:(fun at place -> compute_place_type context at run place)
+    ~read:(fun at place -> read_resolved context at run place)
 
 let compute_changes ?(also = []) context run (frame : State.frame) (blocks : Mir.block list) =
   let is_bound : Locals.local -> bool = function
@@ -396,22 +356,7 @@ let forget_changes context run (frame : State.frame) (changed : State.changed_pa
       (fun root -> (root, find_declared_root_type context frame run root))
       (List.sort_uniq compare (List.map (fun (part : State.changed_part) -> part.root) changed))
   in
-  let measure (at : State.frame) =
-    List.fold_left
-      (fun total (root, ty) ->
-        match
-          match root with
-          | Locals.Core_local Self -> at.self
-          | root -> Locals.find_opt root at.locals
-        with
-        | Some term -> Costs.plus total (Amounts.compute_potential context at ty term)
-        | None -> total)
-      Costs.zero roots
-  in
-  let forgotten = Loops.havoc context frame changed in
-  Operations.spend context forgotten (fun counter ->
-      Operations.charge_potential context counter
-        (lazy (Costs.minus (Costs.at_least_zero (measure forgotten)) (measure frame))))
+  Potentials.spend_forgotten context roots ~before:frame ~after:(Loops.havoc context frame changed)
 
 let read_operand context frame run (operand : Mir.operand) =
   match operand with
@@ -737,7 +682,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
         | Borrow { place = { root = Literal { value; _ }; projections = [] }; _ } -> Some value
         | _ -> None
       in
-      (Values.copy_value ?literal context frame ~declared term, term)
+      (Amounts.spend_copy ?literal context frame ~declared term, term)
   | Convert { conversion = Widen; value; converts_function_expression } ->
       Operations.check_widened location ~is_written:converts_function_expression
         (compute_operand_type context frame value)
@@ -748,7 +693,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Parameter_default { definition; position; substitution } ->
       let default = Mir.read_parameter_default context.lookups.mir ~definition ~position in
       let declared, term =
-        Amounts.run_code context
+        Lambdas.run_code context
           {
             frame with
             source = Contracts.read_source_at_key context.lookups default.source;
@@ -997,7 +942,10 @@ and read_providing (context : State.context) run provided ~refresh read =
       exits.breaks <- refresh_since ~before:breaks refresh exits.breaks;
       exits.ends <- refresh_since ~before:ends refresh exits.ends)
     loops;
-  List.iter (fun (frames, before) -> frames := refresh_since ~before refresh !frames) cancelled;
+  List.iter
+    (fun (exits, before) ->
+      exits := refresh_since ~before (fun exit -> { exit with exited = refresh exit.exited }) !exits)
+    cancelled;
   read
 
 and read_statement context frame run (statement : Mir.statement) =
@@ -1025,8 +973,8 @@ and read_statement context frame run (statement : Mir.statement) =
         lazy
           (List.fold_left
              (fun total (implementation : Mir.provided) ->
-               Costs.plus total
-                 (Amounts.compute_potential context frame
+               Logic.plus total
+                 (Potentials.compute_potential context frame
                     (Facts.substitute_type context frame implementation.type_)
                     (read_operand context
                        { frame with makes_obligations = false }
@@ -1034,7 +982,7 @@ and read_statement context frame run (statement : Mir.statement) =
              Costs.zero provided)
       in
       let refresh frame =
-        Operations.spend context
+        Potentials.spend_provided context
           (List.fold_left
              (fun frame place ->
                let root = { (expand_place frame run place) with Mir.projections = [] } in
@@ -1043,10 +991,7 @@ and read_statement context frame run (statement : Mir.statement) =
                  (make_passed_place context run root))
              frame
              (Mir.list_mut_provided_places provided))
-          (fun (counter : Costs.counter) ->
-            if counter.amortized || (not counter.counts_potential) || counter.counting <> Units then
-              Costs.zero
-            else Lazy.force provider_potential)
+          provider_potential
       in
       let read =
         read_providing context run provided ~refresh (fun () -> read_block context frame run body)
@@ -1101,8 +1046,13 @@ and read_statement context frame run (statement : Mir.statement) =
           in
           match task with
           | Branch _ -> (
+              let exit_locals =
+                Locals.make_key run.infos winner
+                :: Option.to_list
+                     (Option.map (fun (_, local) -> Locals.make_key run.infos local) returned)
+              in
               match List.assoc_opt task run.cancelled with
-              | Some frames -> frames := frame :: !frames
+              | Some exits -> exits := { exited = frame; exit_locals } :: !exits
               | None -> Facts.raise_bug "an early exit of a branch that is not around it")
           | Iteration { loop } -> (
               match List.find_opt (fun (exits : loop_exits) -> exits.loop = loop) run.loops with
@@ -1123,19 +1073,21 @@ and read_statement context frame run (statement : Mir.statement) =
                 run.cancelled <- (Mir.Branch { fork; index }, cancelled) :: run.cancelled;
                 let ended = read_statements context frame run branch.statements in
                 run.cancelled <- List.tl run.cancelled;
-                (ended, exits @ List.map (fun exited -> (index, exited)) (List.rev !cancelled)))
+                (ended, exits @ List.map (fun exit -> (index, exit)) (List.rev !cancelled)))
           (Some frame, [])
           (List.mapi (fun index branch -> (index, branch)) branches)
       in
-      let forget_other_branches (index, (exited : State.frame)) =
-        forget_changes context run exited
-          (compute_changes context run exited
-             (List.filteri (fun other _ -> other <> index) branches))
+      let forget_other_branches (index, exit) =
+        forget_changes context run exit.exited
+          (List.filter
+             (fun (part : State.changed_part) -> not (List.mem part.root exit.exit_locals))
+             (compute_changes context run exit.exited
+                (List.filteri (fun other _ -> other <> index) branches)))
       in
       let joined =
         Facts.join_frames context (Option.to_list ended @ List.map forget_other_branches exits)
       in
-      if concurrent then Option.map (wait_for_tasks context) joined else joined
+      if concurrent then Option.map (Amounts.spend_wait_for_tasks context) joined else joined
   | Resume { winner; exits } ->
       let won =
         read_operand context frame run
@@ -1374,13 +1326,8 @@ and read_statement context frame run (statement : Mir.statement) =
         }
       in
       let ended = Loops.run_for_loop context frame for_loop in
-      if loop.schedule = Concurrent then Option.map (wait_for_tasks context) ended else ended
-
-and wait_for_tasks context frame =
-  Operations.spend context frame (fun (counter : Costs.counter) ->
-      match counter.resource with
-      | Metric Time -> Operations.declare_unknown_amount context frame counter
-      | Metric (Allocations | Allocated_bytes) | Calls _ -> Costs.zero)
+      if loop.schedule = Concurrent then Option.map (Amounts.spend_wait_for_tasks context) ended
+      else ended
 
 and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic) =
   match basic with
@@ -1523,11 +1470,11 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
       Facts.declare context (Logic.Constant (symbol, Logic.Bool));
       let _, holds =
         Validity.run_as_specification context (fun () ->
-            Amounts.run_code context frame code ~type_:Types.bool)
+            Lambdas.run_code context frame code ~type_:Types.bool)
       in
       Facts.assume context frame (Logic.equal (Logic.Symbol symbol) holds);
       let location = Facts.locate context frame.source statement.origin in
-      Facts.oblige context frame location
+      Facts.oblige ~is_proven_by_evaluation:true context frame location
         (match statement.origin with
         | Written _ -> Assertion_may_fail { clause = Facts.quote frame.source statement.origin }
         | Desugared _ ->

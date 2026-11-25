@@ -299,6 +299,11 @@ let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.f
       | Some (returned, Some term) -> Some ({ frame with spent = returned.spent }, term)
       | Some (_, None) | None -> None)
 
+let run_code context frame (code : Mir.t) ~type_ =
+  match run_lambda_body context frame ~lambdas:code.lambdas code.body ~type_ with
+  | Some returned -> returned
+  | None -> (frame, Facts.arrive context frame "unfinished" type_)
+
 let compute_returned_type context frame (body : Mir.body) =
   let rec find_returned_type (block : Mir.block) =
     List.find_map
@@ -352,11 +357,7 @@ let find_lambda_definition context frame (function_type : Types.function_type)
       let bound = make_parameter_symbols context frame function_type in
       let defined =
         let mark = context.fresh in
-        let saved_counters = context.counters in
-        context.counters <- [];
-        Fun.protect
-          ~finally:(fun () -> context.counters <- saved_counters)
-          (fun () ->
+        Validity.run_without_costs context (fun () ->
             try
               let enter inside =
                 List.fold_left2
@@ -442,70 +443,10 @@ let find_lambda_definition context frame (function_type : Types.function_type)
       | _ -> None)
   | _ -> None
 
-let check_valid context frame location ty term ~deep ~moment =
-  match Validity.make_validity context frame ~assuming:false ~deep ty term with
+let check_valid ?includes_invariants context frame location ty term ~deep ~moment =
+  match Validity.make_validity context frame ~assuming:false ~deep ?includes_invariants ty term with
   | Logic.Boolean true -> ()
   | valid -> Facts.oblige context frame location (Invariant_may_fail { type_ = ty; moment }) valid
-
-let classify_counting (cost : Mir.cost) : Costs.counting =
-  match cost.bound with Order_of _ -> Units | At_most _ -> At_most | Exactly _ -> Exactly
-
-let list_loop_counters context locals (body : Mir.body) =
-  let counters = ref [] in
-  let note (loop : Mir.loop) =
-    List.iter
-      (function
-        | Mir.Cost cost -> (
-            match
-              Conditions.find_obligation_condition
-                (Conditions.decide context ~substitution:Types.no_substitution cost.holds_when)
-            with
-            | None -> ()
-            | Some condition -> (
-                match Contracts.find_resource cost ~locals with
-                | Some resource ->
-                    counters :=
-                      ( {
-                          Costs.resource;
-                          counting = classify_counting cost;
-                          amortized = false;
-                          counts_potential = true;
-                        },
-                        condition )
-                      :: !counters
-                | None -> Facts.raise_unsupported Whole_definition Calls_target))
-        | Invariant _ | Decreases _ -> ())
-      loop.clauses
-  in
-  let rec visit (block : Mir.block) =
-    List.iter
-      (fun (statement : Mir.statement) ->
-        (match statement.kind with
-        | While { loop; _ } | For { loop; _ } -> note loop
-        | Basic _ | Choose _ | Assert_by_bit_vector _ | Fork _ | Provide _ | Resume _ | Yield _
-        | Jump _ ->
-            ());
-        List.iter visit (Mir.list_nested_blocks statement))
-      block.statements
-  in
-  visit body.code;
-  List.rev !counters
-
-let list_checking_counters (context : State.context) counter =
-  if context.checks_without_potential then Costs.list_checking_counters counter else [ counter ]
-
-let assign_counters (context : State.context) (sources : (Costs.counter * Types.condition) list) =
-  let counters = Contracts.deduplicate_counters (List.map fst sources) in
-  context.counters <- counters;
-  context.conditional_counters <-
-    List.filter (fun counter -> not (List.mem (counter, []) sources)) counters
-
-let list_facts_since (context : State.context) count =
-  let rec take count list =
-    if count <= 0 then []
-    else match list with [] -> [] | item :: rest -> item :: take (count - 1) rest
-  in
-  take (List.length context.facts - count) context.facts
 
 let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : Invocation.site)
     (written : State.lambda_code) ~list_facts ~list_promises =
@@ -521,7 +462,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   let called = Facts.declare_fresh context frame "called" Logic.Bool in
   let inside = { (Facts.restrict frame called) with result = None } in
   let start_fresh = context.fresh
-  and start_facts = List.length context.facts
+  and start_facts = Fact_list.count context.facts
   and start_declarations = List.length context.declarations in
   let arguments =
     List.map
@@ -533,67 +474,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
       function_type.inputs
   in
   List.iter (Facts.assume context inside) (list_facts arguments);
-  let promised =
-    List.filter_map
-      (fun (cost : Types.cost) ->
-        let counting : Costs.counting =
-          match cost.bound with
-          | Order_of -> Units
-          | No_more_than _ -> At_most
-          | Exactly_cost _ -> Exactly
-        in
-        match cost.resource with
-        | Metric metric ->
-            let counter =
-              {
-                Costs.resource = Metric metric;
-                counting;
-                amortized = cost.amortized;
-                counts_potential = true;
-              }
-            in
-            Some (counter, cost.bound)
-        | Calls _ -> None)
-      function_type.costs
-  in
-  let operand_counters =
-    List.filter_map
-      (fun metric ->
-        let counter = Costs.make_operand_counter metric in
-        let is_counted =
-          List.exists
-            (fun (enclosing : Costs.counter) -> enclosing.resource = counter.resource)
-            context.counters
-        in
-        if is_counted && Option.is_none (Costs.find_stated_operand function_type.costs metric) then
-          Some (metric, counter)
-        else None)
-      Language.Metric.all
-  in
-  let saved_counters = context.counters
-  and saved_conditional_counters = context.conditional_counters in
-  assign_counters context
-    (List.concat_map
-       (fun (_, (counter : Costs.counter)) ->
-         let is_conditional =
-           List.for_all
-             (fun (enclosing : Costs.counter) ->
-               enclosing.resource <> counter.resource
-               || List.mem enclosing context.conditional_counters)
-             context.counters
-         in
-         List.map
-           (fun checking -> (checking, if is_conditional then context.condition else []))
-           (list_checking_counters context counter))
-       operand_counters
-    @ List.concat_map
-        (fun (counter, _) ->
-          List.map (fun checking -> (checking, [])) (list_checking_counters context counter))
-        promised
-    @ list_loop_counters context inside.locals written.code);
-  let inside =
-    { inside with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
-  in
+  let counters, inside = Counters.enter_lambda context inside function_type written.code in
   let read_exits (exit_ : State.frame) =
     List.filter_map
       (fun (index, (parameter, ((mode : Language.Mode.t), _))) ->
@@ -605,10 +486,11 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
          (fun index pair -> (index, pair))
          (List.combine written.code.parameters function_type.inputs))
   in
-  let mark = context.fresh and facts_mark = List.length context.facts in
-  let recursive_costs_mark = context.recursive_costs_assumed in
+  let mark = context.fresh and facts_mark = Fact_list.count context.facts in
   let premises =
-    List.drop (List.length context.facts - facts_mark) (list_facts_since context start_facts)
+    List.drop
+      (Fact_list.count context.facts - facts_mark)
+      (Fact_list.list_newest_since context.facts ~count:start_facts)
   in
   let ended = ref [] in
   let saved_returns = context.returns
@@ -621,15 +503,14 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   context.panics <-
     Conditions.may_panic context.lookups ~current:context.current ~condition:context.condition
       function_type.uses;
-  let pending =
+  let inferred_bounds =
     Fun.protect
       ~finally:(fun () ->
         context.returns <- saved_returns;
         context.terminates <- saved_terminates;
         context.panics <- saved_panics;
         context.can_declare_panic <- saved_can_declare_panic;
-        context.counters <- saved_counters;
-        context.conditional_counters <- saved_conditional_counters)
+        Counters.leave_lambda context counters)
       (fun () ->
         let finished =
           let inside = { inside with locals = remove_temporaries inside.locals } in
@@ -699,66 +580,11 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                   (list_promises ~entries:arguments ~exits ~result))
               result)
           !ended;
-        let compute_spent (exit_ : State.frame) counter =
-          match List.assoc_opt counter exit_.spent with Some term -> term | None -> Costs.zero
-        in
-        List.iter
-          (fun (exit_ : State.frame) ->
-            List.iter
-              (fun ((counter : Costs.counter), (bound : Types.cost_bound)) ->
-                let is_within spent =
-                  match bound with
-                  | Order_of -> Logic.less_equal spent (Costs.bound (Logic.int 1))
-                  | No_more_than limit -> Logic.less_equal spent (Logic.Integer limit)
-                  | Exactly_cost limit -> Logic.equal spent (Logic.Integer limit)
-                in
-                List.iter
-                  (fun checking ->
-                    Facts.oblige context exit_ location
-                      (Lambda_cost
-                         {
-                           counting =
-                             (match counter.counting with
-                             | Units | At_most -> Upper_bound
-                             | Exactly -> Exact);
-                           type_ = ty;
-                         })
-                      (is_within (compute_spent exit_ checking)))
-                  (list_checking_counters context counter))
-              promised)
-          exits;
-        let facts =
-          list_facts_since context facts_mark
-          @ List.map (fun (exit_ : State.frame) -> exit_.condition) exits
-        in
-        List.filter_map
-          (fun ((metric : Language.Metric.t), counter) ->
-            let list_spent exit_ =
-              List.map (compute_spent exit_) (list_checking_counters context counter)
-            in
-            let most =
-              match List.concat_map list_spent exits with
-              | [] -> Costs.zero
-              | first :: rest -> List.fold_left Costs.larger first rest
-            in
-            Option.map
-              (fun bound ->
-                ( metric,
-                  ( bound,
-                    List.concat_map
-                      (fun (exit_ : State.frame) ->
-                        List.filter_map
-                          (fun spent ->
-                            Facts.make_closed_obligation context exit_ location
-                              (Lambda_call_above_bound { metric })
-                              (Logic.less_equal spent bound))
-                          (list_spent exit_))
-                      exits ) ))
-              (Costs.find_cost_bound ~varies:(Facts.mentions_fresh_after context mark) ~facts most))
-          operand_counters)
+        Counters.check_lambda_exits context counters exits location ~type_:ty ~fresh_mark:mark
+          ~facts_mark)
   in
   let end_fresh = context.fresh in
-  let shown = list_facts_since context facts_mark in
+  let shown = Fact_list.list_newest_since context.facts ~count:facts_mark in
   let term =
     match find_lambda_definition context frame function_type written with
     | Some term -> term
@@ -774,12 +600,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   else
     add_lambda_relation context frame ~capture_free function_type term ~called ~arguments
       ~start_fresh ~end_fresh ~start_declarations ~premises ~shown ~ended:!ended ~read_exits;
-  context.lambda_captures <- (term, list_captured_locals written) :: context.lambda_captures;
-  if context.recursive_costs_assumed > recursive_costs_mark then
-    context.lambdas_assuming_recursive_costs <- term :: context.lambdas_assuming_recursive_costs;
-  context.lambda_costs <-
-    List.map (fun (metric, pending_cost) -> ((term, metric), pending_cost)) pending
-    @ context.lambda_costs;
+  Counters.note_lambda context counters term ~captures:(list_captured_locals written)
+    ~bounds:inferred_bounds;
   (frame, term)
 
 let translate_lambda context (frame : State.frame) ~(site : Invocation.site)

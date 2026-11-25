@@ -138,6 +138,14 @@ val negate : term -> term
 val add : term -> term -> term
 val subtract : term -> term -> term
 val multiply : term -> term -> term
+val plus : term -> term -> term
+val minus : term -> term -> term
+val times : term -> term -> term
+val larger : term -> term -> term
+val at_least_zero : term -> term
+val linearize : term -> (term * Z.t) list * Z.t
+val combine_linear : (term * Z.t) list * Z.t -> term
+val normalize_linear : term -> term
 val less : term -> term -> term
 val less_equal : term -> term -> term
 val greater : term -> term -> term
@@ -156,7 +164,9 @@ val forall : ?trigger:term list -> (symbol * sort) list * term -> term
 val substitute : (symbol * term) list -> term -> term
 val replace : from:term -> into:term -> term -> term
 val has_untriggered_fact : ?is_counted:(term -> bool) -> query -> bool
+val hash_term : term -> int
 val prune : query -> query
+val list_conjunct_queries : query -> query list
 val show_query : ?cardinality_bound:int -> query -> string
 val has_uninterpreted_sort : query -> bool
 

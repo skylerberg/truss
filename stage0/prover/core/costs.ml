@@ -34,6 +34,41 @@ let list_checking_counters counter =
   | Units -> [ counter; { counter with counts_potential = false } ]
   | At_most | Exactly -> [ counter ]
 
+let classify_counting (cost : Mir.cost) : counting =
+  match cost.bound with Order_of _ -> Units | At_most _ -> At_most | Exactly _ -> Exactly
+
+let find_resource (cost : Mir.cost) ~locals : resource option =
+  match cost.resource with
+  | Metric metric -> Some (Metric metric)
+  | Calls (Function_parameter local) ->
+      Option.map (fun term -> Calls (Through term)) (Locals.find_opt (Core_local local) locals)
+  | Calls (Capability path) -> Some (Calls (Capability path))
+  | Calls (Capability_method (path, name)) -> Some (Calls (Capability_method (path, name)))
+
+let covers ~(clause : target) ~(counter : target) =
+  match (clause, counter) with
+  | Capability path, Capability_method (owner, _) -> Path.equal path owner
+  | Through left, Through right -> left = right
+  | Capability left, Capability right -> Path.equal left right
+  | Capability_method (left, left_method), Capability_method (right, right_method) ->
+      Path.equal left right && left_method = right_method
+  | _ -> false
+
+let is_same_resource (cost : Mir.cost) ~locals (counter : counter) =
+  match (cost.resource, counter.resource) with
+  | Metric bounded, Metric counted -> bounded = counted
+  | Calls _, Calls counted -> (
+      match find_resource cost ~locals with
+      | Some (Calls target) -> covers ~clause:target ~counter:counted
+      | _ -> false)
+  | _ -> false
+
+let make_conditional_amount condition amount =
+  match condition with
+  | Logic.Boolean true -> amount
+  | Logic.Boolean false -> zero
+  | condition -> Logic.ite condition amount zero
+
 let list_stated_bounds (costs : Types.cost list) (metric : Language.Metric.t) ~amortized =
   List.filter_map
     (fun (cost : Types.cost) ->
@@ -56,135 +91,16 @@ let bound bound_function =
     (Logic.multiply (Logic.Integer (Z.shift_left Z.one 17)) bound_function)
     (Logic.Integer (Z.shift_left Z.one 16))
 
-let plus left right =
-  match (left, right) with
-  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.add x y)
-  | (Logic.Integer x, other | other, Logic.Integer x) when Z.equal x Z.zero -> other
-  | _ -> Logic.add left right
-
-let minus left right =
-  match (left, right) with
-  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.sub x y)
-  | other, Logic.Integer x when Z.equal x Z.zero -> other
-  | _ when left = right -> zero
-  | _ -> Logic.subtract left right
-
-let times left right =
-  match (left, right) with
-  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.mul x y)
-  | (Logic.Integer x, other | other, Logic.Integer x) when Z.equal x Z.one -> other
-  | (Logic.Integer x, _ | _, Logic.Integer x) when Z.equal x Z.zero -> zero
-  | _ -> Logic.multiply left right
-
-let at_least_zero term =
-  match term with
-  | Logic.Integer value -> Logic.Integer (Z.max value Z.zero)
-  | _ -> Logic.ite (Logic.greater_equal term zero) term zero
-
-let larger left right =
-  match (left, right) with
-  | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.max x y)
-  | _ when left = right -> left
-  | _ -> Logic.ite (Logic.greater_equal left right) left right
-
-let units amount = plus (at_least_zero amount) (Logic.int 1)
-
-let combine (sums, constant) =
-  let scale (atom, sum_coefficient) = times (Logic.Integer sum_coefficient) atom in
-  let positive = List.filter (fun (_, sum_coefficient) -> Z.sign sum_coefficient > 0) sums in
-  let negative =
-    List.filter_map
-      (fun (atom, sum_coefficient) ->
-        if Z.sign sum_coefficient < 0 then Some (atom, Z.neg sum_coefficient) else None)
-      sums
-  in
-  let total = List.fold_left (fun total entry -> plus total (scale entry)) zero positive in
-  let total =
-    if Z.sign constant >= 0 then plus total (Logic.Integer constant)
-    else minus total (Logic.Integer (Z.neg constant))
-  in
-  List.fold_left (fun total entry -> minus total (scale entry)) total negative
-
-let rec linearize term =
-  let rec add_scaled coefficient term (sums, constant) =
-    match term with
-    | Logic.Integer value -> (sums, Z.add constant (Z.mul coefficient value))
-    | Logic.Operation (Add, arguments) ->
-        List.fold_left
-          (fun sums_and_constant argument -> add_scaled coefficient argument sums_and_constant)
-          (sums, constant) arguments
-    | Logic.Operation (Negate, [ inner ]) -> add_scaled (Z.neg coefficient) inner (sums, constant)
-    | Logic.Operation (Subtract, first :: rest) ->
-        List.fold_left
-          (fun sums_and_constant argument ->
-            add_scaled (Z.neg coefficient) argument sums_and_constant)
-          (add_scaled coefficient first (sums, constant))
-          rest
-    | Logic.Operation (Multiply, [ Logic.Integer factor; inner ])
-    | Logic.Operation (Multiply, [ inner; Logic.Integer factor ]) ->
-        add_scaled (Z.mul coefficient factor) inner (sums, constant)
-    | other -> (
-        match normalize_node other with
-        | Logic.Operation (Add, _) as sum -> add_scaled coefficient sum (sums, constant)
-        | other -> add_atom coefficient other (sums, constant))
-  and add_atom coefficient other (sums, constant) =
-    let rec add = function
-      | [] -> [ (other, coefficient) ]
-      | (atom, sum_coefficient) :: rest when atom = other ->
-          (atom, Z.add sum_coefficient coefficient) :: rest
-      | entry :: rest -> entry :: add rest
-    in
-    (add sums, constant)
-  and normalize_node = function
-    | Logic.Apply (Logic.Symbol.Cost_most, [ left; right ]) -> (
-        let left = normalize left and right = normalize right in
-        let rec list_summands coefficient = function
-          | Logic.Operation (Add, parts) -> List.concat_map (list_summands coefficient) parts
-          | Logic.Operation (Negate, [ inner ]) -> list_summands (Z.neg coefficient) inner
-          | Logic.Operation (Subtract, first :: rest) ->
-              list_summands coefficient first
-              @ List.concat_map (list_summands (Z.neg coefficient)) rest
-          | Logic.Operation (Multiply, [ Logic.Integer factor; inner ]) ->
-              list_summands (Z.mul coefficient factor) inner
-          | Logic.Integer _ -> []
-          | other -> [ (other, coefficient) ]
-        in
-        match
-          List.filter
-            (fun part -> List.mem part (list_summands Z.one right))
-            (list_summands Z.one left)
-        with
-        | [] -> Logic.Apply (Logic.Symbol.Cost_most, [ left; right ])
-        | common ->
-            let shared =
-              List.fold_left
-                (fun total (atom, coefficient) ->
-                  plus total (times (Logic.Integer coefficient) atom))
-                zero common
-            in
-            Logic.add shared
-              (Logic.Apply
-                 ( Logic.Symbol.Cost_most,
-                   [ normalize (minus left shared); normalize (minus right shared) ] )))
-    | Logic.Apply (name, arguments) -> Logic.Apply (name, List.map normalize arguments)
-    | Logic.Is (constructor, argument) -> Logic.Is (constructor, normalize argument)
-    | Logic.Operation (operator, arguments) ->
-        Logic.Operation (operator, List.map normalize arguments)
-    | other -> other
-  in
-  let sums, constant = add_scaled Z.one term ([], Z.zero) in
-  (List.filter (fun (_, sum_coefficient) -> not (Z.equal sum_coefficient Z.zero)) sums, constant)
-
-and normalize term = combine (linearize term)
+let units amount = Logic.plus (Logic.at_least_zero amount) (Logic.int 1)
 
 let reduce_constants amount =
-  let sums, constant = linearize amount in
+  let sums, constant = Logic.linearize amount in
   let factor =
     List.fold_left (fun factor (_, coefficient) -> Z.gcd factor coefficient) Z.zero sums
   in
   if Z.leq factor Z.one && Z.leq (Z.abs constant) Z.one then amount
   else
-    combine
+    Logic.combine_linear
       ( List.map (fun (atom, coefficient) -> (atom, Z.divexact coefficient factor)) sums,
         Z.of_int (Z.sign constant) )
 
@@ -192,7 +108,7 @@ let rec since ~start total =
   match total with
   | Logic.Operation (Ite, [ condition; left; right ]) ->
       Logic.ite condition (since ~start left) (since ~start right)
-  | _ -> normalize (minus total start)
+  | _ -> Logic.normalize_linear (Logic.minus total start)
 
 type polarity = Grows | Shrinks | Both
 
@@ -210,7 +126,7 @@ let rec rewrite_choices_as_most = function
 
 let rec rewrite_most_as_choices = function
   | Logic.Apply (Logic.Symbol.Cost_most, [ left; right ]) ->
-      larger (rewrite_most_as_choices left) (rewrite_most_as_choices right)
+      Logic.larger (rewrite_most_as_choices left) (rewrite_most_as_choices right)
   | Logic.Apply (name, arguments) -> Logic.Apply (name, List.map rewrite_most_as_choices arguments)
   | Logic.Operation (operator, arguments) ->
       Logic.Operation (operator, List.map rewrite_most_as_choices arguments)
@@ -306,7 +222,7 @@ let find_cost_bound ~varies ~facts cost =
               match find_part_bound ~varies ~facts part polarity with
               | Some bound ->
                   Some
-                    (normalize
+                    (Logic.normalize_linear
                        (Logic.replace ~from:part ~into:(rewrite_choices_as_most bound) cost))
               | None -> None)
           parts
@@ -316,7 +232,7 @@ let find_cost_bound ~varies ~facts cost =
       | _ -> None
   in
   Option.map rewrite_most_as_choices
-    (find_bound_within_depth 12 (normalize (rewrite_choices_as_most cost)))
+    (find_bound_within_depth 12 (Logic.normalize_linear (rewrite_choices_as_most cost)))
 
 let list_unbounded_parts ~varies ~facts cost =
   let rec list_within_depth depth cost =
@@ -332,7 +248,9 @@ let list_unbounded_parts ~varies ~facts cost =
         match bound with
         | None -> [ part ]
         | Some bound -> (
-            match list_within_depth (depth - 1) (normalize (rewrite_choices_as_most bound)) with
+            match
+              list_within_depth (depth - 1) (Logic.normalize_linear (rewrite_choices_as_most bound))
+            with
             | [] -> []
             | parts -> part :: parts))
       (list_varying_parts varies cost)
@@ -340,13 +258,150 @@ let list_unbounded_parts ~varies ~facts cost =
   List.fold_left
     (fun parts part -> if List.mem part parts then parts else parts @ [ part ])
     []
-    (list_within_depth 12 (normalize (rewrite_choices_as_most cost)))
+    (list_within_depth 12 (Logic.normalize_linear (rewrite_choices_as_most cost)))
 
 let mentions_part ~part amount =
   let rec holds term = term = part || List.exists holds (Logic.list_arguments term) in
-  holds (normalize (rewrite_choices_as_most amount))
+  holds (Logic.normalize_linear (rewrite_choices_as_most amount))
 
 let list_upper_bounds ~varies ~facts term =
   List.filter_map
     (fun (smaller, larger) -> if smaller = term && not (varies larger) then Some larger else None)
     (List.concat_map list_comparisons facts)
+
+let is_potential = function
+  | Logic.Apply ((Logic.Symbol.Potential _ | Logic.Symbol.Slack _), _) -> true
+  | Logic.Apply (_, arguments) ->
+      List.exists
+        (function Logic.Symbol (Logic.Symbol.Potential_measure _) -> true | _ -> false)
+        arguments
+  | _ -> false
+
+let mentions_potential term =
+  let rec walk term =
+    is_potential term
+    ||
+    match term with
+    | Logic.Forall (_, _, body) | Logic.Exists (_, body) -> walk body
+    | term -> List.exists walk (Logic.list_arguments term)
+  in
+  walk term
+
+let rec list_potentials term =
+  if is_potential term then [ term ]
+  else List.concat_map list_potentials (Logic.list_arguments term)
+
+let rec take_potential_as_zero term =
+  if is_potential term then Logic.Integer Z.zero
+  else Logic.map_arguments take_potential_as_zero term
+
+let split_shared_summands (values : (Logic.term * Logic.term) list) =
+  let linear = List.map (fun (on, value) -> (on, Logic.linearize value)) values in
+  let shared =
+    match linear with
+    | (_, (first_sums, _)) :: rest ->
+        List.filter
+          (fun (atom, coefficient) ->
+            List.for_all
+              (fun (_, (sums, _)) ->
+                match List.assoc_opt atom sums with
+                | Some other -> Z.equal other coefficient
+                | None -> false)
+              rest)
+          first_sums
+    | [] -> []
+  in
+  ( Logic.combine_linear (shared, Z.zero),
+    List.map
+      (fun (on, (sums, constant)) ->
+        ( on,
+          Logic.combine_linear
+            (List.filter (fun (atom, _) -> not (List.mem_assoc atom shared)) sums, constant) ))
+      linear )
+
+let find_shared_potential_summands
+    (values : (Logic.term * (Logic.term * Logic.term) list * Logic.term) list) =
+  let joined_terms = List.concat_map (fun (_, renamings, _) -> List.map snd renamings) values in
+  let linear =
+    List.map (fun (on, renamings, amount) -> (on, renamings, Logic.linearize amount)) values
+  in
+  let find_coefficient sums atom = Option.value (List.assoc_opt atom sums) ~default:Z.zero in
+  let joined_atoms =
+    List.fold_left
+      (fun atoms (_, _, (sums, _)) ->
+        List.fold_left
+          (fun atoms (atom, _) ->
+            if
+              is_potential atom
+              && List.exists (fun joined -> mentions_part ~part:joined atom) joined_terms
+              && not (List.mem atom atoms)
+            then atoms @ [ atom ]
+            else atoms)
+          atoms sums)
+      [] linear
+  in
+  let align linear atom =
+    match
+      List.find_map
+        (fun (_, _, (sums, _)) ->
+          let coefficient = find_coefficient sums atom in
+          if Z.equal coefficient Z.zero then None else Some coefficient)
+        linear
+    with
+    | None -> linear
+    | Some target ->
+        List.map
+          (fun (on, renamings, (sums, constant)) ->
+            let difference = Z.sub target (find_coefficient sums atom) in
+            if Z.equal difference Z.zero then (on, renamings, (sums, constant))
+            else
+              let on_path =
+                List.fold_left
+                  (fun atom (incoming, joined) -> Logic.replace ~from:joined ~into:incoming atom)
+                  atom renamings
+              in
+              ( on,
+                renamings,
+                Logic.linearize
+                  (Logic.plus
+                     (Logic.combine_linear (sums, constant))
+                     (Logic.times (Logic.Integer difference) (Logic.minus atom on_path))) ))
+          linear
+  in
+  let is_misaligned atom =
+    match linear with
+    | (_, _, (first_sums, _)) :: rest ->
+        let coefficient = find_coefficient first_sums atom in
+        List.exists
+          (fun (_, _, (sums, _)) -> not (Z.equal (find_coefficient sums atom) coefficient))
+          rest
+    | [] -> false
+  in
+  match List.filter is_misaligned joined_atoms with
+  | [] -> None
+  | misaligned ->
+      let aligned = List.fold_left align linear misaligned in
+      let shared =
+        match aligned with
+        | (_, _, (first_sums, _)) :: rest ->
+            List.filter
+              (fun (atom, coefficient) ->
+                is_potential atom
+                && List.for_all
+                     (fun (_, _, (sums, _)) ->
+                       match List.assoc_opt atom sums with
+                       | Some other -> Z.equal other coefficient
+                       | None -> false)
+                     rest)
+              first_sums
+        | [] -> []
+      in
+      Some
+        ( Logic.combine_linear (shared, Z.zero),
+          List.map
+            (fun (on, _, (sums, constant)) ->
+              ( on,
+                Logic.combine_linear
+                  (List.filter (fun (atom, _) -> not (List.mem_assoc atom shared)) sums, constant)
+              ))
+            aligned )

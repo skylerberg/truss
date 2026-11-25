@@ -1,0 +1,9 @@
+type Ranges(span: Span, count: UInt64)
+  invariant count <= 10
+
+fn Ranges.widen(mut self)
+  requires self.span.high < 1000
+{
+  self.count = 11
+  self.span.low = self.span.high + 1
+}

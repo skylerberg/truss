@@ -58,11 +58,3 @@ val apply_specification_function :
   unconverted:Types.ty list ->
   types:Types.ty list ->
   State.frame * Logic.term
-
-val copy_value :
-  ?literal:Language.Literal.t ->
-  State.context ->
-  State.frame ->
-  declared:Types.ty ->
-  Logic.term ->
-  State.frame

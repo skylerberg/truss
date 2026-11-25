@@ -1,7 +1,6 @@
 let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_failures = true)
-    ?(panics = false) ?(can_declare_panic = false) ?panic_condition
-    ?(checks_without_potential = false) ?(loops_counting_potential = []) (lookups : Lookups.t) ~home
-    ~current ~terminates ~measures ~inherits_precondition =
+    ?(panics = false) ?(can_declare_panic = false) ?panic_condition ?loops_counting_potential
+    (lookups : Lookups.t) ~home ~current ~terminates ~measures ~inherits_precondition =
   let node = Option.value node ~default:current in
   let rec context =
     {
@@ -32,7 +31,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       type_clauses = Tables.Path_table.create 16;
       callees = Tables.Path_table.create 16;
       stated = Tables.Stated_table.create 64;
-      facts = [];
+      facts = Fact_list.empty;
       scopes = [];
       quantifier_facts = Tables.Term_table.create 16;
       written_quantifiers = Tables.Term_table.create 4;
@@ -52,33 +51,18 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       axiom_clauses = Tables.Axiom_clause_table.create 16;
       lending = None;
       callbacks = [];
-      counters = [];
-      conditional_counters = [];
-      bounded_counters = [];
-      checks_without_potential;
-      has_counted_potential = false;
-      enclosing_loops = [];
-      loops_counting_potential;
-      recursive_costs_assumed = 0;
-      lambdas_assuming_recursive_costs = [];
+      cost = Counters.make_state ?loops_counting_potential ();
       fresh_order = Tables.Symbol_table.create 64;
       logs = [];
       powers = [];
-      lambda_costs = [];
-      lambda_captures = [];
-      call_amounts = [];
       lambda_definitions = Tables.Symbol_table.create 8;
-      potentials = [];
       models = Tables.Model_table.create 16;
-      holds_potential = Tables.Type_table.create 16;
-      buffers = Tables.Type_table.create 16;
       equalities = [];
       path_notes = [];
       entry = [];
       inherits_precondition;
       holes = [];
       unfinished = [];
-      call_targets = [];
       reading_callback = false;
       validating = [];
       ranking = terminates && measures = [] && lookups.list_recursion_group node <> [];
@@ -118,13 +102,6 @@ let make_empty_frame source =
     spent = [];
   }
 
-type promise = {
-  counter : Costs.counter;
-  clause : Mir.cost;
-  written_in : State.source;
-  inherited : bool;
-}
-
 let is_capability_implementation (lookups : Lookups.t) (path : Path.t) =
   match path with
   | Method { owner; _ } -> (
@@ -134,90 +111,6 @@ let is_capability_implementation (lookups : Lookups.t) (path : Path.t) =
           = Some Resolve.Names.Capability
       | None -> false)
   | _ -> false
-
-let list_promises context (source : State.source) locals (costs : Mir.cost list) ~inherited
-    ~counts_provider_potential =
-  List.filter_map
-    (fun (cost : Mir.cost) ->
-      match Contracts.find_resource cost ~locals with
-      | None -> Facts.raise_unsupported (Facts.locate context source cost.origin) Calls_target
-      | Some resource ->
-          let counting = Lambdas.classify_counting cost in
-          let counter =
-            {
-              Costs.resource;
-              counting;
-              amortized =
-                (cost.amortized
-                || counts_provider_potential && counting = Units
-                   && match resource with Metric _ -> true | Calls _ -> false);
-              counts_potential = true;
-            }
-          in
-          (match (cost.resource, resource) with
-          | Calls (Function_parameter local), Calls (Through term) ->
-              context.call_targets <- (term, local) :: context.call_targets
-          | _ -> ());
-          if counter.counting = Units && not (List.mem counter context.bounded_counters) then
-            context.bounded_counters <- counter :: context.bounded_counters;
-          Some { counter; clause = cost; written_in = source; inherited })
-    costs
-
-let list_promise_counters context promised =
-  List.concat_map
-    (fun promise ->
-      List.map
-        (fun counter -> (counter, promise.clause.holds_when))
-        (Lambdas.list_checking_counters context promise.counter))
-    promised
-
-let find_promiser (lookups : Lookups.t) (source : State.source) : Catalog.Prover.promiser =
-  match source.key with
-  | { path = Method { owner; _ }; _ }
-    when Resolve.Names.find_kind lookups.interface.names owner = Some Resolve.Names.Capability ->
-      Capability_promiser
-  | _ -> Trait_promiser
-
-let classify_counting (promise : promise) : Catalog.Prover.counting =
-  match promise.counter.counting with Units | At_most -> Upper_bound | Exactly -> Exact
-
-let keep_promise ?restated context (frame : State.frame) (promise : promise) ~(at : State.frame)
-    ~location ~compute_potential_at_entry =
-  let amount =
-    match promise.clause.bound with
-    | Order_of amount | At_most amount | Exactly amount ->
-        snd (Validity.read_specification context { at with makes_obligations = false } amount)
-  in
-  let is_within spent =
-    match promise.counter.counting with
-    | Units -> Logic.less_equal spent (Costs.bound amount)
-    | Exactly -> Logic.equal spent amount
-    | At_most -> Logic.less_equal spent amount
-  in
-  let compute_counted (counter : Costs.counter) =
-    let spent =
-      match List.assoc_opt counter frame.spent with Some term -> term | None -> Costs.zero
-    in
-    if counter.amortized && not counter.counts_potential then
-      Costs.minus spent (compute_potential_at_entry ())
-    else spent
-  in
-  let counting = classify_counting promise
-  and clause = Facts.quote promise.written_in promise.clause.origin in
-  List.iter
-    (fun counter ->
-      Facts.oblige context frame location ~holds_when:promise.clause.holds_when
-        ~can_be_required:(promise.counter.counting <> Units)
-        (Cost_promise
-           (match restated with
-           | Some (for_type, name, trait, declared) ->
-               Restated_promise { counting; for_type; name; clause; trait; declared }
-           | None when promise.inherited ->
-               Inherited_promise
-                 { counting; promiser = find_promiser context.lookups promise.written_in; clause }
-           | None -> Own_promise { counting; clause }))
-        (is_within (compute_counted counter)))
-    (Lambdas.list_checking_counters context promise.counter)
 
 let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_condition
     ~loops_counting_potential (lookups : Lookups.t) (source : State.source) ~path =
@@ -287,9 +180,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   in
   let context =
     make_context lookups ~condition ~keeps_termination ~keeps_failures ~panics ~can_declare_panic
-      ?panic_condition
-      ~checks_without_potential:(Option.is_some loops_counting_potential)
-      ?loops_counting_potential ~home ~current:path
+      ?panic_condition ?loops_counting_potential ~home ~current:path
       ~node:
         (Mir.Call_edges.resolve_node
            { interface = lookups.interface; mir = lookups.mir }
@@ -371,7 +262,8 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
             (match self with
             | Logic.Symbol symbol -> context.entry <- symbol :: context.entry
             | _ -> ());
-            if not is_update_step then Validity.assume_valid context frame self_type self;
+            Validity.assume_valid context frame ~includes_invariants:(not is_update_step) self_type
+              self;
             { frame with self = Some self; self_type = Some self_type }
         | local ->
             let ty = Facts.substitute_type context frame parameter.type_ in
@@ -396,9 +288,9 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
           Some
             {
               part_type = part;
-              part_postconditions = List.filter Amounts.mentions_result declared_ensures;
+              part_postconditions = List.filter Contracts.mentions_result declared_ensures;
               return_postconditions =
-                List.filter (fun clause -> not (Amounts.mentions_result clause)) declared_ensures;
+                List.filter (fun clause -> not (Contracts.mentions_result clause)) declared_ensures;
             };
         { start with yielded_so_far = Some (Intrinsics.make_empty_parts context start part) }
     | _ -> start
@@ -463,21 +355,16 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   in
   let counts_provider_potential = is_capability_implementation lookups path in
   let promised =
-    list_promises context source start.locals contract.costs ~inherited:false
+    Counters.list_promises context source start.locals contract.costs ~inherited:false
       ~counts_provider_potential
     @
     match find_trait_frame start ~result:None with
     | Some (clauses, inside) ->
-        list_promises context clauses.callee inside.locals clauses.costs ~inherited:true
+        Counters.list_promises context clauses.callee inside.locals clauses.costs ~inherited:true
           ~counts_provider_potential
     | None -> []
   in
-  Lambdas.assign_counters context
-    (list_promise_counters context promised
-    @ Lambdas.list_loop_counters context start.locals mir.body);
-  let start =
-    { start with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
-  in
+  let start = Counters.enter_definition context start promised ~body:(Some mir.body) in
   if context.inherits_precondition then
     if declared_requires = [] then Facts.assume context start trait_requires
     else
@@ -538,15 +425,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
         start contract.panics_unless
     else start
   in
-  List.iter
-    (fun (promise : promise) ->
-      if not promise.inherited then
-        match promise.clause.bound with
-        | Order_of amount | At_most amount | Exactly amount ->
-            let result = Option.map (Facts.arrive context start "result") output in
-            Conditions.with_obligation_condition context promise.clause.holds_when (fun () ->
-                ignore (Validity.read_specification context { start with result } amount)))
-    promised;
+  Counters.check_promise_amounts context start promised ~output;
   Reader.read_body context start ~lambdas:mir.lambdas mir.body;
   let returns = List.rev context.returns in
   let mut_parameters =
@@ -580,10 +459,10 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                 ~moment:(Mut_parameter_at_return (Facts.read_parameter_name parameter))
           | _ -> ())
         mut_parameters;
-      (match (mut_self, is_update_step, frame.self, frame.self_type) with
-      | true, false, Some self, Some self_type ->
+      (match (mut_self, frame.self, frame.self_type) with
+      | true, Some self, Some self_type ->
           Lambdas.check_valid context frame Whole_definition self_type self ~deep:true
-            ~moment:Self_at_return
+            ~includes_invariants:(not is_update_step) ~moment:Self_at_return
       | _ -> ());
       (match (context.lending, frame.yielded_so_far) with
       | Some { return_postconditions; _ }, Some yielded_so_far ->
@@ -613,32 +492,32 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
             declared_ensures);
       let under_trait = Facts.restrict frame trait_requires in
       let compute_potential_at_entry () =
-        List.fold_left
-          (fun total (parameter : Mir.parameter) ->
-            let entry, ty =
-              match parameter.local with
-              | Self -> (start.self, start.self_type)
-              | local ->
-                  ( Locals.find_opt (Core_local local) start.locals,
-                    Some (Facts.substitute_declared_type context start parameter.type_) )
-            in
-            match (parameter.mode, entry, ty) with
-            | (Language.Mode.Mut | Language.Mode.Own), Some entry, Some ty ->
-                Costs.plus total (Amounts.compute_potential context frame ty entry)
-            | _ -> total)
-          Costs.zero parameters
+        Potentials.compute_given_potential context frame
+          (List.filter_map
+             (fun (parameter : Mir.parameter) ->
+               let entry, ty =
+                 match parameter.local with
+                 | Self -> (start.self, start.self_type)
+                 | local ->
+                     ( Locals.find_opt (Core_local local) start.locals,
+                       Some (Facts.substitute_declared_type context start parameter.type_) )
+               in
+               match (entry, ty) with
+               | Some entry, Some ty -> Some (parameter.mode, ty, entry)
+               | _ -> None)
+             parameters)
       in
       List.iter
-        (fun promise ->
+        (fun (promise : Counters.promise) ->
           if promise.inherited then
             match find_trait_frame frame ~result:returned with
             | Some (_, inside) ->
-                keep_promise context under_trait promise
+                Counters.check_promise context under_trait promise
                   ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
                   ~location:Whole_definition ~compute_potential_at_entry
             | None -> ()
           else
-            keep_promise context frame promise
+            Counters.check_promise context frame promise
               ~at:{ frame with locals = frame.old_locals; self = frame.old_self; result = returned }
               ~location:(Facts.locate context source promise.clause.origin)
               ~compute_potential_at_entry)
@@ -651,7 +530,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
               Facts.oblige ~holds_when:clause.holds_when context under_trait Whole_definition
                 (Promiser_ensures
                    {
-                     promiser = find_promiser lookups clauses.callee;
+                     promiser = Contracts.find_promiser lookups clauses.callee;
                      clause = Facts.quote clauses.callee clause.origin;
                    })
                 term)
@@ -660,7 +539,8 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
     returns;
   ( make_outcome context,
     context.skipped_conditions,
-    if context.has_counted_potential then Some context.loops_counting_potential else None )
+    if context.cost.has_counted_potential then Some context.cost.loops_counting_potential else None
+  )
 
 let find_circular_contract (lookups : Lookups.t) (source : State.source) ~path =
   let context =
@@ -895,13 +775,10 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
               ~substitution:subtrait_substitution
           in
           let promised =
-            list_promises context clauses.callee (reading entry).locals clauses.costs
+            Counters.list_promises context clauses.callee (reading entry).locals clauses.costs
               ~inherited:true ~counts_provider_potential:false
           in
-          Lambdas.assign_counters context (list_promise_counters context promised);
-          let entry =
-            { entry with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
-          in
+          let entry = Counters.enter_definition context entry promised ~body:None in
           let result_type =
             Types.substitute_erased subtrait_substitution
               (Types.extract_result_type signature.output)
@@ -980,20 +857,17 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
                 term)
             clauses.ensures;
           let compute_potential_at_entry () =
-            List.fold_left
-              (fun total (parameter : Mir.parameter) ->
-                match parameter.mode with
-                | Language.Mode.Mut | Own ->
-                    Costs.plus total
-                      (Amounts.compute_potential context after
-                         (Types.substitute subtrait_substitution parameter.type_)
-                         (read_place parameter entry))
-                | Read -> total)
-              Costs.zero clauses.parameters
+            Potentials.compute_given_potential context after
+              (List.map
+                 (fun (parameter : Mir.parameter) ->
+                   ( parameter.mode,
+                     Types.substitute subtrait_substitution parameter.type_,
+                     read_place parameter entry ))
+                 clauses.parameters)
           in
           List.iter
             (fun promise ->
-              keep_promise context after promise ~at:entry_reading ~location
+              Counters.check_promise context after promise ~at:entry_reading ~location
                 ~compute_potential_at_entry ~restated:(for_type, name, trait, declared))
             promised)
   | Some Built_in ->
@@ -1011,10 +885,8 @@ let translate_restated_clauses (lookups : Lookups.t) (source : State.source) ~im
   let impl_interface = Interface.Definition.read_impl_interface lookups.interface impl in
   let translate ~loops_counting_potential =
     let context =
-      make_context lookups
-        ~checks_without_potential:(Option.is_some loops_counting_potential)
-        ?loops_counting_potential ~home ~current:impl ~terminates:false ~measures:[]
-        ~inherits_precondition:false
+      make_context lookups ?loops_counting_potential ~home ~current:impl ~terminates:false
+        ~measures:[] ~inherits_precondition:false
     in
     List.iter
       (fun (restated : Types.restated_method) ->
@@ -1036,8 +908,8 @@ let translate_restated_clauses (lookups : Lookups.t) (source : State.source) ~im
   in
   let context = translate ~loops_counting_potential:None in
   make_outcome
-    (if context.has_counted_potential then
-       translate ~loops_counting_potential:(Some context.loops_counting_potential)
+    (if context.cost.has_counted_potential then
+       translate ~loops_counting_potential:(Some context.cost.loops_counting_potential)
      else context)
 
 let translate_type (lookups : Lookups.t) (source : State.source) ~path =
@@ -1060,7 +932,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
           List.iter
             (fun (default : Mir.t Mir.field_default) ->
               ignore
-                (Amounts.run_code context start default.value
+                (Lambdas.run_code context start default.value
                    ~type_:(Facts.substitute_type context start default.type_)))
             defaults
       | Some { form = Parameter_defaults _; _ } | None -> ());
@@ -1099,7 +971,7 @@ let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
       let frame = make_empty_frame source in
       Facts.reject_constant_cycle context frame code;
       ignore
-        (Amounts.run_code context frame code
+        (Lambdas.run_code context frame code
            ~type_:(Interface.Definition.read_constant_type context.lookups.interface path));
       {
         (make_outcome context) with

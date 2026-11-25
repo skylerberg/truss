@@ -74,7 +74,7 @@ let declare (context : State.context) (declaration : Logic.declaration) =
 let find_argument_sorts (context : State.context) symbol =
   Tables.Symbol_table.find_opt context.declared symbol
 
-let add_fact (context : State.context) fact = context.facts <- fact :: context.facts
+let add_fact (context : State.context) fact = context.facts <- Fact_list.add fact context.facts
 
 let declare_value_symbol context (frame : State.frame) name sort =
   match List.rev frame.binders with
@@ -324,7 +324,7 @@ and make_obligation (context : State.context) (frame : State.frame) location obl
     Logic.prune
       {
         declarations = List.rev context.declarations;
-        facts = List.rev context.facts;
+        facts = Fact_list.list_oldest_first context.facts;
         goal = Logic.( ==> ) frame.condition goal;
       }
   in
@@ -367,11 +367,8 @@ let is_panic_obligation : Diagnostic.Code.prover -> bool = function
   | Overflow | Division | Shift | Panic -> true
   | _ -> false
 
-let find_counter_condition (context : State.context) counter =
-  if List.mem counter context.conditional_counters then context.condition else []
-
-let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?holds_when (context : State.context)
-    (frame : State.frame) location obligation goal =
+let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?(is_proven_by_evaluation = false)
+    ?holds_when (context : State.context) (frame : State.frame) location obligation goal =
   let code = Catalog.Prover_description.find_code obligation in
   let holds_when = Option.value holds_when ~default:context.obligation_condition in
   if
@@ -383,31 +380,41 @@ let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?holds_when (context :
          || (is_panic_obligation code && context.keeps_failures))
   then assume context frame goal
   else
-    match
-      make_closed_obligation context frame location obligation
-        (add_quantifier_facts
-           ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
-           context goal)
-    with
-    | Some obligation ->
-        let is_home_body = is_home context frame.source && frame.makes_obligations in
-        let fixes =
-          match fixes with
-          | [] when is_home_body && can_be_required -> (
-              match find_goal_code context goal with
-              | Some _ when Logic.is_refuted goal -> []
-              | Some required -> add_requires context frame [ Clause required ]
-              | None -> [])
-          | fixes -> fixes
-        in
-        let fixes =
-          if is_panic_obligation code && context.can_declare_panic && is_home_body then
-            fixes @ make_panic_fix context
-          else fixes
-        in
-        context.obligations <- { obligation with cited; fixes } :: context.obligations;
-        assume context frame goal
-    | None -> ()
+    let is_held =
+      match goal with
+      | Logic.Boolean _ -> false
+      | _ ->
+          (not is_proven_by_evaluation) && frame.makes_obligations
+          && (not (Logic.mentions frame.bound goal || Logic.mentions frame.bound frame.condition))
+          && Fact_list.holds context.facts ~under:frame.condition goal
+    in
+    if is_held then assume context frame goal
+    else
+      match
+        make_closed_obligation context frame location obligation
+          (add_quantifier_facts
+             ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
+             context goal)
+      with
+      | Some obligation ->
+          let is_home_body = is_home context frame.source && frame.makes_obligations in
+          let fixes =
+            match fixes with
+            | [] when is_home_body && can_be_required -> (
+                match find_goal_code context goal with
+                | Some _ when Logic.is_refuted goal -> []
+                | Some required -> add_requires context frame [ Clause required ]
+                | None -> [])
+            | fixes -> fixes
+          in
+          let fixes =
+            if is_panic_obligation code && context.can_declare_panic && is_home_body then
+              fixes @ make_panic_fix context
+            else fixes
+          in
+          context.obligations <- { obligation with cited; fixes } :: context.obligations;
+          assume context frame goal
+      | None -> ()
 
 let reject_recursion_through_supplied_code (context : State.context) (frame : State.frame) location
     (statement : Mir.statement) =
@@ -614,6 +621,18 @@ let reject_circular_proof context frame (circular : circular_proof) =
 
 let quote (source : State.source) origin : Catalog.Prover.quoted = { key = source.key; origin }
 
+let describe_local (context : State.context) (frame : State.frame) :
+    Locals.local -> Catalog.Prover.value = function
+  | Core_local Self -> Self_value
+  | local -> (
+      match
+        ( Tables.Local_table.find_opt context.local_names local,
+          Tables.Local_table.find_opt context.local_origins local )
+      with
+      | Some name, _ -> Named name
+      | None, Some origin -> Quoted (quote frame.source origin)
+      | None, None -> Temporary)
+
 let find_bounds (ty : Types.ty) =
   if Types.is_builtin Character ty then Some (Z.zero, Z.of_int 0x10FFFF)
   else Types.find_integer_range ty
@@ -817,32 +836,6 @@ let find_impl (context : State.context) (trait : Types.trait_reference) (ty : Ty
       Some (impl, substitution)
   | Bound -> None
 
-let is_potential = function
-  | Logic.Apply ((Logic.Symbol.Potential _ | Logic.Symbol.Slack _), _) -> true
-  | Logic.Apply (_, arguments) ->
-      List.exists
-        (function Logic.Symbol (Logic.Symbol.Potential_measure _) -> true | _ -> false)
-        arguments
-  | _ -> false
-
-let mentions_potential term =
-  let rec walk term =
-    is_potential term
-    ||
-    match term with
-    | Logic.Forall (_, _, body) | Logic.Exists (_, body) -> walk body
-    | term -> List.exists walk (Logic.list_arguments term)
-  in
-  walk term
-
-let rec list_potentials term =
-  if is_potential term then [ term ]
-  else List.concat_map list_potentials (Logic.list_arguments term)
-
-let rec take_potential_as_zero term =
-  if is_potential term then Logic.Integer Z.zero
-  else Logic.map_arguments take_potential_as_zero term
-
 let restrict (frame : State.frame) condition =
   { frame with State.condition = Logic.( &&& ) frame.condition condition }
 
@@ -887,117 +880,6 @@ let name_path_condition context (frame : State.frame) condition =
       let path = declare_fresh context frame "path" Logic.Bool in
       add_frame_fact context frame (Logic.equal path condition);
       path
-
-let find_shared_potential_summands
-    (values : (Logic.term * (Logic.term * Logic.term) list * Logic.term) list) =
-  let joined_terms = List.concat_map (fun (_, renamings, _) -> List.map snd renamings) values in
-  let linear =
-    List.map (fun (on, renamings, amount) -> (on, renamings, Costs.linearize amount)) values
-  in
-  let find_coefficient sums atom = Option.value (List.assoc_opt atom sums) ~default:Z.zero in
-  let joined_atoms =
-    List.fold_left
-      (fun atoms (_, _, (sums, _)) ->
-        List.fold_left
-          (fun atoms (atom, _) ->
-            if
-              is_potential atom
-              && List.exists (fun joined -> Costs.mentions_part ~part:joined atom) joined_terms
-              && not (List.mem atom atoms)
-            then atoms @ [ atom ]
-            else atoms)
-          atoms sums)
-      [] linear
-  in
-  let align linear atom =
-    match
-      List.find_map
-        (fun (_, _, (sums, _)) ->
-          let coefficient = find_coefficient sums atom in
-          if Z.equal coefficient Z.zero then None else Some coefficient)
-        linear
-    with
-    | None -> linear
-    | Some target ->
-        List.map
-          (fun (on, renamings, (sums, constant)) ->
-            let difference = Z.sub target (find_coefficient sums atom) in
-            if Z.equal difference Z.zero then (on, renamings, (sums, constant))
-            else
-              let on_path =
-                List.fold_left
-                  (fun atom (incoming, joined) -> Logic.replace ~from:joined ~into:incoming atom)
-                  atom renamings
-              in
-              ( on,
-                renamings,
-                Costs.linearize
-                  (Costs.plus
-                     (Costs.combine (sums, constant))
-                     (Costs.times (Logic.Integer difference) (Costs.minus atom on_path))) ))
-          linear
-  in
-  let is_misaligned atom =
-    match linear with
-    | (_, _, (first_sums, _)) :: rest ->
-        let coefficient = find_coefficient first_sums atom in
-        List.exists
-          (fun (_, _, (sums, _)) -> not (Z.equal (find_coefficient sums atom) coefficient))
-          rest
-    | [] -> false
-  in
-  match List.filter is_misaligned joined_atoms with
-  | [] -> None
-  | misaligned ->
-      let aligned = List.fold_left align linear misaligned in
-      let shared =
-        match aligned with
-        | (_, _, (first_sums, _)) :: rest ->
-            List.filter
-              (fun (atom, coefficient) ->
-                is_potential atom
-                && List.for_all
-                     (fun (_, _, (sums, _)) ->
-                       match List.assoc_opt atom sums with
-                       | Some other -> Z.equal other coefficient
-                       | None -> false)
-                     rest)
-              first_sums
-        | [] -> []
-      in
-      Some
-        ( Costs.combine (shared, Z.zero),
-          List.map
-            (fun (on, _, (sums, constant)) ->
-              ( on,
-                Costs.combine
-                  (List.filter (fun (atom, _) -> not (List.mem_assoc atom shared)) sums, constant)
-              ))
-            aligned )
-
-let split_shared_summands (values : (Logic.term * Logic.term) list) =
-  let linear = List.map (fun (on, value) -> (on, Costs.linearize value)) values in
-  let shared =
-    match linear with
-    | (_, (first_sums, _)) :: rest ->
-        List.filter
-          (fun (atom, coefficient) ->
-            List.for_all
-              (fun (_, (sums, _)) ->
-                match List.assoc_opt atom sums with
-                | Some other -> Z.equal other coefficient
-                | None -> false)
-              rest)
-          first_sums
-    | [] -> []
-  in
-  ( Costs.combine (shared, Z.zero),
-    List.map
-      (fun (on, (sums, constant)) ->
-        ( on,
-          Costs.combine
-            (List.filter (fun (atom, _) -> not (List.mem_assoc atom shared)) sums, constant) ))
-      linear )
 
 let merge context ?value_type ~condition
     (paths : (Logic.term * State.frame * Logic.term option) list) =
@@ -1128,7 +1010,7 @@ let merge context ?value_type ~condition
           | [] -> term
         in
         let name_amount choice =
-          if Logic.mentions first.bound choice || mentions_potential choice then choice
+          if Logic.mentions first.bound choice || Costs.mentions_potential choice then choice
           else
             let symbol = declare_fresh context first "spent" Logic.Int in
             add_frame_fact context first (Logic.equal symbol choice);
@@ -1140,21 +1022,23 @@ let merge context ?value_type ~condition
           ->
             (key, first_value)
         | _ when not key.counts_potential -> (
-            match split_shared_summands (List.map (fun (on, _, value) -> (on, value)) values) with
+            match
+              Costs.split_shared_summands (List.map (fun (on, _, value) -> (on, value)) values)
+            with
             | shared, (_, first_rest) :: others
               when List.for_all (fun (_, other) -> other = first_rest) others ->
-                (key, Costs.plus shared first_rest)
-            | shared, rests -> (key, Costs.plus shared (choose_amount rests)))
+                (key, Logic.plus shared first_rest)
+            | shared, rests -> (key, Logic.plus shared (choose_amount rests)))
         | _ -> (
-            match find_shared_potential_summands values with
+            match Costs.find_shared_potential_summands values with
             | None ->
                 ( key,
                   name_amount (choose_amount (List.map (fun (on, _, value) -> (on, value)) values))
                 )
             | Some (shared, (_, first_rest) :: others)
               when List.for_all (fun (_, other) -> other = first_rest) others ->
-                (key, Costs.plus shared first_rest)
-            | Some (shared, rests) -> (key, Costs.plus shared (name_amount (choose_amount rests)))))
+                (key, Logic.plus shared first_rest)
+            | Some (shared, rests) -> (key, Logic.plus shared (name_amount (choose_amount rests)))))
       first.spent
   in
   let value =

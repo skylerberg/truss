@@ -1,0 +1,10 @@
+type Bounded(count: UInt64)
+  invariant count <= 10
+
+fn read(bounded: Bounded) -> UInt64 {
+  bounded.count
+}
+
+fn pass(bounded: Bounded) -> UInt64 {
+  read(bounded)
+}
