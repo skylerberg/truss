@@ -1,3 +1,4 @@
+val keeps_potential : Intrinsic.operation -> bool
 val declare_buffer_slack : State.context -> Types.ty -> Logic.term -> Logic.term
 val replace_elements : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term
 val find_sequence_element : State.context -> State.frame -> Types.ty -> Types.ty

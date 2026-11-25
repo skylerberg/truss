@@ -1,0 +1,3 @@
+public opaque type Credit(amount: UInt32)
+  cost potential amount
+  derives Plain

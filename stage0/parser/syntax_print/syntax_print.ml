@@ -94,11 +94,12 @@ and show_function_type { inputs; result; clauses } =
 
 and show_result = function
   | Some (Returns type_) -> "-> " ^ show_type_expression type_
-  | Some (Lends (written, type_)) ->
-      "lends "
-      ^ (match written with Some written -> show_mode written ^ " " | None -> "")
-      ^ show_type_expression type_
+  | Some (Lends (written, type_)) -> "lends " ^ show_moded written type_
   | None -> ""
+
+and show_moded written type_ =
+  (match written with Some written -> show_mode written ^ " " | None -> "")
+  ^ show_type_expression type_
 
 and show_generic (parameter : Syntax.generic_parameter) =
   match parameter.kind with
@@ -233,7 +234,7 @@ and show_expression (value : Syntax.expression) =
            (fun (key, value) -> make_form "" [ show_expression key; show_expression value ])
            entries)
   | Lambda { parameters; body } ->
-      make_form "fn" [ make_form "" (list show_pattern parameters); show_block body ]
+      make_form "fn" [ make_form "" (list show_lambda_parameter parameters); show_block body ]
   | If { condition; then_; else_ } ->
       let else_ =
         match else_ with
@@ -252,6 +253,7 @@ and show_expression (value : Syntax.expression) =
 and show_bracket_item = function
   | Item value -> show_expression value
   | Item_constraint (name, type_) -> name.text ^ " = " ^ show_type_expression type_
+  | Item_type type_ -> show_type_expression type_
 
 and show_argument (argument : Syntax.argument) =
   match argument.label with
@@ -357,6 +359,11 @@ and show_pattern (written : Syntax.pattern) =
   | Tuple patterns -> make_form "tuple" (list show_pattern patterns)
   | Alternatives alternatives -> make_form "|" (list show_pattern alternatives)
   | Pattern_error -> "error"
+
+and show_lambda_parameter ({ pattern; annotation } : Syntax.lambda_parameter) =
+  match annotation with
+  | None -> show_pattern pattern
+  | Some { mode; type_; _ } -> make_form (show_pattern pattern ^ ":") [ show_moded mode type_ ]
 
 and show_pattern_field (field : Syntax.pattern_field) =
   match field.kind with

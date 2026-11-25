@@ -58,6 +58,7 @@ module Code : sig
     | Repeated_clause
     | Cost_word
     | Loop_cost_bound
+    | Amortized_bound
     | Function_type_names
     | Misplaced_callback_contract
     | Misplaced_condition
@@ -84,7 +85,7 @@ module Code : sig
     | Power_operator
     | Short_declaration
     | Pipe_operator
-    | Lambda_annotation
+    | Lambda_result_type
     | Impl_parameters
     | Null_coalescing
     | Misplaced_assert
@@ -146,7 +147,6 @@ module Code : sig
     | Cost_of_other_resource
     | Not_assignable
     | Wrong_try
-    | Lambda_needs_type
     | Not_a_record
     | Not_a_tuple_type
     | Unknown_variant

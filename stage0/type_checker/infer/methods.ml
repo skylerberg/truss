@@ -341,7 +341,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                         Failures.report_mismatch state (Written inner.id) ~expected:type_
                           ~actual:receiver_type;
                       Modes.check_mode state env receiver.value
-                        { name = "self"; mode = wanted_mode; type_; has_default = false }
+                        ~recipient:(Catalog.Inference.Named_parameter "self") wanted_mode
                         receiver_type;
                       check_method_with_receiver state env ?expected value ~receiver:receiver.value
                         ~receiver_type method_path rest

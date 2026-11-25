@@ -23,6 +23,7 @@ val make_evaluation_root : Prover.Obligation.evaluation -> Lowered.Item.t
 val ensure_item : Tracker.t -> Lowered.Item.t -> unit
 val supply_lowered : Tracker.t -> Lowered.Item.t -> Lowering.lowered -> unit
 val record_evaluation : Tracker.t -> Lowered.Item.t -> Lowering.evaluation -> unit
+val record_test_run : Tracker.t -> Lowered.Item.t -> Lowering.test_pass option -> unit
 
 val list_runs :
   Tracker.t ->

@@ -166,9 +166,6 @@ let bind unifier index type_ =
 
 let count_solutions unifier = Hashtbl.length unifier.type_solutions
 
-let poison unifier index report =
-  Hashtbl.replace unifier.type_solutions (read_root unifier index) (Types.Error report)
-
 let join unifier left right =
   let older = min left right and younger = max left right in
   let domain =
@@ -186,6 +183,13 @@ let join unifier left right =
   end
 
 type unknown = Unknown_type of int | Unknown_value of int
+
+let poison unifier unknown report =
+  match unknown with
+  | Unknown_type index ->
+      Hashtbl.replace unifier.type_solutions (read_root unifier index) (Types.Error report)
+  | Unknown_value index ->
+      Hashtbl.replace unifier.value_solutions (read_root unifier index) (Types.Value_error report)
 
 let list_unknowns unifier (type_ : Types.ty) =
   let unknowns = ref [] in
@@ -302,4 +306,5 @@ and unify_value unifier left right =
       left_index = right_index
       || bind_value (max left_index right_index) (Value_variable (min left_index right_index))
   | Value_variable index, other | other, Value_variable index -> bind_value index other
+  | Value_error _, _ | _, Value_error _ -> true
   | left, right -> left = right

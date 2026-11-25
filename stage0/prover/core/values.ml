@@ -514,6 +514,11 @@ let apply_construct context frame (site : Invocation.site) variant
           Logic.Apply (Facts.make_constructor_symbol ty variant, List.map read_field_value shaped)
         in
         check_built context frame site ty built;
+        let frame =
+          Operations.spend context frame (fun (counter : Costs.counter) ->
+              if counter.amortized then Amounts.compute_declared_potential context frame ty built
+              else Costs.zero)
+        in
         (frame, built)
     | None -> (frame, Facts.arrive context frame "built" ty)
 
@@ -597,7 +602,8 @@ let apply_specification_function context frame ~location (measure : Core.specifi
       (frame, Lambdas.apply_callback_ensures context function_type values)
   | _ -> Facts.raise_unsupported location Specification_function
 
-let copy_value ?literal (context : State.context) frame ty term =
+let copy_value ?literal (context : State.context) frame ~(declared : Types.ty) term =
+  let ty = Types.erase_views declared in
   let literal =
     match (literal, ty) with
     | Some (Language.Literal.Elements _), Types.Named { arguments = [ Types.Type element ]; _ }
@@ -610,7 +616,7 @@ let copy_value ?literal (context : State.context) frame ty term =
   if
     context.counters = []
     || Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.bounds ty
-       && not (try Amounts.has_potential context ty with Facts.Unsupported _ -> true)
+       && not (try Amounts.has_potential context declared with Facts.Unsupported _ -> true)
   then frame
   else
     let declare_copy_cost_of metric copied =
@@ -624,36 +630,42 @@ let copy_value ?literal (context : State.context) frame ty term =
         (fun ({ element; model_of; _ } : State.buffer) ->
           let per_element =
             if
-              Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.bounds element
+              Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.bounds
+                (Amounts.find_declared_element (Types.strip_view declared) ~erased:element)
             then Costs.least_amount (Metric metric)
             else declare_copy_cost_of metric element
           in
           Logic.multiply (Models.make_sequence_length context element (model_of term)) per_element)
         (Amounts.find_buffer context ty)
     in
-    Operations.spend context frame (fun (counter : Costs.counter) ->
+    Operations.spend_operation context frame
+      ~potential_change:(Some (fun () -> Amounts.compute_potential context frame declared term))
+      (fun (counter : Costs.counter) ->
+        let make_plain amount = { Costs.amount; counted = No_potential } in
+        let make_unknown () =
+          Costs.make_counted_charge counter
+            (Operations.declare_unknown_amount context frame counter)
+        in
         match (literal, counter.resource, counter.counting) with
         | None, Metric Time, Units when Option.is_some (compute_elements_cost Time) ->
-            Costs.plus (Option.get (compute_elements_cost Time)) (Logic.int 1)
+            make_plain (Costs.plus (Option.get (compute_elements_cost Time)) (Logic.int 1))
         | _, Metric Time, Units ->
             let time = match literal with Some _ -> Costs.zero | None -> declare_copy_cost Time in
-            let copy_potential =
-              try Amounts.compute_potential context frame ty term
-              with Facts.Unsupported _ -> Costs.zero
-            in
-            Costs.minus (Costs.plus time (Logic.int 1)) copy_potential
+            { Costs.amount = Costs.plus time (Logic.int 1); counted = Potential_change }
         | Some literal, Metric (Allocations | Allocated_bytes), Units
         | Some literal, Metric Allocations, _ ->
-            Logic.int (match literal with Text "" | Elements [] -> 0 | Text _ | Elements _ -> 1)
+            make_plain
+              (Logic.int
+                 (match literal with Text "" | Elements [] -> 0 | Text _ | Elements _ -> 1))
         | Some (Text text), Metric Allocated_bytes, (At_most | Exactly) ->
-            Logic.int (String.length text)
-        | Some (Elements _), Metric Allocated_bytes, (At_most | Exactly) ->
-            Operations.declare_unknown_amount context frame counter
-        | Some _, Calls _, _ -> Costs.zero
+            make_plain (Logic.int (String.length text))
+        | Some (Elements _), Metric Allocated_bytes, (At_most | Exactly) -> make_unknown ()
+        | Some _, Calls _, _ -> Costs.make_counted_charge counter Costs.zero
         | None, Metric Allocations, _ when Option.is_some (compute_elements_cost Allocations) ->
-            Amounts.compute_amount_within context frame counter
-              (Costs.plus (Option.get (compute_elements_cost Allocations)) (Logic.int 1))
+            make_plain
+              (Amounts.compute_amount_within context frame counter
+                 (Costs.plus (Option.get (compute_elements_cost Allocations)) (Logic.int 1)))
         | None, Metric ((Allocations | Allocated_bytes) as metric), _ ->
-            Amounts.compute_amount_within context frame counter (declare_copy_cost metric)
-        | _, Metric Time, (At_most | Exactly) | None, Calls _, _ ->
-            Operations.declare_unknown_amount context frame counter)
+            make_plain
+              (Amounts.compute_amount_within context frame counter (declare_copy_cost metric))
+        | _, Metric Time, (At_most | Exactly) | None, Calls _, _ -> make_unknown ())

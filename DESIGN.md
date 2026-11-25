@@ -381,6 +381,7 @@ rule excludes `Plain` arguments, such as indexes, so that case is rare.
 | A view is read-only, and elements are written through a range of a mutable place, as in `sort(mut items[1..])`. | Write access then always names the place it writes, so the ownership check compares the written place with every other argument and view, and the prover writes the callee's changes back to that place. Write access held in a variable would let `var target = items[1..5]` overwrite elements that `items[0..4]`, passed beside it, still views. |
 | A range is passed `mut` only to a parameter that its function declares `modifies items[..]`. | A range has no capacity of its own, so a `push` through it would write over the elements that follow it. The clause states that the callee keeps the length, which the body check enforces and the caller's proof uses, so one function serves a whole list and a range of one. |
 | A read-only argument is compared with its parameter's type without `view`, so a `List[view String]` passes to a `List[String]` parameter and a `view String` looks up a `Map[String, Int64]`. | A view has the layout of the type that it views, and a callee cannot mutate, move, drop, or store a read-only parameter, so it cannot tell a view from an owned value. Without the rule a lookup would allocate a `String`, and a function over a list of texts would be written twice. |
+| A place of a `List` or a `String` given where a type parameter is undecided makes the type argument a view, as in `let found = Some(names[0])`. | A `let` bound to the place alone is a view with no annotation, and the place cannot be moved, so the only other reading is an error that asks for a copy. A view costs nothing and the ownership check tracks it; where an owner is wanted, the declared type or `copy()` says so. |
 | A parameter declared `T` is lent for the call, and one declared `view T` may be stored. | Most functions only read their arguments, so the plain type is the short spelling and promises the caller that nothing stays borrowed. A function that keeps a view says so in its signature, where the caller's ownership check reads it: the argument then stays borrowed while the stored view is live. |
 | A view implements a trait through an `impl` that the compiler derives: it forwards each method that the viewed type's `impl` writes, and inherits the rest with the view as `Self`. The derived `impl` must be acceptable as any `impl` is. | Stated as a condition of its own, the rule is a second list of what an `impl` must meet, and an entry that the list lacks is a hole: it once lacked the traits that a trait requires. Stated as an `impl`, it has no list. A forwarded method is compiled for an owner, so the call's own typing keeps a view from an `own` or `mut` parameter, where the method would drop or write elements that the view borrows. An inherited method knows `Self` only through the trait and the traits that it requires, so compiled for `Self = view T` it copies and drops views and writes no element. `Ordered` is the case that matters: its `impl` writes `compare`, and `max`, `min`, and `clamp` are inherited, so a view is a key of a `Map` and an element that `sort` orders. |
 
@@ -482,7 +483,7 @@ State that is updated from one call to the next goes in a `for` loop or a
 method such as `fold`, and behavior with state is a record that implements
 a trait.
 
-A lambda has no annotations, so what it knows of its arguments comes from
+A lambda states no contract, so what it knows of its arguments comes from
 the callee. A parameter's function type states that fact in a `requires`,
 as in `make: (fn(index: UInt64) -> Element requires index < count)`, and a
 lambda passed for `make` may rely on `index < count`. The callee's contract
@@ -493,8 +494,10 @@ caller reads from the lambda's body
 | Rule | Reason |
 |---|---|
 | Only a lambda that captures nothing can be stored. A function-typed parameter is non-escaping unless it is `own`. | A lambda that captures is a view, and a view cannot escape. |
-| A lambda's parameter types and result type come from its expected function type, never from its body. | *Local reasoning.* Rust checks a closure's body before it knows the parameter types, and "type annotations needed" is one of its commonest errors. |
-| A lambda's parameter modes come from the expected type too. | A mode keyword at a call site shows the mutation of an existing place. A lambda's parameter is a new binding, so a keyword there would show nothing. |
+| A lambda's parameter types are decided before its body is checked: by its expected function type, or by an annotation. | *Local reasoning.* Rust checks a closure's body before it knows the parameter types, and "type annotations needed" is one of its commonest errors. |
+| A lambda's parameter may have an annotation, which states the mode and the type that the expected function type gives. | Type inference stops at the statement ([Functions](#functions)), and every other binding can state a type that its statement does not decide. Without the annotation, a stored lambda needs a typed `let` that restates its parameters by position, and a generic callee needs every type argument in brackets. An annotation that converted the argument would be the only annotation that converts. |
+| An annotation writes the mode as a function's parameter does. A parameter without an annotation writes none. | `score: Score` is read-only in a signature and in a lambda alike. A bare mode keyword would show nothing: at a call site it shows the mutation of an existing place, and a lambda's parameter is a new binding. |
+| A lambda declares no result type. | The body's value has a type, and the expected function type's result is checked against it. A written result type would restate one of the two. |
 | `return` exits the lambda. | Kotlin's non-local `return` from an inline lambda is a known source of confusion. |
 | A lambda has one form, `fn(x) { ... }`, passed inside the call's parentheses. | *One spelling.* A block's value is its last expression, so `x => x * 2` would be a second form, and a trailing lambda a second way to pass an argument. |
 | A lambda names its parameters. | An implicit parameter such as `it` or `$0` is not a descriptive name ([Names](#names)). |
@@ -706,6 +709,22 @@ potential. Mutable value semantics guarantees that no value is shared, so
 amortized bounds compose. A value's potential includes the potential of its
 parts, so a push onto a list inside a list is paid for by the inner list.
 
+**A caller with an amortized bound counts an amortized callee at its
+bound.** The callee's bound already counts the change in the potential of
+the values it changes, so the caller's proof never reads the potential of a
+type that the caller does not define. The caller pays only for the
+potential that its own code makes: the values it builds, the fields it
+writes, and the results and changes of a callee that states only a plain
+bound. A caller with a plain bound counts the potential that an amortized
+callee may spend, which is none for a list that the caller creates empty.
+
+**Potential is credit that a value owns.** That reading is what lets a
+caller skip its callees' potential, and it holds only where the potential
+follows ownership: `own` transfers it, `mut` lends it, and read-only access
+touches none. So a view holds none, a `Plain` type holds none, since an
+implicit copy would duplicate it, and a capability's provider, which no
+caller can read, is lent to every call of the capability's methods.
+
 **There are no expected-time bounds.** A hash map is O(1) only on average,
 on the assumption that hashes behave randomly. No proof can promise that
 against input chosen by an attacker, and proving expected bounds needs
@@ -718,6 +737,10 @@ worst case instead.
 | `O(f)` bounds the cost for every input, not only for large inputs. | The textbook definition is a limit, which a prover handles poorly, and it gives wrong answers for bounds in several variables. |
 | A bound can mention `result`. | An output-sensitive bound, such as the bound of a function that returns its matches, cannot be stated otherwise. |
 | The `time` of a generic function counts the methods of its bounds. | `O(self.length())` would be false for `contains` on a list of strings, where one comparison is not one step. `String` could not keep a promise of `O(1)` on `Equal.equal`, and a second trait for constant-time comparison would give every generic method two overloads. |
+| A type that declares a `cost potential` is not `Plain`. | An implicit copy would give two values one potential, and an amortized callee could spend it twice. |
+| A capability method's bound counts the change in its provider's potential, plain or `amortized`. | No caller can read a provider, which a `provide` block outside it supplies. The `impl` is where the provider's potential changes, so the `impl` is where the change is checked, and a collecting provider can still state a bound. |
+| `amortized` takes only an `O(...)` bound on `time`, `allocations`, or `allocated_bytes`. | Potential is credit in time or memory. Counted against calls it would let a push's credit pay for calls, and an exact `<=` or `==` count has no slack to borrow. |
+| A caller with an amortized bound counts an amortized callee at the callee's bound, not at its actual cost less the potential it makes. | Counting actual cost made every caller cancel each callee's potential against its own, through the capacity of `List`'s storage. In a loop the cancellation was syntactic, so a loop that pushed on one path and not the other failed to prove. |
 | A function that calls a callback bounds its allocations with `allocations(visit)`, and its allocated bytes with `allocated_bytes(visit)`. | `Option.map` allocates what its callback allocates. Without the term it states no allocation bound, and a function with `cost allocations <= 0` then calls no combinator, even with a lambda that allocates nothing. The alternative is an allocation clause on the type of every callback, which rejects each function that states none. |
 
 ### Function types

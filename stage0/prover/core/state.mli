@@ -1,4 +1,4 @@
-type source = { key : Resolve.Names.key; definition : Path.t; name : string }
+type source = { key : Resolve.Names.key; definition : Path.t }
 
 type clauses = {
   callee : source;
@@ -48,7 +48,7 @@ type frame = {
   lends : (Logic.term * (frame -> Logic.term -> frame)) list Locals.t;
 }
 
-type changed_part = { root : Locals.local; fields : string list }
+type changed_part = { root : Locals.local; declared_root_type : Types.ty; fields : string list }
 type place_value = One of Logic.term | Run of Logic.term * Logic.term
 type noted_place = { origin : Core.origin; value : place_value }
 
@@ -98,6 +98,7 @@ type call_amount = {
   call : Catalog.Prover.quoted;
   callee : Path.t;
   states_cost : bool;
+  counts_potential : bool;
   counter : Costs.counter;
   amount : Logic.term;
 }
@@ -137,7 +138,6 @@ type context = {
   local_origins : Core.origin Tables.Local_table.t;
   mutable returns : (frame * Logic.term option) list;
   mutable enclosing_provides : Mir.provided list list;
-  mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
   mutable instantiating : Path.t list;
   mutable reading_requires : Path.t list;
   mutable axiomatizing : Logic.symbol list;
@@ -153,6 +153,7 @@ type context = {
   mutable conditional_counters : Costs.counter list;
   mutable bounded_counters : Costs.counter list;
   mutable recursive_costs_assumed : int;
+  mutable lambdas_assuming_recursive_costs : Logic.term list;
   fresh_order : int Tables.Symbol_table.t;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;

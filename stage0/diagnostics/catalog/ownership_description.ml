@@ -534,6 +534,5 @@ let describe : Ownership.t -> Nodes.description = function
                 its callers take every part of `%s` that the clause does not name to keep its \
                 value."
                (if is_whole then Printf.sprintf "All of `%s`" shown else Printf.sprintf "`%s`" shown)
-               (Build.show_function_name function_)
-               parameter);
+               (Build.show_callee function_) parameter);
         ]

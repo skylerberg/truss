@@ -7,7 +7,6 @@ module Path_table = Hashtbl.Make (Path)
 type linkage = C_runtime.linkage = External | Internal
 
 let shared_structs = C_runtime.shared_structs
-let version = 29
 
 type failure = C_runtime.failure = Echo | Todo
 type fragment = Fragment.t

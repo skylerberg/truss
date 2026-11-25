@@ -1,6 +1,34 @@
 let make ?(fixes = []) code location message : Nodes.description =
   { code = Types code; severity = Error; location; message; notes = []; fixes }
 
+let tick written = [ Description.Text "`"; Build.quote_over written; Text "`" ]
+let tick_node origin = [ Description.Text "`"; Build.quote origin; Text "`" ]
+
+let show_generic (generic : Types.generic) =
+  match generic.kind with
+  | Type_generic [] -> generic.generic.name
+  | Type_generic bounds ->
+      generic.generic.name ^ ": " ^ String.concat " + " (List.map Types.show_trait bounds)
+  | Value_generic -> generic.generic.name ^ ": UInt64"
+
+let show_signature (signature : Types.signature) =
+  Printf.sprintf "%s(%s)%s"
+    (match signature.generics with
+    | [] -> ""
+    | generics -> "[" ^ String.concat ", " (List.map show_generic generics) ^ "]")
+    (String.concat ", "
+       ((match signature.receiver with
+          | Some (mode, _) -> [ Language.Mode.show_prefix mode ^ "self" ]
+          | None -> [])
+       @ List.map
+           (fun (parameter : Types.parameter_info) ->
+             Printf.sprintf "%s: %s%s%s" parameter.name
+               (Language.Mode.show_prefix parameter.mode)
+               (Types.show parameter.type_)
+               (if parameter.has_default then " = ..." else ""))
+           signature.parameters))
+    (Types.show_output signature.output)
+
 let show_property : Types.property -> string = function
   | Copyable -> "is `Copyable`"
   | Plain -> "is `Plain`"
@@ -92,59 +120,59 @@ let describe : Typing.t -> Nodes.description = function
               "`%s` is defined from itself, or from a set that this `impl` defines after it." name))
   | Arity { at = origin; written; expected; given } ->
       make Arity (Build.at origin)
-        (say
-           (Printf.sprintf "`%s` takes %s, and %s given." written
-              (Diagnostic.show_count expected "argument" "arguments")
-              (Diagnostic.show_count given "is" "are")))
+        (tick written
+        @ say
+            (Printf.sprintf " takes %s, and %s given."
+               (Diagnostic.show_count expected "argument" "arguments")
+               (Diagnostic.show_count given "is" "are")))
   | Head_arity { at = origin; written; expected; given } ->
       make Arity (Build.at origin)
-        (say
-           (Printf.sprintf "`%s` takes %s, and this head names %d." written
-              (Diagnostic.show_count expected "generic parameter" "generic parameters")
-              given))
+        (tick written
+        @ say
+            (Printf.sprintf " takes %s, and this head names %d."
+               (Diagnostic.show_count expected "generic parameter" "generic parameters")
+               given))
   | Argument_kind { at = origin; written; parameter; mismatch } ->
       make Argument_kind (Build.at origin)
-        (say
-           (match mismatch with
-           | Value_for_type ->
-               Printf.sprintf "`%s`'s parameter `%s` is a `UInt64` value, not a type." written
-                 parameter
-           | Type_for_value ->
-               Printf.sprintf "`%s`'s parameter `%s` is a type, not a value." written parameter))
+        (tick written
+        @ say
+            (match mismatch with
+            | Value_for_type ->
+                Printf.sprintf "'s parameter `%s` is a `UInt64` value, not a type." parameter
+            | Type_for_value -> Printf.sprintf "'s parameter `%s` is a type, not a value." parameter)
+        )
   | Arguments_to_parameter { at = origin; written } ->
       make Arity (Build.at origin)
-        (say (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." written))
-  | Count_error { at = origin; written; error } ->
+        (tick written @ say " is a generic parameter, which takes no arguments.")
+  | Count_error { at = origin; error } ->
       make Arity (Build.at origin)
-        (say
-           (match error with
-           | Not_uint64 ->
-               Printf.sprintf "`%s` in a type argument must be a constant of type `UInt64`." written
-           | Uncomputable ->
-               Printf.sprintf
-                 "The value of `%s` cannot be computed: a constant used in a type cannot refer to \
-                  itself, and is made of literals, arithmetic, and other such constants."
-                 written))
+        (match error with
+        | Not_uint64 ->
+            tick_node origin @ say " in a type argument must be a constant of type `UInt64`."
+        | Uncomputable ->
+            say "The value of " @ tick_node origin
+            @ say
+                " cannot be computed: a constant used in a type cannot refer to itself, and is \
+                 made of literals, arithmetic, and other such constants.")
   | Trait_as_type { at = origin; written } ->
       make Not_a_type (Build.at origin)
-        (say
-           (Printf.sprintf
-              "`%s` is a trait, not a type. A type parameter can have it as a bound, as in `[Item: \
-               %s]`."
-              written written))
+        (tick written
+        @ say " is a trait, not a type. A type parameter can have it as a bound, as in `[Item: "
+        @ [ Build.quote_over written ]
+        @ say "]`.")
   | Capability_as_type { at = origin; written } ->
-      make Not_a_type (Build.at origin)
-        (say (Printf.sprintf "`%s` is a capability, not a type." written))
+      make Not_a_type (Build.at origin) (tick written @ say " is a capability, not a type.")
   | Head_not_a_type { at = origin; written; kind } ->
       make Not_a_type (Build.at origin)
-        (say
-           (Printf.sprintf "`%s` is %s, not a type, so it has no methods, constants, or `impl`s."
-              written (show_kind kind)))
+        (tick written
+        @ say
+            (Printf.sprintf " is %s, not a type, so it has no methods, constants, or `impl`s."
+               (show_kind kind)))
   | Not_a_trait { at = origin; written; is_parameter } ->
       make Not_a_trait (Build.at origin)
-        (say
-           (if is_parameter then Printf.sprintf "`%s` is a generic parameter, not a trait." written
-            else Printf.sprintf "`%s` is not a trait." written))
+        (tick written
+        @ say (if is_parameter then " is a generic parameter, not a trait." else " is not a trait.")
+        )
   | Decided_condition { at = origin; subject } ->
       make Decided_condition (Build.at origin)
         (say
@@ -162,17 +190,16 @@ let describe : Typing.t -> Nodes.description = function
               (Types.show subject) name (Types.show base) (Types.show_trait trait) name name name))
   | Not_a_capability { at = origin; written; is_type_parameter } ->
       make Not_a_capability (Build.at origin)
-        (say
-           (if is_type_parameter then
-              Printf.sprintf
-                "`%s` is a type parameter, not a capability. A capability parameter is written \
-                 `generic %s` at each use."
-                written written
-            else Printf.sprintf "`%s` is not a capability." written))
+        (if is_type_parameter then
+           tick written
+           @ say
+               " is a type parameter, not a capability. A capability parameter is written `generic "
+           @ [ Build.quote_over written ]
+           @ say "` at each use."
+         else tick written @ say " is not a capability.")
   | Calls_not_a_capability { at = origin; written } ->
       make Not_a_capability (Build.at origin)
-        (say
-           (Printf.sprintf "`calls` counts the calls of a capability, and `%s` is not one." written))
+        (say "`calls` counts the calls of a capability, and " @ tick written @ say " is not one.")
   | Calls_through_parameter { at = origin; name } ->
       make Not_a_capability (Build.at origin)
         (say
@@ -183,7 +210,7 @@ let describe : Typing.t -> Nodes.description = function
               name))
   | Unknown_capability_method { at = origin; written; method_ } ->
       make Unknown_member (Build.at origin)
-        (say (Printf.sprintf "`%s` has no method `%s`." written method_))
+        (tick written @ say (Printf.sprintf " has no method `%s`." method_))
   | Time_of_run_forever { at = origin } ->
       make Unbounded_time (Build.at origin)
         (say
@@ -218,11 +245,14 @@ let describe : Typing.t -> Nodes.description = function
               (Types.show type_)))
   | Missing_associated_type { at = origin; name; trait } ->
       make Missing_member (Build.at origin)
-        (say (Printf.sprintf "This `impl` must give `type %s`, which `%s` declares." name trait))
+        (say
+           (Printf.sprintf "This `impl` must give `type %s`, which `%s` declares." name
+              (Path.show_name trait)))
   | Missing_method { at = origin; name; signature; trait } ->
       make Missing_member (Build.at origin)
         (say
-           (Printf.sprintf "This `impl` must give `%s%s`, which `%s` declares." name signature trait))
+           (Printf.sprintf "This `impl` must give `%s%s`, which `%s` declares." name
+              (show_signature signature) (Path.show_name trait)))
   | Implements_built_in_capability { at = origin; capability } ->
       make Implements_built_in_capability (Build.at origin)
         (say
@@ -242,15 +272,17 @@ let describe : Typing.t -> Nodes.description = function
         (say
            (Printf.sprintf
               "The compiler implements `%s` from a type's fields; no `impl` of it can be written."
-              trait))
+              (Path.show_name trait)))
   | Associated_bound_unmet { at = origin; trait; name; bound; chosen } ->
       make Unsatisfied_bound (Build.at origin)
         (say
-           (Printf.sprintf "`%s` declares `type %s: %s`, and `%s` is not one." trait name
-              (Types.show_trait bound) (Types.show chosen)))
+           (Printf.sprintf "`%s` declares `type %s: %s`, and `%s` is not one."
+              (Path.show_name trait) name (Types.show_trait bound) (Types.show chosen)))
   | Extra_associated { at = origin; trait; name; associated } ->
       make Extra_member (Build.at origin)
-        (say (Printf.sprintf "`%s` declares no %s `%s`." trait (show_associated associated) name))
+        (say
+           (Printf.sprintf "`%s` declares no %s `%s`." (Path.show_name trait)
+              (show_associated associated) name))
   | Capability_set_defined_twice { at = origin; name } ->
       make Extra_member (Build.at origin)
         (say
@@ -261,8 +293,8 @@ let describe : Typing.t -> Nodes.description = function
   | Missing_required_impl { at = origin; trait; required; for_type } ->
       make Missing_required_impl (Build.at origin)
         (say
-           (Printf.sprintf "`%s` requires `%s`, which `%s` does not implement." trait
-              (Types.show_trait required) (Types.show for_type)))
+           (Printf.sprintf "`%s` requires `%s`, which `%s` does not implement."
+              (Path.show_name trait) (Types.show_trait required) (Types.show for_type)))
   | Uses_on_trait_impl { at = origin } ->
       make Impl_uses (Build.at origin)
         (say
@@ -272,7 +304,7 @@ let describe : Typing.t -> Nodes.description = function
       make Signature_mismatch (Build.at origin)
         (Description.Text
            (Printf.sprintf "`%s` must state the callback contract that `%s` declares for `%s`: "
-              name trait parameter)
+              name (Path.show_name trait) parameter)
          ::
          (match clauses with
          | [] -> say "no `requires` and no `ensures`"
@@ -291,17 +323,20 @@ let describe : Typing.t -> Nodes.description = function
             (Printf.sprintf
                ". A caller through `%s` relies on that contract, so the method's own callback \
                 contract is that one."
-               trait))
+               (Path.show_name trait)))
   | Restated_without_own { at = origin; trait; declared_by; name; for_type } ->
       make Extra_member (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` restates `%s.%s` and declares no method of its own by that name. Give `%s` in \
                the `impl` of `%s` for `%s`."
-              trait (Path.show declared_by) name name (Path.show declared_by) (Types.show for_type)))
+              (Path.show_name trait) (Path.show declared_by) name name (Path.show declared_by)
+              (Types.show for_type)))
   | Undeclared_method { at = origin; trait; name } ->
       make Extra_member (Build.at origin)
-        (say (Printf.sprintf "`%s` declares no method `%s` with this receiver." trait name))
+        (say
+           (Printf.sprintf "`%s` declares no method `%s` with this receiver." (Path.show_name trait)
+              name))
   | Capability_method_receiver { at = origin } ->
       make Wrong_receiver (Build.at origin)
         (say
@@ -313,12 +348,12 @@ let describe : Typing.t -> Nodes.description = function
               "`%s` declares `%s` with a default, so no `impl` overrides it. A call that omits the \
                argument reads the default from the declaration in `%s`, and this method would be a \
                second declaration that shows none."
-              trait name trait))
+              (Path.show_name trait) name (Path.show_name trait)))
   | Impl_signature_mismatch { at = origin; name; signature; trait } ->
       make Signature_mismatch (Build.at origin)
         (say
            (Printf.sprintf "`%s` must have the signature `%s%s` that `%s` declares." name name
-              signature trait))
+              (show_signature signature) (Path.show_name trait)))
   | Uses_beyond_impl { at = origin; name } ->
       make Impl_uses (Build.at origin)
         (say
@@ -328,7 +363,9 @@ let describe : Typing.t -> Nodes.description = function
               name))
   | Uses_beyond_trait { at = origin; name; trait } ->
       make Impl_uses (Build.at origin)
-        (say (Printf.sprintf "`%s` can use only the capabilities `%s` declares for it." name trait))
+        (say
+           (Printf.sprintf "`%s` can use only the capabilities `%s` declares for it." name
+              (Path.show_name trait)))
   | Panic_beyond_condition { at = origin; name; trait } ->
       make Impl_uses (Build.at origin)
         (say
@@ -336,7 +373,7 @@ let describe : Typing.t -> Nodes.description = function
               "`%s` declares `%s` with `uses Panic unless` a condition, and this `%s` uses `Panic` \
                without one, so it could panic where that condition holds. Declare `uses Panic \
                unless` a condition that `%s`'s implies."
-              trait name name trait))
+              (Path.show_name trait) name name (Path.show_name trait)))
   | Bound_unmet { at = origin; type_; argument; bound } ->
       make Unsatisfied_bound (Build.at origin)
         (say
@@ -371,40 +408,47 @@ let describe : Typing.t -> Nodes.description = function
               (show_recipient recipient)))
   | No_real_implementation { at = origin; written; recipient } ->
       make No_real_implementation (Build.at origin)
-        (say
-           (Printf.sprintf
-              "`%s` has no real implementation, so the runtime cannot provide it to %s. Provide an \
-               implementation in the body with `provide`."
-              written (show_recipient recipient)))
+        (tick written
+        @ say
+            (Printf.sprintf
+               " has no real implementation, so the runtime cannot provide it to %s. Provide an \
+                implementation in the body with `provide`."
+               (show_recipient recipient)))
   | Main_signature { at = origin } ->
       make Main_signature (Build.at origin)
         (say
            "`main` must have exactly the signature `fn main(arguments: List[String]) -> ExitCode`.")
   | Duplicate_member { at = origin; member_kind; name } ->
       make Duplicate_field (Build.at origin)
-        (say (Printf.sprintf "Another %s of this type is already named `%s`." member_kind name))
+        (say
+           (Printf.sprintf "Another %s of this type is already named `%s`."
+              (match member_kind with Field_member -> "field" | Variant_member -> "variant")
+              name))
   | Not_derivable { at = origin; written } ->
       make Not_derivable (Build.at origin)
         (say
-           (Printf.sprintf
-              "Only `Equal`, `Hash`, `Ordered`, `Default`, `Copyable`, `Plain`, \
-               `serialization.Serialize`, and `serialization.Deserialize` can be derived, not \
-               `%s`."
-              written))
+           "Only `Equal`, `Hash`, `Ordered`, `Default`, `Copyable`, `Plain`, \
+            `serialization.Serialize`, and `serialization.Deserialize` can be derived, not "
+        @ tick written @ say ".")
   | Derives_inferred { at = origin; written; entry; siblings } ->
       make Derives_inferred (Build.at origin)
         ~fixes:
           [
             { title = say "Remove the declaration."; edits = [ Build.remove_entry entry siblings ] };
           ]
-        (say
-           (Printf.sprintf
-              "Whether `%s` holds for this type is derived from its fields, which are visible. \
-               Only an opaque type declares it."
-              written))
+        (say "Whether " @ tick written
+        @ say
+            " holds for this type is derived from its fields, which are visible. Only an opaque \
+             type declares it.")
   | Field_not_derivable { at = origin; written } ->
       make Cannot_derive (Build.at origin)
-        (say (Printf.sprintf "A field of this type is not `%s`, so the type cannot be." written))
+        (say "A field of this type is not " @ tick written @ say ", so the type cannot be.")
+  | Potential_not_plain { at = origin } ->
+      make Cannot_derive (Build.at origin)
+        (say
+           "A type that declares a `cost potential` is not `Plain`: an implicit copy would \
+            duplicate the potential, and a caller could spend it twice. Derive `Copyable`, whose \
+            `copy()` pays for the potential of the copy.")
   | Default_of_sum { at = origin } ->
       make Cannot_derive (Build.at origin)
         (say
@@ -412,15 +456,12 @@ let describe : Typing.t -> Nodes.description = function
             variant of this type is its default. Write the `impl`, which says which variant is.")
   | Derived_without_equal { at = origin; written } ->
       make Cannot_derive (Build.at origin)
-        (say
-           (Printf.sprintf "Deriving `%s` needs `Equal` to be derived too, so that the two agree."
-              written))
+        (say "Deriving " @ tick written
+        @ say " needs `Equal` to be derived too, so that the two agree.")
   | Field_lacks_impl { at = origin; type_; written } ->
       make Cannot_derive (Build.at origin)
-        (say
-           (Printf.sprintf
-              "A field of type `%s` does not implement `%s`, so `%s` cannot be derived."
-              (Types.show type_) written written))
+        (say (Printf.sprintf "A field of type `%s` does not implement " (Types.show type_))
+        @ tick written @ say ", so " @ tick written @ say " cannot be derived.")
   | Trait_cycle { at = origin } ->
       make Trait_cycle (Build.at origin)
         (say "This trait requires itself through the traits it requires.")
@@ -430,21 +471,21 @@ let describe : Typing.t -> Nodes.description = function
            (Printf.sprintf
               "`%s` restates `%s.%s`, so it adds only `ensures` and `cost` clauses. A caller \
                through `%s` would never prove this `requires`."
-              name declared_by name declared_by))
+              name (Path.show declared_by) name (Path.show declared_by)))
   | Restated_decreases { at = origin; name; declared_by } ->
       make Restated_method_clause (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` restates `%s.%s`, so it adds only `ensures` and `cost` clauses. It has no \
                body, so it has no recursion to measure."
-              name declared_by name))
+              name (Path.show declared_by) name))
   | Restated_modifies { at = origin; name; declared_by } ->
       make Restated_method_clause (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` restates `%s.%s`, so it adds only `ensures` and `cost` clauses. The parts that \
                its implementations change are those that `%s.%s` names."
-              name declared_by name declared_by name))
+              name (Path.show declared_by) name (Path.show declared_by) name))
   | Not_viewable_type { at = origin; type_ } ->
       make Not_viewable (Build.at origin)
         (say
@@ -546,7 +587,7 @@ let describe : Typing.t -> Nodes.description = function
                names."
               name
               (Types.show_modified_part ~root:parameter part)
-              trait name))
+              (Path.show_name trait) name))
   | Restated_default { at = origin; name; declared_by } ->
       make Restated_method_default (Build.at origin)
         (say
@@ -554,26 +595,26 @@ let describe : Typing.t -> Nodes.description = function
               "`%s` restates `%s.%s`, which has a default, and a method with a default has one \
                declaration. A call that omits the argument reads the default from `%s`, and this \
                restatement would be a second declaration that shows none."
-              name declared_by name declared_by))
+              name (Path.show declared_by) name (Path.show declared_by)))
   | Restated_body { at = origin; name; declared_by } ->
       make Restated_method_body (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` restates `%s.%s`, so it has no body: each type's `impl` of `%s` gives the body."
-              name declared_by name declared_by))
+              name (Path.show declared_by) name (Path.show declared_by)))
   | Redeclared_method { at = origin; declared_by; name; receiver } ->
       make Redeclared_method (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` already declares a `%s` that takes %s, and this restatement adds no `ensures` \
                or `cost` clause. Add the clauses that the trait promises, or delete the method."
-              declared_by name (Path.show_receiver receiver)))
-  | Restated_signature { at = origin; name; declared_by; signature; uses } ->
+              (Path.show declared_by) name (Path.show_receiver receiver)))
+  | Restated_signature { at = origin; name; declared_by; signature } ->
       make Signature_mismatch (Build.at origin)
         (say
            (Printf.sprintf "`%s` restates `%s.%s`, so it has the signature `%s%s%s`." name
-              declared_by name name signature
-              (match uses with
+              (Path.show declared_by) name name (show_signature signature)
+              (match Types.list_capabilities signature.uses with
               | [] -> ""
               | capabilities ->
                   " uses " ^ String.concat ", " (List.map Types.show_capability capabilities))))

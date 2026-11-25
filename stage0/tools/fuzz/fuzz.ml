@@ -142,14 +142,14 @@ let judge : Diagnostic.Code.t -> verdict = function
       | Open_range | Float_pattern | Increment | Double_negation | Match_arm_comma
       | Conditional_operator | Let_mut | Address_of | Closure_bars | Brace_record | Turbofish
       | Trailing_lambda | As_conversion | Elif | Angle_brackets | Qualified_variant | Macro_call
-      | Tuple | Power_operator | Short_declaration | Pipe_operator | Lambda_annotation
+      | Tuple | Power_operator | Short_declaration | Pipe_operator | Lambda_result_type
       | Impl_parameters | Null_coalescing | Misplaced_condition ) ->
       Grammar_rejects
   | Parser (Cost_word | Misplaced_potential | Interpolation_not_allowed) -> Unknown
   | Parser
       ( Use_after_definition | Let_else_brace | Nesting_too_deep | Misplaced_opaque
       | Misplaced_tuple | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause
-      | Loop_cost_bound | Function_type_names | Misplaced_callback_contract
+      | Loop_cost_bound | Amortized_bound | Function_type_names | Misplaced_callback_contract
       | Misplaced_function_type | Misplaced_associated_type | Misplaced_constraint
       | Misplaced_assert | Misplaced_proof | Misplaced_loop_exit | Exits_parallel
       | Echo_in_specification | Reserved_specification_name )

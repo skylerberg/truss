@@ -1,6 +1,7 @@
 (executable
  (name proof_fuzz)
  (libraries
+  catalog
   zarith
   path
   source

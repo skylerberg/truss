@@ -253,7 +253,7 @@ let () =
       Database.For_testing.lower_roots database;
       let output = Codegen_support.make_scratch_path "tests" in
       match Backend.For_testing.build_test_program backend ~time_limit_ms:300 roots ~output with
-      | Error message -> Codegen_support.fail "%s" message
+      | Error failure -> Codegen_support.fail "%s" (Codegen_support.describe_failure failure)
       | Ok () ->
           let status, out, _ = Process.run output [] in
           Codegen_support.expect_int ~expected:1 status;

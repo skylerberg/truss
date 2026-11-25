@@ -80,7 +80,8 @@ let visit_expression_parts ~on_expression ~on_statement (value : Syntax.expressi
       List.iter
         (function
           | Syntax.Item item -> on_expression item
-          | Item_constraint (_, type_) -> visit_type_expression on_expression type_)
+          | Item_constraint (_, type_) | Item_type type_ ->
+              visit_type_expression on_expression type_)
         items
   | Call (callee, arguments) ->
       on_expression callee;
@@ -110,7 +111,15 @@ let visit_expression_parts ~on_expression ~on_statement (value : Syntax.expressi
           on_expression key;
           on_expression value)
         entries
-  | Lambda { body; _ } -> visit_block body
+  | Lambda { parameters; body } ->
+      List.iter
+        (fun (parameter : Syntax.lambda_parameter) ->
+          Option.iter
+            (fun (annotation : Syntax.parameter_annotation) ->
+              visit_type_expression on_expression annotation.type_)
+            parameter.annotation)
+        parameters;
+      visit_block body
   | If { condition; then_; else_ } -> (
       on_expression condition;
       visit_block then_;
@@ -400,7 +409,13 @@ let walk_names ~on_name (definition : Syntax.definition) =
             walk_type type_);
         walk_expression body
     | Lambda { parameters; body } ->
-        List.iter walk_pattern parameters;
+        List.iter
+          (fun ({ pattern; annotation } : Syntax.lambda_parameter) ->
+            walk_pattern pattern;
+            Option.iter
+              (fun (annotation : Syntax.parameter_annotation) -> walk_type annotation.type_)
+              annotation)
+          parameters;
         walk_block body
     | Match { scrutinees; arms } ->
         List.iter walk_expression scrutinees;
@@ -417,7 +432,8 @@ let walk_names ~on_name (definition : Syntax.definition) =
             | Syntax.Item item -> walk_expression item
             | Item_constraint (name, type_) ->
                 on_name name;
-                walk_type type_)
+                walk_type type_
+            | Item_type type_ -> walk_type type_)
           items
     | _ -> visit_expression_parts ~on_expression:walk_expression ~on_statement:walk_statement value
   and walk_statement (statement : Syntax.statement) =

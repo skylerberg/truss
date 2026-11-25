@@ -121,6 +121,10 @@ let tables =
        NULL, proven INTEGER NOT NULL, trusts_compiled_code INTEGER NOT NULL, failure BLOB, PRIMARY \
        KEY (definition, position)"
       [];
+    keyed_by_columns "solver_run"
+      "definition INTEGER NOT NULL, position INTEGER NOT NULL, input_hash BLOB NOT NULL, output \
+       TEXT NOT NULL, PRIMARY KEY (definition, position)"
+      [];
     keyed_by_id "grant"
       ("dependency INTEGER PRIMARY KEY, " ^ state ^ ", capabilities BLOB, unknown BLOB")
       [];
@@ -135,6 +139,9 @@ let tables =
       [];
     keyed_by_id "test_key" ("item INTEGER PRIMARY KEY, " ^ state ^ ", key BLOB") [];
     keyed_by_id "evaluation" ("item INTEGER PRIMARY KEY, " ^ state ^ ", value BLOB") [];
+    keyed_by_id "test_run"
+      ("item INTEGER PRIMARY KEY, " ^ state ^ ", compiler_fingerprint BLOB, microseconds INTEGER")
+      [];
     keyed_by_columns "unit"
       ("item INTEGER NOT NULL, profile INTEGER NOT NULL, " ^ state
      ^ ", text_hash BLOB, PRIMARY KEY (item, profile)")

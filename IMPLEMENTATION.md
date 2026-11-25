@@ -71,8 +71,8 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `truss.opam` matches `dune-project`, rejects comments, runs every test
   suite, and proves the standard library, on every pull request and every
   push to `main`. It must stay fast: it installs nothing in an ordinary run,
-  restores dune's cache, the solver's answers, and compiled objects from
-  `main`, and gives the longest suites runners of their own.
+  restores dune's cache and compiled objects from `main`, and gives the
+  longest suites runners of their own.
 
 ### Libraries
 
@@ -248,5 +248,4 @@ Every stage of stage0 is tested the same way:
   variables it needs and does not restore them itself.
 - **A test keeps its share.** `TRUSS_TEST_SHARE=index/count` runs the tests
   whose names hash to `index`, so adding or removing a test moves no other
-  test to another share. CI caches solver answers for each runner's shares,
-  and a module that moved runner would be proven again from nothing.
+  test to another share.

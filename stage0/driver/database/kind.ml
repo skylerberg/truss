@@ -33,6 +33,7 @@ type stage =
   | Lower
   | Key_tests
   | Evaluate
+  | Run_test
   | Render of Profile.t
   | Decide
 
@@ -72,6 +73,7 @@ let stages =
     Lower;
     Key_tests;
     Evaluate;
+    Run_test;
     Render Development;
     Render Release;
     Decide;
@@ -118,6 +120,7 @@ type fact =
   | Lowered
   | Test_key
   | Evaluation
+  | Test_run
   | Unit of Profile.t
 
 let facts =
@@ -153,6 +156,7 @@ let facts =
     Lowered;
     Test_key;
     Evaluation;
+    Test_run;
     Unit Development;
     Unit Release;
   ]
@@ -271,6 +275,7 @@ let show_stage = function
   | Lower -> "lowered code"
   | Key_tests -> "test key"
   | Evaluate -> "evaluation"
+  | Run_test -> "test run"
   | Render Development -> "development unit"
   | Render Release -> "release unit"
   | Decide -> "verdicts"
@@ -302,6 +307,7 @@ let show_fact = function
   | Lowered -> "lowered code"
   | Test_key -> "test key"
   | Evaluation -> "evaluation"
+  | Test_run -> "test run"
   | Unit Development -> "development unit"
   | Unit Release -> "release unit"
 
@@ -334,7 +340,7 @@ let is_signature = function
       true
   | Resolved _ | Grant | Body_form | Body_tables | Run_forever | Ownership_modes | Body_mir
   | Generated_mir | Callees | Recursion_group | Proof_group | Usage_check | Ownership
-  | Dependency_use | Proof | Lowered | Test_key | Evaluation | Unit _ ->
+  | Dependency_use | Proof | Lowered | Test_key | Evaluation | Test_run | Unit _ ->
       false
 
 let list_read_targets = function
@@ -344,7 +350,7 @@ let list_read_targets = function
     | Type_facts | Checked_interface | Contract | Body_form | Body_tables | Run_forever
     | Ownership_modes | Body_mir | Contract_mir | Generated_mir | Callees | Recursion_group
     | Proof_group | Usage_check | Ownership | Dependency_use | Proof | Lowered | Test_key
-    | Evaluation | Unit _ ) as fact ->
+    | Evaluation | Test_run | Unit _ ) as fact ->
       [ fact ]
 
 let lookups_of_definition = [ Imports; Declaration; Tree; Text; Place; Container; Contained ]

@@ -19,7 +19,7 @@ type record = {
 
 exception Malformed of string
 
-let raise_malformed text = raise (Malformed ("A test report cannot be read: " ^ text))
+let raise_malformed text = raise (Malformed text)
 let started_kind = 0
 let ended_kind = 1
 let record_head_width = 5

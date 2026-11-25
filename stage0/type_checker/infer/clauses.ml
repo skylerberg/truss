@@ -21,7 +21,6 @@ let check_measures state env measures =
 
 let check_resource state (resource : Syntax.resource) =
   let check_capability (path : Syntax.path_type) (method_ : Syntax.name option) =
-    let path_text = Interface.Elaborator.show_path path.path in
     match State.find_target state path.path.last with
     | Some (Definition (Capability, capability)) -> (
         match method_ with
@@ -33,14 +32,15 @@ let check_resource state (resource : Syntax.resource) =
               (No_method
                  {
                    at = Written method_.id;
-                   owner = Named_owner path_text;
+                   owner = Path_owner capability;
                    name = method_.text;
                    candidates = [];
                  })
         | _ -> ())
     | Some (Unknown _) -> ()
     | _ ->
-        State.report state (Counted_not_a_capability { at = Written path.id; written = path_text })
+        State.report state
+          (Counted_not_a_capability { at = Written path.id; written = Catalog.cover_path path.path })
   in
   match resource with
   | Metric _ -> ()

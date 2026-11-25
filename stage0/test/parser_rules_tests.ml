@@ -294,6 +294,13 @@ let () =
   Harness.test "a loop's cost is not amortized" (fun () ->
       Parse_support.expect_body_error "while a\n  cost amortized time O(1)\n{}"
         ~code:Loop_cost_bound ~at:"cost");
+  Harness.test "an amortized bound is an O bound on a metric" (fun () ->
+      Parse_support.expect_error "fn f()\n  cost amortized allocations <= 0\n{}"
+        ~code:Amortized_bound ~at:"amortized";
+      Parse_support.expect_error "fn f(visit: fn())\n  cost amortized calls(visit) O(1)\n{}"
+        ~code:Amortized_bound ~at:"amortized";
+      Parse_support.expect_error "fn f(visit: (fn() cost amortized allocations == 0)) {}"
+        ~code:Amortized_bound ~at:"amortized");
   Harness.test "specifications allow forall" (fun () ->
       Parse_support.expect_definition
         "type S(items: List[Int64])\n  invariant forall i in items => i > 0"
@@ -556,12 +563,9 @@ let () =
         ~at:"|>"
         ~fixed:("let total = items\n  |> list.sum", "let total = list.sum(items)");
       Parse_support.expect_body_error "let total = items |> take(3)" ~code:Pipe_operator ~at:"|>");
-  Harness.test "a lambda with annotations" (fun () ->
-      Parse_support.expect_body_error "let double = fn(x: Int64) { x * 2 }" ~code:Lambda_annotation
-        ~at:": Int64" ~fixed:("x: Int64", "x");
-      Parse_support.expect_body_error "let double = fn(x) -> Int64 { x * 2 }"
-        ~code:Lambda_annotation ~at:" -> Int64"
-        ~fixed:("let double = fn(x) -> Int64 { x * 2 }", "let double = fn(x) { x * 2 }"));
+  Harness.test "a lambda with a result type" (fun () ->
+      Parse_support.expect_body_error "let double = fn(x: Int64) -> Int64 { x * 2 }"
+        ~code:Lambda_result_type ~at:" -> Int64" ~fixed:(" -> Int64", ""));
   Harness.test "List<String>.new() in an expression" (fun () ->
       Parse_support.expect_body_error "let names = List<String>.new()" ~code:Angle_brackets ~at:"<"
         ~fixed:("List<String>", "List[String]"));

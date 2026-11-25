@@ -163,7 +163,7 @@ fn walk_expression_parts(cursor: mut TokenCursor, visitor: Visitor, value: synta
       for item in items {
         match item {
           Item(element) => on_expression(mut cursor, visitor, value: element)
-          ItemConstraint(value: written, ..) => walk_type_expression(mut cursor, visitor, written)
+          ItemConstraint(value: written, ..) | ItemType(value: written) => walk_type_expression(mut cursor, visitor, written)
         }
       }
     }
@@ -210,7 +210,14 @@ fn walk_expression_parts(cursor: mut TokenCursor, visitor: Visitor, value: synta
       on_expression(mut cursor, visitor, value: entry.key)
       on_expression(mut cursor, visitor, value: entry.value)
     }
-    Lambda(body, ..) => walk_block(mut cursor, visitor, block: body)
+    Lambda(parameters, body) => {
+      for parameter in parameters {
+        if parameter.annotation is Some(annotation) {
+          walk_type_expression(mut cursor, visitor, written: annotation.written)
+        }
+      }
+      walk_block(mut cursor, visitor, block: body)
+    }
     If(condition, then_block, else_branch) => {
       on_expression(mut cursor, visitor, value: condition)
       walk_block(mut cursor, visitor, block: then_block)

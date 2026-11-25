@@ -19,4 +19,6 @@ module Path_table : Hashtbl.S with type key = Path.t
 module Local_table : Hashtbl.S with type key = Locals.local
 module Stated_table : Hashtbl.S with type key = stated
 module Model_table : Hashtbl.S with type key = Types.ty * Types.ty
-module Axiom_clause_table : Hashtbl.S with type key = Logic.symbol * string * Core.origin
+
+module Axiom_clause_table :
+  Hashtbl.S with type key = Logic.symbol * Resolve.Names.key * Path.t * Core.origin

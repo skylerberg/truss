@@ -665,6 +665,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
          (List.combine written.code.parameters function_type.inputs))
   in
   let mark = context.fresh and facts_mark = List.length context.facts in
+  let recursive_costs_mark = context.recursive_costs_assumed in
   let premises =
     List.drop (List.length context.facts - facts_mark) (list_facts_since context start_facts)
   in
@@ -818,6 +819,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
     add_lambda_relation context frame ~capture_free function_type term ~called ~arguments
       ~start_fresh ~end_fresh ~start_declarations ~premises ~shown ~ended:!ended ~read_exits;
   context.lambda_captures <- (term, list_captured_locals written) :: context.lambda_captures;
+  if context.recursive_costs_assumed > recursive_costs_mark then
+    context.lambdas_assuming_recursive_costs <- term :: context.lambdas_assuming_recursive_costs;
   context.lambda_costs <-
     List.map (fun (metric, pending_cost) -> ((term, metric), pending_cost)) pending
     @ context.lambda_costs;

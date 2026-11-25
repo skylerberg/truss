@@ -983,6 +983,24 @@ let () =
       expect_fine Fixtures.Ownership.grid_cell_that_may_diverge)
 
 let () =
+  Harness.test "a list is not mutated while a variant built from its element is live" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.list_mutated_while_a_variant_views_its_element
+        "ownership.mutated_while_viewed");
+  Harness.test "an element given where the binding declares an owner is not moved" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.element_given_where_an_owner_is_declared
+        "ownership.not_owned" ~fixed:("names[0]", "names[0].copy()"));
+  Harness.test "an element given to a type parameter that no view meets is not moved" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.element_given_to_a_parameter_that_is_stored
+        "ownership.not_owned" ~fixed:("names[0]", "names[0].copy()"));
+  Harness.test "an element given after an owned argument decided the type is not moved" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.element_given_after_an_owned_argument
+        "ownership.not_owned" ~fixed:("names[0]", "names[0].copy()"));
+  Harness.test "a temporary given after a place decided the type is viewed, and dropped too soon"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.temporary_given_after_a_borrowed_argument
+        "ownership.views_temporary")
+
+let () =
   Harness.test "a cursor cannot view a temporary that the statement drops" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.cursor_over_a_temporary_string
         "ownership.views_temporary");

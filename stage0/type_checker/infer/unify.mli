@@ -34,10 +34,10 @@ val list_possible_members : t -> Types.ty -> Language.Builtin_type.t list
 val is_within : t -> Types.ty -> Language.Builtin_type.t list -> bool
 val may_decide : t -> int -> bool
 val count_solutions : t -> int
-val poison : t -> int -> Catalog.reported -> unit
 
 type unknown = Unknown_type of int | Unknown_value of int
 
+val poison : t -> unknown -> Catalog.reported -> unit
 val list_unknowns : t -> Types.ty -> unknown list
 val list_argument_unknowns : t -> Types.argument -> unknown list
 val unify : ?modulo_views:bool -> t -> Types.ty -> Types.ty -> bool

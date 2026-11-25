@@ -58,6 +58,11 @@ let read_entry_siblings (entries : Core.origin range list) index : Core.origin s
       Compiler_bug.raise_bug ~stage:"Catalog" "the siblings of the only entry of a list"
   | _, _ -> Previous (List.nth entries (index - 1))
 
+let cover_names names =
+  { covering = List.map (fun (name : Syntax.name) : Core.origin -> Written name.id) names }
+
+let cover_path (path : Syntax.path) = cover_names (path.modules @ [ path.last ])
+
 type diagnostic =
   | Usage of Usage.t
   | Package of Package.t
@@ -85,6 +90,10 @@ type reported = Diagnostic.reported
 let make_reported (_ : diagnostic) = Diagnostic.reported_elsewhere
 let reported_elsewhere = Diagnostic.reported_elsewhere
 
+module Code = Code
+module Codegen = Codegen
+module Codegen_description = Codegen_description
+module Model_value = Model_value
 module Usage = Usage
 module Usage_description = Usage_description
 module Package = Package

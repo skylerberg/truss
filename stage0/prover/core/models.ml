@@ -124,6 +124,7 @@ let substitute_value_term context (value : Types.value) =
             (Facts.make_in_range (Types.make_builtin UInt64) (Logic.Symbol symbol)));
       Logic.Symbol symbol
   | Value_variable _ -> Facts.raise_unsupported Whole_definition Unsolved_size
+  | Value_error _ -> Facts.raise_bug "a value with an error, which no proof reaches"
 
 let is_model_built_from_contents : Path.t -> bool = function
   | Impl { module_; trait; for_type } ->
@@ -275,7 +276,7 @@ let rec make_value_term context (frame : State.frame) (value : Types.value) =
       | Some (Types.Value argument) when argument <> Value_parameter parameter ->
           make_value_term context frame argument
       | _ -> substitute_value_term context value)
-  | Known _ | Value_variable _ -> substitute_value_term context value
+  | Known _ | Value_variable _ | Value_error _ -> substitute_value_term context value
 
 let make_array_model context frame (ty : Types.ty) term =
   match ty with

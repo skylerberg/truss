@@ -102,9 +102,26 @@ let describe_lock_problem : Problem.lock -> string = function
   | Repeated_line name -> Printf.sprintf "`%s` already has a line above." (show name)
   | Missing_header header -> Printf.sprintf "A lock file starts with the line `%s`." header
 
+let name_registry_variable variable = Printf.sprintf "set `%s` to the registry's directory" variable
+
+let describe_unavailable : Problem.unavailable -> string = function
+  | No_registry { variable } -> "no registry is set; " ^ name_registry_variable variable
+  | Missing_from_registry { registry; name; version } ->
+      Printf.sprintf "the registry at %s has no `%s` %s" registry (show name) (show_version version)
+  | Changed_in_registry { registry; name; version } ->
+      Printf.sprintf
+        "the files the registry at %s holds as `%s` %s do not have the hash the lock file names"
+        registry (show name) (show_version version)
+  | Unwritable { directory } -> Printf.sprintf "cannot write %s" directory
+
+let show_unfinished : Problem.unfinished -> string = function Todo -> "todo" | Echo -> "echo"
+
+let show_location ({ path; line; column } : Problem.located) =
+  Printf.sprintf "%s:%d:%d" path line column
+
 let describe_load_failure : Problem.load_failure -> string = function
   | Unfetched -> "its files are not fetched yet"
-  | Unavailable reason -> reason
+  | Unavailable unavailable -> describe_unavailable unavailable
   | Unreadable_manifest { line; problem } ->
       Printf.sprintf "its manifest cannot be read: line %d: %s" line
         (describe_manifest_problem problem)
@@ -203,3 +220,36 @@ let describe : Problem.t -> string = function
         errors
         (if errors = 1 then "error" else "errors")
         path line column first
+  | Unset_registry { variable } ->
+      "No registry is set. " ^ String.capitalize_ascii (name_registry_variable variable) ^ "."
+  | Unregistered_package name -> Printf.sprintf "The registry has no package `%s`." (show name)
+  | Unregistered_version { name; version } ->
+      Printf.sprintf "The registry has no `%s` %s." (show name) (show_version version)
+  | Unpublished_dependency name ->
+      Printf.sprintf
+        "`%s` is a package of this project, and its files are not those of a version the registry \
+         holds. A package is published with registry packages only, so publish `%s` first."
+        (show name) (show name)
+  | Ownerless_name { name } ->
+      Printf.sprintf
+        "`%s` has no owner in its name, which a published package's has, such as `acme.%s`." name
+        name
+  | Major_mismatch { name; major; next } ->
+      Printf.sprintf
+        "A version of `%s` starts with %d, the number at the end of its name, or 1 for a name \
+         without one. A release with another first number is published under another name, such as \
+         `%s`."
+        (show name) major (show next)
+  | Release_not_newer { name; newest } ->
+      Printf.sprintf "The newest release of `%s` is %s, so this release needs a higher version."
+        (show name) (show_version newest)
+  | Unfinished_code { unfinished; location } ->
+      Printf.sprintf "%s: `%s` is not finished code." (show_location location)
+        (show_unfinished unfinished)
+  | Unshippable { unshippable; location; way } ->
+      Printf.sprintf "%s: %s, so the program cannot be built.\n    %s" (show_location location)
+        (match unshippable with
+        | Reached unfinished ->
+            Printf.sprintf "`%s` can be reached from `main`" (show_unfinished unfinished)
+        | Unfinished_proof -> "`todo` leaves unfinished a proof that `main` relies on")
+        (String.concat " -> " (List.map Path.show way))

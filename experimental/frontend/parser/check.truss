@@ -69,7 +69,12 @@ fn check_expression(cursor: mut TokenCursor, context: CheckContext, value: synta
     _ => {}
   }
   match value.kind {
-    Lambda(body, ..) => {
+    Lambda(parameters, body) => {
+      for parameter in parameters {
+        if parameter.annotation is Some(annotation) {
+          check_types(mut cursor, context, written: annotation.written)
+        }
+      }
       let enclosing_loop = if context.enclosing_loop == EnclosingLoop.NoLoop { EnclosingLoop.NoLoop } else { EnclosingLoop.AcrossLambda }
       check_block(mut cursor, context: context with (allows_assert: false, is_in_parallel: false, enclosing_loop), block: body)
     }

@@ -1,11 +1,13 @@
 type profile = Profile.t = Development | Release
 type t
-type results = { find : string -> string option; add : string -> string -> unit }
-type 'value ran = 'value Lowering.ran = Ran of 'value | Unfinished of string | Stopped of string
+
+type 'value ran = 'value Lowering.ran =
+  | Ran of 'value
+  | Unfinished of Catalog.Codegen.stop
+  | Stopped of Catalog.Codegen.stop
 
 val create :
   ?show_file:(Path.file -> string) ->
-  ?results:results ->
   ?evaluation_cpu_time_limit_ms:int ->
   ?programs:string ->
   Lowering.lowered_lookups ->
@@ -52,7 +54,7 @@ val run_tests :
   t ->
   time_limit_ms:int ->
   Path.t list ->
-  (Test_report.record list, string) result
+  (Test_report.record list, Catalog.Codegen.failure) result
 
 type location = { file : Path.file; line : int; column : int }
 type unshippable = { failure : [ `Todo | `Echo ]; location : location; way : Path.t list }
@@ -61,14 +63,22 @@ val list_unshippable : Lowering.lowered_lookups -> main:Path.t -> unshippable li
 val list_reached_definitions : Lowering.lowered_lookups -> Path.t -> Path.t list
 val list_reached_todo_types : Lowering.lowered_lookups -> Path.t -> Path.t list
 val make_program_path : t -> string
-val build_program : t -> main:Path.t -> output:string -> is_kept:bool -> (unit, string) result
+
+val build_program :
+  t -> main:Path.t -> output:string -> is_kept:bool -> (unit, Catalog.Codegen.failure) result
+
+val describe_failure : t -> Catalog.Codegen.failure -> string
 val evaluate : t -> Lowered.Item.t list -> Lowered.static_value ran list
 
 module For_testing : sig
   val is_folded : t -> Path.t -> bool
 
   val build_test_program :
-    t -> time_limit_ms:int -> Lowered.Item.t list -> output:string -> (unit, string) result
+    t ->
+    time_limit_ms:int ->
+    Lowered.Item.t list ->
+    output:string ->
+    (unit, Catalog.Codegen.failure) result
 
   val compile_fragment : t -> Lowered.Item.t -> Emit_c.fragment
   val render_unit : t -> Lowered.Item.t -> string

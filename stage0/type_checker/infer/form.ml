@@ -764,7 +764,11 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
       let captures =
         match elaboration with Some (Lambda { captures }) -> captures | _ -> raise_unexpected ()
       in
-      let parameters = List.map (build_pattern form) parameters in
+      let parameters =
+        List.map
+          (fun (parameter : Syntax.lambda_parameter) -> build_pattern form parameter.pattern)
+          parameters
+      in
       let result =
         match read_type form value with
         | Types.Function function_type -> function_type.output

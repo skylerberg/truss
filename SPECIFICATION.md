@@ -632,7 +632,9 @@ fn Option[Value].take(mut self) -> Option[Value] {
 
 - **`Plain` types copy implicitly.** A type made only of fixed-size data with
   nothing on the heap, such as the integers, floats, `Bool`, `Character`,
-  and records, sum types, and `Array`s built only from those, is `Plain`.
+  and records, sum types, and `Array`s built only from those, is `Plain`. A
+  type that declares a `cost potential` is not (see
+  [Amortized costs](#amortized-costs)).
 - **A name bound to a `Plain` value is a copy.** A `let`, or a pattern of a
   `match` or an `is`, that binds a `Plain` value without `mut` copies it, so
   the place it was bound from can be assigned while the name is live. A
@@ -690,6 +692,26 @@ var longest: view String = words[0]
   annotated binding, an assignment, and a returned value. An `Array` converts
   to the `List` of its elements where a read-only or `mut` `List` or a
   view of one is expected.
+- **A place given where a type parameter is undecided is viewed.** In
+  `let found = Some(names[0])`, nothing but the argument decides the type
+  parameter of `Option`. The argument is a place of a `String`, written
+  without `own`, so the type argument is `view String` and `found` is an
+  `Option[view String]`.
+  - The rule covers an `own` parameter of a generic function, a field of a
+    constructed value, an element of a list literal, and a key or a value of
+    a map literal.
+  - The place is of a `List` or a `String`. It may be a constant or a part
+    that a method lends read-only.
+  - `Some(own name)` moves `name`, and `Some(names[0].copy())` copies the
+    element. Each is an `Option[String]`.
+  - A place is viewed only where a view meets every bound of the type
+    parameter. Given to a `Value: Storable`, the place is an owned value
+    that cannot be moved.
+  - Arguments decide a type parameter in the order written. After
+    `pick("fig".copy(), second: names[0])` has decided `String`, the element
+    is an owned value that cannot be moved. A declared type, as in
+    `let found: Option[String] = Some(names[0])`, decides before any
+    argument.
 - **A view converts to no owned value.** `copy()` makes a `List` or a
   `String` that owns copies of the viewed elements, and a view where an
   owned value is needed is an error with that fix.
@@ -886,6 +908,7 @@ let connection = connect(host, secure: false)?
 ```truss
 let value = parse[Int64](text)?
 let builder = List[String].with_capacity(64)
+let words = List[view String].with_capacity(64)
 ```
 
 Type arguments that cannot be inferred are written in brackets after the
@@ -895,6 +918,7 @@ function's name.
   type, or a trait, and is an index otherwise. After a `.`, it holds type
   arguments when the name is a method of the receiver.
 - The written arguments give the generic parameters in brackets, in order.
+- A type argument that is a view is written `view T`, as in a declared type.
 - A capability parameter takes no type argument, since it is written at its
   uses and not in brackets: `for_each[String](names, visit: greet)` gives
   `Item` alone.
@@ -1373,12 +1397,38 @@ fn List[Element].push(mut self, item: own Element)
   parts' potentials, and belongs to that value alone; `copy()` pays for the
   new one. A view holds no potential: the potential of the elements that it
   views belongs to their owner, so a `List[view String]` holds only its own.
+- **Potential is owned like the value that holds it.** `own` transfers it.
+  `mut` lends it, and the borrower's bound covers the change. Read-only
+  access, a view's included, changes none.
+- A type that declares a `cost potential`, or holds a value that does, is not
+  `Plain`, since an implicit copy would duplicate its potential. A type
+  parameter bounded by `Plain` holds no potential.
 - `cost amortized time O(f)` promises that the actual cost, plus the change
   in the potential of the values the function mutates or returns, is within
-  `O(f)`. `amortized` works with every resource that takes an `O(...)` bound.
+  `O(f)`. `amortized` takes only an `O(...)` bound, on `time`, `allocations`,
+  or `allocated_bytes`. Potential pays for no calls, and an exact count with
+  `<=` or `==` cannot borrow from it.
 - A function may state a plain and an amortized bound on one resource. A
-  caller with an amortized bound counts the amortized one, and any other
-  caller the plain one.
+  caller counts each call by the bound of its own kind.
+- A caller with an amortized bound counts a callee's amortized bound as
+  stated, and never reads the potential that the callee changes. It counts
+  a callee that states only a plain bound at that bound plus the change in
+  the potential of the values the call mutates, consumes, or returns.
+- A caller with an amortized bound also counts the potential that its own
+  code makes. A value it builds counts its type's potential. A write counts
+  the change in the potential of the values that contain the written place.
+- A caller with a plain bound counts a callee's plain bound. Where the
+  callee states only an amortized bound, the caller counts that bound less
+  the change in potential. A function that pushes only onto a list it
+  creates empty therefore has a plain bound, since the list starts with no
+  potential to spend.
+- **A capability method's `O(...)` bound counts the change in the potential
+  of its provider,** whether or not it is `amortized`. An `impl` of the
+  capability is checked so, and a caller counts the bound as stated. A plain
+  bound of a function that uses a capability is therefore relative to the
+  potential its provider holds, and the function with the `provide` block
+  counts, in its plain bounds, the potential that the provider held when the
+  block began.
 
 ### Function types
 
@@ -1412,6 +1462,9 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log))
 - **A function type takes only functions whose capabilities its `uses`
   names,** so one without `RunForever` takes only functions that terminate
   (see [Termination](#termination)).
+- A function type's bound is met only by a bound of the same kind: a plain
+  bound does not stand for an amortized one, nor an amortized bound for a
+  plain one.
 - Clauses after a definition's result type belong to the definition.
 - A function type's `requires`, `ensures`, `Panic unless` condition, and
   bounds that are not integer literals are a callback's contract (see
@@ -1526,11 +1579,11 @@ type, and the terms `time(visit)`, `allocations(visit)`,
 - **The clauses of a callback contract appear only on the type of a
   function's or a theorem's parameter,** at the top level of that type, and
   the type then names its inputs. A law's parameter takes none, since a law
-  states a fact of every value of its parameters' types. Each can mention the inputs and the parameters before
-  that parameter. In the `ensures`, `result` is the callback's result, and
-  `old(input)` is a `mut` input's value when the callback was called. A type
-  that values are stored in or compared by holds no clause that needs a
-  proof to compare.
+  states a fact of every value of its parameters' types. Each clause can
+  mention the inputs and the parameters before that parameter. In the
+  `ensures`, `result` is the callback's result, and `old(input)` is a `mut`
+  input's value when the callback was called. A type that values are stored
+  in or compared by holds no clause that needs a proof to compare.
 - **The definition proves the `requires` at every call through the
   parameter, and each such call meets the `ensures`.** It proves the `Panic
   unless` condition at each call too unless it uses `Panic` itself, and each
@@ -2037,18 +2090,30 @@ fn production(config: own Config) -> Config {
 ### Lambdas
 
 ```ebnf
-lambda = "fn" "(" list(pattern) ")" block ;
+lambda           = "fn" "(" list(lambda_parameter) ")" block ;
+lambda_parameter = pattern [ ":" [ mode ] type ] ;
 ```
 
 ```truss
 let passing = scores.filter(fn(score) { score >= threshold })
 mut scores.update_each(fn(score) { score = score / 2 })
+let halve = fn(score: UInt8) { score / 2 }
 ```
 
-- A lambda's parameter types, modes, and result type come from the function
-  type it is passed as. Types are inferred from the outside in, never from
-  the lambda's body. Where nothing gives a lambda a function type, the `let`
-  has a type or the call has type arguments.
+- A lambda's parameter modes and types come from the function type it is
+  passed as. An annotation states them as a function's parameter does, so
+  `score: UInt8` is read-only and `score: mut UInt8` is `mut`. An
+  annotation must state the mode and the type that the function type gives:
+  it never converts the argument.
+- A lambda that nothing passes as a function type takes its parameter modes
+  and types from its annotations: `halve` has the type
+  `fn(UInt8) -> UInt8`.
+- Types are inferred from the outside in, never from the lambda's body.
+  Each parameter's type is decided before the body is checked, by the
+  function type or by the annotation, and a parameter whose type neither
+  decides is an error.
+- A lambda declares no result type. Its result type is the type of its
+  body's value, converted to the function type's result.
 - A lambda captures local variables by view and cannot mutate them. A
   lambda that captures a variable is a view; one that captures none can be
   returned, stored, and moved.
@@ -2361,7 +2426,7 @@ postfix    = primary { "." LOWER_NAME
 brackets   = bracket_item { "," bracket_item } [ "," ]
            | [ additive ] ".." [ additive ]
            | [ additive ] "..=" additive ;
-bracket_item = expression | UPPER_NAME "=" type ;
+bracket_item = expression | UPPER_NAME "=" type | "view" type ;
 
 primary    = INTEGER | FLOAT | STRING | TAGGED_STRING
            | "true" | "false" | "todo" | "unreachable" | "break" | "continue"

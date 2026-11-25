@@ -165,7 +165,7 @@ internal type ExpressionKind =
   | indirect Parenthesized(inner: Expression)
   | List(items: List[Expression])
   | Map(entries: List[Entry])
-  | Lambda(parameters: List[Pattern], body: Block)
+  | Lambda(parameters: List[LambdaParameter], body: Block)
   | indirect If(condition: Expression, then_block: Block, else_branch: Option[ElseBranch])
   | Match(scrutinees: List[Expression], arms: List[Arm])
   | Provide(implementations: List[Expression], body: Block)
@@ -188,7 +188,10 @@ internal type Text(value: String, id: UInt64)
 internal type Argument(label: Option[Name], value: Expression)
   derives Equal
 
-internal type BracketItem = Item(value: Expression) | ItemConstraint(name: Name, value: TypeExpression)
+internal type BracketItem =
+  | Item(value: Expression)
+  | ItemConstraint(name: Name, value: TypeExpression)
+  | ItemType(value: TypeExpression)
   derives Equal
 
 internal type Update(kind: UpdateKind, id: UInt64)
@@ -236,6 +239,12 @@ internal type LoopClauseKind = Invariant(value: Expression) | LoopDecreases(meas
   derives Equal
 
 internal type Arm(patterns: List[Pattern], guard: Option[Expression], body: Statement, id: UInt64)
+  derives Equal
+
+internal type LambdaParameter(pattern: Pattern, annotation: Option[ParameterAnnotation])
+  derives Equal
+
+internal type ParameterAnnotation(mode: Option[Mode], written: TypeExpression, id: UInt64)
   derives Equal
 
 internal type Pattern(kind: PatternKind, id: UInt64)

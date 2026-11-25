@@ -113,7 +113,7 @@ let find_implemented_method lookups (path : Path.t) =
       None
 
 let is_open_value = function
-  | Types.Value_variable _ -> true
+  | Types.Value_variable _ | Value_error _ -> true
   | Types.Known _ | Value_parameter _ -> false
 
 let rec match_type ~variables (substitution : Types.substitution) pattern type_ =
@@ -148,9 +148,8 @@ and match_arguments ~variables substitution patterns arguments =
                 match Types.find_argument parameter substitution with
                 | Some (Types.Value bound) -> if bound = value then Some substitution else None
                 | _ -> Some (Types.bind_argument parameter (Types.Value value) substitution))
-            | Types.Value left, Types.Value right -> (
-                if left = right then Some substitution
-                else match right with Types.Value_variable _ -> Some substitution | _ -> None)
+            | Types.Value left, Types.Value right ->
+                if left = right || is_open_value right then Some substitution else None
             | _ -> None))
       (Some substitution) patterns arguments
 

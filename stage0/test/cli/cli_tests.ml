@@ -332,7 +332,12 @@ let () =
 
 let () =
   test "a command refuses a cache that other users can write, and exits with 2" (fun () ->
-      let root = make_package [ ("main.truss", "fn main() {}\n") ] in
+      let root =
+        make_package
+          [
+            ("main.truss", "fn main(arguments: List[String]) -> ExitCode {\n  ExitCode.success\n}\n");
+          ]
+      in
       let cache = Harness.make_scratch_directory "writable-cache" in
       Unix.chmod cache 0o777;
       Workspace.reset ();
@@ -1768,7 +1773,7 @@ let () =
       in
       match outcomes with
       | [ ("reaches", "incomplete", message); ("counts", "passed", _) ]
-        when message = "the type demo.Session is defined as todo\n  at main.truss:1:6" ->
+        when message = "the type `demo.Session` is defined as todo\n  at main.truss:1:6" ->
           ()
       | _ ->
           fail "%s"

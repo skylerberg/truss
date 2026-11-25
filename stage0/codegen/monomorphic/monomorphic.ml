@@ -50,6 +50,7 @@ and ground_argument context substitution (argument : Types.argument) : Ground.ar
   | Value (Value_parameter parameter) ->
       raise_bug "the value parameter %s is not substituted" parameter.name
   | Value (Value_variable _) -> raise_bug "a value the checker left undecided"
+  | Value (Value_error _) -> raise_bug "a value with an error, which no build reaches"
 
 and ground_function context substitution (function_type : Types.function_type) :
     Ground.function_type =

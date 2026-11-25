@@ -17,10 +17,11 @@ let list_unfinished snapshot database packages =
               let line, column =
                 Source.compute_position source (Source.Definition_span.to_file ~base span).start
               in
-              ( (match keyword with `Todo -> "todo" | `Echo -> "echo"),
-                Source.path source,
-                line,
-                column ))
+              Project_catalog.Problem.Unfinished_code
+                {
+                  unfinished = (match keyword with `Todo -> Todo | `Echo -> Echo);
+                  location = { path = Source.path source; line; column };
+                })
             (Inspect.list_unfinished (source_lookups.read_spans key) (names.read_definition key)))
         (names.list_declarations_in file))
     (Command_packages.list_files snapshot packages)
@@ -69,14 +70,7 @@ let record database snapshot registry (package : Path.package) =
             | Some (version, hash) ->
                 add name version hash;
                 List.iter visit (list_dependencies ~code:true name)
-            | None ->
-                problems :=
-                  Printf.sprintf
-                    "`%s` is a package of this project, and its files are not those of a version \
-                     the registry holds. A package is published with registry packages only, so \
-                     publish `%s` first."
-                    (Path.show_package name) (Path.show_package name)
-                  :: !problems)
+            | None -> problems := Project_catalog.Problem.Unpublished_dependency name :: !problems)
         | None, None -> ()
       end
     in
@@ -118,30 +112,22 @@ let run ~version =
   let version = Upgrade_command.read_version version in
   let snapshot, packages = Command_packages.load_current () in
   let name = Command_packages.require_one packages in
-  if name.owner = None then
-    Outcome.raise_cannot_run
-      "`%s` has no owner in its name, which a published package's has, such as `acme.%s`." name.name
-      name.name;
+  if name.owner = None then Outcome.raise_problems [ Ownerless_name { name = name.name } ];
   let major, _, _ = version and name_major = Registry.Version.parse_major name in
   if major <> name_major then
-    Outcome.raise_cannot_run
-      "A version of `%s` starts with %d, the number at the end of its name, or 1 for a name \
-       without one. A release with another first number is published under another name, such as \
-       `%s`."
-      (Path.show_package name) name_major
-      (Path.show_package (Registry.Version.make_next_major_name name));
+    Outcome.raise_problems
+      [
+        Major_mismatch
+          { name; major = name_major; next = Registry.Version.make_next_major_name name };
+      ];
   let registry =
     match Registry.Index.find_current_registry () with
     | Some registry -> registry
-    | None ->
-        Outcome.raise_cannot_run "No registry is set. Set `%s` to the registry's directory."
-          Registry.Index.variable
+    | None -> Outcome.raise_problems [ Unset_registry { variable = Registry.Index.variable } ]
   in
   (match Registry.Index.find_newest registry name with
   | Some (newest, _) when Registry.Version.compare version newest <= 0 ->
-      Outcome.raise_cannot_run
-        "The newest release of `%s` is %s, so this release needs a higher version."
-        (Path.show_package name) (Registry.Version.show newest)
+      Outcome.raise_problems [ Release_not_newer { name; newest } ]
   | _ -> ());
   let database = Workspace.open_database snapshot in
   let report = Report.gather ~proofs:true database snapshot packages in
@@ -158,16 +144,13 @@ let run ~version =
   | [] -> ()
   | unfinished_code ->
       refuse
-        (List.map
-           (fun (keyword, file, line, column) ->
-             Printf.sprintf "%s:%d:%d: `%s` is not finished code." file line column keyword)
-           unfinished_code
+        (List.map Project_catalog.describe unfinished_code
         @ [ "Cannot publish a package with a `todo` or an `echo`." ]));
   (match list_failed_tests database snapshot packages with
   | [] -> ()
   | failed -> refuse (failed @ [ "Cannot publish a package whose tests fail." ]));
   match record database snapshot registry name with
-  | _, (_ :: _ as problems) -> refuse problems
+  | _, (_ :: _ as problems) -> refuse (List.map Project_catalog.describe problems)
   | record, [] ->
       let files = list_files (Command_packages.locate_directory snapshot name) record in
       Registry.Index.add registry name version files;

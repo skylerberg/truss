@@ -75,14 +75,18 @@ nowhere else.
 | Payload field | Rendered as |
 |---|---|
 | `node` | The node's span, as a location, or its source text, as a quote |
-| `Path.t`, `Types.ty`, `Types.capability`, `Types.condition` | The printer of that type, called by the catalog |
+| A written path, `Core.origin Description.range` over its names | Its source text, as a quote |
+| `Path.t`, `Types.ty`, `Types.signature`, `Types.capability`, `Types.condition` | The printer of that type, called by the catalog |
 | A name, such as a field or a label | The name, in backquotes |
-| `code` | Truss code printed by a pass's printer, such as the prover's rendering of a proof goal |
+| `Code.t`, such as the prover's suggested `requires` | Truss code, printed by the prover's description with one precedence table |
+| `Model_value.t`, a value in a counterexample | A Truss value, printed by the prover's description |
+| `Patterns.witness`, a value a `match` misses | A pattern, printed by the pattern family's description |
 | A count, a keyword, a mode | Written by the catalog |
 
-`code` is the one field that holds text a pass produced. It is for printed
-Truss code only, so a search for `code` fields lists everything left to
-review.
+A pass prints nothing into a payload. A `string` field holds a name, or
+text that comes from outside the compiler: the solver's reason for
+giving up, a message that the compiled program reports when it panics,
+and the C compiler's output.
 
 The catalog has four libraries in one directory, `stage0/diagnostics`:
 
@@ -90,8 +94,8 @@ The catalog has four libraries in one directory, `stage0/diagnostics`:
 |---|---|---|
 | `description` | None: the generic description types and the renderer for file spans | `diagnostic`, `source` |
 | `syntax_catalog` | `Lexing`, `Parsing` | `description`, `token`, `language` |
-| `project_catalog` | The manifest, lock file, selection, and layout problems | `path`, `grant` |
-| `catalog` | Every family after parsing | `description`, `types`, `core`, `path` |
+| `project_catalog` | The manifest, lock file, selection, layout, registry, and publishing problems | `path`, `grant` |
+| `catalog` | Every family after parsing, and `Codegen`: the build failures and the stopped evaluations of code generation | `description`, `types`, `core`, `path`, `intrinsic`, `syntax` |
 
 The project family's types are `Project_catalog.Problem`. The lexer and
 the manifest parser keep their light dependencies, and an audit reads one
@@ -173,8 +177,14 @@ their description modules write the code.
   which names a broken invariant in its error through
   `Infer.Lookups.read_clause_text`.
 
-What remains for review is the `code` fields, the `Spelled` edits, and
-the printers that fill them.
+- Code generation reports a build failure or a stopped evaluation as a
+  `Codegen` value, and the prover quotes the stop of an evaluation that
+  a proof reads as that value. The CLI prints a failure through
+  `Codegen_description`, and the backend renders through it the message
+  of a test that a failure leaves incomplete.
+
+What remains for review is the `Spelled` edits and the printers that the
+descriptions call.
 
 ## Conversion
 
@@ -193,7 +203,8 @@ One pull request converts everything, and the old mechanisms go in it:
 
 | Question | Decision |
 |---|---|
-| Do payloads hold `Types.ty` and `Path.t`, or text printed by the pass? | Typed values. The catalog calls every printer, and the only text a pass produces is `code`. |
+| Do payloads hold `Types.ty` and `Path.t`, or text printed by the pass? | Typed values. The catalog calls every printer. Code that a pass suggests is a `Code.t` tree, not text. |
+| Does a payload hold names as a private type, so that a pass cannot format one? | No. A name comes from syntax, a type's field, or a path, so the private type needs a constructor from `string`, and a pass could format the string it passes. |
 | Does a tool render every diagnostic from examples? | No. Examples for every constructor took about 5,300 lines, more than the sentences they render. The description modules are the audit. |
 | Do manifest, lock file, and registry problems, which are `Project.problem` strings today, join the catalog? | Yes, as a family with no nodes. They are shown beside diagnostics, and an audit should see them. |
 | Does a compiler bug's message join the catalog? | No. A bug's message is for the compiler's authors, and it names an internal state. |
