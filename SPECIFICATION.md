@@ -718,9 +718,10 @@ var longest: view String = words[0]
   hold a view of a part of itself.
 - **A view implements a trait that its viewed type implements** when every
   method that the viewed type's `impl` writes takes `self` read-only and
-  takes `Self` only in read-only parameters. A method that the `impl`
-  inherits from its trait is compiled for the view, so `Self` in it is the
-  view. So a `view String` is `Equal`, `Hash`, `Display`, and `Ordered`: a
+  takes `Self` only in read-only parameters, and the view implements every
+  trait that the trait requires. A method that the `impl` inherits from its
+  trait is compiled for the view, so `Self` in it is the view: its body
+  reaches the viewed elements only through methods that read them. So a `view String` is `Equal`, `Hash`, `Display`, and `Ordered`: a
   `List[view String]` is sorted in place, and a `Map[view String, Int64]`
   is keyed by views. A view implements no trait whose `impl` writes a
   method that takes `self` by `mut` or `own`, or that returns `Self`.

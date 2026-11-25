@@ -337,13 +337,27 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
               Some (Evidence Bound)
             else None
         | Types.Named _ when Types.is_view type_ -> (
+            let implements_supertraits () =
+              List.for_all
+                (fun (required : Types.trait_reference) ->
+                  Path.equal required.trait wanted.trait
+                  || Option.is_some
+                       (find_evidence lookups ~list_bounds ~depth:(depth + 1) ~checks_conditions
+                          type_ required))
+                (Properties.list_bound_closure lookups ~self:type_ wanted)
+            in
             match
               find_evidence lookups ~list_bounds ~depth ~checks_conditions (Types.strip_view type_)
                 wanted
             with
-            | Some (Evidence (Impl { impl; _ })) as served when serves_a_view lookups impl -> served
+            | Some (Evidence (Impl { impl; _ })) as served
+              when serves_a_view lookups impl && implements_supertraits () ->
+                served
             | Some (Evidence (Impl _)) -> None
-            | served when has_only_methods_that_read_self lookups wanted.trait -> served
+            | served
+              when has_only_methods_that_read_self lookups wanted.trait && implements_supertraits ()
+              ->
+                served
             | _ -> None)
         | Types.Named _ ->
             List.find_map
