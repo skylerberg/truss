@@ -47,6 +47,14 @@ val list_required_bounds :
 
 val inherits_method : Types.trait_interface -> Types.impl_interface -> Types.trait_method -> bool
 
+type obligation =
+  | Provides of Types.trait_method
+  | Bounds_associated_type of { name : string; chosen : Types.ty; bound : Types.trait_reference }
+  | Requires of Types.trait_reference
+
+val list_obligations :
+  Types.trait_interface -> Types.impl_interface -> self:Types.ty -> obligation list
+
 val find_evidence :
   Lookups.t ->
   list_bounds:bounds ->

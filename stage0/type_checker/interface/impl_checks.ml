@@ -145,7 +145,7 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
       with
       | None -> ()
       | Some { implementation; shown_trait; list_impl_bounds; missing_associated } ->
-          let trait = implementation.trait and substitution = implementation.substitution in
+          let trait = implementation.trait in
           let check_evidence_grants (span : Source.Definition_span.t) evidence =
             state.diagnostics :=
               List.map
@@ -164,42 +164,41 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
               (lookups.names.list_contained state.key)
           in
           List.iter
-            (fun (method_ : Types.trait_method) ->
-              let is_written =
-                List.exists
-                  (fun (name, receiver) -> Types.is_implemented_by trait method_ ~name ~receiver)
-                  written_methods
-              in
-              if (not is_written) && not method_.provided then
-                Checking.report state Missing_member state.spans.(trait_path.id)
-                  (Printf.sprintf "This `impl` must give `%s%s`, which `%s` declares."
-                     method_.method_name
-                     (show_signature
-                        (Impls.Conformance.normalize_signature_in_impl lookups
-                           ~list_bounds:(Checking.list_bounds state) implementation
-                           (Definition.read_method_signature lookups ~owner:impl.implements.trait
-                              method_)))
-                     shown_trait))
-            trait.methods;
-          List.iter
-            (fun (associated : Types.associated_type) ->
-              match List.assoc_opt associated.associated_name impl.implements.associated with
-              | None -> ()
-              | Some chosen ->
-                  List.iter
-                    (fun bound ->
-                      let bound = Types.substitute_trait substitution bound in
-                      match
-                        Impls.find_evidence lookups ~list_bounds:list_impl_bounds chosen bound
-                      with
-                      | None ->
-                          Checking.report state Unsatisfied_bound state.spans.(trait_path.id)
-                            (Printf.sprintf "`%s` declares `type %s: %s`, and `%s` is not one."
-                               shown_trait associated.associated_name (Types.show_trait bound)
-                               (Types.show chosen))
-                      | Some evidence -> check_evidence_grants state.spans.(trait_path.id) evidence)
-                    associated.associated_bounds)
-            trait.associated_types;
+            (function
+              | Impls.Provides method_ ->
+                  let is_written =
+                    List.exists
+                      (fun (name, receiver) ->
+                        Types.is_implemented_by trait method_ ~name ~receiver)
+                      written_methods
+                  in
+                  if (not is_written) && not method_.provided then
+                    Checking.report state Missing_member state.spans.(trait_path.id)
+                      (Printf.sprintf "This `impl` must give `%s%s`, which `%s` declares."
+                         method_.method_name
+                         (show_signature
+                            (Impls.Conformance.normalize_signature_in_impl lookups
+                               ~list_bounds:(Checking.list_bounds state) implementation
+                               (Definition.read_method_signature lookups
+                                  ~owner:impl.implements.trait method_)))
+                         shown_trait)
+              | Bounds_associated_type { name; chosen; bound } -> (
+                  match Impls.find_evidence lookups ~list_bounds:list_impl_bounds chosen bound with
+                  | None ->
+                      Checking.report state Unsatisfied_bound state.spans.(trait_path.id)
+                        (Printf.sprintf "`%s` declares `type %s: %s`, and `%s` is not one."
+                           shown_trait name (Types.show_trait bound) (Types.show chosen))
+                  | Some evidence -> check_evidence_grants state.spans.(trait_path.id) evidence)
+              | Requires required -> (
+                  match
+                    Impls.find_evidence lookups ~list_bounds:list_impl_bounds impl.for_type required
+                  with
+                  | None ->
+                      Checking.report state Missing_required_impl state.spans.(trait_path.id)
+                        (Printf.sprintf "`%s` requires `%s`, which `%s` does not implement."
+                           shown_trait (Types.show_trait required) (Types.show impl.for_type))
+                  | Some evidence -> check_evidence_grants state.spans.(trait_path.id) evidence))
+            (Impls.list_obligations trait impl ~self:impl.for_type);
           ignore
             (List.fold_left
                (fun defined (line : Syntax.impl_member Syntax.node) ->
@@ -230,18 +229,6 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
                      name.text :: defined
                  | Impl_member_error -> defined)
                [] written_members);
-          List.iter
-            (fun (required : Types.trait_reference) ->
-              let required = Types.substitute_trait substitution required in
-              match
-                Impls.find_evidence lookups ~list_bounds:list_impl_bounds impl.for_type required
-              with
-              | None ->
-                  Checking.report state Missing_required_impl state.spans.(trait_path.id)
-                    (Printf.sprintf "`%s` requires `%s`, which `%s` does not implement." shown_trait
-                       (Types.show_trait required) (Types.show impl.for_type))
-              | Some evidence -> check_evidence_grants state.spans.(trait_path.id) evidence)
-            trait.requires;
           if (not trait.is_capability) && impl.impl_uses <> Types.no_capabilities then
             Checking.report state Impl_uses state.spans.(trait_path.id)
               "Only an `impl` of a capability can have `uses`. A trait's methods can use only the \

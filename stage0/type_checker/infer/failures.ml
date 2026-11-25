@@ -234,8 +234,10 @@ let report_unmet_bound (state : State.state) ~at ~of_type ~sides ~unmet subject
           ((match associated with
              | None when Types.is_view subject ->
                  needs
-                 ^ ", which does not hold: a view implements a trait only where each method that \
-                    an `impl` writes takes `Self` through read-only parameters alone."
+                 ^ ", which does not hold: a view implements a trait only where an `impl` that \
+                    forwards each method to its viewed type would be accepted. A view passes to no \
+                    `own` or `mut` parameter of its viewed type, and it must implement each trait \
+                    that the trait requires."
              | None -> needs ^ ", which does not hold."
              | Some (name, found, _) ->
                  Printf.sprintf "%s, and its `%s` is `%s`." needs name (State.show state found))
