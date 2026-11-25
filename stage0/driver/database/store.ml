@@ -914,6 +914,26 @@ let replace_verdicts store ~definition verdicts =
   end;
   is_changed
 
+type solver_run = { input_hash : string; output : string }
+
+let list_solver_runs store ~definition =
+  Sql.list_rows store.sql
+    "SELECT input_hash, output FROM main.solver_run WHERE definition = ?1 ORDER BY position"
+    [ Integer definition ] (fun row ->
+      { input_hash = Sql.read_blob row 0; output = Sql.read_text row 1 })
+
+let replace_solver_runs store ~definition runs =
+  if list_solver_runs store ~definition <> runs then begin
+    Sql.run store.sql "DELETE FROM main.solver_run WHERE definition = ?1" [ Integer definition ];
+    List.iteri
+      (fun position (run : solver_run) ->
+        Sql.run store.sql
+          "INSERT INTO main.solver_run (definition, position, input_hash, output) VALUES (?1, ?2, \
+           ?3, ?4)"
+          [ Integer definition; Integer position; Blob run.input_hash; Text run.output ])
+      runs
+  end
+
 let list_differing_rows store ~table ~columns ~before ~after =
   let select ~of_ ~minus =
     Printf.sprintf "SELECT %s FROM (SELECT * FROM %s.\"%s\"%s)"

@@ -163,6 +163,11 @@ val list_file_verdicts : t -> file:int -> (string * placed * verdict) list
 val find_placed : t -> schema -> definition:int -> placed option
 val replace_verdicts : t -> definition:int -> verdict list -> bool
 
+type solver_run = { input_hash : string; output : string }
+
+val list_solver_runs : t -> definition:int -> solver_run list
+val replace_solver_runs : t -> definition:int -> solver_run list -> unit
+
 val list_differing_rows :
   t ->
   table:string ->

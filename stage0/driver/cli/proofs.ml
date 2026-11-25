@@ -1,14 +1,5 @@
 let make_solver () =
-  let cache = Workspace.open_cache () in
-  match
-    Solver.find
-      ~cache:
-        {
-          find = (fun key -> Cache.find_result cache ~kind:Solver_answer ~key);
-          add = (fun key value -> Cache.add_result cache ~kind:Solver_answer ~key value);
-        }
-      ()
-  with
+  match Solver.find () with
   | Ok solver -> solver
   | Error message -> Outcome.raise_cannot_run "%s" message
 
