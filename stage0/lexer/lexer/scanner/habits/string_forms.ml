@@ -78,7 +78,7 @@ let lex_character_literal (cursor : Cursor.t) ~tag ~literal_start ~stop =
       [
         {
           action = Write replacement;
-          edits = [ Diagnostic.replace (Source.make_span literal_start stop) replacement ];
+          edits = [ { replaced = Source.make_span literal_start stop; code = Spelled replacement } ];
         };
       ]
     (Source.make_span literal_start stop)
@@ -111,13 +111,17 @@ let format_field_edits cursor ~start ~stop =
       | '\\' -> find_edits (position + 2) reversed_edits
       | ('{' | '}') when Cursor.is_at cursor (position + 1) current ->
           find_edits (position + 2)
-            (Diagnostic.replace (Source.make_span position (position + 2)) (String.of_char current)
+            ({
+               Syntax_catalog.Lexing.replaced = Source.make_span position (position + 2);
+               code = Single_brace { is_opening = current = '{' };
+             }
             :: reversed_edits)
       | '{' -> (
           match find_field_end (position + 1) with
           | Some close when Cursor.skip_spaces cursor (position + 1) < close ->
               find_edits (close + 1)
-                (Diagnostic.insert (Source.make_zero_width position) "$" :: reversed_edits)
+                ({ Syntax_catalog.Lexing.replaced = Source.make_zero_width position; code = Dollar }
+                :: reversed_edits)
           | _ -> None)
       | _ -> find_edits (position + 1) reversed_edits
   in
@@ -132,7 +136,9 @@ let lex_prefixed_string (cursor : Cursor.t) ~scan ~prefix ~start ~nesting =
   let quotes = Cursor.run_length cursor quote_start '"' in
   let empty = quotes = 2 in
   let kind_of_prefix = classify_prefix prefix in
-  let remove_prefix = Diagnostic.replace (Source.make_span start quote_start) "" in
+  let remove_prefix : Syntax_catalog.Lexing.edit =
+    { replaced = Source.make_span start quote_start; code = Removed }
+  in
   let kind, ending =
     if kind_of_prefix = Raw_text && quotes = 1 then begin
       cursor.position <- quote_start + 1;
@@ -189,8 +195,8 @@ let lex_prefixed_string (cursor : Cursor.t) ~scan ~prefix ~start ~nesting =
                 action = Write_raw_string;
                 edits =
                   [
-                    Diagnostic.replace (Source.make_span start text_start) "\"\"\"";
-                    Diagnostic.replace (Source.make_span text_stop (text_stop + 1)) "\"\"\"";
+                    { replaced = Source.make_span start text_start; code = Quote_marks 3 };
+                    { replaced = Source.make_span text_stop (text_stop + 1); code = Quote_marks 3 };
                   ];
               };
             ] )
@@ -235,7 +241,6 @@ let hash_raw_string cursor ~start =
             measure_longest_run (position + max run 1) (max longest run)
         in
         let quotes = max 3 (measure_longest_run text_start 0 + 1) in
-        let delimiter = String.make quotes '"' in
         let interpolates = String.includes ~affix:"${" written in
         let stop = text_stop + 1 + hashes in
         Cursor.report cursor
@@ -251,8 +256,8 @@ let hash_raw_string cursor ~start =
                    action = Write_raw_string;
                    edits =
                      [
-                       Diagnostic.replace (Source.make_span start text_start) delimiter;
-                       Diagnostic.replace (Source.make_span text_stop stop) delimiter;
+                       { replaced = Source.make_span start text_start; code = Quote_marks quotes };
+                       { replaced = Source.make_span text_stop stop; code = Quote_marks quotes };
                      ];
                  };
                ])
@@ -296,7 +301,8 @@ let lex_quoted_string (cursor : Cursor.t) ~scan ~nesting ~delimiter =
     else if Cursor.is_at cursor position '\\' then quote_edits (position + 2) reversed_edits
     else if Cursor.is_at cursor position '"' && not (is_inside_interpolation position) then
       quote_edits (position + 1)
-        (Diagnostic.insert (Source.make_zero_width position) "\\" :: reversed_edits)
+        ({ Syntax_catalog.Lexing.replaced = Source.make_zero_width position; code = Backslash }
+        :: reversed_edits)
     else quote_edits (position + 1) reversed_edits
   in
   let template = delimiter = '`' in
@@ -307,9 +313,12 @@ let lex_quoted_string (cursor : Cursor.t) ~scan ~nesting ~delimiter =
            {
              action = Write_between_quotes;
              edits =
-               Diagnostic.replace (Source.make_span start (start + 1)) "\""
+               {
+                 Syntax_catalog.Lexing.replaced = Source.make_span start (start + 1);
+                 code = Quote_marks 1;
+               }
                :: quote_edits (start + 1) []
-               @ [ Diagnostic.replace (Source.make_span (stop - 1) stop) "\"" ];
+               @ [ { replaced = Source.make_span (stop - 1) stop; code = Quote_marks 1 } ];
            };
          ]
        else [])
@@ -344,8 +353,8 @@ let lex_curly_quoted_string (cursor : Cursor.t) ~opening_length ~closing =
                  action = Write_between_quotes;
                  edits =
                    [
-                     Diagnostic.replace (Source.make_span start text_start) "\"";
-                     Diagnostic.replace (Source.make_span text_stop stop) "\"";
+                     { replaced = Source.make_span start text_start; code = Quote_marks 1 };
+                     { replaced = Source.make_span text_stop stop; code = Quote_marks 1 };
                    ];
                };
              ])

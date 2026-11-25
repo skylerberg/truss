@@ -37,9 +37,9 @@ let remove_colliding_renames text (tokens : Token.t array)
   let find_rename (diagnostic : Syntax_catalog.Lexing.t) =
     match (diagnostic.problem, diagnostic.fixes) with
     | Name (Not_ascii _), _ -> None
-    | Name _, [ { edits = [ edit ]; _ } ] ->
+    | Name _, [ { edits = [ { code = Spelled renamed; _ } ]; _ } ] ->
         let span = diagnostic.at in
-        Some (String.sub text span.start (span.stop - span.start), edit.replacement)
+        Some (String.sub text span.start (span.stop - span.start), renamed)
     | _ -> None
   in
   let renames = List.filter_map find_rename diagnostics in

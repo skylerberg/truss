@@ -82,13 +82,38 @@ type macro =
 type visibility_owner = Test_owner | Law_proof_owner | Impl_owner
 type range_part = Range_start | Range_stop
 type chain = Range_chain | Comparison_chain | Implication_chain
+type angle_bracket = Opening_angle | Closing_angle | Double_closing_angle
+type float_type = Float32 | Float64
+type insertion = Open_parenthesis | Close_parenthesis | Repeated_operand of Source.span
+
+type regrouping_kind =
+  | Group_first_two
+  | Group_last_two
+  | Add_parentheses
+  | Join_comparisons
+  | Negate_test
+  | Negate_value
+
+type regrouping = {
+  expression : Source.span;
+  insertions : (int * insertion) list;
+  kind : regrouping_kind;
+}
+
+type pipe = { value : Source.span; callee : Source.span }
+type trailing_call = { callee_gap : Source.span; closing : Source.span; uses : Source.span list }
 
 type problem =
   | Unexpected of { expected : expected; found : Token.kind }
   | Reserved_word of { word : string }
   | Nesting_too_deep of { limit : int }
   | Chain_too_long of { limit : int }
-  | Misspelled_cost_word of { category : cost_word; words : string list; found : string }
+  | Misspelled_cost_word of {
+      category : cost_word;
+      words : string list;
+      found : string;
+      correction : string option;
+    }
   | Whole_type_quantifier of { quantifier : string }
   | Implies_in_code
   | Echo_in_specification
@@ -104,58 +129,74 @@ type problem =
   | Misplaced_assert
   | Parameter_named_result
   | Lending_parameter_named_final
-  | Associated_type_argument of { written : string; is_law_proof : bool }
+  | Associated_type_argument of { argument : Source.span; is_law_proof : bool }
   | Function_type_argument of { is_law_proof : bool }
   | Constraint_on_trait of {
-      written : string;
+      constraint_ : Source.span;
       name : string;
-      chosen : string option;
+      chosen : Source.span;
       is_law_proof : bool;
     }
   | Function_named_old
   | Function_named_identical
-  | Increment of { sign : string; written : string }
-  | Double_negation
-  | Match_arm_comma
-  | Conditional_operator
-  | Let_mut
-  | Address_of of { is_mut : bool }
-  | Closure_bars
-  | Brace_record
-  | Turbofish
-  | Angle_brackets
+  | Increment of { is_increment : bool; target : Source.span }
+  | Double_negation of { operand : Source.span }
+  | Match_arm_comma of { next_arm : Source.span option }
+  | Conditional_operator of { condition : Source.span; then_ : Source.span; else_ : Source.span }
+  | Let_mut of { let_mut : Source.span }
+  | Address_of of { is_mut : bool; removed : Source.span; needs_space : bool }
+  | Closure_bars of {
+      closing : Source.span;
+      body : Source.span;
+      has_parameters : bool;
+      is_block : bool;
+      is_before_else : bool;
+    }
+  | Brace_record of { opening : Source.span; closing : Source.span }
+  | Turbofish of { opening : Source.span; closing : Source.span }
+  | Angle_brackets of (Source.span * angle_bracket) list
   | Qualified_variant of { variant : string }
-  | Macro_call of { name : string; macro : macro }
-  | Keyword_macro
+  | Macro_call of { name : string; macro : macro; list_call : Source.span option }
+  | Keyword_macro of { call : Source.span option }
   | Tuple
   | Tuple_field
   | Power_operator
-  | Short_declaration
-  | Pipe_operator
+  | Short_declaration of { name : Source.span option }
+  | Pipe_operator of { call : pipe option }
   | Lambda_annotation
-  | Impl_parameters
-  | Null_coalescing of { written : string }
-  | Trailing_lambda of { parameter : string }
-  | As_conversion of { target : string; conversion : conversion }
-  | As_float_conversion of { method_ : string }
+  | Impl_parameters of { parameters : Source.span option }
+  | Null_coalescing of {
+      written : string;
+      value : Source.span;
+      default : Source.span;
+      needs_parentheses : bool;
+    }
+  | Trailing_lambda of { receiver : string option; call : trailing_call option }
+  | As_conversion of { value : Source.span; target : Source.span; conversion : conversion }
+  | As_float_conversion of {
+      value : Source.span;
+      target : Source.span;
+      float_type : float_type;
+      is_simple : bool;
+    }
   | As_unknown_conversion
-  | Elif
+  | Elif of { replaced : Source.span }
   | Loop_keyword
   | Constant_keyword of { word : string }
-  | Misplaced_visibility of visibility_owner
+  | Misplaced_visibility of { owner : visibility_owner; removed : Source.span }
   | Self_outside_method
   | Self_not_first
   | Self_in_capability
-  | Lends_own
+  | Lends_own of { removed : Source.span }
   | Repeated_uses
   | Repeated_decreases
   | Repeated_modifies
   | Repeated_loop_decreases
-  | Missing_body
-  | One_field_tuple
+  | Missing_body of { can_add_todo : bool }
+  | One_field_tuple of { removed : Source.span }
   | Interpolated_test_name
-  | Misplaced_opaque
-  | Misplaced_tuple_word of { written : string }
+  | Misplaced_opaque of { removed : Source.span }
+  | Misplaced_tuple_word of { written : string; is_misspelled : bool; removed : Source.span }
   | Statement_at_top_level
   | Empty_type_arguments
   | Function_type_condition
@@ -173,51 +214,17 @@ type problem =
   | Update_label
   | Mixed_collection
   | Tuple_pattern_annotation
-  | Let_else_brace
+  | Let_else_brace of { value : Source.span }
   | Amortized_loop_cost
   | Interpolated_pattern
   | Float_pattern
   | Rest_not_last
-  | Use_after_definition
-  | Lowest_operand
-  | Chained of chain
-  | Mixed_and_or
-  | Unordered_operators
-  | Mixed_bitwise
-  | Negation_and_is
+  | Use_after_definition of { moved : Source.span; destination : Source.span }
+  | Lowest_operand of regrouping list
+  | Chained of { chain : chain; regroupings : regrouping list }
+  | Mixed_and_or of regrouping list
+  | Unordered_operators of regrouping list
+  | Mixed_bitwise of regrouping list
+  | Negation_and_is of regrouping list
 
-type action =
-  | Write of string
-  | Write_conversion of string
-  | Write_method of string
-  | Remove_it
-  | Remove_own
-  | Add_todo_body
-  | Remove_word of string
-  | Remove_comma
-  | Next_arm_on_line
-  | Write_if
-  | Remove_ampersand
-  | Write_lambda
-  | Use_parentheses
-  | Use_square_brackets
-  | Remove_qualifier
-  | Write_list
-  | Remove_macro_call
-  | Declare_with_let
-  | Write_call
-  | Remove_annotation
-  | Remove_parameters
-  | Call_unwrap_or
-  | Pass_lambda
-  | Move_use_up
-  | Parenthesize_expression
-  | Add_parentheses
-  | Group_first_two
-  | Group_last_two
-  | Join_comparisons
-  | Negate_test
-  | Negate_value
-
-type fix = { action : action; edits : Source.span Diagnostic.edit list }
-type t = { at : Source.span; problem : problem; fixes : fix list }
+type t = { at : Source.span; problem : problem; has_lexer_errors : bool }

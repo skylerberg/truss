@@ -6,4 +6,6 @@ let describe = function
   | Lexing diagnostic -> Lexing_description.describe diagnostic
   | Parsing diagnostic -> Parsing_description.describe diagnostic
 
-let render ~text diagnostic = Description.render_file ~text (describe diagnostic)
+let render ~text = function
+  | Lexing diagnostic -> Lexing_description.render ~text diagnostic
+  | Parsing diagnostic -> Parsing_description.render ~text diagnostic

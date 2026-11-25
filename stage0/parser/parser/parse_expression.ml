@@ -721,9 +721,7 @@ and parse_postfix cursor : Syntax.expression =
         (match items with
         | [ item ] when is_open_range item -> (
             match Cursor.lookup_token cursor (Cursor.lookup_closer cursor opener - 1) with
-            | { kind = Punctuation Comma; span; _ } ->
-                Cursor.report cursor span Open_range_comma
-                  ~fixes:[ { action = Remove_comma; edits = [ Diagnostic.delete span ] } ]
+            | { kind = Punctuation Comma; span; _ } -> Cursor.report cursor span Open_range_comma
             | _ -> ())
         | _ -> ());
         if List.compare_length_with items 1 > 0 then
@@ -1203,9 +1201,7 @@ and parse_trailing_lambda cursor (statement : Syntax.statement) =
   let closing = Cursor.lookup_token cursor closer in
   match (list_uses_of_it (Cursor.group cursor), find_trailing_callee statement) with
   | (_ :: _ as uses), Some callee ->
-      Habits.report_trailing_lambda cursor ~callee
-        ~parameter:(Habits.derive_parameter_name callee)
-        ~opening ~closing
+      Habits.report_trailing_lambda cursor ~callee ~opening ~closing
         ~next:(Cursor.lookup_token cursor (closer + 1))
         ~uses;
       ignore (parse_block cursor);
@@ -1303,19 +1299,8 @@ and parse_binding cursor ~is_var =
     if Cursor.is_keyword cursor Else then begin
       (match Cursor.find_previous_token cursor with
       | Some { kind = Punctuation (Close Curly); _ } ->
-          let span = Cursor.read_file_span cursor value.id in
-          Cursor.report cursor (Cursor.peek cursor).span Let_else_brace
-            ~fixes:
-              [
-                {
-                  action = Parenthesize_expression;
-                  edits =
-                    [
-                      Diagnostic.insert (Source.make_zero_width span.start) "(";
-                      Diagnostic.insert (Source.make_zero_width span.stop) ")";
-                    ];
-                };
-              ]
+          Cursor.report cursor (Cursor.peek cursor).span
+            (Let_else_brace { value = Cursor.read_file_span cursor value.id })
       | _ -> ());
       Cursor.advance cursor;
       Some (parse_body cursor)

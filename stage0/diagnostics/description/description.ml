@@ -219,16 +219,18 @@ let render_edit source : _ edit -> _ Diagnostic.edit option = function
               (List.map (fun line -> "\n" ^ indentation ^ render_pieces source line) lines)))
   | Add_line_before (node, line) -> add_line_before source node (render_pieces source line)
 
-let render_fix source (fix : _ fix) =
+let render_fix ~rejects_edit source (fix : _ fix) =
   let edits = List.map (render_edit source) fix.edits in
-  if List.for_all Option.is_some edits then
-    Some (Diagnostic.fix (render_pieces source fix.title) (List.filter_map Fun.id edits))
-  else None
+  match List.filter_map Fun.id edits with
+  | rendered
+    when List.length rendered = List.length edits && not (List.exists rejects_edit rendered) ->
+      Some (Diagnostic.fix (render_pieces source fix.title) rendered)
+  | _ -> None
 
-let render_with source (description : _ t) =
+let render_with ?(rejects_edit = fun _ -> false) source (description : _ t) =
   let start, stop = locate_location source description.location in
   Diagnostic.make ~severity:description.severity
-    ~fixes:(List.filter_map (render_fix source) description.fixes)
+    ~fixes:(List.filter_map (render_fix ~rejects_edit source) description.fixes)
     ~notes:
       (List.map
          (fun (location, note) ->
@@ -238,9 +240,9 @@ let render_with source (description : _ t) =
     ~code:description.code (source.make_span start stop)
     (render_pieces source description.message)
 
-let render_file ~text (description : Source.span t) =
+let render_file ?rejects_edit ~text (description : Source.span t) =
   let locate (span : Source.span) = (span.start, span.stop) in
-  render_with
+  render_with ?rejects_edit
     {
       text = Lazy.from_val text;
       locate;

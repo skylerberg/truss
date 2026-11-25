@@ -83,7 +83,7 @@ let list_code_fixes cursor span codes =
       if joins_neighbor cursor span code then None
       else
         Some
-          ({ action = Write code; edits = [ Diagnostic.replace span code ] }
+          ({ action = Write code; edits = [ { replaced = span; code = Spelled code } ] }
             : Syntax_catalog.Lexing.fix))
     codes
 

@@ -214,7 +214,8 @@ and lex_number cursor ~inline ~nesting =
                      (match reading with
                      | Some reading -> Write_reading { code = replacement; reading }
                      | None -> Write replacement);
-                   edits = [ Diagnostic.replace (Source.make_span start stop) replacement ];
+                   edits =
+                     [ { replaced = Source.make_span start stop; code = Spelled replacement } ];
                  })
                checked.fixes)
         (Source.make_span (start + problem.start) (start + problem.stop))
@@ -304,7 +305,8 @@ and lex_name cursor ~inline ~nesting =
                     [
                       ({
                          action = Write fixed;
-                         edits = [ Diagnostic.replace (Source.make_span start stop) fixed ];
+                         edits =
+                           [ { replaced = Source.make_span start stop; code = Spelled fixed } ];
                        }
                         : Syntax_catalog.Lexing.fix);
                     ]

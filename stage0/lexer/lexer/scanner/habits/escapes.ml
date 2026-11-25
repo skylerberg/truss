@@ -10,17 +10,16 @@ let scan (cursor : Cursor.t) buffer =
     else None
   in
   let report_escape stop value =
-    let replacement = Printf.sprintf "\\u{%X}" value in
     Cursor.report cursor
       ~fixes:
         [
           {
-            action = Write replacement;
-            edits = [ Diagnostic.replace (Source.make_span start stop) replacement ];
+            action = Write_escape value;
+            edits = [ { replaced = Source.make_span start stop; code = Escapes [ value ] } ];
           };
         ]
       (Source.make_span start stop)
-      (Foreign_escape { replacement });
+      (Foreign_escape { code_point = value });
     Buffer.add_utf_8_uchar buffer (Uchar.of_int value);
     cursor.position <- stop;
     true
@@ -60,8 +59,11 @@ let scan (cursor : Cursor.t) buffer =
                     action = Write_interpolation;
                     edits =
                       [
-                        Diagnostic.replace (Source.make_span start content) "${";
-                        Diagnostic.replace (Source.make_span stop (stop + 1)) "}";
+                        { replaced = Source.make_span start content; code = Interpolation_opening };
+                        {
+                          replaced = Source.make_span stop (stop + 1);
+                          code = Interpolation_closing;
+                        };
                       ];
                   };
                 ]
@@ -76,8 +78,9 @@ let scan (cursor : Cursor.t) buffer =
           ~fixes:
             [
               {
-                action = Write "'";
-                edits = [ Diagnostic.replace (Source.make_span start (start + 2)) "'" ];
+                action = Write_apostrophe;
+                edits =
+                  [ { replaced = Source.make_span start (start + 2); code = Apostrophe_mark } ];
               };
             ]
           (Source.make_span start (start + 2))

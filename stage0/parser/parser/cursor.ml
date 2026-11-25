@@ -191,87 +191,14 @@ let allocate_id_from cursor start_index = allocate_id cursor (make_span_from cur
 let read_span cursor id = Dynarray.get cursor.spans id
 let set_span cursor id span = Dynarray.set cursor.spans id span
 let read_file_span cursor id = make_file_span cursor (read_span cursor id)
-
-let locate_first (tokens : Token.t array) ~first ~stop is_reached =
-  let rec search low high =
-    if low >= high then low
-    else
-      let middle = low + ((high - low) / 2) in
-      if is_reached tokens.(middle) then search low middle else search (middle + 1) high
-  in
-  search first stop
-
-let rec list_tokens_within (tokens : Token.t array) ~first ~stop (span : Source.span) =
-  let inside_first =
-    locate_first tokens ~first ~stop (fun (token : Token.t) -> token.span.start >= span.start)
-  in
-  let inside_stop =
-    locate_first tokens ~first:inside_first ~stop (fun (token : Token.t) ->
-        token.span.stop > span.stop)
-  in
-  let encloses index =
-    first <= index && index < stop
-    && tokens.(index).span.start <= span.start
-    && span.stop <= tokens.(index).span.stop
-  in
-  if inside_first < inside_stop then Array.sub tokens inside_first (inside_stop - inside_first)
-  else
-    match List.find_opt encloses [ inside_stop; inside_first - 1 ] with
-    | Some index -> (
-        match tokens.(index).kind with
-        | String literal -> (
-            match
-              List.find_opt
-                (fun (interpolation : Token.interpolation) ->
-                  interpolation.span.start <= span.start && span.stop <= interpolation.span.stop)
-                (Array.to_list (Token.list_interpolations literal))
-            with
-            | Some interpolation ->
-                list_tokens_within interpolation.tokens ~first:0
-                  ~stop:(Array.length interpolation.tokens)
-                  span
-            | None -> [||])
-        | _ -> [||])
-    | None -> [||]
-
-let spell cursor ?insertions span =
-  match list_tokens_within cursor.tokens ~first:cursor.first ~stop:cursor.stop span with
-  | [||] -> None
-  | tokens -> Token.spell_tokens ?insertions tokens
-
-let joins_neighbors cursor (span : Source.span) code =
-  let find_spelling ~offset_of offset =
-    let rec search index =
-      if index < cursor.stop && offset_of cursor.tokens.(index) = offset then
-        let token = cursor.tokens.(index) in
-        if token.span.start < token.span.stop then Token.spell_tokens [| token |]
-        else search (index + 1)
-      else None
-    in
-    Option.bind
-      (search
-         (locate_first cursor.tokens ~first:cursor.first ~stop:cursor.stop (fun token ->
-              offset_of token >= offset)))
-      (fun spelling -> if spelling = "" then None else Some spelling)
-  in
-  let before =
-    Option.map
-      (fun spelling -> spelling.[String.length spelling - 1])
-      (find_spelling ~offset_of:(fun (token : Token.t) -> token.span.stop) span.start)
-  and after =
-    Option.map
-      (fun spelling -> spelling.[0])
-      (find_spelling ~offset_of:(fun (token : Token.t) -> token.span.start) span.stop)
-  in
-  Token.joins_neighbor ~before ~after code
-
 let has_reported cursor = not (Dynarray.is_empty cursor.diagnostics)
 
-let report cursor ?(fixes = []) at (problem : Syntax_catalog.Parsing.problem) =
+let report cursor at (problem : Syntax_catalog.Parsing.problem) =
   (match problem with
-  | Missing_body -> cursor.syntax_errors := at :: !(cursor.syntax_errors)
+  | Missing_body _ -> cursor.syntax_errors := at :: !(cursor.syntax_errors)
   | _ -> record_syntax_error cursor ~index:cursor.index at);
-  Dynarray.add_last cursor.diagnostics { Syntax_catalog.Parsing.at; problem; fixes }
+  Dynarray.add_last cursor.diagnostics
+    { Syntax_catalog.Parsing.at; problem; has_lexer_errors = false }
 
 let fail cursor expected =
   let token = peek cursor in

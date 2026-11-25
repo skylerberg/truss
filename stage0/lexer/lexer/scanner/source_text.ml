@@ -1,23 +1,27 @@
 type context = Code | Ordinary_string | Raw_string
 
-let remove_trivia cursor ~start ~stop ~line_break =
+let remove_trivia cursor ~start ~stop ~line_break : Syntax_catalog.Lexing.edit =
   let before = Cursor.count_spaces_before cursor start in
   let after = Cursor.skip_spaces cursor stop in
   let code_before = not (Cursor.has_only_spaces_before cursor start) in
   let code_after = not (Cursor.is_end_of_line cursor after) in
   match (code_before, code_after) with
   | true, true ->
-      Diagnostic.replace (Source.make_span before after)
-        (if line_break then "\n" ^ Cursor.extract_indentation cursor start else " ")
-  | true, false -> Diagnostic.delete (Source.make_span before after)
-  | false, true -> Diagnostic.delete (Source.make_span start after)
+      {
+        replaced = Source.make_span before after;
+        code =
+          (if line_break then Line_break_indented (Cursor.extract_indentation cursor start)
+           else Space);
+      }
+  | true, false -> { replaced = Source.make_span before after; code = Removed }
+  | false, true -> { replaced = Source.make_span start after; code = Removed }
   | false, false ->
       let line_start = Source.compute_line_start cursor.source start in
       let stop =
         if Cursor.is_at_end cursor after then after
         else after + Cursor.measure_line_break cursor after
       in
-      Diagnostic.delete (Source.make_span line_start stop)
+      { replaced = Source.make_span line_start stop; code = Removed }
 
 let report_forbidden_run (cursor : Cursor.t) ~context =
   let start = cursor.position in
@@ -45,16 +49,11 @@ let report_forbidden_run (cursor : Cursor.t) ~context =
           };
         ]
     | Ordinary_string ->
-        let escapes =
-          String.concat ""
-            (List.map
-               (fun character -> Printf.sprintf "\\u{%X}" (Uchar.to_int character))
-               characters)
-        in
+        let code_points = List.map Uchar.to_int characters in
         [
           {
-            action = Replace_with escapes;
-            edits = [ Diagnostic.replace (Source.make_span start stop) escapes ];
+            action = Replace_with_escapes code_points;
+            edits = [ { replaced = Source.make_span start stop; code = Escapes code_points } ];
           };
         ]
     | Raw_string -> []
@@ -127,7 +126,7 @@ let consume_line_break (cursor : Cursor.t) =
         [
           {
             action = Replace_with_line_feed;
-            edits = [ Diagnostic.replace (Source.make_span start (start + 1)) "\n" ];
+            edits = [ { replaced = Source.make_span start (start + 1); code = Line_feed } ];
           };
         ]
       (Source.make_span start (start + 1))

@@ -72,7 +72,7 @@ type problem =
   | Attribute
   | Inline_attribute
   | Confusable of { character : character; spelled : confusable }
-  | Foreign_escape of { replacement : string }
+  | Foreign_escape of { code_point : int }
   | Parenthesized_interpolation
   | Escaped_apostrophe
   | Path_separator
@@ -99,24 +99,43 @@ type note =
 type action =
   | Write of string
   | Write_reading of { code : string; reading : reading }
+  | Write_escape of int
+  | Write_apostrophe
   | Replace_with_line_feed
   | Remove_empty_interpolation
   | Close_string
-  | Close_string_with of string
+  | Close_string_with_quotes of int
   | Move_closing_delimiter
   | Indent_like_delimiter
   | Replace_semicolon
   | Remove_semicolon
   | Delete_characters of { is_plural : bool }
-  | Replace_with of string
+  | Replace_with_escapes of int list
   | Write_interpolation
   | Write_ordinary_string
   | Write_raw_string
   | Remove_prefix
   | Write_between_quotes
-  | Insert of string
+  | Insert_closers of Token.bracket list
 
-type fix = { action : action; edits : Source.span Diagnostic.edit list }
+type code =
+  | Removed
+  | Space
+  | Line_feed
+  | Line_break_indented of string
+  | Quote_marks of int
+  | Apostrophe_mark
+  | Backslash
+  | Dollar
+  | Interpolation_opening
+  | Interpolation_closing
+  | Single_brace of { is_opening : bool }
+  | Escapes of int list
+  | Closer of { bracket : Token.bracket; indentation : string option }
+  | Spelled of string
+
+type edit = { replaced : Source.span; code : code }
+type fix = { action : action; edits : edit list }
 
 type t = {
   at : Source.span;

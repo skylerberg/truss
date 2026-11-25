@@ -33,17 +33,8 @@ val read_span : t -> Syntax.id -> Source.Definition_span.t
 val set_span : t -> Syntax.id -> Source.Definition_span.t -> unit
 val read_file_span : t -> Syntax.id -> Source.span
 val make_file_span : t -> Source.Definition_span.t -> Source.span
-val spell : t -> ?insertions:(int * string) list -> Source.span -> string option
-val joins_neighbors : t -> Source.span -> string -> bool
 val has_reported : t -> bool
-
-val report :
-  t ->
-  ?fixes:Syntax_catalog.Parsing.fix list ->
-  Source.span ->
-  Syntax_catalog.Parsing.problem ->
-  unit
-
+val report : t -> Source.span -> Syntax_catalog.Parsing.problem -> unit
 val fail : t -> Syntax_catalog.Parsing.expected -> 'a
 val expect_punctuation : t -> Token.punctuation -> unit
 val expect_keyword : t -> Token.keyword -> unit

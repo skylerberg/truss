@@ -31,14 +31,8 @@ let report_misplaced_visibility cursor (tokens : Token.t list) owner =
       let last = List.nth tokens (List.length tokens - 1) in
       let next = Cursor.peek cursor in
       let span = Source.make_span first.span.start last.span.stop in
-      Cursor.report cursor span (Misplaced_visibility owner)
-        ~fixes:
-          [
-            {
-              action = Remove_it;
-              edits = [ Diagnostic.delete (Source.make_span first.span.start next.span.start) ];
-            };
-          ]
+      Cursor.report cursor span
+        (Misplaced_visibility { owner; removed = Source.make_span first.span.start next.span.start })
 
 let parse_type_head cursor : Syntax.type_head =
   let start = Cursor.index cursor in
@@ -100,18 +94,8 @@ let parse_result cursor =
     let own = Cursor.peek cursor in
     let mode = Atoms.parse_mode cursor in
     if mode = Some Own then
-      Cursor.report cursor own.span Lends_own
-        ~fixes:
-          [
-            {
-              action = Remove_own;
-              edits =
-                [
-                  Diagnostic.delete
-                    (Source.make_span own.span.start (Cursor.peek cursor).span.start);
-                ];
-            };
-          ];
+      Cursor.report cursor own.span
+        (Lends_own { removed = Source.make_span own.span.start (Cursor.peek cursor).span.start });
     Some (Lends (mode, Parse_expression.parse_type_expression cursor))
   end
   else None
@@ -166,17 +150,14 @@ let parse_body cursor =
       in
       if ends_member && not (Cursor.is_after_inserted_closer cursor) then begin
         let has_earlier_error = Cursor.has_reported cursor in
-        Cursor.report cursor (Source.make_zero_width stop) Missing_body
-          ~fixes:
-            (match Cursor.find_previous_token cursor with
-            | Some previous when Token.can_end previous.kind && not has_earlier_error ->
-                [
-                  {
-                    action = Add_todo_body;
-                    edits = [ Diagnostic.insert (Source.make_zero_width stop) " { todo }" ];
-                  };
-                ]
-            | Some _ | None -> []);
+        Cursor.report cursor (Source.make_zero_width stop)
+          (Missing_body
+             {
+               can_add_todo =
+                 (match Cursor.find_previous_token cursor with
+                 | Some previous -> Token.can_end previous.kind && not has_earlier_error
+                 | None -> false);
+             });
         let at = Cursor.make_definition_span cursor (Source.make_zero_width stop) in
         {
           statements = [ { kind = Statement_error; id = Cursor.allocate_id cursor at } ];
@@ -352,8 +333,7 @@ let parse_type_definition cursor ~name ~(tuple : (Source.span * Source.span) opt
     | Some _, Fields (_ :: _ :: _) -> true
     | None, _ -> false
     | Some (word, removal), _ ->
-        Cursor.report cursor word One_field_tuple
-          ~fixes:[ { action = Remove_word "tuple"; edits = [ Diagnostic.delete removal ] } ];
+        Cursor.report cursor word (One_field_tuple { removed = removal });
         false
   in
   Syntax.Type_definition { is_tuple; name; generics; body; clauses = parse_type_clauses cursor }
@@ -457,14 +437,8 @@ let parse_top_level cursor ~parse_function =
     | _, Some _, Left ((Impl _ | Test _ | Law_proof _), _) ->
         ()
     | _, Some (public, opaque), _ ->
-        Cursor.report cursor opaque.span Misplaced_opaque
-          ~fixes:
-            [
-              {
-                action = Remove_word "opaque";
-                edits = [ Diagnostic.delete (Source.make_span public.span.stop opaque.span.stop) ];
-              };
-            ]);
+        Cursor.report cursor opaque.span
+          (Misplaced_opaque { removed = Source.make_span public.span.stop opaque.span.stop }));
     if not (Cursor.is_at_end cursor) then Cursor.fail cursor Line_break_after_definition;
     kind
   in
@@ -502,21 +476,12 @@ let parse_top_level cursor ~parse_function =
     | Lower written when Cursor.peek_ahead cursor 1 = Keyword Type ->
         let word = (Cursor.take cursor).span in
         Cursor.report cursor word
-          (Misplaced_tuple_word { written })
-          ~fixes:
-            (if String.edit_distance written "tuple" <= 2 then
-               [ { action = Write "tuple"; edits = [ Diagnostic.replace word "tuple" ] } ]
-             else
-               [
-                 {
-                   action = Remove_word written;
-                   edits =
-                     [
-                       Diagnostic.delete
-                         (Source.make_span word.start (Cursor.peek cursor).span.start);
-                     ];
-                 };
-               ]);
+          (Misplaced_tuple_word
+             {
+               written;
+               is_misspelled = String.edit_distance written "tuple" <= 2;
+               removed = Source.make_span word.start (Cursor.peek cursor).span.start;
+             });
         parse_type None
     | Keyword Type -> parse_type None
     | Keyword Trait ->

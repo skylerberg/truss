@@ -48,8 +48,18 @@ type ('node, 'span) source = {
   make_span : int -> int -> 'span;
 }
 
-val render_with : ('node, 'span) source -> 'node t -> 'span Diagnostic.diagnostic
-val render_file : text:string -> Source.span t -> Diagnostic.t
+val render_with :
+  ?rejects_edit:('span Diagnostic.edit -> bool) ->
+  ('node, 'span) source ->
+  'node t ->
+  'span Diagnostic.diagnostic
+
+val render_file :
+  ?rejects_edit:(Source.span Diagnostic.edit -> bool) ->
+  text:string ->
+  Source.span t ->
+  Diagnostic.t
+
 val select_shown : Diagnostic.t list -> Diagnostic.t list
 
 module For_testing : sig

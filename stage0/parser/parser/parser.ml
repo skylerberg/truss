@@ -56,7 +56,8 @@ let attach_lexer_errors tokens ~lexer_diagnostics ~nested piece
             };
         },
         List.map
-          (fun (diagnostic : Syntax_catalog.Parsing.t) -> { diagnostic with fixes = [] })
+          (fun (diagnostic : Syntax_catalog.Parsing.t) ->
+            { diagnostic with has_lexer_errors = true })
           diagnostics )
 
 let check_definition cursor (definition : Syntax.definition) =
@@ -120,25 +121,15 @@ let compute_line_stop (tokens : Token.t array) piece =
   | _ -> tokens.(piece.stop - 1).span.stop
 
 let use_after_definition (tokens : Token.t array) piece (line : _ Syntax.item) ~destination =
-  let fixes =
-    match Token.spell_tokens (Array.sub tokens piece.first (piece.stop - piece.first)) with
-    | Some spelling ->
-        [
-          {
-            Syntax_catalog.Parsing.action = Move_use_up;
-            edits =
-              [
-                Diagnostic.insert (Source.make_zero_width destination) (spelling ^ "\n");
-                Diagnostic.delete (Source.make_span line.base (compute_line_stop tokens piece));
-              ];
-          };
-        ]
-    | None -> []
-  in
   {
     Syntax_catalog.Parsing.at = Source.make_span line.base line.stop;
-    problem = Use_after_definition;
-    fixes;
+    problem =
+      Use_after_definition
+        {
+          moved = Source.make_span line.base (compute_line_stop tokens piece);
+          destination = Source.make_zero_width destination;
+        };
+    has_lexer_errors = false;
   }
 
 let parse tokens ~lexer_diagnostics =

@@ -143,7 +143,7 @@ let rec scan_interpolation (cursor : Cursor.t) ~scan ~nesting ~delimiter_length 
              [
                {
                  action = Remove_empty_interpolation;
-                 edits = [ Diagnostic.delete interpolation_span ];
+                 edits = [ { replaced = interpolation_span; code = Removed } ];
                };
              ]
            else [])
@@ -190,7 +190,7 @@ and scan_ordinary ?(closing = '"') cursor ~scan ~tag ~nesting =
                [
                  {
                    action = Close_string;
-                   edits = [ Diagnostic.insert (Source.make_zero_width position) "\"" ];
+                   edits = [ { replaced = Source.make_zero_width position; code = Quote_marks 1 } ];
                  };
                ])
           (Source.make_span literal_start position)
@@ -359,8 +359,8 @@ and scan_one_line_raw cursor ~scan ~tag ~form ~nesting ~literal_start ~dollars ~
         then
           [
             {
-              Syntax_catalog.Lexing.action = Close_string_with delimiter;
-              edits = [ Diagnostic.insert (Source.make_zero_width position) delimiter ];
+              Syntax_catalog.Lexing.action = Close_string_with_quotes quotes;
+              edits = [ { replaced = Source.make_zero_width position; code = Quote_marks quotes } ];
             };
           ]
         else []
@@ -531,7 +531,13 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
             [
               {
                 action = Move_closing_delimiter;
-                edits = [ Diagnostic.insert (Source.make_zero_width start) ("\n" ^ indentation) ];
+                edits =
+                  [
+                    {
+                      replaced = Source.make_zero_width start;
+                      code = Line_break_indented indentation;
+                    };
+                  ];
               };
             ]
           (Source.make_span start (start + quotes))
@@ -574,9 +580,10 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
                   action = Indent_like_delimiter;
                   edits =
                     [
-                      Diagnostic.replace
-                        (Source.make_span first.span.start whitespace_stop)
-                        indentation;
+                      {
+                        replaced = Source.make_span first.span.start whitespace_stop;
+                        code = Spelled indentation;
+                      };
                     ];
                 };
               ]

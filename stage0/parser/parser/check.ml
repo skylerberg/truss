@@ -164,14 +164,14 @@ let rec check_trait_arguments cursor ~is_law_proof (trait_ : Syntax.path_type) =
     trait_.arguments
 
 and check_trait_argument cursor ~is_law_proof (type_ : Syntax.type_expression) =
-  let report_associated_type written =
-    report cursor type_.id (Associated_type_argument { written; is_law_proof })
+  let report_associated_type () =
+    report cursor type_.id
+      (Associated_type_argument { argument = Cursor.read_file_span cursor type_.id; is_law_proof })
   in
   match type_.kind with
   | Path_type path -> check_trait_arguments cursor ~is_law_proof path
   | Function_type _ -> report cursor type_.id (Function_type_argument { is_law_proof })
-  | Associated (parameter, name) -> report_associated_type (parameter.text ^ "." ^ name.text)
-  | Self_type (Some name) -> report_associated_type ("Self." ^ name.text)
+  | Associated _ | Self_type (Some _) -> report_associated_type ()
   | Self_type None | Type_error -> ()
 
 let check_header_trait cursor ~is_law_proof (trait_ : Syntax.path_type) =
@@ -183,13 +183,12 @@ let check_header_trait cursor ~is_law_proof (trait_ : Syntax.path_type) =
               (Source.Definition_span.make (Cursor.read_span cursor name.id).start
                  (Cursor.read_span cursor type_.id).stop)
           in
-          let written = Option.value ~default:name.text (Cursor.spell cursor span) in
           Cursor.report cursor span
             (Constraint_on_trait
                {
-                 written;
+                 constraint_ = span;
                  name = name.text;
-                 chosen = Cursor.spell cursor (Cursor.read_file_span cursor type_.id);
+                 chosen = Cursor.read_file_span cursor type_.id;
                  is_law_proof;
                })
       | Type_argument _ | Count _ | Count_name _ -> ())

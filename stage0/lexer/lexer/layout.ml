@@ -126,14 +126,17 @@ let find_closing_edits source tokens ~closers ~is_unterminated_string openers =
         | None -> None
         | Some (position, starts_line) ->
             let position = max position earliest in
-            let closer = spell_closer opener.bracket in
-            let replacement =
+            let indentation =
               if starts_line && opener.bracket = Curly then
-                "\n" ^ extract_indentation source opener.span.start ^ closer
-              else closer
+                Some (extract_indentation source opener.span.start)
+              else None
             in
             find_edits position
-              (Diagnostic.insert (Source.make_zero_width position) replacement :: reversed)
+              ({
+                 Syntax_catalog.Lexing.replaced = Source.make_zero_width position;
+                 code = Closer { bracket = opener.bracket; indentation };
+               }
+              :: reversed)
               outer)
   in
   find_edits 0 [] openers
@@ -181,18 +184,16 @@ let run ~source ~diagnostics ~mode read_next_input =
       insert_closer position
     done
   in
-  let list_closing_fixes openers ~closers:inserted : Syntax_catalog.Lexing.fix list =
+  let list_closing_fixes openers : Syntax_catalog.Lexing.fix list =
     match find_closing_edits source output ~closers ~is_unterminated_string openers with
-    | Some edits -> [ { action = Insert inserted; edits } ]
+    | Some edits ->
+        [ { action = Insert_closers (List.map (fun opener -> opener.bracket) openers); edits } ]
     | None -> []
   in
   let close_all ~position ~before =
     match !stack with
     | [] -> ()
     | innermost :: outer ->
-        let closers =
-          String.concat "" (List.map (fun opener -> spell_closer opener.bracket) !stack)
-        in
         let notes =
           List.map
             (fun opener ->
@@ -200,9 +201,7 @@ let run ~source ~diagnostics ~mode read_next_input =
                 Syntax_catalog.Lexing.Also_unclosed { opener = spell_opener opener.bracket } ))
             outer
         in
-        report ~notes
-          ~fixes:(list_closing_fixes !stack ~closers)
-          innermost.span
+        report ~notes ~fixes:(list_closing_fixes !stack) innermost.span
           (Unclosed_bracket { opener = spell_opener innermost.bracket; before = Some before });
         close_silently position
   in
@@ -222,8 +221,7 @@ let run ~source ~diagnostics ~mode read_next_input =
                     Closes_earlier { closer = spell_closer bracket; opener = spell_opener bracket }
                   );
                 ]
-              ~fixes:(list_closing_fixes [ opener ] ~closers:(spell_closer opener.bracket))
-              opener.span
+              ~fixes:(list_closing_fixes [ opener ]) opener.span
               (Unclosed_bracket { opener = spell_opener opener.bracket; before = None });
             insert_closer span.start;
             close_unclosed ()

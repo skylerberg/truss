@@ -1,3 +1,6 @@
+let show_escapes code_points =
+  String.concat "" (List.map (fun code_point -> Printf.sprintf "\\u{%X}" code_point) code_points)
+
 let say text : _ Description.piece list = [ Text text ]
 
 let show_character = function
@@ -256,7 +259,8 @@ let describe_problem at = function
            (match spelled with
            | Space_character -> "the space character"
            | Punctuation spelling -> "`" ^ spelling ^ "`"))
-  | Foreign_escape { replacement } ->
+  | Foreign_escape { code_point } ->
+      let replacement = show_escapes [ code_point ] in
       [
         Text "`";
         Quote at;
@@ -338,28 +342,51 @@ let describe_note = function
            delimiter)
   | Empty_raw_string -> say "For an empty string, write `\"\"`."
 
+let show_closer bracket = Token.spell_punctuation (Close bracket)
+
 let describe_action = function
   | Lexing.Write code -> "Write `" ^ code ^ "`"
   | Write_reading { code; reading } ->
       Printf.sprintf "Write `%s` (%s)" code
         (match reading with Octal_reading -> "octal" | Decimal_reading -> "decimal")
+  | Write_escape code_point -> "Write `" ^ show_escapes [ code_point ] ^ "`"
+  | Write_apostrophe -> "Write `'`"
   | Replace_with_line_feed -> "Replace with a line feed"
   | Remove_empty_interpolation -> "Remove the empty interpolation"
   | Close_string -> "Close the string"
-  | Close_string_with delimiter -> "Close the string with `" ^ delimiter ^ "`"
+  | Close_string_with_quotes quotes -> "Close the string with `" ^ String.make quotes '"' ^ "`"
   | Move_closing_delimiter -> "Move the closing delimiter to its own line"
   | Indent_like_delimiter -> "Indent the line like the closing delimiter"
   | Replace_semicolon -> "Replace the `;` with a line break"
   | Remove_semicolon -> "Remove the `;`"
   | Delete_characters { is_plural } ->
       if is_plural then "Delete the characters" else "Delete the character"
-  | Replace_with replacement -> "Replace with `" ^ replacement ^ "`"
+  | Replace_with_escapes code_points -> "Replace with `" ^ show_escapes code_points ^ "`"
   | Write_interpolation -> "Write `${...}`"
   | Write_ordinary_string -> "Write an ordinary string"
   | Write_raw_string -> "Write a raw string"
   | Remove_prefix -> "Remove the prefix"
   | Write_between_quotes -> "Write the string between `\"`s"
-  | Insert closers -> Printf.sprintf "Insert `%s`" closers
+  | Insert_closers brackets ->
+      Printf.sprintf "Insert `%s`" (String.concat "" (List.map show_closer brackets))
+
+let show_code : Lexing.code -> string = function
+  | Removed -> ""
+  | Space -> " "
+  | Line_feed -> "\n"
+  | Line_break_indented indentation -> "\n" ^ indentation
+  | Quote_marks quotes -> String.make quotes '"'
+  | Apostrophe_mark -> "'"
+  | Backslash -> "\\"
+  | Dollar -> "$"
+  | Interpolation_opening -> "${"
+  | Interpolation_closing -> "}"
+  | Single_brace { is_opening } -> if is_opening then "{" else "}"
+  | Escapes code_points -> show_escapes code_points
+  | Closer { bracket; indentation } ->
+      Option.fold ~none:"" ~some:(fun indentation -> "\n" ^ indentation) indentation
+      ^ show_closer bracket
+  | Spelled code -> code
 
 let describe ({ at; problem; notes; fixes } : Lexing.t) : Source.span Description.t =
   {
@@ -375,8 +402,8 @@ let describe ({ at; problem; notes; fixes } : Lexing.t) : Source.span Descriptio
             title = say (describe_action action);
             edits =
               List.map
-                (fun (edit : Source.span Diagnostic.edit) ->
-                  Description.Replace (edit.span, [ Text edit.replacement ]))
+                (fun ({ replaced; code } : Lexing.edit) ->
+                  Description.Replace (replaced, say (show_code code)))
                 edits;
           })
         fixes;
