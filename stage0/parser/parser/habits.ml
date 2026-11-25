@@ -155,8 +155,8 @@ let pipe_operator cursor ~(value : Syntax.expression) ~(operator : Token.t)
             else None);
        })
 
-let report_lambda_annotation cursor ~from ~stop =
-  Cursor.report cursor (Source.make_span from stop) Lambda_annotation
+let report_lambda_result_type cursor ~from ~stop =
+  Cursor.report cursor (Source.make_span from stop) Lambda_result_type
 
 let report_impl_parameters cursor ~(opening : Token.t) ~(closing : Token.t) ~has_bounds =
   Cursor.report cursor opening.span

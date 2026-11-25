@@ -23,8 +23,8 @@ type state = {
 type posed
 
 val pose : runs:(Obligation.evaluation * Obligation.run) list -> proof -> posed
-val list_requests : posed -> (Solver.request * Logic.query) list
-val list_refutation_requests : posed -> Solver.answer list -> (Solver.request * Logic.query) list
+val list_requests : posed -> Solver.request list
+val list_refutation_requests : posed -> Solver.answer list -> Solver.request list
 
 val list_states :
   posed -> answers:Solver.answer list -> refutations:Solver.answer list -> state list

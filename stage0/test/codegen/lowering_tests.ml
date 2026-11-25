@@ -1,4 +1,8 @@
 let () =
+  Codegen_support.test "an implication evaluates its right operand only where its left holds"
+    (fun () ->
+      Codegen_support.expect_output Fixtures.Lowering.implication_guarding_an_index
+        "test 0 passed\n");
   Codegen_support.test "an index of a list out of bounds is reported where the index is written"
     (fun () ->
       Codegen_support.expect_output Fixtures.Lowering.grid_cell_index_out_of_bounds
@@ -123,3 +127,27 @@ let () =
             ~expected:"Evaluating `example.spun` stopped: it used more than 5 ms of CPU time"
             (Codegen_support.describe_failure failure)
       | Ok _ -> Codegen_support.fail "the tests ran")
+
+let () =
+  Codegen_support.test
+    "a caller of a lending method initializes only the live fields of its lend record and mark"
+    (fun () ->
+      let read : Lowered.Item.t =
+        Code
+          {
+            path = Top { module_ = Codegen_support.example; name = "read" };
+            instantiation = Ground.no_instantiation;
+            assumes_condition = false;
+          }
+      in
+      let _, backend =
+        Codegen_support.load ~roots:[ read ]
+          Fixtures.Lowering.call_of_a_lending_method_that_never_lends
+      in
+      let c = Emit_c.For_testing.render_c (Backend.For_testing.compile_fragment backend read) in
+      List.iter
+        (fun call ->
+          if not (String.includes ~affix:call c) then Codegen_support.fail "no %s in:\n%s" call c)
+        [ "truss_lend_init(&"; "truss_lend_init_mark(&" ];
+      if String.includes ~affix:"= {0};" c then
+        Codegen_support.fail "a zeroed declaration in:\n%s" c)

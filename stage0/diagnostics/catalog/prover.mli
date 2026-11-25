@@ -67,6 +67,12 @@ type unbounded =
       counts_units : bool;
     }
   | Changing_cost of { is_amortized : bool; call : quoted; values : changed_part list }
+  | Uncounted_potential of {
+      metric : Language.Metric.t;
+      callee : Path.t;
+      call : quoted;
+      is_editable : bool;
+    }
   | Unbounded_iteration
 
 type promiser = Trait_promiser | Capability_promiser

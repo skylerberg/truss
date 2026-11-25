@@ -22,6 +22,8 @@ type linked =
   | Evaluated of { item : Lowered.Item.t; evaluator : Lowered.Item.t }
   | Unbuildable of unbuildable
 
+type test_pass = { compiler_fingerprint : string; microseconds : int }
+
 type lowered_lookups = {
   system : Libc.system;
   read_source : Path.file -> Source.t;
@@ -30,6 +32,8 @@ type lowered_lookups = {
   find_lowered : Lowered.Item.t -> (lowered, unbuildable) result option;
   find_evaluation : Lowered.Item.t -> evaluation option;
   record_evaluation : Lowered.Item.t -> evaluation -> unit;
+  find_test_pass : Lowered.Item.t -> test_pass option;
+  record_test_run : Lowered.Item.t -> test_pass option -> unit;
   read_test_key : Lowered.Item.t -> (string, unbuildable) result;
   list_linked : Profile.t -> Lowered.Item.t list -> linked list;
   render_unit : Profile.t -> Lowered.Item.t -> string;

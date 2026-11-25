@@ -208,6 +208,22 @@ let describe_unbounded = function
                 ", which this loop changes, so the prover cannot bound the cost of an iteration by \
                  the values the loop does not mutate. Give the loop a `cost` clause.";
             ])
+  | Uncounted_potential { metric; callee; call; is_editable } ->
+      let metric = Language.Metric.show metric in
+      let callee = Printf.sprintf "`%s`" (show_callee callee) in
+      [
+        Text
+          (Printf.sprintf "%s states no `cost amortized %s`, so the prover counts `" callee metric);
+        quote_in call;
+        Text
+          (Printf.sprintf
+             "` at its plain cost plus the change in potential of the values it mutates or \
+              returns. The prover cannot bound that change by the values this loop does not \
+              mutate.%s"
+             (if is_editable then
+                Printf.sprintf " Give %s a `cost amortized %s` clause." callee metric
+              else ""));
+      ]
   | Unbounded_iteration ->
       say
         "The prover cannot bound the cost of one iteration of this loop by the values the loop \

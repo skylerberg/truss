@@ -1,6 +1,5 @@
 type profile = Profile.t = Development | Release
 type t
-type results = { find : string -> string option; add : string -> string -> unit }
 
 type 'value ran = 'value Lowering.ran =
   | Ran of 'value
@@ -9,7 +8,6 @@ type 'value ran = 'value Lowering.ran =
 
 val create :
   ?show_file:(Path.file -> string) ->
-  ?results:results ->
   ?evaluation_cpu_time_limit_ms:int ->
   ?programs:string ->
   Lowering.lowered_lookups ->

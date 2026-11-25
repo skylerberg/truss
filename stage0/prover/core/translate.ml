@@ -43,7 +43,6 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       local_origins = Tables.Local_table.create 16;
       returns = [];
       enclosing_provides = [];
-      lent_back = [];
       instantiating = [];
       reading_requires = [];
       axiomatizing = [];
@@ -56,6 +55,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       conditional_counters = [];
       bounded_counters = [];
       recursive_costs_assumed = 0;
+      lambdas_assuming_recursive_costs = [];
       fresh_order = Tables.Symbol_table.create 64;
       logs = [];
       powers = [];
@@ -120,17 +120,32 @@ type promise = {
   inherited : bool;
 }
 
-let list_promises context (source : State.source) locals (costs : Mir.cost list) ~inherited =
+let is_capability_implementation (lookups : Lookups.t) (path : Path.t) =
+  match path with
+  | Method { owner; _ } -> (
+      match Interface.Definition.find_impl_interface lookups.interface owner with
+      | Some impl ->
+          Resolve.Names.find_kind lookups.interface.names impl.implements.trait
+          = Some Resolve.Names.Capability
+      | None -> false)
+  | _ -> false
+
+let list_promises context (source : State.source) locals (costs : Mir.cost list) ~inherited
+    ~counts_provider_potential =
   List.filter_map
     (fun (cost : Mir.cost) ->
       match Contracts.find_resource cost ~locals with
       | None -> Facts.raise_unsupported (Facts.locate context source cost.origin) Calls_target
       | Some resource ->
+          let counting = Lambdas.classify_counting cost in
           let counter =
             {
               Costs.resource;
-              counting = Lambdas.classify_counting cost;
-              amortized = cost.amortized;
+              counting;
+              amortized =
+                (cost.amortized
+                || counts_provider_potential && counting = Units
+                   && match resource with Metric _ -> true | Calls _ -> false);
             }
           in
           (match (cost.resource, resource) with
@@ -153,11 +168,10 @@ let classify_counting (promise : promise) : Catalog.Prover.counting =
   match promise.counter.counting with Units | At_most -> Upper_bound | Exactly -> Exact
 
 let keep_promise ?restated context (frame : State.frame) (promise : promise) ~(at : State.frame)
-    ~location ~compute_change =
+    ~location =
   let spent =
     match List.assoc_opt promise.counter frame.spent with Some term -> term | None -> Costs.zero
   in
-  let spent = if promise.clause.amortized then Costs.plus spent (compute_change ()) else spent in
   let amount =
     match promise.clause.bound with
     | Order_of amount | At_most amount | Exactly amount ->
@@ -172,6 +186,7 @@ let keep_promise ?restated context (frame : State.frame) (promise : promise) ~(a
   let counting = classify_counting promise
   and clause = Facts.quote promise.written_in promise.clause.origin in
   Facts.oblige context frame location ~holds_when:promise.clause.holds_when
+    ~can_be_required:(promise.counter.counting <> Units)
     (Cost_promise
        (match restated with
        | Some (for_type, name, trait, declared) ->
@@ -322,11 +337,6 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   let declared_requires = Facts.list_clauses contract.requires
   and declared_ensures = contract.ensures in
   let output = match signature with Some { output = Returns ty; _ } -> Some ty | _ -> None in
-  let declared_output =
-    match Interface.Impls.read_signature lookups.interface path with
-    | Some { output = Returns ty; _ } -> Some (Types.substitute substitution ty)
-    | _ -> None
-  in
   let start =
     List.fold_left
       (fun frame (parameter : Mir.parameter) ->
@@ -354,7 +364,6 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
-  let declared_output = Option.map (Facts.substitute_declared_type context start) declared_output in
   let output = Option.map (Facts.substitute_type context start) output in
   let start =
     match signature with
@@ -428,12 +437,15 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
     | Some { form; _ } -> form
     | None -> Facts.raise_bug "`%s` has a body and no MIR" (Resolve.Names.show_key source.key)
   in
+  let counts_provider_potential = is_capability_implementation lookups path in
   let promised =
     list_promises context source start.locals contract.costs ~inherited:false
+      ~counts_provider_potential
     @
     match find_trait_frame start ~result:None with
     | Some (clauses, inside) ->
         list_promises context clauses.callee inside.locals clauses.costs ~inherited:true
+          ~counts_provider_potential
     | None -> []
   in
   Lambdas.assign_counters context
@@ -575,46 +587,6 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                 (Ensures_at_return { clause = Facts.quote source ensured.origin })
                 term)
             declared_ensures);
-      let compute_change () =
-        let potential_change =
-          List.fold_left
-            (fun total (parameter : Mir.parameter) ->
-              let entry, later, ty =
-                match parameter.local with
-                | Self -> (start.self, frame.self, frame.self_type)
-                | local ->
-                    ( Locals.find_opt (Core_local local) start.locals,
-                      Locals.find_opt (Core_local local) frame.locals,
-                      Some (Facts.substitute_declared_type context frame parameter.type_) )
-              in
-              match (parameter.mode, entry, ty) with
-              | (Language.Mode.Mut | Language.Mode.Own), Some entry, Some ty ->
-                  let potential_after =
-                    match (parameter.mode, later) with
-                    | Language.Mode.Mut, Some later ->
-                        Amounts.compute_potential context frame ty later
-                    | _ -> Costs.zero
-                  in
-                  Costs.plus total
-                    (Costs.minus potential_after (Amounts.compute_potential context frame ty entry))
-              | _ -> total)
-            Costs.zero parameters
-        in
-        let potential_change =
-          List.fold_left
-            (fun total (ty, handed, back) ->
-              Costs.minus total
-                (Costs.minus
-                   (Amounts.compute_potential context frame ty back)
-                   (Amounts.compute_potential context frame ty handed)))
-            potential_change context.lent_back
-        in
-        match (returned, declared_output) with
-        | Some term, Some declared_output ->
-            Costs.plus potential_change
-              (Amounts.compute_potential context frame declared_output term)
-        | _ -> potential_change
-      in
       let under_trait = Facts.restrict frame trait_requires in
       List.iter
         (fun promise ->
@@ -623,13 +595,12 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
             | Some (_, inside) ->
                 keep_promise context under_trait promise
                   ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
-                  ~location:Whole_definition ~compute_change
+                  ~location:Whole_definition
             | None -> ()
           else
             keep_promise context frame promise
               ~at:{ frame with locals = frame.old_locals; self = frame.old_self; result = returned }
-              ~location:(Facts.locate context source promise.clause.origin)
-              ~compute_change)
+              ~location:(Facts.locate context source promise.clause.origin))
         promised;
       match find_trait_frame frame ~result:returned with
       | Some (clauses, inside) ->
@@ -875,7 +846,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
           in
           let promised =
             list_promises context clauses.callee (reading entry).locals clauses.costs
-              ~inherited:true
+              ~inherited:true ~counts_provider_potential:false
           in
           Lambdas.assign_counters context
             (List.map (fun promise -> (promise.counter, promise.clause.holds_when)) promised);
@@ -962,24 +933,6 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
           List.iter
             (fun promise ->
               keep_promise context after promise ~at:entry_reading ~location
-                ~compute_change:(fun () ->
-                  List.fold_left
-                    (fun total (parameter : Mir.parameter) ->
-                      let ty = Types.substitute subtrait_substitution parameter.type_ in
-                      let before =
-                        Amounts.compute_potential context after ty (read_place parameter entry)
-                      in
-                      match parameter.mode with
-                      | Language.Mode.Mut ->
-                          Costs.plus total
-                            (Costs.minus
-                               (Amounts.compute_potential context after ty
-                                  (read_place parameter after))
-                               before)
-                      | Own -> Costs.minus total before
-                      | Read -> total)
-                    (Amounts.compute_potential context after result_type result)
-                    clauses.parameters)
                 ~restated:(for_type, name, trait, declared))
             promised)
   | Some Built_in ->

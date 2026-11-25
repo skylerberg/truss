@@ -1,58 +1,37 @@
+let run_example_tests database backend =
+  match Backend.run_tests backend ~time_limit_ms:2000 (Codegen_support.list_tests database) with
+  | Ok records -> records
+  | Error failure -> failwith (Codegen_support.describe_failure failure)
+
 let () =
-  Codegen_support.test
-    "a passing test's result is kept by its key, and only a changed test runs again" (fun () ->
-      let table = Hashtbl.create 4 in
-      let results : Backend.results =
-        { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
-      in
-      let run text =
-        let database, backend = Codegen_support.load ~results text in
-        match
-          Backend.run_tests backend ~time_limit_ms:2000 (Codegen_support.list_tests database)
-        with
-        | Ok records ->
-            ( (if
-                 List.for_all
-                   (fun (record : Backend.Test_report.record) -> record.outcome = Passed)
-                   records
-               then 0
-               else 1),
-              Codegen_support.render_records records )
-        | Error failure -> failwith (Codegen_support.describe_failure failure)
-      in
-      let count_stored () = Hashtbl.length table in
-      let source = Fixtures.Program.passing_tests in
-      let first = run source in
-      Codegen_support.expect_int ~expected:1 (count_stored ());
-      let second = run source in
-      if first <> second then
-        Codegen_support.fail "the report changed when kept:\n%s\n%s" (snd first) (snd second);
-      Codegen_support.expect_int ~expected:1 (fst second);
-      let _ = run Fixtures.Program.passing_test_of_two_plus_two in
-      Codegen_support.expect_int ~expected:2 (count_stored ()))
+  Codegen_support.test "a passing test's pass is recorded, and only a changed test runs again"
+    (fun () ->
+      let database, backend = Codegen_support.load Fixtures.Program.passing_tests in
+      let first = run_example_tests database backend in
+      let second = run_example_tests database backend in
+      if Codegen_support.render_records first <> Codegen_support.render_records second then
+        Codegen_support.fail "the report changed when recorded:\n%s\n%s"
+          (Codegen_support.render_records first)
+          (Codegen_support.render_records second);
+      (match second with
+      | [ { outcome = Failed; cached = false; _ }; { outcome = Passed; cached = true; _ } ] -> ()
+      | _ -> Codegen_support.fail "expected the failure run again and the recorded pass");
+      Database.update database
+        [ (Codegen_support.example_file, Some Fixtures.Program.passing_test_of_two_plus_two) ];
+      let backend = Codegen_support.make_backend database in
+      match (run_example_tests database backend, run_example_tests database backend) with
+      | [ { outcome = Passed; cached = false; _ } ], [ { outcome = Passed; cached = true; _ } ] ->
+          ()
+      | _ -> Codegen_support.fail "expected the changed test to run once and then be recorded")
 
 let () =
   Codegen_support.test
-    "an external test gets the real capabilities it uses, and its result is never kept" (fun () ->
-      let table = Hashtbl.create 4 in
-      let results : Backend.results =
-        { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
-      in
-      let database, backend =
-        Codegen_support.load ~results Fixtures.Program.test_reading_the_clock
-      in
-      let run () =
-        match
-          Backend.run_tests backend ~time_limit_ms:2000 (Codegen_support.list_tests database)
-        with
-        | Ok records -> records
-        | Error failure -> failwith (Codegen_support.describe_failure failure)
-      in
-      ignore (run ());
-      match run () with
-      | [ { outcome = Passed; cached = false; _ } ] ->
-          if Hashtbl.length table > 0 then Codegen_support.fail "kept a result"
-      | _ -> Codegen_support.fail "did not pass, or came from the kept results")
+    "an external test gets the real capabilities it uses, and its pass is never recorded" (fun () ->
+      let database, backend = Codegen_support.load Fixtures.Program.test_reading_the_clock in
+      ignore (run_example_tests database backend);
+      match run_example_tests database backend with
+      | [ { outcome = Passed; cached = false; _ } ] -> ()
+      | _ -> Codegen_support.fail "did not pass, or came from a recorded pass")
 
 let () =
   Codegen_support.test

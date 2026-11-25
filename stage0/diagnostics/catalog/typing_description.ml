@@ -443,6 +443,12 @@ let describe : Typing.t -> Nodes.description = function
   | Field_not_derivable { at = origin; written } ->
       make Cannot_derive (Build.at origin)
         (say "A field of this type is not " @ tick written @ say ", so the type cannot be.")
+  | Potential_not_plain { at = origin } ->
+      make Cannot_derive (Build.at origin)
+        (say
+           "A type that declares a `cost potential` is not `Plain`: an implicit copy would \
+            duplicate the potential, and a caller could spend it twice. Derive `Copyable`, whose \
+            `copy()` pays for the potential of the copy.")
   | Default_of_sum { at = origin } ->
       make Cannot_derive (Build.at origin)
         (say

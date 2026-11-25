@@ -34,6 +34,7 @@ type cost_operand = {
 
 val list_cost_operands : t -> Syntax.expression -> cost_operand list
 val elaborate_type : t -> Syntax.type_expression -> Types.ty
+val elaborate_mode : Syntax.mode option -> Language.Mode.t
 val elaborate_condition : t -> Syntax.condition -> Types.condition
 val add_condition : t -> Types.condition -> t
 

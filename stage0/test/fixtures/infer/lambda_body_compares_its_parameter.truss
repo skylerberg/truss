@@ -1,0 +1,12 @@
+type Span(ticks: Int64) derives Equal
+
+fn make[Value](build: fn(Value) -> Value) -> Option[Value] {
+  None
+}
+
+fn f(span: Span) -> Bool {
+  let made = make(fn(scaled) {
+    if scaled == span { scaled } else { span }
+  })
+  made.is_some()
+}

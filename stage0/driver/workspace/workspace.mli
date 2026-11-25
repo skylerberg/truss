@@ -48,7 +48,6 @@ module For_testing : sig
   val load_standard_package_database : unit -> string
   val copy_standard_package_database : into:string -> unit
   val build_cold_database : snapshot -> Database.t
-  val collect_cache : unit -> unit
   val save : unit -> unit
   val listen : key:string -> (Unix.file_descr, string) result
 

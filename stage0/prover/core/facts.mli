@@ -35,6 +35,7 @@ val find_counter_condition : State.context -> Costs.counter -> Types.condition
 val oblige :
   ?cited:Resolve.Names.key * Core.origin ->
   ?fixes:Catalog.Prover.fix list ->
+  ?can_be_required:bool ->
   ?holds_when:Types.condition ->
   State.context ->
   State.frame ->

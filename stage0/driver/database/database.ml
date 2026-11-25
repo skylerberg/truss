@@ -310,7 +310,7 @@ let find_checker (stage : Kind.stage) : checker option =
   | Declare | Supply | Claim_roots | Resolve_grant | Read_trait_header | Evaluate_constant
   | Derive_interface | Compute_type_facts | Build_body_mir | Build_contract_mir | Generate_mir
   | List_calls | Group_recursion | Check_dependency | Prove | Lower | Key_tests | Evaluate
-  | Render _ | Decide ->
+  | Run_test | Render _ | Decide ->
       None
 
 let has_unchecked_body (database : t) (package : Path.package) =
@@ -822,6 +822,15 @@ let find_lowered_lookups (database : t) packages : (Lowering.lowered_lookups, st
               | Some (Value evaluation) -> Some evaluation
               | Some (Failed | Blocked) | None -> None);
           record_evaluation = Recipes.record_evaluation database;
+          find_test_pass =
+            (fun item ->
+              match
+                Tracker.find_settled database Tracker.untracked Facts.test_run.whole
+                  (Lookups.locate_items database) ~id:(Ids.of_item item)
+              with
+              | Some (Value pass) -> Some pass
+              | Some (Failed | Blocked) | None -> None);
+          record_test_run = Recipes.record_test_run database;
           find_lowered =
             (fun item ->
               match find_item_outcome database Facts.lowered item with

@@ -250,6 +250,16 @@ let test_key : (string, Lowering.unbuildable) result Tracker.fact =
 let evaluation : Lowering.evaluation Tracker.fact =
   make_marshaled ~stage:Evaluate ~table:"evaluation" ~id_column:"item" Evaluation
 
+let test_run : Lowering.test_pass Tracker.fact =
+  Tracker.make_fact ~stage:Run_test ~table:"test_run" ~id_column:"item" ~fixed:[]
+    ~groups:[ (Test_run, [ "compiler_fingerprint"; "microseconds" ]) ]
+    ~encode:(fun (pass : Lowering.test_pass) ->
+      [ Blob pass.compiler_fingerprint; Integer pass.microseconds ])
+    ~decode:(function
+      | [| Blob compiler_fingerprint; Integer microseconds |] ->
+          { compiler_fingerprint; microseconds }
+      | _ -> Compiler_bug.raise_bug ~stage:"Database" "a row of test_run holds no test pass")
+
 let rank_profile : Profile.t -> int = function Development -> 0 | Release -> 1
 
 let unit =

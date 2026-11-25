@@ -543,7 +543,11 @@ map_entry:
   | expression COLON expression { () }
 
 lambda:
-  | FN LPAREN comma_list(pattern) RPAREN newline_opt block { () }
+  | FN LPAREN comma_list(lambda_parameter) RPAREN newline_opt block { () }
+
+lambda_parameter:
+  | pattern { () }
+  | pattern COLON mode_opt type_expression { () }
 
 if_expression:
   | IF expression newline_opt block %prec if_without_else { () }

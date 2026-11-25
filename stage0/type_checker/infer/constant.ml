@@ -96,7 +96,7 @@ let rec find_use_of_a_type_parameter (state : State.state) (value : Syntax.expre
         (function
           | Types.Type type_ -> mentions_type_parameter state type_
           | Value (Value_parameter _) -> true
-          | Value (Known _ | Value_variable _) -> false)
+          | Value (Known _ | Value_variable _ | Value_error _) -> false)
         instantiation.type_arguments
     in
     match Tables.find_call state.tables value.id with

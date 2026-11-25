@@ -38,6 +38,7 @@
   prover
   inspect
   solver
+  blake3
   well_known
   sqlite3
   unix
