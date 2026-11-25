@@ -640,7 +640,10 @@ fn Option[Value].take(mut self) -> Option[Value] {
   the target can assign the operand's place. The variable of a `for` loop is
   not copied: the loop lends its collection for the body.
 - **`Copyable` types have `copy()`,** whose result is identical to the
-  original.
+  original. A copy of a `List`, a `String`, or an `Array` costs one unit of
+  time and at most one allocation, plus the cost of copying each element:
+  `text.copy()` is within `cost time O(text.length())`. A copy of any other
+  type costs `time(T.copy)`.
 - **Handles are not `Copyable`,** nor is a type that holds one.
 - `Copyable` and `Plain` are prelude traits that the compiler implements and
   no `impl` can, and `Plain` requires `Copyable`. The compiler derives them
