@@ -156,9 +156,6 @@ val forall : ?trigger:term list -> (symbol * sort) list * term -> term
 val substitute : (symbol * term) list -> term -> term
 val replace : from:term -> into:term -> term -> term
 val has_untriggered_fact : ?is_counted:(term -> bool) -> query -> bool
-
-module Term_table : Hashtbl.S with type key = term
-
 val prune : query -> query
 val list_conjunct_queries : query -> query list
 val show_query : ?cardinality_bound:int -> query -> string

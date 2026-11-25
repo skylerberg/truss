@@ -150,13 +150,6 @@ let rec hash_term term =
       hash_terms (combine 8 (Hashtbl.hash variables)) (body :: triggers)
   | Exists (variables, body) -> combine (combine 9 (Hashtbl.hash variables)) (hash_term body)
 
-module Term_table = Hashtbl.Make (struct
-  type t = term
-
-  let equal : t -> t -> bool = ( = )
-  let hash term = hash_term term land max_int
-end)
-
 let show_bits width value =
   "#b" ^ String.init width (fun index -> if Z.testbit value (width - 1 - index) then '1' else '0')
 
@@ -718,11 +711,19 @@ let prune query =
     | _ -> fun () -> List.exists (Symbol_table.mem reached) symbols
   in
   let distinct =
-    let seen = Term_table.create 64 in
+    let alike_by_start = Hashtbl.create 64 in
     List.filter
       (fun fact ->
-        let is_new = not (Term_table.mem seen fact) in
-        Term_table.replace seen fact ();
+        let start_hash = Hashtbl.hash_param 64 256 fact in
+        let whole_hash = lazy (hash_term fact) in
+        let is_new =
+          not
+            (List.exists
+               (fun (other_hash, other) ->
+                 Lazy.force other_hash = Lazy.force whole_hash && other = fact)
+               (Hashtbl.find_all alike_by_start start_hash))
+        in
+        if is_new then Hashtbl.add alike_by_start start_hash (whole_hash, fact);
         is_new)
       query.facts
   in
