@@ -65,6 +65,7 @@ type passed = {
   origin : Core.origin option;
   passed_place : passed_place option;
   type_ : Types.ty;
+  declared_type : Types.ty;
   term : Logic.term;
 }
 

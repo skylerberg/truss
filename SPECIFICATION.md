@@ -1338,7 +1338,8 @@ fn List[Element].push(mut self, item: own Element)
 - A `cost potential` is an integer expression over a type's fields that never
   goes below zero. A value's potential is its type's potential plus its
   parts' potentials, and belongs to that value alone; `copy()` pays for the
-  new one.
+  new one. A view holds no potential: the potential of the elements that it
+  views belongs to their owner, so a `List[view String]` holds only its own.
 - `cost amortized time O(f)` promises that the actual cost, plus the change
   in the potential of the values the function mutates or returns, is within
   `O(f)`. `amortized` works with every resource that takes an `O(...)` bound.

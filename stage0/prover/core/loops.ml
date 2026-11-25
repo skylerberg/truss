@@ -1001,6 +1001,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
               origin = None;
               passed_place = Some cursor_access;
               type_ = cursor_type;
+              declared_type = cursor_type;
               term = cursor;
             };
           ]
