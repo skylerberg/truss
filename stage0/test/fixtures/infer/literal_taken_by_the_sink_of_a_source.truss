@@ -1,0 +1,13 @@
+trait Taker[Value] {
+  fn take(self, value: Value) -> Bool
+}
+
+trait Source {
+  type Item
+  type Sink: Taker[Self.Item]
+  fn sink(self) -> Self.Sink
+}
+
+fn give[Machine: Source[Item = Int64]](machine: Machine) -> Bool {
+  machine.sink().take(1)
+}

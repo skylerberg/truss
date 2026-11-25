@@ -510,6 +510,13 @@ bound             = path_type { "+" path_type } ;
 - A generic function cannot call itself, or a function in a cycle with it,
   with a type argument built from its own type parameters, and a generic
   type cannot contain itself with other arguments.
+- **A type's or a trait's arguments meet the bounds of its parameters**
+  wherever it is written, the head of an `impl` or of a method included.
+  Where `type Sorted[Element: Ordered]`, the head
+  `impl Display for Sorted[Element]` is an error, and is written
+  `impl Display for Sorted[Element: Ordered]`. Where
+  `trait Getter[Value: Display]`, `impl Getter[Point] for Box` needs
+  `Point: Display`.
 
 ### Invariants
 
@@ -2840,6 +2847,8 @@ trait Ordered: Equal {
 
 - A `law` holds for every implementation and every set of values that meets
   its `requires`.
+- A trait declares each associated type, capability set, and law once, and
+  an `impl` defines each associated type and capability set once.
 - A trait's contracts bind every `impl` and are proven for each.
 - **An `impl`'s method has its trait's signature.** It restates that
   signature: the generic parameters with their bounds; the parameters with
@@ -2933,6 +2942,15 @@ trait IntoCursor {
   `impl` chooses for `type Cursor: Cursor` implements `Cursor`, so code
   bounded by `Source: IntoCursor` calls `Cursor`'s methods on
   `Source.Cursor`.
+- **An associated type's name picks one trait.** `Value.Part` and
+  `Self.Part` name the `Part` of the one trait among the bounds, and the
+  traits they require, that declares `Part`. Two traits that declare it,
+  or two instances of one trait such as `Add[Int64]` and `Add[UInt64]`,
+  make the name ambiguous, unless every one of them fixes it to one type,
+  as `FixedWidthInteger` fixes the `Output` of each operator trait it
+  requires to `Self`. A type parameter fixed by one bound names one of
+  them: `[Part, Value: First[Part = Part] + Second]`. The same holds for
+  an associated capability set.
 
 ### Associated capability sets
 
@@ -3001,6 +3019,7 @@ type Priority =
 
 - Every field has the trait, and a derived trait's required traits are
   derived too: `Ordered` and `Hash` need a derived `Equal`.
+- A type derives each trait once.
 - A generic type has a derived trait only where its parameters do.
 - A derived implementation satisfies the trait's laws; a hand-written one
   proves them.

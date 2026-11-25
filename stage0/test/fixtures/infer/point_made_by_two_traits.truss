@@ -1,0 +1,21 @@
+trait First {
+  fn make() -> Self
+}
+
+trait Second {
+  fn make() -> Self
+}
+
+type Point(x: Int64)
+
+impl First for Point {
+  fn make() -> Point { todo }
+}
+
+impl Second for Point {
+  fn make() -> Point { todo }
+}
+
+fn f() -> Point {
+  Point.make()
+}

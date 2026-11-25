@@ -1970,6 +1970,56 @@ let () =
         ~alternatives:[ ("Counter(count: 3).label()", "Second.label(Counter(count: 3))") ]);
   Harness.test "two bounds that give one overload of a name are ambiguous through the type"
     (fun () -> expect_one_diagnostic Fixtures.Infer.bounds_giving_one_make "types.ambiguous_method");
+  Harness.test "a method that two traits a bound requires declare is ambiguous" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.name_of_a_value_whose_trait_requires_two_namers
+        "types.ambiguous_method"
+        ~alternatives:[ ("value.name()", "Second.name(value)") ]
+        ~fixed:("value.name()", "First.name(value)"));
+  Harness.test "a method that two traits provide is ambiguous at the call" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.name_that_two_traits_provide "types.ambiguous_method"
+        ~alternatives:[ ("value.name()", "Second.name(value)") ]
+        ~fixed:("value.name()", "First.name(value)"));
+  Harness.test "a static method that two traits give a type is ambiguous" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.point_made_by_two_traits "types.ambiguous_method"
+        ~says:"`First`, `Second`");
+  Harness.test "a call with a dot skips a trait's method that takes no `self`" (fun () ->
+      expect_fine Fixtures.Infer.integer_fresh_by_two_traits);
+  Harness.test "a trait's method that takes no `self` is not called with a dot" (fun () ->
+      expect_one_diagnostic
+        "trait Make {\n\
+        \  fn make() -> Self\n\
+         }\n\n\
+         type Point(x: Int64)\n\n\
+         impl Make for Point {\n\
+        \  fn make() -> Point { todo }\n\
+         }\n\n\
+         fn f(point: Point) -> Point {\n\
+        \  point.make()\n\
+         }\n"
+        "types.unknown_member");
+  Harness.test "a trait's static method written in full takes `Self` from the expected type"
+    (fun () ->
+      expect_fine
+        "trait Make {\n\
+        \  fn make() -> Self\n\
+         }\n\n\
+         type Point(x: Int64)\n\n\
+         impl Make for Point {\n\
+        \  fn make() -> Point { todo }\n\
+         }\n\n\
+         fn f() -> Point {\n\
+        \  Make.make()\n\
+         }\n");
+  Harness.test "a bound's trait argument that two impls could give is not inferred" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.conversion_of_an_int32_to_an_undecided_target
+        "types.cannot_infer" ~says:"`Target`");
+  Harness.test "an impl's method applies only where the impl's conditions hold" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.total_of_a_holder_whose_measure_needs_order
+        "types.unknown_member");
+  Harness.test "a method that bounds its type's parameter applies only where the bound holds"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.sameness_of_holders_of_opaque_values
+        "types.unsatisfied_bound" ~says:"`Opaque: Equal`");
   Harness.test "two unrelated bounds that share a name are ambiguous however each takes self"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.unrelated_bounds_sharing_label "types.ambiguous_method"
@@ -2462,7 +2512,61 @@ let () =
   Harness.test "an associated type a bound fixes must be the one the impl gives" (fun () ->
       expect_one_diagnostic
         (source ^ Fixtures.Infer.text_of_a_source_of_integers)
-        "types.unsatisfied_bound")
+        "types.unsatisfied_bound");
+  Harness.test "a constraint on a required trait's associated type must be the impl's choice"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.blue_car_given_a_black_sedan "types.unsatisfied_bound"
+        ~says:"its `Color` is `Black`");
+  Harness.test "a constraint fixes only the associated type it names" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.pair_with_a_fixed_first_passed_for_a_fixed_second
+        "types.unsatisfied_bound" ~says:"its `Second` is `Value.Second`");
+  Harness.test "an associated type has only the methods of its declared bounds" (fun () ->
+      expect_one_diagnostic
+        "trait Get {\n\
+        \  type Value\n\
+        \  fn get(self) -> Self.Value\n\
+         }\n\n\
+         fn read[Source: Get](source: Source) -> Int64 {\n\
+        \  source.get().number()\n\
+         }\n"
+        "types.unknown_member" ~says:"`Source.Value` has no method `number`");
+  Harness.test "an associated type may be bounded by its own trait" (fun () ->
+      expect_fine
+        "trait Stream {\n\
+        \  type Rest: Stream\n\
+        \  fn rest(own self) -> Self.Rest\n\
+        \  fn size(self) -> Int64\n\
+         }\n\n\
+         fn third_size[Source: Stream](source: own Source) -> Int64 {\n\
+        \  (own source).rest().rest().size()\n\
+         }\n");
+  Harness.test "a provided method's body does not know its trait's associated type" (fun () ->
+      expect_one_diagnostic
+        "trait Make {\n  type Value\n  fn make() -> Self.Value {\n    1\n  }\n}\n" "types.mismatch"
+        ~says:"Expected `Self.Value`, found an integer.");
+  Harness.test "a value with a field of an associated type is built at a type and through a bound"
+    (fun () -> expect_fine Fixtures.Infer.holders_of_source_values);
+  Harness.test
+    "a literal takes the type that an associated type's bound names through another associated type"
+    (fun () ->
+      let text = Fixtures.Infer.literal_taken_by_the_sink_of_a_source in
+      expect_fine text;
+      expect_type text "1" "Int64");
+  Harness.test "an associated type is fixed in a bound, not among an expression's type arguments"
+    (fun () ->
+      expect_one_diagnostic
+        "trait Get {\n\
+        \  type Value\n\
+        \  fn get() -> Int64\n\
+         }\n\n\
+         impl Get for Int64 {\n\
+        \  type Value = Int64\n\
+        \  fn get() -> Int64 { 1 }\n\
+         }\n\n\
+         fn read() -> Int64 {\n\
+        \  Get[Value = Int64].get()\n\
+         }\n"
+        "types.arity" ~says:"not among type arguments in an expression")
 
 let point = "type Point(x: Int64, y: Int64)\n\n"
 

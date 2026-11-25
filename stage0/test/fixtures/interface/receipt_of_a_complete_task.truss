@@ -1,0 +1,11 @@
+trait Async {
+  type Cancel
+}
+
+type Receipt[Source: Async](source: Source)
+
+type Complete(count: Int64)
+
+impl Async for Complete {
+  type Cancel = Receipt[Complete]
+}

@@ -55,6 +55,18 @@ and resource =
 
 and cost_bound = Order_of | No_more_than of Z.t | Exactly_cost of Z.t
 
+type associated_kind = Associated_type | Associated_capability_set
+
+type application =
+  | Type_application of ty
+  | Trait_application of trait_reference
+  | Associated_application of {
+      base : ty;
+      bounds : trait_reference list;
+      name : string;
+      kind : associated_kind;
+    }
+
 val unit : ty
 val bool : ty
 val make_builtin : ?arguments:argument list -> Language.Builtin_type.t -> ty

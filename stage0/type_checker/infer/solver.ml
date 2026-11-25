@@ -106,7 +106,10 @@ let decide_by_bounds (state : State.state) goal trait ~subject ~(wanted : Types.
   if has_unknowns state wanted.trait_arguments then
     match
       List.sort_uniq compare
-        (List.map (fun (bound : Types.trait_reference) -> bound.trait_arguments) matching)
+        (List.map
+           (fun (bound : Types.trait_reference) ->
+             List.map (Types.map_argument (State.normalize state)) bound.trait_arguments)
+           matching)
     with
     | [ arguments ] ->
         if Unify.unify_arguments state.unifier wanted.trait_arguments arguments then

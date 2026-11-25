@@ -1,0 +1,17 @@
+trait Shown {
+  fn show(self) -> Int64
+}
+
+trait Getter[Value: Shown] {
+  fn get(self) -> Value
+}
+
+type Holder[Value](value: Value)
+
+impl Getter[Value] for Holder[Value: Shown] {
+  fn get(self) -> Value { todo }
+}
+
+impl Getter[Int64] for Int64 {
+  fn get(self) -> Int64 { todo }
+}

@@ -1,0 +1,27 @@
+trait Getter[Value] {
+  fn get(self) -> Value
+}
+
+trait Holder: Getter[Self.Item] {
+  type Item
+}
+
+type Counter(count: Int64)
+
+impl Getter[Int64] for Counter {
+  fn get(self) -> Int64 { todo }
+}
+
+impl Holder for Counter {
+  type Item = Int64
+}
+
+type Flag(value: Bool)
+
+impl Getter[Bool] for Flag {
+  fn get(self) -> Bool { todo }
+}
+
+impl Holder for Flag {
+  type Item = Int64
+}

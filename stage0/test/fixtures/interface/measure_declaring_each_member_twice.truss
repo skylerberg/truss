@@ -1,0 +1,15 @@
+trait Measure {
+  type Unit
+  type Unit
+  capability Uses
+  capability Uses
+  fn size(self) -> Int64
+
+  law positive(value: Self) {
+    value.size() >= 0
+  }
+
+  law positive(value: Self) {
+    value.size() >= 1
+  }
+}

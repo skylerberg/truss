@@ -59,7 +59,12 @@ type obligation =
   | Requires of Types.trait_reference
 
 val list_obligations :
-  Types.trait_interface -> Types.impl_interface -> self:Types.ty -> obligation list
+  Lookups.t ->
+  list_bounds:bounds ->
+  Types.trait_interface ->
+  Types.impl_interface ->
+  self:Types.ty ->
+  obligation list
 
 val find_evidence :
   Lookups.t ->

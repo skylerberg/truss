@@ -15,7 +15,7 @@ type t = {
   self_capabilities : (string * Types.capability_set) list;
   is_in_capability : bool;
   diagnostics : Catalog.diagnostic list ref;
-  named : (Syntax.id * Types.ty) list ref;
+  applications : (Syntax.id * Types.application) list ref;
 }
 
 let create_with lookups resolved (scope : _ Environment.scope) ~known_bounds =
@@ -40,7 +40,7 @@ let create_with lookups resolved (scope : _ Environment.scope) ~known_bounds =
     self_capabilities = scope.self_capabilities;
     is_in_capability = false;
     diagnostics = ref [];
-    named = ref [];
+    applications = ref [];
   }
 
 let create_declared lookups resolved (scope : Environment.declared_bounds Environment.scope) =
@@ -78,7 +78,7 @@ let add_condition context condition =
   { context with condition = Types.make_condition (context.condition @ condition) }
 
 let list_diagnostics context = !(context.diagnostics)
-let list_named_types context = !(context.named)
+let list_applications context = !(context.applications)
 
 let make_scope context : Environment.declared_bounds Environment.scope =
   {
@@ -125,6 +125,12 @@ let record_diagnostic diagnostics (diagnostic : Catalog.Typing.t) =
   let reported = Catalog.Typing diagnostic in
   diagnostics := reported :: !diagnostics;
   Catalog.make_reported reported
+
+let record_application context id application =
+  context.applications := (id, application) :: !(context.applications)
+
+let record_associated context (key : Syntax.name) ~base ~bounds kind =
+  record_application context key.id (Associated_application { base; bounds; name = key.text; kind })
 
 let report_error_type context diagnostic =
   Types.Error (record_diagnostic context.diagnostics diagnostic)
@@ -190,6 +196,7 @@ and elaborate_self_associated context (at : Core.origin) (key : Syntax.name) =
             (Self_outside_trait
                { at = Written key.id; name = key.text; associated = Associated_type })
       | Ok self, Some trait -> (
+          record_associated context key ~base:self ~bounds:[ trait ] Associated_type;
           match List.assoc_opt key.text trait.associated with
           | Some fixed -> fixed
           | None -> (
@@ -223,7 +230,9 @@ and elaborate_associated context base parameter (key : Syntax.name) =
       bounds
   in
   match associated_type with
-  | Some associated_type -> associated_type
+  | Some associated_type ->
+      record_associated context key ~base ~bounds Associated_type;
+      associated_type
   | None ->
       report_error_type context
         (Unbounded_associated
@@ -319,14 +328,20 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
       | Some Integer -> Types.Integer
       | Some _ | None -> (
           let arguments = elaborate_arguments context path in
-          match
-            check_arity context path
-              (Resolve.Names.find_generics context.lookups.names definition_path)
-          with
+          let arity =
+            if List.exists (function Syntax.Constraint _ -> true | _ -> false) path.arguments then
+              Error
+                (record_diagnostic context.diagnostics
+                   (Constraint_on_type { at = Written path.id }))
+            else
+              check_arity context path
+                (Resolve.Names.find_generics context.lookups.names definition_path)
+          in
+          match arity with
           | Error report -> Types.Error report
           | Ok () ->
               let type_ = Types.Named { path = definition_path; arguments } in
-              context.named := (path.id, type_) :: !(context.named);
+              record_application context path.id (Type_application type_);
               type_))
   | Some (Definition (Trait, _)) ->
       report_error_type context (Trait_as_type { at = Written path.id; written })
@@ -350,7 +365,10 @@ and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_
     let trait_arguments = elaborate_arguments context path in
     match check_arity context path (Resolve.Names.find_generics context.lookups.names trait) with
     | Error report -> Error report
-    | Ok () -> Ok { trait; trait_arguments; associated }
+    | Ok () ->
+        let reference : Types.trait_reference = { trait; trait_arguments; associated } in
+        record_application context path.id (Trait_application reference);
+        Ok reference
   in
   match find_target context path.path.last with
   | Some (Definition (Trait, trait)) -> build_trait_reference trait
@@ -448,7 +466,10 @@ and elaborate_capability context (written : Syntax.capability_reference) : Types
                    { at = Written key.id; name = key.text; associated = Associated_capability_set })
           | Ok self, Some trait -> (
               match find_capability_projection context self [ trait ] key with
-              | Some projection -> [ projection ]
+              | Some projection ->
+                  record_associated context key ~base:self ~bounds:[ trait ]
+                    Associated_capability_set;
+                  [ projection ]
               | None ->
                   report_error_capability context
                     (Undeclared_associated
@@ -463,8 +484,11 @@ and elaborate_capability context (written : Syntax.capability_reference) : Types
       | Error report -> [ Types.Capability_error report ]
       | Ok parameter -> (
           let bounds = list_bounds context parameter in
-          match find_capability_projection context (Types.Parameter parameter) bounds key with
-          | Some projection -> [ projection ]
+          let base = Types.Parameter parameter in
+          match find_capability_projection context base bounds key with
+          | Some projection ->
+              record_associated context key ~base ~bounds Associated_capability_set;
+              [ projection ]
           | None ->
               report_error_capability context
                 (Unbounded_associated
@@ -1021,7 +1045,12 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
             | Some Never -> Types.Never
             | Some Integer -> Types.Integer
             | _ ->
-                Types.Named { path = type_path; arguments = Types.list_generic_arguments generics })
+                let type_ =
+                  Types.Named
+                    { path = type_path; arguments = Types.list_generic_arguments generics }
+                in
+                record_application context head.id (Type_application type_);
+                type_)
       in
       (generics, type_)
   | Some (Definition (((Trait | Capability) as kind), _)) ->
@@ -1258,14 +1287,14 @@ let elaborate_header (lookups : Lookups.t) (key : Resolve.Names.key) =
           {
             Environment.container;
             container_scope = make_scope context;
-            container_named = List.rev !(context.named);
+            container_applications = List.rev !(context.applications);
           }
 
 let make_elaborated_interface context interface : Environment.elaborated_interface =
   {
     interface;
     diagnostics = List.rev !(context.diagnostics);
-    named = List.rev !(context.named);
+    applications = List.rev !(context.applications);
     scope = close_scope context.lookups (make_scope context);
   }
 
@@ -1375,7 +1404,7 @@ let make_container_interface lookups (key : Resolve.Names.key) (header : Environ
   {
     interface;
     diagnostics = [];
-    named = header.container_named;
+    applications = header.container_applications;
     scope = close_scope lookups header.container_scope;
   }
 

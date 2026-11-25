@@ -653,7 +653,7 @@ let () =
         "types.extra_member";
       expect_one_diagnostic
         (feed ^ Fixtures.Capabilities.impl_defining_uses_twice)
-        "types.extra_member");
+        "types.duplicate_member");
   Harness.test "a set cannot be defined from itself" (fun () ->
       expect_one_diagnostic
         (feed ^ Fixtures.Capabilities.set_defined_as_itself)

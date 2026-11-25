@@ -1,0 +1,3 @@
+trait Chromosome[Other: Chromosome[Int32]] {}
+
+impl Chromosome[Int32] for Int32 {}

@@ -1,0 +1,15 @@
+trait First {
+  fn name(self) -> Int64 { 1 }
+}
+
+trait Second {
+  fn name(self) -> Int64 { 2 }
+}
+
+impl First for Int64 {}
+
+impl Second for Int64 {}
+
+fn f(value: Int64) -> Int64 {
+  value.name()
+}
