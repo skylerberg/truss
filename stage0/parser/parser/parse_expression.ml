@@ -427,13 +427,12 @@ and parse_clause cursor : Syntax.clause =
   { kind; condition; id = Cursor.allocate_id_from cursor start }
 
 and parse_cost cursor =
-  let amortized =
+  let amortized_word =
     match (Contextual_keyword.of_token (Cursor.peek_kind cursor), Cursor.peek_ahead cursor 1) with
-    | Some Amortized, Lower _ ->
-        Cursor.advance cursor;
-        true
-    | _ -> false
+    | Some Amortized, Lower _ -> Some (Cursor.take cursor)
+    | _ -> None
   in
+  let amortized = Option.is_some amortized_word in
   if Contextual_keyword.of_token (Cursor.peek_kind cursor) = Some Potential then begin
     Cursor.report cursor (Cursor.peek cursor).span Misplaced_potential;
     raise Cursor.Failed
@@ -460,6 +459,10 @@ and parse_cost cursor =
              ~expected:Cost_bound);
         Big_o (parse_parenthesized_expression cursor)
   in
+  (match (amortized_word, resource, bound) with
+  | Some word, (Calls _ | Metric _), (At_most _ | Exactly _) | Some word, Calls _, Big_o _ ->
+      Cursor.report cursor word.span Amortized_bound
+  | Some _, Metric _, Big_o _ | None, _, _ -> ());
   { amortized; resource; bound }
 
 and parse_call_target cursor =
@@ -1334,7 +1337,13 @@ and parse_loop_clauses cursor =
     | Keyword Cost ->
         let keyword = Cursor.take cursor in
         let cost = parse_cost cursor in
-        if cost.amortized then Cursor.report cursor keyword.span Amortized_loop_cost;
+        if
+          cost.amortized
+          &&
+          match (cost.resource, cost.bound) with
+          | Metric _, Big_o _ -> true
+          | (Metric _ | Calls _), (Big_o _ | At_most _ | Exactly _) -> false
+        then Cursor.report cursor keyword.span Amortized_loop_cost;
         gather
           (({
               kind = Loop_cost cost;

@@ -1,0 +1,12 @@
+fn charged(credit: UInt32) -> Meter
+  cost time O(1)
+{
+  Meter(credit: credit)
+}
+
+fn charged_then_spent(credit: UInt32)
+  cost amortized time O(1)
+{
+  var meter = charged(credit)
+  mut meter.spend()
+}

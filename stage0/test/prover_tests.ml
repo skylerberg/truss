@@ -1964,6 +1964,49 @@ let () =
       if actual <> [ "prover.cost" ] then Harness.fail "%s" (String.concat ", " actual));
   Harness.test "a caller that lowers a lent part's potential is paid by it" (fun () ->
       expect_proven (meter ^ bag ^ Fixtures.Prover.meter_credit_spent_through_a_lent_part));
+  Harness.test "a write that raises a declared potential pays for it" (fun () ->
+      expect_not_proven Fixtures.Prover.credit_set_by_a_write "prover.cost");
+  Harness.test "a value that a provided capability changes pays for its potential" (fun () ->
+      expect_not_proven
+        (meter ^ Fixtures.Prover.meter_credit_raised_by_a_provided_capability)
+        "prover.cost");
+  Harness.test "a callee with only a plain bound pays for the potential of its result" (fun () ->
+      expect_not_proven
+        (meter ^ Fixtures.Prover.meter_built_by_a_plain_callee_then_spent)
+        "prover.cost");
+  Harness.test "a construction pays for the potential its type declares" (fun () ->
+      expect_proven (meter ^ Fixtures.Prover.meter_built_with_its_credit));
+  Harness.test "a construction whose potential exceeds the bound is not amortized constant"
+    (fun () ->
+      expect_not_proven (meter ^ Fixtures.Prover.meter_built_in_constant_time) "prover.cost");
+  Harness.test "a type that declares a potential is not `Plain`" (fun () ->
+      expect_not_proven
+        (meter ^ Fixtures.Prover.meter_copied_implicitly)
+        "ownership.not_owned"
+        ~fixed:("var copy = meter", "var copy = meter.copy()")
+        ~left_after_fix:[ "prover.cost" ];
+      expect_not_proven Fixtures.Prover.plain_credit_declared "types.cannot_derive");
+  Harness.test "a type parameter bounded by `Plain` holds no potential" (fun () ->
+      expect_proven Fixtures.Prover.plain_values_read_twice);
+  Harness.test "a view holds no potential of the elements it reaches" (fun () ->
+      expect_not_proven (meter ^ Fixtures.Prover.meters_held_then_spent) "prover.cost";
+      expect_not_proven (meter ^ Fixtures.Prover.meter_packed_with_a_view) "prover.cost");
+  Harness.test "a function with a plain bound does not convert to an amortized function type"
+    (fun () ->
+      expect_not_proven
+        (meter ^ Fixtures.Prover.plain_function_passed_as_an_amortized_callback)
+        "types.mismatch");
+  Harness.test "a capability method's bound counts the change in its provider's potential"
+    (fun () ->
+      expect_not_proven (meter ^ Fixtures.Prover.meter_deposit_provided) "prover.cost";
+      expect_proven (meter ^ Fixtures.Prover.meter_ticked_by_a_provided_capability);
+      expect_proven Fixtures.Prover.values_collected_by_a_provided_capability);
+  Harness.test "a cancelled branch's change to a value pays for its potential" (fun () ->
+      expect_not_proven (meter ^ Fixtures.Prover.meter_raised_in_a_cancelled_branch) "prover.cost");
+  Harness.test "an amortized loop over an owned list is linear" (fun () ->
+      expect_proven Fixtures.Prover.amortized_loop_over_an_owned_list);
+  Harness.test "a string's bytes move in amortized constant time" (fun () ->
+      expect_proven Fixtures.Prover.amortized_length_of_owned_bytes);
   Harness.test "a potential below zero" (fun () ->
       expect_not_proven "type Debt(owed: Int64)\n  cost potential owed\n" "prover.cost");
   Harness.test "a potential its invariant keeps at or above zero" (fun () ->
@@ -2405,6 +2448,11 @@ let () =
     (fun () ->
       expect_not_proven Fixtures.Prover.loop_pushing_values_of_a_type_parameter_within_a_small_bound
         "prover.cost");
+  Harness.test
+    "an amortized push onto a list that a callback returned pays for the list's potential"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.amortized_push_onto_a_list_that_a_callback_returns
+        "prover.cost");
   Harness.test "a push onto a list that a callback returned spends the list's potential" (fun () ->
       expect_not_proven Fixtures.Prover.loop_pushing_onto_a_list_that_a_callback_returns
         "prover.cost");
@@ -2561,7 +2609,15 @@ let () =
   Harness.test "a loop that pushes on one path onto a `mut` parameter is amortized linear"
     (fun () -> expect_proven Fixtures.Prover.loop_pushing_onto_a_parameter_in_one_branch);
   Harness.test "a loop that pushes on one path is counted by its cost clause" (fun () ->
-      expect_proven Fixtures.Prover.loop_pushing_in_one_branch_with_a_cost_clause)
+      expect_proven Fixtures.Prover.loop_pushing_in_one_branch_with_a_cost_clause);
+  Harness.test "an amortized loop names a mutating callee that states no amortized bound" (fun () ->
+      expect_a_message_saying
+        ~says:
+          "`drop_last` states no `cost amortized time`, so the prover counts `drop_last(mut kept)` \
+           at its plain cost plus the change in potential of the values it mutates or returns. The \
+           prover cannot bound that change by the values this loop does not mutate. Give \
+           `drop_last` a `cost amortized time` clause."
+        (list_diagnostics Fixtures.Prover.loop_calling_a_mutating_callee_without_an_amortized_bound))
 
 let () =
   Harness.test
@@ -3797,11 +3853,7 @@ let () =
         "prover.cost");
   Harness.test "a callback passed on spends its own allocations" (fun () ->
       expect_proven
-        (callbacks ^ Fixtures.Prover.apply_forwarding_a_callback_bounded_by_its_allocations));
-  Harness.test "a plain bound does not take a named function's amortized allocations" (fun () ->
-      expect_not_proven
-        (callbacks ^ Fixtures.Prover.apply_of_a_named_function_with_an_amortized_allocation_bound)
-        "prover.cost")
+        (callbacks ^ Fixtures.Prover.apply_forwarding_a_callback_bounded_by_its_allocations))
 
 let () =
   Harness.test "the allocations of a callback are within the bound that its type states" (fun () ->
@@ -3810,10 +3862,6 @@ let () =
     (fun () ->
       expect_not_proven
         Fixtures.Prover.callback_whose_type_states_its_allocations_counted_below_its_bound
-        "prover.cost");
-  Harness.test "a plain bound does not take the amortized allocations that a callback's type states"
-    (fun () ->
-      expect_not_proven Fixtures.Prover.callback_whose_type_states_amortized_allocations
         "prover.cost");
   Harness.test "a plain bound does not take the amortized time that a callback's type states"
     (fun () ->

@@ -238,7 +238,9 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
             if Well_known.is Plain trait then Impls.is_plain state.lookups ~list_bounds self
             else Impls.is_copyable state.lookups ~list_bounds self
           in
-          if not holds then
+          if Well_known.is Plain trait && interface.declares_potential then
+            Checking.report state (Potential_not_plain { at = Written written.id })
+          else if not holds then
             Checking.report state (Field_not_derivable { at = Written written.id; written = shown })
         end
       else begin

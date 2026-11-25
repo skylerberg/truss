@@ -416,6 +416,9 @@ public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: 
     let _ = mut self.replace_value_at(position, value: own value)
     proof {
       assert forall other: Key =>
+        self.model().contains_key(other) && other == key ==>
+          identical(other, old(self.keys.model())[position])
+      assert forall other: Key =>
         !(other == key) && old(self.model()).contains_key(other) ==>
           identical(self.model().get(other), old(self.model()).get(other))
       assert self.keys.length() == old(self.keys.length()) && self.length() == self.keys.length()

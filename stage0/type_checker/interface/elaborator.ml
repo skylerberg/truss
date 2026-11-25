@@ -1475,6 +1475,13 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                      opaque = (lookups.names.read_declaration key).visibility = Public_opaque;
                      is_tuple;
                      derives;
+                     declares_potential =
+                       List.exists
+                         (fun (clause : Syntax.type_clause) ->
+                           match clause.kind with
+                           | Potential _ -> true
+                           | Type_invariant _ | Derives _ -> false)
+                         clauses;
                    })
           | Constant { name; type_; _ } ->
               let context =

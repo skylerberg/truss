@@ -1,0 +1,8 @@
+type Credit(amount: UInt32)
+  cost potential amount
+
+fn Credit.set(mut self, amount: UInt32)
+  cost amortized time O(1)
+{
+  self.amount = amount
+}
