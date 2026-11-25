@@ -274,7 +274,9 @@ call a helper while the list is unsorted.
 
 | Rule | Reason |
 |---|---|
-| An invariant belongs to the whole type, never to one variant. | It can state a fact about the whole value, such as a tree being balanced, and a clause after the last variant is unambiguous. A condition on one variant is a `match` in the invariant, or a field whose type carries the condition. |
+| An invariant belongs to the whole type, never to one variant. | It can state a fact about the whole value, such as a bound that holds in every variant, and a clause after the last variant is unambiguous. A condition on one variant is a `match` in the invariant, or a field whose type carries the condition. |
+| An invariant cannot call a function whose proof depends on its type. | A contract is proven for arguments that meet their invariants, so a function that uses a value of the type assumes the invariant, and an invariant that reads its contract is a circular proof. With `invariant self.value() <= 10` and `ensures result <= 10` on `value`, `Counter(count: 500)` proved: the check of the new value assumed the postcondition, which was proven only of a value that already met the invariant. The cycle needs no `self`: `invariant through(count) >= 0` is circular when `through` builds a `Counter`, since a false postcondition of a method that `through` calls then proves from the invariant. |
+| An invariant cannot call a function on a part of the same type either, such as `rest[0].head()`. | Some such invariants are sound by induction on the value, and some are not: where `head` reaches a function that builds a larger value around its argument, a false postcondition of `head` proved. Telling the two apart needs every way back to the invariant to be on a part, which [Termination](#termination) asks of a recursive call and the prover compares only for calls. Until it compares the same for an invariant, the condition is stated over the part's fields, with a pattern. |
 | An invariant clause that calls a definition private to its type's module is opaque in other modules. | The clause can only be proven where its definition is visible, so other modules gain nothing from the definition, and each obligation that holds a value of the type would carry it: `Map`'s index invariant added about 1 MB of axioms to every obligation of `Set`, `json`, and `toml`, and some ran out of steps. A module that builds the value from its fields cannot prove the clause, so no module can make a value that breaks it. |
 | A type with an invariant can still expose its fields. | An invariant protects facts about the contents of a value. `opaque` does a different job: it controls where a value is constructed and hides the representation ([Visibility](#visibility)). |
 
@@ -1377,6 +1379,25 @@ the start.
 ### Bodies and contracts in proofs
 
 Rules: [Bodies and contracts in proofs](SPECIFICATION.md#bodies-and-contracts-in-proofs).
+
+**A cycle of proofs is one fact of the dependency graph.** The proof of a
+definition depends on its callees, on the functions its contract calls, on
+the functions that a contract taken from its trait calls, on the types
+whose values it uses, and, for a type, on the functions its invariant
+calls. Each is an edge that the definition's own pass lists, and a
+cycle is a strongly connected component of those edges, as a recursion is of
+calls. A check that searched other definitions for the cycle would read
+their bodies, and would be recomputed by every edit to one. The rule is in
+[Circular proofs](SPECIFICATION.md#circular-proofs).
+
+| Rule | Reason |
+|---|---|
+| A contract cannot call a function whose proof depends on the contract, outside a recursion. | The proof of a clause assumes the contract of each call in it. With `ensures result == n` and `ensures clamp(n) <= 3` on `clamp`, the second clause proved from itself, and `clamp(500) <= 3` held for every caller. A recursion is different: its body's calls form the cycle, and a measure shows that it ends. |
+| Two contracts cannot call each other's functions, even where both clauses are true. | `Set.count` ensured that every member is `self.element(position)` for some position, and `Set.element` requires `position < self.count()`. With the same two references, `element ensures result <= 3` and `count ensures forall position in 0..result => self.element(position) <= 3` proved of an `element` that returns 500: each proof assumed the other's clause. Accepting the true pair needs the dependencies of each clause, not of each contract. Until the graph holds those, a fact that relates two functions is a theorem that neither contract calls, such as `set.every_member_is_an_element`, and a proof that quantifies over a set's members calls it. |
+| The proof of an `impl`'s method depends on the functions that its trait's contract calls. | The method's proof assumes the `requires` that the trait declares, whether or not the `impl` restates it. With `requires self.limit() >= 0` on a trait's `measure`, and `ensures self.measure() <= 3` on an `impl`'s `limit`, a false `ensures result <= 3` of `measure` proved, and no clause written in the `impl` showed the way back. |
+| A value of a generic type cannot be used where the type's invariant, at those type arguments, calls a function whose proof depends on the user. | `Box[Item: Measured]` with `invariant item.measure() >= 0` names no `impl`, so its own proof sees no cycle. The cycle exists at `Box[Marker]`, where `Marker.measure` calls a function that takes a `Box[Marker]`, and is reported at that value. The dependency is on the functions that the invariant calls, not on every method of the `impl`: `Cursor.skip` returns a `Skip[Self]`, whose invariant calls no method of the cursor. |
+| The dependencies of a generic type's value follow its fields, and enter each type once on a chain of fields. | A value meets the invariants of its fields, so `Shelf[Marker]` with a field of type `Box[Marker]` depends on what the invariant of `Box` calls. A type that holds itself with other type arguments has a new instance at every step, and `Nested[Element]` with a field of type `Nested[List[Element]]` has no last one. At a second instance of a type on one chain, the dependency is every method that the instance's type arguments supply to its bounds, which is the dependency of a call to generic code. |
+| A cycle through an invariant is reported at the invariant alone. | Every function on the cycle whose contract calls another is on it too, and reporting each would hide the one clause to change. |
 
 **A caller's proof reads the contract of its callee, never its body.** A
 function whose body is its definition, such as `is_sorted`, states the body

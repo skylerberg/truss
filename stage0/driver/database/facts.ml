@@ -206,15 +206,18 @@ let call_node : Path.t list Tracker.fact =
     ~encode:(fun callees -> [ Tracker.marshal callees ])
     ~decode:(fun cells -> Tracker.unmarshal cells.(0))
 
-let recursion_group : Path.t list Tracker.fact =
-  Tracker.make_fact ~stage:Group_recursion ~table:"recursion_group" ~id_column:"path" ~fixed:[]
-    ~groups:[ (Recursion_group, [ "representative"; "members" ]) ]
+let make_group ~table target : Path.t list Tracker.fact =
+  Tracker.make_fact ~stage:Group_recursion ~table ~id_column:"path" ~fixed:[]
+    ~groups:[ (target, [ "representative"; "members" ]) ]
     ~encode:(fun members : Store.cell list ->
       [
         (match members with first :: _ -> Integer (Ids.of_path first) | [] -> Null);
         Tracker.marshal members;
       ])
     ~decode:(fun cells -> Tracker.unmarshal cells.(1))
+
+let recursion_group = make_group ~table:"recursion_group" Recursion_group
+let proof_group = make_group ~table:"proof_group" Proof_group
 
 let proof : Prover.proof Tracker.fact =
   make_marshaled ~stage:Prove ~table:"proof" ~id_column:"definition" Proof

@@ -61,6 +61,7 @@ type fact =
   | Generated_mir
   | Callees
   | Recursion_group
+  | Proof_group
   | Usage_check
   | Ownership
   | Dependency_use
@@ -108,7 +109,7 @@ val list_read_targets : fact -> fact list
 val lookups_of_definition : lookup list
 val facts_of_definition : fact list
 
-type marker = Reads | References | Calls | Instantiates | Grows | Claims
+type marker = Reads | References | Calls | Assumes | Instantiates | Grows | Claims
 
 val encode_markers : marker list -> int
 val has_marker : int -> marker -> bool
