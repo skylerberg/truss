@@ -983,7 +983,8 @@ let () =
     "a borrowed string in a tagged template is moved where the part type converts only from an \
      owned string" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.template_part_that_needs_an_owned_string
-        "ownership.not_owned");
+        "ownership.not_owned"
+        ~fixed:("Sentence\"hello ${name}\"", "Sentence\"hello ${name.copy()}\""));
   Harness.test "a `let` can bind a range of a temporary list" (fun () ->
       expect_fine Fixtures.Ownership.let_of_a_range_of_a_temporary);
   Harness.test "a `let` can bind an element of a temporary list" (fun () ->
