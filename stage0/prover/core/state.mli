@@ -65,6 +65,7 @@ type passed = {
   origin : Core.origin option;
   passed_place : passed_place option;
   type_ : Types.ty;
+  declared_type : Types.ty;
   term : Logic.term;
 }
 
@@ -138,6 +139,7 @@ type context = {
   mutable returns : (frame * Logic.term option) list;
   mutable enclosing_provides : Mir.provided list list;
   mutable instantiating : Path.t list;
+  mutable reading_requires : Path.t list;
   mutable axiomatizing : Logic.symbol list;
   axiom_clauses : unit Tables.Axiom_clause_table.t;
   mutable open_axioms : open_axiom list;

@@ -287,7 +287,7 @@ test "a template builds a value around the values written in it" {
   let name = "Ada \"the first\""
   let count: Int64 = 3
   let tags: List[json.Value] = [json.Value.from("a"), json.Value.from(true)]
-  let built = json.Value"""{"name": ${name.copy()}, "count": ${count}, "tags": ${own tags}, "nested": [ ${false} , null, 1.5]}"""
+  let built = json.Value"""{"name": ${name}, "count": ${count}, "tags": ${own tags}, "nested": [ ${false} , null, 1.5]}"""
   assert built.to_text() == "{\"name\":\"Ada \\\"the first\\\"\",\"count\":3,\"tags\":[\"a\",true],\"nested\":[false,null,1.5]}"
   let whole = json.Value"${count}"
   let inner = json.Value"""{"id": ${count}}"""

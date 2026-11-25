@@ -1,0 +1,24 @@
+fn first_length(parts: own List[view String]) -> UInt64
+  cost amortized time O(1)
+{
+  parts.length()
+}
+
+fn make(text: String) -> List[view String]
+  cost amortized time O(1)
+{
+  [text]
+}
+
+fn make_and_measure(text: String) -> UInt64
+  cost amortized time O(1)
+{
+  let parts = make(text)
+  first_length(own parts)
+}
+
+fn add(parts: mut List[view String], text: view String)
+  cost amortized time O(1)
+{
+  mut parts.push(text)
+}

@@ -1,0 +1,24 @@
+trait Measured {
+  fn limit(self) -> UInt64
+
+  fn measure(self) -> UInt64
+    requires self.limit() >= 0
+}
+
+type Marker(value: UInt64)
+
+impl Measured for Marker {
+  fn limit(self) -> UInt64
+    ensures result == 3
+    ensures self.measure() <= 3
+  {
+    3
+  }
+
+  fn measure(self) -> UInt64
+    ensures result == self.value
+    ensures result <= 3
+  {
+    self.value
+  }
+}

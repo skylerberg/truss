@@ -127,8 +127,8 @@ fn material_of(value: json.Value) -> Result[Material, Error]
     let x = bytes_of(value, name: "x")?
     let y = bytes_of(value, name: "y")?
     var point: List[UInt8] = [4]
-    mut point.append_slice(x)
-    mut point.append_slice(y)
+    mut point.append_items(x)
+    mut point.append_items(y)
     let public_key = match cryptography.EcdsaVerifyingKey.from_sec1(curve, bytes: point) {
       Some(key) => key
       None => return Err(failure("an EC key that is not a point on its curve"))

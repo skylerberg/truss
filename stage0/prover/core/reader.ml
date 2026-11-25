@@ -466,6 +466,8 @@ let evaluate_call_values context frame run (invocation : Invocation.t)
                  origin = find_operand_origin value;
                  passed_place = find_argument_place context run mode value;
                  type_ = compute_operand_type context frame value;
+                 declared_type =
+                   Facts.substitute_declared_type context frame (Mir.extract_operand_type value);
                  term =
                    Validity.run_reading_callback context (fun () ->
                        read_operand context frame run value);

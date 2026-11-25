@@ -115,31 +115,67 @@ let show_promiser = function
   | Prover.Trait_promiser -> "trait"
   | Capability_promiser -> "capability"
 
-let describe_constant_cycle ~cyclic { Prover.kind; path; omitted } =
+let name_dependency { Prover.kind; path; _ } =
+  match kind with Reads -> Path.show path | Calls | Uses -> show_callee path
+
+let show_dependency_verb = function Prover.Reads -> "reads" | Calls -> "calls" | Uses -> "uses"
+
+let describe_dependency ({ Prover.kind; omitted; _ } as dependency) =
+  let verb = show_dependency_verb kind and name = name_dependency dependency in
+  match omitted with
+  | None -> Printf.sprintf "This %s `%s`" verb name
+  | Some (Omitted_field field) ->
+      Printf.sprintf "This leaves out the field `%s`, whose default %s `%s`" field verb name
+  | Some (Omitted_argument parameter) ->
+      Printf.sprintf "This leaves out the argument `%s`, whose default %s `%s`" parameter verb name
+
+let describe_constant_cycle ~cyclic ({ Prover.kind; path; omitted } as dependency) =
   let cyclic_name = Path.show cyclic in
   let consequence = Printf.sprintf "so `%s` would be computed from itself." cyclic_name in
-  let verb, name, part =
-    match kind with
-    | Reads -> ("reads", Path.show path, "value")
-    | Calls -> ("calls", show_callee path, "code")
-    | Uses -> ("uses", show_callee path, "code")
-  in
-  let describe_omitted = function
-    | Prover.Omitted_field field -> Printf.sprintf "field `%s`" field
-    | Omitted_argument parameter -> Printf.sprintf "argument `%s`" parameter
-  in
+  let part = match kind with Reads -> "value" | Calls | Uses -> "code" in
+  let described = describe_dependency dependency in
   match (omitted, Path.equal path cyclic) with
-  | None, true -> Printf.sprintf "This %s `%s` in its own value, %s" verb name consequence
+  | None, true -> Printf.sprintf "%s in its own value, %s" described consequence
   | None, false ->
-      Printf.sprintf "This %s `%s`, whose %s depends on `%s`, %s" verb name part cyclic_name
-        consequence
-  | Some omitted, true ->
-      Printf.sprintf "This leaves out the %s, whose default %s `%s`, %s" (describe_omitted omitted)
-        verb name consequence
-  | Some omitted, false ->
+      Printf.sprintf "%s, whose %s depends on `%s`, %s" described part cyclic_name consequence
+  | Some _, true -> Printf.sprintf "%s, %s" described consequence
+  | Some _, false ->
+      Printf.sprintf "%s. The %s of `%s` depends on `%s`, %s" described part
+        (name_dependency dependency) cyclic_name consequence
+
+let describe_circular_proof = function
+  | Prover.Circular_clause { clause; type_; dependency } ->
+      let clause, verb =
+        match clause with
+        | Invariant_clause -> ("invariant", "proven")
+        | Potential_clause -> ("potential", "defined")
+      in
+      Printf.sprintf "%s, whose proof depends on the %s of `%s`, so the %s would be %s from itself."
+        (describe_dependency dependency) clause (Types.show type_) clause verb
+  | Circular_contract { cyclic; dependency } when Path.equal dependency.path cyclic ->
+      Printf.sprintf "%s in its own contract, so the contract would be proven from itself."
+        (describe_dependency dependency)
+  | Circular_contract { cyclic; dependency } ->
       Printf.sprintf
-        "This leaves out the %s, whose default %s `%s`. The %s of `%s` depends on `%s`, %s"
-        (describe_omitted omitted) verb name part name cyclic_name consequence
+        "%s, whose proof depends on the contract of `%s`, so the contract would be proven from \
+         itself."
+        (describe_dependency dependency) (show_callee cyclic)
+  | Circular_inherited_contract { cyclic; dependency } ->
+      Printf.sprintf
+        "The contract that this method takes from its trait %s `%s`, whose proof depends on the \
+         contract of `%s`, so the contract would be proven from itself."
+        (show_dependency_verb dependency.kind)
+        (name_dependency dependency) (show_callee cyclic)
+  | Circular_instance { type_; dependency; cyclic } when Path.equal dependency cyclic ->
+      Printf.sprintf
+        "A value of type `%s` is used here, and the invariant of that type or of a part of it \
+         depends on `%s`, so the invariant would be proven from itself."
+        (Types.show type_) (show_callee dependency)
+  | Circular_instance { type_; dependency; cyclic } ->
+      Printf.sprintf
+        "A value of type `%s` is used here. The invariant of that type or of a part of it depends \
+         on `%s`, whose proof depends on `%s`, so the invariant would be proven from itself."
+        (Types.show type_) (show_callee dependency) (show_callee cyclic)
 
 let describe_unbounded = function
   | Prover.Unstated_costs { metric; callees; editable; counts_units } ->
@@ -323,6 +359,7 @@ let describe_obligation = function
             that the recursion ends."
            (Path.show owner))
   | Constant_cycle { cyclic; dependency } -> say (describe_constant_cycle ~cyclic dependency)
+  | Circular_proof circular -> say (describe_circular_proof circular)
   | Precondition_may_fail { clause; call } ->
       tick clause @ (Description.Text " may not hold for " :: describe_call call) @ [ Text "." ]
   | Precondition_may_panic { clause; call } ->
@@ -549,6 +586,7 @@ let find_code : Prover.obligation -> Diagnostic.Code.prover = function
   | Loop_measure_may_not_decrease ->
       Termination
   | Constant_cycle _ -> Constant_cycle
+  | Circular_proof _ -> Circular_proof
   | Precondition_may_fail _ | Intrinsic_requirement _ | Callback_precondition _
   | Parameter_contract _ | Float_conversion _ | Not_a_scalar_value _ | Impl_precondition _
   | Impl_panic_condition _ | Callback_requirement _ | Value_contract _ ->

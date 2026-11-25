@@ -340,7 +340,7 @@ fn write_string(output: mut List[UInt8], text: String) {
     huffman_encode(mut output, bytes: bytes)
   } else {
     write_integer(mut output, flags: 0, prefix_bits: 7, value: bytes.length())
-    mut output.append_slice(bytes)
+    mut output.append_items(bytes)
   }
 }
 

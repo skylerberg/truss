@@ -664,10 +664,10 @@ let compute_arguments_potential_change context ~(before : State.frame) ~(after :
           | Some later ->
               Costs.plus total
                 (Costs.minus
-                   (compute_accessible_potential context after passed.type_ later)
-                   (compute_accessible_potential context before passed.type_ passed.term))
+                   (compute_accessible_potential context after passed.declared_type later)
+                   (compute_accessible_potential context before passed.declared_type passed.term))
           | None -> total)
-      | Own -> Costs.minus total (compute_potential context before passed.type_ passed.term)
+      | Own -> Costs.minus total (compute_potential context before passed.declared_type passed.term)
       | Read -> total)
     Costs.zero values
 

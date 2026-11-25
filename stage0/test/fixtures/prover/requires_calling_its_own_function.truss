@@ -1,0 +1,11 @@
+fn clamp(n: UInt64) -> UInt64
+  requires clamp(n) >= 0
+  ensures result == n
+  ensures result <= 3
+{
+  n
+}
+
+fn clamped() -> UInt64 {
+  clamp(100)
+}

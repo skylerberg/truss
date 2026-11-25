@@ -326,10 +326,10 @@ impl IntoCursor for Array[Element, count: UInt64] {
   }
 }
 
-public type SliceCursor[Element: Plain](elements: view List[Element], offset: UInt64)
+public type ViewCursor[Element: Plain](elements: view List[Element], offset: UInt64)
   invariant offset <= elements.length()
 
-impl FiniteCursor for SliceCursor[Element: Plain] {
+impl FiniteCursor for ViewCursor[Element: Plain] {
   fn remaining(self) -> UInt64
     ensures result == self.elements.length() - self.offset
     cost time O(1)
@@ -339,7 +339,7 @@ impl FiniteCursor for SliceCursor[Element: Plain] {
   }
 }
 
-impl Cursor for SliceCursor[Element: Plain] {
+impl Cursor for ViewCursor[Element: Plain] {
   type Element = Element
 
   fn next(mut self) -> Option[Element]
@@ -359,12 +359,12 @@ impl Cursor for SliceCursor[Element: Plain] {
   }
 }
 
-public fn List[Element: Plain].cursor(self) -> SliceCursor[Element]
+public fn List[Element: Plain].cursor(self) -> ViewCursor[Element]
   ensures result.remaining() == self.length()
   cost time O(1)
   cost allocations == 0
 {
-  SliceCursor(elements: self, offset: 0)
+  ViewCursor(elements: self, offset: 0)
 }
 
 impl Index for List[Element] {
@@ -622,7 +622,7 @@ public fn List[Element].append(mut self, other: own List[Element])
   }
 }
 
-public fn List[Element: Copyable].append_slice(mut self, items: List[Element])
+public fn List[Element: Copyable].append_items(mut self, items: List[Element])
   ensures self.length() == old(self.length()) + items.length()
   ensures identical(self.model(), old(self.model()).concatenate(items.model()))
   cost amortized time O(items.length() * (1 + time(Element.copy)))

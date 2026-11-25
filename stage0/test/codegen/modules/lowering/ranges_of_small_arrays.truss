@@ -16,7 +16,7 @@ fn Pair.all(self) -> view List[Int64] {
   self.cells
 }
 
-test "a slice of a small array, or of one in a small record, views the caller's array" {
+test "a range of a small array, or of one in a small record, views the caller's array" {
   let fixed: Array[Int64, 2] = [4, 5]
   let part = fixed
   assert churn(40) == 820
