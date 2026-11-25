@@ -17,3 +17,9 @@ let () =
          example/main.truss:5:11: -8\n\
          example/main.truss:6:11: -16\n\
          example/main.truss:7:11: -32\n\n")
+
+let () =
+  Codegen_support.test
+    "a missing field of a variant or a record takes its default when deserialized" (fun () ->
+      Codegen_support.expect_output Fixtures.Feature.defaulted_fields_deserialize
+        "test 0 passed\ntest 1 passed\ntest 2 passed\ntest 3 passed\ntest 4 passed\n")

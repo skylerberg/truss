@@ -120,8 +120,14 @@ and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syn
                             type_;
                             variant = variant_name.text;
                             candidates =
-                              List.map
-                                (fun (variant : Types.variant) -> variant.variant_name)
+                              List.filter_map
+                                (fun (variant : Types.variant) ->
+                                  let has_fields =
+                                    match variant.fields with Some (_ :: _) -> true | _ -> false
+                                  in
+                                  if has_fields = Option.is_some fields then
+                                    Some variant.variant_name
+                                  else None)
                                 variants;
                           }))
           | None ->

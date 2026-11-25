@@ -106,8 +106,7 @@
   documents
   file_system)
  (deps
-  (glob_files %{workspace_root}/*.md)
-  (glob_files_rec %{workspace_root}/standard/*.md)))
+  (glob_files %{workspace_root}/*.md)))
 
 (executable
  (name module_tests)

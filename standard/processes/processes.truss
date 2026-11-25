@@ -91,7 +91,7 @@ fn split_into_words(words: mut List[String], word: mut String, in_word: Bool, te
 }
 
 impl FromTemplate for Command {
-  type Part = Argument
+  type Interpolation = Argument
 
   fn is_valid_template(literals: List[text.Literal]) -> Bool
   {
@@ -129,8 +129,8 @@ impl FromTemplate for Command {
       decreases template.literals.length() - index
     {
       in_word = split_into_words(mut words, word: mut word, in_word: in_word, text: template.literals[index].text())
-      if index < template.parts.length() {
-        mut word.push(template.parts[index].text)
+      if index < template.interpolations.length() {
+        mut word.push(template.interpolations[index].text)
         in_word = true
       }
       index += 1

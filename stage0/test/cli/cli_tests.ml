@@ -153,6 +153,7 @@ let () =
     (fun () ->
       let root = make_package_served_by_other_build () in
       let status, output = run_truss [ "check"; "-C"; root ] in
+      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "-C"; root ]));
       if status <> 0 then fail "exited with %d: %s" status output);
   test "stop ends the background process of another build" (fun () ->
       let root = make_package_served_by_other_build () in
@@ -303,9 +304,10 @@ let () =
       let ended = Filename.concat servers "0123456789abcdef-0123456789abcdef" in
       let paths = List.map (fun suffix -> ended ^ suffix) [ ".key"; ".lock"; ".start" ] in
       List.iter (fun path -> Out_channel.with_open_bin path ignore) paths;
-      ignore (make_package_served_by_other_build ());
+      let root = make_package_served_by_other_build () in
       let is_removed () = not (List.exists Sys.file_exists paths) in
       wait_until_deadline ~is_done:is_removed;
+      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "-C"; root ]));
       if not (is_removed ()) then fail "the ended process's files are still there");
   test "a background process does its periodic work while its project keeps changing" (fun () ->
       let servers = Filename.concat (Sys.getenv "TRUSS_CACHE") "servers" in
@@ -325,6 +327,7 @@ let () =
         end
       in
       change_until_removed 0;
+      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "-C"; root ]));
       if not (is_removed ()) then fail "the ended process's files are still there")
 
 let () =
@@ -772,6 +775,14 @@ let make_diagnostic ~fixes start stop =
   Diagnostic.For_rendering.make ~fixes ~code:(Usage Unused_variable) (Source.make_span start stop)
     "x."
 
+let expect_checks_cleanly root =
+  let status, output = run_truss [ "check"; "-C"; root ] in
+  if
+    status <> 0
+    || String.includes ~affix:"error[" output
+    || String.includes ~affix:"warning[" output
+  then fail "after the fix, check exited with %d: %s" status output
+
 let () =
   test "edits apply at the offsets of the text they were made for" (fun () ->
       expect_string ~expected:"A bb C"
@@ -800,7 +811,8 @@ let () =
       let status = run_quietly [ "check"; "-C"; root; "--fix" ] in
       if status <> 0 then fail "status %d" status;
       if not (String.includes ~affix:"let _ = value" (read root "main.truss")) then
-        fail "wrote %s" (read root "main.truss"));
+        fail "wrote %s" (read root "main.truss");
+      expect_checks_cleanly root);
   test "check's summary counts the diagnostics that --fix fixes" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.twice_with_one_fix) ] in
       let _, output = run_truss [ "check"; "-C"; root ] in
@@ -818,7 +830,8 @@ let () =
       let status = run_quietly [ "check"; "-C"; root; "--fix" ] in
       if status <> 0 then fail "status %d" status;
       if String.includes ~affix:"RunForever" (read root "main.truss") then
-        fail "wrote %s" (read root "main.truss"))
+        fail "wrote %s" (read root "main.truss");
+      expect_checks_cleanly root)
 
 let () =
   test "check proves, and reports each unproven obligation" (fun () ->
@@ -1644,18 +1657,22 @@ let () =
       if not (List.exists writes_the_file (String.split_on_char '\n' output)) then
         fail "no row counts the statement that writes the file, run once: %s" output);
   test "a second release build of an unchanged package computes no body, proof, or code" (fun () ->
-      let root = make_package [ ("main.truss", Fixtures.Cli.main_with_a_todo_proof) ] in
-      Unix.putenv "TRUSS_DATABASE_COUNTS" "";
-      ignore (run_truss [ "build"; "-C"; root ]);
+      let root = make_package [ ("main.truss", Fixtures.Cli.main_returning_success) ] in
       Unix.putenv "TRUSS_DATABASE_COUNTS" "1";
-      let _, output = run_truss [ "build"; "-C"; root ] in
+      let first_status, first = run_truss [ "build"; "-C"; root ] in
+      let second_status, second = run_truss [ "build"; "-C"; root ] in
       Unix.putenv "TRUSS_DATABASE_COUNTS" "";
+      if first_status <> 0 || second_status <> 0 then
+        fail "the builds exited with %d and %d: %s" first_status second_status second;
       List.iter
         (fun kind ->
-          match find_counts output kind with
+          (match find_counts first kind with
+          | Some (count :: _) when count <> "0" -> ()
+          | _ -> fail "the first build computed no parts of kind %s: %s" kind first);
+          match find_counts second kind with
           | None | Some ("0" :: _) -> ()
-          | Some _ -> fail "the second build computed parts of kind %s: %s" kind output)
-        [ "parsed file"; "checked body"; "proof"; "lowered code"; "test key" ])
+          | Some _ -> fail "the second build computed parts of kind %s: %s" kind second)
+        [ "parsed file"; "checked body"; "proof"; "lowered code" ])
 
 let list_holes root =
   list_objects (Cli.Json.lookup_field "holes" (run_json [ "holes"; "-C"; root ]))

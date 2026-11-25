@@ -2058,7 +2058,7 @@ public fn Route.parse(text: String) -> Option[Route] {
 }
 
 impl FromTemplate for Route {
-  type Part = String
+  type Interpolation = String
 
   fn is_valid_template(literals: List[text.Literal]) -> Bool
   {

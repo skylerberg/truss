@@ -1026,7 +1026,7 @@ impl From[UInt64] for Component {
 }
 
 impl FromTemplate for Url {
-  type Part = Component
+  type Interpolation = Component
 
   fn is_valid_template(literals: List[text.Literal]) -> Bool
   {
@@ -1044,8 +1044,8 @@ impl FromTemplate for Url {
       decreases template.literals.length() - index
     {
       mut text.push(template.literals[index].text())
-      if index < template.parts.length() {
-        mut text.push(template.parts[index].text)
+      if index < template.interpolations.length() {
+        mut text.push(template.interpolations[index].text)
       }
       index += 1
     }

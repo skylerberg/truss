@@ -1,3 +1,0 @@
-type Nested[Element] =
-  | Leaf(value: Element)
-  | indirect Node(inner: Nested[List[Element]])

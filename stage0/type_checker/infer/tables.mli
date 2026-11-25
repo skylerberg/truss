@@ -64,7 +64,11 @@ type pattern =
 
 type template =
   | Interpolated of { displays : call list }
-  | Tagged of { from_template : call; part : Types.ty; part_conversions : call option list }
+  | Tagged of {
+      from_template : call;
+      interpolation_type : Types.ty;
+      conversions : call option list;
+    }
 
 type conversion =
   | From_never

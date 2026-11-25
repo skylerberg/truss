@@ -1,5 +1,0 @@
-fn f() -> Int64 {
-  var count: Int64 = 0
-  count = 1
-  count
-}

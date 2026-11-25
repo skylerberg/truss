@@ -1,3 +1,0 @@
-let Some(f) = (fn() { g() }) else {
-  return
-}

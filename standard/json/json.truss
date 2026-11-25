@@ -104,9 +104,9 @@ type ParsedValue(value: Value, end: UInt64)
 
 type ParsedString(text: String, end: UInt64)
 
-let part_marker: UInt8 = 1
+let interpolation_marker: UInt8 = 1
 
-let no_parts: List[Value] = []
+let no_interpolations: List[Value] = []
 
 fn with_position(bytes: List[UInt8], failure: Failure) -> ParseError
 {
@@ -363,8 +363,8 @@ fn parse_array(
   text: String,
   from: UInt64,
   depth: UInt64,
-  parts: List[Value],
-  next_part: mut UInt64,
+  interpolations: List[Value],
+  next_interpolation: mut UInt64,
   in_template: Bool,
 ) -> Result[ParsedValue, Failure]
   requires from < text.length()
@@ -386,8 +386,8 @@ fn parse_array(
       text,
       from: index,
       depth: depth - 1,
-      parts: parts,
-      next_part: mut next_part,
+      interpolations: interpolations,
+      next_interpolation: mut next_interpolation,
       in_template: in_template,
     )?
     let next = skip_whitespace(text, from: item.end)
@@ -410,8 +410,8 @@ fn parse_object(
   text: String,
   from: UInt64,
   depth: UInt64,
-  parts: List[Value],
-  next_part: mut UInt64,
+  interpolations: List[Value],
+  next_interpolation: mut UInt64,
   in_template: Bool,
 ) -> Result[ParsedValue, Failure]
   requires from < text.length()
@@ -444,8 +444,8 @@ fn parse_object(
       text,
       from: skip_whitespace(text, from: colon + 1),
       depth: depth - 1,
-      parts: parts,
-      next_part: mut next_part,
+      interpolations: interpolations,
+      next_interpolation: mut next_interpolation,
       in_template: in_template,
     )?
     let next = skip_whitespace(text, from: member.end)
@@ -468,8 +468,8 @@ fn parse_value(
   text: String,
   from: UInt64,
   depth: UInt64,
-  parts: List[Value],
-  next_part: mut UInt64,
+  interpolations: List[Value],
+  next_interpolation: mut UInt64,
   in_template: Bool,
 ) -> Result[ParsedValue, Failure]
   requires from <= text.length()
@@ -485,9 +485,23 @@ fn parse_value(
       return Err(Failure(kind: ParseErrorKind.TooDeep, offset: from))
     }
     return if byte == 123 {
-      parse_object(text, from: from, depth: depth, parts: parts, next_part: mut next_part, in_template: in_template)
+      parse_object(
+        text,
+        from: from,
+        depth: depth,
+        interpolations: interpolations,
+        next_interpolation: mut next_interpolation,
+        in_template: in_template,
+      )
     } else {
-      parse_array(text, from: from, depth: depth, parts: parts, next_part: mut next_part, in_template: in_template)
+      parse_array(
+        text,
+        from: from,
+        depth: depth,
+        interpolations: interpolations,
+        next_interpolation: mut next_interpolation,
+        in_template: in_template,
+      )
     }
   }
   if byte == 34 {
@@ -506,9 +520,13 @@ fn parse_value(
   if byte == 45 || (48 <= byte && byte <= 57) {
     return parse_number(text, from: from)
   }
-  if byte == part_marker && in_template {
-    let value = if next_part < parts.length() { parts[next_part].copy() } else { Value.Null }
-    next_part = next_part.saturating_add(1)
+  if byte == interpolation_marker && in_template {
+    let value = if next_interpolation < interpolations.length() {
+      interpolations[next_interpolation].copy()
+    } else {
+      Value.Null
+    }
+    next_interpolation = next_interpolation.saturating_add(1)
     return Ok(ParsedValue(value: own value, end: from + 1))
   }
   Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: from))
@@ -517,18 +535,18 @@ fn parse_value(
 fn parse_document(
   text: String,
   maximum_depth: UInt64,
-  parts: List[Value],
+  interpolations: List[Value],
   in_template: Bool,
 ) -> Result[Value, Failure]
 {
-  var next_part: UInt64 = 0
+  var next_interpolation: UInt64 = 0
   let start = skip_whitespace(text, from: 0)
   let step = parse_value(
     text,
     from: start,
     depth: maximum_depth,
-    parts: parts,
-    next_part: mut next_part,
+    interpolations: interpolations,
+    next_interpolation: mut next_interpolation,
     in_template: in_template,
   )?
   let end = skip_whitespace(text, from: step.end)
@@ -540,7 +558,7 @@ fn parse_document(
 
 public fn parse(text: String, maximum_depth: UInt64 = 128) -> Result[Value, ParseError]
 {
-  match parse_document(text, maximum_depth: maximum_depth, parts: no_parts, in_template: false) {
+  match parse_document(text, maximum_depth: maximum_depth, interpolations: no_interpolations, in_template: false) {
     Ok(value) => Ok(own value)
     Err(failure) => Err(with_position(text.bytes(), failure: failure))
   }
@@ -1004,13 +1022,18 @@ impl text.Parse for Value {
 }
 
 impl FromTemplate for Value {
-  type Part = Value
+  type Interpolation = Value
 
   fn is_valid_template(literals: List[text.Literal]) -> Bool
   {
     match template_text(literals) {
       Some(text) => {
-        parse_document(text, maximum_depth: text.length(), parts: no_parts, in_template: true) is Ok(_)
+        parse_document(
+          text,
+          maximum_depth: text.length(),
+          interpolations: no_interpolations,
+          in_template: true,
+        ) is Ok(_)
       }
       None => false
     }
@@ -1023,7 +1046,7 @@ impl FromTemplate for Value {
         match parse_document(
           text,
           maximum_depth: text.length(),
-          parts: template.parts,
+          interpolations: template.interpolations,
           in_template: true,
         ) {
           Ok(value) => value

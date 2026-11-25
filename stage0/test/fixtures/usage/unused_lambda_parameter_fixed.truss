@@ -1,3 +1,0 @@
-fn f(items: List[Int64]) -> List[Int64] {
-  items.map(fn(_) { 0 })
-}

@@ -2714,15 +2714,16 @@ let pattern = Regex"[a-z]+@${domain}"
   tag of another module is written after its module, as in
   `sql.SqlQuery"select 1"`.
 - A type is a tag by implementing the prelude trait `FromTemplate`. Its
-  associated type `Part` is the type each interpolated value is converted to,
-  and its method `from_template` takes a `Template[Part]`, which holds the
-  literal text as `text.Literal` values, which only the compiler makes, and
-  the converted values.
-- An interpolated value of a type other than `Part` is converted with the
-  `Part`'s impl of `From` for that type. A place of a `List` or a `String`
-  that is not passed `own` is converted from a view of it where `Part`
-  implements `From` for the view, as `Regex"^${name}"` converts from
-  `view String`: the place is read, not moved.
+  associated type `Interpolation` is the type each interpolated value is
+  converted to. Its method `from_template` takes a
+  `Template[Interpolation]`. The template's `literals` hold the literal text
+  as `text.Literal` values, which only the compiler makes, and its
+  `interpolations` hold the converted values.
+- An interpolated value of a type other than `Interpolation` is converted
+  by `Interpolation`'s impl of `From` for that type. A place of a `List` or
+  a `String` that is not passed `own` is converted from a view of it where
+  `Interpolation` implements `From` for the view, as `Regex"^${name}"`
+  converts from `view String`: the place is read, not moved.
 - A tag's `is_valid_template` states the rules for valid literal text, and
   `from_template` requires it.
 - The literal text of a template is a `List[text.Literal]` constant without
@@ -2738,13 +2739,13 @@ let pattern = Regex"[a-z]+@${domain}"
 
 ```truss
 impl FromTemplate for Regex {
-  type Part = RegexPart
+  type Interpolation = RegexInterpolation
 
   fn is_valid_template(literals: List[text.Literal]) -> Bool {
     todo
   }
 
-  fn from_template(template: Template[RegexPart]) -> Regex {
+  fn from_template(template: Template[RegexInterpolation]) -> Regex {
     todo
   }
 }

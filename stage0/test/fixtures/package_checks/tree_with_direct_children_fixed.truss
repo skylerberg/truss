@@ -1,3 +1,0 @@
-type Tree =
-  | Leaf
-  | indirect Node(left: Tree, right: Tree)

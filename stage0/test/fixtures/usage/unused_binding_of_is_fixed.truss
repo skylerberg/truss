@@ -1,3 +1,0 @@
-fn f(present: Option[Int64]) -> Bool {
-  present is Some(_)
-}

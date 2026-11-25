@@ -2375,7 +2375,7 @@ fn layout_parts(pattern: String) -> Option[List[LayoutPart]]
 }
 
 impl FromTemplate for Layout {
-  type Part = Never
+  type Interpolation = Never
 
   fn is_valid_template(literals: List[text.Literal]) -> Bool
   {

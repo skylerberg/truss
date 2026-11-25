@@ -1,5 +1,0 @@
-test "assign an element" {
-  var waits: List[UInt64] = [0, 0]
-  waits[1] = 5
-  assert waits == [0, 5]
-}

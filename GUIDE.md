@@ -5094,11 +5094,11 @@ A type becomes a tag by implementing the prelude trait `FromTemplate`. Its
 `is_valid_template` method states which literal text is valid, and the
 compiler runs it on each template's text when it checks the code, as it
 runs the condition of an `assert ... by evaluation`. The trait's associated
-type `Part` is the type that each interpolated value is converted to. Its
-`from_template` method builds the value from a `Template[Part]`: the
-literal text and the converted values. `from_template` requires
-`is_valid_template`, so it never receives invalid text. `truss show
-FromTemplate` prints the trait.
+type `Interpolation` is the type that each interpolated value is converted
+to. Its `from_template` method builds the value from a
+`Template[Interpolation]`: the literal text and the converted values.
+`from_template` requires `is_valid_template`, so it never receives invalid
+text. `truss show FromTemplate` prints the trait.
 
 ### Overloads by receiver mode
 

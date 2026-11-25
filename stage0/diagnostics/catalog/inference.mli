@@ -247,7 +247,7 @@ type t =
       name : string;
       receiver : Core.origin;
       arguments : Core.origin Description.range list;
-      traits : Types.trait_reference list;
+      traits : (Types.trait_reference * Language.Mode.t) list;
     }
   | Index_not_mutable of { at : Core.origin; by : mutation; self_type : Types.ty; assigns : bool }
   | View_written of { at : Core.origin; by : mutation; view : Core.origin }
@@ -351,10 +351,10 @@ type t =
   | Not_iterable_loop of { at : Core.origin; mode : Language.Mode.t; is_view : bool; type_ : shown }
   | Cursor_not_cursor of { at : Core.origin; type_ : Types.ty; cursor : Types.ty }
   | Not_displayable of { at : Core.origin; type_ : Types.ty }
-  | Template_part_conversion of {
+  | Interpolation_not_convertible of {
       at : Core.origin;
-      part_type : Types.ty;
-      part : Types.ty;
+      interpolated_type : Types.ty;
+      interpolation_type : Types.ty;
       tag_type : Types.ty;
     }
   | Not_a_tag of { at : Core.origin; tag_type : Types.ty }
