@@ -221,7 +221,7 @@ public fn Style.apply(self, text: String) -> String
   cost time O(text.length())
 {
   if self.foreground is None && self.background is None && !self.bold && !self.dim && !self.italic && !self.underline {
-    return text.to_string()
+    return text.copy()
   }
   var output: String = ""
   mut output.push("\u{1b}[0")

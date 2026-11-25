@@ -610,6 +610,7 @@ let () =
     String.sub text 0 at ^ " " ^ String.concat " " run ^ " "
     ^ String.sub text at (String.length text - at)
   in
+  Array.iter check_parsers_agree examples;
   for _ = 1 to !count do
     check_robust (make_random_text ());
     let several = ref (pick_example ()) in

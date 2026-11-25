@@ -14,7 +14,7 @@ impl Display for Error {
 }
 
 fn failure(message: String) -> Error {
-  Error(message: message.to_string())
+  Error(message: message.copy())
 }
 
 public type Material =
@@ -44,7 +44,7 @@ internal fn decoded(text: String) -> Result[List[UInt8], Error] {
 fn text_of(value: json.Value, name: String) -> Option[String] {
   match value.get(name) {
     Some(member) => match member.as_text() {
-      Some(text) => Some(text.to_string())
+      Some(text) => Some(text.copy())
       None => None
     }
     None => None
@@ -192,7 +192,7 @@ public fn Key.parse(text: String) -> Result[Key, Error]
 }
 
 fn put(members: mut Map[String, json.Value], name: String, text: String) {
-  mut members.insert(name.to_string(), value: json.Value.String(value: text.to_string()))
+  mut members.insert(name.copy(), value: json.Value.String(value: text.copy()))
 }
 
 fn put_bytes(members: mut Map[String, json.Value], name: String, bytes: List[UInt8]) {
@@ -326,7 +326,7 @@ public fn KeySet.parse(text: String) -> Result[KeySet, Error]
   }
   let items = match value.get("keys") {
     Some(keys) => match keys.as_items() {
-      Some(items) => items.to_list()
+      Some(items) => items.copy()
       None => return Err(failure("a key set whose \"keys\" is not an array"))
     }
     None => return Err(failure("a key set without \"keys\""))

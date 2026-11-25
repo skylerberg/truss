@@ -84,7 +84,7 @@ impl Display for Failure {
 }
 
 fn violation(code: UInt32, message: String) -> Failure {
-  Failure.Protocol(code: code, message: message.to_string())
+  Failure.Protocol(code: code, message: message.copy())
 }
 
 internal fn failure_code(failure: Failure) -> UInt32 {
@@ -230,7 +230,7 @@ fn strip_padding(payload: List[UInt8], flags: UInt8, skip: UInt64) -> Result[Lis
     return Err(violation(frame_size_error, message: "a frame too short for its priority"))
   }
   start += skip
-  Ok(payload[start..stop].to_list())
+  Ok(payload[start..stop].copy())
 }
 
 type PeerSettings(initial_window: Option[Int64], frame_size: Option[UInt64], table_size: Option[UInt64])

@@ -1180,7 +1180,7 @@ test "a range views part of a list" {
 
 `items[1..3]` is a `List[Int64]` that owns nothing: it views two elements of
 `items`. A view has every read-only method of the type that it views, and
-`middle.to_list()` makes a list that owns copies of the elements.
+`middle.copy()` makes a list that owns copies of the elements.
 
 A view that a function returns, or that a field or a `var` holds, says so in
 its type: `view List[Int64]` and `view String`. A `List` or a `String`
@@ -2236,7 +2236,7 @@ Truss has one text type, `String`: growable UTF-8 text. A function that only
 reads text takes a `String`, which copies nothing. A method that gives part
 of a text, such as `trim` or `split`, returns a `view String`: a view of the
 receiver's bytes, with every read-only method of a `String`. A `String` and
-a `view String` compare with `==` directly, and `viewed.to_string()` copies
+a `view String` compare with `==` directly, and `viewed.copy()` copies
 a view into a new `String`.
 
 **A string literal is a constant,** so reading it and binding it with `let`
@@ -2362,7 +2362,7 @@ output every run.
 fn count_words(text: String) -> Map[String, UInt64] {
   var counts: Map[String, UInt64] = [:]
   for word in text.split_whitespace() {
-    mut counts.update(word.to_string(), default: 0, change: fn(count) {
+    mut counts.update(word.copy(), default: 0, change: fn(count) {
       count = count.saturating_add(1)
     })
   }
@@ -2505,14 +2505,14 @@ type Setting(name: String, value: UInt64)
 fn parse_setting(line: String) -> Result[Setting, SettingError] {
   let parts = line.split_at_most("=", parts: 2)
   if parts.length() != 2 {
-    return Err(SettingError.MissingEquals(line.to_string()))
+    return Err(SettingError.MissingEquals(line.copy()))
   }
   let name = parts[0].trim()
   let text = parts[1].trim()
   let value = UInt64.parse(text).map_error(fn(_) {
-    SettingError.BadNumber(name: name.to_string(), text: text.to_string())
+    SettingError.BadNumber(name: name.copy(), text: text.copy())
   })?
-  Ok(Setting(name: name.to_string(), value))
+  Ok(Setting(name: name.copy(), value))
 }
 
 fn parse_settings(text: String) -> Result[List[Setting], SettingError] {
@@ -3654,11 +3654,11 @@ type StockRoom(counts: Map[String, UInt64])
 
 impl Inventory for StockRoom {
   fn count(self, item: String) -> UInt64 {
-    self.counts.get(item.to_string()).unwrap_or(0)
+    self.counts.get(item.copy()).unwrap_or(0)
   }
 
   fn take(mut self, item: String) -> Bool {
-    let key = item.to_string()
+    let key = item.copy()
     if self.counts.get(key) is Some(count) && count > 0 {
       self.counts[own key] = count - 1
       true

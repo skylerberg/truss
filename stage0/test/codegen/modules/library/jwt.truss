@@ -149,7 +149,7 @@ test "tokens that Node signed verify with their public JWKs, and Truss signs tok
 test "a token is refused for a key of the wrong kind, an expired time, a future start, a missing expiration, or another audience" uses Panic, RunForever {
   provide simulation.World.new() {
     let rsa_public = key(rs256_public)
-    let confused = jwk.Key(material: jwk.Material.Secret(bytes: rsa_public.to_text().bytes().to_list()))
+    let confused = jwk.Key(material: jwk.Material.Secret(bytes: rsa_public.to_text().bytes().copy()))
     match jwt.sign(Short(sub: "eve", exp: 4102444800), key: confused, algorithm: jwt.Algorithm.Hs256) {
       Ok(forged) => assert jwt.verify(forged, keys: [rsa_public.copy()], rules: jwt.Validation(algorithms: [jwt.Algorithm.Hs256, jwt.Algorithm.Rs256])) == Err(jwt.Error.Signature)
       Err(_) => assert false

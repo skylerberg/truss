@@ -37,8 +37,8 @@ test "a set holds views of one string" {
 }
 
 test "the greater of two views is a view, and generic code orders views" {
-  let first = "apple".to_string()
-  let second = "pear".to_string()
+  let first = "apple".copy()
+  let second = "pear".copy()
   assert later(first, second: second) == "pear"
   let apple: view String = first
   let pear: view String = second

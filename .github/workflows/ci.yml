@@ -18,6 +18,7 @@ env:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -67,6 +68,7 @@ jobs:
 
   prover-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -89,10 +91,11 @@ jobs:
         run: |
           opam exec -- dune build ./stage0/test/prover_tests.exe
           cd _build/default/stage0/test
-          "$GITHUB_WORKSPACE/.github/scripts/test-shares.sh" 4 ./prover_tests.exe
+          "$GITHUB_WORKSPACE/.github/scripts/test-shares.sh" 0 1 ./prover_tests.exe
 
   codegen:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -133,6 +136,7 @@ jobs:
 
   proofs:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -170,7 +174,7 @@ jobs:
         run: |
           opam exec -- dune build ./stage0/test/standard_library_tests.exe
           cd _build/default/stage0/test
-          "$GITHUB_WORKSPACE/.github/scripts/prove-share.sh" ${{ matrix.share }} ${{ strategy.job-total }}
+          "$GITHUB_WORKSPACE/.github/scripts/test-shares.sh" ${{ matrix.share }} ${{ strategy.job-total }} ./standard_library_tests.exe
 
       - if: github.event_name == 'push'
         uses: actions/cache/save@v6.1.0
@@ -180,6 +184,7 @@ jobs:
 
   thread-sanitizer:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
 

@@ -455,7 +455,7 @@ fn singularize(word: String) -> Option[String]
   let is_excluded = word.ends_with("ss") || word.ends_with("us") || word.ends_with("is") || word.ends_with("ses")
     || word.ends_with("xes") || word.ends_with("zes") || word.ends_with("ches") || word.ends_with("shes")
   if length > 1 && word.ends_with("s") && !is_excluded {
-    return Some(word.substring(0, to: length - 1).to_string())
+    return Some(word.substring(0, to: length - 1).copy())
   }
   None
 }
@@ -471,8 +471,8 @@ fn derive_parameter_name(callee: syntax.Expression) -> String
     _ => None
   }
   match own candidate {
-    Some(name) => if name != "it" && token.find_word(name).is_none() { name } else { "element".to_string() }
-    None => "element".to_string()
+    Some(name) => if name != "it" && token.find_word(name).is_none() { name } else { "element".copy() }
+    None => "element".copy()
   }
 }
 

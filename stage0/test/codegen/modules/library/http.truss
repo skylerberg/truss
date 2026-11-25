@@ -135,7 +135,7 @@ fn client_and_server() -> List[String]
       match http.send(
         http.Method.Post,
         url: url.Url"http://localhost:8080/echo",
-        body: body.bytes().to_list(),
+        body: body.bytes().copy(),
       ) {
         Ok(response) => mut seen.push("${response.status.code} ${response.text_body().unwrap_or("")}")
         Err(error) => mut seen.push("failed: ${error}")

@@ -805,7 +805,7 @@ fn continue_multi_line_raw(scanner: mut Scanner, builder: mut Builder, text: mut
           report_too_many_quotes(mut scanner, start: first, run: run, quotes: text.quotes, is_multi_line: true)
         }
         scanner.position = first + run
-        text.closing = Some(Closing.OwnLine(indentation: scanner.text(line_start, stop: first).to_string(), delimiter_start: first))
+        text.closing = Some(Closing.OwnLine(indentation: scanner.text(line_start, stop: first).copy(), delimiter_start: first))
         return StringProgress.Ended(ending: Ending.Closed, stop: first)
       }
       builder = make_builder(line_start)
@@ -871,7 +871,7 @@ fn compute_common_prefix(first: String, second: String) -> String
   while index < length && first.byte(index) == second.byte(index) {
     index += 1
   }
-  first.substring(0, to: index).to_string()
+  first.substring(0, to: index).copy()
 }
 
 fn compute_common_indentation(lines: List[Finished]) -> String
@@ -881,7 +881,7 @@ fn compute_common_indentation(lines: List[Finished]) -> String
   for line in lines {
     if find_leading_whitespace(line) is Some(prefix) {
       common = match common {
-        None => Some(prefix.to_string())
+        None => Some(prefix.copy())
         Some(so_far) => Some(compute_common_prefix(prefix, second: so_far))
       }
     }

@@ -16,16 +16,6 @@ val make_source : Project.package list -> Resolve.Names.source
 val list_declarations : Project.package list -> Path.module_ -> Resolve.Names.declaration list
 val list_codes : Diagnostic.t list -> string list
 
-val expect_error :
-  list_diagnostics:(string -> Diagnostic.t list) ->
-  ?fixed:string ->
-  ?alternatives:string list ->
-  ?occurrence:int ->
-  string ->
-  code:Diagnostic.Code.t ->
-  at:string ->
-  unit
-
 val run_check :
   check:(Project.package list -> Path.file -> Diagnostic.t list) ->
   Project.package list ->
@@ -44,12 +34,37 @@ val collect_first_core_nodes : string -> core_nodes
 val expect_no_diagnostics :
   check:(Project.package list -> Path.file -> Diagnostic.t list) -> (string * string) list -> unit
 
+val apply_edit : string -> string * string -> string
+
+val expect_codes :
+  check:(Project.package list -> Path.file -> Diagnostic.t list) ->
+  ?setup:((string * string) list -> Project.package list) ->
+  ?file:string ->
+  ?others:(string * string) list ->
+  string ->
+  string list ->
+  unit
+
+val expect_diagnostic :
+  list_diagnostics:(string -> Diagnostic.t list) ->
+  ?fixed:string * string ->
+  ?alternatives:(string * string) list ->
+  ?left_after_fix:string list ->
+  ?says:string ->
+  ?at:string * int ->
+  ?notes:(string * (string * int)) list ->
+  string ->
+  string ->
+  unit
+
 val expect_one_diagnostic :
   check:(Project.package list -> Path.file -> Diagnostic.t list) ->
   ?setup:((string * string) list -> Project.package list) ->
   ?file:string ->
   ?others:(string * string) list ->
-  ?fixed:string ->
+  ?fixed:string * string ->
+  ?alternatives:(string * string) list ->
+  ?left_after_fix:string list ->
   ?says:string ->
   ?at:string * int ->
   ?notes:(string * (string * int)) list ->

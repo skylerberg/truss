@@ -626,15 +626,23 @@ let describe_path_note = function
       [ Text "`"; Build.quote pattern; Text "` does not match, so the `else` runs" ]
   | Returns_early tried -> [ Text "`"; Build.quote tried; Text "` returns early" ]
 
+let show_stop_report report =
+  let sentence =
+    String.concat " " (List.map String.trim (String.split_on_char '\n' (String.trim report)))
+  in
+  if String.ends_with ~suffix:"." sentence then sentence else sentence ^ "."
+
 let describe_failed_runs failed_runs =
   List.map
     (function
       | Prover.Constant_run { path; report } ->
           Description.Text
             (Printf.sprintf " The evaluation of `%s` stopped, so its value is not known: %s"
-               (Path.show path) report)
+               (Path.show path) (show_stop_report report))
       | Assertion_run report ->
-          Text (Printf.sprintf " Its evaluation stopped, so its result is not known: %s" report))
+          Text
+            (Printf.sprintf " Its evaluation stopped, so its result is not known: %s"
+               (show_stop_report report)))
     failed_runs
 
 let describe_failure = function

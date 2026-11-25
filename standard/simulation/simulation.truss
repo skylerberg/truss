@@ -71,7 +71,7 @@ public fn Setup.with_input(own self, lines: own List[String]) -> Setup {
 
 public fn Setup.with_host(own self, name: String, address: network.IpAddress) -> Setup {
   var changed = own self
-  mut changed.hosts.push(Host(name: name.to_string(), address: address))
+  mut changed.hosts.push(Host(name: name.copy(), address: address))
   changed
 }
 
@@ -82,7 +82,7 @@ public fn Setup.with_program(
   output: own processes.Output,
 ) -> Setup {
   var changed = own self
-  mut changed.programs.push(Program(name: name.to_string(), arguments: own arguments, output: own output))
+  mut changed.programs.push(Program(name: name.copy(), arguments: own arguments, output: own output))
   changed
 }
 
@@ -529,7 +529,7 @@ internal fn State.send_to(
         other.open && other.local.port == address.port && same_host(other.local.address, second: address.address)
       })
       match receiver {
-        Some(index) => mut self.sockets[index].packets.push_back(Packet(bytes: bytes.to_list(), from: from))
+        Some(index) => mut self.sockets[index].packets.push_back(Packet(bytes: bytes.copy(), from: from))
         None => {}
       }
       Ok(bytes.length())
@@ -678,7 +678,7 @@ internal fn State.start(mut self, command: processes.Command) -> Result[Started,
     Some(error) => return Err(error)
     None => {}
   }
-  var words: List[String] = [command.program().to_string()]
+  var words: List[String] = [command.program().copy()]
   for argument in command.argument_list() {
     mut words.push(argument.copy())
   }
@@ -831,7 +831,7 @@ public fn World.output(self) -> String
   uses Tasks
 {
   intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
-    state.console.output().to_string()
+    state.console.output().copy()
   })
 }
 
@@ -839,7 +839,7 @@ public fn World.errors(self) -> String
   uses Tasks
 {
   intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
-    state.console.errors().to_string()
+    state.console.errors().copy()
   })
 }
 
@@ -1776,7 +1776,7 @@ impl Signals for World
 {
   fn wait(self, signals: List[processes.Signal]) -> Option[processes.Signal] {
     match self.perform(
-      Blocking.Catching(signals: signals.to_list()),
+      Blocking.Catching(signals: signals.copy()),
       reason: "waiting for a signal that has not been delivered",
     ) {
       Ok(Caught(signal)) => Some(signal)

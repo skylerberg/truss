@@ -89,6 +89,8 @@ val assume_element_potential_change :
   written:Logic.term ->
   unit
 
+val find_buffer : State.context -> Types.ty -> State.buffer option
+
 val declare_method_cost :
   State.context ->
   State.frame ->

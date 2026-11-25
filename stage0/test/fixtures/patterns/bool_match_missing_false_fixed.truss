@@ -1,6 +1,0 @@
-fn f(ready: Bool) -> Int64 {
-  match ready {
-    true => 1
-    false => todo
-  }
-}

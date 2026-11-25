@@ -18,7 +18,7 @@ let () =
          (calls FileRead.read) (== 3)) (cost (calls FileRead) (== 4)) (block))");
   Harness.test "parsing continues after a misspelled cost word" (fun () ->
       Parse_support.expect_error "fn f() cost tme O(1) {}" ~code:Cost_word ~at:"tme"
-        ~fixed:"fn f() cost time O(1) {}";
+        ~fixed:("tme", "time");
       let _, diagnostics = Parse_support.parse "fn f() cost tme fnite {}" in
       if Support.list_codes diagnostics <> [ "parser.cost_word"; "parser.cost_word" ] then
         Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
@@ -27,7 +27,7 @@ let () =
         "(trait T (type K))");
   Harness.test "a misspelled cost word has a fix" (fun () ->
       Parse_support.expect_error "fn f() cost allocation == 0 {}" ~code:Cost_word ~at:"allocation"
-        ~fixed:"fn f() cost allocations == 0 {}");
+        ~fixed:("allocation", "allocations"));
   Harness.test "cost potential belongs to a type" (fun () ->
       Parse_support.expect_error "fn f() cost potential x {}" ~code:Misplaced_potential
         ~at:"potential");
@@ -46,7 +46,7 @@ let () =
         ~at:"modifies");
   Harness.test "a missing body gets { todo }" (fun () ->
       Parse_support.expect_error "fn f() -> Int64\nfn g() {}" ~code:Missing_body ~at:"\nfn g"
-        ~fixed:"fn f() -> Int64 { todo }\nfn g() {}");
+        ~fixed:("Int64", "Int64 { todo }"));
   Harness.test "self only in a method" (fun () ->
       Parse_support.expect_error "fn f(self) {}" ~code:Misplaced_self ~at:"self");
   Harness.test "self only first" (fun () ->
@@ -105,7 +105,7 @@ let () =
         ~code:Misplaced_self ~at:"self");
   Harness.test "an impl's methods need bodies" (fun () ->
       Parse_support.expect_error Fixtures.Parser_rules.impl_method_without_a_body ~code:Missing_body
-        ~at:"\n}" ~fixed:Fixtures.Parser_rules.impl_method_without_a_body_fixed);
+        ~at:"\n}" ~fixed:("Instant", "Instant { todo }"));
   Harness.test "constants" (fun () ->
       Parse_support.expect_definition "public let UInt8.maximum: UInt8 = 255"
         "(public (let UInt8.maximum : UInt8 255))";
@@ -125,7 +125,7 @@ let () =
       Parse_support.expect_error "test \"a${b}\" {}" ~code:Interpolation_not_allowed ~at:"\"a");
   Harness.test "an impl takes no visibility" (fun () ->
       Parse_support.expect_error "public impl A for B {}" ~code:Misplaced_visibility ~at:"public"
-        ~fixed:"impl A for B {}");
+        ~fixed:("public impl", "impl"));
   Harness.test
     "an impl's trait arguments declare no generic parameter, as the recursive type check assumes"
     (fun () ->
@@ -167,10 +167,10 @@ let () =
         "(impl From[Array[UInt8, 32]] for Digest)");
   Harness.test "a test takes no visibility" (fun () ->
       Parse_support.expect_error "internal test \"a\" {}" ~code:Misplaced_visibility ~at:"internal"
-        ~fixed:"test \"a\" {}");
+        ~fixed:("internal test", "test"));
   Harness.test "a law's proof takes no visibility" (fun () ->
       Parse_support.expect_error "public proof A.b for C {}" ~code:Misplaced_visibility ~at:"public"
-        ~fixed:"proof A.b for C {}");
+        ~fixed:("public proof", "proof"));
   Harness.test "a tuple type" (fun () ->
       Parse_support.expect_definition "tuple type Span(start: UInt64, end: UInt64)"
         "(tuple type Span ((start: UInt64) (end: UInt64)))";
@@ -178,29 +178,29 @@ let () =
         "(public (tuple type Span ((start: UInt64) (end: UInt64))))");
   Harness.test "only a record with two or more fields is a tuple type" (fun () ->
       Parse_support.expect_error "tuple type Id(number: UInt64)" ~code:Misplaced_tuple ~at:"tuple"
-        ~fixed:"type Id(number: UInt64)";
+        ~fixed:("tuple type", "type");
       Parse_support.expect_error "tuple type Bit = Zero | One" ~code:Misplaced_tuple ~at:"tuple"
-        ~fixed:"type Bit = Zero | One");
+        ~fixed:("tuple type", "type"));
   Harness.test "only `tuple` comes before `type`" (fun () ->
       Parse_support.expect_error "tupel type Span(start: UInt64, end: UInt64)" ~code:Misplaced_tuple
-        ~at:"tupel" ~fixed:"tuple type Span(start: UInt64, end: UInt64)";
+        ~at:"tupel" ~fixed:("tupel", "tuple");
       Parse_support.expect_error "record type Span(start: UInt64, end: UInt64)"
-        ~code:Misplaced_tuple ~at:"record" ~fixed:"type Span(start: UInt64, end: UInt64)");
+        ~code:Misplaced_tuple ~at:"record" ~fixed:("record type", "type"));
   Harness.test "a tuple pattern takes no type annotation" (fun () ->
       Parse_support.expect_body_error "let low, high: Span = span" ~code:Unexpected_token ~at:":");
   Harness.test "only a type is opaque" (fun () ->
       Parse_support.expect_error "public opaque fn f() {}" ~code:Misplaced_opaque ~at:"opaque"
-        ~fixed:"public fn f() {}");
+        ~fixed:("opaque fn", "fn"));
   Harness.test "an impl with a visibility and a modifier has one diagnostic" (fun () ->
       Parse_support.expect_error "public opaque impl A for B {}" ~code:Misplaced_visibility
-        ~at:"public" ~fixed:"impl A for B {}")
+        ~at:"public" ~fixed:("public opaque impl", "impl"))
 
 let () =
   let expect_combination text ~at ~code ~fixes =
     match fixes with
     | fixed :: alternatives ->
-        Parse_support.expect_body_error ("let x = " ^ text) ~code ~at ~fixed:("let x = " ^ fixed)
-          ~alternatives:(List.map (( ^ ) "let x = ") alternatives)
+        Parse_support.expect_body_error ("let x = " ^ text) ~code ~at ~fixed:(text, fixed)
+          ~alternatives:(List.map (fun alternative -> (text, alternative)) alternatives)
     | [] -> Parse_support.expect_body_error ("let x = " ^ text) ~code ~at
   in
   Harness.test "bitwise and comparison: Rust's reading, then C's" (fun () ->
@@ -246,8 +246,9 @@ let () =
       expect_combination "0..10..20" ~at:"..20" ~code:Needs_parentheses ~fixes:[]);
   Harness.test "==> does not chain: Dafny's reading first" (fun () ->
       Parse_support.expect_error "fn f() requires a ==> b ==> c {}" ~code:Needs_parentheses
-        ~at:"==> c" ~fixed:"fn f() requires a ==> (b ==> c) {}"
-        ~alternatives:[ "fn f() requires (a ==> b) ==> c {}" ]);
+        ~at:"==> c"
+        ~fixed:("fn f() requires a ==> b ==> c {}", "fn f() requires a ==> (b ==> c) {}")
+        ~alternatives:[ ("fn f() requires a ==> b ==> c {}", "fn f() requires (a ==> b) ==> c {}") ]);
   Harness.test "parentheses settle a combination" (fun () ->
       Parse_support.expect_statement "let x = (flags & mask) == 0"
         "(let x (== (paren (& flags mask)) 0))");
@@ -257,10 +258,10 @@ let () =
   Harness.test "a quantifier elsewhere needs parentheses" (fun () ->
       Parse_support.expect_error "fn f() requires count + forall x in s => x {}"
         ~code:Needs_parentheses ~at:"forall"
-        ~fixed:"fn f() requires count + (forall x in s => x) {}");
+        ~fixed:("forall x in s => x", "(forall x in s => x)"));
   Harness.test "echo as an operand needs parentheses" (fun () ->
       Parse_support.expect_body_error "let x = count + echo x" ~code:Needs_parentheses ~at:"echo"
-        ~fixed:"let x = count + (echo x)");
+        ~fixed:("echo x", "(echo x)"));
   Harness.test "a fix's title spells the fixed expression only when it is short" (fun () ->
       let list_titles text =
         List.concat_map
@@ -343,7 +344,7 @@ let () =
         "(fn yields ((yield: Int64)) -> Int64 (block yield))");
   Harness.test "lends own" (fun () ->
       Parse_support.expect_error "fn T.part(own self) lends own Part {}" ~code:Lends_own
-        ~at:"own Part" ~fixed:"fn T.part(own self) lends Part {}");
+        ~at:"own Part" ~fixed:("own Part", "Part"));
   Harness.test "break outside a loop" (fun () ->
       Parse_support.expect_body_error "break" ~code:Misplaced_loop_exit ~at:"break");
   Harness.test "continue across a lambda" (fun () ->
@@ -421,12 +422,14 @@ let () =
 
 let () =
   Harness.test "i++" (fun () ->
-      Parse_support.expect_body_error "count++" ~code:Increment ~at:"++" ~fixed:"count += 1");
+      Parse_support.expect_body_error "count++" ~code:Increment ~at:"++"
+        ~fixed:("count++", "count += 1"));
   Harness.test "i--" (fun () ->
-      Parse_support.expect_body_error "items[0]--" ~code:Increment ~at:"--" ~fixed:"items[0] -= 1");
+      Parse_support.expect_body_error "items[0]--" ~code:Increment ~at:"--"
+        ~fixed:("items[0]--", "items[0] -= 1"));
   Harness.test "--x" (fun () ->
       Parse_support.expect_body_error "let y = --x" ~code:Double_negation ~at:"--"
-        ~fixed:"let y = -(-x)");
+        ~fixed:("let y = --x", "let y = -(-x)"));
   Harness.test "a fix that would add an error is withheld" (fun () ->
       let list_fixes text code =
         match
@@ -458,53 +461,60 @@ let () =
         ]);
   Harness.test "a comma after a match arm" (fun () ->
       Parse_support.expect_body_error "match a {\n  A => 1,\n  B => 2\n}" ~code:Match_arm_comma
-        ~at:"," ~fixed:"match a {\n  A => 1\n  B => 2\n}");
+        ~at:"," ~fixed:("A => 1,", "A => 1"));
   Harness.test "x ? a : b" (fun () ->
       Parse_support.expect_body_error "let y = ready ? first : second" ~code:Conditional_operator
-        ~at:"?" ~fixed:"let y = if ready { first } else { second }");
+        ~at:"?"
+        ~fixed:("ready ? first : second", "if ready { first } else { second }"));
   Harness.test "x ? a : b takes the whole left side as the condition" (fun () ->
       Parse_support.expect_body_error "let larger = a > b ? a : b" ~code:Conditional_operator
-        ~at:"?" ~fixed:"let larger = if a > b { a } else { b }");
+        ~at:"?"
+        ~fixed:("a > b ? a : b", "if a > b { a } else { b }"));
   Harness.test "let mut" (fun () ->
       Parse_support.expect_body_error "let mut count = 0" ~code:Let_mut ~at:"mut"
-        ~fixed:"var count = 0");
+        ~fixed:("let mut", "var"));
   Harness.test "&x" (fun () ->
-      Parse_support.expect_body_error "f(&x)" ~code:Address_of ~at:"&" ~fixed:"f(x)");
+      Parse_support.expect_body_error "f(&x)" ~code:Address_of ~at:"&" ~fixed:("f(&x)", "f(x)"));
   Harness.test "& between two names" (fun () ->
       Parse_support.expect_body_error "match& value {\n  _ => todo\n}" ~code:Address_of ~at:"&"
-        ~fixed:"match value {\n  _ => todo\n}");
+        ~fixed:("match&", "match"));
   Harness.test "&mut x" (fun () ->
       Parse_support.expect_body_error "sort(&mut items)" ~code:Address_of ~at:"&"
-        ~fixed:"sort(mut items)");
+        ~fixed:("&mut", "mut"));
   Harness.test "|x| x + 1" (fun () ->
       Parse_support.expect_body_error "let f = items.map(|item| item + 1)" ~code:Closure_bars
-        ~at:"|" ~fixed:"let f = items.map(fn(item) { item + 1 })");
+        ~at:"|"
+        ~fixed:("|item| item + 1", "fn(item) { item + 1 }"));
   Harness.test "|x| with a block" (fun () ->
       Parse_support.expect_body_error "let f = items.map(|item| { item })" ~code:Closure_bars
-        ~at:"|" ~fixed:"let f = items.map(fn(item) { item })");
+        ~at:"|" ~fixed:("|item|", "fn(item)"));
   Harness.test "|x| before let ... else" (fun () ->
       Parse_support.expect_body_error Fixtures.Parser_rules.closure_before_let_else
-        ~code:Closure_bars ~at:"||" ~fixed:Fixtures.Parser_rules.closure_before_let_else_fixed);
+        ~code:Closure_bars ~at:"||"
+        ~fixed:("let Some(f) = || g() else {", "let Some(f) = (fn() { g() }) else {"));
   Harness.test "|| x" (fun () ->
       Parse_support.expect_body_error "let f = run(|| 1)" ~code:Closure_bars ~at:"||"
-        ~fixed:"let f = run(fn() { 1 })");
+        ~fixed:("let f = run(|| 1)", "let f = run(fn() { 1 })"));
   Harness.test "Point { x: 1.0 }" (fun () ->
       Parse_support.expect_body_error "let p = Point { x: 1.0, y: 2.0 }" ~code:Brace_record
-        ~at:"{ x" ~fixed:"let p = Point(x: 1.0, y: 2.0)");
+        ~at:"{ x"
+        ~fixed:("Point { x: 1.0, y: 2.0 }", "Point(x: 1.0, y: 2.0)"));
   Harness.test "parse::<Int64>(text)" (fun () ->
       Parse_support.expect_body_error "let n = parse::<Int64>(text)" ~code:Turbofish ~at:"<"
-        ~fixed:"let n = parse[Int64](text)");
+        ~fixed:("parse::<Int64>", "parse[Int64]"));
   Harness.test "List<String> in a type" (fun () ->
       Parse_support.expect_body_error "let names: List<String> = []" ~code:Angle_brackets ~at:"<"
-        ~fixed:"let names: List[String] = []";
+        ~fixed:("List<String>", "List[String]");
       Parse_support.expect_body_error "let table: Map<String, List<Int64>> = [:]"
-        ~code:Angle_brackets ~at:"<" ~fixed:"let table: Map[String, List[Int64]] = [:]");
+        ~code:Angle_brackets ~at:"<"
+        ~fixed:("Map<String, List<Int64>>", "Map[String, List[Int64]]"));
   Harness.test "fn first<T> in a definition" (fun () ->
       Parse_support.expect_error
         "fn first<Element: Ordered>(items: List[Element]) -> Element { todo }" ~code:Angle_brackets
-        ~at:"<" ~fixed:"fn first[Element: Ordered](items: List[Element]) -> Element { todo }";
+        ~at:"<"
+        ~fixed:("first<Element: Ordered>", "first[Element: Ordered]");
       Parse_support.expect_error "type Box<Item>(item: Item)" ~code:Angle_brackets ~at:"<"
-        ~fixed:"type Box[Item](item: Item)");
+        ~fixed:("Box<Item>", "Box[Item]"));
   Harness.test "a comparison after a type is not angle brackets" (fun () ->
       let _, diagnostics = Parse_support.parse_body "let small = count as Int64 < limit" in
       if Support.list_codes diagnostics <> [ "parser.as_conversion" ] then
@@ -522,13 +532,12 @@ let () =
         [ "(let items (call (. error new)))" ]);
   Harness.test "a variant with its type in a pattern" (fun () ->
       Parse_support.expect_body_error Fixtures.Parser_rules.match_on_a_type_qualified_variant
-        ~code:Qualified_variant ~at:"Shape."
-        ~fixed:Fixtures.Parser_rules.match_on_a_type_qualified_variant_fixed;
+        ~code:Qualified_variant ~at:"Shape." ~fixed:("Shape.Circle", "Circle");
       Parse_support.expect_body_error "let empty = shape is geometry.Shape.Empty"
-        ~code:Qualified_variant ~at:"geometry.Shape." ~fixed:"let empty = shape is Empty");
+        ~code:Qualified_variant ~at:"geometry.Shape." ~fixed:("geometry.Shape.Empty", "Empty"));
   Harness.test "a variant with its module in a pattern" (fun () ->
       Parse_support.expect_body_error "let round = shape is geometry.Circle(radius)"
-        ~code:Qualified_variant ~at:"geometry." ~fixed:"let round = shape is Circle(radius)");
+        ~code:Qualified_variant ~at:"geometry." ~fixed:("geometry.Circle", "Circle"));
   Harness.test "a constant of a type in a pattern is not a variant" (fun () ->
       List.iter
         (fun text ->
@@ -538,11 +547,11 @@ let () =
         [ "let teapot = status is Status.teapot"; "let teapot = status is http.Status.teapot" ]);
   Harness.test "vec![...]" (fun () ->
       Parse_support.expect_body_error "let items = vec![1, 2]" ~code:Macro_call ~at:"!"
-        ~fixed:"let items = [1, 2]");
+        ~fixed:("vec!", ""));
   Harness.test "println!(...) has no fix" (fun () ->
       Parse_support.expect_body_error "println!(\"total: {}\", total)" ~code:Macro_call ~at:"!");
   Harness.test "todo!()" (fun () ->
-      Parse_support.expect_body_error "todo!()" ~code:Macro_call ~at:"!" ~fixed:"todo";
+      Parse_support.expect_body_error "todo!()" ~code:Macro_call ~at:"!" ~fixed:("todo!()", "todo");
       Parse_support.expect_body_error "unreachable!(\"never\")" ~code:Macro_call ~at:"!");
   Harness.test "a negation after a name is not a macro" (fun () ->
       let _, diagnostics = Parse_support.parse_body "let different = a != (b)" in
@@ -558,49 +567,54 @@ let () =
       Parse_support.expect_recovered_statements "let y = a + x ** 2" [ "(let y (+ a error))" ]);
   Harness.test "name := value" (fun () ->
       Parse_support.expect_body_error "count := 0" ~code:Short_declaration ~at:":="
-        ~fixed:"let count = 0";
+        ~fixed:("count := 0", "let count = 0");
       Parse_support.expect_body_error "point.x := 0" ~code:Short_declaration ~at:":=");
   Harness.test "value |> function" (fun () ->
       Parse_support.expect_body_error "let total = items |> sum" ~code:Pipe_operator ~at:"|>"
-        ~fixed:"let total = sum(items)";
+        ~fixed:("items |> sum", "sum(items)");
       Parse_support.expect_body_error "let total = items\n  |> list.sum" ~code:Pipe_operator
-        ~at:"|>" ~fixed:"let total = list.sum(items)";
+        ~at:"|>"
+        ~fixed:("let total = items\n  |> list.sum", "let total = list.sum(items)");
       Parse_support.expect_body_error "let total = items |> take(3)" ~code:Pipe_operator ~at:"|>");
   Harness.test "a lambda with annotations" (fun () ->
       Parse_support.expect_body_error "let double = fn(x: Int64) { x * 2 }" ~code:Lambda_annotation
-        ~at:": Int64" ~fixed:"let double = fn(x) { x * 2 }";
+        ~at:": Int64" ~fixed:("x: Int64", "x");
       Parse_support.expect_body_error "let double = fn(x) -> Int64 { x * 2 }"
-        ~code:Lambda_annotation ~at:" -> Int64" ~fixed:"let double = fn(x) { x * 2 }");
+        ~code:Lambda_annotation ~at:" -> Int64"
+        ~fixed:("let double = fn(x) -> Int64 { x * 2 }", "let double = fn(x) { x * 2 }"));
   Harness.test "List<String>.new() in an expression" (fun () ->
       Parse_support.expect_body_error "let names = List<String>.new()" ~code:Angle_brackets ~at:"<"
-        ~fixed:"let names = List[String].new()");
+        ~fixed:("List<String>", "List[String]"));
   Harness.test "a comparison of uppercase names is not angle brackets" (fun () ->
       let _, diagnostics = Parse_support.parse_body "let between = Low < value && value > High" in
       if Support.list_codes diagnostics <> [] then
         Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
   Harness.test "impl<T>" (fun () ->
       Parse_support.expect_error "impl<Item> Shown for Box[Item] {}" ~code:Impl_parameters ~at:"<"
-        ~fixed:"impl Shown for Box[Item] {}";
+        ~fixed:("impl<Item>", "impl");
       Parse_support.expect_error "impl<Item: Shown> Shown for Box[Item] {}" ~code:Impl_parameters
         ~at:"<");
   Harness.test "!value is Pattern needs parentheses" (fun () ->
       Parse_support.expect_body_error "let failed = !response is Ok(_)" ~code:Needs_parentheses
-        ~at:"is" ~fixed:"let failed = !(response is Ok(_))"
-        ~alternatives:[ "let failed = (!response) is Ok(_)" ];
+        ~at:"is"
+        ~fixed:("let failed = !response is Ok(_)", "let failed = !(response is Ok(_))")
+        ~alternatives:[ ("!response", "(!response)") ];
       Parse_support.expect_body_error "let off = !flags.ready is true" ~code:Needs_parentheses
-        ~at:"is" ~fixed:"let off = !(flags.ready is true)"
-        ~alternatives:[ "let off = (!flags.ready) is true" ]);
+        ~at:"is"
+        ~fixed:("flags.ready is true", "(flags.ready is true)")
+        ~alternatives:[ ("!flags.ready", "(!flags.ready)") ]);
   Harness.test "a negation that is not the whole left operand of is needs none" (fun () ->
       let _, diagnostics = Parse_support.parse_body Fixtures.Parser_rules.negations_around_is in
       if Support.list_codes diagnostics <> [] then
         Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
   Harness.test "a ?? b" (fun () ->
       Parse_support.expect_body_error "let name = user.name ?? \"guest\"" ~code:Null_coalescing
-        ~at:"?" ~fixed:"let name = user.name.unwrap_or(\"guest\")";
+        ~at:"?"
+        ~fixed:("name ?? \"guest\"", "name.unwrap_or(\"guest\")");
       Parse_support.expect_body_error "let port = settings.port ?: 80" ~code:Null_coalescing ~at:"?"
-        ~fixed:"let port = settings.port.unwrap_or(80)";
+        ~fixed:("port ?: 80", "port.unwrap_or(80)");
       Parse_support.expect_body_error "let total = a + b ?? 0" ~code:Null_coalescing ~at:"?"
-        ~fixed:"let total = (a + b).unwrap_or(0)");
+        ~fixed:("a + b ?? 0", "(a + b).unwrap_or(0)"));
   Harness.test "a ? after a call is still a try" (fun () ->
       let _, diagnostics =
         Parse_support.parse_body Fixtures.Parser_rules.question_marks_after_calls_and_names
@@ -609,10 +623,12 @@ let () =
         Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
   Harness.test "items.map { it.name }" (fun () ->
       Parse_support.expect_body_error "let names = items.map { it.name }" ~code:Trailing_lambda
-        ~at:"{ it" ~fixed:"let names = items.map(fn(item) { item.name })");
+        ~at:"{ it"
+        ~fixed:("map { it.name }", "map(fn(item) { item.name })"));
   Harness.test "it in an interpolation is renamed too" (fun () ->
       Parse_support.expect_body_error "let x = items.map { \"${it.name}\" }" ~code:Trailing_lambda
-        ~at:"{ \"" ~fixed:"let x = items.map(fn(item) { \"${item.name}\" })");
+        ~at:"{ \""
+        ~fixed:("map { \"${it.name}\" }", "map(fn(item) { \"${item.name}\" })"));
   Harness.test "a trailing lambda followed by more of its line has no fix" (fun () ->
       let _, diagnostics = Parse_support.parse_body "let total = items.map { it.size }.sum()" in
       Harness.expect_strings
@@ -622,22 +638,24 @@ let () =
         Harness.fail "a diagnostic has a fix");
   Harness.test "the lambda's parameter is a plain singular, or element" (fun () ->
       Parse_support.expect_body_error "let x = entries.map { it.key }" ~code:Trailing_lambda
-        ~at:"{ it" ~fixed:"let x = entries.map(fn(entry) { entry.key })";
+        ~at:"{ it"
+        ~fixed:("map { it.key }", "map(fn(entry) { entry.key })");
       Parse_support.expect_body_error "let x = statuses.map { it.code }" ~code:Trailing_lambda
-        ~at:"{ it" ~fixed:"let x = statuses.map(fn(element) { element.code })");
+        ~at:"{ it"
+        ~fixed:("map { it.code }", "map(fn(element) { element.code })"));
   Harness.test "x as Int64" (fun () ->
       Parse_support.expect_body_error "let n = size as Int64" ~code:As_conversion ~at:"as"
-        ~fixed:"let n = Int64.from_integer(size)"
-        ~alternatives:[ "let n = Int64.try_from_integer(size)" ]);
+        ~fixed:("size as Int64", "Int64.from_integer(size)")
+        ~alternatives:[ ("size as Int64", "Int64.try_from_integer(size)") ]);
   Harness.test "x as Float64" (fun () ->
       Parse_support.expect_body_error "let ratio = count as Float64" ~code:As_conversion ~at:"as"
-        ~fixed:"let ratio = count.to_float64()");
+        ~fixed:("count as Float64", "count.to_float64()"));
   Harness.test "loop" (fun () ->
       Parse_support.expect_body_error "loop {\n  todo\n}" ~code:Reserved_word ~at:"loop"
-        ~fixed:"while true {\n  todo\n}");
+        ~fixed:("loop", "while true"));
   Harness.test "const" (fun () ->
       Parse_support.expect_error "const pi: Float64 = 3.14" ~code:Reserved_word ~at:"const"
-        ~fixed:"let pi: Float64 = 3.14");
+        ~fixed:("const", "let"));
   Harness.test "elif" (fun () ->
       Parse_support.expect_body_error "if a {\n  f()\n}\nelif b {\n  g()\n}" ~code:Elif ~at:"elif"
-        ~fixed:"if a {\n  f()\n} else if b {\n  g()\n}")
+        ~fixed:("}\nelif b {", "} else if b {"))

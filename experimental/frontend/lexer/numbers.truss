@@ -32,7 +32,7 @@ fn parse_digits(digits: String, radix: UInt32) -> String
     if digits.is_empty() {
       return "0"
     }
-    return digits.substring(start, to: digits.length()).to_string()
+    return digits.substring(start, to: digits.length()).copy()
   }
   if digits.is_empty() {
     return "0"
@@ -168,7 +168,7 @@ fn remove_underscores(group: String) -> String
 type Issue(problem: NumberProblem, is_fixable: Bool)
 
 fn make_issue(code: String, message: String, start: UInt64, stop: UInt64, is_fixable: Bool = true) -> Issue {
-  Issue(problem: NumberProblem(code: code.to_string(), message: message.to_string(), start, stop), is_fixable)
+  Issue(problem: NumberProblem(code: code.copy(), message: message.copy(), start, stop), is_fixable)
 }
 
 fn make_underscore_issue(offset: UInt64) -> Issue
@@ -216,7 +216,7 @@ fn choose_problem(value: own NumberValue, issues: own List[Issue], fixed: String
     Some(problem) => CheckedNumber(
       own value,
       problem: Some(own problem),
-      fixes: [Replacement(title: "Write `${fixed}`", text: fixed.to_string())],
+      fixes: [Replacement(title: "Write `${fixed}`", text: fixed.copy())],
     )
   }
 }
@@ -636,7 +636,7 @@ fn derive(derivation: own Derivation, text: own String, applied: AppliedFixes, f
 type Examination = Final(checked: CheckedNumber) | Derived(derivation: Derivation, text: String, applied: AppliedFixes)
 
 fn make_problem(code: String, message: String, start: UInt64, stop: UInt64) -> NumberProblem {
-  NumberProblem(code: code.to_string(), message: message.to_string(), start, stop)
+  NumberProblem(code: code.copy(), message: message.copy(), start, stop)
 }
 
 fn translate(
@@ -727,7 +727,7 @@ fn examine(text: String, applied: AppliedFixes) -> Examination
       start: 0,
       stop: length,
     )
-    return derive(Derivation.HexadecimalFloat(own problem), text: text.substring(0, to: stop).to_string(), applied: applied, fix: NumberFix.HexadecimalFloat)
+    return derive(Derivation.HexadecimalFloat(own problem), text: text.substring(0, to: stop).copy(), applied: applied, fix: NumberFix.HexadecimalFloat)
   }
   if !applied.has(NumberFix.UppercasePrefix) && is_radix(text) && (text.byte(1) == 88 || text.byte(1) == 66 || text.byte(1) == 79) {
     let prefix = "0${text.substring(1, to: 2).to_ascii_lowercase()}"
@@ -756,7 +756,7 @@ fn examine(text: String, applied: AppliedFixes) -> Examination
     )
     return derive(
       Derivation.Suffixed(own problem, is_float: is_float_suffix(lowered_suffix)),
-      text: number.to_string(),
+      text: number.copy(),
       applied: applied,
       fix: NumberFix.TypeSuffix,
     )

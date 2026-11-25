@@ -1,3 +1,0 @@
-fn f() -> Option[Int64] {
-  None
-}

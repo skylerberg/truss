@@ -271,7 +271,7 @@ public fn serve_directory(
     Ok(metadata) => {
       if metadata.is_directory() {
         if !path.ends_with("/") {
-          var location = path.to_string()
+          var location = path.copy()
           mut location.push("/")
           match request.query() {
             Some(query) => {

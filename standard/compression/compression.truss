@@ -631,7 +631,7 @@ fn distance_symbol(distance: UInt64) -> UInt64
 type Node(weight: UInt64, parent: UInt64)
 
 fn code_lengths(frequencies: List[UInt64], limit: UInt64) -> List[UInt64] {
-  var weights: List[UInt64] = frequencies.to_list()
+  var weights: List[UInt64] = frequencies.copy()
   var used: UInt64 = 0
   for weight in weights {
     if weight > 0 {

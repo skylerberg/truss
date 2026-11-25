@@ -7,20 +7,15 @@ let check_file database file =
 
 let check packages = check_file (Support.make_database packages)
 let expect_proven text = Support.expect_no_diagnostics ~check [ ("app.main", text) ]
-let expect_not_proven text code = Support.expect_one_diagnostic ~check text code
+let expect_not_proven = Support.expect_one_diagnostic ~check
 
 let list_codes text =
   let packages = Support.setup [ ("app.main", text) ] in
   Support.list_codes (check packages (Support.parse_file "app.main"))
 
-let expect_only_codes text codes =
-  match list_codes text with
-  | [] -> Harness.fail "no diagnostics"
-  | actual ->
-      if List.exists (fun other -> not (List.mem other codes)) actual then
-        Harness.fail "%s" (String.concat ", " actual)
+let expect_codes = Support.expect_codes ~check
 
-let list_termination_failures text =
+let list_termination_messages text =
   let packages = Support.setup [ ("app.main", text) ] in
   List.filter_map
     (fun (diagnostic : Diagnostic.t) ->
@@ -29,7 +24,7 @@ let list_termination_failures text =
     (check packages (Support.parse_file "app.main"))
 
 let expect_one_termination_failure ~says text =
-  match list_termination_failures text with
+  match list_termination_messages text with
   | [ message ] ->
       if not (String.includes ~affix:says message) then
         Harness.fail "expected a message that says %S, got: %s" says message
@@ -48,7 +43,12 @@ let read_message text =
 
 let () =
   Harness.test "an addition that can overflow" (fun () ->
-      expect_not_proven Fixtures.Prover.addition_that_can_overflow "prover.overflow");
+      expect_not_proven Fixtures.Prover.addition_that_can_overflow "prover.overflow"
+        ~fixed:
+          ( "fn f(count: UInt8) -> UInt8 {",
+            "fn f(count: UInt8) -> UInt8\n  requires count <= UInt8.maximum - 1\n{" )
+        ~alternatives:
+          [ ("fn f(count: UInt8) -> UInt8 {", "fn f(count: UInt8) -> UInt8\n  uses Panic\n{") ]);
   Harness.test "an overflow's counterexample names the value" (fun () ->
       let actual = read_message Fixtures.Prover.addition_that_can_overflow in
       if not (String.includes ~affix:"`count` is 255" actual) then Harness.fail "message %S" actual);
@@ -97,18 +97,46 @@ let () =
   Harness.test "a check in an if rules out the overflow" (fun () ->
       expect_proven Fixtures.Prover.increment_checked_by_an_if);
   Harness.test "a division by a value that may be zero" (fun () ->
-      expect_not_proven Fixtures.Prover.division_by_a_value_that_may_be_zero "prover.division");
+      expect_not_proven Fixtures.Prover.division_by_a_value_that_may_be_zero "prover.division"
+        ~fixed:
+          ( "fn f(value: UInt32, divisor: UInt32) -> UInt32 {",
+            "fn f(value: UInt32, divisor: UInt32) -> UInt32\n  requires divisor != 0\n{" )
+        ~alternatives:
+          [
+            ( "fn f(value: UInt32, divisor: UInt32) -> UInt32 {",
+              "fn f(value: UInt32, divisor: UInt32) -> UInt32\n  uses Panic\n{" );
+          ]);
   Harness.test "a signed division by -1 can overflow" (fun () ->
-      expect_not_proven Fixtures.Prover.signed_division_by_an_unchecked_divisor "prover.overflow");
+      expect_not_proven Fixtures.Prover.signed_division_by_an_unchecked_divisor "prover.overflow"
+        ~fixed:
+          ( "requires divisor != 0\n{\n  value / divisor",
+            "requires divisor != 0\n\
+            \  requires value != Int64.minimum || divisor != -1\n\
+             {\n\
+            \  value / divisor" )
+        ~alternatives:[ ("requires divisor != 0", "uses Panic\n  requires divisor != 0") ]);
   Harness.test "a signed division rounds toward zero" (fun () ->
       expect_proven Fixtures.Prover.quotient_ensured_rounded_toward_zero;
       expect_not_proven Fixtures.Prover.quotient_ensured_rounded_down "prover.ensures");
   Harness.test "a remainder has the sign of its left operand" (fun () ->
       expect_proven Fixtures.Prover.remainder_of_negative_seven);
   Harness.test "a shift amount must be less than the width" (fun () ->
-      expect_not_proven Fixtures.Prover.shift_by_an_unbounded_amount "prover.shift");
+      expect_not_proven Fixtures.Prover.shift_by_an_unbounded_amount "prover.shift"
+        ~fixed:
+          ( "fn f(value: UInt32, amount: UInt32) -> UInt32 {",
+            "fn f(value: UInt32, amount: UInt32) -> UInt32\n  requires amount < 32\n{" )
+        ~alternatives:
+          [
+            ( "fn f(value: UInt32, amount: UInt32) -> UInt32 {",
+              "fn f(value: UInt32, amount: UInt32) -> UInt32\n  uses Panic\n{" );
+          ]);
   Harness.test "negating the least signed value overflows" (fun () ->
-      expect_not_proven Fixtures.Prover.negation_of_an_int8 "prover.overflow");
+      expect_not_proven Fixtures.Prover.negation_of_an_int8 "prover.overflow"
+        ~fixed:
+          ( "fn f(value: Int8) -> Int8 {",
+            "fn f(value: Int8) -> Int8\n  requires value != Int8.minimum\n{" )
+        ~alternatives:
+          [ ("fn f(value: Int8) -> Int8 {", "fn f(value: Int8) -> Int8\n  uses Panic\n{") ]);
   Harness.test "an unreachable that can be reached" (fun () ->
       expect_not_proven Fixtures.Prover.unreachable_that_can_be_reached "prover.unreachable");
   Harness.test "an unreachable after a check" (fun () ->
@@ -122,38 +150,38 @@ let () =
              ~affix:"It can also be checked first with an `if`, or done with the checked operation."
              actual)
       then Harness.fail "message %S" actual;
-      Support.expect_error ~list_diagnostics Fixtures.Prover.addition_that_can_overflow
-        ~code:(Prover Overflow) ~at:"count + 1"
+      Support.expect_one_diagnostic ~check Fixtures.Prover.addition_that_can_overflow
+        "prover.overflow" ~at:("count + 1", 1)
         ~fixed:
-          "fn f(count: UInt8) -> UInt8\n  requires count <= UInt8.maximum - 1\n{\n  count + 1\n}\n"
-        ~alternatives:[ "fn f(count: UInt8) -> UInt8\n  uses Panic\n{\n  count + 1\n}\n" ]);
-  Harness.test "the `uses Panic` fix joins the function's `uses` clause" (fun () ->
-      Support.expect_error ~list_diagnostics
-        Fixtures.Prover.overflow_in_a_function_with_other_clauses ~code:(Prover Overflow)
-        ~at:"value + 1"
-        ~fixed:
-          "fn increment(value: UInt8) -> UInt8\n\
-          \  uses Clock\n\
-          \  ensures true\n\
-          \  requires value <= UInt8.maximum - 1\n\
-           {\n\
-          \  value + 1\n\
-           }\n"
+          ( "fn f(count: UInt8) -> UInt8 {",
+            "fn f(count: UInt8) -> UInt8\n  requires count <= UInt8.maximum - 1\n{" )
         ~alternatives:
-          [
-            "fn increment(value: UInt8) -> UInt8\n\
-            \  uses Clock, Panic\n\
-            \  ensures true\n\
-             {\n\
-            \  value + 1\n\
-             }\n";
-          ]);
+          [ ("fn f(count: UInt8) -> UInt8 {", "fn f(count: UInt8) -> UInt8\n  uses Panic\n{") ]);
+  Harness.test "the `uses Panic` fix joins the function's `uses` clause" (fun () ->
+      Support.expect_one_diagnostic ~check Fixtures.Prover.overflow_in_a_function_with_other_clauses
+        "prover.overflow" ~at:("value + 1", 1)
+        ~fixed:
+          ( "ensures true\n{\n  value + 1",
+            "ensures true\n  requires value <= UInt8.maximum - 1\n{\n  value + 1" )
+        ~alternatives:[ ("Clock", "Clock, Panic") ]);
   Harness.test "a function that declares `uses Panic` lets its integer operations panic" (fun () ->
-      expect_only_codes Fixtures.Prover.failing_operations_of_a_function_that_may_panic
-        [ "prover.out_of_bounds"; "prover.requires" ]);
+      expect_codes Fixtures.Prover.failing_operations_of_a_function_that_may_panic
+        [
+          "prover.out_of_bounds";
+          "prover.out_of_bounds";
+          "prover.requires";
+          "prover.requires";
+          "prover.requires";
+        ]);
   Harness.test "a function that uses `Panic unless` a bound proves its operations where it holds"
     (fun () ->
-      expect_not_proven Fixtures.Prover.operation_that_panics_unless_a_bound_holds "prover.overflow";
+      expect_not_proven Fixtures.Prover.operation_that_panics_unless_a_bound_holds "prover.overflow"
+        ~fixed:
+          ( "uses Panic unless Tag: Checked\n{\n  value + 1",
+            "uses Panic unless Tag: Checked\n\
+            \  requires value <= UInt8.maximum - 1 when Tag: Checked\n\
+             {\n\
+            \  value + 1" );
       expect_proven Fixtures.Prover.operation_proven_where_a_bound_holds);
   Harness.test "expect returns the payload of an Option or a Result" (fun () ->
       expect_proven Fixtures.Prover.payloads_through_expect);
@@ -161,8 +189,7 @@ let () =
       expect_proven Fixtures.Prover.elements_lent_through_expect);
   Harness.test "a test that declares `Panic` lets its integer operations panic, as a function does"
     (fun () ->
-      expect_only_codes Fixtures.Prover.test_indexing_by_a_sum_from_a_loop
-        [ "prover.out_of_bounds" ]);
+      expect_codes Fixtures.Prover.test_indexing_by_a_sum_from_a_loop [ "prover.out_of_bounds" ]);
   Harness.test "a lambda passed as a function type without `Panic` proves its operations" (fun () ->
       match
         check
@@ -188,7 +215,10 @@ let () =
   Harness.test "an index through a bound is proven in a function that declares `uses Panic`"
     (fun () ->
       expect_not_proven Fixtures.Prover.index_through_a_bound_of_a_function_that_may_panic
-        "prover.requires");
+        "prover.requires"
+        ~fixed:
+          ( "uses Panic\n{\n  inspect(collection[key])",
+            "uses Panic\n  requires collection.contains_key(key)\n{\n  inspect(collection[key])" ));
   Harness.test "an unreachable is proven in a function that declares `uses Panic`" (fun () ->
       expect_not_proven Fixtures.Prover.unreachable_of_a_function_that_may_panic
         "prover.unreachable")
@@ -202,30 +232,35 @@ let () =
   Harness.test "an ensures that does not hold" (fun () ->
       expect_not_proven Fixtures.Prover.identity_ensured_larger "prover.ensures");
   Harness.test "an ensures holds at an early return" (fun () ->
-      expect_not_proven Fixtures.Prover.early_return_of_a_negative "prover.ensures");
+      expect_not_proven Fixtures.Prover.early_return_of_a_negative "prover.ensures"
+        ~fixed:
+          ( "ensures result >= 0\n{\n  if value < 0 { return value }",
+            "ensures result >= 0\n\
+            \  requires (value < 0) ==> (value >= 0)\n\
+             {\n\
+            \  if value < 0 { return value }" ));
   Harness.test "a callee's ensures is a fact after the call" (fun () ->
       expect_proven Fixtures.Prover.bump_ensures_after_the_call);
   Harness.test "a mut argument is mutated only through the callee's ensures" (fun () ->
       expect_not_proven Fixtures.Prover.touch_without_an_ensures "prover.ensures")
 
 let () =
-  let expect_one_cycle = Support.expect_one_diagnostic ~check in
   Harness.test "constants whose values read each other are an error at each of them" (fun () ->
       match list_codes "let first: Int64 = second + 1\nlet second: Int64 = first + 1\n" with
       | [ "prover.constant_cycle"; "prover.constant_cycle" ] -> ()
       | found -> Harness.fail "found [%s]" (String.concat "; " found));
   Harness.test "a constant whose value reads itself is an error" (fun () ->
-      expect_one_cycle "let count: Int64 = count + 1\n" "prover.constant_cycle"
+      expect_not_proven "let count: Int64 = count + 1\n" "prover.constant_cycle"
         ~says:"This reads `app.main.count` in its own value" ~at:("count", 2));
   Harness.test "a constant built with a field default that reads the constant is an error"
     (fun () ->
-      expect_one_cycle
+      expect_not_proven
         "type Point(x: Int64, y: Int64 = origin.x)\nlet origin: Point = Point(x: 1)\n"
         "prover.constant_cycle" ~says:"leaves out the field `y`, whose default reads");
   Harness.test
     "a constant built by a call that omits an argument whose default reads it is an error"
     (fun () ->
-      expect_one_cycle "fn scale(by: Int64 = limit) -> Int64 { by }\nlet limit: Int64 = scale()\n"
+      expect_not_proven "fn scale(by: Int64 = limit) -> Int64 { by }\nlet limit: Int64 = scale()\n"
         "prover.constant_cycle"
         ~says:
           "This leaves out the argument `by`, whose default reads `app.main.limit`, so \
@@ -236,7 +271,7 @@ let () =
         "type Point(x: Int64, y: Int64 = origin.x)\nlet origin: Point = Point(x: 1, y: 2)\n");
   Harness.test "a constant whose value calls a function that reads the constant is an error"
     (fun () ->
-      expect_one_cycle Fixtures.Prover.constant_read_by_the_function_it_calls
+      expect_not_proven Fixtures.Prover.constant_read_by_the_function_it_calls
         "prover.constant_cycle"
         ~says:
           "This calls `next_after_limit`, whose code depends on `app.main.limit`, so \
@@ -244,8 +279,8 @@ let () =
         ~at:("next_after_limit()", 2));
   Harness.test "a constant read by an impl that its value passes to generic code is an error"
     (fun () ->
-      expect_one_cycle Fixtures.Prover.constant_read_by_the_impl_it_supplies "prover.constant_cycle"
-        ~says:"This uses `Coin.weight`, whose code depends on");
+      expect_not_proven Fixtures.Prover.constant_read_by_the_impl_it_supplies
+        "prover.constant_cycle" ~says:"This uses `Coin.weight`, whose code depends on");
   Harness.test "a call in a constant's value meets its callee's requires" (fun () ->
       expect_not_proven Fixtures.Prover.constant_calling_outside_a_requires "prover.requires")
 
@@ -461,11 +496,6 @@ let () =
     Printf.sprintf "fn f() -> UInt64 {\n  proof {\n    assert %s by evaluation\n  }\n  %s\n}\n"
       condition result
   in
-  let expect_codes text expected =
-    match List.sort compare (list_codes text) with
-    | codes when codes = expected -> ()
-    | codes -> Harness.fail "codes [%s]" (String.concat "; " codes)
-  in
   Harness.test "an assertion by evaluation that holds proves its fact, and trusts compiled code"
     (fun () ->
       let text = accepted ^ assert_then "is_accepted(97)" "accept(97)" in
@@ -573,7 +603,7 @@ let () =
   Harness.test "an impl whose method's cost meets the restated cost is proven" (fun () ->
       expect_proven Fixtures.Prover.restated_cost_that_the_contract_keeps);
   Harness.test "a clause with a condition is proven with the condition's bounds" (fun () ->
-      expect_proven Fixtures.Prover.conditional_ensures_kept;
+      expect_proven Fixtures.Infer.clause_calling_a_method_of_its_condition;
       expect_not_proven Fixtures.Prover.conditional_ensures_broken "prover.ensures");
   Harness.test "a call has the clause whose condition its type arguments meet" (fun () ->
       expect_proven Fixtures.Prover.conditional_ensures_at_a_call_that_meets_it;
@@ -592,6 +622,12 @@ let () =
   Harness.test "a requires that a call leaves undecided is proven with its condition" (fun () ->
       Support.expect_one_diagnostic ~check
         Fixtures.Prover.conditional_requires_left_undecided_at_a_call "prover.requires"
+        ~fixed:
+          ( "uses Items.Uses\n{\n  first(mut items)",
+            "uses Items.Uses\n\
+            \  requires items.remaining() > 0 when Items: FiniteCursor\n\
+             {\n\
+            \  first(mut items)" )
         ~says:"`source.remaining() > 0` may not hold for this call to `first`.");
   Harness.test "a recursion measured under a condition ends where the condition holds" (fun () ->
       expect_proven Fixtures.Prover.recursion_measured_under_a_condition;
@@ -605,15 +641,23 @@ let () =
     (fun () -> expect_proven Fixtures.Prover.measure_proven_under_a_subtrait);
   Harness.test "a caller without `Panic` proves a callee's condition on values" (fun () ->
       expect_proven Fixtures.Prover.scaled_under_a_condition_on_its_argument;
-      Support.expect_error ~list_diagnostics Fixtures.Prover.scaled_without_a_proof_of_its_condition
-        ~code:(Prover Panic) ~at:"scaled(value)"
-        ~fixed:Fixtures.Prover.scaled_without_a_proof_of_its_condition_fixed
-        ~alternatives:[ Fixtures.Prover.scaled_without_a_proof_of_its_condition_panicking ]);
+      Support.expect_one_diagnostic ~check Fixtures.Prover.scaled_without_a_proof_of_its_condition
+        "prover.panic" ~at:("scaled(value)", 1)
+        ~fixed:
+          ( "requires value >= 0\n{\n  scaled(value)",
+            "requires value >= 0\n  requires value * 1000 <= Int64.maximum\n{\n  scaled(value)" )
+        ~alternatives:[ ("requires value >= 0", "uses Panic\n  requires value >= 0") ]);
   Harness.test "a function rules out every panic where its condition on values holds" (fun () ->
       expect_not_proven Fixtures.Prover.crash_where_the_condition_holds "prover.panic";
       expect_proven Fixtures.Prover.crash_where_the_condition_fails;
       expect_not_proven Fixtures.Prover.operation_that_fails_where_the_condition_holds
-        "prover.overflow");
+        "prover.overflow"
+        ~fixed:
+          ( "uses Panic unless count < 200\n{\n  count + 100",
+            "uses Panic unless count < 200\n\
+            \  requires count <= UInt8.maximum - 100\n\
+             {\n\
+            \  count + 100" ));
   Harness.test "a caller that panics unless a condition proves its callee's where it holds"
     (fun () ->
       match list_codes Fixtures.Prover.condition_passed_on_to_a_callee with
@@ -623,10 +667,19 @@ let () =
       expect_proven Fixtures.Prover.function_with_a_condition_on_values_in_a_specification;
       expect_not_proven
         Fixtures.Prover.function_with_a_condition_on_values_in_a_specification_outside_it
-        "prover.panic");
+        "prover.panic"
+        ~fixed:
+          ( "ensures text.byte(0) == 48 ==> result\n{\n  text.byte(0) == 48",
+            "ensures text.byte(0) == 48 ==> result\n\
+            \  requires 0 < text.length()\n\
+             {\n\
+            \  text.byte(0) == 48" ));
   Harness.test "expect needs no `Panic` where its value is proven present" (fun () ->
       expect_proven Fixtures.Prover.expect_of_a_value_proven_present;
-      expect_not_proven Fixtures.Prover.expect_of_a_value_that_may_be_absent "prover.panic");
+      expect_not_proven Fixtures.Prover.expect_of_a_value_that_may_be_absent "prover.panic"
+        ~fixed:
+          ( "fn first(values: List[Int64]) -> Int64 {",
+            "fn first(values: List[Int64]) -> Int64\n  uses Panic\n{" ));
   Harness.test "an impl's condition on values follows from its trait's" (fun () ->
       Support.expect_one_diagnostic ~check Fixtures.Prover.impl_condition_beyond_its_trait
         "prover.requires" ~says:"may not follow from the trait's condition after `Panic unless`";
@@ -635,6 +688,9 @@ let () =
     (fun () ->
       Support.expect_one_diagnostic ~check
         Fixtures.Prover.call_through_a_bound_beyond_the_trait_condition "prover.panic"
+        ~fixed:
+          ( "fn large[Shape: Sized](shape: Shape) -> Int64 {",
+            "fn large[Shape: Sized](shape: Shape) -> Int64\n  uses Panic\n{" )
         ~says:"may not hold for this call to `Sized.size`, so the call may panic");
   Harness.test "a loop that counts up to its bound ends" (fun () ->
       expect_proven Fixtures.Prover.while_loop_counting_up);
@@ -684,8 +740,7 @@ let () =
       expect_proven Fixtures.Prover.even_and_odd_with_measures);
   Harness.test "an impl that reaches itself through a generic function cannot be shown to end"
     (fun () ->
-      expect_only_codes Fixtures.Prover.check_reaching_itself_through_a_generic
-        [ "prover.termination" ])
+      expect_codes Fixtures.Prover.check_reaching_itself_through_a_generic [ "prover.termination" ])
 
 let () =
   List.iter
@@ -887,11 +942,11 @@ let () =
     (fun () -> expect_proven Fixtures.Prover.chain_searched_after_an_unchanged_chain);
   Harness.test "recursion on a part of a parameter does not end while an earlier one grows"
     (fun () ->
-      expect_one_termination_failure
+      expect_not_proven
         ~says:
           "This recursive call may not be on a part of the first of `grown` and `chain` that it \
            changes: give the function a `decreases` clause."
-        Fixtures.Prover.chain_counted_while_the_first_chain_grows);
+        Fixtures.Prover.chain_counted_while_the_first_chain_grows "prover.termination");
   Harness.test "a user's model is not known to be smaller than its value" (fun () ->
       expect_not_proven Fixtures.Prover.spin_on_a_knot_whose_model_holds_it "prover.termination");
   Harness.test "a match with guards ends in an unreachable that is proven" (fun () ->
@@ -915,7 +970,10 @@ let () =
   Harness.test "match binds a variant's fields" (fun () ->
       expect_proven (shape ^ Fixtures.Prover.match_on_a_shape));
   Harness.test "a variant's field is in its type's range, and no further" (fun () ->
-      expect_not_proven (shape ^ Fixtures.Prover.circle_radius_squared) "prover.overflow");
+      expect_not_proven
+        (shape ^ Fixtures.Prover.circle_radius_squared)
+        "prover.overflow"
+        ~fixed:("fn f(shape: Shape) -> Int64 {", "fn f(shape: Shape) -> Int64\n  uses Panic\n{"));
   Harness.test "a counterexample shows a variant by its name" (fun () ->
       let actual = read_message (shape ^ Fixtures.Prover.circle_radius_plus_one) in
       if not (String.includes ~affix:"`shape` is Circle(radius: 9223372036854775807)" actual) then
@@ -929,7 +987,10 @@ let () =
   Harness.test "is binds the parts it matches, where it is true" (fun () ->
       expect_proven Fixtures.Prover.is_some_positive);
   Harness.test "? continues with the value inside" (fun () ->
-      expect_not_proven Fixtures.Prover.question_mark_on_an_option "prover.overflow");
+      expect_not_proven Fixtures.Prover.question_mark_on_an_option "prover.overflow"
+        ~fixed:
+          ( "fn f(value: Option[UInt8]) -> Option[UInt8] {",
+            "fn f(value: Option[UInt8]) -> Option[UInt8]\n  uses Panic\n{" ));
   Harness.test "? returns an error unchanged" (fun () ->
       expect_proven Fixtures.Prover.question_mark_on_a_result)
 
@@ -1027,7 +1088,13 @@ let () =
      lender" (fun () ->
       expect_proven Fixtures.Prover.cell_assigned_by_an_arm_after_lending_its_part_mut);
   Harness.test "a lending method that lends a part it does not promise" (fun () ->
-      expect_not_proven Fixtures.Prover.couple_larger_lending_first "prover.ensures");
+      expect_not_proven Fixtures.Prover.couple_larger_lending_first "prover.ensures"
+        ~fixed:
+          ( "ensures result >= self.first && result >= self.second\n{\n  self.first",
+            "ensures result >= self.first && result >= self.second\n\
+            \  requires self.first >= self.first && self.first >= self.second\n\
+             {\n\
+            \  self.first" ));
   Harness.test "a loop over a user's collection gets the facts of its `count` and its `element`"
     (fun () -> expect_proven (couple ^ Fixtures.Prover.couple_loop_counted));
   Harness.test
@@ -1111,7 +1178,12 @@ let () =
    Harness.test "an assignment through an index to a key the collection does not accept" (fun () ->
        expect_not_proven
          (samples ^ Fixtures.Prover.samples_stored_without_a_bound)
-         "prover.requires"));
+         "prover.requires"
+         ~fixed:
+           ( "fn store(samples: mut Samples, position: UInt64) {",
+             "fn store(samples: mut Samples, position: UInt64)\n\
+             \  requires position < samples.values.length()\n\
+              {" )));
   Harness.test "a later arm sees an earlier arm's guard's mutations" (fun () ->
       expect_proven Fixtures.Prover.match_guard_bumping_a_count);
   Harness.test "assigning an element mutates only that element" (fun () ->
@@ -1203,13 +1275,19 @@ let () =
    Harness.test "another module does not know an invariant clause that names a private definition"
      (fun () ->
        Support.expect_one_diagnostic ~check ~others:[ counter ]
-         Fixtures.Prover.counter_read_by_another_module "prover.ensures");
+         Fixtures.Prover.counter_read_by_another_module "prover.ensures"
+         ~fixed:
+           ( "ensures result <= 10\n{\n  value.count",
+             "ensures result <= 10\n  requires value.count <= 10\n{\n  value.count" ));
    Harness.test "another module cannot prove an invariant clause that names a private definition"
      (fun () ->
        Support.expect_one_diagnostic ~check ~others:[ counter ]
          Fixtures.Prover.counter_built_by_another_module "prover.invariant"));
   Harness.test "building a value must meet its invariant" (fun () ->
-      expect_not_proven (span ^ Fixtures.Prover.span_built_without_its_invariant) "prover.invariant");
+      expect_not_proven
+        (span ^ Fixtures.Prover.span_built_without_its_invariant)
+        "prover.invariant"
+        ~fixed:("fn f(low: Int64) -> Span {", "fn f(low: Int64) -> Span\n  requires low <= 0\n{"));
   Harness.test "building a value that meets its invariant" (fun () ->
       expect_proven (span ^ Fixtures.Prover.span_built_within_its_invariant));
   Harness.test "a derived Default must meet the invariant" (fun () ->
@@ -1237,12 +1315,19 @@ let () =
         (span ^ Fixtures.Prover.span_var_in_a_loop_body_past_its_invariant)
         "prover.invariant");
   Harness.test "a with must meet the invariant" (fun () ->
-      expect_not_proven (span ^ Fixtures.Prover.span_updated_past_its_invariant) "prover.invariant";
+      expect_not_proven
+        (span ^ Fixtures.Prover.span_updated_past_its_invariant)
+        "prover.invariant"
+        ~fixed:
+          ("fn f(span: Span) -> Int64 {", "fn f(span: Span) -> Int64\n  requires 10 <= span.high\n{");
       expect_proven (span ^ Fixtures.Prover.span_updated_within_its_invariant));
   Harness.test "a with through a path must meet the invariant of the record it rebuilds" (fun () ->
       expect_not_proven
         (span ^ Fixtures.Prover.interval_updated_past_its_span_invariant)
-        "prover.invariant");
+        "prover.invariant"
+        ~fixed:
+          ( "fn f(interval: Interval) -> Int64 {",
+            "fn f(interval: Interval) -> Int64\n  requires 10 <= interval.span.high\n{" ));
   Harness.test "a var may break its invariant before its scope ends" (fun () ->
       expect_proven (span ^ Fixtures.Prover.span_var_restored_before_its_scope_ends));
   Harness.test "a var changed through a field passed mut must meet its invariant" (fun () ->
@@ -1354,7 +1439,10 @@ let () =
   Harness.test "a string's length plus one, a sum of two, and the room below the maximum fit"
     (fun () -> expect_proven Fixtures.Prover.sums_of_lengths_that_fit);
   Harness.test "a sum of three string lengths may overflow" (fun () ->
-      expect_not_proven Fixtures.Prover.sum_of_three_lengths "prover.overflow");
+      expect_not_proven Fixtures.Prover.sum_of_three_lengths "prover.overflow"
+        ~fixed:
+          ( "fn f(first: String, second: String, third: String) -> UInt64 {",
+            "fn f(first: String, second: String, third: String) -> UInt64\n  uses Panic\n{" ));
   Harness.test "pushing text onto a string adds its length" (fun () ->
       expect_proven Fixtures.Prover.string_push);
   Harness.test "a string pattern matches text with its bytes" (fun () ->
@@ -1368,7 +1456,12 @@ let () =
   Harness.test "a tagged template meets its tag's requires" (fun () ->
       expect_proven (shout ^ Fixtures.Prover.shout_of_a_literal));
   Harness.test "a call of from_template through a bound must meet the tag's check" (fun () ->
-      expect_not_proven Fixtures.Prover.from_template_through_a_bound "prover.requires");
+      expect_not_proven Fixtures.Prover.from_template_through_a_bound "prover.requires"
+        ~fixed:
+          ( "fn make[Made: FromTemplate](template: Template[Made.Part]) -> Made {",
+            "fn make[Made: FromTemplate](template: Template[Made.Part]) -> Made\n\
+            \  requires Made.is_valid_template(template.literals)\n\
+             {" ));
   Harness.test "a call of from_template through a bound meets the check its caller requires"
     (fun () -> expect_proven Fixtures.Prover.from_template_through_a_bound_that_requires_the_check);
   Harness.test "a tagged template whose check gives false fails every time it is reached" (fun () ->
@@ -1560,7 +1653,17 @@ let swap = Fixtures.Prover.exchange
 
 let () =
   Harness.test "two elements lent together must be different elements" (fun () ->
-      expect_not_proven (swap ^ Fixtures.Prover.exchange_of_two_elements) "prover.disjoint");
+      expect_not_proven
+        (swap ^ Fixtures.Prover.exchange_of_two_elements)
+        "prover.disjoint"
+        ~fixed:
+          ( "requires first < items.length() && second < items.length()\n\
+             {\n\
+            \  exchange(mut items[first], second: mut items[second])",
+            "requires first < items.length() && second < items.length()\n\
+            \  requires !(first == second)\n\
+             {\n\
+            \  exchange(mut items[first], second: mut items[second])" ));
   Harness.test "two different elements can be lent together" (fun () ->
       expect_proven (swap ^ Fixtures.Prover.exchange_of_distinct_elements));
   Harness.test "elements of two ranges lent together must be in ranges that do not overlap"
@@ -1590,13 +1693,25 @@ let () =
     (fun () ->
       expect_not_proven Fixtures.Prover.element_of_a_range_pushed_onto_itself "prover.disjoint");
   Harness.test "parallel branches that mutate elements must mutate different ones" (fun () ->
-      expect_not_proven Fixtures.Prover.parallel_branches_assigning_two_elements "prover.disjoint")
+      expect_not_proven Fixtures.Prover.parallel_branches_assigning_two_elements "prover.disjoint"
+        ~fixed:
+          ( "requires first < items.length() && second < items.length()\n{\n  parallel {",
+            "requires first < items.length() && second < items.length()\n\
+            \  requires !(first == second)\n\
+             {\n\
+            \  parallel {" ))
 
 let () =
   Harness.test "self mutated on one path is joined with the other" (fun () ->
       expect_not_proven Fixtures.Prover.box_set_on_one_path "prover.ensures");
   Harness.test "a lending method's `ensures` holds for the part lent on each path" (fun () ->
-      expect_not_proven Fixtures.Prover.maybe_part_lent_on_each_path "prover.ensures")
+      expect_not_proven Fixtures.Prover.maybe_part_lent_on_each_path "prover.ensures"
+        ~fixed:
+          ( "ensures result == self.value\n{\n  if self.present {",
+            "ensures result == self.value\n\
+            \  requires (!(self.present)) ==> (self.other == self.value)\n\
+             {\n\
+            \  if self.present {" ))
 
 let () =
   Harness.test "a loop forgets a list it mutates through a method" (fun () ->
@@ -1653,7 +1768,7 @@ let () =
       expect_proven (constant_step ^ Fixtures.Prover.nested_range_loops_of_quadratic_time));
   Harness.test "a loop whose iterations cost their index is quadratic" (fun () ->
       expect_proven Fixtures.Prover.work_with_iterations_costing_their_index);
-  Harness.test "a loop over a list runs once per element" (fun () ->
+  Harness.test "a loop over a list takes time linear in its length" (fun () ->
       expect_proven (constant_step ^ Fixtures.Prover.list_loop_of_linear_time));
   Harness.test "an iteration's cost is the larger of its branches'" (fun () ->
       expect_proven Fixtures.Prover.loop_with_branches_of_different_costs);
@@ -1941,7 +2056,8 @@ let () =
   Harness.test "a constant, a field default, or a parameter default left todo is read" (fun () ->
       expect_proven Fixtures.Prover.values_left_todo);
   Harness.test "a constant left todo has an unknown value" (fun () ->
-      expect_not_proven Fixtures.Prover.increment_of_a_todo_constant "prover.overflow");
+      expect_not_proven Fixtures.Prover.increment_of_a_todo_constant "prover.overflow"
+        ~fixed:("fn above_limit() -> Int64 {", "fn above_limit() -> Int64\n  uses Panic\n{"));
   Harness.test "an impl's laws wait while one of its methods is not written" (fun () ->
       expect_proven Fixtures.Prover.meters_equal_left_todo);
   Harness.test "a type that contains itself through a map's values is read" (fun () ->
@@ -1952,16 +2068,31 @@ let () =
       expect_not_proven Fixtures.Prover.same_lambda_in_range "prover.ensures");
   Harness.test "a lambda's result is in range only for arguments whose fields are in range"
     (fun () ->
-      expect_not_proven Fixtures.Prover.lambda_reading_a_field_passed_to_a_function "prover.ensures");
+      expect_not_proven Fixtures.Prover.lambda_reading_a_field_passed_to_a_function "prover.ensures"
+        ~fixed:
+          ( "ensures result <= 0\n{\n  let _ = ignore(fn(e) { e.value })",
+            "ensures result <= 0\n  requires x <= 0\n{\n  let _ = ignore(fn(e) { e.value })" ));
   Harness.test "an uncalled lambda's calls show nothing of the path" (fun () ->
-      expect_not_proven Fixtures.Prover.lambda_calling_a_hang_uncalled "prover.ensures");
+      expect_not_proven Fixtures.Prover.lambda_calling_a_hang_uncalled "prover.ensures"
+        ~fixed:
+          ( "ensures result <= 0\n{\n  if x > 0 {",
+            "ensures result <= 0\n  requires x <= 0\n{\n  if x > 0 {" ));
   Harness.test "a lambda whose arguments cannot meet its requires shows nothing of the path"
     (fun () ->
-      expect_not_proven Fixtures.Prover.each_index_with_an_unreachable_lambda "prover.ensures");
+      expect_not_proven Fixtures.Prover.each_index_with_an_unreachable_lambda "prover.ensures"
+        ~fixed:
+          ( "ensures result <= 0\n{\n  if x > 0 {",
+            "ensures result <= 0\n  requires x <= 0\n{\n  if x > 0 {" ));
   Harness.test "a quantifier over an empty range shows nothing of the path" (fun () ->
-      expect_not_proven Fixtures.Prover.quantifier_over_an_empty_range_after_a_hang "prover.ensures");
+      expect_not_proven Fixtures.Prover.quantifier_over_an_empty_range_after_a_hang "prover.ensures"
+        ~fixed:
+          ( "ensures result <= 0\n{\n  if x > 0 {",
+            "ensures result <= 0\n  requires x <= 0\n{\n  if x > 0 {" ));
   Harness.test "a lambda over a type no value has shows nothing of the path" (fun () ->
-      expect_not_proven Fixtures.Prover.lambda_over_an_empty_type "prover.ensures");
+      expect_not_proven Fixtures.Prover.lambda_over_an_empty_type "prover.ensures"
+        ~fixed:
+          ( "ensures result <= 0\n{\n  if x > 0 {",
+            "ensures result <= 0\n  requires x <= 0\n{\n  if x > 0 {" ));
   Harness.test "a todo in a law's proof is a hole that stands for the law" (fun () ->
       let text =
         monoid ^ make_flag_impl_source "true"
@@ -2076,9 +2207,11 @@ let () =
 
 let () =
   Harness.test "provided methods that call each other are recursion" (fun () ->
-      expect_only_codes Fixtures.Prover.ping_and_pong_provided_methods [ "prover.termination" ]);
+      expect_codes Fixtures.Prover.ping_and_pong_provided_methods
+        [ "prover.termination"; "prover.termination" ]);
   Harness.test "an implementation that calls the function providing it is recursion" (fun () ->
-      expect_only_codes Fixtures.Prover.looper_provided_by_its_own_caller [ "prover.termination" ])
+      expect_codes Fixtures.Prover.looper_provided_by_its_own_caller
+        [ "prover.termination"; "prover.termination" ])
 
 let () =
   Harness.test "an impl's method that calls itself through its type is recursion" (fun () ->
@@ -2208,7 +2341,7 @@ let () =
            back here."
         Fixtures.Prover.tree_equal_comparing_its_lists_of_children);
   Harness.test "an equal that compares each child in a loop recurses on parts" (fun () ->
-      match list_termination_failures Fixtures.Prover.tree_equal_comparing_each_child with
+      match list_termination_messages Fixtures.Prover.tree_equal_comparing_each_child with
       | [] -> ()
       | messages -> Harness.fail "%s" (String.concat "; " messages));
   Harness.test "a method of a generic impl is given the impl of its type argument" (fun () ->
@@ -2233,7 +2366,17 @@ let () =
 
 let () =
   Harness.test "generic negation without `Panic` proves the trait method's condition" (fun () ->
-      expect_not_proven Fixtures.Prover.generic_negation "prover.panic");
+      expect_not_proven Fixtures.Prover.generic_negation "prover.panic"
+        ~fixed:
+          ( "fn negate[Number: Negate](value: Number) -> Number.Output {",
+            "fn negate[Number: Negate](value: Number) -> Number.Output\n\
+            \  requires value.negate_is_defined()\n\
+             {" )
+        ~alternatives:
+          [
+            ( "fn negate[Number: Negate](value: Number) -> Number.Output {",
+              "fn negate[Number: Negate](value: Number) -> Number.Output\n  uses Panic\n{" );
+          ]);
   Harness.test "generic negation proves where the trait method's condition holds" (fun () ->
       expect_proven Fixtures.Prover.generic_negation_with_its_precondition);
   Harness.test
@@ -2295,9 +2438,8 @@ let () =
       expect_proven Fixtures.Prover.loop_pushing_lists_of_unknown_length);
   Harness.test "a loop that pushes a callback's values spends the callback's time in each iteration"
     (fun () ->
-      expect_only_codes
-        Fixtures.Prover.loop_pushing_values_of_a_type_parameter_with_a_small_cost_clause
-        [ "prover.cost" ]);
+      expect_codes Fixtures.Prover.loop_pushing_values_of_a_type_parameter_with_a_small_cost_clause
+        [ "prover.cost"; "prover.cost" ]);
   Harness.test "a function that pushes a callback's values in a loop spends the loop's cost"
     (fun () ->
       expect_not_proven Fixtures.Prover.loop_pushing_values_of_a_type_parameter_within_a_small_bound
@@ -2554,25 +2696,11 @@ let () =
       expect_proven Fixtures.Prover.concurrent_block_under_an_allocation_bound)
 
 let () =
-  let fix_titles text =
-    let packages = Support.setup [ ("app.main", text) ] in
-    List.concat_map
-      (fun (diagnostic : Diagnostic.t) ->
-        List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes)
-      (check packages (Support.parse_file "app.main"))
-  in
   Harness.test "an impl's method offers no requires, since the trait's would have to imply it"
     (fun () ->
-      List.iter
-        (fun text ->
-          match fix_titles text with
-          | [] -> ()
-          | actual -> Harness.fail "%s" (String.concat "; " actual))
-        [
-          Fixtures.Prover.increment_in_a_describe_impl;
-          Fixtures.Prover.increment_in_a_greeter_impl;
-          Fixtures.Prover.decrement_in_a_countdown_cursor;
-        ]);
+      expect_not_proven Fixtures.Prover.increment_in_a_describe_impl "prover.overflow";
+      expect_not_proven Fixtures.Prover.increment_in_a_greeter_impl "prover.overflow";
+      expect_not_proven Fixtures.Prover.decrement_in_a_countdown_cursor "prover.overflow");
   Harness.test "a narrowing conversion names its callee and offers each bound at the target"
     (fun () ->
       let packages =
@@ -2600,107 +2728,188 @@ let () =
                       :: List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes))
                   actual)));
   Harness.test "a divisor that may be zero offers a requires that it is not" (fun () ->
-      match fix_titles Fixtures.Prover.halves_of_an_unchecked_divisor with
-      | [ "Add `requires parts != 0`"; "Add `uses Panic`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.halves_of_an_unchecked_divisor "prover.division"
+        ~fixed:
+          ( "fn halves(total: UInt32, parts: UInt32) -> UInt32 {",
+            "fn halves(total: UInt32, parts: UInt32) -> UInt32\n  requires parts != 0\n{" )
+        ~alternatives:
+          [
+            ( "fn halves(total: UInt32, parts: UInt32) -> UInt32 {",
+              "fn halves(total: UInt32, parts: UInt32) -> UInt32\n  uses Panic\n{" );
+          ]);
   Harness.test "a shift amount that may be too large offers a requires below the width" (fun () ->
-      match fix_titles Fixtures.Prover.shifted_by_an_unbounded_amount with
-      | [ "Add `requires by < 64`"; "Add `uses Panic`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.shifted_by_an_unbounded_amount "prover.shift"
+        ~fixed:
+          ( "fn shifted(value: UInt64, by: UInt64) -> UInt64 {",
+            "fn shifted(value: UInt64, by: UInt64) -> UInt64\n  requires by < 64\n{" )
+        ~alternatives:
+          [
+            ( "fn shifted(value: UInt64, by: UInt64) -> UInt64 {",
+              "fn shifted(value: UInt64, by: UInt64) -> UInt64\n  uses Panic\n{" );
+          ]);
   Harness.test "an overflow with a literal offers the bound as a requires" (fun () ->
-      let packages = Support.setup [ ("app.main", Fixtures.Prover.next_count) ] in
-      match check packages (Support.parse_file "app.main") with
-      | [ { fixes = [ { title; _ }; { title = "Add `uses Panic`"; _ } ]; _ } ]
-        when title = "Add `requires count <= UInt8.maximum - 1`" ->
-          ()
-      | actual ->
-          Harness.fail "%s"
-            (String.concat "; "
-               (List.map
-                  (fun (diagnostic : Diagnostic.t) ->
-                    String.concat ", "
-                      (List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes))
-                  actual)));
+      expect_not_proven Fixtures.Prover.next_count "prover.overflow"
+        ~fixed:
+          ( "fn next(count: UInt8) -> UInt8 {",
+            "fn next(count: UInt8) -> UInt8\n  requires count <= UInt8.maximum - 1\n{" )
+        ~alternatives:
+          [
+            ("fn next(count: UInt8) -> UInt8 {", "fn next(count: UInt8) -> UInt8\n  uses Panic\n{");
+          ]);
   Harness.test "a failed assert about the parameters offers it as a requires" (fun () ->
-      match fix_titles Fixtures.Prover.assert_on_ordered_parameters with
-      | [ "Add `requires low < high`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.assert_on_ordered_parameters "prover.assertion"
+        ~fixed:
+          ( "fn ordered(low: Int64, high: Int64) -> Int64 {",
+            "fn ordered(low: Int64, high: Int64) -> Int64\n  requires low < high\n{" ));
   Harness.test "a failed assert under an if offers the if's condition as a premise" (fun () ->
-      match fix_titles Fixtures.Prover.assert_under_an_if with
-      | [ "Add `requires (flag) ==> (count > 0)`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.assert_under_an_if "prover.assertion"
+        ~fixed:
+          ( "fn guarded(flag: Bool, count: Int64) -> Int64 {",
+            "fn guarded(flag: Bool, count: Int64) -> Int64\n  requires (flag) ==> (count > 0)\n{" ));
   Harness.test "a failed assert with arithmetic offers it as a requires" (fun () ->
-      match fix_titles Fixtures.Prover.assert_on_spaced_parameters with
-      | [ "Add `requires low + 2 * high <= 100 - (high - low)`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.assert_on_spaced_parameters "prover.assertion"
+        ~fixed:
+          ( "fn spaced(low: Int64, high: Int64) -> Int64 {",
+            "fn spaced(low: Int64, high: Int64) -> Int64\n\
+            \  requires low + 2 * high <= 100 - (high - low)\n\
+             {" ));
   Harness.test "an overflow of a local offers the bound on the parameter it holds" (fun () ->
-      match fix_titles Fixtures.Prover.bumped_local with
-      | [ "Add `requires start <= Int64.maximum - 1`"; "Add `uses Panic`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.bumped_local "prover.overflow"
+        ~fixed:
+          ( "fn bumped(start: Int64) -> Int64 {",
+            "fn bumped(start: Int64) -> Int64\n  requires start <= Int64.maximum - 1\n{" )
+        ~alternatives:
+          [
+            ( "fn bumped(start: Int64) -> Int64 {",
+              "fn bumped(start: Int64) -> Int64\n  uses Panic\n{" );
+          ]);
   Harness.test "a callee's requires through a local names the caller's parameter" (fun () ->
-      match fix_titles Fixtures.Prover.halve_of_a_local with
-      | [ "Add `requires total < 100`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.halve_of_a_local "prover.requires"
+        ~fixed:
+          ( "fn quarter(total: UInt32) -> UInt32 {",
+            "fn quarter(total: UInt32) -> UInt32\n  requires total < 100\n{" ));
   Harness.test "an unsigned sum that may overflow offers only its upper bound" (fun () ->
-      match fix_titles Fixtures.Prover.total_of_two_bytes with
-      | [ "Add `requires count + other <= UInt8.maximum`"; "Add `uses Panic`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.total_of_two_bytes "prover.overflow"
+        ~fixed:
+          ( "fn total(count: UInt8, other: UInt8) -> UInt8 {",
+            "fn total(count: UInt8, other: UInt8) -> UInt8\n\
+            \  requires count + other <= UInt8.maximum\n\
+             {" )
+        ~alternatives:
+          [
+            ( "fn total(count: UInt8, other: UInt8) -> UInt8 {",
+              "fn total(count: UInt8, other: UInt8) -> UInt8\n  uses Panic\n{" );
+          ]);
   Harness.test "an unsigned difference that may overflow offers only its lower bound" (fun () ->
-      match fix_titles Fixtures.Prover.gap with
-      | [ "Add `requires 0 <= high - low`"; "Add `uses Panic`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.gap "prover.overflow"
+        ~fixed:
+          ( "fn gap(low: UInt8, high: UInt8) -> UInt8 {",
+            "fn gap(low: UInt8, high: UInt8) -> UInt8\n  requires 0 <= high - low\n{" )
+        ~alternatives:
+          [
+            ( "fn gap(low: UInt8, high: UInt8) -> UInt8 {",
+              "fn gap(low: UInt8, high: UInt8) -> UInt8\n  uses Panic\n{" );
+          ]);
   Harness.test "a signed product that may overflow offers both limits by name" (fun () ->
-      match fix_titles Fixtures.Prover.scaled_count with
-      | [
-       "Add `requires Int64.minimum <= count * 1000 && count * 1000 <= Int64.maximum`";
-       "Add `uses Panic`";
-      ] ->
-          ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.scaled_count "prover.overflow"
+        ~fixed:
+          ( "fn scaled(count: Int64) -> Int64 {",
+            "fn scaled(count: Int64) -> Int64\n\
+            \  requires Int64.minimum <= count * 1000 && count * 1000 <= Int64.maximum\n\
+             {" )
+        ~alternatives:
+          [
+            ( "fn scaled(count: Int64) -> Int64 {",
+              "fn scaled(count: Int64) -> Int64\n  uses Panic\n{" );
+          ]);
   Harness.test "an overflow under an if offers the if's condition as a premise" (fun () ->
-      match fix_titles Fixtures.Prover.product_under_an_if with
-      | [
-       "Add `requires (flag) ==> (Int64.minimum <= left * right && left * right <= Int64.maximum)`";
-       "Add `uses Panic`";
-      ] ->
-          ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.product_under_an_if "prover.overflow"
+        ~fixed:
+          ( "fn product(flag: Bool, left: Int64, right: Int64) -> Int64 {",
+            "fn product(flag: Bool, left: Int64, right: Int64) -> Int64\n\
+            \  requires (flag) ==> (Int64.minimum <= left * right && left * right <= Int64.maximum)\n\
+             {" )
+        ~alternatives:
+          [
+            ( "fn product(flag: Bool, left: Int64, right: Int64) -> Int64 {",
+              "fn product(flag: Bool, left: Int64, right: Int64) -> Int64\n  uses Panic\n{" );
+          ]);
   Harness.test "a negation that may overflow offers to exclude the least value" (fun () ->
-      match fix_titles Fixtures.Prover.negated_value with
-      | [ "Add `requires value != Int64.minimum`"; "Add `uses Panic`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.negated_value "prover.overflow"
+        ~fixed:
+          ( "fn negated(value: Int64) -> Int64 {",
+            "fn negated(value: Int64) -> Int64\n  requires value != Int64.minimum\n{" )
+        ~alternatives:
+          [
+            ( "fn negated(value: Int64) -> Int64 {",
+              "fn negated(value: Int64) -> Int64\n  uses Panic\n{" );
+          ]);
   Harness.test "a signed quotient that may overflow offers to exclude the least value over -1"
     (fun () ->
-      match fix_titles Fixtures.Prover.signed_quotient with
-      | [ "Add `requires dividend != Int64.minimum || divisor != -1`"; "Add `uses Panic`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.signed_quotient "prover.overflow"
+        ~fixed:
+          ( "requires divisor != 0\n{\n  dividend / divisor",
+            "requires divisor != 0\n\
+            \  requires dividend != Int64.minimum || divisor != -1\n\
+             {\n\
+            \  dividend / divisor" )
+        ~alternatives:[ ("requires divisor != 0", "uses Panic\n  requires divisor != 0") ]);
   Harness.test "an overflow with a literal under an if offers the if's condition as a premise"
     (fun () ->
-      match fix_titles Fixtures.Prover.next_count_under_an_if with
-      | [ "Add `requires (flag) ==> (count <= UInt8.maximum - 1)`"; "Add `uses Panic`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.next_count_under_an_if "prover.overflow"
+        ~fixed:
+          ( "fn next(flag: Bool, count: UInt8) -> UInt8 {",
+            "fn next(flag: Bool, count: UInt8) -> UInt8\n\
+            \  requires (flag) ==> (count <= UInt8.maximum - 1)\n\
+             {" )
+        ~alternatives:
+          [
+            ( "fn next(flag: Bool, count: UInt8) -> UInt8 {",
+              "fn next(flag: Bool, count: UInt8) -> UInt8\n  uses Panic\n{" );
+          ]);
   Harness.test "a divisor under an if offers the if's condition as a premise" (fun () ->
-      match fix_titles Fixtures.Prover.divisor_under_an_if with
-      | [ "Add `requires (flag) ==> (parts != 0)`"; "Add `uses Panic`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.divisor_under_an_if "prover.division"
+        ~fixed:
+          ( "fn halves(flag: Bool, total: UInt32, parts: UInt32) -> UInt32 {",
+            "fn halves(flag: Bool, total: UInt32, parts: UInt32) -> UInt32\n\
+            \  requires (flag) ==> (parts != 0)\n\
+             {" )
+        ~alternatives:
+          [
+            ( "fn halves(flag: Bool, total: UInt32, parts: UInt32) -> UInt32 {",
+              "fn halves(flag: Bool, total: UInt32, parts: UInt32) -> UInt32\n  uses Panic\n{" );
+          ]);
   Harness.test "a shift amount under an if offers the if's condition as a premise" (fun () ->
-      match fix_titles Fixtures.Prover.shift_under_an_if with
-      | [ "Add `requires (flag) ==> (by < 64)`"; "Add `uses Panic`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.shift_under_an_if "prover.shift"
+        ~fixed:
+          ( "fn shifted(flag: Bool, value: UInt64, by: UInt64) -> UInt64 {",
+            "fn shifted(flag: Bool, value: UInt64, by: UInt64) -> UInt64\n\
+            \  requires (flag) ==> (by < 64)\n\
+             {" )
+        ~alternatives:
+          [
+            ( "fn shifted(flag: Bool, value: UInt64, by: UInt64) -> UInt64 {",
+              "fn shifted(flag: Bool, value: UInt64, by: UInt64) -> UInt64\n  uses Panic\n{" );
+          ]);
   Harness.test "a callee's requires under an if offers the if's condition as a premise" (fun () ->
-      match fix_titles Fixtures.Prover.call_under_an_if with
-      | [ "Add `requires (flag) ==> (count < 100)`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.call_under_an_if "prover.requires"
+        ~fixed:
+          ( "fn quarter(flag: Bool, count: UInt32) -> UInt32 {",
+            "fn quarter(flag: Bool, count: UInt32) -> UInt32\n\
+            \  requires (flag) ==> (count < 100)\n\
+             {" ));
   Harness.test "a condition with no spelling in the parameters leaves the requires unconditional"
     (fun () ->
-      match fix_titles Fixtures.Prover.next_count_under_a_quotient with
-      | [ "Add `requires count <= UInt8.maximum - 1`"; "Add `uses Panic`" ] -> ()
-      | actual -> Harness.fail "%s" (String.concat "; " actual));
+      expect_not_proven Fixtures.Prover.next_count_under_a_quotient "prover.overflow"
+        ~fixed:
+          ( "fn next(count: UInt8) -> UInt8 {",
+            "fn next(count: UInt8) -> UInt8\n  requires count <= UInt8.maximum - 1\n{" )
+        ~alternatives:
+          [
+            ("fn next(count: UInt8) -> UInt8 {", "fn next(count: UInt8) -> UInt8\n  uses Panic\n{");
+          ]);
   Harness.test "a failed assert about a call's result offers no requires" (fun () ->
-      let packages = Support.setup [ ("app.main", Fixtures.Prover.assert_on_a_list_length) ] in
-      match check packages (Support.parse_file "app.main") with
-      | [ { code; fixes = []; _ } ] when Diagnostic.Code.name code = "prover.assertion" -> ()
-      | actual -> Harness.fail "%d diagnostics" (List.length actual));
+      expect_not_proven Fixtures.Prover.assert_on_a_list_length "prover.assertion");
   Harness.test "an overflow names the fixes that change the code's semantics" (fun () ->
       let actual = read_message Fixtures.Prover.next_count in
       if not (String.includes ~affix:"checked operation" actual) then
@@ -2814,6 +3023,10 @@ let () =
 let () =
   Harness.test "a string's characters collect into a list in time linear in its length" (fun () ->
       expect_proven Fixtures.Prover.characters_collected_in_linear_time);
+  Harness.test "a copy of a string or a list costs time in its length and one allocation" (fun () ->
+      expect_proven Fixtures.Prover.copies_of_a_string_and_a_list_within_their_lengths);
+  Harness.test "a copy of a string does not cost constant time" (fun () ->
+      expect_not_proven Fixtures.Prover.copy_of_a_string_in_constant_time "prover.cost");
   Harness.test "a list of views passed `own` or `mut` holds no potential for its elements"
     (fun () -> expect_proven Fixtures.Prover.list_of_views_passed_on_in_constant_amortized_time);
   Harness.test "a view holds no potential, so returning one costs constant amortized time"
@@ -3490,14 +3703,10 @@ let () =
 
 let check_in_standard text =
   check_file
-    (Database.create
-       (Support.setup
-          [
-            ("standard.core", Fixtures.Prover.index_trait);
-            ("standard.specification", Fixtures.Prover.sequence_with_index);
-            ("standard.probe", text);
-          ]))
+    (Support.extend_standard_library (Support.setup [ ("standard.probe", text) ]))
     (Support.parse_file "standard.probe")
+
+let expect_not_proven_in_standard = Support.expect_diagnostic ~list_diagnostics:check_in_standard
 
 let expect_proven_in_standard text =
   match check_in_standard text with
@@ -3539,49 +3748,50 @@ let () =
   Harness.test "every one below a power of two is counted" (fun () ->
       expect_proven_in_standard Fixtures.Prover.count_ones_below_a_power_of_two);
   Harness.test "a value may have ones" (fun () ->
-      match Support.list_codes (check_in_standard Fixtures.Prover.count_ones_ensured_zero) with
-      | [ "prover.ensures" ] -> ()
-      | codes -> Harness.fail "expected prover.ensures, found %s" (String.concat ", " codes))
+      expect_not_proven_in_standard Fixtures.Prover.count_ones_ensured_zero "prover.ensures")
 
 let () =
   Harness.test "an intrinsic operation has its operator's facts" (fun () ->
       expect_proven_in_standard Fixtures.Prover.intrinsic_mask);
   Harness.test "an intrinsic shift has its operator's obligation on the amount" (fun () ->
-      match Support.list_codes (check_in_standard Fixtures.Prover.intrinsic_shift_left) with
-      | [ "prover.shift" ] -> ()
-      | codes -> Harness.fail "expected prover.shift, found %s" (String.concat ", " codes));
+      expect_not_proven_in_standard Fixtures.Prover.intrinsic_shift_left "prover.shift"
+        ~fixed:
+          ( "fn shifted(value: UInt64, amount: UInt64) -> UInt64 {",
+            "fn shifted(value: UInt64, amount: UInt64) -> UInt64\n  requires amount < 64\n{" )
+        ~alternatives:
+          [
+            ( "fn shifted(value: UInt64, amount: UInt64) -> UInt64 {",
+              "fn shifted(value: UInt64, amount: UInt64) -> UInt64\n  uses Panic\n{" );
+          ]);
   Harness.test "a character made from an integer must be a Unicode scalar value" (fun () ->
-      match
-        Support.list_codes (check_in_standard Fixtures.Prover.character_converted_from_a_code)
-      with
-      | [ "prover.requires" ] -> ()
-      | codes -> Harness.fail "expected prover.requires, found %s" (String.concat ", " codes))
+      expect_not_proven_in_standard Fixtures.Prover.character_converted_from_a_code
+        "prover.requires"
+        ~fixed:
+          ( "fn character(code: UInt32) -> Character {",
+            "fn character(code: UInt32) -> Character\n\
+            \  requires (0 <= code && code <= 1114111) && !((55296 <= code && code <= 57343))\n\
+             {" ))
 
 let () =
-  let expect_unsupported text =
-    match Support.list_codes (check_in_standard text) with
-    | [ "prover.unsupported" ] -> ()
-    | codes -> Harness.fail "expected prover.unsupported, found %s" (String.concat ", " codes)
-  in
   Harness.test "a float converted to a type parameter is unsupported, not unchecked" (fun () ->
-      expect_unsupported Fixtures.Prover.float_converted_to_a_type_parameter);
+      expect_not_proven_in_standard Fixtures.Prover.float_converted_to_a_type_parameter
+        "prover.unsupported");
   Harness.test "an intrinsic sum at a type parameter with no integer bound is unsupported"
-    (fun () -> expect_unsupported Fixtures.Prover.intrinsic_sum_at_a_type_parameter)
+    (fun () ->
+      expect_not_proven_in_standard Fixtures.Prover.intrinsic_sum_at_a_type_parameter
+        "prover.unsupported")
 
 let () =
-  let expect_only_requires text =
-    match Support.list_codes (check_in_standard text) with
-    | [ "prover.requires" ] -> ()
-    | codes -> Harness.fail "expected prover.requires, found %s" (String.concat ", " codes)
-  in
   Harness.test "an element of a storage is read only at an index within it" (fun () ->
-      expect_only_requires Fixtures.Prover.storage_read_at_an_unchecked_index);
+      expect_not_proven_in_standard Fixtures.Prover.storage_read_at_an_unchecked_index
+        "prover.requires");
   Harness.test "an element of a storage at an index below its length proves" (fun () ->
       expect_proven_in_standard Fixtures.Prover.storage_read_at_a_checked_index);
   Harness.test "a storage is popped only when it holds an element" (fun () ->
-      expect_only_requires Fixtures.Prover.storage_popped_without_a_length);
+      expect_not_proven_in_standard Fixtures.Prover.storage_popped_without_a_length
+        "prover.requires");
   Harness.test "a view is ranged only within its length" (fun () ->
-      expect_only_requires Fixtures.Prover.view_ranged_past_its_end)
+      expect_not_proven_in_standard Fixtures.Prover.view_ranged_past_its_end "prover.requires")
 
 let () =
   let apply = Fixtures.Prover.apply_bounded_by_the_time_of_change in

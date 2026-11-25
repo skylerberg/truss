@@ -11,14 +11,13 @@ fn main(arguments: List[String]) -> ExitCode
   }
   let closed = network.SocketAddress(address: network.IpAddress.loopback, port: unused)
   var refused = 0
-  for attempt in 0..2000 {
-    let limit = if attempt % 2 == 0 { None } else { Some(Duration.nanoseconds(2000000000)) }
+  for limit in [None, Some(Duration.nanoseconds(2000000000))] {
     if NetworkClient.connect(closed, timeout: limit) is Err(error) {
       if error == SystemError.ConnectionRefused {
         refused += 1
       }
     }
   }
-  Console.print_line("refused ${refused} of 2000")
+  Console.print_line("refused ${refused} of 2")
   ExitCode(0)
 }

@@ -474,7 +474,7 @@ public fn Certificate.parse(encoded: List[UInt8]) -> Result[Certificate, Error]
     }
   }
   Ok(Certificate(
-    encoded: encoded.to_list(),
+    encoded: encoded.copy(),
     signed: der.encode(parts[0]),
     algorithm: algorithm,
     signature: own signature,
