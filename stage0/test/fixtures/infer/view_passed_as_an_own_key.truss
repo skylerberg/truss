@@ -1,0 +1,4 @@
+fn f(counts: mut Map[String, Int64], text: String) {
+  let word = text.trim()
+  mut counts.insert(word, value: 1)
+}

@@ -2,8 +2,9 @@ let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
 
 let decide backend database =
-  let proofs = Database.prove database [ Codegen_support.example_file ] in
-  Database.decide proofs ~runs:(Evaluations.run backend (Database.list_evaluations proofs)) solver
+  let proofs = Database.prove database (In_files [ Codegen_support.example_file ]) in
+  ignore (Backend.evaluate backend (Database.list_evaluations proofs));
+  Database.decide proofs solver
 
 let list_diagnostics backend database =
   decide backend database;
@@ -54,7 +55,7 @@ let () =
           (Codegen_support.make_example_package
              [ (Codegen_support.example_file, Fixtures.Evaluate.shout_with_an_ill_typed_check) ])
       in
-      let proofs = Database.prove database [ Codegen_support.example_file ] in
+      let proofs = Database.prove database (In_files [ Codegen_support.example_file ]) in
       match Database.list_evaluations proofs with
       | [] ->
           expect_failure_saying
@@ -88,6 +89,19 @@ let () =
       in
       compile Development;
       compile ~evaluation_cpu_time_limit_ms:5 Release)
+
+let () =
+  Codegen_support.test
+    "a command reads the result that an earlier command recorded, and builds no program" (fun () ->
+      let database, _ = Codegen_support.load Fixtures.Lowering.constant_computed_by_a_long_loop in
+      let spun = Lowered.Item.Constant (Top { module_ = Codegen_support.example; name = "spun" }) in
+      let compile () =
+        ignore (Backend.For_testing.compile_fragment (Codegen_support.make_backend database) spun)
+      in
+      compile ();
+      let built = Backend.For_testing.count_built_programs () in
+      compile ();
+      Codegen_support.expect_int ~expected:built (Backend.For_testing.count_built_programs ()))
 
 let () =
   Codegen_support.test
@@ -152,11 +166,11 @@ let () =
             (List.length trusting) (List.length ensured));
   Codegen_support.test "the query of a template states the result of running its check" (fun () ->
       let database, backend = load_shout_of_a_name_and_an_identity () in
-      let proofs = Database.prove database [ Codegen_support.example_file ] in
-      let runs = Evaluations.run backend (Database.list_evaluations proofs) in
-      let list_queries runs = Database.For_testing.list_queries proofs ~runs in
-      let with_runs = list_queries runs and without_runs = list_queries [] in
-      Database.decide proofs ~runs solver;
+      let proofs = Database.prove database (In_files [ Codegen_support.example_file ]) in
+      let without_runs = Database.For_testing.list_queries proofs in
+      ignore (Backend.evaluate backend (Database.list_evaluations proofs));
+      let with_runs = Database.For_testing.list_queries proofs in
+      Database.decide proofs solver;
       let states = Database.list_proof_states database Codegen_support.example_file in
       if List.length with_runs <> List.length states then
         Codegen_support.fail "listed %d queries for %d obligations" (List.length with_runs)

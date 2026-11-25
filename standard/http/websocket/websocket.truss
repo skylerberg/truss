@@ -20,14 +20,14 @@ internal let invalid_data: UInt16 = 1007
 
 internal let message_too_big: UInt16 = 1009
 
-internal fn accept_key(key: StringSlice) -> String {
-  var input = key.to_string()
+internal fn accept_key(key: String) -> String {
+  var input = key.copy()
   mut input.push("258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
-  let digest = cryptography.sha1(input.slice().bytes())
+  let digest = cryptography.sha1(input.bytes())
   base64.encode(digest[..])
 }
 
-internal fn is_valid_key(key: StringSlice) -> Bool {
+internal fn is_valid_key(key: String) -> Bool {
   match base64.decode(key) {
     Ok(bytes) => bytes.length() == 16
     Err(_) => false
@@ -41,11 +41,11 @@ internal type Parsed =
   | Complete(frame: Frame, length: UInt64)
   | Invalid(code: UInt16, reason: String)
 
-fn invalid(code: UInt16, reason: StringSlice) -> Parsed {
-  Parsed.Invalid(code: code, reason: reason.to_string())
+fn invalid(code: UInt16, reason: String) -> Parsed {
+  Parsed.Invalid(code: code, reason: reason.copy())
 }
 
-internal fn parse(bytes: Slice[UInt8], is_server: Bool, limit: UInt64, is_deflate: Bool = false) -> Parsed {
+internal fn parse(bytes: List[UInt8], is_server: Bool, limit: UInt64, is_deflate: Bool = false) -> Parsed {
   if bytes.length() < 2 {
     return Parsed.Incomplete
   }
@@ -59,7 +59,7 @@ internal fn parse(bytes: Slice[UInt8], is_server: Bool, limit: UInt64, is_deflat
   let is_final = (first & 128) != 0
   let is_masked = (second & 128) != 0
   if is_masked != is_server {
-    let reason = if is_server { "a frame from a client that is not masked".slice() } else { "a masked frame from a server".slice() }
+    let reason = if is_server { "a frame from a client that is not masked" } else { "a masked frame from a server" }
     return invalid(protocol_error, reason: reason)
   }
   if (opcode > 2 && opcode < 8) || opcode > 10 {
@@ -115,7 +115,7 @@ internal fn parse(bytes: Slice[UInt8], is_server: Bool, limit: UInt64, is_deflat
   Parsed.Complete(frame: Frame(is_final: is_final, is_compressed: is_compressed, opcode: opcode, payload: own payload), length: at + length)
 }
 
-internal fn encode(opcode: UInt8, payload: Slice[UInt8], is_final: Bool, mask: Option[Array[UInt8, 4]], is_compressed: Bool = false) -> List[UInt8] {
+internal fn encode(opcode: UInt8, payload: List[UInt8], is_final: Bool, mask: Option[Array[UInt8, 4]], is_compressed: Bool = false) -> List[UInt8] {
   var bytes: List[UInt8] = List.with_capacity(payload.length() + 14)
   mut bytes.push((if is_final { 128 } else { 0 }) | (if is_compressed { 64 } else { 0 }) | (opcode & 15))
   let mask_bit: UInt8 = if mask is Some(_) { 128 } else { 0 }
@@ -135,25 +135,25 @@ internal fn encode(opcode: UInt8, payload: Slice[UInt8], is_final: Bool, mask: O
   }
   match mask {
     Some(key) => {
-      mut bytes.append_slice(key[..])
+      mut bytes.append_items(key[..])
       for index in 0..length {
         mut bytes.push(payload[index] ^ key[index % 4])
       }
     }
-    None => mut bytes.append_slice(payload)
+    None => mut bytes.append_items(payload)
   }
   bytes
 }
 
-internal fn close_payload(code: UInt16, reason: StringSlice) -> List[UInt8] {
+internal fn close_payload(code: UInt16, reason: String) -> List[UInt8] {
   var payload: List[UInt8] = [intrinsic.convert((code >> 8) & 255), intrinsic.convert(code & 255)]
   let bytes = reason.bytes()
   let kept = if bytes.length() > 123 { 123 } else { bytes.length() }
-  mut payload.append_slice(bytes[0..kept])
+  mut payload.append_items(bytes[0..kept])
   payload
 }
 
-internal fn close_code(payload: Slice[UInt8]) -> Result[UInt16, UInt16] {
+internal fn close_code(payload: List[UInt8]) -> Result[UInt16, UInt16] {
   if payload.is_empty() {
     return Ok(1005)
   }
@@ -176,7 +176,7 @@ internal type DeflateAcceptance(response: String, deflate: Deflate)
 
 type Parameter(name: String, value: Option[String])
 
-fn parameters_of(extension: StringSlice) -> List[Parameter] {
+fn parameters_of(extension: String) -> List[Parameter] {
   var parameters: List[Parameter] = []
   for part in extension.split(";") {
     let item = part.trim()
@@ -184,7 +184,7 @@ fn parameters_of(extension: StringSlice) -> List[Parameter] {
       Some(at) => {
         let raw = item.part(at + 1, to: item.length()).trim()
         let value = if raw.length() >= 2 && raw.starts_with("\"") && raw.ends_with("\"") { raw.part(1, to: raw.length() - 1) } else { raw }
-        mut parameters.push(Parameter(name: item.part(0, to: at).trim().to_ascii_lowercase(), value: Some(value.to_string())))
+        mut parameters.push(Parameter(name: item.part(0, to: at).trim().to_ascii_lowercase(), value: Some(value.copy())))
       }
       None => mut parameters.push(Parameter(name: item.to_ascii_lowercase(), value: None))
     }
@@ -192,19 +192,19 @@ fn parameters_of(extension: StringSlice) -> List[Parameter] {
   parameters
 }
 
-fn is_window_bits(value: StringSlice) -> Bool {
+fn is_window_bits(value: String) -> Bool {
   value == "8" || value == "9" || value == "10" || value == "11" || value == "12"
     || value == "13" || value == "14" || value == "15"
 }
 
 type DeflateParameters(server_window: Option[String], client_window: Option[String], keeps_server_context: Bool)
 
-fn deflate_parameters(parameters: Slice[Parameter], is_response: Bool) -> Option[DeflateParameters] {
+fn deflate_parameters(parameters: List[Parameter], is_response: Bool) -> Option[DeflateParameters] {
   var seen: List[String] = []
   var settings = DeflateParameters(server_window: None, client_window: None, keeps_server_context: true)
   for index in 1..parameters.length() {
     let parameter = parameters[index]
-    let name = parameter.name.slice()
+    let name = parameter.name
     for earlier in seen {
       if earlier == name {
         return None
@@ -245,7 +245,7 @@ fn deflate_parameters(parameters: Slice[Parameter], is_response: Bool) -> Option
   Some(own settings)
 }
 
-internal fn accepted_deflate(offers: Option[StringSlice]) -> Option[DeflateAcceptance] {
+internal fn accepted_deflate(offers: Option[String]) -> Option[DeflateAcceptance] {
   let header = match offers {
     Some(header) => header
     None => return None
@@ -253,7 +253,7 @@ internal fn accepted_deflate(offers: Option[StringSlice]) -> Option[DeflateAccep
   for extension in header.split(",") {
     let parameters = parameters_of(extension)
     if !parameters.is_empty() && parameters[0].name == "permessage-deflate" {
-      match deflate_parameters(parameters.slice(), is_response: false) {
+      match deflate_parameters(parameters, is_response: false) {
         Some(settings) => {
           var response = deflate_offer.copy()
           var compresses = true
@@ -274,7 +274,7 @@ internal fn accepted_deflate(offers: Option[StringSlice]) -> Option[DeflateAccep
   None
 }
 
-internal fn agreed_deflate(response: Option[StringSlice], is_offered: Bool) -> Result[Option[Deflate], String] {
+internal fn agreed_deflate(response: Option[String], is_offered: Bool) -> Result[Option[Deflate], String] {
   let header = match response {
     Some(header) => header.trim()
     None => return Ok(None)
@@ -286,7 +286,7 @@ internal fn agreed_deflate(response: Option[StringSlice], is_offered: Bool) -> R
   if !is_offered || header.contains(",") || parameters.is_empty() || parameters[0].name != "permessage-deflate" {
     return Err("a WebSocket extension that was not offered")
   }
-  let settings = match deflate_parameters(parameters.slice(), is_response: true) {
+  let settings = match deflate_parameters(parameters, is_response: true) {
     Some(settings) => own settings
     None => return Err("a permessage-deflate response with invalid parameters")
   }

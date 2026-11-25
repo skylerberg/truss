@@ -1,0 +1,13 @@
+fn measured(size: (fn() -> Int64 uses Panic), count: Int64) -> Int64
+  uses Panic unless count < 10
+{
+  if count >= 10 {
+    size()
+  } else {
+    count
+  }
+}
+
+fn small(size: (fn() -> Int64 uses Panic)) -> Int64 {
+  measured(size, count: 3)
+}

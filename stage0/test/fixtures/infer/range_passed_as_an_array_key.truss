@@ -1,0 +1,3 @@
+fn f(tables: Map[Array[UInt8, 3], Int64], key: List[UInt8]) -> Bool {
+  tables.contains(key)
+}

@@ -1,0 +1,13 @@
+fn rest(items: List[Int64]) -> view List[Int64]
+  requires items.length() >= 1
+  cost amortized time O(1)
+{
+  items[1..]
+}
+
+fn count_rest(items: List[Int64]) -> UInt64
+  requires items.length() >= 1
+  cost amortized time O(1)
+{
+  rest(items).length()
+}

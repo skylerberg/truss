@@ -7,6 +7,7 @@
   cmdliner
   source
   diagnostic
+  description
   syntax
   path
   well_known
@@ -22,7 +23,6 @@
   emit_c
   unicode
   backend
-  evaluations
   lowering
   database
   solver
@@ -30,5 +30,6 @@
   workspace
   cache
   project
+  project_catalog
   infer
   file_system))

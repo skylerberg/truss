@@ -25,13 +25,15 @@ type stage =
   | Check_sealed
   | Check_impl
   | Check_type
-  | Check_instantiations
-  | Check_tests
+  | Check_instantiation
+  | Check_test
   | Check_unexported
-  | Check_dependencies
+  | Check_dependency
   | Prove
   | Lower
   | Key_tests
+  | Evaluate
+  | Render of Profile.t
   | Decide
 
 val stages : stage list
@@ -48,6 +50,7 @@ type fact =
   | Derived_interface
   | Type_facts
   | Signature_check
+  | Checked_interface
   | Contract
   | Body_form
   | Body_tables
@@ -56,15 +59,17 @@ type fact =
   | Body_mir
   | Contract_mir
   | Generated_mir
-  | Call_node
   | Callees
   | Recursion_group
+  | Proof_group
   | Usage_check
   | Ownership
-  | Unused_dependencies
+  | Dependency_use
   | Proof
   | Lowered
   | Test_key
+  | Evaluation
+  | Unit of Profile.t
 
 type lookup =
   | Source
@@ -83,23 +88,15 @@ type lookup =
   | Contained
   | Module_declarations
   | File_declarations
-  | Package_declarations
   | Members
   | Traits_declaring
   | Impls_of_type
   | Impls_of_trait
   | Law_proofs
+  | Tests
 
-type entity = Definition | Import | Package | Unknown_implementation | Item
-
-type selection =
-  | Unresolved
-  | Import_references
-  | Unchecked_bodies
-  | Body_uses
-  | Instantiations
-  | Package_references
-
+type entity = Definition | Import | Package | Item
+type selection = Unresolved | Import_references | Package_references
 type target = Fact of fact | Lookup of lookup | Entity of entity | Selection of selection
 
 val rank_target : target -> int
@@ -108,10 +105,11 @@ val show_stage : stage -> string
 val show_fact : fact -> string
 val show_lookup : lookup -> string
 val is_signature : fact -> bool
+val list_read_targets : fact -> fact list
 val lookups_of_definition : lookup list
 val facts_of_definition : fact list
 
-type marker = Reads | References | Calls | Instantiates | Grows | Claims | Implements
+type marker = Reads | References | Calls | Assumes | Instantiates | Grows | Claims
 
 val encode_markers : marker list -> int
 val has_marker : int -> marker -> bool

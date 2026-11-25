@@ -1,5 +1,0 @@
-fn apply[Value](action: fn(Value) -> Int64) -> Int64 { todo }
-
-fn f() -> Int64 {
-  apply(fn(true..=false) { 1 })
-}

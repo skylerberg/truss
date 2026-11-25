@@ -1,0 +1,7 @@
+fn gather[Items: FiniteCursor](items: own Items) -> List[Items.Element]
+  uses Items.Uses
+  ensures result.length() <= old(items.remaining())
+  cost amortized time O((items.remaining() + 1) * time(Items.next))
+{
+  Cursor.to_list(own items)
+}

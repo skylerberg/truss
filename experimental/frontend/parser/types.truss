@@ -5,7 +5,7 @@ use frontend.token
 fn is_clause_keyword(kind: token.Kind) -> Bool {
   match kind {
     Keyword(keyword) => match keyword {
-      Uses | Requires | Ensures | Decreases | Cost => true
+      Uses | Requires | Ensures | Decreases | Modifies | Cost => true
       _ => false
     }
     _ => false
@@ -235,14 +235,14 @@ fn parse_type_expression_inner(cursor: mut TokenCursor) -> Result[syntax.TypeExp
     }
     return Ok(make_type_node(mut cursor, start, kind: syntax.TypeKind.SelfType(own associated)))
   }
-  if first == token.Kind.Keyword(token.Keyword.Any) {
-    advance(mut cursor)
-    let path_type = parse_path_type(mut cursor)?
-    return Ok(make_type_node(mut cursor, start, kind: syntax.TypeKind.AnyType(own path_type)))
-  }
   if first == token.Kind.Keyword(token.Keyword.Fn) {
     let function_type = parse_function_type(mut cursor, with_clauses: false)?
     return Ok(make_type_node(mut cursor, start, kind: syntax.TypeKind.FunctionType(own function_type)))
+  }
+  if first == token.Kind.Keyword(token.Keyword.View) {
+    advance(mut cursor)
+    let viewed = parse_type_expression(mut cursor)?
+    return Ok(make_type_node(mut cursor, start, kind: syntax.TypeKind.ViewType(own viewed)))
   }
   if first == token.Kind.Punctuation(token.Punctuation.Open(token.Bracket.Paren)) {
     return Ok(parse_parenthesized_function_type(mut cursor))
@@ -386,6 +386,8 @@ fn parse_function_type(cursor: mut TokenCursor, with_clauses: Bool) -> Result[sy
         mut clauses.push(parse_clause(mut cursor)?)
       } else if kind == token.Kind.Keyword(token.Keyword.Decreases) {
         return Err(fail(mut cursor, "`uses`, `cost`, `requires`, or `ensures`; a function type has no `decreases`"))
+      } else if kind == token.Kind.Keyword(token.Keyword.Modifies) {
+        return Err(fail(mut cursor, "`uses`, `cost`, `requires`, or `ensures`; a function type has no `modifies`"))
       } else {
         break
       }
@@ -723,6 +725,7 @@ fn parse_clause(cursor: mut TokenCursor) -> Result[syntax.Clause, Failure]
       Requires => syntax.ClauseKind.Requires(parse_expression(mut cursor)?)
       Ensures => syntax.ClauseKind.Ensures(parse_expression(mut cursor)?)
       Decreases => syntax.ClauseKind.Decreases(parse_expression_list(mut cursor)?)
+      Modifies => syntax.ClauseKind.Modifies(parse_expression_list(mut cursor)?)
       Cost => syntax.ClauseKind.Cost(parse_cost(mut cursor)?)
       _ => return Err(fail(mut cursor, expected: "a clause"))
     }
@@ -736,6 +739,11 @@ fn parse_clause(cursor: mut TokenCursor) -> Result[syntax.Clause, Failure]
           expected: "`,` or the end of the `uses` clause; a capability's condition follows `unless`, as in `uses RunForever unless Source: FiniteCursor`",
         ),
       )
+    }
+    None
+  } else if kind is Modifies(_) {
+    if cursor.is_keyword(token.Keyword.When) {
+      return Err(fail(mut cursor, expected: "`,` or the end of the `modifies` clause, which takes no condition"))
     }
     None
   } else {

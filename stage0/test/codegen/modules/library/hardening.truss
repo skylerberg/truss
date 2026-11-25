@@ -7,14 +7,14 @@ fn loopback(port: UInt16) -> network.SocketAddress {
   network.SocketAddress(address: network.IpAddress.loopback, port: port)
 }
 
-fn exchange(port: UInt16, raw: StringSlice) -> String
+fn exchange(port: UInt16, raw: String) -> String
   uses NetworkClient, Handles, Panic, RunForever
 {
   var connection = network.connect("localhost", port: port).expect("the server accepts")
   let _ = mut connection.write_all(raw.bytes())
   var reply: List[UInt8] = []
   let _ = mut connection.read_to_end(mut reply)
-  String.from_utf8_lossy(reply.slice())
+  String.from_utf8_lossy(reply)
 }
 
 type Stalled(reply: String, waited: Duration)
@@ -57,7 +57,7 @@ fn second_waits_for_first() -> List[String]
       var idle = network.connect("localhost", port: 8100).expect("the server accepts")
       Clock.sleep(Duration.milliseconds(100))
       let reply = exchange(8100, raw: "GET / HTTP/1.1\r\nConnection: close\r\n\r\n")
-      mut seen.push("${reply.slice().ends_with("ok")} ${Clock.monotonic() - started >= Duration.seconds(5)}")
+      mut seen.push("${reply.ends_with("ok")} ${Clock.monotonic() - started >= Duration.seconds(5)}")
       let _ = mut idle.shut_down(network.Direction.Sending)
       return seen
     }
@@ -97,9 +97,9 @@ fn deadlines() -> List[String]
     }, options: http.ServerOptions(request_timeout_seconds: 1))
     {
       let unstarted = exchange(8101, raw: "GET / HTTP/1.1\r\nConnection: close\r\n\r\n")
-      mut seen.push("${unstarted.slice().starts_with("HTTP/1.1 503")}")
+      mut seen.push("${unstarted.starts_with("HTTP/1.1 503")}")
       let started = exchange(8101, raw: "GET /streaming HTTP/1.1\r\nConnection: close\r\n\r\n")
-      mut seen.push("${started.slice().starts_with("HTTP/1.1 200")} ${started.slice().contains("part")} ${started.slice().ends_with("0\r\n\r\n")}")
+      mut seen.push("${started.starts_with("HTTP/1.1 200")} ${started.contains("part")} ${started.ends_with("0\r\n\r\n")}")
       Clock.sleep(Duration.seconds(120))
       mut seen.push("${finished.value()}")
       return seen
@@ -145,9 +145,9 @@ test "a handler whose HTTP/1.1 client disconnects is cancelled" uses Panic, RunF
   }
 }
 
-fn frame(kind: UInt8, flags: UInt8, stream: UInt8, payload: Slice[UInt8]) -> List[UInt8] {
+fn frame(kind: UInt8, flags: UInt8, stream: UInt8, payload: List[UInt8]) -> List[UInt8] {
   var bytes: List[UInt8] = [0, 0, UInt8.try_from_integer(payload.length()).unwrap_or(0), kind, flags, 0, 0, 0, stream]
-  mut bytes.append(payload.to_list())
+  mut bytes.append(payload.copy())
   bytes
 }
 
@@ -162,14 +162,14 @@ fn reset_over_http_two() -> Int64
     })
     {
       var connection = network.connect("localhost", port: 8103).expect("the server accepts")
-      var opening: List[UInt8] = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".bytes().to_list()
+      var opening: List[UInt8] = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".bytes().copy()
       mut opening.append(frame(4, flags: 0, stream: 0, payload: []))
       let block: List[UInt8] = [130, 134, 65, 1, 120, 132]
-      mut opening.append(frame(1, flags: 5, stream: 1, payload: block.slice()))
-      let _ = mut connection.write_all(opening.slice())
+      mut opening.append(frame(1, flags: 5, stream: 1, payload: block))
+      let _ = mut connection.write_all(opening)
       Clock.sleep(Duration.seconds(1))
       let cancel: List[UInt8] = [0, 0, 0, 8]
-      let _ = mut connection.write_all(frame(3, flags: 0, stream: 1, payload: cancel.slice()).slice())
+      let _ = mut connection.write_all(frame(3, flags: 0, stream: 1, payload: cancel))
       Clock.sleep(Duration.seconds(120))
       return finished.value()
     }
@@ -194,10 +194,10 @@ fn clients_seen() -> List[String]
   var seen: List[String] = []
   concurrent {
     http.serve(mut trusting, handler: fn(request, responder) {
-      let _ = mut responder.send(http.Response.text(http.peer_key(request).slice()))
+      let _ = mut responder.send(http.Response.text(http.peer_key(request)))
     }, options: http.ServerOptions(trusted_proxies: [local, private]))
     http.serve(mut doubting, handler: fn(request, responder) {
-      let _ = mut responder.send(http.Response.text(http.peer_key(request).slice()))
+      let _ = mut responder.send(http.Response.text(http.peer_key(request)))
     })
     {
       let forwarded_for = "GET / HTTP/1.1\r\nX-Forwarded-For: 198.51.100.4, 203.0.113.7, 10.0.0.5\r\nConnection: close\r\n\r\n"
@@ -205,11 +205,11 @@ fn clients_seen() -> List[String]
       let everyone_trusted = "GET / HTTP/1.1\r\nX-Forwarded-For: 10.1.2.3\r\nConnection: close\r\n\r\n"
       let garbled = "GET / HTTP/1.1\r\nX-Forwarded-For: 203.0.113.7, nonsense\r\nConnection: close\r\n\r\n"
       for raw in [forwarded_for.copy(), forwarded.copy(), everyone_trusted.copy(), garbled.copy()] {
-        let reply = exchange(8104, raw: raw.slice())
-        mut seen.push(reply.slice().lines().last().unwrap_or("").to_string())
+        let reply = exchange(8104, raw: raw)
+        mut seen.push(reply.lines().last().unwrap_or("").copy())
       }
-      let ignored = exchange(8105, raw: forwarded_for.slice())
-      mut seen.push(ignored.slice().lines().last().unwrap_or("").to_string())
+      let ignored = exchange(8105, raw: forwarded_for)
+      mut seen.push(ignored.lines().last().unwrap_or("").copy())
       return seen
     }
   }

@@ -1,0 +1,14 @@
+public opaque type Counter(count: UInt64)
+  invariant stated(count) >= 0
+
+fn stated(count: UInt64) -> UInt64
+  ensures result == measured(count)
+{
+  count
+}
+
+fn measured(count: UInt64) -> UInt64
+  ensures result == count
+{
+  Counter(count: count).count
+}

@@ -28,7 +28,7 @@ let load_text_at (context : Context.t) address ~is_present =
       Context.call context ~result:(Lowered.make_local_place count) Terminated_length
         [ Copy (Lowered.make_local_place address) ]);
   Context.set context
-    (Storage.build_view (Storage.make_view_type byte)
+    (Storage.build_borrowed (Storage.make_storage_type byte)
        ~buffer:(Copy (Lowered.make_local_place elements))
        ~length:(Copy (Lowered.make_local_place count)))
 

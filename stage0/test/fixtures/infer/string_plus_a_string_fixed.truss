@@ -1,3 +1,0 @@
-fn f(name: String) -> String {
-  "${name}!"
-}

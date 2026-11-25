@@ -1,0 +1,34 @@
+trait Measured {
+  fn measure(self) -> UInt64
+}
+
+type Alternating[First: Measured, Second: Measured](item: First, rest: List[Alternating[Second, First]])
+  invariant item.measure() >= 0
+
+type Ruler(count: UInt64)
+
+impl Measured for Ruler {
+  fn measure(self) -> UInt64
+    ensures result == self.count
+  {
+    self.count
+  }
+}
+
+type Marker(count: UInt64)
+
+impl Measured for Marker {
+  fn measure(self) -> UInt64
+    ensures result == self.count
+    ensures result <= 3
+  {
+    held(Alternating(item: Ruler(count: self.count), rest: []))
+  }
+}
+
+fn held(alternating: Alternating[Ruler, Marker]) -> UInt64
+  ensures result == alternating.item.count
+  ensures result <= 3
+{
+  alternating.item.count
+}

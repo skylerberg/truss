@@ -76,8 +76,8 @@ test "the rate_limit middleware answers 429 with Retry-After once a peer spends 
   provide simulation.World.new() {
     let seen = limited_statuses()
     assert seen.length() == 3
-    assert seen[0].slice().starts_with("200 - from ") && seen[0] != "200 - from "
-    assert seen[1].slice().starts_with("200 - from ")
+    assert seen[0].starts_with("200 - from ") && seen[0] != "200 - from "
+    assert seen[1].starts_with("200 - from ")
     assert seen[2] == "429 5 Too Many Requests"
   }
 }

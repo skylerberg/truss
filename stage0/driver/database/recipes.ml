@@ -4,7 +4,6 @@ type definition_stage = {
   stage : Kind.stage;
   unit_id : unit_id;
   applies : Store.definition -> bool;
-  facts : Tracker.any_fact list;
   run : Tracker.t -> Store.definition -> unit;
 }
 
@@ -19,6 +18,10 @@ let read_file (database : Tracker.t) id =
 
 let parse (file : Path.file) text =
   Parser.parse_source (Source.create ~path:(Path.show_file file) text)
+
+let parse_with_diagnostics file text =
+  let tree, diagnostics = parse file text in
+  (tree, List.map (fun diagnostic -> Renderer.Syntax diagnostic) diagnostics)
 
 let replace_entries (database : Tracker.t) ~source (module_ : Path.module_) ~file_name entries =
   let module_id = Ids.of_module module_ in
@@ -53,7 +56,7 @@ let run_parse (database : Tracker.t) id =
   let tree, diagnostics =
     Tracker.record database Parse id (fun recorder ->
         recorder.note Reads (Lookup Source) id "";
-        parse file text)
+        parse_with_diagnostics file text)
   in
   let is_diagnosed_otherwise =
     Tracker.replace_file_diagnostics database Parse ~package:file.module_.package ~file:id
@@ -86,7 +89,7 @@ let remove_file (database : Tracker.t) (file : Path.file) =
     Store.remove_file database.store ~id;
     ignore (replace_entries database ~source:id file.module_ ~file_name:file.name []);
     Store.replace_imports database.store ~file:id [];
-    List.iter (fun stage -> Tracker.forget database stage id ~facts:[]) file_stages;
+    List.iter (fun stage -> Tracker.forget database stage id) file_stages;
     Tracker.mark_stale database Declare module_id;
     Tracker.mark_readers database (Lookup Source) id "";
     Tracker.mark_readers database (Lookup Files) module_id "";
@@ -148,18 +151,18 @@ let run_check_imports (database : Tracker.t) id =
         recorder.note Reads (Lookup Source) id "";
         recorder.note Reads (Selection Unresolved) id "";
         recorder.note Reads (Selection Import_references) id "";
-        Resolve.list_file_diagnostics
-          (Lookups.make_names database recorder)
-          file
-          (fst (parse file text))
-          ~text
-          ~used:
-            (if Store.has_unresolved database.store ~file:id then None
-             else
-               Some
-                 (Store.list_names_of_edges_into database.store
-                    ~kind:(Kind.rank_target (Entity Import))
-                    ~id ~markers:references)))
+        List.map (fun import -> Renderer.Import import)
+        @@ Resolve.list_file_diagnostics
+             (Lookups.make_names database recorder)
+             file
+             (fst (parse file text))
+             ~used:
+               (if Store.has_unresolved database.store ~file:id then None
+                else
+                  Some
+                    (Store.list_names_of_edges_into database.store
+                       ~kind:(Kind.rank_target (Entity Import))
+                       ~id ~markers:references)))
   in
   Tracker.report Check_imports id
     ~is_changed:
@@ -208,7 +211,7 @@ let run_header database (row : Store.definition) =
       with
       | Ok header -> (Value header, [])
       | Error [] -> (Blocked, [])
-      | Error diagnostics -> (Failed, diagnostics))
+      | Error descriptions -> (Failed, descriptions))
 
 let run_elaborate database (row : Store.definition) =
   let key = Declarations.decode_key row.key in
@@ -221,7 +224,7 @@ let run_elaborate database (row : Store.definition) =
       match (elaborated.diagnostics, elaborated.interface) with
       | [], Error_interface _ -> (Blocked, [])
       | [], _ -> (Value elaborated, [])
-      | diagnostics, _ -> (Failed, diagnostics))
+      | descriptions, _ -> (Failed, descriptions))
 
 let run_derive_interface database (row : Store.definition) =
   let key = Declarations.decode_key row.key in
@@ -285,14 +288,14 @@ let run_check_signature database (row : Store.definition) =
               key
           with
           | [] -> (Value (), [])
-          | diagnostics -> (Failed, diagnostics))
+          | descriptions -> (Failed, descriptions))
       | Failed | Blocked -> (Blocked, []))
 
 let check_types check database recorder key : Infer.checked Tracker.outcome * _ =
   match check (Lookups.make_infer database recorder) key with
   | Ok checked -> (Value checked, [])
   | Error [] -> (Blocked, [])
-  | Error diagnostics -> (Failed, diagnostics)
+  | Error descriptions -> (Failed, descriptions)
 
 let run_check_contract database (row : Store.definition) =
   let key = Declarations.decode_key row.key in
@@ -302,30 +305,29 @@ let run_check_contract database (row : Store.definition) =
       | Failed, diagnostics -> (Failed, diagnostics)
       | Blocked, diagnostics -> (Blocked, diagnostics))
 
+let is_checked_for_instantiation (row : Store.definition) =
+  row.is_generic && row.ordinal = 0
+  && match Declarations.decode_kind row.kind with Function | Method -> true | _ -> false
+
 let run_check_body (database : Tracker.t) (row : Store.definition) =
   let key = Declarations.decode_key row.key in
   let package = Ids.of_package key.module_.package in
-  let is_checked_for_instantiation =
-    row.is_generic && row.ordinal = 0
-    && match Declarations.decode_kind row.kind with Function | Method -> true | _ -> false
-  in
   let outcome, diagnostics =
-    Tracker.record database ~package Check_body row.id (fun recorder ->
+    Tracker.record database Check_body row.id (fun recorder ->
         block (fun () ->
             let outcome, diagnostics = check_types Infer.check_body database recorder key in
             (match outcome with
             | Value checked ->
                 List.iter
                   (fun used ->
-                    recorder.note References (Entity Package) (Ids.of_package used)
-                      (Path.show_package used))
+                    recorder.note References (Entity Package) package (Path.show_package used))
                   checked.used_packages;
                 List.iter
                   (fun path -> recorder.note References (Entity Definition) (Ids.of_path path) "")
                   (Package_checks.list_uses checked.form
                   @ Inspect.References.list_named_members checked.tables
                       ((Lookups.make_names database recorder).read_definition key));
-                if is_checked_for_instantiation then
+                if is_checked_for_instantiation row then
                   List.iter
                     (fun (callee, grows) ->
                       let note marker =
@@ -338,13 +340,6 @@ let run_check_body (database : Tracker.t) (row : Store.definition) =
             (outcome, diagnostics)))
   in
   let state_before = Tracker.write database Facts.body ~id:row.id (Some outcome) in
-  let was_unchecked =
-    match state_before with
-    | Some (Tracker.Has_failed | Is_blocked) -> true
-    | Some Has_value | None -> false
-  and is_unchecked = match outcome with Value _ -> false | Failed | Blocked -> true in
-  if was_unchecked <> is_unchecked then
-    Tracker.mark_readers database (Selection Unchecked_bodies) package "";
   if state_before = Some Tracker.Has_failed || diagnostics <> [] then
     Tracker.replace_definition_diagnostics database Check_body ~package:key.module_.package
       ~definition:row.id diagnostics
@@ -379,7 +374,7 @@ let run_check_usage database (row : Store.definition) =
   run_fact database Check_usage Facts.usage_check row ~id:row.id (fun recorder ->
       match Usage.check (Lookups.make_usage database recorder) key with
       | [] -> (Value (), [])
-      | diagnostics -> (Failed, diagnostics))
+      | descriptions -> (Failed, descriptions))
 
 let run_check_ownership database (row : Store.definition) =
   let key = Declarations.decode_key row.key in
@@ -387,7 +382,7 @@ let run_check_ownership database (row : Store.definition) =
       let result = Ownership.check (Lookups.make_ownership database recorder) key in
       match result.diagnostics with
       | [] -> (Value result.must_be_disjoint, [])
-      | diagnostics -> (Failed, diagnostics))
+      | descriptions -> (Failed, descriptions))
 
 let run_generate_mir (database : Tracker.t) (row : Store.definition) =
   let path = (Declarations.decode_key row.key).path in
@@ -412,32 +407,11 @@ let run_list_calls database (row : Store.definition) =
   let path = (Declarations.decode_key row.key).path in
   run_fact database List_calls Facts.call_node row ~id:row.path (fun recorder ->
       let lookups = Lookups.make_call_edges database recorder in
-      (match path with
-      | Method
-          { owner = (Impl { trait = { path = trait; _ }; _ } | Derived { trait; _ }) as impl; _ }
-        when List.exists (Path.equal impl)
-               (lookups.interface.names.list_impls_of_trait (Path.locate_package impl) trait) -> (
-          match Interface.Definition.find_impl_interface lookups.interface impl with
-          | exception Tracker.Reads_failed_fact ->
-              recorder.note Implements (Entity Unknown_implementation) (Ids.of_path trait) ""
-          | None -> ()
-          | Some impl_interface -> (
-              match
-                Mir.Call_edges.find_implemented_declaration lookups.interface impl_interface ~impl
-                  path
-              with
-              | Some declaration ->
-                  recorder.note Implements (Entity Definition) (Ids.of_path declaration) ""
-              | None | (exception Tracker.Reads_failed_fact) -> ()))
-      | Top _ | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _
-      | Unresolved _ ->
-          ());
       let callees = Mir.Call_edges.list_path_edges lookups path in
-      let node = Mir.Call_edges.find_node lookups path in
-      List.iter
-        (fun callee -> recorder.note Calls (Entity Definition) (Ids.of_path callee) "")
-        callees;
-      (Value { Facts.node; callees }, []))
+      let note marker target = recorder.note marker (Entity Definition) (Ids.of_path target) "" in
+      List.iter (note Calls) callees;
+      List.iter (note Assumes) (Mir.Call_edges.list_assumed_paths lookups path);
+      (Value callees, []))
 
 module Integer_node = struct
   type t = int
@@ -449,127 +423,143 @@ end
 
 let group_recursion (database : Tracker.t) ~is_node (rows : Store.definition list) =
   let rank = Kind.rank_stage Group_recursion in
-  let names = Lookups.make_names database Tracker.untracked in
   List.iter
     (fun package ->
       let package_name = Path.show_package package in
-      let visible =
-        List.map Path.show_package
-          (package :: Resolve.Names.list_transitive_dependencies names package)
-      in
-      let graph = Tracker.make_call_graph ~visible in
       let seeds =
-        List.filter_map
-          (fun (row : Store.definition) ->
-            if List.mem row.package visible then Some row.path else None)
-          rows
-      in
-      let own_seeds =
         List.filter_map
           (fun (row : Store.definition) ->
             if row.package = package_name then Some row.path else None)
           rows
       in
       if seeds <> [] then begin
-        let nodes = Store.list_cycle_nodes database.store graph ~seeds in
-        let successors = Hashtbl.create 64 in
-        List.iter
-          (fun (source, target) -> Hashtbl.add successors source target)
-          (Store.list_call_pairs database.store graph ~nodes);
-        let members_of = Hashtbl.create 64 in
-        List.iter
-          (fun component ->
-            match component with
-            | [ single ] ->
-                if List.mem single (Hashtbl.find_all successors single) then
-                  Hashtbl.replace members_of single component
-            | members -> List.iter (fun member -> Hashtbl.replace members_of member members) members)
-          (Strongly_connected.list_components
-             (module Integer_node)
-             ~list_successors:(Hashtbl.find_all successors) nodes);
+        let nodes = Store.list_cycle_nodes database.store Tracker.proof_graph ~seeds in
+        let edges = Store.list_proof_edges database.store Tracker.proof_graph ~nodes in
+        let group ~follows =
+          let successors = Hashtbl.create 64 in
+          List.iter
+            (fun (edge : Store.proof_edge) ->
+              if follows edge.markers then Hashtbl.add successors edge.source edge.target)
+            edges;
+          let members_of = Hashtbl.create 64 in
+          List.iter
+            (fun component ->
+              match component with
+              | [ single ] ->
+                  if List.mem single (Hashtbl.find_all successors single) then
+                    Hashtbl.replace members_of single component
+              | members ->
+                  List.iter (fun member -> Hashtbl.replace members_of member members) members)
+            (Strongly_connected.list_components
+               (module Integer_node)
+               ~list_successors:(Hashtbl.find_all successors) nodes);
+          members_of
+        in
+        let recursion_groups = group ~follows:(fun markers -> Kind.has_marker markers Calls)
+        and proof_groups = group ~follows:(fun _ -> true) in
         let paths = Hashtbl.create 64 in
         List.iter
           (fun (id, key) -> Hashtbl.replace paths id (Declarations.decode_key key).path)
           (Store.list_keys_of_paths database.store
              ~paths:
                (List.sort_uniq Int.compare
-                  (Hashtbl.fold (fun _ members ids -> members @ ids) members_of [])));
-        let blocked = Hashtbl.create 16 in
-        (match
-           Store.list_targets_of_kind database.store
-             ~kind:(Kind.rank_target (Entity Unknown_implementation))
-             ~visible
-         with
-        | [] -> ()
-        | traits ->
-            List.iter
-              (fun node -> Hashtbl.replace blocked node ())
-              (Store.list_callers_closure database.store graph
-                 ~seeds:(Store.list_paths_owned_by database.store ~owners:traits)));
+                  (Hashtbl.fold (fun _ members ids -> members @ ids) proof_groups [])));
         let targets =
           List.sort_uniq Int.compare
-            (own_seeds @ List.filter (fun node -> is_node ~package:package_name node) nodes)
+            (seeds @ List.filter (fun node -> is_node ~package:package_name node) nodes)
         in
         Tracker.report_computed Group_recursion targets;
-        let flipped =
-          List.filter
-            (fun node ->
-              ignore (Store.unmark_stale database.store ~stage:rank ~id:node);
-              let outcome : Path.t list Tracker.outcome option =
-                if Hashtbl.mem blocked node then Some Blocked
-                else
-                  Option.map
-                    (fun members : _ Tracker.outcome ->
-                      Value
-                        (List.sort Path.compare (List.filter_map (Hashtbl.find_opt paths) members)))
-                    (Hashtbl.find_opt members_of node)
-              in
-              let state_before = Tracker.write database Facts.recursion_group ~id:node outcome in
-              state_before = Some Tracker.Is_blocked <> Hashtbl.mem blocked node)
-            targets
+        let write fact groups node =
+          ignore
+            (Tracker.write database fact ~id:node
+               (Option.map
+                  (fun members : Path.t list Tracker.outcome ->
+                    Value
+                      (List.sort Path.compare (List.filter_map (Hashtbl.find_opt paths) members)))
+                  (Hashtbl.find_opt groups node)))
         in
-        if flipped <> [] then Tracker.mark_callers_to_group database ~seeds:flipped
+        List.iter
+          (fun node ->
+            ignore (Store.unmark_stale database.store ~stage:rank ~id:node);
+            write Facts.recursion_group recursion_groups node;
+            write Facts.proof_group proof_groups node)
+          targets
       end)
     (Store.list_project database.store)
 
 let replace_placed (database : Tracker.t) stage ~package ~unit placed =
   Tracker.report stage unit
-    ~is_changed:
-      (Tracker.replace_placed_diagnostics database stage ~package ~unit
-         (List.map
-            (fun ({ key; diagnostic } : Package_checks.placed) -> (Ids.of_key key, diagnostic))
-            placed))
+    ~is_changed:(Tracker.replace_placed_diagnostics database stage ~package ~unit placed)
 
-let run_package_check database stage ~package ~unit check =
-  replace_placed database stage ~package ~unit
-    (Tracker.record database stage unit (fun recorder ->
-         match Package_checks.run (Lookups.make_package_checks database recorder) package check with
-         | Placed placed -> placed
-         | Unused_dependencies _ -> []
-         | exception Tracker.Reads_failed_fact -> []))
+let check_package_unit database stage ~package ~unit check =
+  Tracker.record database stage unit (fun recorder ->
+      match Package_checks.run (Lookups.make_package_checks database recorder) package check with
+      | Placed placed ->
+          List.map
+            (fun ({ key; diagnostic } : Package_checks.placed) -> (Ids.of_key key, diagnostic))
+            placed
+      | Dependency_used _ ->
+          Compiler_bug.raise_bug ~stage:"Database"
+            "the check of a definition answered for a dependency"
+      | exception Tracker.Reads_failed_fact -> [])
 
 let run_definition_check stage make_check database (row : Store.definition) =
   let key = Declarations.decode_key row.key in
-  run_package_check database stage ~package:key.module_.package ~unit:row.id (make_check key)
+  let package = key.module_.package in
+  replace_placed database stage ~package ~unit:row.id
+    (check_package_unit database stage ~package ~unit:row.id (make_check key))
 
-let run_check_dependencies (database : Tracker.t) package =
-  let unit = Ids.of_package package in
-  let outcome : Path.package list Tracker.outcome =
-    Tracker.record database Check_dependencies unit (fun recorder ->
-        match
-          Package_checks.run (Lookups.make_package_checks database recorder) package Dependencies
-        with
-        | Unused_dependencies unused -> Tracker.Value unused
-        | Placed _ -> Value []
-        | exception Tracker.Reads_failed_fact -> Blocked)
+let replace_classified (database : Tracker.t) stage classified =
+  let placed_by_unit =
+    List.map
+      (fun ((key : Resolve.Names.key), unit, reported) ->
+        let package = key.module_.package in
+        (package, unit, Option.map (check_package_unit database stage ~package ~unit) reported))
+      classified
   in
-  ignore (Tracker.write database Facts.unused_dependencies ~id:unit (Some outcome))
+  List.iter
+    (fun (package, unit, placed) ->
+      match placed with
+      | Some placed -> replace_placed database stage ~package ~unit placed
+      | None ->
+          if Store.has_diagnostic database.store ~stage:(Kind.rank_stage stage) ~unit then
+            Tracker.forget database stage unit)
+    placed_by_unit
+
+let classify_together (database : Tracker.t) classify (rows : Store.definition list) =
+  classify
+    (Lookups.make_package_checks database Tracker.untracked)
+    (List.map Declarations.decode_declaration rows)
+
+let classify_uses database rows =
+  replace_classified database Check_unexported
+    (List.map
+       (fun ((declaration : Resolve.Names.declaration), (use : Package_checks.use)) ->
+         ( declaration.key,
+           Ids.of_path declaration.key.path,
+           match use with
+           | Unused _ -> Some (Package_checks.Unexported (declaration.key, use))
+           | Used -> None ))
+       (classify_together database Package_checks.classify_uses rows))
+
+let find_growing_cycles database rows =
+  replace_classified database Check_instantiation
+    (List.map
+       (fun ((key : Resolve.Names.key), grows_on_a_cycle) ->
+         ( key,
+           Ids.of_key key,
+           if grows_on_a_cycle then Some (Package_checks.Instantiation key) else None ))
+       (classify_together database Package_checks.find_growing_cycles rows))
 
 let item_kind = Kind.rank_target (Entity Item)
+
+let item_stages : Kind.stage list =
+  [ Lower; Key_tests; Evaluate; Render Development; Render Release ]
 
 let item_graph : Store.item_graph =
   {
     lower_kind = Kind.rank_stage Lower;
+    evaluate_kind = Kind.rank_stage Evaluate;
     item_kind;
     references = Kind.encode_markers [ References ];
     claims = Kind.encode_markers [ Claims ];
@@ -586,10 +576,7 @@ let ensure_item (database : Tracker.t) (item : Lowered.Item.t) =
         label = Lowered.Item.to_string item;
         definition = Option.map Ids.of_path (Lowered.Item.find_definition item);
       }
-  then begin
-    Tracker.mark_stale database Lower id;
-    Tracker.mark_stale database Key_tests id
-  end
+  then List.iter (fun stage -> Tracker.mark_stale database stage id) item_stages
 
 let list_item_targets (database : Tracker.t) stage id =
   List.filter_map
@@ -601,11 +588,10 @@ let rec collect_items (database : Tracker.t) candidates =
     (fun id ->
       if
         Option.is_some (Store.find_item_key database.store ~id)
-        && not (Store.is_item_claimed database.store item_graph ~item:id)
+        && not (Store.is_item_claimed database.store item_graph ~item:id ~over:Every_edge)
       then begin
         let referenced = list_item_targets database Lower id in
-        Tracker.forget database Lower id ~facts:[ Any Facts.lowered ];
-        Tracker.forget database Key_tests id ~facts:[ Any Facts.test_key ];
+        List.iter (fun stage -> Tracker.forget database stage id) item_stages;
         Store.remove_item database.store ~id;
         collect_items database referenced
       end)
@@ -624,6 +610,13 @@ let follow_item_edges database ~items (changes : Store.edge_change list) =
            None
          end)
        changes)
+
+let read_host_system () =
+  match Libc.host with
+  | Ok system -> system
+  | Error _ ->
+      Compiler_bug.raise_bug ~stage:"Database"
+        "code is lowered on a host that Stage0 does not build for"
 
 let make_evaluation_root : Prover.Obligation.evaluation -> Lowered.Item.t = function
   | Constant_value path -> Constant path
@@ -648,43 +641,69 @@ let run_prove (database : Tracker.t) (row : Store.definition) =
               | Obligations outcome ->
                   List.map
                     (fun ((home : Resolve.Names.key), location) : Store.hole ->
-                      let span = Prover.resolve_location lookups.interface.names home location in
-                      { home = Ids.of_key home; start = span.start; stop = span.stop })
+                      { home = Ids.of_key home; location = Marshal.to_string location [] })
                     outcome.holes
               | Unsupported _ | Not_proven_here -> [] ))
         | exception Tracker.Reads_failed_fact -> (Blocked, [], []))
   in
-  let state_before = Tracker.write database Facts.proof ~id:row.id (Some outcome) in
+  ignore (Tracker.write database Facts.proof ~id:row.id (Some outcome));
   Store.replace_holes database.store ~definition:row.id holes;
-  let warnings =
-    match outcome with Value proof -> Prover.list_warnings proof | Failed | Blocked -> []
-  in
-  if state_before <> None || warnings <> [] then
-    Tracker.replace_definition_diagnostics database Prove ~package:key.module_.package
-      ~definition:row.id warnings;
   follow_item_edges database ~items:roots changes
 
 type posed_unit = { posed : Prover.posed; has_unfinished_run : bool }
 
-let pose_unit (database : Tracker.t) (recorder : Tracker.recorder) ~runs (row : Store.definition) =
+let rec make_value : Lowered.static_value -> Prover.Obligation.value = function
+  | Static_scalar (Bool holds) -> Boolean holds
+  | Static_scalar (Integer (_, number)) -> Integer number
+  | Static_scalar (Character scalar) -> Integer (Z.of_int scalar)
+  | Static_scalar (Float32 bits) -> Float (Int32.float_of_bits bits)
+  | Static_scalar (Float64 bits) -> Float (Int64.float_of_bits bits)
+  | Static_scalar _ ->
+      Compiler_bug.raise_bug ~stage:"Database" "an evaluation gave a scalar that is no value"
+  | Static_record fields -> Constructed { variant = None; fields = make_fields fields }
+  | Static_variant (variant, fields) ->
+      Constructed { variant = Some variant; fields = make_fields fields }
+  | Static_array elements | Static_storage { elements; _ } ->
+      Elements (List.map make_value elements)
+
+and make_fields fields = List.map (fun (name, value) -> (name, make_value value)) fields
+
+let find_run (database : Tracker.t) (recorder : Tracker.recorder) (lookups : Prover.Lookups.t)
+    evaluation : Prover.Obligation.run option =
+  let id = Ids.of_item (make_evaluation_root evaluation) in
+  let find_settled view =
+    Tracker.find_settled database recorder view (Lookups.locate_items database) ~id
+  in
+  recorder.note Reads (Fact Test_key) id "";
+  match (find_settled Facts.lowered.whole, find_settled Facts.evaluation.whole) with
+  | Some (Value (Ok (Folded (data, _)))), _ -> Some (Evaluated (make_value data.value))
+  | Some (Value (Ok (Evaluate (_, ty)))), Some (Value (Ran encoded)) ->
+      let env = Lowering.make_env (read_host_system ()) lookups.interface in
+      Some (Evaluated (make_value (Lowering.Encoding.decode env ty encoded)))
+  | _, Some (Value (Unfinished report)) -> Some (Unfinished report)
+  | _, Some (Value (Stopped report)) -> Some (Failed report)
+  | _, (Some (Value (Ran _) | Failed | Blocked) | None) -> None
+
+let list_runs database recorder lookups proof =
+  List.filter_map
+    (fun evaluation ->
+      Option.map (fun run -> (evaluation, run)) (find_run database recorder lookups evaluation))
+    (Prover.list_evaluations proof)
+
+let pose_unit (database : Tracker.t) (recorder : Tracker.recorder) (row : Store.definition) =
   let key = Declarations.decode_key row.key in
   match Tracker.find database recorder Facts.proof.whole key.module_.package ~id:row.id with
   | Some (Value proof) ->
-      let evaluations = Prover.list_evaluations proof in
-      List.iter
-        (fun evaluation ->
-          recorder.note Reads (Fact Test_key) (Ids.of_item (make_evaluation_root evaluation)) "")
-        evaluations;
+      let lookups = Lookups.make_proof database recorder in
+      let runs = list_runs database recorder lookups proof in
       Some
         {
-          posed = Prover.pose (Lookups.make_proof database recorder) ~runs key proof;
+          posed = Prover.pose ~runs proof;
           has_unfinished_run =
             List.exists
-              (fun evaluation ->
-                match List.assoc_opt evaluation runs with
-                | Some (Prover.Obligation.Unfinished _ | Failed _) -> true
-                | Some (Evaluated _) | None -> false)
-              evaluations;
+              (function
+                | _, (Prover.Obligation.Unfinished _ | Failed _) -> true | _, Evaluated _ -> false)
+              runs;
         }
   | Some (Failed | Blocked) | None -> None
 
@@ -706,7 +725,7 @@ let split_by_counts counts values =
       own)
     counts
 
-let solve_units (database : Tracker.t) ~runs solver (rows : Store.definition list) =
+let solve_units (database : Tracker.t) solver (rows : Store.definition list) =
   let posed =
     List.map
       (fun (row : Store.definition) ->
@@ -714,7 +733,7 @@ let solve_units (database : Tracker.t) ~runs solver (rows : Store.definition lis
         let recorder : Tracker.recorder =
           { note = (fun marker target id name -> notes := (marker, target, id, name) :: !notes) }
         in
-        match pose_unit database recorder ~runs row with
+        match pose_unit database recorder row with
         | unit -> (row.id, Ok (unit, List.rev !notes))
         | exception ((Compiler_bug.Bug _ | Interface.Properties.Recursion_limit _) as raised) ->
             (row.id, Error raised))
@@ -759,35 +778,21 @@ let run_decide (database : Tracker.t) answered (row : Store.definition) =
             List.iter (fun (marker, target, id, name) -> recorder.note marker target id name) notes;
             match unit with
             | Some { posed; has_unfinished_run } ->
-                ( Prover.list_states
-                    (Lookups.make_proof database recorder)
-                    posed ~answers ~refutations,
-                  has_unfinished_run )
+                (Prover.list_states posed ~answers ~refutations, has_unfinished_run)
             | None -> ([], false)))
   in
   Tracker.report Decide row.id
     ~is_changed:
       (Store.replace_verdicts database.store ~definition:row.id
          (List.map
-            (fun ({ site; is_proven; trusts_compiled_code; failure; citation } : Prover.state) :
-                 Store.verdict ->
+            (fun ({ site; is_proven; trusts_compiled_code; failure } : Prover.state) : Store.verdict
+               ->
               {
-                code = Diagnostic.Code.name (Prover site.code);
-                start = site.span.start;
-                stop = site.span.stop;
-                shows = site.shows;
+                code = Diagnostic.Code.name (Catalog.describe (Prover site)).code;
+                site = Marshal.to_string site [];
                 is_proven;
                 trusts_compiled_code;
                 failure = Option.map (fun failure -> Marshal.to_string failure []) failure;
-                citation =
-                  Option.map
-                    (fun ({ cited; clause } : Prover.citation) : Store.citation ->
-                      {
-                        cited = Ids.of_key cited;
-                        clause_start = clause.start;
-                        clause_stop = clause.stop;
-                      })
-                    citation;
               })
             states));
   if has_unfinished_run then Tracker.mark_stale database Decide row.id
@@ -819,13 +824,6 @@ let run_claim_roots (database : Tracker.t) (row : Store.definition) =
   in
   follow_item_edges database ~items:roots changes
 
-let read_host_system () =
-  match Libc.host with
-  | Ok system -> system
-  | Error _ ->
-      Compiler_bug.raise_bug ~stage:"Database"
-        "code is lowered on a host that Stage0 does not build for"
-
 let read_item (database : Tracker.t) id : Lowered.Item.t =
   match Store.find_item_key database.store ~id with
   | Some key -> Marshal.from_string key 0
@@ -836,19 +834,26 @@ let find_call_edges (database : Tracker.t) (recorder : Tracker.recorder) path =
   match
     Tracker.find database recorder Facts.call_node.whole (Path.locate_package path) ~id:node
   with
-  | Some (Value { node = Definition; callees }) -> Some callees
-  | Some (Value { node = Trait_method_declaration; callees }) ->
-      Some
-        (callees
-        @ List.map
-            (fun (_, key) -> (Declarations.decode_key key).path)
-            (Store.list_keys_of_paths database.store
-               ~paths:
-                 (Store.list_implementers database.store
-                    (Tracker.make_call_graph ~visible:(Store.list_all_packages database.store))
-                    ~node)))
+  | Some (Value callees) -> Some callees
   | Some (Failed | Blocked) -> Some []
   | None -> None
+
+let write_lowered (database : Tracker.t) ~id outcome =
+  if snd (Tracker.write_observed database Facts.lowered ~id (Some outcome)) then
+    Tracker.mark_stale database Key_tests id
+
+let supply_lowered (database : Tracker.t) item lowered =
+  let id = Ids.of_item item and references = Lowering.list_references lowered in
+  ensure_item database item;
+  ignore (Store.unmark_stale database.store ~stage:(Kind.rank_stage Lower) ~id);
+  let (), changes =
+    Tracker.record_observed database Lower id (fun recorder ->
+        List.iter
+          (fun referenced -> recorder.note References (Entity Item) (Ids.of_item referenced) "")
+          references)
+  in
+  write_lowered database ~id (Value (Ok lowered));
+  follow_item_edges database ~items:references changes
 
 let run_lower (database : Tracker.t) id =
   let item = read_item database id in
@@ -867,41 +872,113 @@ let run_lower (database : Tracker.t) id =
             (Tracker.Value code, references)
         | Error _ as code -> (Value code, [])
         | exception Tracker.Reads_failed_fact -> (Blocked, [])
-        | exception (Lowering.Todo_type _ | Lowering.Infinite_size _) -> (Failed, []))
+        | exception Lowering.Infinite_size _ -> (Failed, []))
   in
-  ignore (Tracker.write database Facts.lowered ~id (Some outcome));
-  follow_item_edges database ~items:references changes
-
-exception Reaches_unsupported of Lowering.unsupported
+  write_lowered database ~id outcome;
+  follow_item_edges database ~items:references changes;
+  references
 
 let run_key_tests (database : Tracker.t) ids =
   let items = List.map (fun id -> (id, read_item database id)) ids in
   let project = Lookups.locate_items database in
-  let outcome =
-    Tracker.record_group database Key_tests ids ~own:[ Test_key ] (fun recorder ->
-        let read view item =
-          match Tracker.read_value database recorder view project ~id:(Ids.of_item item) with
-          | Ok value -> value
-          | Error unsupported -> raise (Reaches_unsupported unsupported)
+  let read view item =
+    Tracker.read_value database Tracker.untracked view project ~id:(Ids.of_item item)
+  in
+  let outcome : _ Tracker.outcome =
+    match
+      Lowering.derive_test_keys ~read_lowered:(read Facts.lowered.whole)
+        ~read_known_key:(read Facts.test_key.whole) (List.map snd items)
+    with
+    | keys -> Value keys
+    | exception Tracker.Reads_failed_fact -> Blocked
+  in
+  Tracker.report_computed Key_tests ids;
+  let rank = Kind.rank_stage Key_tests in
+  let changed =
+    List.filter
+      (fun (id, item) ->
+        let key : _ Tracker.outcome =
+          match outcome with
+          | Value (Ok keys) -> Value (Ok (List.assoc item keys))
+          | Value (Error unbuildable) -> Value (Error unbuildable)
+          | Failed | Blocked -> Blocked
         in
-        match
-          Lowering.derive_test_keys ~read_lowered:(read Facts.lowered.whole)
-            ~read_known_key:(read Facts.test_key.whole) (List.map snd items)
-        with
-        | keys -> Tracker.Value (Ok keys)
-        | exception Reaches_unsupported unsupported -> Value (Error unsupported)
-        | exception Tracker.Reads_failed_fact -> Blocked)
+        snd (Tracker.write_observed database Facts.test_key ~id (Some key)))
+      items
   in
   List.iter
-    (fun (id, item) ->
-      let key : _ Tracker.outcome =
-        match outcome with
-        | Value (Ok keys) -> Value (Ok (List.assoc item keys))
-        | Value (Error unsupported) -> Value (Error unsupported)
-        | Failed | Blocked -> Blocked
-      in
-      ignore (Tracker.write database Facts.test_key ~id (Some key)))
-    items
+    (fun (id, _) ->
+      Store.mark_stage_of_sources_stale database.store
+        ~target:(Tracker.locate (Entity Item) id "")
+        ~source_kind:(Kind.rank_stage Lower) ~markers:references ~stage:rank)
+    changed;
+  if changed <> [] then
+    List.iter (fun id -> ignore (Store.unmark_stale database.store ~stage:rank ~id)) ids
+
+let render_unit (database : Tracker.t) recorder profile item =
+  let project = Lookups.locate_items database in
+  let find_lowered read =
+    match Tracker.find database recorder Facts.lowered.whole project ~id:(Ids.of_item read) with
+    | Some (Value (Ok lowered)) -> Some lowered
+    | Some (Value (Error _) | Failed | Blocked) | None -> None
+  in
+  let interface = Lookups.make_interface database recorder ~is_checked:true in
+  Option.map
+    (Lowering.render_unit (read_host_system ()) interface
+       ~source:(Lookups.make_source database recorder)
+       profile
+       ~read_source:(Lookups.read_source database recorder)
+       ~is_worked_on:(Lookups.is_worked_on database) ~find_lowered)
+    (match find_lowered item with
+    | Some (Compiled fragment | Folded (_, fragment)) -> Some fragment
+    | Some (Evaluate (_, ty)) -> (
+        match
+          Tracker.find database recorder Facts.evaluation.whole project ~id:(Ids.of_item item)
+        with
+        | Some (Value (Ran encoded)) ->
+            Some
+              (Lowering.make_data
+                 (Lowering.make_env (read_host_system ()) interface)
+                 item ty encoded)
+        | Some (Value (Unfinished _ | Stopped _) | Failed | Blocked) | None -> None)
+    | None -> None)
+
+let record_evaluation (database : Tracker.t) item (result : Lowering.evaluation) =
+  let id = Ids.of_item item in
+  Tracker.record database Evaluate id (fun recorder ->
+      match
+        ( Tracker.read database recorder Facts.lowered.whole (Lookups.locate_items database) ~id,
+          result )
+      with
+      | Value (Ok (Evaluate (evaluator, ty))), Ran encoded ->
+          recorder.note Reads (Fact Test_key) (Ids.of_item evaluator) "";
+          let env =
+            Lowering.make_env (read_host_system ())
+              (Lookups.make_interface database recorder ~is_checked:true)
+          in
+          List.iter
+            (fun referenced -> recorder.note References (Entity Item) (Ids.of_item referenced) "")
+            (Lowering.list_references (Compiled (Lowering.make_data env item ty encoded)))
+      | Value (Ok (Evaluate (evaluator, _))), (Unfinished _ | Stopped _) ->
+          recorder.note Reads (Fact Test_key) (Ids.of_item evaluator) ""
+      | (Value (Ok (Compiled _ | Folded _) | Error _) | Failed | Blocked), _ -> ());
+  ignore (Tracker.write database Facts.evaluation ~id (Some (Value result)));
+  ignore (Store.unmark_stale database.store ~stage:(Kind.rank_stage Evaluate) ~id)
+
+let run_render profile (database : Tracker.t) id =
+  let item = read_item database id in
+  let outcome =
+    Tracker.record database (Render profile) id (fun recorder ->
+        match render_unit database recorder profile item with
+        | text -> Option.map (fun text -> Tracker.Value (C_compiler.hash_text text)) text
+        | exception Tracker.Reads_failed_fact -> Some Blocked)
+  in
+  ignore (Tracker.write database (Facts.unit profile) ~id outcome)
+
+let list_linked (database : Tracker.t) profile ~roots =
+  Store.list_linked database.store item_graph ~profile:(Facts.rank_profile profile)
+    ~unit_kind:(Kind.rank_stage (Render profile))
+    ~roots:(List.map Ids.of_item roots)
 
 let decode_kind (row : Store.definition) = Declarations.decode_kind row.kind
 let is_written (row : Store.definition) = row.origin = Declarations.written_origin
@@ -915,25 +992,12 @@ let has_call_node (row : Store.definition) =
 
 let definition_stages =
   [
-    {
-      stage = Claim_roots;
-      unit_id = Of_definition;
-      applies = is_root;
-      facts = [];
-      run = run_claim_roots;
-    };
-    {
-      stage = Resolve;
-      unit_id = Of_definition;
-      applies = is_written;
-      facts = List.map (fun section -> Tracker.Any (Facts.resolved section)) Resolve.sections;
-      run = run_resolve;
-    };
+    { stage = Claim_roots; unit_id = Of_definition; applies = is_root; run = run_claim_roots };
+    { stage = Resolve; unit_id = Of_definition; applies = is_written; run = run_resolve };
     {
       stage = Read_trait_header;
       unit_id = Of_definition;
       applies = (fun row -> is_written row && decode_kind row = Trait);
-      facts = [ Any Facts.trait_header ];
       run = run_trait_header;
     };
     {
@@ -943,7 +1007,6 @@ let definition_stages =
         (fun row ->
           is_written row && is_first row
           && match decode_kind row with Constant | Member_constant -> true | _ -> false);
-      facts = [ Any Facts.constant_value ];
       run = run_constant_value;
     };
     {
@@ -953,129 +1016,110 @@ let definition_stages =
         (fun row ->
           is_written row
           && match decode_kind row with Trait | Impl | Capability -> true | _ -> false);
-      facts = [ Any Facts.header ];
       run = run_header;
     };
-    {
-      stage = Elaborate;
-      unit_id = Of_definition;
-      applies = is_written;
-      facts = [ Any Facts.elaborated ];
-      run = run_elaborate;
-    };
+    { stage = Elaborate; unit_id = Of_definition; applies = is_written; run = run_elaborate };
     {
       stage = Derive_interface;
       unit_id = Of_path;
       applies = (fun row -> row.origin = Declarations.derived_impl_origin);
-      facts = [ Any Facts.derived_interface ];
       run = run_derive_interface;
     };
     {
       stage = Compute_type_facts;
       unit_id = Of_path;
       applies = (fun row -> is_written row && is_first row && decode_kind row = Type);
-      facts = [ Any Facts.type_facts ];
       run = (fun database row -> run_type_facts database [ (Declarations.decode_key row.key).path ]);
     };
     {
       stage = Check_signature;
       unit_id = Of_definition;
       applies = is_written;
-      facts = [ Any Facts.signature_check ];
       run = run_check_signature;
     };
     {
       stage = Check_contract;
       unit_id = Of_definition;
       applies = is_written;
-      facts = [ Any Facts.contract ];
       run = run_check_contract;
     };
-    {
-      stage = Check_body;
-      unit_id = Of_definition;
-      applies = is_written;
-      facts = [ Any Facts.body ];
-      run = run_check_body;
-    };
+    { stage = Check_body; unit_id = Of_definition; applies = is_written; run = run_check_body };
     {
       stage = Build_body_mir;
       unit_id = Of_definition;
       applies = is_written;
-      facts = [ Any Facts.body_mir ];
       run = run_build_body_mir;
     };
     {
       stage = Build_contract_mir;
       unit_id = Of_definition;
       applies = is_written;
-      facts = [ Any Facts.contract_mir ];
       run = run_build_contract_mir;
     };
     {
       stage = Generate_mir;
       unit_id = Of_path;
       applies = (fun row -> row.origin = Declarations.derived_method_origin);
-      facts = [ Any Facts.generated_mir ];
       run = run_generate_mir;
     };
-    {
-      stage = List_calls;
-      unit_id = Of_path;
-      applies = has_call_node;
-      facts = [ Any Facts.call_node ];
-      run = run_list_calls;
-    };
+    { stage = List_calls; unit_id = Of_path; applies = has_call_node; run = run_list_calls };
     {
       stage = Group_recursion;
       unit_id = Of_path;
       applies = has_call_node;
-      facts = [ Any Facts.recursion_group ];
       run =
         (fun database row -> group_recursion database ~is_node:(fun ~package:_ _ -> false) [ row ]);
     };
-    {
-      stage = Check_usage;
-      unit_id = Of_definition;
-      applies = is_written;
-      facts = [ Any Facts.usage_check ];
-      run = run_check_usage;
-    };
+    { stage = Check_usage; unit_id = Of_definition; applies = is_written; run = run_check_usage };
     {
       stage = Check_ownership;
       unit_id = Of_definition;
       applies = is_written;
-      facts = [ Any Facts.ownership ];
       run = run_check_ownership;
     };
     {
       stage = Check_sealed;
       unit_id = Of_definition;
       applies = (fun row -> is_written row && is_first row && decode_kind row = Impl);
-      facts = [];
       run = run_definition_check Check_sealed (fun key -> Sealed key);
     };
     {
       stage = Check_impl;
       unit_id = Of_definition;
       applies = (fun row -> is_written row && is_first row && decode_kind row = Impl);
-      facts = [];
       run = run_definition_check Check_impl (fun key -> Impl key);
     };
     {
       stage = Check_type;
       unit_id = Of_definition;
       applies = (fun row -> is_written row && is_first row && decode_kind row = Type);
-      facts = [];
       run = run_definition_check Check_type (fun key -> Type key);
     };
     {
-      stage = Prove;
+      stage = Check_instantiation;
       unit_id = Of_definition;
-      applies = is_proven_definition;
-      facts = [ Any Facts.proof ];
-      run = run_prove;
+      applies = (fun row -> is_written row && is_checked_for_instantiation row);
+      run = (fun database row -> find_growing_cycles database [ row ]);
     };
+    {
+      stage = Check_test;
+      unit_id = Of_definition;
+      applies = (fun row -> is_written row && is_first row && decode_kind row = Test);
+      run = run_definition_check Check_test (fun key -> Test key);
+    };
+    {
+      stage = Check_unexported;
+      unit_id = Of_path;
+      applies =
+        (fun row ->
+          is_written row && is_first row
+          &&
+          match decode_kind row with
+          | Function | Method | Constant | Member_constant -> true
+          | _ -> false);
+      run = (fun database row -> classify_uses database [ row ]);
+    };
+    { stage = Prove; unit_id = Of_definition; applies = is_proven_definition; run = run_prove };
   ]
 
 let identify_unit recipe (row : Store.definition) =
@@ -1098,14 +1142,12 @@ let rec forget_definition (database : Tracker.t) (row : Store.definition) =
   in
   List.iter
     (fun recipe ->
-      if recipe.applies row then
-        Tracker.forget database recipe.stage (identify_unit recipe row) ~facts:recipe.facts)
+      if recipe.applies row then Tracker.forget database recipe.stage (identify_unit recipe row))
     definition_stages;
   if is_proven_definition row then begin
-    Tracker.forget database Decide row.id ~facts:[];
+    Tracker.forget database Decide row.id;
     Store.replace_holes database.store ~definition:row.id [];
-    ignore (Store.replace_verdicts database.store ~definition:row.id []);
-    Tracker.mark_readers database (Selection Unchecked_bodies) (Store.identify row.package) ""
+    ignore (Store.replace_verdicts database.store ~definition:row.id [])
   end;
   collect_items database claimed;
   if is_impl row then begin
@@ -1114,7 +1156,7 @@ let rec forget_definition (database : Tracker.t) (row : Store.definition) =
         Store.remove_definition database.store ~id:supplied.id;
         forget_definition database supplied)
       (list_supplied_methods database row);
-    Tracker.forget database Supply row.id ~facts:[]
+    Tracker.forget database Supply row.id
   end
 
 let create_units database (row : Store.definition) =
@@ -1197,10 +1239,20 @@ let run_declare (database : Tracker.t) id =
           (List.map (fun (file, text) -> (file, fst (parse file text), text)) files))
   in
   let written = Declarations.write_module database.store module_ ~files declarations in
+  let is_added id = List.exists (fun (row : Store.definition) -> row.id = id) written.added in
   List.iter
     (fun ({ lookup; scope; name; is_spans_only } : Declarations.change) ->
       if is_spans_only then Tracker.mark_position_holders database (Lookup lookup) scope name
-      else Tracker.mark_readers database (Lookup lookup) scope name)
+      else begin
+        Tracker.mark_readers database (Lookup lookup) scope name;
+        match lookup with
+        | (Declaration | Container) when not (is_added scope) ->
+            Option.iter
+              (fun (row : Store.definition) ->
+                Tracker.mark_stale database Check_unexported row.path)
+              (Store.find_definition database.store Main ~id:scope)
+        | _ -> ()
+      end)
     written.changes;
   List.iter (forget_definition database) written.removed;
   List.iter (create_units database) written.added;
@@ -1208,20 +1260,24 @@ let run_declare (database : Tracker.t) id =
     ~is_changed:(written.changes <> [] || written.added <> [] || written.removed <> []);
   if files = [] then begin
     Store.remove_module database.store ~id;
-    Tracker.forget database Declare id ~facts:[]
+    Tracker.forget database Declare id
   end
 
-let run_grant (database : Tracker.t) id =
+let read_dependency (database : Tracker.t) id =
   let dependency =
     match Store.find_dependency database.store ~id with
     | Some dependency -> dependency
-    | None -> Compiler_bug.raise_bug ~stage:"Database" "a stale grant has no dependency"
+    | None -> Compiler_bug.raise_bug ~stage:"Database" "a stale dependency has no row"
   in
-  let package =
-    match Path.parse_package dependency.package with
+  let parse name =
+    match Path.parse_package name with
     | Some package -> package
-    | None -> Compiler_bug.raise_bug ~stage:"Database" "a dependency's package has no name"
+    | None -> Compiler_bug.raise_bug ~stage:"Database" "a dependency names no package"
   in
+  (dependency, parse dependency.package, parse dependency.dependency)
+
+let run_grant (database : Tracker.t) id =
+  let dependency, package, _ = read_dependency database id in
   let grant =
     Tracker.record database Resolve_grant id (fun recorder ->
         recorder.note Reads (Lookup Dependencies) (Ids.of_package package) "";
@@ -1232,7 +1288,25 @@ let run_grant (database : Tracker.t) id =
   in
   ignore (Tracker.write database Facts.grant ~id (Some (Value grant)))
 
-let forget_grant database id = Tracker.forget database Resolve_grant id ~facts:[ Any Facts.grant ]
+let run_check_dependency (database : Tracker.t) id =
+  let _, package, dependency = read_dependency database id in
+  let is_used =
+    Tracker.record database Check_dependency id (fun recorder ->
+        match
+          Package_checks.run
+            (Lookups.make_package_checks database recorder)
+            package (Dependency dependency)
+        with
+        | Dependency_used is_used -> is_used
+        | Placed _ ->
+            Compiler_bug.raise_bug ~stage:"Database" "the check of a dependency placed a diagnostic")
+  in
+  ignore (Tracker.write database Facts.dependency_use ~id (Some (Value is_used)))
+
+let dependency_stages : Kind.stage list = [ Resolve_grant; Check_dependency ]
+
+let forget_dependency database id =
+  List.iter (fun stage -> Tracker.forget database stage id) dependency_stages
 
 let read_first_definition (database : Tracker.t) recipe id =
   let row =
@@ -1294,74 +1368,23 @@ let drain_type_facts (database : Tracker.t) ~guard stale =
     (Lookups.sort_in_dependency_order database
        (List.sort_uniq Path.compare_package (List.map Path.locate_package paths)))
 
-let package_stages : Kind.stage list =
-  [ Check_instantiations; Check_tests; Check_unexported; Check_dependencies ]
-
-let forget_package (database : Tracker.t) package =
-  List.iter
-    (fun stage ->
-      Tracker.forget database stage (Ids.of_package package)
-        ~facts:(if stage = Kind.Check_dependencies then [ Any Facts.unused_dependencies ] else []))
-    package_stages
-
-let run_package_stage (database : Tracker.t) (stage : Kind.stage) id =
-  let package =
-    match Option.bind (Store.find_package_name database.store ~id) Path.parse_package with
-    | Some package -> package
-    | None -> Compiler_bug.raise_bug ~stage:"Database" "a stale package has no row"
-  in
-  match stage with
-  | Check_instantiations -> run_package_check database stage ~package ~unit:id Instantiations
-  | Check_tests -> run_package_check database stage ~package ~unit:id Tests
-  | Check_unexported -> run_package_check database stage ~package ~unit:id Unexported
-  | _ -> run_check_dependencies database package
-
-let drain_test_keys (database : Tracker.t) ~guard stale =
-  let rank = Kind.rank_stage Key_tests in
-  let closure = Hashtbl.create 64 in
-  let rec close id =
-    if not (Hashtbl.mem closure id) then begin
-      Hashtbl.replace closure id ();
-      List.iter
-        (fun (reader : Store.endpoint) -> if reader.kind = rank then close reader.id)
-        (Store.list_sources database.store
-           ~target:(Tracker.locate (Fact Test_key) id "")
-           ~markers:reads)
-    end
-  in
-  List.iter close stale;
-  List.iter
-    (fun component ->
-      let was_stale =
-        List.map (fun id -> Store.unmark_stale database.store ~stage:rank ~id) component
-      in
-      if List.exists Fun.id was_stale then
-        guard component (fun () -> run_key_tests database component))
-    (Strongly_connected.list_components
-       (module Integer_node)
-       ~list_successors:(fun id ->
-         List.filter (Hashtbl.mem closure) (list_item_targets database Lower id))
-       (List.sort Int.compare (Hashtbl.fold (fun id () ids -> id :: ids) closure [])))
-
-let list_claimed_items (database : Tracker.t) packages =
-  Store.list_claimed_items database.store item_graph
-    ~packages:(Option.map (List.map Path.show_package) packages)
-
 let list_definition_facts () =
-  List.concat_map (fun recipe -> List.map Tracker.describe recipe.facts) definition_stages
+  List.concat_map
+    (fun recipe -> List.map Tracker.describe (Tracker.list_facts recipe.stage))
+    definition_stages
 
 let locate_entity (stage : Kind.stage) : Store.unit_entity =
   match stage with
-  | Lower | Key_tests -> Item_unit
+  | Lower | Key_tests | Evaluate | Render _ -> Item_unit
   | Parse | Check_imports -> File_unit
   | Declare -> Module_unit
-  | Resolve_grant -> Dependency_unit
+  | Resolve_grant | Check_dependency -> Dependency_unit
   | Supply | Decide -> Definition_unit
-  | Check_instantiations | Check_tests | Check_unexported | Check_dependencies -> Package_unit
   | Claim_roots | Resolve | Read_trait_header | Evaluate_constant | Elaborate_header | Elaborate
   | Derive_interface | Compute_type_facts | Check_signature | Check_contract | Check_body
   | Build_body_mir | Build_contract_mir | Generate_mir | List_calls | Group_recursion | Check_usage
-  | Check_ownership | Check_sealed | Check_impl | Check_type | Prove -> (
+  | Check_ownership | Check_sealed | Check_impl | Check_type | Check_instantiation | Check_test
+  | Check_unexported | Prove -> (
       match (find_recipe stage).unit_id with
       | Of_definition -> Definition_unit
       | Of_path -> Path_unit)
@@ -1373,8 +1396,9 @@ let list_stale_units (database : Tracker.t) (stage : Kind.stage) ~scope =
        ~scope)
 
 let guard_units (database : Tracker.t) ?on_bug (stage : Kind.stage) ids run =
+  let mark_stale () = List.iter (Tracker.mark_stale database stage) ids in
   let fail bug =
-    List.iter (Tracker.mark_stale database stage) ids;
+    mark_stale ();
     Tracker.record_bug database stage ids bug;
     match on_bug with Some on_bug -> on_bug bug | None -> raise (Compiler_bug.Bug bug)
   in
@@ -1384,15 +1408,28 @@ let guard_units (database : Tracker.t) ?on_bug (stage : Kind.stage) ids run =
   with
   | () -> ()
   | exception Compiler_bug.Bug bug -> fail bug
-  | exception Interface.Properties.Recursion_limit message ->
+  | exception Interface.Properties.Recursion_limit _ ->
       fail
         {
           stage = "Database";
-          message = "a stage after the checks reached a recursion limit: " ^ message;
+          message = "a stage after the checks reached a recursion limit";
           doing = [];
         }
+  | exception raised ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      mark_stale ();
+      Printexc.raise_with_backtrace raised backtrace
 
-let drain_decide (database : Tracker.t) ?on_bug ~scope ~runs solver =
+let run_units (database : Tracker.t) ?on_bug (stage : Kind.stage) ids run =
+  List.iter
+    (fun id ->
+      if
+        (not (Tracker.is_broken database stage id))
+        && Store.unmark_stale database.store ~stage:(Kind.rank_stage stage) ~id
+      then guard_units database ?on_bug stage [ id ] (fun () -> run database id))
+    ids
+
+let drain_decide (database : Tracker.t) ?on_bug ~scope solver =
   match
     List.filter_map
       (fun id -> Store.find_definition database.store Main ~id)
@@ -1400,7 +1437,7 @@ let drain_decide (database : Tracker.t) ?on_bug ~scope ~runs solver =
   with
   | [] -> ()
   | rows ->
-      let answered = solve_units database ~runs (Lazy.force solver) rows in
+      let answered = solve_units database (Lazy.force solver) rows in
       List.iter
         (fun (row : Store.definition) ->
           if Store.unmark_stale database.store ~stage:(Kind.rank_stage Decide) ~id:row.id then
@@ -1412,13 +1449,7 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
   let rank = Kind.rank_stage stage in
   let stale = list_stale_units database stage ~scope in
   let guard = guard_units database ?on_bug stage in
-  let run_each run =
-    List.iter
-      (fun id ->
-        if Store.unmark_stale database.store ~stage:rank ~id then
-          guard [ id ] (fun () -> run database id))
-      stale
-  in
+  let run_each = run_units database ?on_bug stage stale in
   (match stage with
   | Parse -> run_each run_parse
   | Declare -> run_each run_declare
@@ -1461,17 +1492,134 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
           match Store.find_definition database.store Main ~id with
           | Some impl -> run_supply database impl
           | None -> Compiler_bug.raise_bug ~stage:"Database" "a stale impl has no row")
-  | Check_instantiations | Check_tests | Check_unexported | Check_dependencies ->
-      run_each (fun database id -> run_package_stage database stage id)
-  | Lower -> run_each run_lower
-  | Key_tests -> if stale <> [] then drain_test_keys database ~guard stale
-  | Decide ->
+  | Check_dependency -> run_each run_check_dependency
+  | Check_instantiation | Check_unexported ->
+      let recipe = find_recipe stage in
+      let find_unit id =
+        match recipe.unit_id with
+        | Of_definition ->
+            Option.bind (Store.find_definition database.store Main ~id) (fun row ->
+                if recipe.applies row then Some row else None)
+        | Of_path ->
+            List.find_opt recipe.applies (Store.list_definitions database.store Main (Of_path id))
+      in
+      let rows =
+        List.filter_map
+          (fun id ->
+            if Store.unmark_stale database.store ~stage:rank ~id then begin
+              let row = find_unit id in
+              if Option.is_none row then Tracker.forget database stage id;
+              row
+            end
+            else None)
+          stale
+      in
+      if rows <> [] then
+        guard
+          (List.map (identify_unit recipe) rows)
+          (fun () ->
+            if stage = Check_unexported then classify_uses database rows
+            else find_growing_cycles database rows)
+  | Lower | Key_tests ->
       Compiler_bug.raise_bug ~stage:"Database"
-        "Decide is drained with the results of its evaluations and a solver"
+        "an item is lowered and keyed from the claims that reach it"
+  | Render _ ->
+      Compiler_bug.raise_bug ~stage:"Database" "a unit is rendered when its item is linked"
+  | Evaluate ->
+      Compiler_bug.raise_bug ~stage:"Database"
+        "an evaluation is recorded by the command that runs it"
+  | Decide -> Compiler_bug.raise_bug ~stage:"Database" "Decide is drained with a solver"
   | Resolve | Read_trait_header | Evaluate_constant | Elaborate_header | Elaborate
   | Derive_interface | Check_signature | Check_body | Build_body_mir | Build_contract_mir
   | Generate_mir | List_calls | Check_usage | Check_ownership | Check_sealed | Check_impl
-  | Check_type | Prove | Claim_roots ->
+  | Check_type | Check_test | Prove | Claim_roots ->
       let recipe = find_recipe stage in
       run_each (fun database id -> recipe.run database (read_first_definition database recipe id)));
   stale <> []
+
+let drain_test_keys (database : Tracker.t) ?on_bug packages =
+  let rank = Kind.rank_stage Key_tests in
+  let candidates = Hashtbl.create 64 in
+  let lower_rank = Kind.rank_stage Lower in
+  let rec add_referrers id =
+    if not (Hashtbl.mem candidates id) then begin
+      Hashtbl.replace candidates id ();
+      List.iter
+        (fun (referrer : Store.endpoint) ->
+          if referrer.kind = lower_rank then add_referrers referrer.id)
+        (Store.list_sources database.store
+           ~target:(Tracker.locate (Entity Item) id "")
+           ~markers:references)
+    end
+  in
+  List.iter add_referrers (list_stale_units database Key_tests ~scope:Everything);
+  let list_sorted_ids table =
+    List.sort Int.compare (Hashtbl.fold (fun id _ ids -> id :: ids) table [])
+  in
+  if Hashtbl.length candidates > 0 then begin
+    let targets = Hashtbl.create 64 in
+    let list_candidate_targets id =
+      match Hashtbl.find_opt targets id with
+      | Some candidate_targets -> candidate_targets
+      | None ->
+          let candidate_targets =
+            List.filter (Hashtbl.mem candidates) (list_item_targets database Lower id)
+          in
+          Hashtbl.replace targets id candidate_targets;
+          candidate_targets
+    in
+    let unsettled = Hashtbl.create 16 in
+    List.iter
+      (fun id -> Hashtbl.replace unsettled id ())
+      (Store.list_stale database.store ~stage:(Kind.rank_stage Lower) ~entity:Item_unit
+         ~scope:Everything);
+    let reached = Hashtbl.create 64 in
+    let rec reach id =
+      if not (Hashtbl.mem reached id || Hashtbl.mem unsettled id) then begin
+        Hashtbl.replace reached id ();
+        List.iter reach (list_candidate_targets id)
+      end
+    in
+    List.iter reach
+      (Store.list_claimed_among database.store item_graph ~items:(list_sorted_ids candidates)
+         ~packages);
+    List.iter
+      (fun component ->
+        let was_stale =
+          List.map (fun id -> Store.unmark_stale database.store ~stage:rank ~id) component
+        in
+        if List.exists Fun.id was_stale then
+          guard_units database ?on_bug Key_tests component (fun () ->
+              run_key_tests database component))
+      (Strongly_connected.list_components
+         (module Integer_node)
+         ~list_successors:(fun id -> List.filter (Hashtbl.mem reached) (list_candidate_targets id))
+         (list_sorted_ids reached))
+  end
+
+let drain_claimed_items (database : Tracker.t) ?on_bug packages =
+  let rec lower_each = function
+    | [] -> ()
+    | id :: pending ->
+        let referenced = ref [] in
+        run_units database ?on_bug Lower [ id ] (fun database id ->
+            referenced := List.map Ids.of_item (run_lower database id));
+        lower_each (!referenced @ pending)
+  in
+  let rec lower_claimed () =
+    match
+      List.filter
+        (fun item ->
+          Store.is_item_claimed database.store item_graph ~item ~over:(Settled_edges { packages }))
+        (list_stale_units database Lower ~scope:Everything)
+    with
+    | [] -> ()
+    | claimed ->
+        lower_each claimed;
+        lower_claimed ()
+  in
+  lower_claimed ();
+  drain_test_keys database ?on_bug packages
+
+let render_units (database : Tracker.t) ?on_bug profile items =
+  run_units database ?on_bug (Render profile) items (run_render profile)

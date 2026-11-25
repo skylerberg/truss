@@ -1,6 +1,6 @@
 type overload =
   | Type_overload of Path.t
-  | View_overload of Path.t
+  | List_overload of Path.t
   | Trait_overload of Types.trait_reference * Types.trait_method
 
 let classify_receiver_mode (arguments : Syntax.argument list) : Language.Mode.t =
@@ -9,12 +9,12 @@ let classify_receiver_mode (arguments : Syntax.argument list) : Language.Mode.t 
   | { value = { kind = Mode (Own, _); _ }; _ } :: _ -> Own
   | _ -> Read
 
-let describe_missing_method state type_ name =
-  match Types.find_view (State.normalize state type_) with
-  | Some view ->
-      Printf.sprintf "`%s` has no method `%s`, and neither has its view `%s`."
-        (State.show state type_) name (State.show state view)
-  | None -> Printf.sprintf "`%s` has no method `%s`." (State.show state type_) name
+let make_method_owner state type_ : Catalog.Inference.method_owner =
+  Type_owner
+    {
+      type_ = State.zonk state type_;
+      list = Option.map (State.zonk state) (Types.find_list_of_array (State.normalize state type_));
+    }
 
 let rec check_name (state : State.state) (env : State.env) (value : Syntax.expression)
     ({ name; target; type_arguments } : Resolve.head) =
@@ -34,17 +34,14 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
       state.tables.resolutions.(value.id) <- Some (Value_parameter parameter);
       Types.make_builtin UInt64
   | Type_parameter _ | Capability_parameter _ ->
-      State.make_error_type state Not_a_value (State.read_span state value.id)
-        (Printf.sprintf "`%s` is a type, not a value." text)
+      State.make_error_type state (Type_parameter_as_value { at = Written value.id; name = text })
   | Definition (Theorem, _) ->
-      State.make_error_type state Not_a_value (State.read_span state value.id)
-        (Printf.sprintf
-           "`%s` is a theorem, so it is not a value. Call it in a proof to use its `ensures`." text)
+      State.make_error_type state (Theorem_as_value { at = Written value.id; name = text })
   | Definition (Function, path) -> (
       match Instantiation.find_function_signature state.signatures state.lookups path with
       | Some signature -> (
           let instance =
-            Instantiation.instantiate state (State.read_span state value.id) signature
+            Instantiation.instantiate state ~written:value.id ~declared_on:path signature
           in
           match
             match type_arguments with
@@ -67,15 +64,12 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
           Some (Variant_value { type_ = Types.unit; variant = Language.Builtin_type.show Unit });
         Types.unit
       end
-      else
-        State.make_error_type state Not_a_value (State.read_span state value.id)
-          (Printf.sprintf "`%s` is a type. Build a value with `%s(...)`." text text)
+      else State.make_error_type state (Type_as_value { at = Written value.id; name = text })
   | Definition ((Trait | Capability), _) ->
-      State.make_error_type state Not_a_value (State.read_span state value.id)
-        (Printf.sprintf "`%s` is not a value." text)
+      State.make_error_type state (Trait_as_value { at = Written value.id; name = text })
   | Variant (type_path, variant) ->
       check_variant_value state value type_path variant
-        ~arguments:(Instantiation.instantiate_type state (State.read_span state value.id) type_path)
+        ~arguments:(Instantiation.instantiate_type state ~written:value.id type_path)
   | Field field -> (
       match env.self with
       | Some (Types.Named { path = self_path; arguments }) -> (
@@ -95,8 +89,8 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
       | None -> State.raise_bug "`result` is named where nothing is returned")
   | Old | Identical | Final | Specification_function _ ->
       state.tables.resolutions.(value.id) <- Some Specification_value;
-      State.make_error_type state Not_a_value (State.read_span state value.id)
-        (Printf.sprintf "`%s` is applied to its subject, as in `%s(...)`." text text)
+      State.make_error_type state
+        (Specification_function_as_value { at = Written value.id; name = text })
   | Visited -> (
       state.tables.resolutions.(value.id) <- Some Specification_value;
       match env.loop_element with
@@ -117,7 +111,7 @@ and check_variant_value state (value : Syntax.expression) type_path variant ~arg
       | Some { fields = None; _ } -> type_
       | Some { fields = Some [ field ]; _ } ->
           Solver.flatten state
-            (Bound { at = State.read_span state value.id; of_type = None })
+            (Bound { at = Written value.id; of_type = None })
             (Types.Function
                {
                  inputs = [ (Language.Mode.Own, field.field_type) ];
@@ -126,30 +120,30 @@ and check_variant_value state (value : Syntax.expression) type_path variant ~arg
                  costs = [ { amortized = false; resource = Metric Time; bound = Order_of } ];
                })
       | Some { fields = Some fields; _ } ->
-          State.make_error_type state Not_a_value (State.read_span state value.id)
-            (Printf.sprintf
-               "`%s` has %d fields, so it is not a function: a function takes its arguments by \
-                position, and fields have no order. Build it with named fields, as in `%s(%s)`."
-               variant (List.length fields) variant
-               (String.concat ", "
-                  (List.map (fun (field : Types.field) -> field.field_name ^ ": ...") fields)))
+          State.make_error_type state
+            (Variant_with_fields_as_function
+               {
+                 at = Written value.id;
+                 variant;
+                 fields = List.map (fun (field : Types.field) -> field.field_name) fields;
+               })
       | None ->
-          State.make_error_type state Unknown_variant (State.read_span state value.id)
-            (Printf.sprintf "`%s` has no variant `%s`." (Types.show type_) variant))
-  | None ->
-      State.make_error_type state Unknown_variant (State.read_span state value.id)
-        (Printf.sprintf "`%s` has no variants." (Types.show type_))
+          State.make_error_type state
+            (Unknown_variant { at = Written value.id; type_; variant; candidates = [] }))
+  | None -> State.make_error_type state (No_variants { at = Written value.id; type_ })
 
 and check_field state (value : Syntax.expression) base_type (member : Syntax.name) =
   let report_unknown candidates =
-    State.make_error_type state Unknown_member (State.read_span state member.id)
-      ~fixes:
-        (Diagnostic.list_spelling_fixes (State.read_span state member.id) ~written:member.text
-           candidates)
-      (Printf.sprintf "%s has no field `%s`."
-         (String.capitalize_ascii (State.describe state base_type))
-         member.text)
+    State.make_error_type state
+      (Unknown_field
+         {
+           at = Written member.id;
+           base = State.make_shown state base_type;
+           name = member.text;
+           candidates;
+         })
   in
+  let base_type = Types.strip_view base_type in
   match base_type with
   | Types.Named { path; arguments } -> (
       match Members.find_fields state.lookups path arguments with
@@ -159,43 +153,35 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
           with
           | Some written ->
               if not (Members.are_fields_visible state.lookups ~package:state.package path) then begin
-                State.make_error_type state Private_field (State.read_span state member.id)
-                  (Printf.sprintf
-                     "`%s` is opaque, so its fields can be read only in its own package."
-                     (State.show state base_type))
+                State.make_error_type state
+                  (Opaque_field_read { at = Written member.id; type_ = State.zonk state base_type })
               end
               else begin
                 state.tables.resolutions.(value.id) <-
                   Some (Field_access { type_ = base_type; field = member.text });
                 Solver.flatten state
-                  (Bound { at = State.read_span state member.id; of_type = None })
+                  (Bound { at = Written member.id; of_type = None })
                   written.field_type
               end
           | None ->
               if Members.has_visible_method state path member.text then begin
-                State.make_error_type state Not_a_value (State.read_span state member.id)
-                  (Printf.sprintf "`%s` is a method, so it is called: `%s()`." member.text
-                     member.text)
+                State.make_error_type state
+                  (Method_as_field { at = Written member.id; name = member.text })
               end
               else
                 report_unknown (List.map (fun (written : Types.field) -> written.field_name) fields)
           )
       | None ->
           if Members.has_visible_method state path member.text then
-            State.make_error_type state Not_a_value (State.read_span state member.id)
-              (Printf.sprintf "`%s` is a method, so it is called: `%s()`." member.text member.text)
+            State.make_error_type state
+              (Method_as_field { at = Written member.id; name = member.text })
           else report_unknown [])
   | _ -> report_unknown []
 
 and check_function_value state (value : Syntax.expression) (instance : Instantiation.instance) =
   match Types.make_function_type instance.signature with
   | Some function_type -> instance.flatten (Types.Function function_type)
-  | None ->
-      State.make_error_type state Not_a_value (State.read_span state value.id)
-        (Printf.sprintf
-           "`%s` lends a part, and a function value cannot lend. Call it where the part is used, \
-            or write a lambda that returns a copy of the part."
-           (State.quote_span state (State.read_span state value.id)))
+  | None -> State.make_error_type state (Lending_function_value { at = Written value.id })
 
 and check_static_member state (value : Syntax.expression) type_ (member : Syntax.name) =
   match type_ with
@@ -219,7 +205,8 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
             with
             | Some signature ->
                 let instance =
-                  Instantiation.instantiate state (State.read_span state value.id) signature
+                  Instantiation.instantiate state ~written:value.id ~declared_on:method_path
+                    signature
                 in
                 (match instance.signature.receiver with
                 | Some (_, receiver) -> ignore (State.unify state receiver type_)
@@ -228,21 +215,31 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
                   Some (Global { path = method_path; instantiation = instance.instantiation });
                 check_function_value state value instance
             | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path))
-        | Hidden hidden -> Members.make_hidden_error state (State.read_span state member.id) hidden
+        | Hidden hidden -> Members.make_hidden_error state (Written member.id) hidden
         | Absent ->
-            State.make_error_type state Unknown_member (State.read_span state member.id)
-              (match Types.find_view type_ with
-              | Some (Types.Named { path = Top { name; _ } as view; _ })
-                when Members.has_visible_method state view member.text ->
-                  Printf.sprintf
-                    "`%s` has no member `%s` of its own. The method is its view's: `%s.%s`."
-                    (State.show state type_) member.text name member.text
-              | _ -> Printf.sprintf "`%s` has no member `%s`." (State.show state type_) member.text)
-      )
+            State.make_error_type state
+              (No_member
+                 {
+                   at = Written member.id;
+                   type_ = State.zonk state type_;
+                   name = member.text;
+                   list =
+                     (match Types.find_list_of_array type_ with
+                     | Some (Types.Named { path = Top { name; _ } as list; _ })
+                       when Members.has_visible_method state list member.text ->
+                         Some name
+                     | _ -> None);
+                 }))
   | Types.Error _ | Types.Hole -> type_
   | _ ->
-      State.make_error_type state Unknown_member (State.read_span state member.id)
-        (Printf.sprintf "`%s` has no member `%s`." (State.show state type_) member.text)
+      State.make_error_type state
+        (No_member
+           {
+             at = Written member.id;
+             type_ = State.zonk state type_;
+             name = member.text;
+             list = None;
+           })
 
 and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) instance items :
     (unit, Types.ty) result =
@@ -254,10 +251,9 @@ and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) 
         let own = List.drop head instance.instantiation.type_arguments in
         if List.length written <> List.length own then
           Error
-            (State.make_error_type state Arity (State.read_span state value.id)
-               (Printf.sprintf "This takes %s, and %s given."
-                  (Diagnostic.show_count (List.length own) "type argument" "type arguments")
-                  (Diagnostic.show_count (List.length written) "is" "are")))
+            (State.make_error_type state
+               (Type_argument_count
+                  { at = Written value.id; expected = List.length own; given = List.length written }))
         else
           let errors =
             List.concat
@@ -273,13 +269,13 @@ and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) 
                    | Types.Type (Types.Error _ as reported), Types.Value _ -> [ reported ]
                    | Types.Type _, Types.Value _ ->
                        [
-                         State.make_error_type state Argument_kind (State.read_span state value.id)
-                           "A type argument is given where a `UInt64` value is expected.";
+                         State.make_error_type state
+                           (Type_for_value_argument { at = Written value.id });
                        ]
                    | Types.Value _, Types.Type _ ->
                        [
-                         State.make_error_type state Argument_kind (State.read_span state value.id)
-                           "A `UInt64` value is given where a type argument is expected.";
+                         State.make_error_type state
+                           (Value_for_type_argument { at = Written value.id });
                        ])
                  written own)
           in
@@ -314,23 +310,20 @@ and reject_specification_call state (env : State.env) (value : Syntax.expression
     in
     Some
       (Types.Error
-         (State.report_specification_only state (State.read_span state value.id)
-            (match
-               (Interface.Definition.find_interface state.lookups.interface path, specification_type)
-             with
-            | Some (Theorem_interface _), _ ->
-                Printf.sprintf
-                  "`%s` is a theorem, so it is called only in specifications and proofs, which are \
-                   not compiled."
-                  name
-            | _, Some specification_type ->
-                Printf.sprintf
-                  "`%s` mentions `%s`, which exists only in specifications, so it is called only \
-                   in specifications."
-                  name (Types.show specification_type)
-            | _, None ->
-                Printf.sprintf
-                  "`%s` is for specifications only, so it is called only in specifications." name)))
+         (State.report_specification_only state
+            (Specification_call_in_code
+               {
+                 at = Written value.id;
+                 name;
+                 call =
+                   (match
+                      ( Interface.Definition.find_interface state.lookups.interface path,
+                        specification_type )
+                    with
+                   | Some (Theorem_interface _), _ -> Theorem_call
+                   | _, Some specification_type -> Mentions specification_type
+                   | _, None -> Specification_function_call);
+               })))
 
 and lookup_trait_static_methods (state : State.state) path name =
   Resolve.Names.collect_visible
@@ -339,7 +332,14 @@ and lookup_trait_static_methods (state : State.state) path name =
          choose_trait_method name Path.Static candidate
            (list_candidate_methods state name candidate))
        (list_implemented_trait_lookups state
-          (Types.Named { path; arguments = Instantiation.make_fresh_arguments state path })
+          (Types.Named
+             {
+               path;
+               arguments =
+                 List.map
+                   (Unify.make_fresh_argument state.unifier)
+                   (Instantiation.read_type_generics state path);
+             })
           name))
 
 and list_implemented_trait_lookups (state : State.state) self_type name =
@@ -385,9 +385,6 @@ and list_trait_candidates (state : State.state) receiver_type name =
       list_bound_candidates
         (Interface.Properties.list_known_bounds state.lookups.interface
            ~list_bounds:(State.lookup_bounds state) (Types.Parameter parameter))
-  | Types.Any trait, _ ->
-      list_bound_candidates
-        (Interface.Properties.list_bound_closure state.lookups.interface ~self:receiver_type trait)
   | _, (_ :: _ as closures) -> list_bound_candidates (List.concat_map snd closures)
   | _, [] -> list_implemented_trait_lookups state receiver_type name
 
@@ -480,8 +477,10 @@ and resolve_overloads state receiver_type name :
     in
     let lookup_type_method =
       list_methods_of (fun method_path -> Type_overload method_path) (Some receiver_type)
-    and lookup_view_method =
-      list_methods_of (fun method_path -> View_overload method_path) (Types.find_view receiver_type)
+    and lookup_list_method =
+      list_methods_of
+        (fun method_path -> List_overload method_path)
+        (Types.find_list_of_array receiver_type)
     in
     Ok
       (Resolve.Names.collect_visible
@@ -497,41 +496,20 @@ and resolve_overloads state receiver_type name :
                              (fun (trait, method_) -> Trait_overload (trait, method_))
                              (choose_trait_method name receiver candidate methods))
                          candidates
-                   @ [ lookup_view_method receiver ])))
+                   @ [
+                       (match receiver with
+                       | Path.Instance Own | Static -> Resolve.Names.Absent
+                       | Instance (Read | Mut) -> lookup_list_method receiver);
+                     ])))
             [ Path.Instance Read; Instance Mut; Instance Own ]))
 
-and find_method_version state (span : Source.Definition_span.t) type_ name
-    (receiver : Path.receiver) : (Tables.callee * Types.signature) Resolve.Names.lookup =
-  match resolve_overloads state type_ name with
-  | Error _ | Ok Absent -> Absent
-  | Ok (Hidden hidden) -> Hidden hidden
-  | Ok (Visible overloads) -> (
-      match List.assoc_opt receiver overloads with
-      | Some (Type_overload method_path) -> (
-          match
-            Instantiation.find_function_signature state.signatures state.lookups method_path
-          with
-          | Some signature ->
-              let instance = Instantiation.instantiate state span signature in
-              (match instance.signature.receiver with
-              | Some (_, self_type) -> ignore (State.unify state self_type type_)
-              | None -> ());
-              Visible
-                ( Function { path = method_path; instantiation = instance.instantiation },
-                  instance.signature )
-          | None -> Absent)
-      | Some (Trait_overload (trait, method_)) ->
-          let instance, callee =
-            instantiate_trait_method state span ~self_type:type_ trait method_
-          in
-          Solver.require state (Loop span) type_ trait;
-          Visible (callee, (instance : Instantiation.instance).signature)
-      | Some (View_overload _) | None -> Absent)
-
-and instantiate_trait_method state span ~self_type (trait : Types.trait_reference)
+and instantiate_trait_method state ~written ~self_type (trait : Types.trait_reference)
     (method_ : Types.trait_method) =
   let instance =
-    Instantiation.instantiate state span
+    Instantiation.instantiate state ~written
+      ~declared_on:
+        (Method
+           { owner = trait.trait; name = method_.method_name; receiver = method_.method_receiver })
       ~extra:
         (Types.make_trait_substitution
            (Members.list_trait_generics state.lookups trait.trait)
@@ -547,76 +525,3 @@ and instantiate_trait_method state span ~self_type (trait : Types.trait_referenc
         self_type;
         instantiation = instance.instantiation;
       } )
-
-and make_argumentless_call ?lends callee result : Tables.call =
-  { callee; arguments = []; omitted_defaults = []; callee_result = result; lends }
-
-and find_elements_calls state (iterable : Syntax.expression) type_ (mode : Language.Mode.t) :
-    (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup =
-  let span = State.read_span state iterable.id and receiver = Path.Instance mode in
-  let is_uint64 type_ =
-    Types.is_builtin UInt64
-      (Conversions.read_actual_head state iterable
-         (Solver.flatten state (Bound { at = span; of_type = None }) type_))
-  in
-  match
-    ( find_method_version state span type_ "count" (Instance Read),
-      find_method_version state span type_ "element" receiver )
-  with
-  | Visible (count, counted), Visible (element, lent) -> (
-      match (counted.parameters, counted.output, lent.parameters, lent.output) with
-      | [], Returns count_type, [ position ], Lends (lends, part)
-        when is_uint64 count_type && is_uint64 position.type_ ->
-          let part = State.normalize state part in
-          Visible
-            ( Tables.Elements
-                {
-                  count = make_argumentless_call count (Types.make_builtin UInt64);
-                  element = make_argumentless_call ~lends element part;
-                  lends;
-                },
-              part,
-              lends )
-      | _ -> Absent)
-  | Hidden hidden, (Visible _ | Hidden _) | Visible _, Hidden hidden -> Hidden hidden
-  | Absent, _ | _, Absent -> Absent
-
-and find_consuming_cursor state (iterable : Syntax.expression) type_ :
-    (Tables.loop * Types.ty) Resolve.Names.lookup =
-  let span = State.read_span state iterable.id in
-  match find_method_version state span type_ "cursor" (Instance Own) with
-  | Visible (callee, { parameters = []; output = Returns cursor; _ }) -> (
-      let cursor = Conversions.read_actual_head state iterable cursor in
-      let trait = Types.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
-      match State.find_evidence state cursor trait with
-      | Some _ ->
-          Visible
-            ( Tables.Pulled
-                {
-                  cursor;
-                  cursor_call = Some (make_argumentless_call callee cursor);
-                  remaining = None;
-                },
-              Solver.resolve_associated_type state cursor trait Cursor_element ~at:span )
-      | None -> Absent)
-  | Hidden hidden -> Hidden hidden
-  | Visible _ | Absent -> Absent
-
-and find_remaining_call state cursor =
-  let finite_cursor =
-    Types.make_trait_reference ~arguments:[] (Well_known.make_path Finite_cursor)
-  in
-  let call =
-    Tables.make_method_call finite_cursor Finite_cursor_remaining ~self_type:cursor
-      ~result:(Types.make_builtin UInt64) []
-  in
-  let is_on_a_parameter (bound : Types.bound_condition) =
-    match bound.subject with Types.Parameter _ -> true | _ -> false
-  in
-  match State.find_evidence state cursor finite_cursor with
-  | Some _ -> Some ([], call)
-  | None -> (
-      match State.reduce_condition state [ { subject = cursor; bound = finite_cursor } ] with
-      | Some (_ :: _ as condition) when List.for_all is_on_a_parameter condition ->
-          Some (condition, call)
-      | Some _ | None -> None)

@@ -163,7 +163,7 @@ public fn Hasher.after_bytes(self, bytes: Sequence[UInt8], count: Integer) -> Ha
   }
 }
 
-public fn Hasher.write_bytes(self, bytes: Slice[UInt8]) -> Hasher
+public fn Hasher.write_bytes(self, bytes: List[UInt8]) -> Hasher
   ensures identical(result, self.after_bytes(bytes.model(), count: bytes.length()).write(bytes.length()))
   cost time O(bytes.length())
   cost allocations == 0
@@ -270,6 +270,8 @@ public trait Model {
 
   fn model(self) -> Self.Value
 }
+
+public let maximum_length: UInt64 = 9223372036854775807
 
 public trait Index {
   type Key
@@ -419,6 +421,12 @@ public trait Iterable {
   }
 }
 
+public trait IterableMut: Iterable {
+  fn element(mut self, position: UInt64) lends mut Self.Element
+    requires position < self.count()
+    ensures self.count() == old(self.count())
+}
+
 public trait Cursor {
   type Element
   capability Uses
@@ -428,11 +436,15 @@ public trait Cursor {
 
   fn to_list(own self) -> List[Self.Element]
     uses Self.Uses, RunForever unless Self: FiniteCursor
+    ensures result.length() <= old(self.remaining()) when Self: FiniteCursor
+    cost amortized time O((self.remaining() + 1) * time(Self.next)) when Self: FiniteCursor
   {
     var cursor = own self
     var items: List[Self.Element] = []
     while mut cursor.next() is Some(item)
+      invariant items.length() + cursor.remaining() <= old(self.remaining()) when Self: FiniteCursor
       decreases cursor.remaining() when Self: FiniteCursor
+      cost time O((old(self.remaining()) - cursor.remaining()) * time(Self.next)) when Self: FiniteCursor
     {
       mut items.push(own item)
     }
@@ -441,11 +453,15 @@ public trait Cursor {
 
   fn count(own self) -> UInt64
     uses Self.Uses, RunForever unless Self: FiniteCursor
+    ensures result <= old(self.remaining()) when Self: FiniteCursor
+    cost amortized time O((self.remaining() + 1) * time(Self.next)) when Self: FiniteCursor
   {
     var cursor = own self
     var count: UInt64 = 0
     while mut cursor.next() is Some(_)
+      invariant count + cursor.remaining() <= old(self.remaining()) when Self: FiniteCursor
       decreases cursor.remaining() when Self: FiniteCursor
+      cost time O((old(self.remaining()) - cursor.remaining()) * time(Self.next)) when Self: FiniteCursor
     {
       count = count.saturating_add(1)
     }
@@ -454,11 +470,14 @@ public trait Cursor {
 
   fn last(own self) -> Option[Self.Element]
     uses Self.Uses, RunForever unless Self: FiniteCursor
+    cost amortized time O((self.remaining() + 1) * time(Self.next)) when Self: FiniteCursor
   {
     var cursor = own self
     var last: Option[Self.Element] = None
     while mut cursor.next() is Some(item)
+      invariant cursor.remaining() <= old(self.remaining()) when Self: FiniteCursor
       decreases cursor.remaining() when Self: FiniteCursor
+      cost time O((old(self.remaining()) - cursor.remaining()) * time(Self.next)) when Self: FiniteCursor
     {
       last = Some(own item)
     }
@@ -484,9 +503,14 @@ public trait Cursor {
 
   fn find(mut self, predicate: fn(Self.Element) -> Bool) -> Option[Self.Element]
     uses Self.Uses, RunForever unless Self: FiniteCursor
+    cost amortized time O((self.remaining() + 1) * (time(Self.next) + time(predicate)))
+      when Self: FiniteCursor
   {
     while mut self.next() is Some(item)
+      invariant self.remaining() <= old(self.remaining()) when Self: FiniteCursor
       decreases self.remaining() when Self: FiniteCursor
+      cost time O((old(self.remaining()) - self.remaining()) * (time(Self.next) + time(predicate)))
+        when Self: FiniteCursor
     {
       if predicate(item) {
         return Some(own item)
@@ -548,6 +572,12 @@ public trait FiniteCursor: Cursor {
   fn next(mut self) -> Option[Self.Element]
     uses Self.Uses
     ensures (result is Some(_)) ==> self.remaining() < old(self.remaining())
+}
+
+public trait IntoCursor {
+  type Cursor: Cursor
+
+  fn cursor(own self) -> Self.Cursor
 }
 
 public trait Countable: Ordered + Plain {

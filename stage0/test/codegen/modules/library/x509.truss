@@ -17,7 +17,7 @@ let sha1_root_pem: String = "-----BEGIN CERTIFICATE-----\nMIIC/jCCAeagAwIBAgIUJ/
 
 let sha1_signed_leaf_pem: String = "-----BEGIN CERTIFICATE-----\nMIICKDCCARCgAwIBAgIBTTANBgkqhkiG9w0BAQsFADAWMRQwEgYDVQQDDAtMZWdh\nY3kgUm9vdDAgFw0yNjExMTIyMjUxNDhaGA8yMTI2MTAxOTIyNTE0OFowFjEUMBIG\nA1UEAwwLbGVnYWN5LnRlc3QwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQuLRSk\ndXvxRz+fv3AmVhHYqL7VpGZyiKFwkWAwwEx8CmPyuuoIu7eKqfLc+einKKwLwBxT\naU9xekoN+KHpRCMdo0owSDAJBgNVHRMEAjAAMA4GA1UdDwEB/wQEAwIHgDATBgNV\nHSUEDDAKBggrBgEFBQcDATAWBgNVHREEDzANggtsZWdhY3kudGVzdDANBgkqhkiG\n9w0BAQsFAAOCAQEAb5khD9gmPvbtdJttaIUXXq1YCfWVtWkhTVxpB9uKqCTKTdCC\ngyvK24122riAIocf+rM4H3N4pIypayKIbl2aXxbXG1BbvLaemSjUeNzC9gOXICZM\nzY6kCti2WD803YeJpNvnVEwhFkwQ9zyhRL0z1CKt/Rzlea8fFaV8xAoVlPZgV4HR\nh8TixSDjDFIr+QcwvOX62sM2Ttg21zpv/tLygHZjnIvDhCsPso3UajPBPO7oOvwM\nY8T2SFDr3upi3zbTj/ieKsDIcUhvb2+46YWolOytEl2NkKzvKicEQg9B37FqGBkQ\nlC6Y3WBG6g+qp/8bHar0g7TKHP8ZBdPYzO8HCw==\n-----END CERTIFICATE-----\n"
 
-fn one(text: StringSlice) -> x509.Certificate
+fn one(text: String) -> x509.Certificate
   uses Panic
 {
   match x509.parse_pem(text) {
@@ -33,19 +33,19 @@ fn now() -> Instant
 }
 
 test "a certificate is read: names, validity, key, and extensions" uses Panic {
-  let leaf = one(leaf_pem.slice())
-  assert leaf.common_name() == Some("example.test".slice())
+  let leaf = one(leaf_pem)
+  assert leaf.common_name() == Some("example.test")
   assert leaf.dns_names().length() == 2 && !leaf.is_authority()
   assert leaf.public_key() is Ecdsa(key) && key.curve() == cryptography.Curve.P384
   assert leaf.not_before() < now() && now() < leaf.not_after()
-  let intermediate = one(intermediate_pem.slice())
+  let intermediate = one(intermediate_pem)
   assert intermediate.is_authority() && intermediate.public_key() is Rsa(_)
   assert der.parse(leaf.encoded()) is Ok(_)
 }
 
 test "a chain verifies up to a trusted root, and fails for another host, time, or root" uses Panic {
-  let chain: List[x509.Certificate] = [one(leaf_pem.slice()), one(intermediate_pem.slice())]
-  let roots: List[x509.Certificate] = [one(root_pem.slice())]
+  let chain: List[x509.Certificate] = [one(leaf_pem), one(intermediate_pem)]
+  let roots: List[x509.Certificate] = [one(root_pem)]
   assert x509.verify_chain(chain, roots: roots, host: "example.test", now: now()) == Ok(Unit)
   assert x509.verify_chain(chain, roots: roots, host: "API.Apps.Example.Test", now: now()) == Ok(Unit)
   assert x509.verify_chain(chain, roots: roots, host: "10.1.2.3", now: now()) == Ok(Unit)
@@ -55,19 +55,19 @@ test "a chain verifies up to a trusted root, and fails for another host, time, o
   assert x509.verify_chain(chain, roots: roots, host: "example.test", now: early) == Err(x509.VerifyError.NotYetValid)
   let no_roots: List[x509.Certificate] = []
   assert x509.verify_chain(chain, roots: no_roots, host: "example.test", now: now()) == Err(x509.VerifyError.UnknownIssuer)
-  let only_leaf: List[x509.Certificate] = [one(leaf_pem.slice())]
+  let only_leaf: List[x509.Certificate] = [one(leaf_pem)]
   assert x509.verify_chain(only_leaf, roots: roots, host: "example.test", now: now()) == Err(x509.VerifyError.UnknownIssuer)
-  let leaf_as_issuer: List[x509.Certificate] = [one(intermediate_pem.slice())]
+  let leaf_as_issuer: List[x509.Certificate] = [one(intermediate_pem)]
   assert x509.verify_chain(leaf_as_issuer, roots: roots, host: "example.test", now: now()) is Err(_)
 }
 
 test "PKCS #8 keys are read, and sign what their certificates' keys verify" uses Panic {
-  let blocks = x509.pem_blocks(leaf_key_pem.slice(), label: "PRIVATE KEY")
+  let blocks = x509.pem_blocks(leaf_key_pem, label: "PRIVATE KEY")
   assert blocks.length() == 1
   assert x509.parse_private_key(blocks[0]) is Some(Ecdsa(key)) && key.verifying_key().curve() == cryptography.Curve.P384
-  let rsa_blocks = x509.pem_blocks(intermediate_key_pem.slice(), label: "PRIVATE KEY")
+  let rsa_blocks = x509.pem_blocks(intermediate_key_pem, label: "PRIVATE KEY")
   assert x509.parse_private_key(rsa_blocks[0]) is Some(Rsa(private))
-    && one(intermediate_pem.slice()).public_key() == x509.PublicKey.Rsa(key: private.public_key())
+    && one(intermediate_pem).public_key() == x509.PublicKey.Rsa(key: private.public_key())
 }
 
 test "an ECDSA signature goes to DER and back" {
@@ -79,16 +79,16 @@ test "an ECDSA signature goes to DER and back" {
 }
 
 test "the system's roots are read from the first bundle present" uses Panic, RunForever {
-  var disk = files.MemoryFiles.new().with_text(Path.new("/etc/ssl/cert.pem"), contents: root_pem.slice())
+  var disk = files.MemoryFiles.new().with_text(Path.new("/etc/ssl/cert.pem"), contents: root_pem)
   provide mut disk {
     assert x509.system_roots() is Ok(roots) && roots.length() == 1
   }
 }
 
 test "a root self-signed with SHA-1 is read, and anchors a chain whose links use SHA-256" uses Panic {
-  let root = one(sha1_root_pem.slice())
+  let root = one(sha1_root_pem)
   assert !root.is_signed_by(root)
-  let chain: List[x509.Certificate] = [one(sha1_signed_leaf_pem.slice())]
+  let chain: List[x509.Certificate] = [one(sha1_signed_leaf_pem)]
   let roots: List[x509.Certificate] = [root.copy()]
   assert x509.verify_chain(chain, roots: roots, host: "legacy.test", now: now()) == Ok(Unit)
 }

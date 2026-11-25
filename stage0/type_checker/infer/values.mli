@@ -27,7 +27,7 @@ val check_lambda :
   State.env ->
   ?expected:Types.ty ->
   Syntax.expression ->
-  Syntax.pattern list ->
+  Syntax.lambda_parameter list ->
   Syntax.block ->
   Types.ty
 
@@ -39,6 +39,8 @@ val check_if :
   Syntax.block ->
   Syntax.else_branch option ->
   Types.ty
+
+val check_block : State.state -> State.env -> ?expected:Types.ty -> Syntax.block -> Types.ty
 
 val match_ :
   State.state ->

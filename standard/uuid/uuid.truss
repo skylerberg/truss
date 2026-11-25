@@ -45,12 +45,12 @@ public fn time_ordered() -> Uuid
   Uuid(high: high, low: low)
 }
 
-public fn from_name(namespace: Uuid, name: Slice[UInt8]) -> Uuid
+public fn from_name(namespace: Uuid, name: List[UInt8]) -> Uuid
   cost time O(name.length())
 {
   let prefix = namespace.bytes()
   var hasher = cryptography.Sha1.new()
-  mut hasher.update(prefix.slice())
+  mut hasher.update(prefix)
   mut hasher.update(name)
   let digest = own hasher.finish()
   let high = UInt64.from_big_endian_bytes(
@@ -100,7 +100,7 @@ impl Display for Uuid {
   {
     let bytes = self.bytes()
     let digits = hex.encode(bytes[..])
-    let text = digits.slice()
+    let text = digits
     mut output.push(text.part(0, to: 8))
     mut output.push("-")
     mut output.push(text.part(8, to: 12))
@@ -122,7 +122,7 @@ internal fn is_hyphen_place(index: UInt64) -> Bool
 impl text.Parse for Uuid {
   type Error = ParseError
 
-  fn parse(text: StringSlice) -> Result[Uuid, ParseError]
+  fn parse(text: String) -> Result[Uuid, ParseError]
   {
     let hyphenated = text.length() == 36
     if !hyphenated && text.length() != 32 {

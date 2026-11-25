@@ -1,7 +1,7 @@
 fn f(data: mut List[Int64], other: List[Int64]) -> UInt64 {
-  var parts: List[Slice[Int64]] = []
+  var parts: List[view List[Int64]] = []
   mut parts.push(data[..])
-  var held: Slice[Int64] = other[..]
+  var held: view List[Int64] = other[..]
   for part in parts {
     held = part
   }

@@ -8,7 +8,7 @@ fn routes(request: own http.Request, responder: mut http.Responder)
   if request.matches(http.Route"POST /small") is Some(_) {
     let limited = own request.with_body_limit(10)
     let reply = match own limited.bytes() {
-      Ok(bytes) => http.Response.text("${bytes.length()}".slice())
+      Ok(bytes) => http.Response.text("${bytes.length()}")
       Err(BodyTooLarge) => http.Response.text("too large", status: http.Status.content_too_large)
       Err(_) => http.Response.text("failed", status: http.Status.bad_request)
     }
@@ -39,20 +39,20 @@ fn application(request: own http.Request, responder: mut http.Responder)
   })
 }
 
-fn exchange(raw: StringSlice) -> String
+fn exchange(raw: String) -> String
   uses NetworkClient, Handles, Tasks, Panic, RunForever
 {
   let connection = network.connect("localhost", port: 8093).expect("the server accepts")
   let _ = connection.send_all(raw.bytes())
   var reply: List[UInt8] = []
   let _ = connection.receive_to_end(mut reply)
-  String.from_utf8_lossy(reply.slice())
+  String.from_utf8_lossy(reply)
 }
 
-fn header_of(reply: StringSlice, name: StringSlice) -> String {
+fn header_of(reply: String, name: String) -> String {
   for line in reply.split("\r\n") {
-    if line.to_ascii_lowercase().starts_with("${name.to_ascii_lowercase()}: ".slice()) {
-      return line.substring(name.length() + 2, to: line.length()).to_string()
+    if line.to_ascii_lowercase().starts_with("${name.to_ascii_lowercase()}: ") {
+      return line.substring(name.length() + 2, to: line.length()).copy()
     }
   }
   "none"
@@ -67,17 +67,17 @@ fn visit() -> List[String]
     {
       var seen: List[String] = []
       let preflight = exchange("OPTIONS /items HTTP/1.1\r\nHost: x\r\nOrigin: https://app.test\r\nAccess-Control-Request-Method: POST\r\nConnection: close\r\n\r\n")
-      mut seen.push("${preflight.slice().starts_with("HTTP/1.1 204")} ${header_of(preflight.slice(), name: "Access-Control-Allow-Origin")} ${header_of(preflight.slice(), name: "Access-Control-Allow-Methods")}")
+      mut seen.push("${preflight.starts_with("HTTP/1.1 204")} ${header_of(preflight, name: "Access-Control-Allow-Origin")} ${header_of(preflight, name: "Access-Control-Allow-Methods")}")
       let allowed = exchange("GET /items HTTP/1.1\r\nHost: x\r\nOrigin: https://app.test\r\nX-Request-ID: abc-123\r\nConnection: close\r\n\r\n")
-      mut seen.push("${header_of(allowed.slice(), name: "Access-Control-Allow-Origin")} ${header_of(allowed.slice(), name: "Vary")} ${header_of(allowed.slice(), name: "X-Request-ID")} ${header_of(allowed.slice(), name: "Access-Control-Expose-Headers")}")
+      mut seen.push("${header_of(allowed, name: "Access-Control-Allow-Origin")} ${header_of(allowed, name: "Vary")} ${header_of(allowed, name: "X-Request-ID")} ${header_of(allowed, name: "Access-Control-Expose-Headers")}")
       let denied = exchange("GET /items HTTP/1.1\r\nHost: x\r\nOrigin: https://evil.test\r\nConnection: close\r\n\r\n")
-      mut seen.push("${header_of(denied.slice(), name: "Access-Control-Allow-Origin")} ${denied.slice().ends_with("hello")}")
-      mut seen.push("${header_of(denied.slice(), name: "X-Content-Type-Options")} ${header_of(denied.slice(), name: "X-Frame-Options")} ${header_of(denied.slice(), name: "Content-Security-Policy")}")
-      mut seen.push("${header_of(denied.slice(), name: "X-Request-ID").length()}")
+      mut seen.push("${header_of(denied, name: "Access-Control-Allow-Origin")} ${denied.ends_with("hello")}")
+      mut seen.push("${header_of(denied, name: "X-Content-Type-Options")} ${header_of(denied, name: "X-Frame-Options")} ${header_of(denied, name: "Content-Security-Policy")}")
+      mut seen.push("${header_of(denied, name: "X-Request-ID").length()}")
       let custom = exchange("GET /custom HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
-      mut seen.push(header_of(custom.slice(), name: "Content-Security-Policy"))
+      mut seen.push(header_of(custom, name: "Content-Security-Policy"))
       let small = exchange("POST /small HTTP/1.1\r\nHost: x\r\nContent-Length: 20\r\nConnection: close\r\n\r\n01234567890123456789")
-      mut seen.push("${small.slice().starts_with("HTTP/1.1 413")}")
+      mut seen.push("${small.starts_with("HTTP/1.1 413")}")
       return own seen
     }
   }

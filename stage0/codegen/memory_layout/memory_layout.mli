@@ -51,6 +51,7 @@ val system : env -> Libc.system
 val compute_shape : env -> Ground.ty -> shape
 val of_type : env -> Ground.ty -> t
 val has_zero_size : env -> Ground.ty -> bool
+val is_indirect : env -> Ground.ty -> string -> bool
 val lay_out_block : env -> Ground.ty -> string -> t
 val compute_scalar_size : scalar -> int
 val compute_integer_size : integer -> int

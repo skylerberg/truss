@@ -1,0 +1,5 @@
+fn charged(credit: UInt32) -> Meter
+  cost amortized time O(credit)
+{
+  Meter(credit: credit)
+}

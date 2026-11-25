@@ -1,3 +1,0 @@
-type Nest[Value] =
-  | Leaf(value: Value)
-  | indirect More(inner: Nest[Slice[Value]])

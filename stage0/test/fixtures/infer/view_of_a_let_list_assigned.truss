@@ -1,0 +1,6 @@
+fn f() -> UInt64 {
+  let items: List[Int64] = [3, 1, 2]
+  var part: view List[Int64] = items
+  part[0] = 7
+  items.length()
+}

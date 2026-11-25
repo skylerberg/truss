@@ -1,10 +1,10 @@
 type overload =
   | Type_overload of Path.t
-  | View_overload of Path.t
+  | List_overload of Path.t
   | Trait_overload of Types.trait_reference * Types.trait_method
 
 val classify_receiver_mode : Syntax.argument list -> Language.Mode.t
-val describe_missing_method : State.state -> Types.ty -> string -> string
+val make_method_owner : State.state -> Types.ty -> Catalog.Inference.method_owner
 val check_name : State.state -> State.env -> Syntax.expression -> Resolve.head -> Types.ty
 val check_field : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
 val check_static_member : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
@@ -36,7 +36,7 @@ val lookup_trait_static_methods :
 
 val instantiate_trait_method :
   State.state ->
-  Source.Definition_span.t ->
+  written:Syntax.id ->
   self_type:Types.ty ->
   Types.trait_reference ->
   Types.trait_method ->
@@ -52,15 +52,3 @@ val resolve_overloads :
   Types.ty ->
   string ->
   ((Path.receiver * overload) list Resolve.Names.lookup, Types.trait_reference list) Result.t
-
-val find_elements_calls :
-  State.state ->
-  Syntax.expression ->
-  Types.ty ->
-  Language.Mode.t ->
-  (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup
-
-val find_consuming_cursor :
-  State.state -> Syntax.expression -> Types.ty -> (Tables.loop * Types.ty) Resolve.Names.lookup
-
-val find_remaining_call : State.state -> Types.ty -> (Types.condition * Tables.call) option

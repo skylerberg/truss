@@ -13,7 +13,9 @@ let solver =
 let c_compiler =
   lazy
     (match
-       C_compiler.find ~objects:(Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz")
+       C_compiler.find ~x86_64_level:X86_64_level.default
+         ~objects:(Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz")
+         ()
      with
     | Ok c_compiler -> c_compiler
     | Error message -> failwith message)
@@ -79,9 +81,9 @@ let list_runnable database =
               (fun (requirement : Mir.requirement) ->
                 "("
                 ^ Source.Definition_span.quote
-                    (lookups.interface.names.read_text key)
+                    ((Database.make_source_lookups database).read_text key)
                     (Source.Definition_span.locate
-                       (lookups.interface.names.read_spans key)
+                       ((Database.make_source_lookups database).read_spans key)
                        (Core_walk.locate_origin requirement.clause.origin))
                 ^ ")")
               requires
@@ -103,8 +105,8 @@ let list_runnable database =
       | _ -> None)
     (lookups.interface.names.list_declarations example)
 
-let is_proven (names : Resolve.Names.lookups) key states =
-  let base = (names.read_place key).base and text = names.read_text key in
+let is_proven (source : Resolve.Names.source) key states =
+  let base = (source.read_place key).base and text = source.read_text key in
   List.for_all
     (fun (state : Database.proof_state) ->
       state.site.span.stop <= base
@@ -151,7 +153,7 @@ let run_mutant ~samples text =
   | None -> ()
   | Some database -> (
       incr checked;
-      Database.decide (Database.prove database [ example_file ]) ~runs:[] solver;
+      Database.decide (Database.prove database (In_files [ example_file ])) solver;
       let states = Database.list_proof_states database example_file in
       let candidates =
         List.map
@@ -166,7 +168,8 @@ let run_mutant ~samples text =
                          else draw_random range)
                        candidate.ranges)) ))
           (List.filter
-             (fun candidate -> is_proven (Database.make_name_lookups database) candidate.key states)
+             (fun candidate ->
+               is_proven (Database.make_source_lookups database) candidate.key states)
              (list_runnable database))
       in
       let with_samples =
@@ -278,7 +281,7 @@ let () =
             in
             match load text with
             | Some database ->
-                Database.decide (Database.prove database [ example_file ]) ~runs:[] solver;
+                Database.decide (Database.prove database (In_files [ example_file ])) solver;
                 let unproven = Database.list_proof_diagnostics database example_file in
                 print_diagnostics unproven;
                 unproven = []

@@ -1,0 +1,10 @@
+trait Steps {
+  fn step(self, by: Int64 = 3) -> Int64 {
+    by
+  }
+}
+
+trait Strides: Steps {
+  fn step(self, by: Int64) -> Int64
+    ensures result == by
+}

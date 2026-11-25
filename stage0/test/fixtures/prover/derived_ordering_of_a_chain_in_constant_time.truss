@@ -1,0 +1,10 @@
+type Chain =
+  | End
+  | indirect Link(value: Int64, rest: Chain)
+  derives Equal, Ordered
+
+fn precedes(first: Chain, second: Chain) -> Bool
+  cost time O(1)
+{
+  first < second
+}

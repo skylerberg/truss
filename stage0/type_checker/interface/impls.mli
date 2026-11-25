@@ -5,6 +5,7 @@ val list_impls_of_trait_for_type :
   Lookups.t -> trait:Path.t -> type_:Path.t -> Path.package -> Path.t list
 
 val list_impls_of_trait : Lookups.t -> trait:Path.t -> Path.package -> Path.t list
+val derived_generics : Types.generic list -> Types.trait_reference -> Types.generic list
 val derive_interface : Lookups.t -> type_:Path.t -> trait:Path.t -> Types.impl_interface option
 
 type implementation = {
@@ -37,32 +38,28 @@ val match_arguments :
   Types.argument list ->
   Types.substitution option
 
-type evidence =
-  | From_impl of { impl : Path.t; substitution : Types.substitution }
-  | From_bound
-  | From_any
-  | Built_in
-  | Accepted of Types.ty
-
-type through_any = Callable | Has_generics | Names_self
-
-type dispatched = {
-  declared_by : Types.trait_reference;
-  trait_method : Types.trait_method;
-  through_any : through_any;
-}
-
-val list_dispatched_methods : Lookups.t -> Types.trait_reference -> dispatched list
-
-val classify_through_any :
-  Lookups.t -> any:Types.trait_reference -> trait:Path.t -> Types.trait_method -> through_any
-
+type solution = Evidence of Types.evidence | Built_in | Accepted of Types.ty
 type bounds = Properties.Bounds.t
 
 val list_no_bounds : bounds
 
 val list_required_bounds :
   Types.generic list -> Types.substitution -> (Types.ty * Types.trait_reference) list
+
+type method_code =
+  | Method_of_impl of { impl : Path.t; substitution : Types.substitution }
+  | Declaration_for_view
+
+val locate_method :
+  Lookups.t -> Types.evidence -> name:string -> receiver:Path.receiver -> method_code option
+
+type obligation =
+  | Provides of Types.trait_method
+  | Bounds_associated_type of { name : string; chosen : Types.ty; bound : Types.trait_reference }
+  | Requires of Types.trait_reference
+
+val list_obligations :
+  Types.trait_interface -> Types.impl_interface -> self:Types.ty -> obligation list
 
 val find_evidence :
   Lookups.t ->
@@ -71,7 +68,15 @@ val find_evidence :
   ?checks_conditions:bool ->
   Types.ty ->
   Types.trait_reference ->
-  evidence option
+  solution option
+
+val resolve_evidence :
+  Lookups.t ->
+  Types.substitution ->
+  self_type:Types.ty ->
+  trait:Types.trait_reference ->
+  Types.evidence ->
+  Types.evidence
 
 val check_recursion_depth : depth:int -> Types.ty -> Types.trait_reference -> unit
 
@@ -97,15 +102,6 @@ val project_associated_type :
   Types.trait_reference ->
   string ->
   Types.ty option
-
-val project_capability_set :
-  Lookups.t ->
-  list_bounds:bounds ->
-  ?depth:int ->
-  Types.ty ->
-  Types.trait_reference ->
-  string ->
-  Types.capability_set
 
 val normalize_capabilities :
   Lookups.t -> list_bounds:bounds -> ?depth:int -> Types.capability_set -> Types.capability_set
@@ -141,19 +137,17 @@ end
 val read_signature : Lookups.t -> Path.t -> Types.signature option
 val read_scope : Lookups.t -> Resolve.Names.key -> Environment.known_bounds Environment.scope
 
-type declaring_clause =
+type declaring_clause = Catalog.Capabilities.declaring_clause =
   | Own_uses
   | Impl_uses
   | Associated_capability_set of { name : string; is_defined : bool; is_named : bool }
 
-type capability_declaration =
+type capability_declaration = Catalog.Capabilities.declaration =
   | Declared_by of declaring_clause
   | Fixed_by_trait of { trait : Types.trait_reference; method_name : string }
 
 val find_capability_declaration :
   Lookups.t -> Path.t -> Types.capability -> capability_declaration option
-
-val show_declaring_clause : declaring_clause -> string -> string
 
 val decide_property :
   Properties.property -> Lookups.t -> list_bounds:bounds -> Types.ty -> Properties.decision

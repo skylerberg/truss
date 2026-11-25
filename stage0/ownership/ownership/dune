@@ -9,6 +9,7 @@
   well_known
   types
   syntax
+  syntax_walk
   core
   core_walk
   mir
@@ -16,4 +17,4 @@
   interface
   resolve
   compiler_bug
-  diagnostic))
+  catalog))

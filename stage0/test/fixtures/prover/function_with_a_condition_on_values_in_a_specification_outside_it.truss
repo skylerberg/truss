@@ -1,4 +1,4 @@
-fn starts_with_zero(text: StringSlice) -> Bool
+fn starts_with_zero(text: String) -> Bool
   uses Panic
   ensures text.byte(0) == 48 ==> result
 {

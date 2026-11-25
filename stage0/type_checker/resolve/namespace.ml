@@ -136,8 +136,6 @@ and resolve_argument (lookups : Names.lookups) ~file ~imports ~spell ~parameters
       Parameter last.text
   | Path_type written ->
       Named (resolve_reference lookups ~file ~imports ~spell ~parameters ~self written)
-  | Any_type written ->
-      Any (resolve_reference lookups ~file ~imports ~spell ~parameters ~self written)
   | Self_type None ->
       Named
         {
@@ -145,7 +143,7 @@ and resolve_argument (lookups : Names.lookups) ~file ~imports ~spell ~parameters
           arguments = List.map (fun name -> Path.Parameter name) parameters;
           associated = [];
         }
-  | Self_type (Some _) | Associated _ | Function_type _ | Type_error ->
+  | Self_type (Some _) | Associated _ | Function_type _ | View_type _ | Type_error ->
       Named { path = make_unresolved_path file [ spell type_.id ]; arguments = []; associated = [] }
 
 let resolve_header (lookups : Names.lookups) ~file ~imports ~spell (trait_ : Syntax.path_type)
@@ -165,7 +163,7 @@ let rec list_reference_paths (reference : Path.reference) =
   reference.path :: List.concat_map list_argument_paths reference.arguments
 
 and list_argument_paths : Path.argument -> Path.t list = function
-  | Named reference | Any reference -> list_reference_paths reference
+  | Named reference -> list_reference_paths reference
   | Constant path -> [ path ]
   | Parameter _ | Count _ -> []
 

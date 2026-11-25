@@ -25,7 +25,7 @@ test "shift" {
   let _ = one << amount
 }
 
-test "slice" {
+test "range" {
   let items: List[Int64] = [1, 2]
   let _ = items[1..9]
 }

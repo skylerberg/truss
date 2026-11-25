@@ -152,7 +152,7 @@ let list_package_databases () =
          Printf.sprintf "%s %s" (Path.show_package package) (String.sub hash 0 16) :: lines)
        loaded_package_databases [])
 
-type kind = Worktree of string | Trial of { root : string; database : Database.t Lazy.t }
+type kind = Worktree of string | Overlay of string
 type snapshot = { kind : kind; files : (string * string) list; project : Project.t }
 
 let fetch name version ~hash =
@@ -169,7 +169,7 @@ let fetch name version ~hash =
 
 let load_published name version ~hash =
   match fetch name version ~hash with
-  | Error reason -> Error reason
+  | Error reason -> Error (Project_catalog.Problem.Unavailable reason)
   | Ok directory ->
       let files = Registry.Content.list_all_files directory in
       Registry.Selection.read_manifest_and_record ~read:(fun file -> List.assoc_opt file files) name
@@ -268,7 +268,7 @@ let list_dependency_names snapshot name =
       List.map (fun (dependency : Manifest.dependency) -> dependency.package) package.dependencies
   | None -> []
 
-let locate_root snapshot = match snapshot.kind with Worktree root | Trial { root; _ } -> root
+let locate_root snapshot = match snapshot.kind with Worktree root | Overlay root -> root
 
 let list_registry_packages snapshot =
   List.map
@@ -320,17 +320,22 @@ let load_package_databases snapshot =
        (fun (name, _) -> if depends_on_project [] name then None else Some (load_named name))
        hashes
 
-let describe_failed_dependency name version ~is_loaded failed =
+let describe_failed_dependency name version ~is_loaded failed : Project_catalog.Problem.t =
   match failed with
   | (source, (first : Diagnostic.t) :: _) :: _ ->
       let line, column = Source.compute_position source first.span.start in
-      Printf.sprintf "`%s` %s does not check %s. It has %s; the first is at %s:%d:%d: %s"
-        (Path.show_package name) (Registry.Version.show version)
-        (if is_loaded then "with this toolchain" else "against this project's packages")
-        (Diagnostic.show_count
-           (List.fold_left (fun total (_, diagnostics) -> total + List.length diagnostics) 0 failed)
-           "error" "errors")
-        (Source.path source) line column first.message
+      Failed_dependency
+        {
+          name;
+          version;
+          is_loaded;
+          errors =
+            List.fold_left (fun total (_, diagnostics) -> total + List.length diagnostics) 0 failed;
+          path = Source.path source;
+          line;
+          column;
+          first = first.message;
+        }
   | _ -> Compiler_bug.raise_bug ~stage:"Workspace" "a failed package lists no diagnostic"
 
 let list_dependency_problems snapshot database =
@@ -346,7 +351,7 @@ let list_dependency_problems snapshot database =
             {
               Project.file = Project.lock_file;
               line = None;
-              message =
+              problem =
                 describe_failed_dependency name version ~is_loaded:(List.mem name loaded) failed;
             })
     (List.filter
@@ -381,6 +386,7 @@ type worktree = {
   watcher : Watcher.t option;
   lock : Lock_file.t;
   mutable snapshot : snapshot;
+  mutable followed : snapshot;
   database : Database.t;
 }
 
@@ -392,18 +398,24 @@ let log_bug bug =
   !observe_logged_bug bug;
   prerr_endline (Compiler_bug.to_string bug)
 
+let holds_saved_files worktree = worktree.followed == worktree.snapshot
+
 let commit worktree =
-  match Database.commit worktree.database with
-  | () -> ()
-  | exception Database.Unusable message ->
-      prerr_endline
-        (Printf.sprintf "Cannot save the database in %s: %s."
-           (Filename.concat worktree.root database_directory)
-           message)
+  if holds_saved_files worktree then
+    match Database.commit worktree.database with
+    | () -> ()
+    | exception Database.Unusable message ->
+        prerr_endline
+          (Printf.sprintf "Cannot save the database in %s: %s."
+             (Filename.concat worktree.root database_directory)
+             message)
 
 let close worktree =
   Option.iter Watcher.stop worktree.watcher;
-  (try Database.close worktree.database with Database.Unusable _ -> ());
+  (try
+     if holds_saved_files worktree then Database.close worktree.database
+     else Database.close_uncommitted worktree.database
+   with Database.Unusable _ -> ());
   Lock_file.release worktree.lock;
   Hashtbl.remove worktrees worktree.root
 
@@ -442,30 +454,38 @@ let apply_changes ?on_bug database (after : snapshot) = function
       let loaded, packages = load_layout after in
       Database.relayout ?on_bug database ~loaded:(combine_package_databases loaded) packages
 
-let copy_database root (trial : snapshot) =
-  match Hashtbl.find_opt worktrees root with
-  | Some worktree ->
-      let database = Database.copy worktree.database in
-      apply_changes database trial (find_file_changes worktree.snapshot trial);
-      database
-  | None -> build_cold_database trial
+let follow ?on_bug ?changes worktree (snapshot : snapshot) =
+  if worktree.followed != snapshot then begin
+    let changes =
+      match changes with
+      | Some changes -> changes
+      | None -> find_file_changes worktree.followed snapshot
+    in
+    worktree.followed <- snapshot;
+    if changes <> Some [] then apply_changes ?on_bug worktree.database snapshot changes
+  end
 
-let make_trial snapshot changes =
-  let root = locate_root snapshot in
-  let trial =
-    replace_files snapshot
-      (List.filter (fun (path, _) -> not (List.mem_assoc path changes)) snapshot.files
-      @ List.filter_map (fun (path, text) -> Option.map (fun text -> (path, text)) text) changes)
-  in
-  { trial with kind = Trial { root; database = lazy (copy_database root trial) } }
+let make_overlay snapshot changes =
+  let differs (path, text) = List.assoc_opt path snapshot.files <> text in
+  match List.filter differs changes with
+  | [] -> snapshot
+  | changes ->
+      {
+        (replace_files snapshot
+           (List.filter (fun (path, _) -> not (List.mem_assoc path changes)) snapshot.files
+           @ List.filter_map
+               (fun (path, text) -> Option.map (fun text -> (path, text)) text)
+               changes))
+        with
+        kind = Overlay (locate_root snapshot);
+      }
 
 let open_database snapshot =
-  match snapshot.kind with
-  | Worktree root -> (
-      match Hashtbl.find_opt worktrees root with
-      | Some worktree when worktree.snapshot == snapshot -> worktree.database
-      | Some _ | None -> copy_database root snapshot)
-  | Trial { database; _ } -> Lazy.force database
+  match Hashtbl.find_opt worktrees (locate_root snapshot) with
+  | Some worktree ->
+      follow worktree snapshot;
+      worktree.database
+  | None -> build_cold_database snapshot
 
 let list_changed_files root files paths =
   let prefixes =
@@ -501,11 +521,11 @@ let refresh ?on_bug ~(read : Watcher.t -> Watcher.changes) worktree =
     let before = worktree.snapshot in
     let after = replace_files before files in
     worktree.snapshot <- after;
-    match find_file_changes before after with
-    | Some [] -> `Unchanged
-    | changes ->
-        apply_changes ?on_bug worktree.database after changes;
-        `Changed
+    let changes = find_file_changes before after in
+    if worktree.followed == before then follow ?on_bug ~changes worktree after
+    else if find_file_changes worktree.followed after = Some [] then
+      follow ?on_bug ~changes:(Some []) worktree after;
+    if changes = Some [] then `Unchanged else `Changed
   in
   match Option.map read worktree.watcher with
   | Some Removed -> `Removed
@@ -548,7 +568,7 @@ let open_worktree root =
         (snapshot, restore_database root snapshot)
       with
       | snapshot, database ->
-          let worktree = { root; watcher; lock; snapshot; database } in
+          let worktree = { root; watcher; lock; snapshot; followed = snapshot; database } in
           Hashtbl.replace worktrees root worktree;
           Ok worktree
       | exception failure ->
@@ -590,7 +610,7 @@ let take_snapshot directory =
                   root resolved))
 
 let retake snapshot =
-  match snapshot.kind with Worktree root -> load_worktree_snapshot root | Trial _ -> Ok snapshot
+  match snapshot.kind with Worktree root -> load_worktree_snapshot root | Overlay _ -> Ok snapshot
 
 let propagate_changes descriptor =
   Hashtbl.iter
@@ -613,6 +633,7 @@ let locate_file snapshot (file : Path.file) =
   | _ -> Path.show_file file
 
 let time_limit_ms snapshot = snapshot.project.project_layout.time_limit_ms
+let x86_64_level snapshot = snapshot.project.project_layout.x86_64_level
 let lock_fix snapshot = snapshot.project.selection.lock_fix
 
 type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }
@@ -690,7 +711,7 @@ let plan_lock snapshot ~set ~all =
               ~is_local ~load:load_published
           in
           if problems <> [] then
-            Error (String.concat " " (List.map Registry.Selection.describe_problem problems))
+            Error (String.concat " " (List.map Project_catalog.describe_selection_problem problems))
           else
             let after =
               Registry.Selection.lock

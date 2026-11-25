@@ -1,0 +1,23 @@
+type Row(cells: List[Int64])
+
+impl Iterable for Row {
+  type Element = Int64
+
+  fn count(self) -> UInt64 {
+    self.cells.length()
+  }
+
+  fn element(self, position: UInt64) lends Int64
+    requires position < self.count()
+  {
+    self.cells[position]
+  }
+}
+
+fn g(row: Row) -> UInt64 {
+  var nonzero: UInt64 = 0
+  for cell in row {
+    if cell != 0 { nonzero += 1 }
+  }
+  nonzero
+}

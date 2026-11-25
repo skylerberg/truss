@@ -385,10 +385,10 @@ let expect_runtime_status expected program =
     C_compiler.build_executable
       (Lazy.force Codegen_support.c_compiler)
       Development
-      ~units:
+      ~sources:
         [
-          ("the runtime", Startup.render_runtime ~tests:false);
-          ("the program", runtime_declarations ^ program);
+          C_compiler.make_source ~name:"the runtime" (Startup.render_runtime ~tests:false);
+          C_compiler.make_source ~name:"the program" (runtime_declarations ^ program);
         ]
       ~output
   with

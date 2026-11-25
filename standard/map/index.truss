@@ -220,7 +220,7 @@ theorem overflows_when_unmatched[Key: Hash + Ordered](
   }
 }
 
-fn HashIndex.find[Key: Hash + Ordered](self, keys: Slice[Key], key: Key) -> UInt64
+fn HashIndex.find[Key: Hash + Ordered](self, keys: List[Key], key: Key) -> UInt64
   requires self.indexes(keys.model(), count: keys.length(), missing: keys.length())
   ensures result <= keys.length()
   ensures result < keys.length() ==> keys.model()[result] == key
@@ -437,7 +437,7 @@ theorem indexes_after_overflowing[Key: Hash + Ordered](
   assert holds_entry(after.slots.model(), places: after.places.model(), overflow: after.overflow, keys: keys, position: count)
 }
 
-fn HashIndex.place[Key: Hash + Ordered](mut self, keys: Slice[Key], hash: UInt64)
+fn HashIndex.place[Key: Hash + Ordered](mut self, keys: List[Key], hash: UInt64)
   requires 0 < keys.length() && keys.length() < UInt64.maximum
   requires self.indexes(keys.model(), count: keys.length() - 1, missing: keys.length() - 1)
   requires 0 < self.slots.length()
@@ -1097,7 +1097,7 @@ fn HashIndex.flag_slot(self, grown: mut List[Slot], slot: UInt64)
   }
 }
 
-fn HashIndex.grow[Key: Hash + Ordered](mut self, keys: Slice[Key])
+fn HashIndex.grow[Key: Hash + Ordered](mut self, keys: List[Key])
   requires self.indexes(keys.model(), count: keys.length(), missing: keys.length())
   requires self.slots.length() <= 2305843009213693952 && keys.length() < UInt64.maximum
   ensures self.indexes(keys.model(), count: keys.length(), missing: keys.length())
@@ -1270,7 +1270,7 @@ theorem overflow_within_count[Key: Hash + Ordered](
 
 fn HashIndex.unplace[Key: Hash + Ordered](
   mut self,
-  keys: Slice[Key],
+  keys: List[Key],
   position: UInt64,
 )
   requires self.indexes(keys.model(), count: keys.length(), missing: keys.length())
@@ -1369,7 +1369,7 @@ theorem indexes_after_dropping_last[Key: Hash + Ordered](
   }
 }
 
-fn HashIndex.drop_last[Key: Hash + Ordered](mut self, keys: Slice[Key])
+fn HashIndex.drop_last[Key: Hash + Ordered](mut self, keys: List[Key])
   requires 0 < keys.length()
   requires self.indexes(keys.model(), count: keys.length(), missing: keys.length() - 1)
   ensures self.indexes(keys.model(), count: keys.length() - 1, missing: keys.length() - 1)
@@ -1653,7 +1653,7 @@ theorem indexes_after_detaching[Key: Hash + Ordered](
 
 fn HashIndex.detach_last[Key: Hash + Ordered](
   mut self,
-  keys: Slice[Key],
+  keys: List[Key],
   hole: UInt64,
 ) -> Bool
   requires 1 < keys.length() && hole < keys.length() - 1 && keys.length() < UInt64.maximum
@@ -1757,7 +1757,7 @@ theorem indexes_after_attaching[Key: Hash + Ordered](
 
 fn HashIndex.attach[Key: Hash + Ordered](
   mut self,
-  keys: Slice[Key],
+  keys: List[Key],
   position: UInt64,
 )
   requires position < keys.length() && keys.length() < UInt64.maximum - 2

@@ -17,6 +17,5 @@
   process
   startup
   unix
-  monomorphic
   zarith
   types))

@@ -6,9 +6,9 @@ trait Shown {
 type Numbers(items: List[Int64])
 
 impl Shown for Numbers {
-  type Part = Slice[Int64]
+  type Part = view List[Int64]
 
-  fn part(self) -> Slice[Int64] {
+  fn part(self) -> view List[Int64] {
     self.items[0..2]
   }
 }

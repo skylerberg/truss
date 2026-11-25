@@ -1,0 +1,15 @@
+trait Consumed {
+  fn take(own self) -> UInt64
+}
+
+type Names(items: List[String])
+
+impl Consumed for Names {
+  fn take(own self) -> UInt64 {
+    self.items.length()
+  }
+}
+
+fn f(names: own Names) -> UInt64 {
+  Consumed.take(names)
+}

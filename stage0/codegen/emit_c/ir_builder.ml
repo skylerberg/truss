@@ -367,7 +367,6 @@ let list_target_operands : Lowered.target -> Lowered.operand list = function
   | Direct _ | Intrinsic _ | Foreign _ -> []
   | Indirect { code; environment; _ } -> [ code; environment ]
   | Evidence_call { evidence; _ } -> [ evidence ]
-  | Table_call { table; value; _ } -> [ table; value ]
 
 let list_failure_operands ~message ~length ~reported ~trace =
   message :: length :: (Option.to_list reported @ Option.to_list trace)
@@ -554,21 +553,28 @@ let render_local_declarations builder (emission : Emission.t) ~locals ~parameter
          let ty = lookup_local_type builder local in
          if List.mem local parameters || Lowered.is_erased emission.types.env ty then None
          else
-           let initializer_ =
-             if not (Dynarray.get builder.locals local).is_zeroed then ""
-             else
-               match ty with
-               | Value ty when C_types.is_struct emission.types ty -> " = {0}"
-               | Value _ | Pointer _ | Raw _ -> " = 0"
-               | Lend | Lend_mark -> " = {0}"
-               | Environment _ | Evidence _ | Capabilities _ | Trace ->
-                   raise_bug "a zeroed environment, evidence slot, table, or link of the call chain"
-           in
-           Some
-             (Text "  "
+           let declare initializer_ =
+             Text "  "
              ++ C_types.render_type emission.types ty
              ++ Text " " ++ Name (Local local)
-             ++ Text (initializer_ ^ ";\n")))
+             ++ Text (initializer_ ^ ";\n")
+           in
+           let declare_and_initialize suffix =
+             declare "" ++ Text "  " ++ Emission.use_helper emission Lend
+             ++ Text (suffix ^ "(&")
+             ++ Name (Local local) ++ Text ");\n"
+           in
+           Some
+             (match (ty, (Dynarray.get builder.locals local).is_zeroed) with
+             | Lend, false -> declare_and_initialize "_init"
+             | Lend_mark, false -> declare_and_initialize "_init_mark"
+             | _, false -> declare ""
+             | Value ty, true when C_types.is_struct emission.types ty -> declare " = {0}"
+             | (Value _ | Pointer _ | Raw _), true -> declare " = 0"
+             | (Environment _ | Evidence _ | Capabilities _ | Trace | Lend | Lend_mark), true ->
+                 raise_bug
+                   "a zeroed environment, evidence slot, table, link of the call chain, lend \
+                    record, or lend mark"))
        locals)
 
 let render_blocks builder number (function_ : function_) ~reached ~jump_targets ~texts =

@@ -1,19 +1,19 @@
 use standard.compression.zstd
 use standard.hex
 
-fn bytes_of(text: StringSlice) -> List[UInt8] {
+fn bytes_of(text: String) -> List[UInt8] {
   match hex.decode(text) {
     Ok(bytes) => own bytes
     Err(_) => []
   }
 }
 
-fn joined(parts: Slice[String]) -> List[UInt8] {
+fn joined(parts: List[String]) -> List[UInt8] {
   var text = ""
   for part in parts {
-    mut text.push(part.slice())
+    mut text.push(part)
   }
-  bytes_of(text.slice())
+  bytes_of(text)
 }
 
 fn words(count: UInt64) -> List[UInt8] {
@@ -44,7 +44,7 @@ fn noise(count: UInt64) -> List[UInt8] {
 
 fn input_of(name: String) -> List[UInt8] {
   if name == "short" {
-    "Hello, zstd and Brotli!".bytes().to_list()
+    "Hello, zstd and Brotli!".bytes().copy()
   } else if name == "text_3000" {
     words(3000)
   } else if name == "text_300000" {
@@ -673,13 +673,13 @@ test "frames that the reference zstd compressed decompress to their input" {
     ],
   ]
   for index in 0..names.length() {
-    let frame = joined(frames[index].slice())
+    let frame = joined(frames[index])
     assert zstd.decompress(frame) == Ok(input_of(names[index]))
   }
 }
 
 test "compress's output decompresses to its input" {
-  let inputs: List[List[UInt8]] = [[], "a".bytes().to_list(), words(3000), noise(1000), List.filled(7, count: 200000), words(140000)]
+  let inputs: List[List[UInt8]] = [[], "a".bytes().copy(), words(3000), noise(1000), List.filled(7, count: 200000), words(140000)]
   for input in inputs {
     assert zstd.decompress(zstd.compress(input)) == Ok(input.copy())
   }
@@ -688,8 +688,8 @@ test "compress's output decompresses to its input" {
 
 test "decompress reads concatenated frames and skips skippable frames" {
   var stream = zstd.compress("first ".bytes())
-  mut stream.append_slice(bytes_of("5a2a4d1803000000010203").slice())
-  mut stream.append_slice(zstd.compress("second".bytes()).slice())
+  mut stream.append_items(bytes_of("5a2a4d1803000000010203"))
+  mut stream.append_items(zstd.compress("second".bytes()))
   assert zstd.decompress(stream) is Ok(bytes) && String.from_utf8_lossy(bytes) == "first second"
 }
 

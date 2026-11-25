@@ -4,7 +4,7 @@ use frontend.show
 use frontend.source
 use frontend.token
 
-fn escape(value: StringSlice) -> String {
+fn escape(value: String) -> String {
   var buffer = String.with_capacity(value.length())
   for character in value.characters() {
     if character == Character"\"" {
@@ -49,27 +49,12 @@ fn show_text(text: token.Text) -> String {
   "\"${escape(text.value)}\" ${show_span(text.span)}"
 }
 
-fn show_token(tables: token.Tables, current: token.Token) -> String
-  uses Panic, RunForever
-{
-  let kind = match current.kind {
-    Upper(name) => "upper ${tables.name(name)}"
-    Lower(name) => "lower ${tables.name(name)}"
-    Underscore => "underscore"
-    Keyword(keyword) => "keyword ${token.spell_keyword(keyword)}"
-    Reserved(reserved) => "reserved ${token.spell_reserved(reserved)}"
-    Integer(literal) => "integer ${tables.integers.get(literal).expect("an integer")}"
-    Float(literal) => match tables.decimals.get(literal) {
-      Some(decimal) => "float ${decimal.significand}e${decimal.exponent}"
-      None => "float"
-    }
-    String(literal) => "string ${show_literal(tables, literal: tables.literal(literal))}"
-    Punctuation(punctuation) => "punctuation ${token.spell_punctuation(punctuation)}"
-    Foreign(foreign) => "foreign ${token.spell_foreign(foreign)}"
-    Newline => "newline"
-    EndOfFile => "end"
-  }
-  var text = "${kind} ${show_span(current.span)}"
+type ShownRun(first: UInt64, next: UInt64, stop: UInt64)
+
+type ShownString(literal_index: UInt64, segment: UInt64, closing: String, string_token: token.Token, enclosing: ShownRun)
+
+fn write_suffix(current: token.Token, text: mut String) {
+  mut text.push(" ${show_span(current.span)}")
   if current.line_break_before {
     mut text.push(" line")
   }
@@ -79,44 +64,130 @@ fn show_token(tables: token.Tables, current: token.Token) -> String
   if current.is_inserted_closer {
     mut text.push(" inserted")
   }
-  text
 }
 
-fn show_literal(tables: token.Tables, literal: token.StringLiteral) -> String
-  uses Panic, RunForever
+fn advance_string(
+  literal: token.StringLiteral,
+  literal_index: UInt64,
+  segment: UInt64,
+  string_token: token.Token,
+  enclosing: ShownRun,
+  strings: mut List[ShownString],
+  text: mut String,
+) -> ShownRun
+  uses Panic
 {
-  var text = ""
+  if segment >= literal.rest.length() {
+    write_suffix(string_token, text: mut text)
+    return enclosing
+  }
+  let interpolation = literal.rest[segment].interpolation
+  mut text.push(" { ${show_span(interpolation.span)} ${interpolation.is_closed} [ ")
+  mut strings.push(ShownString(literal_index, segment, closing: " ] } ${show_text(literal.rest[segment].text)}", string_token, enclosing))
+  ShownRun(first: interpolation.first, next: interpolation.first, stop: interpolation.stop)
+}
+
+fn open_string(
+  literal: token.StringLiteral,
+  literal_index: UInt64,
+  string_token: token.Token,
+  enclosing: ShownRun,
+  strings: mut List[ShownString],
+  text: mut String,
+) -> ShownRun
+  uses Panic
+{
+  mut text.push("string ")
   if literal.tag is Some(tag) {
     mut text.push("tag ${tag.name} ${show_span(tag.span)} ")
   }
   mut text.push("${show_form(literal.form)} ${show_text(literal.first)}")
-  for segment in literal.rest {
-    var inner: List[String] = []
-    for index in segment.interpolation.first..segment.interpolation.stop {
-      mut inner.push(show_token(tables, current: tables.token(index)))
-    }
-    mut text.push(
-      " { ${show_span(segment.interpolation.span)} ${segment.interpolation.is_closed} [ ${inner.join(" ; ")} ] } ${show_text(segment.text)}",
-    )
-  }
-  text
+  advance_string(
+    literal,
+    literal_index,
+    segment: 0,
+    string_token: string_token,
+    enclosing: enclosing,
+    strings: mut strings,
+    text: mut text,
+  )
 }
 
-fn print_tokens(path: StringSlice, text: own String)
+fn show_token(tables: token.Tables, index: UInt64) -> String
+  uses Panic, RunForever
+{
+  var text = ""
+  var run = ShownRun(first: index, next: index, stop: index + 1)
+  var strings: List[ShownString] = []
+  while true {
+    if run.next >= run.stop {
+      let Some(frame) = mut strings.pop() else {
+        return text
+      }
+      mut text.push(frame.closing)
+      run = advance_string(
+        tables.literal(frame.literal_index),
+        literal_index: frame.literal_index,
+        segment: frame.segment + 1,
+        string_token: frame.string_token,
+        enclosing: frame.enclosing,
+        strings: mut strings,
+        text: mut text,
+      )
+      continue
+    }
+    if run.next > run.first {
+      mut text.push(" ; ")
+    }
+    let current = tables.token(run.next)
+    run.next += 1
+    let kind = match current.kind {
+      Upper(name) => "upper ${tables.name(name)}"
+      Lower(name) => "lower ${tables.name(name)}"
+      Underscore => "underscore"
+      Keyword(keyword) => "keyword ${token.spell_keyword(keyword)}"
+      Reserved(reserved) => "reserved ${token.spell_reserved(reserved)}"
+      Integer(literal) => "integer ${tables.integers.get(literal).expect("an integer literal")}"
+      Float(literal) => match tables.decimals.get(literal) {
+        Some(decimal) => "float ${decimal.significand}e${decimal.exponent}"
+        None => Panic.crash("a decimal index past the table")
+      }
+      String(literal) => {
+        run = open_string(
+          tables.literal(literal),
+          literal_index: literal,
+          string_token: current,
+          enclosing: run,
+          strings: mut strings,
+          text: mut text,
+        )
+        continue
+      }
+      Punctuation(punctuation) => "punctuation ${token.spell_punctuation(punctuation)}"
+      Foreign(foreign) => "foreign ${token.spell_foreign(foreign)}"
+      Newline => "newline"
+      EndOfFile => "end"
+    }
+    mut text.push(kind)
+    write_suffix(current, text: mut text)
+  }
+}
+
+fn print_tokens(path: String, text: own String)
   uses Console, Panic, RunForever
 {
   let result = lexer.lex(source.Source.create(path, own text))
   Console.print_line("== ${path}")
   let tables = result.lexed.tables
   for index in result.lexed.first..result.lexed.stop {
-    Console.print_line(show_token(tables, current: tables.token(index)))
+    Console.print_line(show_token(tables, index))
   }
   for diagnostic in result.diagnostics {
     Console.print_line(show_diagnostic(diagnostic))
   }
 }
 
-fn print_file(path: StringSlice, text: own String)
+fn print_file(path: String, text: own String)
   uses Console, Panic, RunForever
 {
   let lexed = lexer.lex(source.Source.create(path, own text))
@@ -136,13 +207,13 @@ fn print_file(path: StringSlice, text: own String)
 
 type Timing(lexing: Int64, parsing: Int64)
 
-fn measure(path: StringSlice, text: StringSlice, rounds: UInt64) -> Timing
+fn measure(path: String, text: String, rounds: UInt64) -> Timing
   uses Clock, Panic, RunForever
 {
   var best_lexing: Int64 = Int64.maximum
   for _ in 0..rounds {
     let before = Clock.monotonic()
-    let result = lexer.lex(source.Source.create(path, text: text.to_string()))
+    let result = lexer.lex(source.Source.create(path, text: text.copy()))
     let elapsed = (Clock.monotonic() - before).total_nanoseconds()
     if result.lexed.stop < result.lexed.first {
       Panic.crash("a token range runs backward")
@@ -151,7 +222,7 @@ fn measure(path: StringSlice, text: StringSlice, rounds: UInt64) -> Timing
       best_lexing = elapsed
     }
   }
-  let lexed = lexer.lex(source.Source.create(path, text: text.to_string()))
+  let lexed = lexer.lex(source.Source.create(path, text: text.copy()))
   var best_parsing: Int64 = Int64.maximum
   for _ in 0..rounds {
     let tables = lexed.lexed.tables.copy()
@@ -169,7 +240,7 @@ fn measure(path: StringSlice, text: StringSlice, rounds: UInt64) -> Timing
   Timing(lexing: best_lexing, parsing: best_parsing)
 }
 
-fn time_files(rounds: UInt64, paths: Slice[String])
+fn time_files(rounds: UInt64, paths: List[String])
   uses Console, Clock, FileRead, Panic, RunForever
 {
   var total_lexing: Int64 = 0
@@ -194,10 +265,10 @@ fn main(arguments: List[String]) -> ExitCode
   let command_name = arguments[1].copy()
   if command_name == "time" && arguments.length() >= 3 {
     let rounds = UInt64.parse(arguments[2]).expect("a count of rounds")
-    time_files(rounds, paths: arguments.slice()[3..])
+    time_files(rounds, paths: arguments[3..])
     return ExitCode.success
   }
-  for path in arguments.slice()[2..] {
+  for path in arguments[2..] {
     let text = FileRead.read_text(Path.new(path)).expect("a readable UTF-8 file")
     if command_name == "tokens" {
       print_tokens(path, own text)

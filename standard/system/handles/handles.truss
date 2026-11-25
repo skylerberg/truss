@@ -86,19 +86,19 @@ fn signed(bits: UInt64) -> Int64 {
   }
 }
 
-fn time_at(status: intrinsic.View[UInt8], offset: UInt64) -> Instant {
-  let length = intrinsic.view_length(status)
+fn time_at(status: intrinsic.Storage[UInt8], offset: UInt64) -> Instant {
+  let length = intrinsic.storage_length(status)
   if offset > length {
     return Instant.epoch
   }
-  let time = intrinsic.view_slice(status, start: offset, stop: length)
+  let time = intrinsic.storage_range(status, start: offset, stop: length)
   clock.instant_from(
     signed(calls.number_at(time, offset: 0, size: 8)),
     nanoseconds: signed(calls.number_at(time, offset: 8, size: 8)),
   )
 }
 
-internal fn metadata_from(status: intrinsic.View[UInt8]) -> files.Metadata {
+internal fn metadata_from(status: intrinsic.Storage[UInt8]) -> files.Metadata {
   let mode = calls.number_at(
     status,
     offset: intrinsic.libc_stat_mode_offset(),
@@ -134,7 +134,7 @@ internal fn metadata_from(status: intrinsic.View[UInt8]) -> files.Metadata {
 internal fn open_with(file: Path, flags: Int32) -> Result[streams.Handle, SystemError]
   uses RunForever, capabilities.System
 {
-  let descriptor = with_file_error(calls.open_file(file.text.slice().bytes, flags: flags))?
+  let descriptor = with_file_error(calls.open_file(file.text.storage, flags: flags))?
   Ok(streams.Handle(descriptor: own descriptor, number: 0))
 }
 
@@ -198,7 +198,7 @@ internal fn duplicate(descriptor: Int32) -> streams.Handle
 internal fn controlling_terminal() -> streams.Handle
   uses RunForever, capabilities.System
 {
-  match calls.open_file("/dev/tty".slice().bytes, flags: intrinsic.libc_o_rdwr()) {
+  match calls.open_file("/dev/tty".storage, flags: intrinsic.libc_o_rdwr()) {
     Ok(descriptor) => streams.Handle(descriptor: own descriptor, number: 0)
     Err(_) => streams.Handle(descriptor: intrinsic.handle_from(-1), number: 0)
   }
@@ -218,14 +218,14 @@ internal fn with_file_error[Value](outcome: own Result[Value, Int32]) -> Result[
 internal fn open_to_read(file: Path) -> Result[intrinsic.Handle, SystemError]
   uses RunForever, capabilities.System
 {
-  with_file_error(calls.open_file(file.text.slice().bytes, flags: intrinsic.libc_o_rdonly()))
+  with_file_error(calls.open_file(file.text.storage, flags: intrinsic.libc_o_rdonly()))
 }
 
 internal fn open_to_write_from_empty(file: Path) -> Result[intrinsic.Handle, SystemError]
   uses RunForever, capabilities.System
 {
   let flags = intrinsic.libc_o_wronly() | intrinsic.libc_o_creat() | intrinsic.libc_o_trunc()
-  with_file_error(calls.open_file(file.text.slice().bytes, flags: flags))
+  with_file_error(calls.open_file(file.text.storage, flags: flags))
 }
 
 internal fn read_all(handle: mut intrinsic.Handle) -> Result[intrinsic.Storage[UInt8], SystemError]
@@ -244,7 +244,7 @@ internal fn read_all(handle: mut intrinsic.Handle) -> Result[intrinsic.Storage[U
   Ok(own bytes)
 }
 
-internal fn write_all(handle: mut intrinsic.Handle, bytes: intrinsic.View[UInt8]) -> Result[Unit, SystemError]
+internal fn write_all(handle: mut intrinsic.Handle, bytes: intrinsic.Storage[UInt8]) -> Result[Unit, SystemError]
   uses RunForever, capabilities.System
 {
   with_file_error(calls.write_fully(intrinsic.handle_descriptor(handle), bytes: bytes))
@@ -259,8 +259,8 @@ impl Handles for SystemHandles
     with_file_error(calls.read_onto_end(descriptor_of(handle), buffer: mut buffer.storage, count: limit))
   }
 
-  fn write(self, handle: streams.Handle, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
-    with_file_error(calls.write_some(descriptor_of(handle), bytes: bytes.elements))
+  fn write(self, handle: streams.Handle, bytes: List[UInt8]) -> Result[UInt64, SystemError] {
+    with_file_error(calls.write_some(descriptor_of(handle), bytes: bytes.storage))
   }
 
   fn read_at(
@@ -276,9 +276,9 @@ impl Handles for SystemHandles
     )
   }
 
-  fn write_at(self, handle: streams.Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
+  fn write_at(self, handle: streams.Handle, offset: UInt64, bytes: List[UInt8]) -> Result[UInt64, SystemError] {
     let position = file_offset(offset)?
-    with_file_error(calls.write_some_at(descriptor_of(handle), bytes: bytes.elements, offset: position))
+    with_file_error(calls.write_some_at(descriptor_of(handle), bytes: bytes.storage, offset: position))
   }
 
   fn seek(self, handle: streams.Handle, to: streams.Position) -> Result[UInt64, SystemError] {
@@ -308,7 +308,7 @@ impl Handles for SystemHandles
 
   fn metadata(self, handle: streams.Handle) -> Result[files.Metadata, SystemError] {
     let status = with_file_error(calls.status_of_descriptor(descriptor_of(handle)))?
-    Ok(metadata_from(intrinsic.storage_view(status)))
+    Ok(metadata_from(status))
   }
 
   fn close(self, handle: own streams.Handle) -> Result[Unit, SystemError] {
@@ -343,10 +343,10 @@ impl Handles for SystemHandles
   fn send_to(
     self,
     socket: streams.Handle,
-    bytes: Slice[UInt8],
+    bytes: List[UInt8],
     address: network.SocketAddress,
   ) -> Result[UInt64, SystemError] {
-    with_file_error(sockets.send_to(descriptor_of(socket), bytes: bytes.elements, address: address))
+    with_file_error(sockets.send_to(descriptor_of(socket), bytes: bytes.storage, address: address))
   }
 
   fn receive_from(
@@ -380,7 +380,7 @@ impl Handles for SystemHandles
       intrinsic.storage_push(mut size, value: 0)
     }
     with_file_error(calls.done(intrinsic.libc_ioctl_tiocgwinsz(descriptor_of(terminal), size: mut size)))?
-    let bytes = intrinsic.storage_view(size)
+    let bytes = size
     let rows = calls.number_at(bytes, offset: 0, size: 2)
     let columns = calls.number_at(bytes, offset: 2, size: 2)
     if rows > 65535 || columns > 65535 {

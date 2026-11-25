@@ -132,7 +132,7 @@ let apply_list_literal context frame (site : Invocation.site) values =
   let element =
     match ty with
     | Types.Named { arguments = Types.Type element :: _; _ } -> element
-    | _ -> Facts.raise_unsupported location "a literal of `%s`" (Types.show ty)
+    | _ -> Facts.raise_unsupported location (Literal_of ty)
   in
   let literal =
     match make_sequence context frame ty ~element values with
@@ -140,7 +140,7 @@ let apply_list_literal context frame (site : Invocation.site) values =
     | None -> (
         match make_set context frame ty ~element values with
         | Some literal -> literal
-        | None -> Facts.raise_unsupported location "a literal of `%s`" (Types.show ty))
+        | None -> Facts.raise_unsupported location (Literal_of ty))
   in
   (frame, literal)
 
@@ -148,24 +148,18 @@ let apply_map_literal context frame ~(ty : Types.ty) ~location terms =
   let key_type, value_type =
     match ty with
     | Types.Named { arguments = [ Types.Type key; Types.Type value_type ]; _ } -> (key, value_type)
-    | _ -> Facts.raise_unsupported location "a literal of `%s`" (Types.show ty)
+    | _ -> Facts.raise_unsupported location (Literal_of ty)
   in
   List.iteri
     (fun index (_, key_term, _) ->
       List.iteri
         (fun other (other_key, other_term, _) ->
           if other > index then
-            Facts.oblige context frame Disjoint
+            Facts.oblige context frame
               (match other_key with
               | Some origin -> Facts.locate context frame.source origin
               | None -> location)
-              [
-                Text "The key `";
-                (match other_key with
-                | Some origin -> Facts.quote frame.source origin
-                | None -> Text "this key");
-                Text "` may equal an earlier key of this map.";
-              ]
+              (Duplicate_key { key = Option.map (Facts.quote frame.source) other_key })
               (Logic.not_ (Operations.make_equality context frame key_type key_term other_term)))
         terms)
     terms;
@@ -174,7 +168,7 @@ let apply_map_literal context frame ~(ty : Types.ty) ~location terms =
   let model =
     match ty with
     | Types.Named { path; _ } when Well_known.is Finite_map path -> literal
-    | _ -> Facts.raise_unsupported location "a literal of `%s`" (Types.show ty)
+    | _ -> Facts.raise_unsupported location (Literal_of ty)
   in
   Validity.assume_valid context frame ty literal;
   let key_sort = Facts.declare_sort context key_type in
@@ -247,27 +241,6 @@ let rec make_literal_value context frame (ty : Types.ty) (value : Language.Liter
                 (Logic.equal part (make_literal_value context frame field_type value)))
       | _ -> ());
   literal
-
-let make_owner_of_view context frame ~(view : Types.ty) ~(owner : Types.ty) viewed =
-  let symbol = Logic.Symbol.Owner_of_view owner in
-  Facts.declare context
-    (Logic.Function (symbol, [ Facts.declare_sort context view ], Facts.declare_sort context owner));
-  let converted = Logic.Apply (symbol, [ viewed ]) in
-  Validity.assume_valid context frame owner converted;
-  let element =
-    match owner with
-    | Types.Named { arguments = [ Types.Type element ]; _ } -> element
-    | _ -> Types.make_builtin UInt8
-  in
-  (match
-     ( Models.find_model context owner converted ~element,
-       Models.find_model context view viewed ~element )
-   with
-  | Some owned, Some elements -> Facts.assume context frame (Logic.equal owned elements)
-  | _ ->
-      Facts.raise_bug "`%s` and its view `%s` have no model of one type" (Types.show owner)
-        (Types.show view));
-  converted
 
 let rec find_abstracted_selection context term =
   match term with
@@ -381,22 +354,17 @@ let translate_named_function (context : State.context) (frame : State.frame)
         in
         List.iter
           (fun (requirement : Mir.formula) ->
-            Facts.oblige context frame Requires
+            Facts.oblige context frame
               (Facts.locate context frame.source site.origin)
-              [
-                Text
-                  (Printf.sprintf
-                     "`%s` is used as a value of `%s`, which promises nothing of its arguments, so \
-                      its `"
-                     (Path.show path) (Types.show ty));
-                Facts.quote callee_clauses.callee requirement.origin;
-                Text "` may not hold.";
-              ]
+              (Value_contract
+                 { path; type_ = ty; clause = Facts.quote callee_clauses.callee requirement.origin })
               (snd (Validity.read_specification context inside requirement)))
           (Facts.list_clauses callee_clauses.requires)
       end
   | _ -> ());
-  let type_arguments = List.map (Types.substitute_argument frame.substitution) type_arguments in
+  let type_arguments =
+    List.map (Types.substitute_argument_erased frame.substitution) type_arguments
+  in
   let symbol = Logic.Symbol.Function_value { callee = path; type_arguments } in
   Facts.declare context (Logic.Constant (symbol, Facts.declare_sort context ty));
   let term = Logic.Symbol symbol in
@@ -428,7 +396,7 @@ let translate_global_value (context : State.context) frame (site : Invocation.si
   | None ->
       Facts.raise_unsupported
         (Facts.locate context frame.source site.origin)
-        "a function the prover cannot read, used as a value"
+        Unreadable_function_value
 
 let evaluate_constant (context : State.context) frame path =
   match
@@ -476,9 +444,11 @@ let evaluate_field_default context frame ty variant field =
           with
           | Some default ->
               let inside = Validity.make_type_frame context frame source ty ~self:None in
-              snd
-                (Amounts.run_code context inside default.value
-                   ~type_:(Facts.substitute_type context inside default.type_))
+              let evaluated, value =
+                Amounts.run_code context inside default.value
+                  ~type_:(Facts.substitute_type context inside default.type_)
+              in
+              ({ frame with spent = evaluated.spent }, value)
           | None -> Facts.raise_bug "the field %s of %s has no default" field (Types.show ty))
       | Some { form = Parameter_defaults _; _ } | None ->
           Facts.raise_bug "a type with no MIR of its defaults")
@@ -487,7 +457,7 @@ let evaluate_field_default context frame ty variant field =
 let check_built context frame (site : Invocation.site) ty term =
   Lambdas.check_valid context frame
     (Facts.locate context frame.source site.origin)
-    ty term ~deep:false ~when_:"for the value built here"
+    ty term ~deep:false ~moment:Built_here
 
 let is_indirect (context : State.context) (ty : Types.ty) variant =
   match (ty, variant) with
@@ -526,8 +496,8 @@ let apply_construct context frame (site : Invocation.site) variant
           match written with
           | Some term -> (frame, field_terms @ [ (field, term) ])
           | None ->
-              ( frame,
-                field_terms @ [ (field, evaluate_field_default context frame ty variant field) ] ))
+              let frame, value = evaluate_field_default context frame ty variant field in
+              (frame, field_terms @ [ (field, value) ]))
         (frame, []) fields
     in
     let frame = Operations.spend context frame (construct_amount context frame ty variant) in
@@ -544,6 +514,11 @@ let apply_construct context frame (site : Invocation.site) variant
           Logic.Apply (Facts.make_constructor_symbol ty variant, List.map read_field_value shaped)
         in
         check_built context frame site ty built;
+        let frame =
+          Operations.spend context frame (fun (counter : Costs.counter) ->
+              if counter.amortized then Amounts.compute_declared_potential context frame ty built
+              else Costs.zero)
+        in
         (frame, built)
     | None -> (frame, Facts.arrive context frame "built" ty)
 
@@ -559,7 +534,7 @@ let make_text_match context location ty term text =
             match Models.index_sequence context byte model (Logic.int index) with
             | Some at -> Logic.equal at (Logic.int (Char.code text.[index]))
             | None -> Logic.Boolean false))
-  | None -> Facts.raise_unsupported location "a string pattern on `%s`" (Types.show ty)
+  | None -> Facts.raise_unsupported location (String_pattern_on ty)
 
 let make_log_facts number ~halving =
   let log number = Logic.Apply (Logic.Symbol.Cost_log, [ number ]) in
@@ -625,9 +600,10 @@ let apply_specification_function context frame ~location (measure : Core.specifi
       (frame, Calls.make_callback_cost context frame metric function_type function_term)
   | Callback_ensures, _, _, Types.Function function_type :: _ ->
       (frame, Lambdas.apply_callback_ensures context function_type values)
-  | _ -> Facts.raise_unsupported location "this specification function"
+  | _ -> Facts.raise_unsupported location Specification_function
 
-let copy_value ?literal (context : State.context) frame ty term =
+let copy_value ?literal (context : State.context) frame ~(declared : Types.ty) term =
+  let ty = Types.erase_views declared in
   let literal =
     match (literal, ty) with
     | Some (Language.Literal.Elements _), Types.Named { arguments = [ Types.Type element ]; _ }
@@ -640,32 +616,55 @@ let copy_value ?literal (context : State.context) frame ty term =
   if
     context.counters = []
     || Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.bounds ty
-       && not (try Amounts.has_potential context ty with Facts.Unsupported _ -> true)
+       && not (try Amounts.has_potential context declared with Facts.Unsupported _ -> true)
   then frame
   else
-    let declare_copy_cost metric =
+    let declare_copy_cost_of metric copied =
       Amounts.declare_method_cost context frame metric
         (Well_known.make_method_path Copyable_copy)
-        ~trait_arguments:[] ty
+        ~trait_arguments:[] copied
     in
-    Operations.spend context frame (fun (counter : Costs.counter) ->
+    let declare_copy_cost metric = declare_copy_cost_of metric ty in
+    let compute_elements_cost metric =
+      Option.map
+        (fun ({ element; model_of; _ } : State.buffer) ->
+          let per_element =
+            if
+              Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.bounds element
+            then Costs.least_amount (Metric metric)
+            else declare_copy_cost_of metric element
+          in
+          Logic.multiply (Models.make_sequence_length context element (model_of term)) per_element)
+        (Amounts.find_buffer context ty)
+    in
+    Operations.spend_operation context frame
+      ~potential_change:(Some (fun () -> Amounts.compute_potential context frame declared term))
+      (fun (counter : Costs.counter) ->
+        let make_plain amount = { Costs.amount; counted = No_potential } in
+        let make_unknown () =
+          Costs.make_counted_charge counter
+            (Operations.declare_unknown_amount context frame counter)
+        in
         match (literal, counter.resource, counter.counting) with
+        | None, Metric Time, Units when Option.is_some (compute_elements_cost Time) ->
+            make_plain (Costs.plus (Option.get (compute_elements_cost Time)) (Logic.int 1))
         | _, Metric Time, Units ->
             let time = match literal with Some _ -> Costs.zero | None -> declare_copy_cost Time in
-            let copy_potential =
-              try Amounts.compute_potential context frame ty term
-              with Facts.Unsupported _ -> Costs.zero
-            in
-            Costs.minus (Costs.plus time (Logic.int 1)) copy_potential
+            { Costs.amount = Costs.plus time (Logic.int 1); counted = Potential_change }
         | Some literal, Metric (Allocations | Allocated_bytes), Units
         | Some literal, Metric Allocations, _ ->
-            Logic.int (match literal with Text "" | Elements [] -> 0 | Text _ | Elements _ -> 1)
+            make_plain
+              (Logic.int
+                 (match literal with Text "" | Elements [] -> 0 | Text _ | Elements _ -> 1))
         | Some (Text text), Metric Allocated_bytes, (At_most | Exactly) ->
-            Logic.int (String.length text)
-        | Some (Elements _), Metric Allocated_bytes, (At_most | Exactly) ->
-            Operations.declare_unknown_amount context frame counter
-        | Some _, Calls _, _ -> Costs.zero
+            make_plain (Logic.int (String.length text))
+        | Some (Elements _), Metric Allocated_bytes, (At_most | Exactly) -> make_unknown ()
+        | Some _, Calls _, _ -> Costs.make_counted_charge counter Costs.zero
+        | None, Metric Allocations, _ when Option.is_some (compute_elements_cost Allocations) ->
+            make_plain
+              (Amounts.compute_amount_within context frame counter
+                 (Costs.plus (Option.get (compute_elements_cost Allocations)) (Logic.int 1)))
         | None, Metric ((Allocations | Allocated_bytes) as metric), _ ->
-            Amounts.compute_amount_within context frame counter (declare_copy_cost metric)
-        | _, Metric Time, (At_most | Exactly) | None, Calls _, _ ->
-            Operations.declare_unknown_amount context frame counter)
+            make_plain
+              (Amounts.compute_amount_within context frame counter (declare_copy_cost metric))
+        | _, Metric Time, (At_most | Exactly) | None, Calls _, _ -> make_unknown ())

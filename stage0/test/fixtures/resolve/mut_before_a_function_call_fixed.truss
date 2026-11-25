@@ -1,5 +1,0 @@
-fn make() -> List[Int64] { todo }
-
-fn f() {
-  make().push(1)
-}

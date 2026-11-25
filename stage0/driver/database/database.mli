@@ -40,22 +40,16 @@ val list_dependency_diagnostics : t -> Path.package -> (Source.t * Diagnostic.t 
 val read_source : t -> Path.file -> Source.t
 
 type proofs
+type proof_scope = In_packages of Path.package list | In_files of Path.file list
 
-val prove : ?on_bug:(Compiler_bug.t -> unit) -> t -> Path.file list -> proofs
-val list_evaluations : proofs -> Prover.Obligation.evaluation list
-
-val decide :
-  ?on_bug:(Compiler_bug.t -> unit) ->
-  proofs ->
-  runs:(Prover.Obligation.evaluation * Prover.Obligation.run) list ->
-  Solver.t Lazy.t ->
-  unit
+val prove : ?on_bug:(Compiler_bug.t -> unit) -> t -> proof_scope -> proofs
+val list_evaluations : proofs -> Lowered.Item.t list
+val decide : ?on_bug:(Compiler_bug.t -> unit) -> proofs -> Solver.t Lazy.t -> unit
 
 type proof_site = { code : string; span : Source.span; shows : string }
 type proof_state = { site : proof_site; is_proven : bool; trusts_compiled_code : bool }
 
 val list_proof_states : t -> Path.file -> proof_state list
-val list_proof_warnings : t -> Path.file -> Diagnostic.t list
 val list_proof_diagnostics : t -> Path.file -> Diagnostic.t list
 val list_holes : proofs -> reached:Path.t list -> (Path.file * int * int * Path.t list) list
 val make_interface_lookups : t -> Interface.Lookups.t
@@ -102,6 +96,7 @@ val list_manifest_problems : t -> Path.package -> manifest_problem list
 val find_code_packages : t -> Path.package -> Path.package list option
 val find_lowered_lookups : t -> Path.package list -> (Lowering.lowered_lookups, string) result
 val make_name_lookups : t -> Resolve.Names.lookups
+val make_source_lookups : t -> Resolve.Names.source
 val list_definitions_naming : t -> Path.t -> Resolve.Names.key list
 val list_readers_of_module : t -> Path.module_ -> Resolve.Names.key list * Path.file list
 
@@ -128,12 +123,8 @@ module For_testing : sig
   val list_unread : t -> string list
   val make_proof_lookups : t -> Prover.Lookups.t
   val find_proof : proofs -> Resolve.Names.key -> Prover.proof outcome option
-
-  val list_queries :
-    proofs ->
-    runs:(Prover.Obligation.evaluation * Prover.Obligation.run) list ->
-    (proof_site * string) list
-
+  val block_proof : t -> Resolve.Names.key -> unit
+  val list_queries : proofs -> (proof_site * string) list
   val lower_roots : ?on_bug:(Compiler_bug.t -> unit) -> t -> unit
   val propagate : ?on_bug:(Compiler_bug.t -> unit) -> t -> unit
 
@@ -148,8 +139,9 @@ module For_testing : sig
   val identify_package : Path.package -> int
   val identify_item : Lowered.Item.t -> int
   val list_reads : t -> Kind.stage -> int -> (Kind.target * int * string) list
-  val with_failing_unit : Kind.stage -> int -> (unit -> 'result) -> 'result
+  val with_failing_unit : ?raising:exn -> Kind.stage -> int -> (unit -> 'result) -> 'result
   val add_root : t -> Lowered.Item.t -> unit
+  val supply_lowered : t -> Lowered.Item.t -> Lowering.lowered -> unit
   val list_differences : t -> t -> (string * int) list
   val list_items : t -> Lowered.Item.t list
   val extend_package : loaded:string -> (Path.file * string) list -> t

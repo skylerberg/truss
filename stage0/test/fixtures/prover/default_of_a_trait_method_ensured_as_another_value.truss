@@ -1,0 +1,17 @@
+trait Scaled {
+  fn scaled(self, factor: Int64 = 2) -> Int64
+    ensures result == factor
+  {
+    factor
+  }
+}
+
+type Box()
+
+impl Scaled for Box {}
+
+fn on_a_known_type(box: Box) -> Int64
+  ensures result == 3
+{
+  box.scaled()
+}

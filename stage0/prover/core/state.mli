@@ -48,12 +48,7 @@ type frame = {
   lends : (Logic.term * (frame -> Logic.term -> frame)) list Locals.t;
 }
 
-type changed = {
-  changed_locals : Locals.local list;
-  changes_self : bool;
-  reassigned : Locals.local list;
-}
-
+type changed_part = { root : Locals.local; fields : string list }
 type place_value = One of Logic.term | Run of Logic.term * Logic.term
 type noted_place = { origin : Core.origin; value : place_value }
 
@@ -70,6 +65,7 @@ type passed = {
   origin : Core.origin option;
   passed_place : passed_place option;
   type_ : Types.ty;
+  declared_type : Types.ty;
   term : Logic.term;
 }
 
@@ -96,6 +92,22 @@ type stated = Tables.stated =
   | Ranked_elements of Types.ty
   | Range_elements of Types.ty
   | Non_negative_rank of Types.ty
+  | Method_cost_bound of Logic.symbol
+
+type call_amount = {
+  call : Catalog.Prover.quoted;
+  callee : Path.t;
+  states_cost : bool;
+  counts_potential : bool;
+  counter : Costs.counter;
+  amount : Logic.term;
+}
+
+type buffer = {
+  kind : Language.Builtin_type.t;
+  element : Types.ty;
+  model_of : Logic.term -> Logic.term;
+}
 
 type lending = {
   part_type : Types.ty;
@@ -126,8 +138,8 @@ type context = {
   local_origins : Core.origin Tables.Local_table.t;
   mutable returns : (frame * Logic.term option) list;
   mutable enclosing_provides : Mir.provided list list;
-  mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
   mutable instantiating : Path.t list;
+  mutable reading_requires : Path.t list;
   mutable axiomatizing : Logic.symbol list;
   axiom_clauses : unit Tables.Axiom_clause_table.t;
   mutable open_axioms : open_axiom list;
@@ -138,19 +150,22 @@ type context = {
   home : Resolve.Names.key;
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   mutable counters : Costs.counter list;
+  mutable conditional_counters : Costs.counter list;
   mutable bounded_counters : Costs.counter list;
+  mutable recursive_costs_assumed : int;
   fresh_order : int Tables.Symbol_table.t;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;
   mutable lambda_costs : ((Logic.term * Language.Metric.t) * (Logic.term * Obligation.t list)) list;
   mutable lambda_captures : (Logic.term * Core.local list) list;
+  mutable call_amounts : call_amount list;
   lambda_definitions : Logic.term Tables.Symbol_table.t;
   mutable potentials : Logic.term list;
   models : (Logic.term -> Logic.term) option Tables.Model_table.t;
   holds_potential : bool Tables.Type_table.t;
-  buffers : (Types.ty * (Logic.term -> Logic.term)) option Tables.Type_table.t;
+  buffers : buffer option Tables.Type_table.t;
   mutable equalities : Logic.term list;
-  mutable path_notes : (string * Logic.term) list;
+  mutable path_notes : (Catalog.Prover.path_note * Logic.term) list;
   mutable entry : Logic.symbol list;
   inherits_precondition : bool;
   mutable holes : (Resolve.Names.key * Obligation.location) list;
@@ -169,7 +184,7 @@ type context = {
   keeps_failures : bool;
   mutable panics : bool;
   mutable can_declare_panic : bool;
-  panic_condition : Obligation.message option;
+  panic_condition : Catalog.Prover.quoted list option;
   mutable obligation_condition : Types.condition;
   mutable skipped_conditions : Types.condition list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;

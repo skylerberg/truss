@@ -8,13 +8,14 @@ val problems : snapshot -> Project.problem list
 val list_dependency_problems : snapshot -> Database.t -> Project.problem list
 val list_packages : snapshot -> (string * Path.package) list
 val time_limit_ms : snapshot -> int
+val x86_64_level : snapshot -> X86_64_level.t
 val list_registry_packages : snapshot -> (Path.package * Registry.Version.t * string) list
 val lock_fix : snapshot -> string option
 val list_package_files : snapshot -> Path.package -> Path.file list
 val list_dependency_names : snapshot -> Path.package -> Path.package list
 val locate_file : snapshot -> Path.file -> string
 val list_package_databases : unit -> string list
-val make_trial : snapshot -> (string * string option) list -> snapshot
+val make_overlay : snapshot -> (string * string option) list -> snapshot
 val flush : unit -> unit
 
 type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }

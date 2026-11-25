@@ -2,11 +2,11 @@ fn take[T](value: own T) -> UInt64 {
   0
 }
 
-fn produce[T](make: fn(own T) -> UInt64) -> T {
+fn produce[T](first: T, make: fn(own T) -> UInt64) -> T {
   todo
 }
 
-fn f() -> UInt64 {
-  let counts = [produce(fn(value) { take(own value) }), 5]
+fn f(small: UInt8) -> UInt64 {
+  let counts = [produce(5, fn(value) { take(own value) }), small]
   counts.length()
 }

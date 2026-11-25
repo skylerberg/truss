@@ -66,23 +66,24 @@ let cut text spans =
   |> List.filter (( <> ) "")
   |> String.concat "\n"
 
-let render_signature (names : Resolve.Names.lookups) ~body ~opaque (key : Resolve.Names.key) =
-  let text = names.read_text key in
+let render_signature (names : Resolve.Names.lookups) (source_lookups : Resolve.Names.source) ~body
+    ~opaque (key : Resolve.Names.key) =
+  let text = source_lookups.read_text key in
   if body then String.trim text
   else
-    let base = (names.read_place key).base in
+    let base = (source_lookups.read_place key).base in
     let contained =
       List.concat_map
         (fun member ->
-          let member_base = (names.read_place member).base in
+          let member_base = (source_lookups.read_place member).base in
           List.map
             (fun (span : Source.Definition_span.t) ->
               Source.Definition_span.of_file ~base
                 (Source.Definition_span.to_file ~base:member_base span))
-            (list_bodies (names.read_spans member) (names.read_definition member)))
+            (list_bodies (source_lookups.read_spans member) (names.read_definition member)))
         (names.list_contained key)
     in
-    let spans = names.read_spans key and definition = names.read_definition key in
+    let spans = source_lookups.read_spans key and definition = names.read_definition key in
     let representation = if opaque then list_representation text spans definition else [] in
     cut text (list_bodies spans definition @ representation @ contained)
 
@@ -99,8 +100,8 @@ let show_kind : Resolve.Names.kind -> string = function
   | Test -> "test"
   | Law_proof -> "law proof"
 
-let find_signature (names : Resolve.Names.lookups) path =
-  Option.map (render_signature names ~body:false ~opaque:false) (names.find_key path)
+let find_signature (names : Resolve.Names.lookups) source_lookups path =
+  Option.map (render_signature names source_lookups ~body:false ~opaque:false) (names.find_key path)
 
 let label_signature label signature =
   let indent = String.make (String.length label) ' ' in

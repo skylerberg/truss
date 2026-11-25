@@ -1,0 +1,8 @@
+type Tagged(tags: List[Int64])
+  derives Equal
+
+fn same(first: Tagged, second: Tagged) -> Bool
+  cost time O(1)
+{
+  first == second
+}

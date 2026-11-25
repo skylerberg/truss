@@ -6,7 +6,7 @@ fn same_text(first: String, second: String) -> Bool
   first == second
 }
 
-fn earlier_text(first: StringSlice, second: StringSlice) -> Bool
+fn earlier_text(first: String, second: String) -> Bool
   cost allocations == 0
 {
   first < second

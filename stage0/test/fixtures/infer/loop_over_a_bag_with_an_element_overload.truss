@@ -6,7 +6,9 @@ impl Iterable for Bag {
   fn element(self, position: UInt64) lends Int64 { self.items[position] }
 }
 
-fn Bag.element(mut self, position: UInt64) lends mut Int64 { mut self.items[position] }
+impl IterableMut for Bag {
+  fn element(mut self, position: UInt64) lends mut Int64 { mut self.items[position] }
+}
 
 fn f(bag: mut Bag) -> Int64 {
   for item in mut bag {

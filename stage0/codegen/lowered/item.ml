@@ -4,8 +4,7 @@ type t =
   | Drop of Ground.ty
   | Copy of Ground.ty
   | Debug of Ground.ty
-  | Any_drop of Ground.ty
-  | Any_copy of Ground.ty
+  | Untyped_drop of Ground.ty
   | Encode of Ground.ty
   | Evaluator of t
   | Assertion of { definition : Path.t; condition : int }
@@ -14,7 +13,6 @@ type t =
 
 and generated =
   | Entry of impl_method
-  | Any_entry of impl_method
   | Locked_entry of { capability : Path.t; name : string }
   | Adapter of {
       function_ : Path.t;
@@ -26,7 +24,6 @@ and generated =
 
 and table =
   | Impl_table of { impl : Path.t; type_arguments : Ground.argument list }
-  | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
   | Locked_table of Path.t
 
 and impl_method = {
@@ -62,21 +59,17 @@ let rec to_string = function
   | Copy ty -> "copy " ^ Ground.to_string ty
   | Debug ty -> "debug " ^ Ground.to_string ty
   | Encode ty -> "encode " ^ Ground.to_string ty
-  | Any_drop ty -> "any drop " ^ Ground.to_string ty
-  | Any_copy ty -> "any copy " ^ Ground.to_string ty
+  | Untyped_drop ty -> "untyped drop " ^ Ground.to_string ty
   | Evaluator evaluated -> "evaluator " ^ to_string evaluated
   | Assertion { definition; condition } ->
       Printf.sprintf "assertion %d of %s" condition (Path.show definition)
   | Generated (Adapter { function_; instantiation; _ }) ->
       "adapter " ^ to_string (make_code function_ instantiation)
-  | Generated (Any_entry impl_method) -> "any entry " ^ to_string (make_method_code impl_method)
   | Generated (Locked_entry { capability; name }) ->
       "locked entry " ^ Path.show capability ^ "." ^ name
   | Generated (Entry impl_method) -> "entry " ^ to_string (make_method_code impl_method)
   | Generated (Program_main main) -> "program " ^ Path.show main
   | Generated (Test_main test) -> "test main " ^ Path.show test
-  | Table (Any_table { impl; type_arguments }) ->
-      "any table " ^ Path.show impl ^ show_arguments type_arguments
   | Table (Locked_table capability) -> "locked table " ^ Path.show capability
   | Table (Impl_table { impl; type_arguments }) ->
       "table " ^ Path.show impl ^ show_arguments type_arguments
@@ -94,7 +87,6 @@ and show_capability_arguments arguments =
 
 let find_type_definition : Ground.ty -> Path.t option = function
   | Named { path; _ } -> Some path
-  | Any { trait; _ } -> Some trait
   | Function _ | Never -> None
 
 let rec find_definition : t -> Path.t option = function
@@ -106,8 +98,8 @@ let rec find_definition : t -> Path.t option = function
       | Adapter { function_ = path; _ }
       | Program_main path
       | Test_main path )
-  | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
+  | Table (Impl_table { impl = path; _ } | Locked_table path) ->
       Some path
   | Evaluator evaluated -> find_definition evaluated
-  | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> find_type_definition ty
-  | Generated (Entry impl_method | Any_entry impl_method) -> Some (make_method_path impl_method)
+  | Drop ty | Copy ty | Debug ty | Untyped_drop ty | Encode ty -> find_type_definition ty
+  | Generated (Entry impl_method) -> Some (make_method_path impl_method)

@@ -26,7 +26,7 @@ let server_only_pem: String = "-----BEGIN CERTIFICATE-----\nMIIBZTCCAQqgAwIBAgIC
 
 let server_only_key_pem: String = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgmqpb8yVPdFvL4hZ2\niyHwM35h1EwbLA5AzYPH6Ng6wWWhRANCAAR+V9yewmBjExK0/C47szZWLpHLx1w1\n9FZgEEM9OfvaDuQzEG31bfqZ2gAUZza4NpcEGaEl46eqBkDx5qrVJrtQ\n-----END PRIVATE KEY-----\n"
 
-fn certificate(text: StringSlice) -> x509.Certificate
+fn certificate(text: String) -> x509.Certificate
   uses Panic
 {
   match x509.parse_pem(text) {
@@ -38,10 +38,10 @@ fn certificate(text: StringSlice) -> x509.Certificate
 fn server_config() -> tls.ServerConfig
   uses Panic
 {
-  let blocks = x509.pem_blocks(leaf_key_pem.slice(), label: "PRIVATE KEY")
-  let key = x509.parse_private_key(blocks[0].slice()).expect("a key")
+  let blocks = x509.pem_blocks(leaf_key_pem, label: "PRIVATE KEY")
+  let key = x509.parse_private_key(blocks[0]).expect("a key")
   tls.ServerConfig(
-    chain: [certificate(leaf_pem.slice()), certificate(intermediate_pem.slice())],
+    chain: [certificate(leaf_pem), certificate(intermediate_pem)],
     key: own key,
     protocols: ["h2", "http/1.1"],
   )
@@ -65,18 +65,18 @@ fn serve_once(listener: mut network.Listener) -> String
       var line: List[UInt8] = []
       let _ = session.receive_exactly(mut line, count: 5)
       var reply: String = "echo "
-      mut reply.push(String.from_utf8_lossy(line.slice()).slice())
-      let _ = session.send_all(reply.slice().bytes())
+      mut reply.push(String.from_utf8_lossy(line))
+      let _ = session.send_all(reply.bytes())
       var rest: List[UInt8] = []
       let ended = session.receive_to_end(mut rest)
-      let protocol = session.protocol().unwrap_or("none".slice()).to_string()
+      let protocol = session.protocol().unwrap_or("none").copy()
       "${protocol} ${ended == Ok(0)}"
     }
     Err(error) => "failed: ${error}"
   }
 }
 
-fn visit(host: StringSlice, roots: own List[x509.Certificate], protocols: own List[String]) -> String
+fn visit(host: String, roots: own List[x509.Certificate], protocols: own List[String]) -> String
   uses NetworkClient, Handles, Tasks, Random, Clock, Panic, RunForever
 {
   var connection = network.connect(host, port: 8443).expect("the server accepts")
@@ -88,14 +88,14 @@ fn visit(host: StringSlice, roots: own List[x509.Certificate], protocols: own Li
       var reply: List[UInt8] = []
       let _ = session.receive_exactly(mut reply, count: 10)
       let _ = session.close_sending()
-      let protocol = session.protocol().unwrap_or("none".slice()).to_string()
-      "${String.from_utf8_lossy(reply.slice())} ${protocol} ${session.peer_certificates().length()}"
+      let protocol = session.protocol().unwrap_or("none").copy()
+      "${String.from_utf8_lossy(reply)} ${protocol} ${session.peer_certificates().length()}"
     }
     Err(error) => "failed: ${error}"
   }
 }
 
-fn handshake(host: StringSlice, roots: own List[x509.Certificate], protocols: own List[String]) -> List[String]
+fn handshake(host: String, roots: own List[x509.Certificate], protocols: own List[String]) -> List[String]
   uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Random, Panic, RunForever
 {
   var listener = NetworkServer.listen(network.SocketAddress(address: network.IpAddress.loopback, port: 8443)).expect("the port is free")
@@ -110,7 +110,7 @@ fn handshake(host: StringSlice, roots: own List[x509.Certificate], protocols: ow
 
 test "a client and a server agree on keys, verify the chain, pick a protocol, and exchange data" uses Panic, RunForever {
   provide world() {
-    let seen = handshake("example.test", roots: [certificate(root_pem.slice())], protocols: ["http/1.1", "h2"])
+    let seen = handshake("example.test", roots: [certificate(root_pem)], protocols: ["http/1.1", "h2"])
     assert seen[0] == "echo hello h2 2"
     assert seen[1] == "h2 true"
   }
@@ -118,9 +118,9 @@ test "a client and a server agree on keys, verify the chain, pick a protocol, an
 
 test "a client rejects a chain for another host or from an unknown root" uses Panic, RunForever {
   provide world() {
-    let other = handshake("localhost", roots: [certificate(root_pem.slice())], protocols: [])
+    let other = handshake("localhost", roots: [certificate(root_pem)], protocols: [])
     assert other[0] == "failed: the certificate is not for this host"
-    assert other[1].slice().starts_with("failed: ")
+    assert other[1].starts_with("failed: ")
   }
   provide world() {
     let unknown = handshake("example.test", roots: [], protocols: [])
@@ -131,7 +131,7 @@ test "a client rejects a chain for another host or from an unknown root" uses Pa
 fn greet(request: own http.Request, responder: mut http.Responder)
   uses Tasks, RunForever
 {
-  let _ = mut responder.send(http.Response.text("secure ${request.path()}".slice()))
+  let _ = mut responder.send(http.Response.text("secure ${request.path()}"))
 }
 
 fn secure_exchange() -> String
@@ -141,7 +141,7 @@ fn secure_exchange() -> String
   concurrent {
     http.serve_tls(mut listener, config: server_config(), handler: greet)
     {
-      let options = http.ClientOptions(roots: Some([certificate(root_pem.slice())]))
+      let options = http.ClientOptions(roots: Some([certificate(root_pem)]))
       return match http.get("https://example.test:8443/page", options: options) {
         Ok(response) => "${response.status.code} ${response.text_body().unwrap_or("")}"
         Err(error) => "failed: ${error}"
@@ -166,21 +166,21 @@ fn route(request: own http.Request) -> http.Response
   uses Handles, Tasks, RunForever
 {
   if request.matches(http.Route"POST /upload") is Some(_) {
-    let tag = request.header("x-tag").unwrap_or("none".slice()).to_string()
+    let tag = request.header("x-tag").unwrap_or("none").copy()
     let length = match own request.bytes() {
       Ok(bytes) => bytes.length()
       Err(_) => 0
     }
-    return http.Response.text("${length} ${tag}".slice())
+    return http.Response.text("${length} ${tag}")
   }
   if request.matches(http.Route"GET /empty") is Some(_) {
     return http.Response.new(status: http.Status.no_content)
   }
   if request.matches(http.Route"GET /big") is Some(_) {
-    let text = "x".slice().repeated(70000)
-    return http.Response.text(text.slice())
+    let text = "x".repeated(70000)
+    return http.Response.text(text)
   }
-  http.Response.text("served ${request.path()}".slice())
+  http.Response.text("served ${request.path()}")
 }
 
 fn summary(outcome: own Result[http.Response, http.Error]) -> String {
@@ -203,21 +203,21 @@ fn client_exchanges(is_secure: Bool) -> List[String]
     }
     {
       var seen: List[String] = []
-      var client = http.Client.new(http.ClientOptions(roots: Some([certificate(root_pem.slice())])))
+      var client = http.Client.new(http.ClientOptions(roots: Some([certificate(root_pem)])))
       let base = if is_secure { "https://example.test:8443" } else { "http://example.test:8080" }
-      mut seen.push(summary(mut client.get("${base}/first".slice())))
-      mut seen.push(summary(mut client.get("${base}/second?page=2".slice())))
+      mut seen.push(summary(mut client.get("${base}/first")))
+      mut seen.push(summary(mut client.get("${base}/second?page=2")))
       var headers = http.Headers.new()
       mut headers.add("X-Tag", value: "tagged")
       let upload: List[UInt8] = List.filled(7, count: 70000)
-      let upload_url = url.parse("${base}/upload".slice()).expect("a URL")
+      let upload_url = url.parse("${base}/upload").expect("a URL")
       mut seen.push(summary(mut client.send(http.Method.Post, url: upload_url, headers: headers, body: upload)))
-      mut seen.push(summary(mut client.get("${base}/empty".slice())))
-      match mut client.get("${base}/big".slice()) {
+      mut seen.push(summary(mut client.get("${base}/empty")))
+      match mut client.get("${base}/big") {
         Ok(response) => mut seen.push("${response.status.code} ${response.body.length()}")
         Err(error) => mut seen.push("failed: ${error}")
       }
-      let head_url = url.parse("${base}/first".slice()).expect("a URL")
+      let head_url = url.parse("${base}/first").expect("a URL")
       mut seen.push(summary(mut client.send(http.Method.Head, url: head_url)))
       return own seen
     }
@@ -250,11 +250,11 @@ test "a client keeps an HTTP/1.1 connection open between requests" uses Panic, R
   }
 }
 
-fn identity(certificate_text: StringSlice, key_text: StringSlice) -> tls.Identity
+fn identity(certificate_text: String, key_text: String) -> tls.Identity
   uses Panic
 {
   let blocks = x509.pem_blocks(key_text, label: "PRIVATE KEY")
-  let key = x509.parse_private_key(blocks[0].slice()).expect("a key")
+  let key = x509.parse_private_key(blocks[0]).expect("a key")
   tls.Identity(chain: [certificate(certificate_text)], key: own key)
 }
 
@@ -265,18 +265,18 @@ fn mutual(port: UInt16, required: tls.ClientCertificates, protocols: List[String
   var config = server_config()
   config.protocols = protocols.copy()
   config.client_certificates = required
-  config.client_roots = [certificate(client_ca_pem.slice())]
+  config.client_roots = [certificate(client_ca_pem)]
   concurrent {
     http.serve_tls(mut listener, config: config, handler: fn(request, responder) {
       let name = match request.client_certificates.first() {
-        Some(leaf) => leaf.common_name().unwrap_or("unnamed").to_string()
+        Some(leaf) => leaf.common_name().unwrap_or("unnamed").copy()
         None => "none"
       }
-      let _ = mut responder.send(http.Response.text("${request.client_certificates.length()} ${name}".slice()))
+      let _ = mut responder.send(http.Response.text("${request.client_certificates.length()} ${name}"))
     })
     {
-      var client = http.Client.new(http.ClientOptions(roots: Some([certificate(root_pem.slice())]), identity: presented.copy()))
-      return match mut client.get("https://example.test:${port}/".slice()) {
+      var client = http.Client.new(http.ClientOptions(roots: Some([certificate(root_pem)]), identity: presented.copy()))
+      return match mut client.get("https://example.test:${port}/") {
         Ok(response) => response.text_body().unwrap_or("")
         Err(_) => "refused"
       }
@@ -286,8 +286,8 @@ fn mutual(port: UInt16, required: tls.ClientCertificates, protocols: List[String
 
 test "a server that requires a client certificate accepts one its roots signed, and refuses others" uses Panic, RunForever {
   provide world() {
-    let client = identity(client_pem.slice(), key_text: client_key_pem.slice())
-    let server_only = identity(server_only_pem.slice(), key_text: server_only_key_pem.slice())
+    let client = identity(client_pem, key_text: client_key_pem)
+    let server_only = identity(server_only_pem, key_text: server_only_key_pem)
     assert mutual(8450, required: tls.ClientCertificates.Required, protocols: ["http/1.1"], presented: Some(client.copy())) == "1 Truss Test client"
     assert mutual(8451, required: tls.ClientCertificates.Required, protocols: ["h2"], presented: Some(client.copy())) == "1 Truss Test client"
     assert mutual(8452, required: tls.ClientCertificates.Required, protocols: ["http/1.1"], presented: None) == "refused"
@@ -300,13 +300,13 @@ fn read_proxy_head(connection: network.Connection) -> String
   uses Handles, Tasks, RunForever
 {
   var received: List[UInt8] = []
-  while !String.from_utf8_lossy(received.slice()).slice().contains("\r\n\r\n") {
+  while !String.from_utf8_lossy(received).contains("\r\n\r\n") {
     match connection.receive(mut received, limit: 4096) {
-      Ok(count) => if count == 0 { return String.from_utf8_lossy(received.slice()) }
-      Err(_) => return String.from_utf8_lossy(received.slice())
+      Ok(count) => if count == 0 { return String.from_utf8_lossy(received) }
+      Err(_) => return String.from_utf8_lossy(received)
     }
   }
-  String.from_utf8_lossy(received.slice())
+  String.from_utf8_lossy(received)
 }
 
 fn pump(from: network.Connection, to: network.Connection)
@@ -323,7 +323,7 @@ fn pump(from: network.Connection, to: network.Connection)
       }
       Err(_) => return
     }
-    if to.send_all(piece.slice()) is Err(_) {
+    if to.send_all(piece) is Err(_) {
       return
     }
   }
@@ -344,8 +344,8 @@ fn proxied() -> List[String]
           Err(_) => return []
         }
         let head = read_proxy_head(client_side)
-        let first = head.slice().lines().first().unwrap_or("").to_string()
-        if first.slice().starts_with("CONNECT ") {
+        let first = head.lines().first().unwrap_or("").copy()
+        if first.starts_with("CONNECT ") {
           let line = first.copy()
           tunnels.update(fn(listed) { mut listed.push(line.copy()) })
           let _ = client_side.send_all("HTTP/1.1 200 Connection established\r\n\r\n".bytes())
@@ -356,15 +356,15 @@ fn proxied() -> List[String]
           }
         } else {
           var authorization = "none"
-          for line in head.slice().lines() {
+          for line in head.lines() {
             match line.strip_prefix("Proxy-Authorization: ") {
-              Some(value) => authorization = value.to_string()
+              Some(value) => authorization = value.copy()
               None => {}
             }
           }
           let body = "${first}|${authorization}"
           let reply = "HTTP/1.1 200 OK\r\nContent-Length: ${body.length()}\r\nConnection: close\r\n\r\n${body}"
-          let _ = client_side.send_all(reply.slice().bytes())
+          let _ = client_side.send_all(reply.bytes())
           let _ = client_side.close_sending()
         }
       }
@@ -375,7 +375,7 @@ fn proxied() -> List[String]
         https: url.parse("http://example.test:3128").ok(),
       )
       var seen: List[String] = []
-      var client = http.Client.new(http.ClientOptions(roots: Some([certificate(root_pem.slice())]), proxy: Some(through.copy())))
+      var client = http.Client.new(http.ClientOptions(roots: Some([certificate(root_pem)]), proxy: Some(through.copy())))
       mut seen.push(summary(mut client.get("http://origin.test/path?q=1")))
       let secured = summary(mut client.get("https://example.test:8455/first"))
       for line in tunnels.read(fn(listed) { listed.copy() }) {
@@ -383,7 +383,7 @@ fn proxied() -> List[String]
       }
       mut seen.push(own secured)
       let skipping = http.Proxy(https: url.parse("http://example.test:3128").ok(), excluded: ["example.test"])
-      var direct = http.Client.new(http.ClientOptions(roots: Some([certificate(root_pem.slice())]), proxy: Some(own skipping)))
+      var direct = http.Client.new(http.ClientOptions(roots: Some([certificate(root_pem)]), proxy: Some(own skipping)))
       mut seen.push(summary(mut direct.get("https://example.test:8455/second")))
       return seen
     }
@@ -431,7 +431,7 @@ fn smtp_session[Stream: streams.Duplex](connection: Stream, transcript: tasks.Ce
     }
     let recorded = line.copy()
     transcript.update(fn(listed) { mut listed.push(recorded.copy()) })
-    if line.slice().starts_with("EHLO") {
+    if line.starts_with("EHLO") {
       let _ = connection.send_all(if offers_tls { "250-mail.example.test\r\n250 STARTTLS\r\n".bytes() } else { "250 mail.example.test\r\n".bytes() })
     } else if line == "STARTTLS" {
       let _ = connection.send_all("220 go ahead\r\n".bytes())
@@ -479,7 +479,7 @@ fn mailed(port: UInt16, offers_tls: Bool) -> List[String]
     }
     {
       let note = mail.Message(from: mail.Address(email: "ada@example.test"), to: [mail.Address(email: "grace@example.test")], subject: "Hello", text: Some("Hi"))
-      outcome = match mail.send(note, options: mail.SmtpOptions(host: "example.test", port: port, roots: Some([certificate(root_pem.slice())]))) {
+      outcome = match mail.send(note, options: mail.SmtpOptions(host: "example.test", port: port, roots: Some([certificate(root_pem)]))) {
         Ok(_) => "sent"
         Err(Unsupported(message)) => "unsupported: ${message}"
         Err(error) => "failed: ${error}"

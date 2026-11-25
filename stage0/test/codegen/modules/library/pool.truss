@@ -83,13 +83,13 @@ test "a temporary directory is writable while the work runs and is removed after
     })
     let seen = own outcome.expect("a temporary directory")
     assert seen.checks == "true true"
-    assert seen.path.slice().starts_with("/tmp/truss-")
-    assert !files.is_present(Path.new(seen.path.slice()))
+    assert seen.path.starts_with("/tmp/truss-")
+    assert !files.is_present(Path.new(seen.path))
     let file_outcome = files.with_temporary_file(fn(path) {
       Seen(checks: "${FileRead.read_text(path).ok() == Some("")}", path: "${path}")
     })
     let file_seen = own file_outcome.expect("a temporary file")
     assert file_seen.checks == "true"
-    assert !files.is_present(Path.new(file_seen.path.slice()))
+    assert !files.is_present(Path.new(file_seen.path))
   }
 }

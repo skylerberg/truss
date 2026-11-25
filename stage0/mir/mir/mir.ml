@@ -5,6 +5,30 @@ include Walk
 include Parts
 
 let expand_formula = Expansion.expand_formula
+
+let list_callee_modified_parts ~read_signature (lookups : Interface.Lookups.t) substitution
+    (callee : Tree.callee) position : Types.modified list option =
+  let list_parts_of path =
+    Option.bind (read_signature path) (fun signature ->
+        Types.list_modified_parts signature position)
+  in
+  match callee.target with
+  | Function { path; _ } -> list_parts_of path
+  | Trait_method { trait; name; receiver; evidence; self_type; _ } -> (
+      match
+        Interface.Impls.locate_method lookups
+          (Interface.Impls.resolve_evidence lookups substitution ~self_type ~trait evidence)
+          ~name ~receiver
+      with
+      | Some (Method_of_impl { impl; _ }) -> list_parts_of (Method { owner = impl; name; receiver })
+      | Some Declaration_for_view | None ->
+          list_parts_of (Method { owner = trait.trait; name; receiver }))
+  | Capability_method { capability; name } ->
+      list_parts_of (Path.make_capability_method capability name)
+  | Intrinsic { operation = Buffer Storage_swap | Lend Storage_at; _ } when position = 0 ->
+      Some [ { position; field_path = []; is_elements = true } ]
+  | Intrinsic _ | Indirect _ -> None
+
 let make_code tree : Parts.code = { tree; graph = Expansion.expand tree }
 
 let make_body_part ?interface (form : Core.t) : body_part =
@@ -29,7 +53,7 @@ let find_defaults (definition : Core.definition) =
               (List.mapi
                  (fun position (parameter : Core.parameter) ->
                    match parameter.default with
-                   | Some default -> [ (position, Builder.of_expression default) ]
+                   | Some default -> [ (position, Builder.of_default default) ]
                    | None -> [])
                  parameters)))
   | Type { defaults; _ } ->
@@ -43,9 +67,7 @@ let find_defaults (definition : Core.definition) =
   | Trait _ | Constant _ | Empty -> None
 
 let find_local_name = Core_walk.find_local_name
-
-let make_parameter ({ local; mode; type_; default; _ } : Core.parameter) : parameter =
-  { local; mode; type_; has_default = default <> None }
+let make_parameter ({ local; mode; type_; _ } : Core.parameter) : parameter = { local; mode; type_ }
 
 let of_conditional_clause ~parameters ({ holds_when; clause } : Core.expression Core.conditional) =
   { (Builder.of_clause ~parameters clause) with holds_when }

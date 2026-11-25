@@ -2,7 +2,6 @@ use frontend.source
 use standard.math
 
 internal type Keyword =
-  | Any
   | Assert
   | Break
   | Capability
@@ -30,6 +29,7 @@ internal type Keyword =
   | Lends
   | Let
   | Match
+  | Modifies
   | Mut
   | Opaque
   | Own
@@ -52,6 +52,7 @@ internal type Keyword =
   | Use
   | Uses
   | Var
+  | View
   | When
   | While
   | With
@@ -153,7 +154,7 @@ internal fn make_token(kind: Kind, span: source.Span) -> Token {
 internal type Decimal(significand: String, exponent: String)
   derives Equal
 
-internal fn normalize_decimal(significand: StringSlice, exponent: own math.BigInteger) -> Decimal
+internal fn normalize_decimal(significand: String, exponent: own math.BigInteger) -> Decimal
   uses Panic
 {
   if significand == "0" {
@@ -165,7 +166,7 @@ internal fn normalize_decimal(significand: StringSlice, exponent: own math.BigIn
   }
   let zeros = significand.length() - stop
   let shifted = exponent + math.BigInteger.from(zeros)
-  Decimal(significand: significand.substring(0, to: stop).to_string(), exponent: "${shifted}")
+  Decimal(significand: significand.substring(0, to: stop).copy(), exponent: "${shifted}")
 }
 
 internal type Tag(name: String, span: source.Span)
@@ -198,21 +199,21 @@ internal fn Tables.empty() -> Tables {
   Tables(tokens: [], names: [], literals: [], integers: [], decimals: [])
 }
 
-internal fn Tables.name(self, index: UInt64) -> StringSlice
+internal fn Tables.name(self, index: UInt64) -> view String
   uses Panic
 {
   if index < self.names.length() {
-    self.names[index].slice()
+    self.names[index]
   } else {
     Panic.crash("a name index past the table")
   }
 }
 
-internal fn Tables.literal(self, index: UInt64) -> StringLiteral
+internal fn Tables.literal(self, index: UInt64) lends StringLiteral
   uses Panic
 {
   if index < self.literals.length() {
-    self.literals[index].copy()
+    self.literals[index]
   } else {
     Panic.crash("a literal index past the table")
   }
@@ -230,9 +231,8 @@ internal fn Tables.token(self, index: UInt64) -> Token
 
 internal type Lexed(tables: Tables, first: UInt64, stop: UInt64)
 
-internal fn find_word(spelling: StringSlice) -> Option[Kind] {
+internal fn find_word(spelling: String) -> Option[Kind] {
   match spelling {
-    "any" => Some(Kind.Keyword(Keyword.Any))
     "assert" => Some(Kind.Keyword(Keyword.Assert))
     "break" => Some(Kind.Keyword(Keyword.Break))
     "capability" => Some(Kind.Keyword(Keyword.Capability))
@@ -260,6 +260,7 @@ internal fn find_word(spelling: StringSlice) -> Option[Kind] {
     "lends" => Some(Kind.Keyword(Keyword.Lends))
     "let" => Some(Kind.Keyword(Keyword.Let))
     "match" => Some(Kind.Keyword(Keyword.Match))
+    "modifies" => Some(Kind.Keyword(Keyword.Modifies))
     "mut" => Some(Kind.Keyword(Keyword.Mut))
     "opaque" => Some(Kind.Keyword(Keyword.Opaque))
     "own" => Some(Kind.Keyword(Keyword.Own))
@@ -282,6 +283,7 @@ internal fn find_word(spelling: StringSlice) -> Option[Kind] {
     "use" => Some(Kind.Keyword(Keyword.Use))
     "uses" => Some(Kind.Keyword(Keyword.Uses))
     "var" => Some(Kind.Keyword(Keyword.Var))
+    "view" => Some(Kind.Keyword(Keyword.View))
     "when" => Some(Kind.Keyword(Keyword.When))
     "while" => Some(Kind.Keyword(Keyword.While))
     "with" => Some(Kind.Keyword(Keyword.With))
@@ -300,9 +302,8 @@ internal fn find_word(spelling: StringSlice) -> Option[Kind] {
   }
 }
 
-internal fn spell_keyword(keyword: Keyword) -> StringSlice {
+internal fn spell_keyword(keyword: Keyword) -> view String {
   match keyword {
-    Any => "any"
     Assert => "assert"
     Break => "break"
     Capability => "capability"
@@ -330,6 +331,7 @@ internal fn spell_keyword(keyword: Keyword) -> StringSlice {
     Lends => "lends"
     Let => "let"
     Match => "match"
+    Modifies => "modifies"
     Mut => "mut"
     Opaque => "opaque"
     Own => "own"
@@ -352,13 +354,14 @@ internal fn spell_keyword(keyword: Keyword) -> StringSlice {
     Use => "use"
     Uses => "uses"
     Var => "var"
+    View => "view"
     When => "when"
     While => "while"
     With => "with"
   }
 }
 
-internal fn spell_reserved(reserved: Reserved) -> StringSlice {
+internal fn spell_reserved(reserved: Reserved) -> view String {
   match reserved {
     As => "as"
     Async => "async"
@@ -374,7 +377,7 @@ internal fn spell_reserved(reserved: Reserved) -> StringSlice {
   }
 }
 
-internal fn spell_punctuation(punctuation: Punctuation) -> StringSlice {
+internal fn spell_punctuation(punctuation: Punctuation) -> view String {
   match punctuation {
     Open(bracket) => match bracket {
       Paren => "("
@@ -429,7 +432,7 @@ internal fn spell_punctuation(punctuation: Punctuation) -> StringSlice {
   }
 }
 
-internal fn spell_foreign(foreign: Foreign) -> StringSlice {
+internal fn spell_foreign(foreign: Foreign) -> view String {
   match foreign {
     PlusPlus => "++"
     MinusMinus => "--"
@@ -478,8 +481,8 @@ internal fn can_begin(kind: Kind) -> Bool {
       _ => false
     }
     Keyword(keyword) => match keyword {
-      Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends | Opaque
-        | Requires | Unless | Uses | When | With => false
+      Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends | Modifies
+        | Opaque | Requires | Unless | Uses | View | When | With => false
       _ => true
     }
     Newline | EndOfFile => false
@@ -500,7 +503,7 @@ internal fn joins(left: UInt8, right: UInt8) -> Bool {
     || (is_operator_byte(left) && is_operator_byte(right))
 }
 
-internal fn joins_neighbor(before: Option[UInt8], after: Option[UInt8], code: StringSlice) -> Bool
+internal fn joins_neighbor(before: Option[UInt8], after: Option[UInt8], code: String) -> Bool
   uses Panic
 {
   if code.is_empty() {
@@ -519,10 +522,7 @@ internal fn joins_neighbor(before: Option[UInt8], after: Option[UInt8], code: St
   }
 }
 
-internal type Insertion(at: UInt64, text: String)
-  derives Equal
-
-fn escape_spelling(text: StringSlice) -> String
+fn escape_spelling(text: String) -> String
   uses Panic
 {
   var buffer = String.with_capacity(text.length())
@@ -567,100 +567,160 @@ fn format_lowercase_hexadecimal(byte: UInt8) -> String
   let high = UInt64.from_integer(byte / 16)
   let low = UInt64.from_integer(byte % 16)
   if high == 0 {
-    digits.substring(low, to: low + 1).to_string()
+    digits.substring(low, to: low + 1).copy()
   } else {
     "${digits.substring(high, to: high + 1)}${digits.substring(low, to: low + 1)}"
   }
 }
 
-fn spell_inserted(insertions: Slice[Insertion], offset: UInt64, buffer: mut String) {
+fn spell_inserted(insertions: List[source.Edit], offset: UInt64, buffer: mut String) {
   for insertion in insertions {
-    if insertion.at == offset {
-      mut buffer.push(insertion.text)
+    if insertion.span.start == offset {
+      mut buffer.push(insertion.replacement)
     }
   }
 }
 
-fn spell_kind(tables: Tables, kind: Kind) -> Option[String]
-  uses Panic, RunForever
+type TokenRun(next: UInt64, stop: UInt64, previous_stop: Option[UInt64])
+
+type StringFrame(literal_index: UInt64, segment: UInt64, escaped_text: String, interpolation_span: source.Span, enclosing: TokenRun)
+
+fn advance_string(
+  literal: StringLiteral,
+  literal_index: UInt64,
+  segment: UInt64,
+  enclosing: TokenRun,
+  strings: mut List[StringFrame],
+  buffer: mut String,
+) -> Option[TokenRun]
+  uses Panic
 {
-  match kind {
-    Upper(name) | Lower(name) => Some(tables.name(name).to_string())
-    Underscore => Some("_")
-    Keyword(keyword) => Some(spell_keyword(keyword).to_string())
-    Reserved(reserved) => Some(spell_reserved(reserved).to_string())
-    Integer(literal) => match tables.integers.get(literal) {
-      Some(value) => Some("${value}")
-      None => None
-    }
-    Float(literal) => match tables.decimals.get(literal) {
-      Some(decimal) => Some("${decimal.significand}e${decimal.exponent}")
-      None => None
-    }
-    String(literal) => spell_string(tables, literal: tables.literal(literal))
-    Punctuation(punctuation) => Some(spell_punctuation(punctuation).to_string())
-    Foreign(foreign) => Some(spell_foreign(foreign).to_string())
-    Newline | EndOfFile => None
+  if segment >= literal.rest.length() {
+    mut buffer.push("\"")
+    return Some(enclosing)
   }
+  let interpolation = literal.rest[segment].interpolation
+  if !interpolation.is_closed {
+    return None
+  }
+  mut buffer.push("\${")
+  mut strings.push(
+    StringFrame(
+      literal_index,
+      segment,
+      escaped_text: escape_spelling(literal.rest[segment].text.value),
+      interpolation_span: interpolation.span,
+      enclosing,
+    ),
+  )
+  Some(TokenRun(next: interpolation.first, stop: interpolation.stop, previous_stop: None))
 }
 
-fn spell_string(tables: Tables, literal: StringLiteral) -> Option[String]
-  uses Panic, RunForever
+fn open_string(
+  literal: StringLiteral,
+  literal_index: UInt64,
+  enclosing: TokenRun,
+  strings: mut List[StringFrame],
+  buffer: mut String,
+) -> Option[TokenRun]
+  uses Panic
 {
-  var text = ""
   if literal.tag is Some(tag) {
-    mut text.push(tag.name)
+    mut buffer.push(tag.name)
   }
-  mut text.push("\"")
-  mut text.push(escape_spelling(literal.first.value))
-  for segment in literal.rest {
-    if !segment.interpolation.is_closed {
-      return None
-    }
-    var inner: List[Token] = []
-    for index in segment.interpolation.first..segment.interpolation.stop {
-      mut inner.push(tables.token(index))
-    }
-    let Some(spelled) = spell_tokens(tables, tokens: inner, insertions: []) else {
-      return None
-    }
-    mut text.push("\${")
-    mut text.push(spelled)
-    mut text.push("}")
-    mut text.push(escape_spelling(segment.text.value))
-  }
-  mut text.push("\"")
-  Some(own text)
+  mut buffer.push("\"")
+  mut buffer.push(escape_spelling(literal.first.value))
+  advance_string(literal, literal_index, segment: 0, enclosing: enclosing, strings: mut strings, buffer: mut buffer)
 }
 
-internal fn spell_tokens(tables: Tables, tokens: Slice[Token], insertions: Slice[Insertion]) -> Option[String]
-  uses Panic, RunForever
+internal fn spell_tokens(tables: Tables, first: UInt64, stop: UInt64, insertions: List[source.Edit]) -> Option[String]
+  uses Panic
 {
   var buffer = ""
-  var previous_stop: Option[UInt64] = None
-  for current in tokens {
+  var run = TokenRun(next: first, stop, previous_stop: None)
+  var strings: List[StringFrame] = []
+  var spelled_offset: UInt64 = 0
+  while true
+    decreases UInt64.maximum - spelled_offset, UInt64.maximum - run.next
+  {
+    if run.next >= run.stop {
+      if run.previous_stop is Some(previous_stop) {
+        spell_inserted(insertions, offset: previous_stop, buffer: mut buffer)
+      }
+      let Some(frame) = mut strings.pop() else {
+        return Some(own buffer)
+      }
+      if frame.interpolation_span.stop <= spelled_offset {
+        Panic.crash("an interpolation that ends before the spelled offset")
+      }
+      spelled_offset = frame.interpolation_span.stop
+      mut buffer.push("}")
+      mut buffer.push(frame.escaped_text)
+      let Some(next_run) = advance_string(
+        tables.literal(frame.literal_index),
+        literal_index: frame.literal_index,
+        segment: frame.segment + 1,
+        enclosing: frame.enclosing,
+        strings: mut strings,
+        buffer: mut buffer,
+      ) else {
+        return None
+      }
+      run = next_run
+      continue
+    }
+    let current = tables.token(run.next)
+    run.next += 1
     if current.kind == Kind.EndOfFile {
       continue
     }
-    let spelled = if current.is_inserted_closer { None } else { spell_kind(tables, kind: current.kind) }
-    let Some(text) = own spelled else {
+    if current.is_inserted_closer {
       return None
     }
-    match previous_stop {
-      Some(stop) => {
-        spell_inserted(insertions, offset: stop, buffer: mut buffer)
-        if stop < current.span.start {
+    match run.previous_stop {
+      Some(previous_stop) => {
+        spell_inserted(insertions, offset: previous_stop, buffer: mut buffer)
+        if previous_stop < current.span.start {
           mut buffer.push(" ")
           spell_inserted(insertions, offset: current.span.start, buffer: mut buffer)
         }
       }
       None => spell_inserted(insertions, offset: current.span.start, buffer: mut buffer)
     }
-    mut buffer.push(text)
-    previous_stop = Some(current.span.stop)
+    run.previous_stop = Some(current.span.stop)
+    match current.kind {
+      Upper(name) | Lower(name) => mut buffer.push(tables.name(name))
+      Underscore => mut buffer.push("_")
+      Keyword(keyword) => mut buffer.push(spell_keyword(keyword))
+      Reserved(reserved) => mut buffer.push(spell_reserved(reserved))
+      Integer(literal) => mut buffer.push(tables.integers.get(literal).expect("an integer literal"))
+      Float(literal) => match tables.decimals.get(literal) {
+        Some(decimal) => {
+          mut buffer.push(decimal.significand)
+          mut buffer.push("e")
+          mut buffer.push(decimal.exponent)
+        }
+        None => Panic.crash("a decimal index past the table")
+      }
+      String(literal) => {
+        if current.span.start < spelled_offset {
+          Panic.crash("a string token before the spelled offset")
+        }
+        spelled_offset = current.span.start + 1
+        let Some(next_run) = open_string(
+          tables.literal(literal),
+          literal_index: literal,
+          enclosing: run,
+          strings: mut strings,
+          buffer: mut buffer,
+        ) else {
+          return None
+        }
+        run = next_run
+      }
+      Punctuation(punctuation) => mut buffer.push(spell_punctuation(punctuation))
+      Foreign(foreign) => mut buffer.push(spell_foreign(foreign))
+      Newline | EndOfFile => return None
+    }
   }
-  if previous_stop is Some(stop) {
-    spell_inserted(insertions, offset: stop, buffer: mut buffer)
-  }
-  Some(own buffer)
 }

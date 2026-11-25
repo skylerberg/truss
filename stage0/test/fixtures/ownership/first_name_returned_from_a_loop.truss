@@ -1,6 +1,6 @@
-fn first(names: List[String]) -> Option[StringSlice] {
+fn first(names: List[String]) -> Option[view String] {
   for name in names {
-    return Some(name.slice())
+    return Some(name)
   }
   None
 }

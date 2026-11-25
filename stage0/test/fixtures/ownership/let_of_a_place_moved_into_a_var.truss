@@ -1,5 +1,7 @@
-fn f(text: String) -> String {
-  let other = text
+type Name(text: String)
+
+fn f(name: Name) -> Name {
+  let other = name
   var held = own other
   held
 }

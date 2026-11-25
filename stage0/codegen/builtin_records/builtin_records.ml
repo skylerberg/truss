@@ -18,18 +18,6 @@ module Shared = struct
     build_record (Ground.make_builtin Shared ~arguments:[ Type element ]) [ (value_field, value) ]
 end
 
-module Any = struct
-  let value_field = "value"
-  let vtable_field = "vtable"
-
-  let shape : Memory_layout.shape =
-    Record [ (value_field, Raw (Pointer Opaque)); (vtable_field, Raw (Pointer Opaque)) ]
-
-  let project_value any = Lowered.project any (Field value_field)
-  let project_vtable any = Lowered.project any (Field vtable_field)
-  let build ty ~value ~vtable = build_record ty [ (value_field, value); (vtable_field, vtable) ]
-end
-
 module Function_value = struct
   let code_field = "code"
   let environment_field = "environment"

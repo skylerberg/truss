@@ -5,7 +5,6 @@ val build :
   tables:Tables.t ->
   context:Interface.Elaborator.t ->
   package:Path.package ->
-  text:string Lazy.t ->
   key:Resolve.Names.key ->
   definition:Syntax.definition ->
   elaborated:Interface.Environment.elaborated_interface ->

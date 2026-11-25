@@ -1,6 +1,6 @@
-fn take(items: mut List[Int64], view: Slice[Int64]) {}
+fn take(items: mut List[Int64], viewed: List[Int64]) {}
 
-fn give(view: Slice[Int64], items: mut List[Int64]) {}
+fn give(viewed: List[Int64], items: mut List[Int64]) {}
 
 fn measure(items: mut List[Int64], count: UInt64) {}
 
@@ -8,7 +8,7 @@ fn show(item: Int64, count: UInt64) {}
 
 fn change(item: mut Int64, count: UInt64) {}
 
-fn count_of(view: Slice[Int64], count: UInt64) {}
+fn count_of(viewed: List[Int64], count: UInt64) {}
 
 fn grow(items: mut List[Int64]) -> UInt64 {
   mut items.push(1)

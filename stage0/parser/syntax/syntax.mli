@@ -23,8 +23,8 @@ and type_kind =
   | Path_type of path_type
   | Self_type of name option
   | Associated of name * name
-  | Any_type of path_type
   | Function_type of function_type
+  | View_type of type_expression
   | Type_error
 
 and path_type = { path : path; arguments : type_argument list; id : id }
@@ -64,6 +64,7 @@ and clause_kind =
   | Requires of expression
   | Ensures of expression
   | Decreases of expression list
+  | Modifies of expression list
   | Cost of cost
   | Clause_error
 
@@ -106,7 +107,6 @@ and expression_kind =
   | With of expression * update list
   | Prefix of prefix * expression
   | Mode of mode * expression
-  | Any of expression
   | Binary of { operator : binary; operator_id : id; left : expression; right : expression }
   | Is of { value : expression; operator_id : id; pattern : pattern }
   | Range of {
@@ -121,12 +121,15 @@ and expression_kind =
   | Parenthesized of expression
   | List of expression list
   | Map of (expression * expression) list
-  | Lambda of { parameters : pattern list; body : block }
+  | Lambda of { parameters : lambda_parameter list; body : block }
   | If of { condition : expression; then_ : block; else_ : else_branch option }
   | Match of { scrutinees : expression list; arms : arm list }
   | Provide of { implementations : expression list; body : block }
   | Block of block
   | Expression_error
+
+and lambda_parameter = { pattern : pattern; annotation : parameter_annotation option }
+and parameter_annotation = { mode : mode option; type_ : type_expression; id : id }
 
 and string_literal = {
   tag : path option;

@@ -1,0 +1,10 @@
+fn f(wanted: UInt64) -> UInt64
+  cost time O(1)
+{
+  for index in 0..1114112 {
+    if index == wanted {
+      return index
+    }
+  }
+  0
+}

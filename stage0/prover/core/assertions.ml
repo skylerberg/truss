@@ -128,13 +128,8 @@ let assert_bit_vector (context : State.context) frame ~named ~origin
   let obligation =
     Facts.make_obligation context
       { isolated with makes_obligations = true }
-      Assertion
       (Facts.locate context frame.source origin)
-      [
-        Text "`";
-        Facts.quote frame.source origin;
-        Text "` may not hold for every value of the variables it names.";
-      ]
+      (Bit_vector_assertion_may_fail { clause = Facts.quote frame.source origin })
       term
   in
   let cited =
@@ -155,7 +150,7 @@ let check_assertion context frame ~origin ~bit_vector term =
   | _ -> ());
   if is_test context || bit_vector <> None then Facts.assume context frame term
   else
-    Facts.oblige context frame Assertion
+    Facts.oblige context frame
       (Facts.locate context frame.source origin)
-      [ Text "`"; Facts.quote frame.source origin; Text "` may not hold." ]
+      (Assertion_may_fail { clause = Facts.quote frame.source origin })
       term

@@ -8,7 +8,7 @@ fn is_lower(byte: UInt8) -> Bool {
   byte >= 97 && byte <= 122
 }
 
-fn classify_is_upper(name: StringSlice) -> Bool
+fn classify_is_upper(name: String) -> Bool
   uses Panic
 {
   for byte in name.bytes() {
@@ -19,10 +19,10 @@ fn classify_is_upper(name: StringSlice) -> Bool
   false
 }
 
-fn split_name(name: StringSlice) -> List[StringSlice]
+fn split_name(name: String) -> List[view String]
   uses Panic
 {
-  var parts: List[StringSlice] = []
+  var parts: List[view String] = []
   for part in name.split("_") {
     if !part.is_empty() {
       mut parts.push(part)
@@ -31,7 +31,7 @@ fn split_name(name: StringSlice) -> List[StringSlice]
   parts
 }
 
-fn has_upper(name: StringSlice) -> Bool {
+fn has_upper(name: String) -> Bool {
   for byte in name.bytes() {
     if is_upper(byte) {
       return true
@@ -40,7 +40,7 @@ fn has_upper(name: StringSlice) -> Bool {
   false
 }
 
-fn has_lower(name: StringSlice) -> Bool {
+fn has_lower(name: String) -> Bool {
   for byte in name.bytes() {
     if is_lower(byte) {
       return true
@@ -49,21 +49,21 @@ fn has_lower(name: StringSlice) -> Bool {
   false
 }
 
-fn lowercase_byte(byte: UInt8) -> StringSlice
+fn lowercase_byte(byte: UInt8) -> view String
   uses Panic
 {
   let index = UInt64.from_integer(byte - 65)
   "abcdefghijklmnopqrstuvwxyz".substring(index, to: index + 1)
 }
 
-fn uppercase_byte(byte: UInt8) -> StringSlice
+fn uppercase_byte(byte: UInt8) -> view String
   uses Panic
 {
   let index = UInt64.from_integer(byte - 97)
   "ABCDEFGHIJKLMNOPQRSTUVWXYZ".substring(index, to: index + 1)
 }
 
-fn to_snake(name: StringSlice) -> String
+fn to_snake(name: String) -> String
   uses Panic
 {
   let length = name.length()
@@ -86,7 +86,7 @@ fn to_snake(name: StringSlice) -> String
   split_name(buffer).join("_")
 }
 
-fn capitalize(part: StringSlice) -> String
+fn capitalize(part: String) -> String
   uses Panic
 {
   if part.is_empty() {
@@ -96,11 +96,11 @@ fn capitalize(part: StringSlice) -> String
   if is_lower(first) {
     "${uppercase_byte(first)}${part.substring(1, to: part.length())}"
   } else {
-    part.to_string()
+    part.copy()
   }
 }
 
-fn to_camel(name: StringSlice) -> String
+fn to_camel(name: String) -> String
   uses Panic
 {
   var text = ""
@@ -114,16 +114,16 @@ fn to_camel(name: StringSlice) -> String
   text
 }
 
-fn correct_case(name: StringSlice) -> String
+fn correct_case(name: String) -> String
   uses Panic
 {
   let parts = split_name(name)
   let Some(first) = parts.get(0) else {
-    return name.to_string()
+    return name.copy()
   }
   if is_upper(first.byte(0)) {
     if !name.contains("_") {
-      name.to_string()
+      name.copy()
     } else if !has_lower(name) {
       parts.join("_").to_ascii_lowercase()
     } else {
@@ -134,7 +134,7 @@ fn correct_case(name: StringSlice) -> String
   }
 }
 
-fn find_case_problem(name: StringSlice) -> Option[String]
+fn find_case_problem(name: String) -> Option[String]
   uses Panic
 {
   if name.starts_with("_") {
@@ -161,7 +161,7 @@ fn find_case_problem(name: StringSlice) -> Option[String]
   None
 }
 
-fn check_name(name: StringSlice) -> NameCheck
+fn check_name(name: String) -> NameCheck
   uses Panic
 {
   let is_upper_name = classify_is_upper(name)

@@ -15,12 +15,12 @@ type Starting(sub: String, exp: Int64, nbf: Int64)
 type Unexpiring(sub: String)
   derives serialization.Serialize
 
-fn key(text: StringSlice) -> jwk.Key
+fn key(text: String) -> jwk.Key
   uses Panic
 {
   match jwk.Key.parse(text) {
     Ok(key) => own key
-    Err(error) => Panic.crash("${error}".slice())
+    Err(error) => Panic.crash("${error}")
   }
 }
 
@@ -48,7 +48,7 @@ test "the HS256 example of RFC 7515 verifies, and only for rules that accept HS2
     let token = "eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
     match jwt.verify(token, keys: [secret.copy()], rules: jwt.Validation(algorithms: [jwt.Algorithm.Hs256], issuer: Some("joe"))) {
       Ok(verified) => assert verified.header.algorithm == jwt.Algorithm.Hs256 && verified.header.kind == Some("JWT")
-      Err(error) => Panic.crash("${error}".slice())
+      Err(error) => Panic.crash("${error}")
     }
     assert jwt.verify(token, keys: [secret.copy()], rules: jwt.Validation(algorithms: [jwt.Algorithm.Rs256])) == Err(jwt.Error.Algorithm(name: "HS256"))
     assert jwt.verify(token, keys: [secret.copy()], rules: jwt.Validation(algorithms: [jwt.Algorithm.Hs256], issuer: Some("eve"))) == Err(jwt.Error.Issuer)
@@ -58,140 +58,140 @@ test "the HS256 example of RFC 7515 verifies, and only for rules that accept HS2
 }
 test "tokens that Node signed verify with their public JWKs, and Truss signs tokens that verify" uses Panic, RunForever {
   provide simulation.World.new() {
-    let rs256_key = key(rs256_public.slice())
-    match jwt.verify(rs256_token.slice(), keys: [rs256_key.copy()], rules: rules(jwt.Algorithm.Rs256)) {
+    let rs256_key = key(rs256_public)
+    match jwt.verify(rs256_token, keys: [rs256_key.copy()], rules: rules(jwt.Algorithm.Rs256)) {
       Ok(verified) => {
         assert verified.header.key_id == Some("rs256")
         assert verified.claims[Claims]() == Ok(Claims(sub: "ada", exp: 4102444800, iss: "https://issuer.test", aud: ["api", "web"]))
       }
-      Err(error) => Panic.crash("RS256: ${error}".slice())
+      Err(error) => Panic.crash("RS256: ${error}")
     }
-    let rs256_signer = key(rs256_private.slice())
+    let rs256_signer = key(rs256_private)
     assert rs256_signer.is_private() && !rs256_key.is_private()
     match jwt.sign(Claims(sub: "grace", exp: 4102444800, iss: "https://issuer.test", aud: ["web"]), key: rs256_signer, algorithm: jwt.Algorithm.Rs256) {
       Ok(signed) => {
-        let verified = jwt.verify(signed.slice(), keys: [rs256_key.copy()], rules: rules(jwt.Algorithm.Rs256))
+        let verified = jwt.verify(signed, keys: [rs256_key.copy()], rules: rules(jwt.Algorithm.Rs256))
         assert verified is Ok(_)
       }
-      Err(error) => Panic.crash("RS256 signing: ${error}".slice())
+      Err(error) => Panic.crash("RS256 signing: ${error}")
     }
-    let ps384_key = key(ps384_public.slice())
-    match jwt.verify(ps384_token.slice(), keys: [ps384_key.copy()], rules: rules(jwt.Algorithm.Ps384)) {
+    let ps384_key = key(ps384_public)
+    match jwt.verify(ps384_token, keys: [ps384_key.copy()], rules: rules(jwt.Algorithm.Ps384)) {
       Ok(verified) => {
         assert verified.header.key_id == Some("ps384")
         assert verified.claims[Claims]() == Ok(Claims(sub: "ada", exp: 4102444800, iss: "https://issuer.test", aud: ["api", "web"]))
       }
-      Err(error) => Panic.crash("PS384: ${error}".slice())
+      Err(error) => Panic.crash("PS384: ${error}")
     }
-    let ps384_signer = key(ps384_private.slice())
+    let ps384_signer = key(ps384_private)
     assert ps384_signer.is_private() && !ps384_key.is_private()
     match jwt.sign(Claims(sub: "grace", exp: 4102444800, iss: "https://issuer.test", aud: ["web"]), key: ps384_signer, algorithm: jwt.Algorithm.Ps384) {
       Ok(signed) => {
-        let verified = jwt.verify(signed.slice(), keys: [ps384_key.copy()], rules: rules(jwt.Algorithm.Ps384))
+        let verified = jwt.verify(signed, keys: [ps384_key.copy()], rules: rules(jwt.Algorithm.Ps384))
         assert verified is Ok(_)
       }
-      Err(error) => Panic.crash("PS384 signing: ${error}".slice())
+      Err(error) => Panic.crash("PS384 signing: ${error}")
     }
-    let es256_key = key(es256_public.slice())
-    match jwt.verify(es256_token.slice(), keys: [es256_key.copy()], rules: rules(jwt.Algorithm.Es256)) {
+    let es256_key = key(es256_public)
+    match jwt.verify(es256_token, keys: [es256_key.copy()], rules: rules(jwt.Algorithm.Es256)) {
       Ok(verified) => {
         assert verified.header.key_id == Some("es256")
         assert verified.claims[Claims]() == Ok(Claims(sub: "ada", exp: 4102444800, iss: "https://issuer.test", aud: ["api", "web"]))
       }
-      Err(error) => Panic.crash("ES256: ${error}".slice())
+      Err(error) => Panic.crash("ES256: ${error}")
     }
-    let es256_signer = key(es256_private.slice())
+    let es256_signer = key(es256_private)
     assert es256_signer.is_private() && !es256_key.is_private()
     match jwt.sign(Claims(sub: "grace", exp: 4102444800, iss: "https://issuer.test", aud: ["web"]), key: es256_signer, algorithm: jwt.Algorithm.Es256) {
       Ok(signed) => {
-        let verified = jwt.verify(signed.slice(), keys: [es256_key.copy()], rules: rules(jwt.Algorithm.Es256))
+        let verified = jwt.verify(signed, keys: [es256_key.copy()], rules: rules(jwt.Algorithm.Es256))
         assert verified is Ok(_)
       }
-      Err(error) => Panic.crash("ES256 signing: ${error}".slice())
+      Err(error) => Panic.crash("ES256 signing: ${error}")
     }
-    let es384_key = key(es384_public.slice())
-    match jwt.verify(es384_token.slice(), keys: [es384_key.copy()], rules: rules(jwt.Algorithm.Es384)) {
+    let es384_key = key(es384_public)
+    match jwt.verify(es384_token, keys: [es384_key.copy()], rules: rules(jwt.Algorithm.Es384)) {
       Ok(verified) => {
         assert verified.header.key_id == Some("es384")
         assert verified.claims[Claims]() == Ok(Claims(sub: "ada", exp: 4102444800, iss: "https://issuer.test", aud: ["api", "web"]))
       }
-      Err(error) => Panic.crash("ES384: ${error}".slice())
+      Err(error) => Panic.crash("ES384: ${error}")
     }
-    let es384_signer = key(es384_private.slice())
+    let es384_signer = key(es384_private)
     assert es384_signer.is_private() && !es384_key.is_private()
     match jwt.sign(Claims(sub: "grace", exp: 4102444800, iss: "https://issuer.test", aud: ["web"]), key: es384_signer, algorithm: jwt.Algorithm.Es384) {
       Ok(signed) => {
-        let verified = jwt.verify(signed.slice(), keys: [es384_key.copy()], rules: rules(jwt.Algorithm.Es384))
+        let verified = jwt.verify(signed, keys: [es384_key.copy()], rules: rules(jwt.Algorithm.Es384))
         assert verified is Ok(_)
       }
-      Err(error) => Panic.crash("ES384 signing: ${error}".slice())
+      Err(error) => Panic.crash("ES384 signing: ${error}")
     }
-    let eddsa_key = key(eddsa_public.slice())
-    match jwt.verify(eddsa_token.slice(), keys: [eddsa_key.copy()], rules: rules(jwt.Algorithm.EdDsa)) {
+    let eddsa_key = key(eddsa_public)
+    match jwt.verify(eddsa_token, keys: [eddsa_key.copy()], rules: rules(jwt.Algorithm.EdDsa)) {
       Ok(verified) => {
         assert verified.header.key_id == Some("eddsa")
         assert verified.claims[Claims]() == Ok(Claims(sub: "ada", exp: 4102444800, iss: "https://issuer.test", aud: ["api", "web"]))
       }
-      Err(error) => Panic.crash("EdDSA: ${error}".slice())
+      Err(error) => Panic.crash("EdDSA: ${error}")
     }
-    let eddsa_signer = key(eddsa_private.slice())
+    let eddsa_signer = key(eddsa_private)
     assert eddsa_signer.is_private() && !eddsa_key.is_private()
     match jwt.sign(Claims(sub: "grace", exp: 4102444800, iss: "https://issuer.test", aud: ["web"]), key: eddsa_signer, algorithm: jwt.Algorithm.EdDsa) {
       Ok(signed) => {
-        let verified = jwt.verify(signed.slice(), keys: [eddsa_key.copy()], rules: rules(jwt.Algorithm.EdDsa))
+        let verified = jwt.verify(signed, keys: [eddsa_key.copy()], rules: rules(jwt.Algorithm.EdDsa))
         assert verified is Ok(_)
       }
-      Err(error) => Panic.crash("EdDSA signing: ${error}".slice())
+      Err(error) => Panic.crash("EdDSA signing: ${error}")
     }
   }
 }
 
 test "a token is refused for a key of the wrong kind, an expired time, a future start, a missing expiration, or another audience" uses Panic, RunForever {
   provide simulation.World.new() {
-    let rsa_public = key(rs256_public.slice())
-    let confused = jwk.Key(material: jwk.Material.Secret(bytes: rsa_public.to_text().slice().bytes().to_list()))
+    let rsa_public = key(rs256_public)
+    let confused = jwk.Key(material: jwk.Material.Secret(bytes: rsa_public.to_text().bytes().copy()))
     match jwt.sign(Short(sub: "eve", exp: 4102444800), key: confused, algorithm: jwt.Algorithm.Hs256) {
-      Ok(forged) => assert jwt.verify(forged.slice(), keys: [rsa_public.copy()], rules: jwt.Validation(algorithms: [jwt.Algorithm.Hs256, jwt.Algorithm.Rs256])) == Err(jwt.Error.Signature)
+      Ok(forged) => assert jwt.verify(forged, keys: [rsa_public.copy()], rules: jwt.Validation(algorithms: [jwt.Algorithm.Hs256, jwt.Algorithm.Rs256])) == Err(jwt.Error.Signature)
       Err(_) => assert false
     }
     let secret = jwk.Key(material: jwk.Material.Secret(bytes: List.filled(7, count: 32)), id: Some("one"))
     let hs = jwt.Validation(algorithms: [jwt.Algorithm.Hs256])
     let expired = jwt.sign(Short(sub: "ada", exp: -100), key: secret, algorithm: jwt.Algorithm.Hs256).ok().unwrap_or("")
-    assert jwt.verify(expired.slice(), keys: [secret.copy()], rules: hs) == Err(jwt.Error.Expired)
+    assert jwt.verify(expired, keys: [secret.copy()], rules: hs) == Err(jwt.Error.Expired)
     let lenient = jwt.Validation(algorithms: [jwt.Algorithm.Hs256], leeway_seconds: 200)
-    assert jwt.verify(expired.slice(), keys: [secret.copy()], rules: lenient) is Ok(_)
+    assert jwt.verify(expired, keys: [secret.copy()], rules: lenient) is Ok(_)
     let later = jwt.sign(Short(sub: "ada", exp: 1000), key: secret, algorithm: jwt.Algorithm.Hs256).ok().unwrap_or("")
-    assert jwt.verify(later.slice(), keys: [secret.copy()], rules: hs) is Ok(_)
+    assert jwt.verify(later, keys: [secret.copy()], rules: hs) is Ok(_)
     let wrong_id = jwk.Key(material: jwk.Material.Secret(bytes: List.filled(7, count: 32)), id: Some("two"))
-    assert jwt.verify(later.slice(), keys: [own wrong_id], rules: hs) == Err(jwt.Error.NoKey)
+    assert jwt.verify(later, keys: [own wrong_id], rules: hs) == Err(jwt.Error.NoKey)
     assert jwt.verify("a.b", keys: [secret.copy()], rules: hs) is Err(Malformed(_))
     let starting = jwt.sign(Starting(sub: "ada", exp: 4102444800, nbf: 1000), key: secret, algorithm: jwt.Algorithm.Hs256).ok().unwrap_or("")
-    assert jwt.verify(starting.slice(), keys: [secret.copy()], rules: hs) == Err(jwt.Error.NotYetValid)
+    assert jwt.verify(starting, keys: [secret.copy()], rules: hs) == Err(jwt.Error.NotYetValid)
     let unexpiring = jwt.sign(Unexpiring(sub: "ada"), key: secret, algorithm: jwt.Algorithm.Hs256).ok().unwrap_or("")
-    assert jwt.verify(unexpiring.slice(), keys: [secret.copy()], rules: hs) is Err(Malformed(_))
+    assert jwt.verify(unexpiring, keys: [secret.copy()], rules: hs) is Err(Malformed(_))
     let optional = jwt.Validation(algorithms: [jwt.Algorithm.Hs256], requires_expiration: false)
-    assert jwt.verify(unexpiring.slice(), keys: [secret.copy()], rules: optional) is Ok(_)
+    assert jwt.verify(unexpiring, keys: [secret.copy()], rules: optional) is Ok(_)
     let for_web = jwt.sign(Claims(sub: "ada", exp: 4102444800, iss: "https://issuer.test", aud: ["web"]), key: secret, algorithm: jwt.Algorithm.Hs256).ok().unwrap_or("")
-    assert jwt.verify(for_web.slice(), keys: [secret.copy()], rules: jwt.Validation(algorithms: [jwt.Algorithm.Hs256], audience: Some("web"))) is Ok(_)
-    assert jwt.verify(for_web.slice(), keys: [secret.copy()], rules: jwt.Validation(algorithms: [jwt.Algorithm.Hs256], audience: Some("api"))) == Err(jwt.Error.Audience)
+    assert jwt.verify(for_web, keys: [secret.copy()], rules: jwt.Validation(algorithms: [jwt.Algorithm.Hs256], audience: Some("web"))) is Ok(_)
+    assert jwt.verify(for_web, keys: [secret.copy()], rules: jwt.Validation(algorithms: [jwt.Algorithm.Hs256], audience: Some("api"))) == Err(jwt.Error.Audience)
   }
 }
 
 test "a JWK has the RFC 7638 thumbprint, round-trips through JSON, and a key set finds keys by id" uses Panic {
   let rsa = key("{\"kty\":\"RSA\",\"n\":\"0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw\",\"e\":\"AQAB\",\"alg\":\"RS256\",\"kid\":\"2011-04-29\"}")
   assert rsa.thumbprint() == "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
-  assert key(rsa.to_text().slice()).thumbprint() == rsa.thumbprint()
-  let ec = key(es256_private.slice())
+  assert key(rsa.to_text()).thumbprint() == rsa.thumbprint()
+  let ec = key(es256_private)
   let public_text = ec.public_key().to_text()
-  assert !public_text.slice().contains("\"d\"") && ec.to_text().slice().contains("\"d\"")
-  assert key(ec.to_text().slice()).thumbprint() == ec.thumbprint()
-  match jwk.KeySet.parse("{\"keys\":[${rs256_public},${eddsa_public},{\"kty\":\"unknown\"}]}".slice()) {
+  assert !public_text.contains("\"d\"") && ec.to_text().contains("\"d\"")
+  assert key(ec.to_text()).thumbprint() == ec.thumbprint()
+  match jwk.KeySet.parse("{\"keys\":[${rs256_public},${eddsa_public},{\"kty\":\"unknown\"}]}") {
     Ok(set) => {
       assert set.keys.length() == 2
       assert set.find("eddsa") is Some(_) && set.find("nothing") is None
-      assert jwk.KeySet.parse(set.to_text().slice()) is Ok(_)
+      assert jwk.KeySet.parse(set.to_text()) is Ok(_)
     }
-    Err(error) => Panic.crash("${error}".slice())
+    Err(error) => Panic.crash("${error}")
   }
   assert jwk.Key.parse("{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"AA\",\"y\":\"AA\"}") is Err(_)
 }

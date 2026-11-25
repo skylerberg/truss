@@ -1,3 +1,0 @@
-fn boxed[Source: Feed](source: own Source) -> any Feed {
-  any source
-}

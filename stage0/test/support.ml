@@ -69,52 +69,14 @@ let read_source packages (file : Path.file) =
   | None -> failwith ("no file " ^ Path.show_file file)
 
 let parse_errors packages file =
+  let source = read_source packages file in
   List.map
-    (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
-    (snd (Parser.parse_source (read_source packages file)))
+    (fun diagnostic ->
+      (Syntax_catalog.Syntax_diagnostic.render ~text:(Source.text source) diagnostic).message)
+    (snd (Parser.parse_source source))
 
 let list_codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
-
-let expect_error ~list_diagnostics ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
-  match list_diagnostics text with
-  | [ (diagnostic : Diagnostic.t) ] -> (
-      let message = diagnostic.message in
-      if
-        message = ""
-        || (not (Char.uppercase_ascii message.[0] = message.[0] && message.[0] <> ' '))
-        || message.[String.length message - 1] <> '.'
-      then Harness.fail "the message %S is not written in sentences" message;
-      if diagnostic.code <> code then
-        Harness.fail "expected %s, got %s" (Diagnostic.Code.name code)
-          (Diagnostic.Code.name diagnostic.code);
-      let expected = locate_occurrence ~sub:at ~occurrence text in
-      if diagnostic.span.start <> expected then
-        Harness.fail "expected the error at %d (%S), got %d" expected at diagnostic.span.start;
-      let results =
-        List.map
-          (fun (fix : Source.span Diagnostic.fix) -> Diagnostic.apply_edits text fix.edits)
-          diagnostic.fixes
-      in
-      match (fixed, results) with
-      | None, [] -> ()
-      | None, result :: _ -> Harness.fail "expected no fix, got one giving %S" result
-      | Some _, [] -> Harness.fail "expected a fix, got none"
-      | Some fixed, results ->
-          if fixed :: alternatives <> results then
-            Harness.fail "expected the fixes to give [%s], got [%s]"
-              (String.concat "; " (List.map (Printf.sprintf "%S") (fixed :: alternatives)))
-              (String.concat "; " (List.map (Printf.sprintf "%S") results));
-          List.iter
-            (fun result ->
-              List.iter
-                (Harness.fail "the fixed text %S has %s" result)
-                (list_codes (list_diagnostics result)))
-            results)
-  | diagnostics ->
-      Harness.fail "expected one diagnostic, got [%s] for %S"
-        (String.concat "; " (list_codes diagnostics))
-        text
 
 let run_check ~check packages name =
   let file = parse_file name in
@@ -149,6 +111,7 @@ let collect_core_nodes packages (key : Resolve.Names.key) : core_nodes =
       }
 
 let make_names packages = Database.make_name_lookups (make_database packages)
+let make_source packages = Database.make_source_lookups (make_database packages)
 
 let list_declarations packages (module_ : Path.module_) =
   (make_names packages).list_declarations module_
@@ -171,23 +134,44 @@ let expect_no_diagnostics ~check files =
                   (fun (diagnostic : Diagnostic.t) ->
                     Diagnostic.Code.name diagnostic.code ^ " " ^ diagnostic.message)
                   reported)));
-      ignore
-        (Core_lint.check_file
-           (Database.make_interface_lookups database)
-           ~find_core:(fun key ->
-             Option.map
-               (fun (checked : Infer.checked) -> checked.form)
-               (Database.read_checked_body database key))
-           (parse_file name)))
+      ignore (Core_lint.check_file database (parse_file name)))
     files
 
-let expect_one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app.main")
-    ?(others = []) ?fixed ?says ?at ?notes text code =
-  let packages = setup ((file, text) :: others) in
-  match run_check ~check packages file with
+let apply_edit text (before, after) =
+  let rec list_starts start =
+    match String.find_first ~sub:before ~start text with
+    | Some occurrence -> occurrence :: list_starts (occurrence + 1)
+    | None -> []
+  in
+  match list_starts 0 with
+  | [ start ] ->
+      String.sub text 0 start ^ after
+      ^ String.sub text
+          (start + String.length before)
+          (String.length text - start - String.length before)
+  | starts ->
+      Harness.fail "the fix's edit replaces %S, which occurs %d times in %S" before
+        (List.length starts) text
+
+let expect_codes ~check ?(setup = fun files -> setup files) ?(file = "app.main") ?(others = []) text
+    expected =
+  let actual = list_codes (run_check ~check (setup ((file, text) :: others)) file) in
+  if List.sort compare actual <> List.sort compare expected then
+    Harness.fail "expected [%s], got [%s]" (String.concat "; " expected) (String.concat "; " actual)
+
+let expect_diagnostic ~list_diagnostics ?fixed ?(alternatives = []) ?(left_after_fix = []) ?says ?at
+    ?notes text code =
+  match list_diagnostics text with
   | [ (diagnostic : Diagnostic.t) ] -> (
       let actual = Diagnostic.Code.name diagnostic.code in
       if actual <> code then Harness.fail "expected %s, got %s: %s" code actual diagnostic.message;
+      let message = diagnostic.message in
+      if
+        message = ""
+        || Char.uppercase_ascii message.[0] <> message.[0]
+        || message.[0] = ' '
+        || message.[String.length message - 1] <> '.'
+      then Harness.fail "the message %S is not written in sentences" message;
       Option.iter
         (fun says ->
           if not (String.includes ~affix:says diagnostic.message) then
@@ -223,17 +207,28 @@ let expect_one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "a
                     (fun (note, offset) -> Printf.sprintf "%S at offset %d" note offset)
                     actual_notes)))
         notes;
-      match (fixed, diagnostic.fixes) with
-      | None, _ -> ()
-      | Some _, [] -> Harness.fail "no fix"
-      | Some expected, fix :: _ -> (
-          let after = Diagnostic.apply_edits text fix.edits in
-          if after <> expected then Harness.fail "fixed to %S" after
-          else
-            let packages = setup ((file, after) :: others) in
-            match run_check ~check packages file with
-            | [] -> ()
-            | left -> Harness.fail "after the fix: %s" (String.concat "; " (list_codes left))))
+      let results =
+        List.map
+          (fun (fix : Source.span Diagnostic.fix) -> Diagnostic.apply_edits text fix.edits)
+          diagnostic.fixes
+      in
+      match (fixed, results) with
+      | None, [] -> ()
+      | None, result :: _ -> Harness.fail "expected no fix, got one giving %S" result
+      | Some _, [] -> Harness.fail "expected a fix, got none"
+      | Some fixed, results ->
+          let expected = List.map (apply_edit text) (fixed :: alternatives) in
+          if expected <> results then
+            Harness.fail "expected the fixes to give [%s], got [%s]"
+              (String.concat "; " (List.map (Printf.sprintf "%S") expected))
+              (String.concat "; " (List.map (Printf.sprintf "%S") results));
+          List.iter
+            (fun result ->
+              let left = list_codes (list_diagnostics result) in
+              if left <> left_after_fix then
+                Harness.fail "the fixed text %S has [%s], not [%s]" result (String.concat "; " left)
+                  (String.concat "; " left_after_fix))
+            results)
   | reported ->
       Harness.fail "expected one %s, got [%s]" code
         (String.concat "; "
@@ -241,6 +236,11 @@ let expect_one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "a
               (fun (diagnostic : Diagnostic.t) ->
                 Diagnostic.Code.name diagnostic.code ^ " " ^ diagnostic.message)
               reported))
+
+let expect_one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app.main")
+    ?(others = []) =
+  expect_diagnostic ~list_diagnostics:(fun text ->
+      run_check ~check (setup ((file, text) :: others)) file)
 
 let solver =
   lazy
@@ -250,39 +250,48 @@ let solver =
         prerr_endline message;
         exit 1)
 
-let prove database file = Database.prove database [ file ]
+let prove database file = Database.prove database (In_files [ file ])
 
 let c_compiler =
   lazy
-    (match C_compiler.find ~objects:(Cache.make_objects_directory (Workspace.open_cache ())) with
+    (match
+       C_compiler.find ~x86_64_level:X86_64_level.default
+         ~objects:(Cache.make_objects_directory (Workspace.open_cache ()))
+         ()
+     with
     | Ok c_compiler -> c_compiler
     | Error message ->
         prerr_endline message;
         exit 1)
 
-let run_evaluations database (file : Path.file) proofs =
+let run_evaluations database packages proofs =
   match Database.list_evaluations proofs with
-  | [] -> []
-  | evaluations ->
+  | [] -> ()
+  | evaluated ->
       let backend =
         Backend.create
-          (match Database.find_lowered_lookups database [ file.module_.package ] with
+          (match Database.find_lowered_lookups database packages with
           | Ok lookups -> lookups
           | Error message -> failwith message)
           (Lazy.force c_compiler) Development
       in
-      Evaluations.run backend evaluations
+      ignore (Backend.evaluate backend evaluated)
 
-let decide database file =
-  let proofs = prove database file in
-  Database.decide proofs ~runs:(run_evaluations database file proofs) solver
+let decide database (scope : Database.proof_scope) =
+  let proofs = Database.prove database scope in
+  run_evaluations database
+    (match scope with
+    | In_packages packages -> packages
+    | In_files files -> List.map (fun (file : Path.file) -> file.module_.package) files)
+    proofs;
+  Database.decide proofs solver
 
 let list_proof_diagnostics database file =
-  decide database file;
+  decide database (In_files [ file ]);
   Database.list_proof_diagnostics database file
 
 let list_proof_states database file =
-  decide database file;
+  decide database (In_files [ file ]);
   Database.list_proof_states database file
 
 let read_proofs database file =

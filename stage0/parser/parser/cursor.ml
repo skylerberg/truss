@@ -7,7 +7,7 @@ type t = {
   base : int;
   group_ends : int array;
   angle_closers : int option array;
-  diagnostics : Diagnostic.Collector.t;
+  diagnostics : Syntax_catalog.Parsing.t Dynarray.t;
   mutable index : int;
   mutable nesting_depth : int;
   spans : Source.Definition_span.t Dynarray.t;
@@ -37,7 +37,7 @@ let group_ends tokens ~first ~stop =
 let continues_type_arguments : Token.kind -> bool = function
   | Upper _ | Lower _ | Integer _
   | Punctuation (Comma | Colon | Dot | Equal | Plus | Arrow)
-  | Keyword (Self_type | Any | Fn | Mut | Own | Capability) ->
+  | Keyword (Self_type | Fn | Mut | Own | View | Capability) ->
       true
   | _ -> false
 
@@ -191,101 +191,14 @@ let allocate_id_from cursor start_index = allocate_id cursor (make_span_from cur
 let read_span cursor id = Dynarray.get cursor.spans id
 let set_span cursor id span = Dynarray.set cursor.spans id span
 let read_file_span cursor id = make_file_span cursor (read_span cursor id)
+let has_reported cursor = not (Dynarray.is_empty cursor.diagnostics)
 
-let locate_first (tokens : Token.t array) ~first ~stop is_reached =
-  let rec search low high =
-    if low >= high then low
-    else
-      let middle = low + ((high - low) / 2) in
-      if is_reached tokens.(middle) then search low middle else search (middle + 1) high
-  in
-  search first stop
-
-let rec list_tokens_within (tokens : Token.t array) ~first ~stop (span : Source.span) =
-  let inside_first =
-    locate_first tokens ~first ~stop (fun (token : Token.t) -> token.span.start >= span.start)
-  in
-  let inside_stop =
-    locate_first tokens ~first:inside_first ~stop (fun (token : Token.t) ->
-        token.span.stop > span.stop)
-  in
-  let encloses index =
-    first <= index && index < stop
-    && tokens.(index).span.start <= span.start
-    && span.stop <= tokens.(index).span.stop
-  in
-  if inside_first < inside_stop then Array.sub tokens inside_first (inside_stop - inside_first)
-  else
-    match List.find_opt encloses [ inside_stop; inside_first - 1 ] with
-    | Some index -> (
-        match tokens.(index).kind with
-        | String literal -> (
-            match
-              List.find_opt
-                (fun (interpolation : Token.interpolation) ->
-                  interpolation.span.start <= span.start && span.stop <= interpolation.span.stop)
-                (Array.to_list (Token.list_interpolations literal))
-            with
-            | Some interpolation ->
-                list_tokens_within interpolation.tokens ~first:0
-                  ~stop:(Array.length interpolation.tokens)
-                  span
-            | None -> [||])
-        | _ -> [||])
-    | None -> [||]
-
-let spell cursor ?insertions span =
-  match list_tokens_within cursor.tokens ~first:cursor.first ~stop:cursor.stop span with
-  | [||] -> None
-  | tokens -> Token.spell_tokens ?insertions tokens
-
-let joins_neighbors cursor (span : Source.span) code =
-  let find_spelling ~offset_of offset =
-    let rec search index =
-      if index < cursor.stop && offset_of cursor.tokens.(index) = offset then
-        let token = cursor.tokens.(index) in
-        if token.span.start < token.span.stop then Token.spell_tokens [| token |]
-        else search (index + 1)
-      else None
-    in
-    Option.bind
-      (search
-         (locate_first cursor.tokens ~first:cursor.first ~stop:cursor.stop (fun token ->
-              offset_of token >= offset)))
-      (fun spelling -> if spelling = "" then None else Some spelling)
-  in
-  let before =
-    Option.map
-      (fun spelling -> spelling.[String.length spelling - 1])
-      (find_spelling ~offset_of:(fun (token : Token.t) -> token.span.stop) span.start)
-  and after =
-    Option.map
-      (fun spelling -> spelling.[0])
-      (find_spelling ~offset_of:(fun (token : Token.t) -> token.span.start) span.stop)
-  in
-  Token.joins_neighbor ~before ~after code
-
-let has_reported cursor = Diagnostic.Collector.to_list cursor.diagnostics <> []
-
-let report cursor ?fixes code span message =
-  (match code with
-  | Diagnostic.Code.Missing_body -> cursor.syntax_errors := span :: !(cursor.syntax_errors)
-  | _ -> record_syntax_error cursor ~index:cursor.index span);
-  Diagnostic.Collector.add cursor.diagnostics
-    (Diagnostic.make ?fixes ~code:(Diagnostic.Code.Parser code) span message)
-
-let describe (token : Token.t) =
-  match token.kind with
-  | Newline -> "a line break"
-  | End_of_file -> "the end of the definition"
-  | Upper name | Lower name -> Printf.sprintf "the name `%s`" name
-  | Underscore -> "`_`"
-  | Keyword keyword -> Printf.sprintf "`%s`" (Token.spell_keyword keyword)
-  | Reserved reserved -> Printf.sprintf "`%s`" (Token.spell_reserved reserved)
-  | Integer _ | Float _ -> "a number"
-  | String _ -> "a string"
-  | Punctuation punctuation -> Printf.sprintf "`%s`" (Token.spell_punctuation punctuation)
-  | Foreign foreign -> Printf.sprintf "`%s`" (Token.spell_foreign foreign)
+let report cursor at (problem : Syntax_catalog.Parsing.problem) =
+  (match problem with
+  | Missing_body _ -> cursor.syntax_errors := at :: !(cursor.syntax_errors)
+  | _ -> record_syntax_error cursor ~index:cursor.index at);
+  Dynarray.add_last cursor.diagnostics
+    { Syntax_catalog.Parsing.at; problem; has_lexer_errors = false }
 
 let fail cursor expected =
   let token = peek cursor in
@@ -296,26 +209,19 @@ let fail cursor expected =
   (match token.kind with
   | _ when is_reported_by_lexer -> record_syntax_error cursor ~index:cursor.index token.span
   | Reserved reserved ->
-      report cursor Reserved_word token.span
-        (Printf.sprintf "`%s` is reserved for possible later use, and means nothing in Truss yet."
-           (Token.spell_reserved reserved))
-  | _ ->
-      report cursor Unexpected_token token.span
-        (Printf.sprintf "Expected %s, found %s." expected (describe token)));
+      report cursor token.span (Reserved_word { word = Token.spell_reserved reserved })
+  | _ -> report cursor token.span (Unexpected { expected; found = token.kind }));
   raise Failed
 
 let expect_punctuation cursor punctuation =
-  if not (accept_punctuation cursor punctuation) then
-    fail cursor (Printf.sprintf "`%s`" (Token.spell_punctuation punctuation))
+  if not (accept_punctuation cursor punctuation) then fail cursor (Token_punctuation punctuation)
 
 let expect_keyword cursor keyword =
-  if not (accept_keyword cursor keyword) then
-    fail cursor (Printf.sprintf "`%s`" (Token.spell_keyword keyword))
+  if not (accept_keyword cursor keyword) then fail cursor (Token_keyword keyword)
 
 let run_nested cursor parse =
   if cursor.nesting_depth >= nesting_limit then begin
-    report cursor Nesting_too_deep (peek cursor).span
-      (Printf.sprintf "This is nested more than %d levels deep." nesting_limit);
+    report cursor (peek cursor).span (Nesting_too_deep { limit = nesting_limit });
     raise Failed
   end;
   cursor.nesting_depth <- cursor.nesting_depth + 1;
@@ -331,11 +237,7 @@ let chain_limit = 10_000
 
 let check_chain_length cursor ~chain_length =
   if chain_length >= chain_limit then begin
-    report cursor Nesting_too_deep (peek cursor).span
-      (Printf.sprintf
-         "This chains more than %d operations, each of which nests one level deeper. Give parts of \
-          it names with `let`."
-         chain_limit);
+    report cursor (peek cursor).span (Chain_too_long { limit = chain_limit });
     raise Failed
   end
 
@@ -424,7 +326,7 @@ let parse_lines cursor ~parse_item ~recover =
           let separated =
             peek_kind cursor = Newline || (ends_with_comma && (peek cursor).line_break_before)
           in
-          if cursor.index < closer_index && not separated then fail cursor "a line break or `}`";
+          if cursor.index < closer_index && not separated then fail cursor Line_break_or_brace;
           value
         with
         | value -> value

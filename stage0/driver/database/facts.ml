@@ -72,12 +72,14 @@ let interface : Interface.Environment.interface Tracker.view =
   Tracker.make_view ~stage:Elaborate ~table:"interface" ~id_column:"definition" ~fixed:[]
     ~target:Interface ~columns:[ "value" ] ~decode:(fun cells -> Tracker.unmarshal cells.(0))
 
-let require_checked_signature view =
-  Tracker.guard_view view ~stage:Check_signature ~target:Signature_check ~table:"signature_check"
+let require_checked_signature view ~targets =
+  Tracker.guard_view view ~stage:Check_signature ~table:"signature_check" ~targets
     ~id_column:"definition"
 
-let checked_interface = require_checked_signature interface
-let checked_elaborated = require_checked_signature elaborated.whole
+let checked_interface = require_checked_signature interface ~targets:[ Checked_interface ]
+
+let checked_elaborated =
+  require_checked_signature elaborated.whole ~targets:[ Checked_interface; Elaboration ]
 
 let derived_interface : Types.impl_interface Tracker.fact =
   make_marshaled ~stage:Derive_interface ~table:"derived_interface" ~id_column:"path"
@@ -130,14 +132,14 @@ let body : Infer.checked Tracker.fact =
       [
         (Body_form, [ "form" ]);
         (Body_tables, [ "tables" ]);
-        (Run_forever, [ "requires_run_forever" ]);
+        (Run_forever, [ "uses_run_forever" ]);
         (Ownership_modes, [ "places_without_keyword"; "mode_keywords" ]);
       ]
     ~encode:(fun (checked : Infer.checked) ->
       [
         Tracker.marshal checked.form;
         Tracker.marshal checked.tables;
-        Integer (Bool.to_int checked.requires_run_forever);
+        Integer (Bool.to_int checked.uses_run_forever);
         Tracker.marshal checked.places_without_keyword;
         Tracker.marshal checked.mode_keywords;
       ])
@@ -146,7 +148,7 @@ let body : Infer.checked Tracker.fact =
         form = Tracker.unmarshal cells.(0);
         tables = Tracker.unmarshal cells.(1);
         used_packages = [];
-        requires_run_forever = decode_boolean cells.(2);
+        uses_run_forever = decode_boolean cells.(2);
         places_without_keyword = Tracker.unmarshal cells.(3);
         mode_keywords = Tracker.unmarshal cells.(4);
       })
@@ -161,8 +163,8 @@ let body_form : Core.t Tracker.view =
 let body_tables : Infer.tables Tracker.view =
   make_body_view Body_tables [ "tables" ] (fun cells -> Tracker.unmarshal cells.(0))
 
-let requires_run_forever : bool Tracker.view =
-  make_body_view Run_forever [ "requires_run_forever" ] (fun cells -> decode_boolean cells.(0))
+let uses_run_forever : bool Tracker.view =
+  make_body_view Run_forever [ "uses_run_forever" ] (fun cells -> decode_boolean cells.(0))
 
 let ownership_modes : ((Syntax.id * Language.Mode.t) list * Core.mode_keyword list) Tracker.view =
   make_body_view Ownership_modes [ "places_without_keyword"; "mode_keywords" ] (fun cells ->
@@ -198,30 +200,15 @@ let generated_mir : (Mir.body_part * Mir.contract_part) Tracker.fact =
     ~encode:(fun (body, contract) -> [ Tracker.marshal body; Tracker.marshal contract ])
     ~decode:(fun cells -> (Tracker.unmarshal cells.(0), Tracker.unmarshal cells.(1)))
 
-type call_node = { node : Mir.Call_edges.node; callees : Path.t list }
-
-let call_node : call_node Tracker.fact =
+let call_node : Path.t list Tracker.fact =
   Tracker.make_fact ~stage:List_calls ~table:"call_node" ~id_column:"path" ~fixed:[]
-    ~groups:[ (Call_node, [ "kind" ]); (Callees, [ "callees" ]) ]
-    ~encode:(fun { node; callees } : Store.cell list ->
-      [
-        Integer (match node with Definition -> 0 | Trait_method_declaration -> 1);
-        Tracker.marshal callees;
-      ])
-    ~decode:(fun cells ->
-      {
-        node =
-          (match cells.(0) with
-          | Integer 0 -> Definition
-          | Integer 1 -> Trait_method_declaration
-          | Blob _ | Text _ | Integer _ | Null ->
-              Compiler_bug.raise_bug ~stage:"Database" "a node of the call graph has no kind");
-        callees = Tracker.unmarshal cells.(1);
-      })
+    ~groups:[ (Callees, [ "callees" ]) ]
+    ~encode:(fun callees -> [ Tracker.marshal callees ])
+    ~decode:(fun cells -> Tracker.unmarshal cells.(0))
 
-let recursion_group : Path.t list Tracker.fact =
-  Tracker.make_fact ~stage:Group_recursion ~table:"recursion_group" ~id_column:"path" ~fixed:[]
-    ~groups:[ (Recursion_group, [ "representative"; "members" ]) ]
+let make_group ~table target : Path.t list Tracker.fact =
+  Tracker.make_fact ~stage:Group_recursion ~table ~id_column:"path" ~fixed:[]
+    ~groups:[ (target, [ "representative"; "members" ]) ]
     ~encode:(fun members : Store.cell list ->
       [
         (match members with first :: _ -> Integer (Ids.of_path first) | [] -> Null);
@@ -229,23 +216,49 @@ let recursion_group : Path.t list Tracker.fact =
       ])
     ~decode:(fun cells -> Tracker.unmarshal cells.(1))
 
+let recursion_group = make_group ~table:"recursion_group" Recursion_group
+let proof_group = make_group ~table:"proof_group" Proof_group
+
 let proof : Prover.proof Tracker.fact =
   make_marshaled ~stage:Prove ~table:"proof" ~id_column:"definition" Proof
 
-let unused_dependencies : Path.package list Tracker.fact =
-  Tracker.make_fact ~stage:Check_dependencies ~table:"dependency_use" ~id_column:"package" ~fixed:[]
-    ~groups:[ (Unused_dependencies, [ "unused" ]) ]
-    ~encode:(fun packages -> [ Tracker.marshal packages ])
-    ~decode:(fun cells -> Tracker.unmarshal cells.(0))
+let dependency_use : bool Tracker.fact =
+  Tracker.make_fact ~stage:Check_dependency ~table:"dependency_use" ~id_column:"dependency"
+    ~fixed:[]
+    ~groups:[ (Dependency_use, [ "is_used" ]) ]
+    ~encode:(fun is_used -> [ Integer (Bool.to_int is_used) ])
+    ~decode:(fun cells -> decode_boolean cells.(0))
 
-let lowered : (Lowering.lowered, Lowering.unsupported) result Tracker.fact =
+let lowered : (Lowering.lowered, Lowering.unbuildable) result Tracker.fact =
   Tracker.make_fact ~stage:Lower ~table:"lowered" ~id_column:"item" ~fixed:[]
-    ~groups:[ (Lowered, [ "code" ]) ]
-    ~encode:(fun code -> [ Tracker.marshal code ])
+    ~groups:[ (Lowered, [ "code"; "is_evaluated"; "sites" ]) ]
+    ~encode:(fun code ->
+      let is_evaluated, sites =
+        match code with
+        | Ok lowered -> (Lowering.is_evaluated lowered, Lowering.list_sites lowered)
+        | Error _ -> (false, [])
+      in
+      [ Tracker.marshal code; Integer (Bool.to_int is_evaluated); Tracker.marshal sites ])
     ~decode:(fun cells -> Tracker.unmarshal cells.(0))
 
-let test_key : (string, Lowering.unsupported) result Tracker.fact =
+let test_key : (string, Lowering.unbuildable) result Tracker.fact =
   Tracker.make_fact ~stage:Key_tests ~table:"test_key" ~id_column:"item" ~fixed:[]
     ~groups:[ (Test_key, [ "key" ]) ]
     ~encode:(fun key -> [ Tracker.marshal key ])
     ~decode:(fun cells -> Tracker.unmarshal cells.(0))
+
+let evaluation : Lowering.evaluation Tracker.fact =
+  make_marshaled ~stage:Evaluate ~table:"evaluation" ~id_column:"item" Evaluation
+
+let rank_profile : Profile.t -> int = function Development -> 0 | Release -> 1
+
+let unit =
+  let make profile : string Tracker.fact =
+    Tracker.make_fact ~stage:(Render profile) ~table:"unit" ~id_column:"item"
+      ~fixed:[ ("profile", Integer (rank_profile profile)) ]
+      ~groups:[ (Unit profile, [ "text_hash" ]) ]
+      ~encode:(fun text_hash -> [ Tracker.marshal text_hash ])
+      ~decode:(fun cells -> Tracker.unmarshal cells.(0))
+  in
+  let development = make Development and release = make Release in
+  function Profile.Development -> development | Release -> release

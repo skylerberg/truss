@@ -13,7 +13,7 @@ fn shown(status: processes.ExitStatus) -> String {
   }
 }
 
-fn run_script(script: StringSlice) -> String
+fn run_script(script: String) -> String
   uses Processes
 {
   let command = processes.Command.new("sh")

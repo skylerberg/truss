@@ -1,0 +1,3 @@
+fn f(counts: Map[String, Int64], bytes: List[UInt8]) -> Bool {
+  counts.contains(bytes)
+}

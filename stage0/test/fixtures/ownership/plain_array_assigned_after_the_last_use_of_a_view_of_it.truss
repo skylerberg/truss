@@ -1,0 +1,6 @@
+fn f(values: mut Array[Int64, 4]) -> UInt64 {
+  let viewed: view List[Int64] = values
+  let length = viewed.length()
+  values[0] = 7
+  length
+}

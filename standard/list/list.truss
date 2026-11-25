@@ -1,13 +1,9 @@
 use standard.core
 use standard.growth
 use standard.intrinsic
-use standard.list.slice
 
 public opaque type List[Element](storage: intrinsic.Storage[Element])
   derives Copyable
-
-public opaque type Slice[Element](elements: intrinsic.View[Element])
-  derives Plain
 
 public trait FromElements {
   type Element
@@ -15,13 +11,13 @@ public trait FromElements {
   fn from_elements(elements: own List[Self.Element]) -> Self
 }
 
-public type SplitFirst[Element](first: Element, rest: Slice[Element])
+public type SplitFirst[Element](first: Element, rest: view List[Element])
   derives Equal
 
-public type SplitLast[Element](last: Element, rest: Slice[Element])
+public type SplitLast[Element](last: Element, rest: view List[Element])
   derives Equal
 
-public type Enumerated[Element](elements: Slice[Element])
+public type Enumerated[Element](elements: view List[Element])
 
 impl Iterable for Enumerated[Element] {
   type Element = core.Indexed[Element]
@@ -45,7 +41,7 @@ impl Iterable for Enumerated[Element] {
   }
 }
 
-public type Reversed[Element](elements: Slice[Element])
+public type Reversed[Element](elements: view List[Element])
 
 impl Iterable for Reversed[Element] {
   type Element = Element
@@ -68,11 +64,11 @@ impl Iterable for Reversed[Element] {
   }
 }
 
-public type Windows[Element](elements: Slice[Element], size: UInt64)
+public type Windows[Element](elements: view List[Element], size: UInt64)
   invariant size > 0
 
 impl Iterable for Windows[Element] {
-  type Element = Slice[Element]
+  type Element = view List[Element]
 
   fn count(self) -> UInt64
     ensures result <= self.elements.length()
@@ -84,7 +80,7 @@ impl Iterable for Windows[Element] {
     if self.size <= self.elements.length() { self.elements.length() - self.size + 1 } else { 0 }
   }
 
-  fn element(self, position: UInt64) lends Slice[Element]
+  fn element(self, position: UInt64) lends view List[Element]
     requires position < self.count()
     ensures result.length() == self.size
     cost time O(1)
@@ -94,11 +90,11 @@ impl Iterable for Windows[Element] {
   }
 }
 
-public type Chunks[Element](elements: Slice[Element], size: UInt64)
+public type Chunks[Element](elements: view List[Element], size: UInt64)
   invariant size > 0
 
 impl Iterable for Chunks[Element] {
-  type Element = Slice[Element]
+  type Element = view List[Element]
 
   fn count(self) -> UInt64
     ensures result <= self.elements.length()
@@ -110,7 +106,7 @@ impl Iterable for Chunks[Element] {
     if self.elements.length() == 0 { 0 } else { (self.elements.length() - 1) / self.size + 1 }
   }
 
-  fn element(self, position: UInt64) lends Slice[Element]
+  fn element(self, position: UInt64) lends view List[Element]
     requires position < self.count()
     ensures result.length() <= self.size
     cost time O(1)
@@ -122,7 +118,7 @@ impl Iterable for Chunks[Element] {
   }
 }
 
-public type Zipped[Element, Other](first: Slice[Element], second: Slice[Other])
+public type Zipped[Element, Other](first: view List[Element], second: view List[Other])
 
 impl Iterable for Zipped[Element, Other] {
   type Element = core.Pair[Element, Other]
@@ -154,16 +150,6 @@ impl Model for List[Element] {
     ensures identical(result, intrinsic.storage_model(self.storage))
   {
     intrinsic.storage_model(self.storage)
-  }
-}
-
-impl Model for Slice[Element] {
-  type Value = Sequence[Element]
-
-  fn model(self) -> Sequence[Element]
-    ensures identical(result, intrinsic.view_model(self.elements))
-  {
-    intrinsic.view_model(self.elements)
   }
 }
 
@@ -228,14 +214,6 @@ public fn List[Element].insert_at(mut self, position: UInt64, item: own Element)
   intrinsic.storage_insert(mut self.storage, index: position, value: own item)
 }
 
-public fn List[Element].slice(self) -> Slice[Element]
-  ensures identical(result.model(), self.model())
-  cost time O(1)
-  cost allocations == 0
-{
-  Slice(elements: intrinsic.storage_view(self.storage))
-}
-
 impl Iterable for List[Element] {
   type Element = Element
 
@@ -257,66 +235,18 @@ impl Iterable for List[Element] {
   }
 }
 
-public fn List[Element].element(mut self, position: UInt64) lends mut Element
-  uses Panic unless position < self.count()
-  ensures identical(result, old(self.model())[position])
-  ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
-  ensures self.length() == old(self.length())
-  ensures self.capacity() == old(self.capacity())
-  cost time O(1)
-  cost amortized time O(1)
-  cost allocations == 0
-{
-  if position >= self.count() {
-    Panic.crash("index out of bounds")
-  }
-  mut self[position]
-}
-
-public fn List[Element].swap(mut self, first: UInt64, second: UInt64)
-  uses Panic unless first < self.length() && second < self.length()
-  ensures self.length() == old(self.length())
-  ensures identical(self.model()[first], old(self.model())[second])
-  ensures identical(self.model()[second], old(self.model())[first])
-  ensures forall i in 0..self.length() =>
-    i == first || i == second || identical(self.model()[i], old(self.model())[i])
-  ensures self.model().is_permutation_of(old(self.model()))
-  cost time O(1)
-  cost amortized time O(1)
-  cost allocations == 0
-{
-  if first >= self.length() || second >= self.length() {
-    Panic.crash("index out of bounds")
-  }
-  intrinsic.storage_swap(mut self.storage, first: first, second: second)
-}
-
-public fn List[Element].reverse(mut self)
-  ensures self.length() == old(self.length())
-  ensures forall i in 0..self.length() =>
-    identical(self.model()[i], old(self.model())[self.length() - 1 - i])
-  ensures self.model().is_permutation_of(old(self.model()))
-  ensures self.capacity() == old(self.capacity())
-  cost time O(self.length())
-  cost amortized time O(self.length())
-{
-  var low: UInt64 = 0
-  var high = self.length()
-  while low + 1 < high
-    invariant self.length() == old(self.length())
-    invariant low + high == self.length()
-    invariant forall i in 0..low =>
-      identical(self.model()[i], old(self.model())[self.length() - 1 - i])
-    invariant forall i in high..self.length() =>
-      identical(self.model()[i], old(self.model())[self.length() - 1 - i])
-    invariant forall i in low..high => identical(self.model()[i], old(self.model())[i])
-    invariant self.model().is_permutation_of(old(self.model()))
-    invariant intrinsic.storage_capacity(self.storage) == old(intrinsic.storage_capacity(self.storage))
-    decreases high - low
+impl IterableMut for List[Element] {
+  fn element(mut self, position: UInt64) lends mut Element
+    requires position < self.count()
+    ensures identical(result, old(self.model())[position])
+    ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
+    ensures self.length() == old(self.length())
+    ensures self.capacity() == old(self.capacity())
+    cost time O(1)
+    cost amortized time O(1)
+    cost allocations == 0
   {
-    high -= 1
-    intrinsic.storage_swap(mut self.storage, first: low, second: high)
-    low += 1
+    mut self[position]
   }
 }
 
@@ -354,21 +284,26 @@ impl Cursor for ListCursor[Element] {
     ensures forall i in 0..self.model().length() =>
       identical(self.model()[i], old(self.model())[i + 1])
     cost time O(1)
+    cost amortized time O(1)
     cost allocations == 0
   {
     mut self.reversed.pop()
   }
 }
 
-public fn List[Element].cursor(own self) -> ListCursor[Element]
-  ensures result.remaining() == self.length()
-  ensures identical(result.model(), self.model())
-  cost time O(self.length())
-  cost amortized time O(self.length())
-{
-  var reversed = own self
-  mut reversed.reverse()
-  ListCursor(reversed: own reversed)
+impl IntoCursor for List[Element] {
+  type Cursor = ListCursor[Element]
+
+  fn cursor(own self) -> ListCursor[Element]
+    ensures result.remaining() == self.length()
+    ensures identical(result.model(), self.model())
+    cost time O(self.length())
+    cost amortized time O(self.length())
+  {
+    var reversed = own self
+    mut reversed.reverse()
+    ListCursor(reversed: own reversed)
+  }
 }
 
 public fn Array[Element, count: UInt64].to_list(own self) -> List[Element]
@@ -378,19 +313,23 @@ public fn Array[Element, count: UInt64].to_list(own self) -> List[Element]
   List(storage: intrinsic.storage_from_array(own self))
 }
 
-public fn Array[Element, count: UInt64].cursor(own self) -> ListCursor[Element]
-  ensures result.remaining() == count
-  ensures identical(result.model(), self.model())
-  cost time O(count)
-  cost amortized time O(count)
-{
-  own self.to_list().cursor()
+impl IntoCursor for Array[Element, count: UInt64] {
+  type Cursor = ListCursor[Element]
+
+  fn cursor(own self) -> ListCursor[Element]
+    ensures result.remaining() == count
+    ensures identical(result.model(), self.model())
+    cost time O(count)
+    cost amortized time O(count)
+  {
+    own self.to_list().cursor()
+  }
 }
 
-public type SliceCursor[Element: Plain](elements: Slice[Element], offset: UInt64)
+public type ViewCursor[Element: Plain](elements: view List[Element], offset: UInt64)
   invariant offset <= elements.length()
 
-impl FiniteCursor for SliceCursor[Element: Plain] {
+impl FiniteCursor for ViewCursor[Element: Plain] {
   fn remaining(self) -> UInt64
     ensures result == self.elements.length() - self.offset
     cost time O(1)
@@ -400,7 +339,7 @@ impl FiniteCursor for SliceCursor[Element: Plain] {
   }
 }
 
-impl Cursor for SliceCursor[Element: Plain] {
+impl Cursor for ViewCursor[Element: Plain] {
   type Element = Element
 
   fn next(mut self) -> Option[Element]
@@ -420,55 +359,12 @@ impl Cursor for SliceCursor[Element: Plain] {
   }
 }
 
-public fn Slice[Element: Plain].cursor(self) -> SliceCursor[Element]
+public fn List[Element: Plain].cursor(self) -> ViewCursor[Element]
   ensures result.remaining() == self.length()
   cost time O(1)
   cost allocations == 0
 {
-  SliceCursor(elements: self, offset: 0)
-}
-
-public fn Slice[Element].length(self) -> UInt64
-  ensures result == self.model().length()
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic.view_length(self.elements)
-}
-
-impl Iterable for Slice[Element] {
-  type Element = Element
-
-  fn count(self) -> UInt64
-    ensures result == self.length()
-    cost time O(1)
-    cost allocations == 0
-  {
-    self.length()
-  }
-
-  fn element(self, position: UInt64) lends Element
-    requires position < self.count()
-    ensures identical(result, self.model()[position])
-    cost time O(1)
-    cost allocations == 0
-  {
-    self[position]
-  }
-}
-
-public fn Slice[Element].element(mut self, position: UInt64) lends mut Element
-  uses Panic unless position < self.count()
-  ensures identical(result, old(self.model())[position])
-  ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
-  cost time O(1)
-  cost amortized time O(1)
-  cost allocations == 0
-{
-  if position >= self.count() {
-    Panic.crash("index out of bounds")
-  }
-  mut self[position]
+  ViewCursor(elements: self, offset: 0)
 }
 
 impl Index for List[Element] {
@@ -504,39 +400,6 @@ impl IndexMut for List[Element] {
     cost allocations == 0
   {
     mut self[key]
-  }
-}
-
-impl Index for Slice[Element] {
-  type Key = UInt64
-  type Output = Element
-
-  fn contains_key(self, key: UInt64) -> Bool
-    ensures result == (key < self.length())
-    cost time O(1)
-    cost allocations == 0
-  {
-    key < self.length()
-  }
-
-  fn at(self, key: UInt64) lends Element
-    requires key < self.length()
-    ensures identical(result, self.model()[key])
-    cost time O(1)
-    cost allocations == 0
-  {
-    self[key]
-  }
-}
-
-impl Equal for List[Element: Equal] {
-  fn equal(self, other: List[Element]) -> Bool
-    ensures result == (self.length() == other.length()
-      && forall i in 0..self.length() => self.model()[i] == other.model()[i])
-    cost time O(self.length() * time(Element.equal))
-    cost allocations <= self.length() * allocations(Element.equal)
-  {
-    self.slice() == other.slice()
   }
 }
 
@@ -679,7 +542,7 @@ public fn List[Element].remove_range(mut self, range: Range[UInt64])
   cost allocations == 0
 {
   if range.start > range.stop || range.stop > self.length() || range.inclusive {
-    Panic.crash("slice out of bounds")
+    Panic.crash("range out of bounds")
   }
   let width = range.stop - range.start
   if width == 0 {
@@ -757,9 +620,13 @@ public fn List[Element].append(mut self, other: own List[Element])
   {
     intrinsic.storage_push(mut self.storage, value: intrinsic.storage_pop(mut rest.storage))
   }
+  proof {
+    assert forall i in 0..self.model().length() =>
+      identical(self.model()[i], old(self.model()).concatenate(other.model())[i])
+  }
 }
 
-public fn List[Element: Copyable].append_slice(mut self, items: Slice[Element])
+public fn List[Element: Copyable].append_items(mut self, items: List[Element])
   ensures self.length() == old(self.length()) + items.length()
   ensures identical(self.model(), old(self.model()).concatenate(items.model()))
   cost amortized time O(items.length() * (1 + time(Element.copy)))
@@ -848,7 +715,11 @@ public fn List[Element: Equal].deduplicate(mut self)
 }
 
 impl Default for List[Element] {
-  fn default() -> List[Element] {
+  fn default() -> List[Element]
+    ensures result.length() == 0
+    cost time O(1)
+    cost allocations == 0
+  {
     []
   }
 }
@@ -862,47 +733,5 @@ impl FromElements for List[Element] {
     cost allocations == 0
   {
     elements
-  }
-}
-
-impl Ordered for List[Element: Ordered] {
-  fn compare(self, other: List[Element]) -> Ordering
-    ensures result == slice.lexicographic(self.model(), second: other.model(), from: 0)
-    cost time O(self.length() * time(Element.compare))
-    cost allocations <= self.length() * allocations(Element.compare)
-  {
-    self.slice().compare(other.slice())
-  }
-}
-
-proof Ordered.agrees_with_equal for List[Element: Ordered] {
-  slice.lexicographic_agrees_with_equal(first.model(), second: second.model(), from: 0)
-}
-
-proof Ordered.antisymmetric for List[Element: Ordered] {
-  slice.lexicographic_is_antisymmetric(first.model(), second: second.model(), from: 0)
-}
-
-proof Ordered.transitive for List[Element: Ordered] {
-  slice.lexicographic_is_transitive(first.model(), second: second.model(), third: third.model(), from: 0)
-}
-
-impl Hash for List[Element: Hash] {
-  fn hash(self, hasher: Hasher) -> Hasher
-    ensures identical(result, slice.hash_elements(hasher.write(self.length()), items: self.model(), count: self.length()))
-    cost time O(self.length() * time(Element.hash))
-    cost allocations <= self.length() * allocations(Element.hash)
-  {
-    self.slice().hash(hasher)
-  }
-}
-
-proof Hash.agrees_with_equal for List[Element: Hash] {
-  slice.elements_hash_alike(hasher.write(first.length()), first: first.model(), second: second.model(), count: first.length())
-}
-
-impl Display for List[Element: Display] {
-  fn display(self, output: mut String) {
-    self.slice().display(mut output)
   }
 }

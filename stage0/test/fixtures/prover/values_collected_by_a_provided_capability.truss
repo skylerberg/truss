@@ -1,0 +1,26 @@
+type Collected(values: List[Int64])
+
+capability Sink {
+  fn put(value: Int64)
+    cost amortized time O(1)
+}
+
+impl Sink for Collected {
+  fn put(mut self, value: Int64)
+    cost amortized time O(1)
+  {
+    mut self.values.push(value)
+  }
+}
+
+fn collects(values: List[Int64]) -> UInt64
+  cost amortized time O(values.length())
+{
+  var collected = Collected(values: [])
+  provide mut collected {
+    for value in values {
+      Sink.put(value)
+    }
+  }
+  collected.values.length()
+}

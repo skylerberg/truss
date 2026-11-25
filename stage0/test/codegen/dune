@@ -14,6 +14,7 @@
   convention
   emit_c
   c_compiler
+  x86_64_level
   process
   startup
   workspace
@@ -76,6 +77,7 @@
   convention
   emit_c
   c_compiler
+  x86_64_level
   process
   startup
   workspace
@@ -96,7 +98,6 @@
   diagnostic
   source
   backend
-  evaluations
   lowering
   database
   strongly_connected
@@ -105,8 +106,7 @@
   documents
   file_system)
  (deps
-  (glob_files %{workspace_root}/*.md)
-  (glob_files_rec %{workspace_root}/standard/*.md)))
+  (glob_files %{workspace_root}/*.md)))
 
 (executable
  (name module_tests)

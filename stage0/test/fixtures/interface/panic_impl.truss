@@ -1,5 +1,5 @@
 type Quiet()
 
 impl Panic for Quiet {
-  fn crash(self, message: StringSlice) -> Never { todo }
+  fn crash(self, message: String) -> Never { todo }
 }

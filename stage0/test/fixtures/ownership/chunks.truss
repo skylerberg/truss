@@ -1,14 +1,20 @@
 type Chunked(chunks: List[List[Int64]])
 
-fn Chunked.count(self) -> UInt64 {
-  self.chunks.count()
+impl Iterable for Chunked {
+  type Element = List[Int64]
+
+  fn count(self) -> UInt64 {
+    self.chunks.count()
+  }
+
+  fn element(self, position: UInt64) lends List[Int64] {
+    self.chunks[position]
+  }
 }
 
-fn Chunked.element(self, position: UInt64) lends List[Int64] {
-  self.chunks[position]
-}
-
-fn Chunked.element(mut self, position: UInt64) lends mut List[Int64] {
-  mut self.chunks[position]
+impl IterableMut for Chunked {
+  fn element(mut self, position: UInt64) lends mut List[Int64] {
+    mut self.chunks[position]
+  }
 }
 

@@ -1,0 +1,7 @@
+fn port(ports: Map[String, UInt16], name: String) -> Bool {
+  ports.contains(name)
+}
+
+fn f() -> Bool {
+  port(["http": 80], name: "https")
+}

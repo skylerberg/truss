@@ -28,7 +28,10 @@ impl Ordered for Float32 {
 }
 
 impl Default for Float32 {
-  fn default() -> Float32 {
+  fn default() -> Float32
+    cost time O(1)
+    cost allocations == 0
+  {
     0.0
   }
 }
@@ -222,7 +225,10 @@ proof Ordered.transitive for Float64 {
 }
 
 impl Default for Float64 {
-  fn default() -> Float64 {
+  fn default() -> Float64
+    cost time O(1)
+    cost allocations == 0
+  {
     0.0
   }
 }

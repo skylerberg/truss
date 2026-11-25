@@ -1,4 +1,4 @@
-fn letters(word: StringSlice) -> List[Character] {
+fn letters(word: String) -> List[Character] {
   List.collect(word.characters())
 }
 

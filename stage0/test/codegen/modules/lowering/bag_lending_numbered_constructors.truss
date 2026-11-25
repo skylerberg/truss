@@ -10,24 +10,38 @@ fn Bag.first(self) lends Option[String] {
   }
 }
 
-fn Bag.count(self) -> UInt64 {
-  self.items.count()
-}
+impl Iterable for Bag {
+  type Element = Numbered
 
-fn Bag.element(self, position: UInt64) lends Numbered {
-  Numbered(index: position, value: self.items[position])
+  fn count(self) -> UInt64 {
+    self.items.count()
+  }
+
+  fn element(self, position: UInt64) lends Numbered {
+    Numbered(index: position, value: self.items[position])
+  }
 }
 
 type Counters(counts: List[Int64], names: List[String])
 
 type Slot(index: UInt64, count: Int64, name: String)
 
-fn Counters.count(self) -> UInt64 {
-  self.counts.count()
+impl Iterable for Counters {
+  type Element = Slot
+
+  fn count(self) -> UInt64 {
+    self.counts.count()
+  }
+
+  fn element(self, position: UInt64) lends Slot {
+    Slot(index: position, count: self.counts[position], name: self.names[position])
+  }
 }
 
-fn Counters.element(mut self, position: UInt64) lends mut Slot {
-  Slot(index: position, count: mut self.counts[position], name: mut self.names[position])
+impl IterableMut for Counters {
+  fn element(mut self, position: UInt64) lends mut Slot {
+    Slot(index: position, count: mut self.counts[position], name: mut self.names[position])
+  }
 }
 
 test "constructors of lent places, lent read-only and `mut`" {

@@ -1,9 +1,11 @@
-exception Recursion_limit of string
+exception Recursion_limit of Catalog.Typing.t
 
 val recursion_limit : int
 
 val list_bound_closure_over :
-  find_requirements:(Path.t -> (Types.generic list * Types.trait_reference list) option) ->
+  find_requirements:
+    (Path.t ->
+    (Types.generic list * Types.trait_reference list * Types.associated_type list) option) ->
   self:Types.ty ->
   Types.trait_reference ->
   Types.trait_reference list
@@ -33,10 +35,7 @@ val list_known_bounds : Lookups.t -> list_bounds:Bounds.t -> Types.ty -> Types.t
 val list_rigid_members :
   Lookups.t -> list_bounds:Bounds.t -> Types.ty -> Language.Builtin_type.t list
 
-type property = Copyable | Plain | View | Holds_function
-
-val show_property : property -> string
-
+type property = Types.property = Copyable | Plain | View | Holds_function
 type occurrence = Environment.occurrence = In_place | Indirect | Function_input
 
 val compose_occurrences : occurrence -> occurrence -> occurrence

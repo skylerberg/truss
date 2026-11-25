@@ -25,7 +25,7 @@ type target =
   | Visited
   | Final
   | Specification_function of specification_function
-  | Unknown of Diagnostic.reported
+  | Unknown of Catalog.reported
 
 type bracket = Index | Type_arguments | Method_bracket
 
@@ -38,7 +38,7 @@ type value =
 type word = Meaning of target | Meaning_unless_defined of target | Loop_element
 
 type scope = {
-  values : (value * string) String_map.t;
+  values : (value * Catalog.Resolve.binding) String_map.t;
   words : word String_map.t;
   cost_bound_functions : specification_function String_map.t;
   types : target String_map.t;
@@ -76,15 +76,14 @@ type section_names = {
   names : target option array;
   brackets : bracket option array;
   mutable holes : (Syntax.id * (string * value) list) list;
-  mutable diagnostics : Diagnostic.in_definition list;
+  mutable diagnostics : Catalog.diagnostic list;
   mutable used_imports : string list;
 }
 
 type state = {
   lookups : Names.lookups;
   key : Names.key;
-  spans : Source.Definition_span.t array;
-  syntax_errors : Source.Definition_span.t list;
+  broken_parts : Parts.part list;
   imports : (string * Path.module_) list Lazy.t;
   visible_packages : Path.package list Lazy.t;
   interface : section_names;
@@ -102,13 +101,12 @@ let make_section_names size =
     used_imports = [];
   }
 
-let create lookups key ~spans ~syntax_errors =
-  let size = Array.length spans in
+let create (lookups : Names.lookups) key =
+  let size = Source.Node_order.count (lookups.read_order key) in
   {
     lookups;
     key;
-    spans;
-    syntax_errors;
+    broken_parts = lookups.list_broken_parts key;
     imports = lazy (lookups.list_imports key);
     visible_packages = lazy (Names.list_visible_packages lookups key.module_.package);
     interface = make_section_names size;
@@ -123,7 +121,6 @@ let lookup_section_names state = function
   | Body -> state.body
 
 let lookup_current_names state = lookup_section_names state state.section
-let read_span state id = state.spans.(id)
 
 let run_in_section state section walk =
   let enclosing = state.section in
@@ -131,25 +128,22 @@ let run_in_section state section walk =
   walk ();
   state.section <- enclosing
 
-let add_diagnostic state ?fixes code (span : Source.Definition_span.t) message =
-  let diagnostic = Diagnostic.make ?fixes ~code:(Resolve code) span message in
+let add_diagnostic state diagnostic =
+  let reported = Catalog.Resolve diagnostic in
   let names = lookup_current_names state in
-  names.diagnostics <- diagnostic :: names.diagnostics;
-  Diagnostic.make_reported diagnostic
+  names.diagnostics <- reported :: names.diagnostics;
+  Catalog.make_reported reported
 
-let report state ?fixes code span message = ignore (add_diagnostic state ?fixes code span message)
+let report state diagnostic = ignore (add_diagnostic state diagnostic)
 
 let set_target state (name : Syntax.name) target =
   (lookup_current_names state).names.(name.id) <- Some target
 
 let report_unknown state (name : Syntax.name) ~expected candidates =
-  let span = read_span state name.id in
   set_target state name
     (Unknown
        (add_diagnostic state
-          ~fixes:(Diagnostic.list_spelling_fixes span ~written:name.text candidates)
-          Unknown_name span
-          (Printf.sprintf "Nothing named `%s` is %s." name.text expected)))
+          (Unknown { name = Written name.id; written = name.text; expected; candidates })))
 
 let find_module_item state text = state.lookups.find state.key.module_ text
 
@@ -166,9 +160,7 @@ let find_in_module state module_ (name : Syntax.name) ~types =
       Some (path, item)
   | Hidden (path, visibility) ->
       set_target state name
-        (Unknown
-           (add_diagnostic state Not_visible (read_span state name.id)
-              (Names.describe_hidden path visibility)));
+        (Unknown (add_diagnostic state (Not_visible { name = Written name.id; path; visibility })));
       None
   | Absent ->
       let candidates =
@@ -182,32 +174,23 @@ let find_in_module state module_ (name : Syntax.name) ~types =
             else None)
           (state.lookups.list_entries module_)
       in
-      report_unknown state name ~expected:("in `" ^ Path.show_module module_ ^ "`") candidates;
+      report_unknown state name ~expected:(In_module module_) candidates;
       None
 
 let report_unresolved_path_start state scope (first : Syntax.name) ~may_start_with_value =
-  let span = read_span state first.id in
+  let name = Core.Written first.id in
   let module_ = state.key.module_ in
   function
   | Names.Scope.Found_module _ ->
       Compiler_bug.raise_bug ~stage:"Resolve" "`%s` starts a path to a module and is reported"
         first.text
-  | Restricted_module ->
-      add_diagnostic state Intrinsic_import span Names.Scope.restricted_module_message
+  | Restricted_module -> add_diagnostic state (Intrinsic_import { name })
   | Ambiguous_module (imported, package) ->
-      add_diagnostic state Ambiguous_module span
-        (Printf.sprintf
-           "`%s` could be the imported module `%s` or the module `%s`. Write the imported one's \
-            full path, or remove its `use`."
-           first.text (Path.show_module imported) (Path.show_module package))
-  | No_module text ->
-      add_diagnostic state Unknown_module span
-        (Printf.sprintf "No module `%s` is imported or exists." text)
+      add_diagnostic state (Import_or_package { name; written = first.text; imported; package })
+  | No_module text -> add_diagnostic state (No_module { name; written = text; path_start = None })
   | No_package text ->
       if state.lookups.module_exists { package = module_.package; modules = [ first.text ] } then
-        add_diagnostic state Unknown_module span
-          (Printf.sprintf "No module `%s` is imported or exists. %s" text
-             (Names.Scope.describe_path_start module_))
+        add_diagnostic state (No_module { name; written = text; path_start = Some module_ })
       else if may_start_with_value then
         let candidates =
           List.map fst (String_map.bindings scope.values)
@@ -218,12 +201,8 @@ let report_unresolved_path_start state scope (first : Syntax.name) ~may_start_wi
           @ List.map fst (Lazy.force state.imports)
           @ Names.list_package_roots (Lazy.force state.visible_packages)
         in
-        add_diagnostic state Unknown_name span
-          ~fixes:(Diagnostic.list_spelling_fixes span ~written:first.text candidates)
-          (Printf.sprintf "Nothing named `%s` is a value or a module here." first.text)
-      else
-        add_diagnostic state Unknown_module span
-          (Printf.sprintf "No module `%s` is imported or exists." text)
+        add_diagnostic state (Unknown_value_or_module { name; written = first.text; candidates })
+      else add_diagnostic state (No_module { name; written = text; path_start = None })
 
 let resolve_path state scope (first : Syntax.name) (rest : Syntax.name list) ~module_lengths
     ~may_start_with_value =
@@ -275,7 +254,7 @@ let list_types_with_variant state text =
             | Type_definition { name; body = Variants variants; _ }
               when List.exists (fun (variant : Syntax.variant) -> variant.name.text = text) variants
               ->
-                Some (state.lookups.read_place declaration.key, name.text)
+                Some (state.lookups.read_file_order declaration.key, name.text)
             | _ -> None)
         | _ -> None)
       (state.lookups.list_declarations state.key.module_)
@@ -283,24 +262,13 @@ let list_types_with_variant state text =
   List.map snd (List.sort (fun (first, _) (second, _) -> compare first second) declared_types)
 
 let report_bare_variant state (name : Syntax.name) owners =
-  let span = read_span state name.id in
-  let written owner = owner ^ "." ^ name.text in
-  set_target state name
-    (Unknown
-       (add_diagnostic state Unknown_name span
-          ~fixes:
-            (List.map
-               (fun owner ->
-                 Diagnostic.fix
-                   (Printf.sprintf "Write `%s`." (written owner))
-                   [ Diagnostic.replace span (written owner) ])
-               owners)
-          (Printf.sprintf
-             "`%s` is a variant of %s, and in an expression a variant is written under its type, \
-              as in `%s`."
-             name.text
-             (String.concat " and " (List.map (fun owner -> "`" ^ owner ^ "`") owners))
-             (written (List.hd owners)))))
+  match owners with
+  | owner :: other_owners ->
+      set_target state name
+        (Unknown
+           (add_diagnostic state
+              (Bare_variant { name = Written name.id; written = name.text; owner; other_owners })))
+  | [] -> Compiler_bug.raise_bug ~stage:"Resolve" "`%s` is a variant of no type" name.text
 
 let resolve_written_path state scope (first : Syntax.name) (rest : Syntax.name list)
     (last : Syntax.name) =
@@ -324,7 +292,7 @@ let resolve_type_name state scope ?(variants = false) (path : Syntax.path) =
               | None when variants && list_types_with_variant state text <> [] ->
                   report_bare_variant state path.last (list_types_with_variant state text)
               | None ->
-                  report_unknown state path.last ~expected:"a type here"
+                  report_unknown state path.last ~expected:Type_here
                     (list_type_candidates state scope
                     @ if variants then List.map Well_known.show_variant Prelude.variants else []))))
 
@@ -333,9 +301,9 @@ let find_target state (name : Syntax.name) = (lookup_current_names state).names.
 let rec resolve_type_expression state scope (type_ : Syntax.type_expression) =
   match type_.kind with
   | Path_type path -> resolve_path_type state scope path
-  | Any_type path -> resolve_path_type state scope path
   | Self_type _ -> ()
-  | Associated (base, member) -> resolve_associated_base state scope base member "type"
+  | Associated (base, member) ->
+      resolve_associated_base state scope base member Catalog.Resolve.Associated_type
   | Function_type { inputs; output; clauses } ->
       List.iter
         (fun (input : Syntax.function_input) -> resolve_type_expression state scope input.type_)
@@ -348,54 +316,41 @@ let rec resolve_type_expression state scope (type_ : Syntax.type_expression) =
           scope inputs
       in
       List.iter (resolve_clause state named) clauses
+  | View_type viewed -> resolve_type_expression state scope viewed
   | Type_error -> ()
 
-and resolve_associated_base state scope (base : Syntax.name) (member : Syntax.name) kind =
+and resolve_associated_base state scope (base : Syntax.name) (member : Syntax.name) associated =
   match String_map.find_opt base.text scope.types with
   | Some parameter -> set_target state base parameter
   | None ->
       set_target state base
         (Unknown
-           (add_diagnostic state Not_a_generic_parameter (read_span state base.id)
-              (Printf.sprintf
-                 "`%s.%s` names an associated %s, so `%s` must be a generic parameter here."
-                 base.text member.text kind base.text)))
+           (add_diagnostic state
+              (Not_a_generic_parameter
+                 { base = Written base.id; written = base.text; member = member.text; associated })))
 
 and resolve_capability_reference state scope (reference : Syntax.capability_reference) =
   match reference.kind with
   | Capability_path { path = { modules = []; last }; arguments = []; _ }
     when String_map.mem last.text scope.capability_parameters
          && not (String_map.mem last.text scope.types) ->
-      let span = read_span state last.id in
       set_target state last
         (Unknown
            (add_diagnostic state
-              ~fixes:
-                [
-                  Diagnostic.fix
-                    (Printf.sprintf "Write `generic %s`." last.text)
-                    [ Diagnostic.replace span ("generic " ^ last.text) ];
-                ]
-              Unknown_name span
-              (Printf.sprintf
-                 "`%s` is a capability parameter of this signature, which is written `generic %s` \
-                  at each use."
-                 last.text last.text)))
+              (Capability_parameter_without_generic { name = Written last.id; written = last.text })))
   | Capability_path path -> resolve_path_type state scope path
   | Self_capabilities _ -> ()
   | Associated_capabilities (base, member) ->
-      resolve_associated_base state scope base member "capability set"
+      resolve_associated_base state scope base member Catalog.Resolve.Associated_capability_set
   | Generic_capability name ->
       set_target state name
         (match String_map.find_opt name.text scope.capability_parameters with
         | Some target -> target
         | None ->
             Unknown
-              (add_diagnostic state Unknown_name (read_span state reference.id)
-                 (Printf.sprintf
-                    "`generic %s` names no capability parameter here. A capability parameter \
-                     belongs to a function, a method, or a theorem, whose signature names it."
-                    name.text)))
+              (add_diagnostic state
+                 (Unknown_generic_capability
+                    { reference = Written reference.id; written = name.text })))
 
 and resolve_path_type state scope (path : Syntax.path_type) =
   resolve_type_name state scope path.path;
@@ -418,10 +373,8 @@ and count_name state scope (name : Syntax.name) =
       | _ ->
           set_target state name
             (Unknown
-               (add_diagnostic state Not_a_constant (read_span state name.id)
-                  (Printf.sprintf
-                     "`%s` in a type argument must be a value generic parameter or a constant."
-                     name.text))))
+               (add_diagnostic state
+                  (Not_a_constant { name = Written name.id; written = name.text }))))
 
 and resolve_clause_condition state scope (condition : Syntax.condition) =
   List.iter
@@ -447,6 +400,7 @@ and resolve_clause state scope (clause : Syntax.clause) =
            :: (if scope.is_lending_method then [ ("final", Meaning Final) ] else [])))
         value
   | Decreases measures -> List.iter (resolve_expression state (enter_specification scope)) measures
+  | Modifies parts -> List.iter (resolve_expression state scope) parts
   | Cost cost -> resolve_cost state scope ~clause_words:[] cost
   | Clause_error -> ()
 
@@ -478,12 +432,7 @@ and resolve_local_value state scope (name : Syntax.name) =
       | Some Loop_element ->
           set_target state name
             (Unknown
-               (add_diagnostic state Unknown_name (read_span state name.id)
-                  (Printf.sprintf
-                     "`%s` is the loop's element, which is bound only in the loop's body: the \
-                      loop's clauses hold before the first element and after the last. Name the \
-                      elements so far with `visited`."
-                     text)))
+               (add_diagnostic state (Loop_element { name = Written name.id; written = text })))
       | (Some (Meaning_unless_defined _) | None) as word -> (
           match (find_module_item state text, word) with
           | Some item, _ when Names.Scope.is_value_kind item.kind ->
@@ -493,20 +442,10 @@ and resolve_local_value state scope (name : Syntax.name) =
           | _ ->
               if text = "null" || text = "nil" then begin
                 set_target state name
-                  (Unknown
-                     (add_diagnostic state Null (read_span state name.id)
-                        ~fixes:
-                          [
-                            Diagnostic.fix "Write `None`."
-                              [ Diagnostic.replace (read_span state name.id) "None" ];
-                          ]
-                        (Printf.sprintf
-                           "Truss has no `%s`. A value that may be missing is an `Option`, and \
-                            `None` is its empty case."
-                           text)))
+                  (Unknown (add_diagnostic state (Null { name = Written name.id; written = text })))
               end
               else
-                report_unknown state name ~expected:"a value here"
+                report_unknown state name ~expected:Value_here
                   (List.map fst (String_map.bindings scope.values)
                   @ List.filter_map
                       (fun (item : Names.entry) ->
@@ -548,14 +487,14 @@ and resolve_member_chain state scope (value : Syntax.expression) =
       | `Module -> resolve_expression_path state scope first members
       | `Ambiguous ->
           let report =
-            add_diagnostic state Ambiguous_module (read_span state first.id)
-              (Printf.sprintf
-                 "`%s` is a definition of `%s` and the first name of a package's path, so `%s.%s` \
-                  could name either. Rename the definition, or import the module and write its \
-                  last name."
-                 first.text
-                 (Path.show_module state.key.module_)
-                 first.text member.text)
+            add_diagnostic state
+              (Definition_or_package
+                 {
+                   name = Written first.id;
+                   written = first.text;
+                   module_ = state.key.module_;
+                   member = member.text;
+                 })
           in
           set_target state first (Unknown report);
           set_target state member (Unknown report)
@@ -592,11 +531,7 @@ and resolve_bracket state scope (value : Syntax.expression) base items =
               match state.lookups.find module_ name with Some item -> item.generic | None -> false
             in
             if not generic then
-              report state Not_generic (read_span state value.id)
-                (Printf.sprintf
-                   "`%s` is a function without generic parameters, so `[...]` cannot give it type \
-                    arguments, and a function cannot be indexed."
-                   name);
+              report state (Not_generic { value = Written value.id; function_ = name });
             Type_arguments
         | _ -> Index)
   in
@@ -638,18 +573,7 @@ and check_place state (written : Syntax.expression) (inner : Syntax.expression) 
   match classify_head inner with
   | `Place _ | `Unknown -> ()
   | `Not_a_place _ ->
-      let keyword_end = (read_span state inner.id).start in
-      report state Not_a_place (read_span state written.id)
-        ~fixes:
-          [
-            Diagnostic.fix "Remove the keyword."
-              [
-                Diagnostic.delete
-                  (Source.Definition_span.make (read_span state written.id).start keyword_end);
-              ];
-          ]
-        "Only a place, such as a variable, a field, or an element, can take `mut` or `own`. A \
-         temporary value is always passed as owned."
+      report state (Not_a_place { written = Written written.id; inner = Written inner.id })
 
 and resolve_expression state scope (value : Syntax.expression) =
   match value.kind with
@@ -676,7 +600,7 @@ and resolve_expression state scope (value : Syntax.expression) =
       List.iter
         (fun (argument : Syntax.argument) -> resolve_expression state scope argument.value)
         arguments
-  | Try inner | Prefix (_, inner) | Any inner | Echo inner | Parenthesized inner ->
+  | Try inner | Prefix (_, inner) | Echo inner | Parenthesized inner ->
       resolve_expression state scope inner
   | Mode (_, inner) ->
       resolve_expression state scope inner;
@@ -717,7 +641,14 @@ and resolve_expression state scope (value : Syntax.expression) =
         entries
   | Lambda { parameters; body } ->
       let inner =
-        List.fold_left (fun scope pattern_ -> bind_pattern state scope pattern_) scope parameters
+        List.fold_left
+          (fun inner ({ pattern; annotation } : Syntax.lambda_parameter) ->
+            Option.iter
+              (fun (annotation : Syntax.parameter_annotation) ->
+                resolve_type_expression state scope annotation.type_)
+              annotation;
+            bind_pattern state inner pattern)
+          scope parameters
       in
       resolve_block state inner body
   | If { condition = test; then_; else_ } ->
@@ -764,9 +695,7 @@ and resolve_arm state scope (arm_ : Syntax.arm) =
 
 and declare_value state scope (name : Syntax.name) =
   let check_shadowing existing =
-    report state Shadowed_name (read_span state name.id)
-      (Printf.sprintf "`%s` is already %s, and a name cannot shadow another. Choose another name."
-         name.text existing)
+    report state (Shadowed { name = Written name.id; written = name.text; existing })
   in
   (match String_map.find_opt name.text scope.values with
   | Some (_, existing) -> check_shadowing existing
@@ -774,12 +703,15 @@ and declare_value state scope (name : Syntax.name) =
   set_target state name Binding;
   {
     scope with
-    values = String_map.add name.text (Value_local name.id, "a local here") scope.values;
+    values = String_map.add name.text (Value_local name.id, Catalog.Resolve.Local) scope.values;
   }
 
 and declare_parameter state scope (name : Syntax.name) =
   let scope = declare_value state scope name in
-  { scope with values = String_map.add name.text (Value_local name.id, "a parameter") scope.values }
+  {
+    scope with
+    values = String_map.add name.text (Value_local name.id, Catalog.Resolve.Parameter) scope.values;
+  }
 
 and bind_pattern state scope (pattern_ : Syntax.pattern) =
   let bound = ref [] in
@@ -820,16 +752,13 @@ and resolve_pattern state scope bound (pattern_ : Syntax.pattern) =
           List.iter
             (fun ((alternative : Syntax.pattern), names) ->
               if list_texts names <> list_texts first then
-                report state Alternative_bindings (read_span state alternative.id)
-                  (Printf.sprintf
-                     "Every alternative of a pattern must bind the same names. The first binds %s, \
-                      and this one binds %s."
-                     (match list_texts first with
-                     | [] -> "none"
-                     | names -> "`" ^ String.concat "`, `" names ^ "`")
-                     (match list_texts names with
-                     | [] -> "none"
-                     | names -> "`" ^ String.concat "`, `" names ^ "`"))
+                report state
+                  (Alternative_bindings
+                     {
+                       alternative = Written alternative.id;
+                       first = list_texts first;
+                       this = list_texts names;
+                     })
               else
                 List.iter
                   (fun (name : Syntax.name) ->
@@ -852,7 +781,7 @@ and resolve_literal_pattern state scope = function
 
 and resolve_qualified_constant state scope = function
   | Module_constant { modules = []; last } ->
-      report_unknown state last ~expected:"a constant in a module here" []
+      report_unknown state last ~expected:Constant_in_module_here []
   | Module_constant { modules = first :: rest; last } ->
       resolve_written_path state scope first rest last
   | Type_constant (path, _) -> resolve_type_name state scope path
@@ -921,11 +850,8 @@ and resolve_statement state scope (statement_ : Syntax.statement) =
           String_map.iter
             (fun key _ ->
               if String_map.mem key after.values then
-                report state Shadowed_name (read_span state branch.id)
-                  (Printf.sprintf
-                     "Another branch of this `%s` block already binds `%s`, and a name cannot \
-                      shadow another. Choose another name."
-                     word key))
+                report state
+                  (Shadowed_in_branch { branch = Written branch.id; block = word; written = key }))
             bound;
           { after with values = String_map.union (fun _ left _ -> Some left) after.values bound })
         scope body.statements
@@ -945,18 +871,16 @@ and resolve_loop_clause state scope ~clause_words (written : Syntax.loop_clause)
   | Loop_decreases measures -> List.iter (resolve_expression state specification) measures
   | Loop_cost cost -> resolve_cost state scope ~clause_words cost
 
-let find_shadowed_type state scope text =
-  if String_map.mem text scope.types then Some "a generic parameter here"
+let find_shadowed_type state scope text : Catalog.Resolve.binding option =
+  if String_map.mem text scope.types then Some Generic_parameter_here
   else
     match find_module_item state text with
     | Some item when Names.Scope.is_type_kind item.kind ->
-        Some (Names.show_kind (Names.convert_named item.kind) ^ " of this module")
-    | _ -> if List.mem text Prelude.names then Some "a name in the prelude" else None
+        Some (Module_definition (Names.convert_named item.kind))
+    | _ -> if List.mem text Prelude.names then Some Prelude_name else None
 
 let report_shadowing state (name : Syntax.name) existing =
-  add_diagnostic state Shadowed_name (read_span state name.id)
-    (Printf.sprintf "`%s` is already %s, and a name cannot shadow another. Choose another name."
-       name.text existing)
+  add_diagnostic state (Shadowed { name = Written name.id; written = name.text; existing })
 
 let declare_type state scope (name : Syntax.name) target =
   Option.iter
@@ -967,7 +891,7 @@ let declare_type state scope (name : Syntax.name) target =
 
 let rec list_generic_capabilities (type_ : Syntax.type_expression) : Syntax.name list =
   match type_.kind with
-  | Path_type path | Any_type path ->
+  | Path_type path ->
       List.concat_map
         (function
           | Syntax.Type_argument argument | Constraint (_, argument) ->
@@ -980,6 +904,7 @@ let rec list_generic_capabilities (type_ : Syntax.type_expression) : Syntax.name
         inputs
       @ Option.fold ~none:[] ~some:list_generic_capabilities output
       @ list_used_generic_capabilities clauses
+  | View_type viewed -> list_generic_capabilities viewed
   | Self_type _ | Associated _ | Type_error -> []
 
 and list_used_generic_capabilities (clauses : Syntax.clause list) =
@@ -991,7 +916,7 @@ and list_used_generic_capabilities (clauses : Syntax.clause list) =
             (fun (use : Syntax.capability_use) ->
               match use.capability.kind with Generic_capability name -> Some name | _ -> None)
             uses
-      | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> [])
+      | Requires _ | Ensures _ | Decreases _ | Modifies _ | Cost _ | Clause_error -> [])
     clauses
 
 let declare_capability_parameters state scope ~(owner : Path.t)
@@ -1001,12 +926,8 @@ let declare_capability_parameters state scope ~(owner : Path.t)
   List.iter
     (fun (name : Syntax.name) ->
       if not (List.exists (fun (typed : Syntax.name) -> typed.text = name.text) constrained) then
-        report state Unconstrained_capability_parameter (read_span state name.id)
-          (Printf.sprintf
-             "`generic %s` appears only in the function's own `uses`, so no argument gives it \
-              capabilities, and it stands for none. Name it in the type of a parameter, as in \
-              `visit: (fn() uses generic %s)`."
-             name.text name.text))
+        report state
+          (Unconstrained_capability_parameter { name = Written name.id; written = name.text }))
     used;
   let parameters =
     List.fold_left
@@ -1044,7 +965,7 @@ let resolve_generics state scope ~(owner : Path.t) (generics : Syntax.generic_pa
               scope with
               values =
                 String_map.add name.text
-                  (Value_generic (make_parameter name), "a generic parameter")
+                  (Value_generic (make_parameter name), Catalog.Resolve.Generic_parameter)
                   scope.values;
             }
         | Generic_error -> scope)
@@ -1099,7 +1020,7 @@ let resolve_clauses state scope (clauses_ : Syntax.clause list) =
       match clause_.kind with
       | Requires _ | Ensures _ | Decreases _ ->
           run_in_section state Contract (fun () -> resolve_clause state scope clause_)
-      | Uses _ | Cost _ | Clause_error -> resolve_clause state scope clause_)
+      | Uses _ | Modifies _ | Cost _ | Clause_error -> resolve_clause state scope clause_)
     clauses_
 
 let resolve_signature state scope ~owner ~(broken : bool) (signature_ : Syntax.signature) =
@@ -1178,7 +1099,7 @@ let resolve_inherited scope ~(owner : Path.t) (generics : Syntax.generic_paramet
             scope with
             values =
               String_map.add name.text
-                (Value_generic (make_parameter name), "a generic parameter")
+                (Value_generic (make_parameter name), Catalog.Resolve.Generic_parameter)
                 scope.values;
           }
       | Generic_error -> scope)
@@ -1186,11 +1107,7 @@ let resolve_inherited scope ~(owner : Path.t) (generics : Syntax.generic_paramet
 
 let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.definition) option)
     (definition_ : Syntax.definition) =
-  let is_broken part =
-    Option.is_some
-      (Parts.find_syntax_error ~spans:state.spans ~syntax_errors:state.syntax_errors definition_
-         part)
-  in
+  let is_broken part = List.mem part state.broken_parts in
   let header_broken = is_broken Header and body_broken = is_broken Body in
   let scope =
     match container with
@@ -1232,7 +1149,8 @@ let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.def
             (enter_specification scope) with
             values =
               List.fold_left
-                (fun values field -> String_map.add field (Value_field field, "a field") values)
+                (fun values field ->
+                  String_map.add field (Value_field field, Catalog.Resolve.Field) values)
                 scope.values record_fields;
           }
         in
@@ -1317,7 +1235,7 @@ let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.def
         let values =
           List.fold_left
             (fun values (index, name) ->
-              String_map.add name (Value_law_parameter index, "a parameter of the law") values)
+              String_map.add name (Value_law_parameter index, Catalog.Resolve.Law_parameter) values)
             scope.values
             (List.mapi (fun index name -> (index, name)) law_parameters)
         in

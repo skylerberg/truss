@@ -45,7 +45,7 @@ val report_short_declaration : Cursor.t -> target:Syntax.expression -> operator:
 val pipe_operator :
   Cursor.t -> value:Syntax.expression -> operator:Token.t -> callee:Syntax.expression -> unit
 
-val report_lambda_annotation : Cursor.t -> from:int -> stop:int -> unit
+val report_lambda_result_type : Cursor.t -> from:int -> stop:int -> unit
 
 val report_impl_parameters :
   Cursor.t -> opening:Token.t -> closing:Token.t -> has_bounds:bool -> unit
@@ -58,12 +58,9 @@ val report_null_coalescing :
   default:Syntax.expression ->
   unit
 
-val derive_parameter_name : Syntax.expression -> string
-
 val report_trailing_lambda :
   Cursor.t ->
   callee:Syntax.expression ->
-  parameter:string ->
   opening:Token.t ->
   closing:Token.t ->
   next:Token.t ->

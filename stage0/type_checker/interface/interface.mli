@@ -4,20 +4,15 @@ module Lookups = Lookups
 module Elaborator : sig
   type t = Elaborator.t
 
-  val create :
-    Lookups.t ->
-    Resolve.resolved ->
-    spans:Source.Definition_span.t array ->
-    Environment.known_bounds Environment.scope ->
-    t
-
-  val read_span : t -> Syntax.id -> Source.Definition_span.t
+  val create : Lookups.t -> Resolve.resolved -> Environment.known_bounds Environment.scope -> t
   val list_known_bounds : t -> Properties.Bounds.t
   val find_self_type : t -> Types.ty option
-  val list_diagnostics : t -> Diagnostic.in_definition list
+  val list_diagnostics : t -> Catalog.diagnostic list
   val list_named_types : t -> (Syntax.id * Types.ty) list
   val show_path : Syntax.path -> string
+  val split_part : Syntax.expression -> (string * Syntax.name list * bool) option
   val elaborate_type : t -> Syntax.type_expression -> Types.ty
+  val elaborate_mode : Syntax.mode option -> Language.Mode.t
   val elaborate_condition : t -> Syntax.condition -> Types.condition
   val add_condition : t -> Types.condition -> t
   val find_bounded_type : t -> Syntax.expression -> Types.ty option
@@ -47,7 +42,7 @@ module Elaborator : sig
   val list_cost_operands : t -> Syntax.expression -> cost_operand list
 
   val elaborate_header :
-    Lookups.t -> Resolve.Names.key -> (Environment.header, Diagnostic.in_definition list) result
+    Lookups.t -> Resolve.Names.key -> (Environment.header, Catalog.diagnostic list) result
 
   val elaborate_definition : Lookups.t -> Resolve.Names.key -> Environment.elaborated_interface
 end
@@ -56,7 +51,7 @@ module Constants = Constants
 module Definition = Definition
 
 module Properties : sig
-  exception Recursion_limit of string
+  exception Recursion_limit of Catalog.Typing.t
 
   module Bounds : sig
     type t = Properties.Bounds.t

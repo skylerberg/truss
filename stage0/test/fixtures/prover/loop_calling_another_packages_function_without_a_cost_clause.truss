@@ -1,0 +1,10 @@
+fn has_even(values: List[Int64]) -> Bool
+  cost time O(values.length())
+{
+  for value in values {
+    if numbers.is_even(value) {
+      return true
+    }
+  }
+  false
+}

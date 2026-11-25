@@ -1,0 +1,4 @@
+fn f(items: List[Int64]) -> view List[Int64] {
+  let all = items
+  all[1..]
+}

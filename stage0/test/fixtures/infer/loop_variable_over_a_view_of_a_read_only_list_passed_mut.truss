@@ -1,6 +1,6 @@
 fn f(items: List[String]) {
-  var view = items[..]
-  for item in mut view {
+  var viewed: view List[String] = items[..]
+  for item in mut viewed {
     mut item.push("x")
   }
 }

@@ -47,10 +47,11 @@ let show_resolution = function
   | Specification_value -> "specification"
 
 type literal = Integer_value of Z.t | Float_value of float
+type element_access = Sequence_element | Lent_by_call of call
 
 type loop =
   | Integer_range of { element : Types.ty; inclusive : bool }
-  | Elements of { count : call; element : call; lends : Language.Mode.t }
+  | Elements of { count : call; element : element_access; lends : Language.Mode.t }
   | Pulled of {
       cursor : Types.ty;
       cursor_call : call option;
@@ -70,12 +71,16 @@ type pattern =
 
 type template =
   | Interpolated of { displays : call list }
-  | Tagged of { from_template : call; part : Types.ty; part_conversions : call option list }
+  | Tagged of {
+      from_template : call;
+      interpolation_type : Types.ty;
+      conversions : call option list;
+    }
 
 type conversion =
   | From_never
-  | Owned_to_view
-  | View_to_owned
+  | Array_as_list
+  | To_view
   | Function_widening
   | To_integer
   | From_integer
@@ -202,7 +207,15 @@ let map ~map_type ~map_argument ~map_capabilities (tables : t) : t =
     | Integer_range { element; inclusive } ->
         Integer_range { element = map_type element; inclusive }
     | Elements { count; element; lends } ->
-        Elements { count = map_call count; element = map_call element; lends }
+        Elements
+          {
+            count = map_call count;
+            element =
+              (match element with
+              | Sequence_element -> Sequence_element
+              | Lent_by_call element -> Lent_by_call (map_call element));
+            lends;
+          }
     | Pulled { cursor; cursor_call; remaining } ->
         Pulled
           {
@@ -228,13 +241,13 @@ let map ~map_type ~map_argument ~map_capabilities (tables : t) : t =
           }
     | Template (Interpolated { displays }) ->
         Template (Interpolated { displays = List.map map_call displays })
-    | Template (Tagged { from_template; part; part_conversions }) ->
+    | Template (Tagged { from_template; interpolation_type; conversions }) ->
         Template
           (Tagged
              {
                from_template = map_call from_template;
-               part = map_type part;
-               part_conversions = List.map (Option.map map_call) part_conversions;
+               interpolation_type = map_type interpolation_type;
+               conversions = List.map (Option.map map_call) conversions;
              })
     | Specification_call (Final { part }) -> Specification_call (Final { part = map_type part })
     | Specification_call (Method_cost cost) ->
@@ -306,7 +319,8 @@ let list_arguments_at (tables : t) id =
   in
   let list_loop = function
     | Integer_range { element; _ } -> [ Types.Type element ]
-    | Elements { count; element; _ } -> list_call count @ list_call element
+    | Elements { count; element = Sequence_element; _ } -> list_call count
+    | Elements { count; element = Lent_by_call element; _ } -> list_call count @ list_call element
     | Pulled { cursor; cursor_call; remaining; _ } ->
         (Types.Type cursor :: Option.fold ~none:[] ~some:list_call cursor_call)
         @ Option.fold ~none:[]
@@ -333,9 +347,9 @@ let list_arguments_at (tables : t) id =
   | Some (Converted_literal { elements = Map_entry { key; value }; call }) ->
       Types.Type key :: Types.Type value :: list_call call
   | Some (Template (Interpolated { displays })) -> List.concat_map list_call displays
-  | Some (Template (Tagged { from_template; part; part_conversions })) ->
-      (Types.Type part :: list_call from_template)
-      @ List.concat_map (Option.fold ~none:[] ~some:list_call) part_conversions
+  | Some (Template (Tagged { from_template; interpolation_type; conversions })) ->
+      (Types.Type interpolation_type :: list_call from_template)
+      @ List.concat_map (Option.fold ~none:[] ~some:list_call) conversions
   | Some (Specification_call (Final { part })) -> [ Types.Type part ]
   | Some (Specification_call (Method_cost { trait; self_type; _ })) ->
       Types.Type self_type :: list_trait trait

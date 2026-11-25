@@ -84,24 +84,24 @@ type maker = {
 let makers =
   [
     {
-      maker = "a slice";
-      type_ = Some "Slice[Int64]";
+      maker = "a range";
+      type_ = Some "view List[Int64]";
       make = (fun ~suffix:_ place -> ([], place ^ "[0..2]"));
     };
     {
-      maker = "a method that gives a slice";
-      type_ = Some "Slice[Int64]";
-      make = (fun ~suffix:_ place -> ([], place ^ ".slice()"));
+      maker = "a method that gives a view";
+      type_ = Some "view List[Int64]";
+      make = (fun ~suffix:_ place -> ([], place ^ ".split_at(1).first"));
     };
     {
-      maker = "a function that gives a slice";
-      type_ = Some "Slice[Int64]";
+      maker = "a function that gives a view";
+      type_ = Some "view List[Int64]";
       make = (fun ~suffix:_ place -> ([], Printf.sprintf "first_of(%s)" place));
     };
     {
-      maker = "a record that holds a slice";
+      maker = "a record that holds a view";
       type_ = Some "Window";
-      make = (fun ~suffix:_ place -> ([], Printf.sprintf "Window(view: %s[0..2])" place));
+      make = (fun ~suffix:_ place -> ([], Printf.sprintf "Window(viewed: %s[0..2])" place));
     };
     {
       maker = "a lambda that captures";
@@ -112,59 +112,82 @@ let makers =
             "built" ^ suffix ));
     };
     { maker = "a cursor"; type_ = None; make = (fun ~suffix:_ place -> ([], place ^ ".cursor()")) };
-    {
-      maker = "an any value";
-      type_ = Some "any Sized";
-      make =
-        (fun ~suffix place ->
-          ( [ Printf.sprintf "let built%s: any Sized = any Window(view: %s[0..2])" suffix place ],
-            "own built" ^ suffix ));
-    };
   ]
 
 type holder = {
   holder : string;
-  hold : view:string -> other:(unit -> string) -> type_:string option -> string list option;
+  hold : viewed:string -> other:(unit -> string) -> type_:string option -> string list option;
 }
 
 let holders =
   let make_simple_holder holder hold =
-    { holder; hold = (fun ~view ~other:_ ~type_:_ -> Some (hold view)) }
+    { holder; hold = (fun ~viewed ~other:_ ~type_ -> Some (hold viewed type_)) }
   in
   let make_typed_holder holder hold =
-    { holder; hold = (fun ~view ~other:_ ~type_ -> Option.map (hold view) type_) }
+    { holder; hold = (fun ~viewed ~other:_ ~type_ -> Option.map (hold viewed) type_) }
   in
   let with_other holder hold =
-    { holder; hold = (fun ~view ~other ~type_:_ -> Some (hold view (other ()))) }
+    { holder; hold = (fun ~viewed ~other ~type_ -> Some (hold viewed (other ()) type_)) }
+  in
+  let declare keyword ~holding type_ =
+    match type_ with
+    | Some type_ -> Printf.sprintf "%s held: %s" keyword (holding type_)
+    | None -> keyword ^ " held"
   in
   [
-    make_simple_holder "a name" (fun view -> [ "let held = " ^ view ]);
-    make_simple_holder "a name bound to another name" (fun view ->
-        [ "let first = " ^ view; "let held = first" ]);
-    make_simple_holder "a field" (fun view -> [ Printf.sprintf "let held = Held(view: %s)" view ]);
-    make_simple_holder "a field of a field" (fun view ->
-        [ Printf.sprintf "let held = Held(view: Held(view: %s))" view ]);
-    make_simple_holder "an Option" (fun view -> [ Printf.sprintf "let held = Some(%s)" view ]);
-    make_simple_holder "a list literal" (fun view -> [ Printf.sprintf "let held = [%s]" view ]);
-    make_typed_holder "a list pushed to" (fun view type_ ->
-        [ Printf.sprintf "var held: List[%s] = []" type_; Printf.sprintf "mut held.push(%s)" view ]);
-    make_typed_holder "a list that a function pushes to" (fun view type_ ->
+    make_simple_holder "a name" (fun viewed _ -> [ "let held = " ^ viewed ]);
+    make_simple_holder "a name bound to another name" (fun viewed _ ->
+        [ "let first = " ^ viewed; "let held = first" ]);
+    make_simple_holder "a field" (fun viewed type_ ->
+        [
+          Printf.sprintf "%s = Held(viewed: %s)"
+            (declare "let" ~holding:(Printf.sprintf "Held[%s]") type_)
+            viewed;
+        ]);
+    make_simple_holder "a field of a field" (fun viewed type_ ->
+        [
+          Printf.sprintf "%s = Held(viewed: Held(viewed: %s))"
+            (declare "let" ~holding:(Printf.sprintf "Held[Held[%s]]") type_)
+            viewed;
+        ]);
+    make_simple_holder "an Option" (fun viewed type_ ->
+        [
+          Printf.sprintf "%s = Some(%s)"
+            (declare "let" ~holding:(Printf.sprintf "Option[%s]") type_)
+            viewed;
+        ]);
+    make_simple_holder "a list literal" (fun viewed type_ ->
+        [
+          Printf.sprintf "%s = [%s]"
+            (declare "let" ~holding:(Printf.sprintf "List[%s]") type_)
+            viewed;
+        ]);
+    make_typed_holder "a list pushed to" (fun viewed type_ ->
+        [
+          Printf.sprintf "var held: List[%s] = []" type_; Printf.sprintf "mut held.push(%s)" viewed;
+        ]);
+    make_typed_holder "a list that a function pushes to" (fun viewed type_ ->
         [
           Printf.sprintf "var held: List[%s] = []" type_;
-          Printf.sprintf "put(mut held, value: %s)" view;
+          Printf.sprintf "put(mut held, value: %s)" viewed;
         ]);
-    make_simple_holder "the result of a function given it" (fun view ->
-        [ Printf.sprintf "let held = same(%s)" view ]);
-    with_other "a name assigned later" (fun view other ->
-        [ "var held = " ^ other; "held = " ^ view ]);
-    with_other "a field assigned later" (fun view other ->
-        [ Printf.sprintf "var held = Held(view: %s)" other; "held.view = " ^ view ]);
-    with_other "the value of an if" (fun view other ->
-        [ Printf.sprintf "let held = if flag { %s } else { %s }" view other ]);
-    with_other "the value of a match" (fun view other ->
-        [ "let held = match flag {"; "  true => " ^ view; "  false => " ^ other; "}" ]);
-    make_typed_holder "a lambda that captures it" (fun view _ ->
-        [ "let inner = " ^ view; "let held: fn() -> Unit = fn() { look(inner) }" ]);
+    make_simple_holder "the result of a function given it" (fun viewed type_ ->
+        [ Printf.sprintf "%s = same(%s)" (declare "let" ~holding:Fun.id type_) viewed ]);
+    with_other "a name assigned later" (fun viewed other type_ ->
+        [ Printf.sprintf "%s = %s" (declare "var" ~holding:Fun.id type_) other; "held = " ^ viewed ]);
+    with_other "a field assigned later" (fun viewed other type_ ->
+        [
+          Printf.sprintf "%s = Held(viewed: %s)"
+            (declare "var" ~holding:(Printf.sprintf "Held[%s]") type_)
+            other;
+          "held.viewed = " ^ viewed;
+        ]);
+    with_other "the value of an if" (fun viewed other _ ->
+        [ Printf.sprintf "let held = if flag { %s } else { %s }" viewed other ]);
+    with_other "the value of a match" (fun viewed other _ ->
+        [ "let held = match flag {"; "  true => " ^ viewed; "  false => " ^ other; "}" ]);
+    make_typed_holder "a lambda that captures it" (fun viewed _ ->
+        [ "let inner = " ^ viewed; "let held: fn() -> Unit = fn() { look(inner) }" ]);
   ]
 
 let sources_and_holders =
@@ -209,13 +232,13 @@ let generate (maker : maker) =
   in
   List.iter
     (fun ((source : source), (holder : holder)) ->
-      let first, view = maker.make ~suffix:"" source.place in
+      let first, viewed = maker.make ~suffix:"" source.place in
       let needs_other = ref false in
       let other () =
         needs_other := true;
         snd (maker.make ~suffix:"_other" "other")
       in
-      match holder.hold ~view ~other ~type_:maker.type_ with
+      match holder.hold ~viewed ~other ~type_:maker.type_ with
       | None -> ()
       | Some hold ->
           let other_first =

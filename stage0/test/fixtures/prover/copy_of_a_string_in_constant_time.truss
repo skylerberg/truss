@@ -1,0 +1,5 @@
+fn duplicate(text: String) -> String
+  cost time O(1)
+{
+  text.copy()
+}

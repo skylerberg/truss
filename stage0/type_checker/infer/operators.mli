@@ -1,11 +1,8 @@
 val select_arithmetic_method : Syntax.arithmetic -> Well_known.method_ * Well_known.associated
-val infer_bitwise_result : State.state -> Source.Definition_span.t -> Types.ty -> Types.ty
+val infer_bitwise_result : State.state -> Core.origin -> Types.ty -> Types.ty
 
 val infer_shift_result :
-  State.state ->
-  left:Source.Definition_span.t * Types.ty ->
-  right:Source.Definition_span.t * Types.ty ->
-  Types.ty
+  State.state -> left:Core.origin * Types.ty -> right:Core.origin * Types.ty -> Types.ty
 
 val try_ : State.state -> State.env -> Syntax.expression -> Syntax.expression -> Types.ty
 
@@ -35,14 +32,6 @@ val check_binary :
   ?expected:Types.ty ->
   Syntax.expression ->
   Syntax.binary ->
-  Syntax.expression ->
-  Syntax.expression ->
-  Types.ty
-
-val check_any :
-  State.state ->
-  State.env ->
-  ?expected:Types.ty ->
   Syntax.expression ->
   Syntax.expression ->
   Types.ty

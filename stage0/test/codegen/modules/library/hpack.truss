@@ -1,23 +1,23 @@
 use standard.hex
 use standard.http.hpack
 
-fn field(name: StringSlice, value: StringSlice) -> hpack.Field {
-  hpack.Field(name: name.to_string(), value: value.to_string())
+fn field(name: String, value: String) -> hpack.Field {
+  hpack.Field(name: name.copy(), value: value.copy())
 }
 
-fn check(decoder: mut hpack.Decoder, block: StringSlice, expected: own List[hpack.Field]) -> Bool
+fn check(decoder: mut hpack.Decoder, block: String, expected: own List[hpack.Field]) -> Bool
   uses Panic, RunForever
 {
   let bytes = hex.decode(block).expect("hexadecimal")
-  mut decoder.decode(bytes.slice()) == Ok(own expected)
+  mut decoder.decode(bytes) == Ok(own expected)
 }
 
-fn fails(block: StringSlice) -> Bool
+fn fails(block: String) -> Bool
   uses Panic, RunForever
 {
   let bytes = hex.decode(block).expect("hexadecimal")
   var decoder = hpack.Decoder.new()
-  mut decoder.decode(bytes.slice()) is Err(_)
+  mut decoder.decode(bytes) is Err(_)
 }
 
 test "RFC 7541 C.3: requests without Huffman coding" uses Panic, RunForever {
@@ -67,14 +67,14 @@ test "an encoder's blocks decode to its fields, and repeated fields shrink to in
   var decoder = hpack.Decoder.new(limit: 256)
   let first_block = mut encoder.encode(first)
   let second_block = mut encoder.encode(second)
-  let decoded = mut decoder.decode(first_block.slice())
+  let decoded = mut decoder.decode(first_block)
   assert decoded is Ok(fields) && fields.length() == 6 && fields[0] == first[0] && fields[3] == first[3]
     && fields[4].is_sensitive && fields[5].is_sensitive && fields[5].value == "abc"
-  assert mut decoder.decode(second_block.slice()) == Ok(second.copy())
+  assert mut decoder.decode(second_block) == Ok(second.copy())
   assert second_block.length() < 10
   mut encoder.set_limit(0)
   let emptied = mut encoder.encode(second)
-  assert mut decoder.decode(emptied.slice()) == Ok(own second)
+  assert mut decoder.decode(emptied) == Ok(own second)
 }
 
 test "malformed header blocks are rejected" uses Panic, RunForever {

@@ -1,8 +1,6 @@
+val keeps_potential : Intrinsic.operation -> bool
 val declare_buffer_slack : State.context -> Types.ty -> Logic.term -> Logic.term
-
-val assume_same_length :
-  State.context -> State.frame -> Types.ty -> before:Logic.term -> after:Logic.term -> unit
-
+val replace_elements : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term
 val find_sequence_element : State.context -> State.frame -> Types.ty -> Types.ty
 
 val read_sequence_element :
@@ -25,10 +23,11 @@ val write_sequence_range :
   Logic.term ->
   start:Logic.term ->
   stop:Logic.term ->
+  range_type:Types.ty ->
   Logic.term ->
   Logic.term
 
-val apply_slice :
+val apply_range :
   State.context ->
   State.frame ->
   node:Core.id ->

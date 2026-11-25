@@ -1,0 +1,17 @@
+type Deck(cards: List[UInt8])
+
+impl IntoCursor for Deck {
+  type Cursor = List[UInt8]
+
+  fn cursor(own self) -> List[UInt8] {
+    own self.cards
+  }
+}
+
+fn total(deck: own Deck) -> UInt8 {
+  var sum: UInt8 = 0
+  for card in own deck {
+    sum = sum.wrapping_add(card)
+  }
+  sum
+}

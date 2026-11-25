@@ -94,14 +94,14 @@ public trait Reader {
 }
 
 public trait Writer {
-  fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
+  fn write(mut self, bytes: List[UInt8]) -> Result[UInt64, SystemError]
     uses Handles
     ensures !(result is Ok(count) && count > bytes.length())
 
   fn flush(mut self) -> Result[Unit, SystemError]
     uses Handles
 
-  fn write_all(mut self, bytes: Slice[UInt8]) -> Result[Unit, SystemError]
+  fn write_all(mut self, bytes: List[UInt8]) -> Result[Unit, SystemError]
     uses Handles
   {
     var written: UInt64 = 0
@@ -117,7 +117,7 @@ public trait Writer {
     Ok(Unit)
   }
 
-  fn write_text(mut self, text: StringSlice) -> Result[Unit, SystemError]
+  fn write_text(mut self, text: String) -> Result[Unit, SystemError]
     uses Handles
   {
     mut self.write_all(text.bytes())
@@ -130,14 +130,14 @@ public trait Duplex {
     ensures !(result is Ok(count) && (count > limit || buffer.length() != old(buffer.length()) + count))
     ensures !(result is Err(_) && buffer.length() != old(buffer.length()))
 
-  fn send(self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
+  fn send(self, bytes: List[UInt8]) -> Result[UInt64, SystemError]
     uses Handles, Tasks, RunForever
     ensures !(result is Ok(count) && count > bytes.length())
 
   fn close_sending(self) -> Result[Unit, SystemError]
     uses Handles, Tasks, RunForever
 
-  fn send_all(self, bytes: Slice[UInt8]) -> Result[Unit, SystemError]
+  fn send_all(self, bytes: List[UInt8]) -> Result[Unit, SystemError]
     uses Handles, Tasks, RunForever
   {
     var sent: UInt64 = 0
@@ -195,16 +195,16 @@ public trait Seek {
   }
 }
 
-public opaque type ByteReader(bytes: Slice[UInt8], position: UInt64)
+public opaque type ByteReader(bytes: view List[UInt8], position: UInt64)
   invariant position <= bytes.length()
 
-public fn ByteReader.new(bytes: Slice[UInt8]) -> ByteReader
+public fn ByteReader.new(bytes: List[UInt8]) -> ByteReader
   cost time O(1)
 {
   ByteReader(bytes: bytes, position: 0)
 }
 
-public fn ByteReader.remaining(self) -> Slice[UInt8]
+public fn ByteReader.remaining(self) -> view List[UInt8]
   ensures result.length() == self.bytes.length() - self.position
   cost time O(1)
 {
@@ -215,7 +215,7 @@ impl Reader for ByteReader {
   fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError] {
     let left = self.bytes.length() - self.position
     let count = if limit < left { limit } else { left }
-    mut buffer.append_slice(self.bytes[self.position..self.position + count])
+    mut buffer.append_items(self.bytes[self.position..self.position + count])
     self.position += count
     Ok(count)
   }
@@ -229,10 +229,10 @@ public fn ByteWriter.new() -> ByteWriter
   ByteWriter(bytes: [])
 }
 
-public fn ByteWriter.written(self) -> Slice[UInt8]
+public fn ByteWriter.written(self) -> view List[UInt8]
   cost time O(1)
 {
-  self.bytes.slice()
+  self.bytes
 }
 
 public fn ByteWriter.finish(own self) -> List[UInt8]
@@ -242,8 +242,8 @@ public fn ByteWriter.finish(own self) -> List[UInt8]
 }
 
 impl Writer for ByteWriter {
-  fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
-    mut self.bytes.append_slice(bytes)
+  fn write(mut self, bytes: List[UInt8]) -> Result[UInt64, SystemError] {
+    mut self.bytes.append_items(bytes)
     Ok(bytes.length())
   }
 
@@ -272,7 +272,7 @@ public fn ByteQueue.is_empty(self) -> Bool
   self.length() == 0
 }
 
-public fn ByteQueue.bytes(self) -> Slice[UInt8]
+public fn ByteQueue.bytes(self) -> view List[UInt8]
   ensures result.length() == self.length()
   cost time O(1)
   cost allocations == 0
@@ -291,7 +291,7 @@ public fn ByteQueue.take(mut self, count: UInt64) -> List[UInt8]
   if count > self.length() {
     Panic.crash("the queue holds fewer bytes")
   }
-  let taken = self.storage[self.start..self.start + count].to_list()
+  let taken = self.storage[self.start..self.start + count].copy()
   self.start += count
   taken
 }
@@ -306,7 +306,7 @@ public fn ByteQueue.take_all(mut self) -> List[UInt8]
   if self.start == 0 {
     return map.exchange(mut self.storage, value: [])
   }
-  let taken = self.storage[self.start..].to_list()
+  let taken = self.storage[self.start..].copy()
   self.start = self.storage.length()
   taken
 }
@@ -345,12 +345,12 @@ fn compact(queue: mut ByteQueue)
   }
 }
 
-public fn ByteQueue.append(mut self, bytes: Slice[UInt8])
+public fn ByteQueue.append(mut self, bytes: List[UInt8])
   ensures self.length() == old(self.length()) + bytes.length()
   cost amortized time O(bytes.length())
 {
   compact(mut self)
-  mut self.storage.append_slice(bytes)
+  mut self.storage.append_items(bytes)
 }
 
 public fn ByteQueue.append_list(mut self, bytes: own List[UInt8])
@@ -361,7 +361,7 @@ public fn ByteQueue.append_list(mut self, bytes: own List[UInt8])
     self.storage = own bytes
     self.start = 0
   } else {
-    mut self.append(bytes.slice())
+    mut self.append(bytes)
   }
 }
 
@@ -436,7 +436,7 @@ public fn BufferedReader[Source: Reader].read_until(
       at_delimiter = unread[index] == delimiter
       index += 1
     }
-    mut buffer.append_slice(unread[..index])
+    mut buffer.append_items(unread[..index])
     mut self.pending.skip(index)
     consumed += index
     if at_delimiter || consumed == limit {
@@ -469,7 +469,7 @@ public fn BufferedReader[Source: Reader].read_line(mut self) -> Result[Option[St
   }
 }
 
-public fn BufferedReader[Source: Reader].peek(mut self, count: UInt64) -> Result[Slice[UInt8], SystemError]
+public fn BufferedReader[Source: Reader].peek(mut self, count: UInt64) -> Result[view List[UInt8], SystemError]
   uses Handles, RunForever
   ensures !(result is Ok(seen) && seen.length() > count)
 {
@@ -514,7 +514,7 @@ impl Reader for BufferedReader[Source: Reader] {
     }
     let available = self.pending.length()
     let count = if limit < available { limit } else { available }
-    mut buffer.append_slice(self.pending.bytes()[..count])
+    mut buffer.append_items(self.pending.bytes()[..count])
     mut self.pending.skip(count)
     Ok(count)
   }
@@ -548,7 +548,7 @@ public fn BufferedWriter[Sink: Writer].new(sink: own Sink, capacity: UInt64 = 65
   BufferedWriter(sink: own sink, pending: [], capacity: capacity)
 }
 
-public fn BufferedWriter[Sink: Writer].write_line(mut self, text: StringSlice) -> Result[Unit, SystemError]
+public fn BufferedWriter[Sink: Writer].write_line(mut self, text: String) -> Result[Unit, SystemError]
   uses Handles
 {
   mut self.write_all(text.bytes())?
@@ -565,7 +565,7 @@ public fn BufferedWriter[Sink: Writer].finish(own self) -> Sink
 }
 
 impl Writer for BufferedWriter[Sink: Writer] {
-  fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
+  fn write(mut self, bytes: List[UInt8]) -> Result[UInt64, SystemError]
     uses Handles
   {
     if bytes.length() >= self.capacity {
@@ -575,7 +575,7 @@ impl Writer for BufferedWriter[Sink: Writer] {
     if self.pending.length() > self.capacity - bytes.length() {
       mut self.flush()?
     }
-    mut self.pending.append_slice(bytes)
+    mut self.pending.append_items(bytes)
     Ok(bytes.length())
   }
 
@@ -583,7 +583,7 @@ impl Writer for BufferedWriter[Sink: Writer] {
     uses Handles
     ensures !(result is Ok(_) && self.pending.length() != 0)
   {
-    mut self.sink.write_all(self.pending.slice())?
+    mut self.sink.write_all(self.pending)?
     mut self.pending.clear()
     mut self.sink.flush()
   }
@@ -597,7 +597,7 @@ public fn copy[Source: Reader, Sink: Writer](source: mut Source, sink: mut Sink)
   var more = true
   while more {
     let count = mut source.read(mut scratch, limit: 65536)?
-    mut sink.write_all(scratch.slice())?
+    mut sink.write_all(scratch)?
     copied = copied.saturating_add(count)
     mut scratch.clear()
     more = count > 0
@@ -636,7 +636,7 @@ impl Handles for NoHandles {
     Err(SystemError.Closed)
   }
 
-  fn write(self, handle: Handle, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
+  fn write(self, handle: Handle, bytes: List[UInt8]) -> Result[UInt64, SystemError] {
     Err(SystemError.Closed)
   }
 
@@ -650,7 +650,7 @@ impl Handles for NoHandles {
     Err(SystemError.Closed)
   }
 
-  fn write_at(self, handle: Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
+  fn write_at(self, handle: Handle, offset: UInt64, bytes: List[UInt8]) -> Result[UInt64, SystemError] {
     Err(SystemError.Closed)
   }
 
@@ -702,7 +702,7 @@ impl Handles for NoHandles {
   fn send_to(
     self,
     socket: Handle,
-    bytes: Slice[UInt8],
+    bytes: List[UInt8],
     address: network.SocketAddress,
   ) -> Result[UInt64, SystemError] {
     Err(SystemError.Closed)
