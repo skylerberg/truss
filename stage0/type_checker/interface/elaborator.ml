@@ -144,10 +144,6 @@ let resolve_parameter context (name : Syntax.name) =
   | Some (Unknown report) -> Error report
   | _ -> raise_bug "`%s` is not resolved as a generic parameter" name.text
 
-let show_path (path : Syntax.path) =
-  String.concat "."
-    (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
-
 let find_literal_bound (bound : Syntax.bound) : Types.cost_bound option =
   match bound with
   | Big_o { kind = Integer _; _ } -> Some Order_of
@@ -256,13 +252,13 @@ and elaborate_count_name context (name : Syntax.name) : Types.argument =
       | Error error ->
           Types.Value
             (Value_error
-               (record_diagnostic context.diagnostics
-                  (Count_error { at = Written name.id; written = name.text; error }))))
+               (record_diagnostic context.diagnostics (Count_error { at = Written name.id; error })))
+      )
   | Some (Unknown report) -> Types.Type (Types.Error report)
   | _ -> raise_bug "`%s` is not resolved as a type argument" name.text
 
-and check_arity context (path : Syntax.path_type) shown expected :
-    (unit, Catalog.reported) Stdlib.result =
+and check_arity context (path : Syntax.path_type) expected : (unit, Catalog.reported) Stdlib.result
+    =
   match expected with
   | None -> Ok ()
   | Some expected -> (
@@ -276,7 +272,7 @@ and check_arity context (path : Syntax.path_type) shown expected :
              (Arity
                 {
                   at = Written path.id;
-                  written = shown;
+                  written = Catalog.cover_path path.path;
                   expected = List.length expected;
                   given = argument_count;
                 }))
@@ -292,7 +288,12 @@ and check_arity context (path : Syntax.path_type) shown expected :
                    [
                      record_diagnostic context.diagnostics
                        (Argument_kind
-                          { at = Written path.id; written = shown; parameter = name; mismatch });
+                          {
+                            at = Written path.id;
+                            written = Catalog.cover_path path.path;
+                            parameter = name;
+                            mismatch;
+                          });
                    ]
                  in
                  match (kind, is_value) with
@@ -304,10 +305,10 @@ and check_arity context (path : Syntax.path_type) shown expected :
         match errors with [] -> Ok () | error :: _ -> Error error)
 
 and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
-  let shown = show_path path.path in
+  let written = Catalog.cover_path path.path in
   match find_target context path.path.last with
   | Some (Type_parameter _) when path.arguments <> [] ->
-      report_error_type context (Arguments_to_parameter { at = Written path.id; written = shown })
+      report_error_type context (Arguments_to_parameter { at = Written path.id; written })
   | Some (Type_parameter parameter) -> (
       match Parameter_table.find_opt context.broken_parameters parameter with
       | Some report -> Types.Error report
@@ -319,7 +320,7 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
       | Some _ | None -> (
           let arguments = elaborate_arguments context path in
           match
-            check_arity context path shown
+            check_arity context path
               (Resolve.Names.find_generics context.lookups.names definition_path)
           with
           | Error report -> Types.Error report
@@ -328,15 +329,15 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
               context.named := (path.id, type_) :: !(context.named);
               type_))
   | Some (Definition (Trait, _)) ->
-      report_error_type context (Trait_as_type { at = Written path.id; written = shown })
+      report_error_type context (Trait_as_type { at = Written path.id; written })
   | Some (Definition (Capability, _)) ->
-      report_error_type context (Capability_as_type { at = Written path.id; written = shown })
+      report_error_type context (Capability_as_type { at = Written path.id; written })
   | Some (Unknown report) -> Types.Error report
-  | _ -> raise_bug "`%s` is not resolved as a type" shown
+  | _ -> raise_bug "`%s` is not resolved as a type" (Syntax_print.show_path path.path)
 
 and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_type) :
     (Types.trait_reference, Catalog.reported) Stdlib.result =
-  let shown = show_path path.path in
+  let written = Catalog.cover_path path.path in
   let build_trait_reference trait : (Types.trait_reference, Catalog.reported) Stdlib.result =
     let associated =
       List.sort compare
@@ -347,9 +348,7 @@ and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_
            path.arguments)
     in
     let trait_arguments = elaborate_arguments context path in
-    match
-      check_arity context path shown (Resolve.Names.find_generics context.lookups.names trait)
-    with
+    match check_arity context path (Resolve.Names.find_generics context.lookups.names trait) with
     | Error report -> Error report
     | Ok () -> Ok { trait; trait_arguments; associated }
   in
@@ -359,13 +358,13 @@ and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_
   | Some (Definition _) ->
       Error
         (record_diagnostic context.diagnostics
-           (Not_a_trait { at = Written path.id; written = shown; is_parameter = false }))
+           (Not_a_trait { at = Written path.id; written; is_parameter = false }))
   | Some (Type_parameter _) ->
       Error
         (record_diagnostic context.diagnostics
-           (Not_a_trait { at = Written path.id; written = shown; is_parameter = true }))
+           (Not_a_trait { at = Written path.id; written; is_parameter = true }))
   | Some (Unknown report) -> Error report
-  | _ -> raise_bug "`%s` is not resolved as a trait" shown
+  | _ -> raise_bug "`%s` is not resolved as a trait" (Syntax_print.show_path path.path)
 
 and elaborate_condition context (written : Syntax.condition) : Types.condition =
   Types.make_condition
@@ -407,17 +406,17 @@ and elaborate_trait_bounds context paths =
     List.find_map (function Error report -> Some report | Ok _ -> None) references )
 
 and elaborate_capability_path context (path : Syntax.path_type) : Types.capability list =
-  let shown = show_path path.path in
+  let written = Catalog.cover_path path.path in
   match find_target context path.path.last with
   | Some (Type_parameter _) ->
       report_error_capability context
-        (Not_a_capability { at = Written path.id; written = shown; is_type_parameter = true })
+        (Not_a_capability { at = Written path.id; written; is_type_parameter = true })
   | Some (Definition (Capability, path_)) -> [ Types.make_capability path_ ]
   | Some (Definition _) ->
       report_error_capability context
-        (Not_a_capability { at = Written path.id; written = shown; is_type_parameter = false })
+        (Not_a_capability { at = Written path.id; written; is_type_parameter = false })
   | Some (Unknown report) -> [ Types.Capability_error report ]
-  | _ -> raise_bug "`%s` is not resolved as a capability" shown
+  | _ -> raise_bug "`%s` is not resolved as a capability" (Syntax_print.show_path path.path)
 
 and find_capability_projection context base traits (key : Syntax.name) =
   List.find_map
@@ -547,7 +546,7 @@ and elaborate_costs context clauses : (Types.cost list, Catalog.reported) Stdlib
   let report_error diagnostic = Error (record_diagnostic context.diagnostics diagnostic) in
   let elaborate_counted (path : Syntax.path_type) (method_ : Syntax.name option) :
       (Types.resource, Catalog.reported) Stdlib.result =
-    let shown = show_path path.path in
+    let written = Catalog.cover_path path.path in
     match find_target context path.path.last with
     | Some (Definition (Capability, capability)) -> (
         match method_ with
@@ -557,7 +556,7 @@ and elaborate_costs context clauses : (Types.cost list, Catalog.reported) Stdlib
                     (Path.make_capability_method capability method_.text)) ->
             report_error
               (Unknown_capability_method
-                 { at = Written method_.id; written = shown; method_ = method_.text })
+                 { at = Written method_.id; written; method_ = method_.text })
         | _ ->
             Ok
               (Calls
@@ -566,7 +565,7 @@ and elaborate_costs context clauses : (Types.cost list, Catalog.reported) Stdlib
                    method_ = Option.map (fun (method_ : Syntax.name) -> method_.text) method_;
                  }))
     | Some (Unknown report) -> Error report
-    | _ -> report_error (Calls_not_a_capability { at = Written path.id; written = shown })
+    | _ -> report_error (Calls_not_a_capability { at = Written path.id; written })
   in
   let costs =
     List.filter_map
@@ -1013,7 +1012,7 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
               (Head_arity
                  {
                    at = Written head.id;
-                   written = show_path head.path;
+                   written = Catalog.cover_path head.path;
                    expected = List.length expected;
                    given = List.length generics;
                  })
@@ -1031,11 +1030,11 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
           (Head_not_a_type
              {
                at = Written head.id;
-               written = show_path head.path;
+               written = Catalog.cover_path head.path;
                kind = Resolve.Names.convert_named kind;
              }) )
   | Some (Unknown report) -> (generics, Types.Error report)
-  | _ -> raise_bug "the type head `%s` is not resolved" (show_path head.path)
+  | _ -> raise_bug "the type head `%s` is not resolved" (Syntax_print.show_path head.path)
 
 let elaborate_fields context (written : Syntax.field list) =
   List.filter_map
@@ -1401,7 +1400,9 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let resolved = lookups.read_resolved Interface key in
   let definition = lookups.names.read_definition key in
   let path = key.path in
-  Compiler_bug.run_while_doing ~stage:"Interface" (Resolve.Names.show_key key) (fun () ->
+  Compiler_bug.run_while_doing ~stage:"Interface"
+    (fun () -> Resolve.Names.show_key key)
+    (fun () ->
       let context = create_declared lookups resolved empty_scope in
       let make_error_interface () =
         make_elaborated_interface context (Error_interface Catalog.reported_elsewhere)

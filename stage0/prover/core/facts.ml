@@ -3,7 +3,7 @@ let make_variable ?(numbers = []) label = Logic.Symbol.Variable { label; numbers
 type unsupported = {
   location : Obligation.location;
   construct : Catalog.Prover.construct;
-  foreign_definition : string option;
+  foreign_definition : Path.t option;
 }
 
 exception Unsupported of unsupported
@@ -26,7 +26,7 @@ let run_in_source (context : State.context) (source : State.source) read =
   | Unsupported ({ foreign_definition = None; _ } as unsupported)
   when not (is_home context source)
   ->
-    raise (Unsupported { unsupported with foreign_definition = Some source.name })
+    raise (Unsupported { unsupported with foreign_definition = Some source.definition })
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format
 let list_method_type_arguments ~self_type arguments = Types.Type self_type :: arguments
@@ -222,71 +222,63 @@ let find_parameter_name (context : State.context) symbol =
     match List.assoc_opt symbol context.values with Some name -> Some name | None -> Some "self"
   else None
 
-let collect_printed printed =
-  if List.mem None printed then None else Some (List.filter_map Fun.id printed)
+let collect_codes codes = if List.mem None codes then None else Some (List.filter_map Fun.id codes)
 
-let show_truss_value context term =
-  let parenthesize level inner text = if inner < level then "(" ^ text ^ ")" else text in
-  let rec show_arithmetic level = function
-    | Logic.Operation (Add, (_ :: _ :: _ as parts)) -> show_infix level 1 " + " parts
-    | Logic.Operation (Multiply, (_ :: _ :: _ as parts)) -> show_infix level 2 " * " parts
-    | Logic.Operation (Subtract, [ left; right ]) ->
-        Option.map
-          (fun printed -> parenthesize level 1 (String.concat " - " printed))
-          (collect_printed [ show_arithmetic 1 left; show_arithmetic 2 right ])
-    | Logic.Operation (Negate, [ Logic.Operation (Negate, [ inner ]) ]) ->
-        show_arithmetic level inner
-    | Logic.Operation (Negate, [ inner ]) ->
-        Option.map (fun printed -> parenthesize level 3 ("-" ^ printed)) (show_arithmetic 4 inner)
-    | Logic.Integer value when Z.sign value < 0 && level > 0 -> Some ("(" ^ Z.to_string value ^ ")")
-    | Logic.Apply (Logic.Symbol.Field { field; variant = None; _ }, [ receiver ]) ->
-        Option.map (fun receiver -> receiver ^ "." ^ field) (show_arithmetic 4 receiver)
-    | Logic.Symbol symbol -> find_parameter_name context symbol
-    | Logic.Integer value -> Some (Z.to_string value)
-    | Logic.Boolean value -> Some (if value then "true" else "false")
-    | _ -> None
-  and show_infix level inner separator parts =
-    Option.map
-      (fun printed -> parenthesize level inner (String.concat separator printed))
-      (collect_printed (List.map (show_arithmetic inner) parts))
-  in
-  show_arithmetic 0 term
+let rec find_value_code context : Logic.term -> Catalog.Code.t option = function
+  | Logic.Operation (Add, (_ :: _ :: _ as parts)) ->
+      Option.map (fun parts -> Catalog.Code.Sum parts) (find_value_codes context parts)
+  | Logic.Operation (Multiply, (_ :: _ :: _ as parts)) ->
+      Option.map (fun parts -> Catalog.Code.Product parts) (find_value_codes context parts)
+  | Logic.Operation (Subtract, [ left; right ]) -> (
+      match (find_value_code context left, find_value_code context right) with
+      | Some left, Some right -> Some (Difference (left, right))
+      | _ -> None)
+  | Logic.Operation (Negate, [ Logic.Operation (Negate, [ inner ]) ]) ->
+      find_value_code context inner
+  | Logic.Operation (Negate, [ inner ]) ->
+      Option.map (fun inner -> Catalog.Code.Negated inner) (find_value_code context inner)
+  | Logic.Apply (Logic.Symbol.Field { field; variant = None; _ }, [ receiver ]) ->
+      Option.map
+        (fun receiver -> Catalog.Code.Field { receiver; field })
+        (find_value_code context receiver)
+  | Logic.Symbol symbol ->
+      Option.map (fun name -> Catalog.Code.Name name) (find_parameter_name context symbol)
+  | Logic.Integer value -> Some (Integer value)
+  | Logic.Boolean value -> Some (Boolean value)
+  | _ -> None
 
-let show_truss_goal context term =
-  let show_value = show_truss_value context in
-  let rec print = function
-    | Logic.Operation (Less, [ left; right ]) -> show_comparison left "<" right
-    | Logic.Operation (Less_equal, [ left; right ]) -> show_comparison left "<=" right
-    | Logic.Operation (Greater, [ left; right ]) -> show_comparison left ">" right
-    | Logic.Operation (Greater_equal, [ left; right ]) -> show_comparison left ">=" right
-    | Logic.Operation (Equal, [ left; right ]) -> show_comparison left "==" right
-    | Logic.Operation (And, parts) -> join_parts " && " parts
-    | Logic.Operation (Or, parts) -> join_parts " || " parts
-    | Logic.Operation (Not, [ inner ]) -> Option.map (Printf.sprintf "!(%s)") (print inner)
-    | Logic.Operation (Implies, [ premise; conclusion ]) -> (
-        match (print premise, print conclusion) with
-        | Some premise, Some conclusion -> Some (Printf.sprintf "(%s) ==> (%s)" premise conclusion)
-        | _ -> None)
-    | term -> show_value term
-  and show_comparison left spelling right =
-    match (show_value left, show_value right) with
-    | Some left, Some right -> Some (Printf.sprintf "%s %s %s" left spelling right)
-    | _ -> None
-  and join_parts separator parts =
-    Option.map
-      (fun printed -> "(" ^ String.concat separator printed ^ ")")
-      (collect_printed (List.map print parts))
-  in
-  let printed =
-    match term with
+and find_value_codes context parts = collect_codes (List.map (find_value_code context) parts)
+
+let find_goal_code context term =
+  let rec find_goal : Logic.term -> Catalog.Code.t option = function
+    | Logic.Operation (Less, [ left; right ]) -> find_comparison left Language.Comparison.Less right
+    | Logic.Operation (Less_equal, [ left; right ]) ->
+        find_comparison left Language.Comparison.Less_equal right
+    | Logic.Operation (Greater, [ left; right ]) ->
+        find_comparison left Language.Comparison.Greater right
+    | Logic.Operation (Greater_equal, [ left; right ]) ->
+        find_comparison left Language.Comparison.Greater_equal right
+    | Logic.Operation (Equal, [ left; right ]) ->
+        find_comparison left Language.Comparison.Equal right
     | Logic.Operation (And, parts) ->
-        Option.map (String.concat " && ") (collect_printed (List.map print parts))
+        Option.map (fun parts -> Catalog.Code.All parts) (collect_codes (List.map find_goal parts))
     | Logic.Operation (Or, parts) ->
-        Option.map (String.concat " || ") (collect_printed (List.map print parts))
-    | term -> print term
+        Option.map (fun parts -> Catalog.Code.Any parts) (collect_codes (List.map find_goal parts))
+    | Logic.Operation (Not, [ inner ]) ->
+        Option.map (fun inner -> Catalog.Code.Not inner) (find_goal inner)
+    | Logic.Operation (Implies, [ premise; conclusion ]) -> (
+        match (find_goal premise, find_goal conclusion) with
+        | Some premise, Some conclusion -> Some (Implies { premise; conclusion })
+        | _ -> None)
+    | term -> find_value_code context term
+  and find_comparison left comparison right =
+    match (find_value_code context left, find_value_code context right) with
+    | Some left, Some right -> Some (Catalog.Code.Compared { left; comparison; right })
+    | _ -> None
   in
-  if List.exists (fun symbol -> List.mem symbol context.entry) (Logic.list_free_constants term) then
-    printed
+  if
+    List.exists (fun symbol -> List.mem symbol context.State.entry) (Logic.list_free_constants term)
+  then find_goal term
   else None
 
 let add_requires (context : State.context) (frame : State.frame) required : Catalog.Prover.fix list
@@ -301,7 +293,7 @@ let add_requires (context : State.context) (frame : State.frame) required : Cata
             premise =
               (match frame.condition with
               | Logic.Boolean true -> None
-              | condition -> show_truss_goal context condition);
+              | condition -> find_goal_code context condition);
             condition = context.condition;
           };
       ]
@@ -402,9 +394,9 @@ let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?holds_when (context :
         let fixes =
           match fixes with
           | [] when is_home_body && can_be_required -> (
-              match show_truss_goal context goal with
+              match find_goal_code context goal with
               | Some _ when Logic.is_refuted goal -> []
-              | Some required -> add_requires context frame [ Code required ]
+              | Some required -> add_requires context frame [ Clause required ]
               | None -> [])
           | fixes -> fixes
         in

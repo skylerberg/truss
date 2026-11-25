@@ -24,7 +24,7 @@ val plan_lock :
   snapshot ->
   set:(Path.package * Registry.Version.t option) list ->
   all:bool ->
-  (lock_plan, string) result
+  (lock_plan, Project_catalog.Problem.t list) result
 
 val find_project_root : string -> string option
 val serve : key:string -> handle:(report_progress:(string -> unit) -> 'request -> 'response) -> unit

@@ -49,6 +49,7 @@ type formula_construct =
   | Parallel_block
 
 type owner = Variant_name of string | Type_named of Types.ty
+type recipient = Named_parameter of string | Function_value
 type counted_callee = Fields_of of owner | Method_besides_self | Plain_function
 
 type bare_owner =
@@ -149,7 +150,7 @@ type t =
   | Repeated_argument of { at : Core.origin; name : string; is_pattern : bool }
   | Not_an_integer of { at : Core.origin; subject : integer_subject; excluded : shown }
   | No_method of { at : Core.origin; owner : method_owner; name : string; candidates : string list }
-  | Counted_not_a_capability of { at : Core.origin; written : string }
+  | Counted_not_a_capability of { at : Core.origin; written : Core.origin Description.range }
   | Counted_not_a_function of { at : Core.origin; name : string; type_ : Types.ty }
   | Counted_neither of { at : Core.origin; name : string }
   | Cost_of_other_metric of {
@@ -262,12 +263,12 @@ type t =
       keyword : Language.Mode.t;
     }
   | Not_assignable_place of { at : Core.origin }
-  | Mode_on_read_argument of { at : Core.origin; inner : Core.origin; parameter : string }
-  | Missing_mut_argument of { at : Core.origin; parameter : string }
-  | Lent_read_only_argument of { at : Core.origin; parameter : string }
-  | Temporary_passed_mut of { at : Core.origin; parameter : string }
+  | Mode_on_read_argument of { at : Core.origin; inner : Core.origin; recipient : recipient }
+  | Missing_mut_argument of { at : Core.origin; recipient : recipient }
+  | Lent_read_only_argument of { at : Core.origin; recipient : recipient }
+  | Temporary_passed_mut of { at : Core.origin; recipient : recipient }
   | Redundant_own of { at : Core.origin; inner : Core.origin; type_ : Types.ty }
-  | Mut_for_own of { at : Core.origin; parameter : string }
+  | Mut_for_own of { at : Core.origin; recipient : recipient }
   | Lambda_parameter_mode of {
       at : Core.origin;
       type_expression : Core.origin;
@@ -291,7 +292,7 @@ type t =
   | Type_argument_count of { at : Core.origin; expected : int; given : int }
   | Type_for_value_argument of { at : Core.origin }
   | Value_for_type_argument of { at : Core.origin }
-  | Specification_call_in_code of { at : Core.origin; name : string; call : specification_call }
+  | Specification_call_in_code of { at : Core.origin; callee : Path.t; call : specification_call }
   | Not_an_integer_operand of { at : Core.origin; operator : integer_operator; excluded : shown }
   | Shift_amount_not_unsigned of { at : Core.origin; excluded : shown }
   | Try_error_mismatch of { at : Core.origin; output_error : Types.ty; error : Types.ty }
@@ -328,7 +329,7 @@ type t =
       reorder : string list option;
     }
   | Unmatched_fields of { at : Core.origin; missing : string list }
-  | Not_structural of { at : Core.origin; type_ : Types.ty; constant : string }
+  | Not_structural of { at : Core.origin; type_ : Types.ty }
   | Not_a_constant of { at : Core.origin }
   | Literal_does_not_fit of {
       at : Core.origin;

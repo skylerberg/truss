@@ -1,11 +1,11 @@
-let run_forever_name = Language.Builtin_capability.show Run_forever
-
-let names_run_forever (use : Syntax.capability_use) =
+let names_run_forever (resolved : Resolve.resolved) (use : Syntax.capability_use) =
   match use.capability.kind with
-  | Capability_path { path = { modules = []; last }; arguments = []; _ } ->
-      last.text = run_forever_name
-  | Capability_path _ | Self_capabilities _ | Associated_capabilities _ | Generic_capability _ ->
-      false
+  | Capability_path written -> (
+      match resolved.names.(written.path.last.id) with
+      | Some (Definition (Capability, path)) ->
+          Well_known.find_builtin_capability path = Some Run_forever
+      | _ -> false)
+  | Self_capabilities _ | Associated_capabilities _ | Generic_capability _ -> false
 
 let contains_run_forever (uses : Types.capability_set) =
   List.exists
@@ -28,19 +28,20 @@ let find_siblings (signature : Syntax.signature) (clause : Syntax.clause) uses i
   | [ _ ] -> Alone { clause = Written clause.id; is_only_clause = signature.clauses = [ clause ] }
   | _ -> Catalog.read_entry_siblings (List.map cover_use uses) index
 
-let list_run_forever_entries (signature : Syntax.signature) =
+let list_run_forever_entries resolved (signature : Syntax.signature) =
   List.concat_map
     (fun (clause : Syntax.clause) ->
       match clause.kind with
       | Uses uses ->
           List.concat
             (List.mapi
-               (fun index use -> if names_run_forever use then [ (clause, uses, index) ] else [])
+               (fun index use ->
+                 if names_run_forever resolved use then [ (clause, uses, index) ] else [])
                uses)
       | Requires _ | Ensures _ | Decreases _ | Modifies _ | Cost _ | Clause_error -> [])
     signature.clauses
 
-let find (lookups : Lookups.t) (key : Resolve.Names.key) (definition : Syntax.definition) =
+let find (lookups : Lookups.t) (key : Resolve.Names.key) (definition : Syntax.definition) resolved =
   let names = lookups.interface.names in
   let declares_run_forever () =
     match Interface.Impls.read_signature lookups.interface key.path with
@@ -52,7 +53,7 @@ let find (lookups : Lookups.t) (key : Resolve.Names.key) (definition : Syntax.de
   | (Function | Method), Function { signature; _ }
     when declares_run_forever ()
          && not (lookups.uses_run_forever key || lookups.is_recursive key.path) -> (
-      match list_run_forever_entries signature with
+      match list_run_forever_entries resolved signature with
       | [ (clause, uses, index) ] ->
           Some
             (Catalog.Usage

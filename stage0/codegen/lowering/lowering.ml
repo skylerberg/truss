@@ -1,7 +1,10 @@
 module Lookups = Lookups
 module Positions = Positions
 
-type unsupported = Lower.unsupported = { construct : string; at : Lowered.site option }
+type unsupported = Lower.unsupported = {
+  construct : Catalog.Codegen.construct;
+  at : Lowered.site option;
+}
 
 type lowered =
   | Compiled of Emit_c.fragment
@@ -9,7 +12,12 @@ type lowered =
   | Evaluate of Lowered.Item.t * Ground.ty
 
 type unbuildable = Unsupported of unsupported | Todo_types of Path.t list
-type 'value ran = Ran of 'value | Unfinished of string | Stopped of string
+
+type 'value ran =
+  | Ran of 'value
+  | Unfinished of Catalog.Codegen.stop
+  | Stopped of Catalog.Codegen.stop
+
 type evaluation = string ran
 
 type linked =
@@ -63,7 +71,7 @@ let lower system (lookups : Lookups.t) item =
   let env = make_env system lookups.interface in
   match
     Compiler_bug.run_while_doing ~stage:"Lowering"
-      ("lowering " ^ Lowered.Item.to_string item)
+      (fun () -> "lowering " ^ Lowered.Item.to_string item)
       (fun () -> make (Lower.make_context ~env lookups) item)
   with
   | lowered -> Ok lowered

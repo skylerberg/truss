@@ -156,14 +156,11 @@ let fetch name version ~hash =
   else
     match Registry.Index.find_current_registry () with
     | Some registry -> Registry.Index.fetch registry ~into:packages name version ~hash
-    | None ->
-        Error
-          (Printf.sprintf "no registry is set; set `%s` to the registry's directory"
-             Registry.Index.variable)
+    | None -> Error (Project_catalog.Problem.No_registry { variable = Registry.Index.variable })
 
 let load_published name version ~hash =
   match fetch name version ~hash with
-  | Error reason -> Error (Project_catalog.Problem.Unavailable reason)
+  | Error unavailable -> Error (Project_catalog.Problem.Unavailable unavailable)
   | Ok directory ->
       let files = Registry.Content.list_all_files directory in
       Registry.Selection.read_manifest_and_record ~read:(fun file -> List.assoc_opt file files) name
@@ -634,10 +631,7 @@ type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Loc
 
 let plan_lock snapshot ~set ~all =
   match Registry.Index.find_current_registry () with
-  | None ->
-      Error
-        (Printf.sprintf "No registry is set. Set `%s` to the registry's directory."
-           Registry.Index.variable)
+  | None -> Error [ Project_catalog.Problem.Unset_registry { variable = Registry.Index.variable } ]
   | Some registry -> (
       let before =
         try
@@ -661,20 +655,15 @@ let plan_lock snapshot ~set ~all =
             | None -> (
                 match Registry.Index.find_newest registry name with
                 | Some (version, hash) -> Ok (name, version, hash)
-                | None ->
-                    Error
-                      (Printf.sprintf "The registry has no package `%s`." (Path.show_package name)))
+                | None -> Error (Project_catalog.Problem.Unregistered_package name))
             | Some version -> (
                 match Registry.Index.hash_of registry name version with
                 | Some hash -> Ok (name, version, hash)
-                | None ->
-                    Error
-                      (Printf.sprintf "The registry has no `%s` %s." (Path.show_package name)
-                         (Registry.Version.show version))))
+                | None -> Error (Unregistered_version { name; version })))
           set
       in
-      match List.find_map (function Error message -> Some message | Ok _ -> None) wanted with
-      | Some message -> Error message
+      match List.find_map (function Error problem -> Some problem | Ok _ -> None) wanted with
+      | Some problem -> Error [ problem ]
       | None ->
           let wanted = List.filter_map Result.to_option wanted in
           let lock =
@@ -705,7 +694,7 @@ let plan_lock snapshot ~set ~all =
               ~is_local ~load:load_published
           in
           if problems <> [] then
-            Error (String.concat " " (List.map Project_catalog.describe_selection_problem problems))
+            Error (List.map (fun problem -> Project_catalog.Problem.Selection problem) problems)
           else
             let after =
               Registry.Selection.lock

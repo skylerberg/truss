@@ -393,16 +393,7 @@ and check_constant_pattern (state : State.state) id at path type_ =
       if not (State.unify state constant_type type_) then
         Failures.report_mismatch state at ~expected:type_ ~actual:constant_type
       else if not (is_structural state (State.resolve state constant_type)) then
-        State.report state
-          (Not_structural
-             {
-               at;
-               type_ = State.zonk state constant_type;
-               constant =
-                 (match path with
-                 | Top { name; _ } | Member_constant { name; _ } | Method { name; _ } -> name
-                 | _ -> "the_constant");
-             })
+        State.report state (Not_structural { at; type_ = State.zonk state constant_type })
   | None -> ()
 
 and is_structural ?(seen = []) state (type_ : Types.ty) =

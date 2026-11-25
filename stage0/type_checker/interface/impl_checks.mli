@@ -1,4 +1,3 @@
-val show_signature : Types.signature -> string
 val signatures_agree : Types.signature -> Types.signature -> bool
 val has_default : Types.signature -> bool
 
@@ -10,10 +9,4 @@ val check_impl :
   unit
 
 val check_impl_method :
-  Checking.state ->
-  Syntax.name ->
-  Path.receiver ->
-  Types.signature ->
-  Types.impl_interface ->
-  Syntax.path_type ->
-  unit
+  Checking.state -> Syntax.name -> Path.receiver -> Types.signature -> Types.impl_interface -> unit

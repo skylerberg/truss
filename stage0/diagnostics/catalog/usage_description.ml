@@ -148,7 +148,7 @@ let describe : Usage.t -> Nodes.description = function
         ]
   | Unmodified_part { entry; function_; parameter; part; change } ->
       let shown = Types.show_modified_part ~root:parameter part in
-      let function_name = Build.show_function_name function_ in
+      let function_name = Build.show_callee function_ in
       make Unmodified_part (Build.at entry) ~severity:Warning
         ~fixes:
           (match change with

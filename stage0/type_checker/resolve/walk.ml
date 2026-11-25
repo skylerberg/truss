@@ -177,7 +177,7 @@ let find_in_module state module_ (name : Syntax.name) ~types =
       report_unknown state name ~expected:(In_module module_) candidates;
       None
 
-let report_unresolved_path_start state scope (first : Syntax.name) ~may_start_with_value =
+let report_unresolved_path_start state scope (first : Syntax.name) ~written ~may_start_with_value =
   let name = Core.Written first.id in
   let module_ = state.key.module_ in
   function
@@ -187,10 +187,10 @@ let report_unresolved_path_start state scope (first : Syntax.name) ~may_start_wi
   | Restricted_module -> add_diagnostic state (Intrinsic_import { name })
   | Ambiguous_module (imported, package) ->
       add_diagnostic state (Import_or_package { name; written = first.text; imported; package })
-  | No_module text -> add_diagnostic state (No_module { name; written = text; path_start = None })
-  | No_package text ->
+  | No_module -> add_diagnostic state (No_module { name; written; path_start = None })
+  | No_package ->
       if state.lookups.module_exists { package = module_.package; modules = [ first.text ] } then
-        add_diagnostic state (No_module { name; written = text; path_start = Some module_ })
+        add_diagnostic state (No_module { name; written; path_start = Some module_ })
       else if may_start_with_value then
         let candidates =
           List.map fst (String_map.bindings scope.values)
@@ -202,7 +202,7 @@ let report_unresolved_path_start state scope (first : Syntax.name) ~may_start_wi
           @ Names.list_package_roots (Lazy.force state.visible_packages)
         in
         add_diagnostic state (Unknown_value_or_module { name; written = first.text; candidates })
-      else add_diagnostic state (No_module { name; written = text; path_start = None })
+      else add_diagnostic state (No_module { name; written; path_start = None })
 
 let resolve_path state scope (first : Syntax.name) (rest : Syntax.name list) ~module_lengths
     ~may_start_with_value =
@@ -219,11 +219,11 @@ let resolve_path state scope (first : Syntax.name) (rest : Syntax.name list) ~mo
     | length :: shorter -> (
         match lookup length with
         | Found_module { module_; imported } -> Ok (module_, imported, length)
-        | (No_module _ | No_package _) as failure ->
-            let longest_failure = Option.value longest_failure ~default:failure in
+        | (No_module | No_package) as failure ->
+            let longest_failure = Option.value longest_failure ~default:(failure, length) in
             if shorter = [] then Error (longest_failure, length)
             else search ~longest_failure:(Some longest_failure) shorter
-        | failure -> Error (failure, length))
+        | failure -> Error ((failure, length), length))
   in
   match search ~longest_failure:None module_lengths with
   | Ok (module_, imported, length) ->
@@ -231,8 +231,12 @@ let resolve_path state scope (first : Syntax.name) (rest : Syntax.name list) ~mo
       let last_name = if length = 0 then first else List.nth rest (length - 1) in
       set_target state first (Module { module_; imported; last_name });
       ignore (find_in_module state module_ item ~types:(item.case = Upper))
-  | Error (failure, length) ->
-      let report = report_unresolved_path_start state scope first ~may_start_with_value failure in
+  | Error ((failure, failure_length), length) ->
+      let report =
+        report_unresolved_path_start state scope first
+          ~written:(Catalog.cover_names (first :: List.take failure_length rest))
+          ~may_start_with_value failure
+      in
       set_target state first (Unknown report);
       set_target state (List.nth rest length) (Unknown report)
 
@@ -838,7 +842,9 @@ and resolve_statement state scope (statement_ : Syntax.statement) =
       resolve_block state inner body;
       scope
   | Parallel body | Concurrent body ->
-      let word = match statement_.kind with Concurrent _ -> "concurrent" | _ -> "parallel" in
+      let block : Catalog.Resolve.branching_block =
+        match statement_.kind with Concurrent _ -> Concurrent_block | _ -> Parallel_block
+      in
       List.fold_left
         (fun (after : scope) (branch : Syntax.statement) ->
           let branch_scope = resolve_statement state scope branch in
@@ -851,7 +857,7 @@ and resolve_statement state scope (statement_ : Syntax.statement) =
             (fun key _ ->
               if String_map.mem key after.values then
                 report state
-                  (Shadowed_in_branch { branch = Written branch.id; block = word; written = key }))
+                  (Shadowed_in_branch { branch = Written branch.id; block; written = key }))
             bound;
           { after with values = String_map.union (fun _ left _ -> Some left) after.values bound })
         scope body.statements

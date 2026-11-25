@@ -1,6 +1,9 @@
 (library
  (name catalog)
  (modules_without_implementation
+  code
+  codegen
+  model_value
   nodes
   usage
   package
@@ -17,6 +20,8 @@
   compiler_bug
   source
   core
+  intrinsic
+  syntax
   path
   language
   types

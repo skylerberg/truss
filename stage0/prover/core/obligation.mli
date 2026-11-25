@@ -9,7 +9,11 @@ type value =
   | Constructed of { variant : string option; fields : (string * value) list }
   | Elements of value list
 
-type run = Evaluated of value | Unfinished of string | Failed of string
+type run =
+  | Evaluated of value
+  | Unfinished of Catalog.Codegen.stop
+  | Failed of Catalog.Codegen.stop
+
 type location = Catalog.Prover.location = Node of Core.origin | Whole_definition
 
 type t = {

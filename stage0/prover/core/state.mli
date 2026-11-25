@@ -1,4 +1,4 @@
-type source = { key : Resolve.Names.key; definition : Path.t; name : string }
+type source = { key : Resolve.Names.key; definition : Path.t }
 
 type clauses = {
   callee : source;

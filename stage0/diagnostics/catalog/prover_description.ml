@@ -9,33 +9,12 @@ let capitalize = function
   | Description.Text text :: rest -> Description.Text (String.capitalize_ascii text) :: rest
   | pieces -> pieces
 
-let rec show_callee (path : Path.t) =
-  match path with
-  | Top { name; _ } -> name
-  | Method { owner = Impl { for_type; _ } | Derived { type_ = for_type; _ }; name; _ }
-  | Method { owner = for_type; name; _ }
-  | Member_constant { owner = for_type; name } ->
-      show_callee for_type ^ "." ^ name
-  | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> Path.show path
+let show_callee = Build.show_callee
 
 let describe_call { Prover.at; callee } =
-  let call =
-    match callee with
-    | Some callee -> Printf.sprintf "call to `%s`" (show_callee callee)
-    | None -> "call"
-  in
   match at with
-  | Whole_definition -> [ Description.Text ("a " ^ call) ]
-  | Node (Written _) -> [ Text ("this " ^ call) ]
-  | Node (Desugared { desugaring; _ } as origin) ->
-      let maker =
-        match desugaring with
-        | For_loop -> [ Description.Text "this `for` loop" ]
-        | Quantifier -> [ Text "this quantifier" ]
-        | Derived -> [ Text "the derived `"; Build.quote origin; Text "`" ]
-        | Rewrite | Try -> [ Text "`"; Build.quote origin; Text "`" ]
-      in
-      (Description.Text ("the " ^ call ^ " that ") :: maker) @ [ Text " makes" ]
+  | Whole_definition -> [ Description.Text ("a " ^ Build.name_call callee) ]
+  | Node origin -> Build.describe_call ?callee origin
 
 let describe_recursive_call call =
   match call.Prover.at with
@@ -626,24 +605,73 @@ let describe_path_note = function
       [ Text "`"; Build.quote pattern; Text "` does not match, so the `else` runs" ]
   | Returns_early tried -> [ Text "`"; Build.quote tried; Text "` returns early" ]
 
-let show_stop_report report =
+let describe_stop = Codegen_description.describe_stop ~show_file:Path.show_file
+
+let describe_stop_sentence stop =
   let sentence =
-    String.concat " " (List.map String.trim (String.split_on_char '\n' (String.trim report)))
+    String.concat " "
+      (List.map String.trim (String.split_on_char '\n' (String.trim (describe_stop stop))))
   in
   if String.ends_with ~suffix:"." sentence then sentence else sentence ^ "."
 
 let describe_failed_runs failed_runs =
   List.map
     (function
-      | Prover.Constant_run { path; report } ->
+      | Prover.Constant_run { path; stop } ->
           Description.Text
             (Printf.sprintf " The evaluation of `%s` stopped, so its value is not known: %s"
-               (Path.show path) (show_stop_report report))
-      | Assertion_run report ->
+               (Path.show path) (describe_stop_sentence stop))
+      | Assertion_run stop ->
           Text
             (Printf.sprintf " Its evaluation stopped, so its result is not known: %s"
-               (show_stop_report report)))
+               (describe_stop_sentence stop)))
     failed_runs
+
+let spell_shortest ~most ~is_same value =
+  let rec spell_digits digits =
+    let text = Printf.sprintf "%.*g" digits value in
+    if digits >= most || is_same (float_of_string text) then text else spell_digits (digits + 1)
+  in
+  spell_digits 1
+
+let show_float value ~is_single =
+  if Float.is_nan value then "NaN"
+  else if value = Float.infinity then "infinity"
+  else if value = Float.neg_infinity then "-infinity"
+  else
+    let text =
+      if is_single then
+        spell_shortest ~most:9
+          ~is_same:(fun read -> Int32.bits_of_float read = Int32.bits_of_float value)
+          value
+      else spell_shortest ~most:17 ~is_same:(fun read -> read = value) value
+    in
+    if String.contains text '.' then text
+    else
+      match String.split_first ~sep:"e" text with
+      | Some (mantissa, exponent) -> mantissa ^ ".0e" ^ exponent
+      | None -> text ^ ".0"
+
+let rec show_model_value : Model_value.t -> string = function
+  | Integer value -> Z.to_string value
+  | Boolean value -> if value then "true" else "false"
+  | Float { value; is_single } -> show_float value ~is_single
+  | Unit_value -> "()"
+  | Variant_value { variant; fields } -> variant ^ show_model_fields fields
+  | Record_value { type_ = Named { path; _ }; fields } ->
+      Path.show_name path ^ show_model_fields fields
+  | Record_value { type_; fields } -> Types.show type_ ^ show_model_fields fields
+  | Unknown -> "a value the prover knows nothing more about"
+
+and show_model_fields = function
+  | [] -> ""
+  | fields ->
+      "("
+      ^ String.concat ", "
+          (List.map
+             (fun (field : Model_value.field) -> field.field ^ ": " ^ show_model_value field.value)
+             fields)
+      ^ ")"
 
 let describe_failure = function
   | Prover.Refuted -> say " This fails every time the code reaches it."
@@ -655,7 +683,10 @@ let describe_failure = function
               Description.Text
                 (" For example, when "
                 ^ String.concat ", "
-                    (List.map (fun (name, value) -> Printf.sprintf "`%s` is %s" name value) values)
+                    (List.map
+                       (fun (name, value) ->
+                         Printf.sprintf "`%s` is %s" name (show_model_value value))
+                       values)
                 ^ ".");
             ])
       @ (match path with
@@ -689,17 +720,66 @@ let advise_other_ways : Diagnostic.Code.prover -> _ = function
       say " It can also be checked first with an `if`, or, for one element, read with `get`."
   | _ -> []
 
+let show_comparison : Language.Comparison.t -> string = function
+  | Equal -> "=="
+  | Not_equal -> "!="
+  | Less -> "<"
+  | Less_equal -> "<="
+  | Greater -> ">"
+  | Greater_equal -> ">="
+
+let rec show_value level (code : Code.t) =
+  let parenthesize inner text = if inner < level then "(" ^ text ^ ")" else text in
+  match code with
+  | Name name -> name
+  | Integer value when Z.sign value < 0 && level > 0 -> "(" ^ Z.to_string value ^ ")"
+  | Integer value -> Z.to_string value
+  | Boolean value -> if value then "true" else "false"
+  | Field { receiver; field } -> show_value 4 receiver ^ "." ^ field
+  | Limit { type_; limit } -> (
+      Types.show type_ ^ match limit with Minimum -> ".minimum" | Maximum -> ".maximum")
+  | Negated inner -> parenthesize 3 ("-" ^ show_value 4 inner)
+  | Sum parts -> parenthesize 1 (String.concat " + " (List.map (show_value 1) parts))
+  | Product parts -> parenthesize 2 (String.concat " * " (List.map (show_value 2) parts))
+  | Difference (left, right) -> parenthesize 1 (show_value 1 left ^ " - " ^ show_value 2 right)
+  | Quotient (left, right) -> parenthesize 2 (show_value 2 left ^ " / " ^ show_value 3 right)
+  | Compared _ | Not _ | All _ | Any _ | Implies _ -> "(" ^ show_code code ^ ")"
+
+and show_goal ~is_nested (code : Code.t) =
+  let join separator parts =
+    let text = String.concat separator (List.map (show_goal ~is_nested:true) parts) in
+    if is_nested then "(" ^ text ^ ")" else text
+  in
+  match code with
+  | Compared { left; comparison; right } ->
+      Printf.sprintf "%s %s %s" (show_value 0 left) (show_comparison comparison)
+        (show_value 0 right)
+  | Not inner -> "!(" ^ show_code inner ^ ")"
+  | All parts -> join " && " parts
+  | Any parts -> join " || " parts
+  | Implies { premise; conclusion } ->
+      Printf.sprintf "(%s) ==> (%s)" (show_code premise) (show_code conclusion)
+  | value -> show_value 0 value
+
+and show_code code = show_goal ~is_nested:false code
+
+let show_argument (code : Code.t) =
+  match code with
+  | Name _ | Field _ | Boolean _ | Limit _ -> show_code code
+  | Integer value when Z.sign value >= 0 -> show_code code
+  | _ -> "(" ^ show_code code ^ ")"
+
 let describe_required = function
-  | Prover.Code code -> Description.Text code
+  | Prover.Clause code -> Description.Text (show_code code)
   | Substituted_clause { clause = { key; origin }; replacements; type_names } ->
       Substituted
         {
           clause = Nodes.In_definition (key, origin);
           replacements =
             List.map
-              (fun (replaced, code) -> (Nodes.In_definition (key, replaced), code))
+              (fun (replaced, code) -> (Nodes.In_definition (key, replaced), show_argument code))
               replacements;
-          type_names;
+          type_names = List.map (fun (name, type_) -> (name, Types.show type_)) type_names;
         }
 
 let describe_fix = function
@@ -712,7 +792,8 @@ let describe_fix = function
       in
       let required =
         match premise with
-        | Some premise -> (Description.Text ("(" ^ premise ^ ") ==> (") :: required) @ [ Text ")" ]
+        | Some premise ->
+            (Description.Text ("(" ^ show_code premise ^ ") ==> (") :: required) @ [ Text ")" ]
         | None -> required
       in
       {
@@ -742,7 +823,9 @@ let show_construct = function
   | Sequence_elements -> "the elements of a sequence"
   | Function_value_costs -> "a function value's costs"
   | Intrinsic_at_parameter { operation; parameter } ->
-      Printf.sprintf "`intrinsic.%s` at the type parameter `%s`" operation (Types.show parameter)
+      Printf.sprintf "`intrinsic.%s` at the type parameter `%s`"
+        (Intrinsic.show_operation operation)
+        (Types.show parameter)
   | Negation_of type_ -> Printf.sprintf "negating a value of `%s`" (Types.show type_)
   | Shift_of type_ -> Printf.sprintf "a shift of `%s`" (Types.show type_)
   | Range_of type_ -> Printf.sprintf "a range of `%s`" (Types.show type_)
@@ -797,11 +880,14 @@ let describe : Prover.t -> Nodes.description = function
         (say
            (Printf.sprintf "The prover cannot read %s yet, so nothing in this definition is proven."
               (match foreign with
-              | Some name -> Printf.sprintf "%s, in `%s`" (show_construct construct) name
+              | Some definition ->
+                  Printf.sprintf "%s, in `%s`" (show_construct construct) (Path.show definition)
               | None -> show_construct construct)))
-  | Unevaluated { path; report } ->
+  | Unevaluated { path; stop } ->
       make Evaluation (At Nodes.Definition)
-        (say (Printf.sprintf "The value of `%s` cannot be computed: %s" (Path.show path) report))
+        (say
+           (Printf.sprintf "The value of `%s` cannot be computed: %s" (Path.show path)
+              (describe_stop stop)))
 
 let find_cited : Prover.t -> Prover.quoted option = function
   | Unproven { cited; _ } -> cited

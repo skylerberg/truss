@@ -1,7 +1,7 @@
 module Lookups = Lookups
 module Positions = Positions
 
-type unsupported = { construct : string; at : Lowered.site option }
+type unsupported = { construct : Catalog.Codegen.construct; at : Lowered.site option }
 
 type lowered =
   | Compiled of Emit_c.fragment
@@ -9,7 +9,12 @@ type lowered =
   | Evaluate of Lowered.Item.t * Ground.ty
 
 type unbuildable = Unsupported of unsupported | Todo_types of Path.t list
-type 'value ran = Ran of 'value | Unfinished of string | Stopped of string
+
+type 'value ran =
+  | Ran of 'value
+  | Unfinished of Catalog.Codegen.stop
+  | Stopped of Catalog.Codegen.stop
+
 type evaluation = string ran
 
 type linked =

@@ -1133,6 +1133,10 @@ let () =
   Harness.test "a mut parameter needs mut at the call, with a fix that adds it" (fun () ->
       expect_one_diagnostic Fixtures.Infer.bump_without_mut "types.missing_mode"
         ~fixed:("bump(count)", "bump(mut count)"));
+  Harness.test "a function value's mut input needs mut at the call" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.function_value_called_without_mut "types.missing_mode"
+        ~fixed:("bump(count)", "bump(mut count)")
+        ~says:"The function value may mutate its argument, so the call site passes it `mut`.");
   Harness.test "own on a place that copies implicitly is redundant" (fun () ->
       expect_one_diagnostic Fixtures.Infer.own_before_an_integer "types.redundant_mode"
         ~fixed:("own count", "count"));

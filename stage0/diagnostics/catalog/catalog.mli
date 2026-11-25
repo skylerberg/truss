@@ -72,7 +72,13 @@ type reported = Diagnostic.reported
 val make_reported : diagnostic -> reported
 val reported_elsewhere : reported
 val read_entry_siblings : Core.origin range list -> int -> Core.origin siblings
+val cover_names : Syntax.name list -> Core.origin range
+val cover_path : Syntax.path -> Core.origin range
 
+module Code = Code
+module Codegen = Codegen
+module Codegen_description = Codegen_description
+module Model_value = Model_value
 module Usage = Usage
 module Usage_description = Usage_description
 module Package = Package

@@ -8,7 +8,7 @@ type t = {
   sources : (Path.file, Source.t) Hashtbl.t;
 }
 
-type location = { file : Path.file; line : int; column : int }
+type location = Catalog.Codegen.location = { file : Path.file; line : int; column : int }
 
 let create names ~source ~read_source =
   { names; source; read_source; places = Path_table.create 16; sources = Hashtbl.create 4 }
