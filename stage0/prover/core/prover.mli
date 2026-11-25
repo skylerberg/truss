@@ -13,9 +13,6 @@ type proof =
 val prove : Lookups.t -> Resolve.Names.key -> proof
 val list_evaluations : proof -> Obligation.evaluation list
 
-val resolve_location :
-  Resolve.Names.lookups -> Resolve.Names.key -> Obligation.location -> Source.Definition_span.t
-
 type state = {
   site : Catalog.Prover.t;
   is_proven : bool;

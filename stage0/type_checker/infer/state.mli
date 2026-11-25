@@ -84,7 +84,7 @@ type state = {
   package : Path.package;
   definition : Syntax.definition;
   resolved : Resolve.resolved;
-  text : string Lazy.t;
+  order : Source.Node_order.t;
   signatures : Signatures.t;
   visible_packages : Path.package list Lazy.t;
   tables : Tables.t;
@@ -100,7 +100,7 @@ type state = {
   mutable mode_keywords : Core.mode_keyword list;
   yielded : (Syntax.id, Language.Mode.t) Hashtbl.t;
   lent_tails : (Syntax.id, unit) Hashtbl.t;
-  mutable lambdas : Source.Definition_span.t list;
+  mutable lambdas : Syntax.id list;
   mutable unsolved : Catalog.reported option;
   mutable capability_constraints : subset_constraint list;
   mutable capability_solution : (int, Types.capability_set) Hashtbl.t option;
@@ -115,7 +115,8 @@ val report : state -> Catalog.Inference.t -> unit
 val record_diagnostic : state -> Catalog.diagnostic -> Catalog.reported
 val is_formula : env -> bool
 val reject_in_formula : state -> env -> Core.origin -> Catalog.Inference.formula_construct -> unit
-val read_span : state -> Syntax.id -> Source.Definition_span.t
+val contains : state -> outer:Syntax.id -> inner:Syntax.id -> bool
+val compare_in_source_order : state -> Syntax.id -> Syntax.id -> int
 val raise_bug : ('a, unit, string, 'b) format4 -> 'a
 val make_error_type : state -> Catalog.Inference.t -> Types.ty
 val mark_lent_tails : state -> Syntax.expression -> unit

@@ -206,7 +206,7 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
 
 and check_lambda (state : State.state) env ?expected (value : Syntax.expression) parameters body =
   let locals_read_before = state.locals_read in
-  state.lambdas <- State.read_span state value.id :: state.lambdas;
+  state.lambdas <- value.id :: state.lambdas;
   let expected = Option.map (Conversions.read_expected_head state) expected in
   let make_untyped unknown =
     List.iter
@@ -262,11 +262,7 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
     else match list with [] -> acc | id :: rest -> list_newer (id :: acc) rest
   in
   let read = list_newer [] state.locals_read in
-  let inside = State.read_span state value.id in
-  let is_outer id =
-    let binding = State.read_span state id in
-    binding.start < inside.start || binding.start >= inside.stop
-  in
+  let is_outer id = not (State.contains state ~outer:value.id ~inner:id) in
   let captures =
     List.fold_left
       (fun acc id -> if is_outer id && not (List.mem id acc) then acc @ [ id ] else acc)

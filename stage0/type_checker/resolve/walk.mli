@@ -44,13 +44,7 @@ type section_names = {
 
 type state
 
-val create :
-  Names.lookups ->
-  Names.key ->
-  spans:Source.Definition_span.t array ->
-  syntax_errors:Source.Definition_span.t list ->
-  state
-
+val create : Names.lookups -> Names.key -> state
 val lookup_section_names : state -> section -> section_names
 val report : state -> Catalog.Resolve.t -> unit
 

@@ -290,18 +290,30 @@ let describe : Typing.t -> Nodes.description = function
                could call the method on a copy of a slice, and a copy views the same elements, so \
                the write would reach elements that were lent read-only."
               trait (Types.show for_type)))
-  | Callback_contract_mismatch { at = origin; name; trait; parameter; clauses } ->
+  | Callback_contract_mismatch { at = origin; name; trait; parameter; declaration; clauses } ->
       make Signature_mismatch (Build.at origin)
-        (say
-           (Printf.sprintf
-              "`%s` must state the callback contract that `%s` declares for `%s`: %s. A caller \
-               through `%s` relies on that contract, so the method's own callback contract is that \
-               one."
-              name trait parameter
-              (match clauses with
-              | [] -> "no `requires` and no `ensures`"
-              | clauses -> String.concat ", " (List.map (fun clause -> "`" ^ clause ^ "`") clauses))
-              trait))
+        (Description.Text
+           (Printf.sprintf "`%s` must state the callback contract that `%s` declares for `%s`: "
+              name trait parameter)
+         ::
+         (match clauses with
+         | [] -> say "no `requires` and no `ensures`"
+         | clauses ->
+             List.concat
+               (List.mapi
+                  (fun index clause ->
+                    (if index = 0 then [] else say ", ")
+                    @ [
+                        Description.Text "`";
+                        Quote (Nodes.In_definition (declaration, clause));
+                        Text "`";
+                      ])
+                  clauses))
+        @ say
+            (Printf.sprintf
+               ". A caller through `%s` relies on that contract, so the method's own callback \
+                contract is that one."
+               trait))
   | Restated_without_own { at = origin; trait; declared_by; name; for_type } ->
       make Extra_member (Build.at origin)
         (say

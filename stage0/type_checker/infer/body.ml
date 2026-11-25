@@ -396,16 +396,11 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
   let elaborated = lookups.interface.read_elaborated_interface key in
   let module_ = key.module_ in
   let definition = lookups.interface.names.read_definition key in
-  let spans = lookups.interface.names.read_spans key in
-  let syntax_errors = lookups.interface.names.list_syntax_errors key in
-  let has_syntax_error part =
-    Option.is_some (Resolve.Parts.find_syntax_error ~spans ~syntax_errors definition part)
-  in
+  let has_syntax_error part = Resolve.Names.is_broken lookups.interface.names key part in
   let context =
-    Interface.Elaborator.create lookups.interface resolved ~spans
+    Interface.Elaborator.create lookups.interface resolved
       (Interface.Impls.read_scope lookups.interface key)
   in
-  let text = lazy (lookups.interface.names.read_text key) in
   let state : State.state =
     {
       lookups;
@@ -413,7 +408,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       package = module_.package;
       definition;
       resolved;
-      text;
+      order = lookups.interface.names.read_order key;
       signatures = Signatures.create ();
       visible_packages =
         lazy (Resolve.Names.list_visible_packages lookups.interface.names module_.package);
@@ -469,7 +464,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
   in
   let build tables =
     Form.build lookups ~signatures:state.signatures ~resolved ~tables ~context
-      ~package:state.package ~text ~key ~definition ~elaborated ~law_parameters:state.law_parameters
+      ~package:state.package ~key ~definition ~elaborated ~law_parameters:state.law_parameters
       ~checks_body ~has_syntax_error
   in
   let checked = if is_clean tables then Some (build tables) else None in

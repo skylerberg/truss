@@ -408,11 +408,6 @@ let solve_head (state : State.state) ?default_at index =
       if Unify.count_solutions state.unifier <> count then solve_givers ()
   | _ -> ()
 
-let compare_in_source_order state left right =
-  let left : Source.Definition_span.t = State.read_span state left
-  and right : Source.Definition_span.t = State.read_span state right in
-  compare (left.start, -left.stop) (right.start, -right.stop)
-
 let constrain_capability_equalities (state : State.state) (frame : State.frame) =
   List.iter
     (fun (left, right) ->
@@ -588,7 +583,7 @@ let hand_open_parts_to_parent (state : State.state) (frame : State.frame) parent
   List.iter (State.check_compiled_binding state) settled_bindings;
   List.iter
     (State.check_compiled_expression state)
-    (List.sort (compare_in_source_order state) settled_expressions)
+    (List.sort (State.compare_in_source_order state) settled_expressions)
 
 let settle (state : State.state) (frame : State.frame) =
   let parent = match state.frames with _ :: parent :: _ -> Some parent | _ -> None in

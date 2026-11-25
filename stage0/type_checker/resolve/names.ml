@@ -42,6 +42,7 @@ type visibility = Language.Visibility.t = Private | Internal | Public | Public_o
 type key = Path.key = { module_ : Path.module_; path : Path.t; ordinal : int }
 type declaration = { key : key; kind : kind; visibility : visibility; generic : bool }
 type place = { file : Path.file; base : int }
+type file_order = { file : Path.file; index : int }
 
 let show_key key =
   if key.ordinal = 0 then Path.show key.path
@@ -79,10 +80,9 @@ type lookups = {
   list_declarations_in : Path.file -> declaration list;
   list_package_declarations : Path.package -> declaration list;
   read_definition : key -> Syntax.definition;
-  read_text : key -> string;
-  read_spans : key -> Source.Definition_span.t array;
-  list_syntax_errors : key -> Source.Definition_span.t list;
-  read_place : key -> place;
+  read_order : key -> Source.Node_order.t;
+  list_broken_parts : key -> Parts.part list;
+  read_file_order : key -> file_order;
   find_container : key -> key option;
   list_contained : key -> key list;
   list_members : Path.t -> string -> key list;
@@ -131,9 +131,14 @@ let is_visible_package lookups ~(from : Path.module_) package =
 let is_visible_module lookups ~from (module_ : Path.module_) =
   is_visible_package lookups ~from module_.package && lookups.module_exists module_
 
+type source = {
+  read_text : key -> string;
+  read_spans : key -> Source.Definition_span.t array;
+  read_place : key -> place;
+}
+
 let find_syntax_error (lookups : lookups) key part =
-  Parts.find_syntax_error ~spans:(lookups.read_spans key)
-    ~syntax_errors:(lookups.list_syntax_errors key) (lookups.read_definition key) part
+  if List.mem part (lookups.list_broken_parts key) then Some Catalog.reported_elsewhere else None
 
 let is_broken lookups key part = Option.is_some (find_syntax_error lookups key part)
 

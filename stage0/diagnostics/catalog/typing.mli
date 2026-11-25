@@ -100,7 +100,8 @@ type t =
       name : string;
       trait : string;
       parameter : string;
-      clauses : string list;
+      declaration : Path.key;
+      clauses : Core.origin list;
     }
   | Restated_without_own of {
       at : Core.origin;

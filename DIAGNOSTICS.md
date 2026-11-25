@@ -144,18 +144,36 @@ The lexer and the parser keep span edits, which they build from tokens.
 
 ## Enforcement
 
-- A pass reports a catalog value. Only `Description.render_with` calls
-  `Diagnostic.make` with a message; removing the parameter is not done.
-- An edit names nodes, so a pass has no span to compute. The lexer and
-  the parser build span edits from tokens, and a fix's title comes from
-  the catalog through its `action`.
-- A pass reads spans only for what is not a diagnostic: inference's
-  capture and ordering checks, the prover's `todo` holes, and the
-  elaborator's syntax errors. Removing `read_spans` from the passes'
-  lookups is not done.
+- A pass returns catalog values, and the database stores them. No pass
+  has a channel for a rendered diagnostic.
+- A rendered diagnostic and its fixes are private records, and
+  `Diagnostic.make` is gone. Their one constructor,
+  `Diagnostic.For_rendering`, is for the description library;
+  `.github/scripts/for_rendering.sh` rejects its use anywhere else but
+  tests and tools.
+- The parser, resolution, the interface checks, and inference do not
+  depend on the `diagnostic` library. The lexer reads its own rendered
+  fixes to recover, and the prover reads diagnostic codes to tell panic
+  obligations from the rest; neither can build a rendered diagnostic.
+- An edit names nodes, so a pass has no span to compute. The parser's
+  problems carry the spans that their fixes need, and
+  `Parsing_description` writes the code. The lexer's fixes are a typed
+  edit vocabulary; only code that the lexer computes, such as a number's
+  spelling, a rename, or a copied indentation, is a `Spelled` string.
+- The passes' lookups, `Resolve.Names.lookups`, offer no spans, no text,
+  and no offset of a definition in its file. A pass sees the order and
+  nesting of nodes, `Source.Node_order`, the parts that hold a syntax
+  error, and a definition's file and index in it. The renderer, the
+  driver's commands, and code generation read spans and text through
+  `Resolve.Names.source`.
+- Two readers of source text remain, for text in the compiled program,
+  not in a diagnostic: code generation, which writes a site's position
+  and an assertion's text into a panic, and the derived `Deserialize`,
+  which names a broken invariant in its error through
+  `Infer.Lookups.read_clause_text`.
 
-What remains for review is the `code` fields and the printers that fill
-them.
+What remains for review is the `code` fields, the `Spelled` edits, and
+the printers that fill them.
 
 ## Conversion
 
@@ -167,8 +185,8 @@ One pull request converts everything, and the old mechanisms go in it:
 2. Convert one family at a time: its codes become catalog constructors,
    and its call sites report them. Delete the pass's `report` wrapper,
    `read_span`, quoting, and edit helpers as its last call site goes.
-3. Remove the message parameter of `Diagnostic.make`, and remove
-   `read_text` and `read_spans` from the passes' lookups.
+3. Remove `Diagnostic.make`, and remove `read_text` and `read_spans`
+   from the passes' lookups.
 
 ## Decisions
 

@@ -45,11 +45,11 @@ let lies_in all (syntax_error : Source.Definition_span.t) (part_span : Source.De
       part_span.start = position
     else part_span.start <= position && position < part_span.stop
 
-let find_syntax_error ~spans ~syntax_errors definition part =
+let list_broken_parts ~spans ~syntax_errors definition =
   let all = list_part_spans spans definition in
-  match List.assoc_opt part all with
-  | None -> None
-  | Some span ->
+  List.filter_map
+    (fun (part, span) ->
       if List.exists (fun syntax_error -> lies_in all syntax_error span) syntax_errors then
-        Some Catalog.reported_elsewhere
-      else None
+        Some part
+      else None)
+    all

@@ -2,6 +2,7 @@
  (name interface)
  (modules_without_implementation environment lookups)
  (libraries
+  syntax_print
   language
   structural_key
   source

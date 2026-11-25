@@ -4,6 +4,7 @@ type 'value outcome = 'value Tracker.outcome = Value of 'value | Failed | Blocke
 exception Unusable = Sql.Failed
 
 let make_name_lookups database = Lookups.make_names database Tracker.untracked
+let make_source_lookups database = Lookups.make_source database Tracker.untracked
 
 let add_package_rows (database : t) (package : Project.package) =
   let name = Path.show_package package.name in
@@ -676,7 +677,6 @@ let list_unit_targets (database : t) stage id =
 
 let list_holes proofs ~reached =
   let database = proofs.database in
-  let names = make_name_lookups database in
   let proven_by_path = Hashtbl.create 64 and proven_by_id = Hashtbl.create 64 in
   List.iter
     (fun (key : Resolve.Names.key) ->
@@ -706,14 +706,19 @@ let list_holes proofs ~reached =
                   if target.kind = definition_kind then Some target.id else None)
                 (list_unit_targets database List_calls (Ids.of_path key.path))))
   in
-  let locate ({ home; start; _ } : Store.hole) =
+  let lookups = make_render_lookups database (Hashtbl.create 1) in
+  let locate ({ home; location } : Store.hole) =
     match Store.find_definition_key_anywhere database.store ~id:home with
     | Some key ->
-        let ({ file; base } : Resolve.Names.place) =
-          names.read_place (Declarations.decode_key key)
+        let key = Declarations.decode_key key in
+        let placed = lookups.read_placed key in
+        let start =
+          match (Marshal.from_string location 0 : Catalog.Prover.location) with
+          | Node origin -> (Renderer.locate lookups key origin).start
+          | Whole_definition -> placed.base
         in
-        let line, column = Source.compute_position (read_source database file) (base + start) in
-        (file, line, column)
+        let line, column = Source.compute_position (read_source database placed.file) start in
+        (placed.file, line, column)
     | None -> Compiler_bug.raise_bug ~stage:"Database" "a hole is in a definition with no row"
   in
   let visited = Hashtbl.create 64 and pending = Queue.create () in
@@ -806,6 +811,7 @@ let find_lowered_lookups (database : t) packages : (Lowering.lowered_lookups, st
         {
           system;
           read_source = read_source database;
+          source = Lookups.make_source database Tracker.untracked;
           interface = make_interface_lookups database;
           find_evaluation =
             (fun item ->

@@ -29,8 +29,8 @@ let locate_expression text written occurrence =
         let key = declaration.key in
         match
           ( (Support.make_names packages).read_definition key,
-            (Support.make_names packages).read_spans key,
-            (Support.make_names packages).read_place key,
+            (Support.make_source packages).read_spans key,
+            (Support.make_source packages).read_place key,
             Database.read_checked_body (Support.make_database packages) key )
         with
         | definition, spans, { base; _ }, Some result ->

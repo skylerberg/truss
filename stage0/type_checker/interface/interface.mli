@@ -4,14 +4,7 @@ module Lookups = Lookups
 module Elaborator : sig
   type t = Elaborator.t
 
-  val create :
-    Lookups.t ->
-    Resolve.resolved ->
-    spans:Source.Definition_span.t array ->
-    Environment.known_bounds Environment.scope ->
-    t
-
-  val read_span : t -> Syntax.id -> Source.Definition_span.t
+  val create : Lookups.t -> Resolve.resolved -> Environment.known_bounds Environment.scope -> t
   val list_known_bounds : t -> Properties.Bounds.t
   val find_self_type : t -> Types.ty option
   val list_diagnostics : t -> Catalog.diagnostic list

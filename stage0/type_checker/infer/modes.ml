@@ -6,9 +6,7 @@ let find_immutable_name state (name : Syntax.name) =
   | Some (Local id) -> (
       let captured =
         match state.lambdas with
-        | (lambda : Source.Definition_span.t) :: _ ->
-            let binding = State.read_span state id in
-            binding.start < lambda.start || binding.start >= lambda.stop
+        | lambda :: _ -> not (State.contains state ~outer:lambda ~inner:id)
         | [] -> false
       in
       match Hashtbl.find_opt state.locals id with

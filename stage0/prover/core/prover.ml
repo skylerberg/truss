@@ -285,13 +285,6 @@ let list_path_notes (obligation : Obligation.t) answer_values =
          | _ -> None)
        obligation.path_notes)
 
-let resolve_location (names : Resolve.Names.lookups) (key : Resolve.Names.key)
-    (location : Obligation.location) =
-  Source.Definition_span.locate (names.read_spans key)
-    (match location with
-    | Node origin -> Core_walk.locate_origin origin
-    | Whole_definition -> (names.read_definition key).id)
-
 type state = {
   site : Catalog.Prover.t;
   is_proven : bool;

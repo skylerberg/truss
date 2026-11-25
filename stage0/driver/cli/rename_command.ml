@@ -86,9 +86,10 @@ let parse_module_path package text =
   | { member = Some _; _ } | (exception Outcome.Cannot_run _) -> None
 
 let list_definition_occurrences database (names : Resolve.Names.lookups) (key : Resolve.Names.key) =
+  let source_lookups = Database.make_source_lookups database in
   match Database.read_resolved database key with
   | Some resolved ->
-      let ({ file; base } : Resolve.Names.place) = names.read_place key in
+      let ({ file; base } : Resolve.Names.place) = source_lookups.read_place key in
       let tables =
         Option.map
           (fun (checked : Infer.checked) -> checked.tables)
@@ -97,7 +98,7 @@ let list_definition_occurrences database (names : Resolve.Names.lookups) (key : 
       List.map
         (fun ({ span; target } : Inspect.References.occurrence) ->
           (file, Source.Definition_span.to_file ~base span, target))
-        (Inspect.References.list_occurrences ~path:key.path (names.read_spans key)
+        (Inspect.References.list_occurrences ~path:key.path (source_lookups.read_spans key)
            (names.read_definition key) resolved tables)
   | None -> []
 

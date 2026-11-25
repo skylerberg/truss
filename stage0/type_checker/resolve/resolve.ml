@@ -109,14 +109,10 @@ let find_value_name (definition : Syntax.definition) : Syntax.name option =
   | _ -> None
 
 let resolve (lookups : Names.lookups) (key : Names.key) =
-  let definition = lookups.read_definition key
-  and spans = lookups.read_spans key
-  and syntax_errors = lookups.list_syntax_errors key in
-  let is_broken part =
-    Option.is_some (Parts.find_syntax_error ~spans ~syntax_errors definition part)
-  in
+  let definition = lookups.read_definition key and broken_parts = lookups.list_broken_parts key in
+  let is_broken part = List.mem part broken_parts in
   let module_ = key.module_ in
-  let state = Walk.create lookups key ~spans ~syntax_errors in
+  let state = Walk.create lookups key in
   let container_key = lookups.find_container key in
   let container =
     Option.map
@@ -144,7 +140,7 @@ let resolve (lookups : Names.lookups) (key : Names.key) =
       | _ -> ())
   | _ -> ());
   if key.ordinal > 0 && Path.is_resolved key.path then begin
-    let first = lookups.read_place { key with ordinal = 0 } in
+    let first = lookups.read_file_order { key with ordinal = 0 } in
     Walk.report state
       (Redefined
          {
@@ -153,7 +149,8 @@ let resolve (lookups : Names.lookups) (key : Names.key) =
                (fun (name : Syntax.name) -> Core.Written name.id)
                (find_declared_name definition);
            path = key.path;
-           first = (if first.file <> (lookups.read_place key).file then Some first.file else None);
+           first =
+             (if first.file <> (lookups.read_file_order key).file then Some first.file else None);
          })
   end;
   (match find_value_name definition with

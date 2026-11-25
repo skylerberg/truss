@@ -21,6 +21,7 @@ type visibility = Language.Visibility.t = Private | Internal | Public | Public_o
 type key = Path.key = { module_ : Path.module_; path : Path.t; ordinal : int }
 type declaration = { key : key; kind : kind; visibility : visibility; generic : bool }
 type place = { file : Path.file; base : int }
+type file_order = { file : Path.file; index : int }
 
 val show_key : key -> string
 val extract_signature_name : Syntax.signature -> Syntax.name
@@ -49,10 +50,9 @@ type lookups = {
   list_declarations_in : Path.file -> declaration list;
   list_package_declarations : Path.package -> declaration list;
   read_definition : key -> Syntax.definition;
-  read_text : key -> string;
-  read_spans : key -> Source.Definition_span.t array;
-  list_syntax_errors : key -> Source.Definition_span.t list;
-  read_place : key -> place;
+  read_order : key -> Source.Node_order.t;
+  list_broken_parts : key -> Parts.part list;
+  read_file_order : key -> file_order;
   find_container : key -> key option;
   list_contained : key -> key list;
   list_members : Path.t -> string -> key list;
@@ -60,6 +60,12 @@ type lookups = {
   list_impls_of_type : Path.package -> Path.t -> (Path.t * Path.t) list;
   list_impls_of_trait : Path.package -> Path.t -> Path.t list;
   list_law_proofs : Path.package -> law_proof_name -> key list;
+}
+
+type source = {
+  read_text : key -> string;
+  read_spans : key -> Source.Definition_span.t array;
+  read_place : key -> place;
 }
 
 val resolve_used_module : lookups -> from:Path.module_ -> Syntax.path -> Path.module_

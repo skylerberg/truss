@@ -145,7 +145,7 @@ type scope = Everything | Packages of string list | Files of int list
 
 val find_unproven_definition : t -> scope:scope -> origin:int -> string option
 
-type hole = { home : int; start : int; stop : int }
+type hole = { home : int; location : string }
 
 val list_holes : t -> schema -> definition:int -> hole list
 val replace_holes : t -> definition:int -> hole list -> unit
@@ -312,6 +312,7 @@ val replace_module_law_proofs :
 
 val has_module : t -> schema -> module_:int -> bool
 val find_place : t -> schema -> definition:int -> (string * int) option
+val find_file_order : t -> schema -> definition:int -> (string * int) option
 val find_text : t -> schema -> definition:int -> string option
 val find_definition_key : t -> schema -> id:int -> string option
 val list_member_keys : t -> schema -> owner:int -> member:string -> origin:int -> string list

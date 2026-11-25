@@ -820,19 +820,14 @@ let find_unproven_definition store ~scope ~origin =
         ON d.id = p.definition WHERE p.state != 0 AND d.origin = ?1%s LIMIT 1"
        membership) (Integer origin :: members) (fun row -> Sql.read_blob row 0)
 
-type hole = { home : int; start : int; stop : int }
+type hole = { home : int; location : string }
 
 let list_holes store schema ~definition =
   Sql.list_rows store.sql
-    (Printf.sprintf "SELECT home, start, stop FROM %s.hole WHERE definition = ?1 ORDER BY position"
+    (Printf.sprintf "SELECT home, location FROM %s.hole WHERE definition = ?1 ORDER BY position"
        (name_schema schema))
     [ Integer definition ]
-    (fun row ->
-      {
-        home = Sql.read_integer row 0;
-        start = Sql.read_integer row 1;
-        stop = Sql.read_integer row 2;
-      })
+    (fun row -> { home = Sql.read_integer row 0; location = Sql.read_blob row 1 })
 
 let replace_holes store ~definition holes =
   if list_holes store Main ~definition <> holes then begin
@@ -840,15 +835,8 @@ let replace_holes store ~definition holes =
     List.iteri
       (fun position (hole : hole) ->
         Sql.run store.sql
-          "INSERT INTO main.hole (definition, position, home, start, stop) VALUES (?1, ?2, ?3, ?4, \
-           ?5)"
-          [
-            Integer definition;
-            Integer position;
-            Integer hole.home;
-            Integer hole.start;
-            Integer hole.stop;
-          ])
+          "INSERT INTO main.hole (definition, position, home, location) VALUES (?1, ?2, ?3, ?4)"
+          [ Integer definition; Integer position; Integer hole.home; Blob hole.location ])
       holes
   end
 
@@ -1528,6 +1516,15 @@ let find_place store schema ~definition =
   Sql.find_row store.sql
     (Printf.sprintf
        "SELECT file.key, definition.base FROM %s.definition CROSS JOIN %s.file ON file.id = \
+        definition.file WHERE definition.id = ?1"
+       schema schema) [ Integer definition ] (fun row ->
+      (Sql.read_blob row 0, Sql.read_integer row 1))
+
+let find_file_order store schema ~definition =
+  let schema = name_schema schema in
+  Sql.find_row store.sql
+    (Printf.sprintf
+       "SELECT file.key, definition.position FROM %s.definition CROSS JOIN %s.file ON file.id = \
         definition.file WHERE definition.id = ?1"
        schema schema) [ Integer definition ] (fun row ->
       (Sql.read_blob row 0, Sql.read_integer row 1))

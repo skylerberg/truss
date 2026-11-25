@@ -713,7 +713,7 @@ let () =
         (Type_check (make_main_key "Outer"))
         ~includes:[ Name (Tree (make_main_key "Outer")) ]
         ~excludes:[ Name (Place (make_main_key "Outer")); Name (Place (make_main_key "Inner")) ]);
-  Harness.test "a reformat inside a definition recomputes only that definition's proof" (fun () ->
+  Harness.test "a reformat inside a definition recomputes no proof" (fun () ->
       expect_recomputed
         (list_propagated
            ~before:[ ("app.main", callee_and_caller) ]
@@ -730,7 +730,6 @@ let () =
             Import_check (Support.parse_file "app.main");
             Declared (Support.parse_module "app.main");
             Parsed (Support.parse_file "app.main");
-            Proof (make_main_key "callee");
           ]);
   Harness.test "a reformat inside a definition with a type error recomputes no check of it"
     (fun () ->

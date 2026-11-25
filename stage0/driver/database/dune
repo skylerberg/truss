@@ -18,6 +18,7 @@
   renderer
   strongly_connected
   core
+  core_walk
   manifest
   project
   parser

@@ -11,14 +11,12 @@ type t = {
   context : Interface.Elaborator.t;
   law_parameters : (string * Types.ty) list;
   package : Path.package;
-  text : string Lazy.t;
   counters : counters;
 }
 
 type env = { output : Types.result option; self : Types.ty option }
 
-let read_span form id = Interface.Elaborator.read_span form.context id
-let quote form id = Source.Definition_span.quote (Lazy.force form.text) (read_span form id)
+let show_node id = Printf.sprintf "the node %d" id
 
 let allocate_node_id form =
   let id = form.counters.next_node_id in
@@ -245,7 +243,7 @@ let read_constructor_fields form type_ variant type_arguments =
 let read_type form (value : Syntax.expression) =
   match form.tables.types.(value.id) with
   | Some type_ -> type_
-  | None -> raise_bug "`%s` has a core node but no recorded type" (quote form value.id)
+  | None -> raise_bug "%s has a core node but no recorded type" (show_node value.id)
 
 let read_local_type form (id : Syntax.id) =
   match form.tables.local_types.(id) with
@@ -264,7 +262,7 @@ let build_literal : Tables.literal -> Core.kind = function
 let build_function_value form (value : Syntax.expression) : Core.kind =
   match form.tables.resolutions.(value.id) with
   | Some (Global { path; instantiation }) -> Function_value { path; instantiation }
-  | _ -> raise_bug "`%s` is not recorded as a function" (quote form value.id)
+  | _ -> raise_bug "%s is not recorded as a function" (show_node value.id)
 
 let build_variant_value form (value : Syntax.expression) type_path variant : Core.kind =
   match read_type form value with
@@ -614,13 +612,13 @@ let rec build_expression form env (value : Syntax.expression) : Core.expression 
           | Some type_ ->
               let kind = build_kind form env value in
               { Core.id; origin = compute_expression_origin value kind; type_; kind }
-          | None -> raise_bug "`%s` has a node and no type" (quote form value.id))
+          | None -> raise_bug "%s has a node and no type" (show_node value.id))
     in
     List.fold_left (apply_conversion form value.id) built form.tables.conversions.(value.id)
 
 and build_kind form env (value : Syntax.expression) : Core.kind =
   let elaboration = form.tables.elaborations.(value.id) in
-  let raise_unexpected () = raise_bug "`%s` has no elaboration of its form" (quote form value.id) in
+  let raise_unexpected () = raise_bug "%s has no elaboration of its form" (show_node value.id) in
   match value.kind with
   | Integer _ | Float _ -> (
       match elaboration with
@@ -841,7 +839,7 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
   | Block body -> Block (build_block form env body)
   | Parenthesized _ | Mode _ -> raise_bug "a wrapper has no node of its own"
   | Self_type_value | Expression_error ->
-      raise_bug "`%s` is not a value and has no core node" (quote form value.id)
+      raise_bug "%s is not a value and has no core node" (show_node value.id)
 
 and build_name form env (value : Syntax.expression) : Core.kind =
   match Resolve.find_head form.resolved value with
@@ -859,7 +857,7 @@ and build_name form env (value : Syntax.expression) : Core.kind =
       match List.nth_opt form.law_parameters index with
       | Some (name, type_) ->
           Use (Local { local = Trait_parameter { index; name }; type_; origin = Written value.id })
-      | None -> raise_bug "the law has no parameter `%s`" (quote form value.id))
+      | None -> raise_bug "the law has no parameter at %s" (show_node value.id))
   | Some { target = Value_parameter parameter; _ } -> Value_parameter parameter
   | Some { target = Definition (Function, _); _ } -> build_function_value form value
   | Some { target = Definition (Constant, path); _ } ->
@@ -878,7 +876,7 @@ and build_name form env (value : Syntax.expression) : Core.kind =
            })
   | Some { target = Result_value; _ } -> Result
   | Some { target = Visited; _ } -> Yielded
-  | Some _ | None -> raise_bug "`%s` is not a value and has no core node" (quote form value.id)
+  | Some _ | None -> raise_bug "%s is not a value and has no core node" (show_node value.id)
 
 and build_member form env (value : Syntax.expression) base (member : Syntax.name) : Core.kind =
   match form.tables.resolutions.(value.id) with
@@ -896,7 +894,7 @@ and build_member form env (value : Syntax.expression) base (member : Syntax.name
   | Some (Variant_value { type_ = Types.Named { path; _ }; variant }) ->
       build_variant_value form value path variant
   | Some (Global _) -> build_function_value form value
-  | _ -> raise_bug "`%s` is a member with no recorded resolution" (quote form value.id)
+  | _ -> raise_bug "%s is a member with no recorded resolution" (show_node value.id)
 
 and build_index form env (value : Syntax.expression) base items : Core.kind =
   match items with
@@ -920,8 +918,8 @@ and build_index form env (value : Syntax.expression) base items : Core.kind =
                  type_ = element;
                  origin = Written value.id;
                })
-      | None, None -> raise_bug "`%s` is indexed and has no elements" (quote form value.id))
-  | _ -> raise_bug "`%s` is indexed with other than one item" (quote form value.id)
+      | None, None -> raise_bug "%s is indexed and has no elements" (show_node value.id))
+  | _ -> raise_bug "%s is indexed with other than one item" (show_node value.id)
 
 and build_specification_call form env (value : Syntax.expression) (arguments : Syntax.argument list)
     (specification : Tables.specification_call) : Core.kind =
@@ -1781,7 +1779,7 @@ and build_pattern form (written : Syntax.pattern) : Core.pattern =
           type_;
           kind = build_pattern_kind form type_ written;
         }
-    | None -> raise_bug "`%s` has a node and no type" (quote form written.id)
+    | None -> raise_bug "%s has a node and no type" (show_node written.id)
 
 and build_pattern_kind form type_ (written : Syntax.pattern) : Core.pattern_kind =
   match (written.kind, form.tables.patterns.(written.id)) with
@@ -1806,7 +1804,7 @@ and build_pattern_kind form type_ (written : Syntax.pattern) : Core.pattern_kind
       Record (build_pattern_fields form fields)
   | Alternatives alternatives, _ -> Alternatives (List.map (build_pattern form) alternatives)
   | (Binding _ | Qualified_constant _ | Variant _ | Record _ | Tuple _), _ ->
-      raise_bug "`%s` is a pattern the checker did not record" (quote form written.id)
+      raise_bug "%s is a pattern the checker did not record" (show_node written.id)
 
 and build_pattern_fields form (fields : (string * Syntax.pattern) list) =
   List.map (fun (field, written) -> (field, build_pattern form written)) fields
@@ -2108,7 +2106,7 @@ let rec replace_holes type_ =
 and replace_capability_holes capabilities =
   Types.map_capability_types replace_holes (Types.map_trait replace_holes) capabilities
 
-let build lookups ~signatures ~resolved ~tables ~context ~package ~text ~key ~definition ~elaborated
+let build lookups ~signatures ~resolved ~tables ~context ~package ~key ~definition ~elaborated
     ~law_parameters ~checks_body ~has_syntax_error : Core.t =
   let tables_with_holes =
     if Tables.exists_type (function Types.Hole -> true | _ -> false) tables then Some tables
@@ -2130,7 +2128,6 @@ let build lookups ~signatures ~resolved ~tables ~context ~package ~text ~key ~de
       context;
       law_parameters;
       package;
-      text;
       counters = { next_node_id = 0; next_synthetic_local = 0 };
     }
   in

@@ -645,7 +645,6 @@ let list_diagnostics (lookups : Lookups.t) key =
       key;
       definition = lookups.names.read_definition key;
       elaborated = lookups.read_elaborated_interface key;
-      spans = lookups.names.read_spans key;
       diagnostics = ref [];
     }
   in

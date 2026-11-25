@@ -110,8 +110,8 @@ let tables =
     fact_of_definition "ownership" (state ^ ", must_be_disjoint BLOB");
     fact_of_definition ~has_index_without_value:true "proof" (state ^ ", value BLOB");
     keyed_by_columns "hole"
-      "definition INTEGER NOT NULL, position INTEGER NOT NULL, home INTEGER NOT NULL, start \
-       INTEGER NOT NULL, stop INTEGER NOT NULL, PRIMARY KEY (definition, position)"
+      "definition INTEGER NOT NULL, position INTEGER NOT NULL, home INTEGER NOT NULL, location \
+       BLOB NOT NULL, PRIMARY KEY (definition, position)"
       [];
     keyed_by_columns "verdict"
       "definition INTEGER NOT NULL, position INTEGER NOT NULL, code TEXT NOT NULL, site BLOB NOT \

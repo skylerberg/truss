@@ -276,20 +276,11 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
               (Mut_self_for_slice
                  { at = Written trait_path.id; trait = shown_trait; for_type = impl.for_type }))
 
-let list_callback_contracts (definition : Syntax.definition) ~text ~spans =
+let list_callback_contracts (definition : Syntax.definition) =
   let parameters =
     match definition.kind with
     | Function { signature; _ } | Method_declaration signature -> signature.parameters
     | _ -> []
-  in
-  let quote (value : Syntax.expression) =
-    String.concat " "
-      (List.filter
-         (fun word -> word <> "")
-         (String.split_on_char ' '
-            (String.map
-               (function '\n' | '\t' -> ' ' | character -> character)
-               (Source.Definition_span.quote text (Source.Definition_span.locate spans value.id)))))
   in
   List.filter_map
     (fun (parameter : Syntax.parameter) ->
@@ -297,12 +288,11 @@ let list_callback_contracts (definition : Syntax.definition) ~text ~spans =
       | Named_parameter { name; type_ = { kind = Function_type { clauses; _ }; _ }; _ } ->
           Some
             ( name.text,
-              List.filter_map
+              List.filter
                 (fun (clause : Syntax.clause) ->
                   match clause.kind with
-                  | Requires value -> Some ("requires " ^ quote value)
-                  | Ensures value -> Some ("ensures " ^ quote value)
-                  | Uses _ | Cost _ | Decreases _ | Modifies _ | Clause_error -> None)
+                  | Requires _ | Ensures _ -> true
+                  | Uses _ | Cost _ | Decreases _ | Modifies _ | Clause_error -> false)
                 clauses )
       | Named_parameter _ | Self_parameter _ | Parameter_error -> None)
     parameters
@@ -312,24 +302,28 @@ let check_callback_contracts (state : Checking.state) (name : Syntax.name) ~show
   match state.lookups.names.find_key declaration with
   | None -> ()
   | Some key ->
-      let declared =
-        list_callback_contracts
-          (state.lookups.names.read_definition key)
-          ~text:(state.lookups.names.read_text key)
-          ~spans:(state.lookups.names.read_spans key)
-      and written =
-        list_callback_contracts state.definition
-          ~text:(state.lookups.names.read_text state.key)
-          ~spans:state.spans
-      in
+      let written = list_callback_contracts state.definition in
       List.iter
-        (fun (parameter, clauses) ->
+        (fun (parameter, (clauses : Syntax.clause list)) ->
           let written_clauses = Option.value ~default:[] (List.assoc_opt parameter written) in
-          if clauses <> written_clauses then
+          if
+            List.map Syntax_print.show_clause clauses
+            <> List.map Syntax_print.show_clause written_clauses
+          then
             Checking.report state
               (Callback_contract_mismatch
-                 { at = Written name.id; name = name.text; trait = shown_trait; parameter; clauses }))
-        declared
+                 {
+                   at = Written name.id;
+                   name = name.text;
+                   trait = shown_trait;
+                   parameter;
+                   declaration = key;
+                   clauses =
+                     List.map
+                       (fun (clause : Syntax.clause) : Core.origin -> Written clause.id)
+                       clauses;
+                 }))
+        (list_callback_contracts (state.lookups.names.read_definition key))
 
 let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : Path.receiver)
     (written : Types.signature) (impl : Types.impl_interface) (trait_path : Syntax.path_type) =

@@ -83,8 +83,7 @@ type section_names = {
 type state = {
   lookups : Names.lookups;
   key : Names.key;
-  spans : Source.Definition_span.t array;
-  syntax_errors : Source.Definition_span.t list;
+  broken_parts : Parts.part list;
   imports : (string * Path.module_) list Lazy.t;
   visible_packages : Path.package list Lazy.t;
   interface : section_names;
@@ -102,13 +101,12 @@ let make_section_names size =
     used_imports = [];
   }
 
-let create lookups key ~spans ~syntax_errors =
-  let size = Array.length spans in
+let create (lookups : Names.lookups) key =
+  let size = Source.Node_order.count (lookups.read_order key) in
   {
     lookups;
     key;
-    spans;
-    syntax_errors;
+    broken_parts = lookups.list_broken_parts key;
     imports = lazy (lookups.list_imports key);
     visible_packages = lazy (Names.list_visible_packages lookups key.module_.package);
     interface = make_section_names size;
@@ -256,7 +254,7 @@ let list_types_with_variant state text =
             | Type_definition { name; body = Variants variants; _ }
               when List.exists (fun (variant : Syntax.variant) -> variant.name.text = text) variants
               ->
-                Some (state.lookups.read_place declaration.key, name.text)
+                Some (state.lookups.read_file_order declaration.key, name.text)
             | _ -> None)
         | _ -> None)
       (state.lookups.list_declarations state.key.module_)
@@ -1100,11 +1098,7 @@ let resolve_inherited scope ~(owner : Path.t) (generics : Syntax.generic_paramet
 
 let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.definition) option)
     (definition_ : Syntax.definition) =
-  let is_broken part =
-    Option.is_some
-      (Parts.find_syntax_error ~spans:state.spans ~syntax_errors:state.syntax_errors definition_
-         part)
-  in
+  let is_broken part = List.mem part state.broken_parts in
   let header_broken = is_broken Header and body_broken = is_broken Body in
   let scope =
     match container with

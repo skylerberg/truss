@@ -25,18 +25,14 @@ let check_clauses (state : State.state) (name : Syntax.name) clauses =
     List.filter_map
       (fun (clause : Syntax.clause) ->
         match clause.kind with
-        | Requires _ | Cost _ -> Some (State.read_span state clause.id)
+        | Requires _ | Cost _ -> Some clause.id
         | Ensures _ | Uses _ | Decreases _ | Modifies _ | Clause_error -> None)
       clauses
   in
   if is_called_from_other_packages state && requires_and_costs <> [] then begin
     let record_name id (path : Path.t) =
-      let span = State.read_span state id in
       if
-        List.exists
-          (fun (clause : Source.Definition_span.t) ->
-            clause.start <= span.start && span.stop <= clause.stop)
-          requires_and_costs
+        List.exists (fun clause -> State.contains state ~outer:clause ~inner:id) requires_and_costs
         && not (is_visible_to_other_packages state.lookups path)
       then
         State.report state

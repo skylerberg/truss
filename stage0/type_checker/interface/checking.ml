@@ -3,7 +3,6 @@ type state = {
   key : Resolve.Names.key;
   definition : Syntax.definition;
   elaborated : Environment.elaborated_interface;
-  spans : Source.Definition_span.t array;
   diagnostics : Catalog.diagnostic list ref;
 }
 

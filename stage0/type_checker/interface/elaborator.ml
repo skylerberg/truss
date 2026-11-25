@@ -17,10 +17,9 @@ type t = {
   is_in_impl : bool;
   diagnostics : Catalog.diagnostic list ref;
   named : (Syntax.id * Types.ty) list ref;
-  spans : Source.Definition_span.t array;
 }
 
-let create_with lookups resolved ~spans (scope : _ Environment.scope) ~known_bounds =
+let create_with lookups resolved (scope : _ Environment.scope) ~known_bounds =
   let bounds = Parameter_table.create 8 in
   List.iter
     (fun (parameter, traits) -> Parameter_table.replace bounds parameter traits)
@@ -44,17 +43,13 @@ let create_with lookups resolved ~spans (scope : _ Environment.scope) ~known_bou
     is_in_impl = false;
     diagnostics = ref [];
     named = ref [];
-    spans;
   }
 
-let create_declared lookups resolved ~spans (scope : Environment.declared_bounds Environment.scope)
-    =
-  create_with lookups resolved ~spans scope ~known_bounds:Properties.Bounds.none
+let create_declared lookups resolved (scope : Environment.declared_bounds Environment.scope) =
+  create_with lookups resolved scope ~known_bounds:Properties.Bounds.none
 
-let create lookups resolved ~spans (scope : Environment.known_bounds Environment.scope) =
-  create_with lookups resolved ~spans scope ~known_bounds:(Properties.Bounds.of_known scope.bounds)
-
-let read_span context id = context.spans.(id)
+let create lookups resolved (scope : Environment.known_bounds Environment.scope) =
+  create_with lookups resolved scope ~known_bounds:(Properties.Bounds.of_known scope.bounds)
 
 let list_bounds context parameter =
   let declared = Option.value ~default:[] (Parameter_table.find_opt context.bounds parameter) in
@@ -1271,9 +1266,7 @@ let elaborate_header (lookups : Lookups.t) (key : Resolve.Names.key) =
   then Error []
   else
     match
-      elaborate_container
-        (create_declared lookups resolved ~spans:(lookups.names.read_spans key) empty_scope)
-        key.path definition
+      elaborate_container (create_declared lookups resolved empty_scope) key.path definition
     with
     | _, context when !(context.diagnostics) <> [] -> Error (List.rev !(context.diagnostics))
     | Error _, _ -> Error []
@@ -1403,9 +1396,9 @@ let make_container_interface lookups (key : Resolve.Names.key) (header : Environ
     scope = close_scope lookups header.container_scope;
   }
 
-let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : Syntax.definition)
+let elaborate_member (lookups : Lookups.t) ~path resolved (definition : Syntax.definition)
     (header : Environment.header) =
-  let context = create_declared lookups resolved ~spans header.container_scope in
+  let context = create_declared lookups resolved header.container_scope in
   match definition.kind with
   | Function { signature; _ } | Method_declaration signature ->
       let is_in_capability, is_in_impl =
@@ -1424,10 +1417,9 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
 let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let resolved = lookups.read_resolved Interface key in
   let definition = lookups.names.read_definition key in
-  let spans = lookups.names.read_spans key in
   let path = key.path in
   Compiler_bug.run_while_doing ~stage:"Interface" (Resolve.Names.show_key key) (fun () ->
-      let context = create_declared lookups resolved ~spans empty_scope in
+      let context = create_declared lookups resolved empty_scope in
       let make_error_interface () =
         make_elaborated_interface context (Error_interface Catalog.reported_elsewhere)
       in
@@ -1437,7 +1429,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
       with
       | Some report, _ -> make_elaborated_interface context (Error_interface report)
       | None, Some None -> make_error_interface ()
-      | None, Some (Some header) -> elaborate_member lookups ~path ~spans resolved definition header
+      | None, Some (Some header) -> elaborate_member lookups ~path resolved definition header
       | None, None -> (
           match definition.kind with
           | Trait _ | Capability _ | Impl _ -> (

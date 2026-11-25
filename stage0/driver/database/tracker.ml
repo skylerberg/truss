@@ -54,9 +54,7 @@ let mark_readers_of_all tracker targets =
       ~markers:reads
 
 let stages_holding_positions =
-  List.fold_left
-    (fun stages stage -> stages lor (1 lsl Kind.rank_stage stage))
-    0 [ Kind.Prove; Lower ]
+  List.fold_left (fun stages stage -> stages lor (1 lsl Kind.rank_stage stage)) 0 [ Kind.Lower ]
 
 let mark_position_holders tracker target id name =
   if tracker.records_reads then

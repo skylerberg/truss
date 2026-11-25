@@ -151,6 +151,7 @@ let collect_core_nodes packages (key : Resolve.Names.key) : core_nodes =
       }
 
 let make_names packages = Database.make_name_lookups (make_database packages)
+let make_source packages = Database.make_source_lookups (make_database packages)
 
 let list_declarations packages (module_ : Path.module_) =
   (make_names packages).list_declarations module_

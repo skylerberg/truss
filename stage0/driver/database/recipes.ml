@@ -629,8 +629,7 @@ let run_prove (database : Tracker.t) (row : Store.definition) =
               | Obligations outcome ->
                   List.map
                     (fun ((home : Resolve.Names.key), location) : Store.hole ->
-                      let span = Prover.resolve_location lookups.interface.names home location in
-                      { home = Ids.of_key home; start = span.start; stop = span.stop })
+                      { home = Ids.of_key home; location = Marshal.to_string location [] })
                     outcome.holes
               | Unsupported _ | Not_proven_here -> [] ))
         | exception Tracker.Reads_failed_fact -> (Blocked, [], []))
@@ -913,7 +912,9 @@ let render_unit (database : Tracker.t) recorder profile item =
   in
   let interface = Lookups.make_interface database recorder ~is_checked:true in
   Option.map
-    (Lowering.render_unit (read_host_system ()) interface profile
+    (Lowering.render_unit (read_host_system ()) interface
+       ~source:(Lookups.make_source database recorder)
+       profile
        ~read_source:(Lookups.read_source database recorder)
        ~is_worked_on:(Lookups.is_worked_on database) ~find_lowered)
     (match find_lowered item with

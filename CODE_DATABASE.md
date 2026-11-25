@@ -126,7 +126,7 @@ recursion_group (definition, state, representative, members)
 usage_check     (definition, state)
 ownership       (definition, state, must_be_disjoint)
 proof           (definition, state, value)
-hole            (definition, position, home, start, stop)
+hole            (definition, position, home, location)
 verdict         (definition, position, code, site, proven, trusts_compiled_code, failure)
 ```
 
@@ -412,7 +412,8 @@ runs the evaluation again.
 
 | Column | Read whole by |
 |---|---|
-| `syntax.tree`, `syntax.spans` | Resolve, Elaborate, Infer |
+| `syntax.tree` | Resolve, Elaborate, Infer |
+| `syntax.spans` | The node order and the broken parts that Resolve and Infer read, the listing of diagnostics, Lower |
 | `resolved.names`, `brackets`, `holes` | Elaborate, Infer, `explain` |
 | `header.value`, `interface.value` | Every stage after Elaborate |
 | `contract.form`, `body.form`, `body.tables` | Build MIR, Check bodies |
