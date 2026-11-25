@@ -215,7 +215,7 @@ impl Reader for ByteReader {
   fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError] {
     let left = self.bytes.length() - self.position
     let count = if limit < left { limit } else { left }
-    mut buffer.append_slice(self.bytes[self.position..self.position + count])
+    mut buffer.append_items(self.bytes[self.position..self.position + count])
     self.position += count
     Ok(count)
   }
@@ -243,7 +243,7 @@ public fn ByteWriter.finish(own self) -> List[UInt8]
 
 impl Writer for ByteWriter {
   fn write(mut self, bytes: List[UInt8]) -> Result[UInt64, SystemError] {
-    mut self.bytes.append_slice(bytes)
+    mut self.bytes.append_items(bytes)
     Ok(bytes.length())
   }
 
@@ -350,7 +350,7 @@ public fn ByteQueue.append(mut self, bytes: List[UInt8])
   cost amortized time O(bytes.length())
 {
   compact(mut self)
-  mut self.storage.append_slice(bytes)
+  mut self.storage.append_items(bytes)
 }
 
 public fn ByteQueue.append_list(mut self, bytes: own List[UInt8])
@@ -436,7 +436,7 @@ public fn BufferedReader[Source: Reader].read_until(
       at_delimiter = unread[index] == delimiter
       index += 1
     }
-    mut buffer.append_slice(unread[..index])
+    mut buffer.append_items(unread[..index])
     mut self.pending.skip(index)
     consumed += index
     if at_delimiter || consumed == limit {
@@ -514,7 +514,7 @@ impl Reader for BufferedReader[Source: Reader] {
     }
     let available = self.pending.length()
     let count = if limit < available { limit } else { available }
-    mut buffer.append_slice(self.pending.bytes()[..count])
+    mut buffer.append_items(self.pending.bytes()[..count])
     mut self.pending.skip(count)
     Ok(count)
   }
@@ -575,7 +575,7 @@ impl Writer for BufferedWriter[Sink: Writer] {
     if self.pending.length() > self.capacity - bytes.length() {
       mut self.flush()?
     }
-    mut self.pending.append_slice(bytes)
+    mut self.pending.append_items(bytes)
     Ok(bytes.length())
   }
 

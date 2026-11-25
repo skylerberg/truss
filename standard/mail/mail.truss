@@ -145,13 +145,13 @@ fn quoted_printable(text: String) -> String {
   {
     let byte = bytes[index]
     if byte == 13 && index + 1 < bytes.length() && bytes[index + 1] == 10 {
-      mut output.append_slice("\r\n".bytes())
+      mut output.append_items("\r\n".bytes())
       column = 0
       index += 2
       continue
     }
     if byte == 10 {
-      mut output.append_slice("\r\n".bytes())
+      mut output.append_items("\r\n".bytes())
       column = 0
       index += 1
       continue
@@ -160,7 +160,7 @@ fn quoted_printable(text: String) -> String {
     let is_plain = (byte >= 33 && byte <= 126 && byte != 61) || ((byte == 32 || byte == 9) && !ends_line)
     let width: UInt64 = if is_plain { 1 } else { 3 }
     if column + width > 75 {
-      mut output.append_slice("=\r\n".bytes())
+      mut output.append_items("=\r\n".bytes())
       column = 0
     }
     if is_plain {
@@ -463,9 +463,9 @@ fn authenticate[Stream: streams.Duplex](stream: Stream, inbox: mut streams.ByteQ
   let password = options.password.copy().unwrap_or("")
   if offers_mechanism(features, mechanism: "PLAIN") {
     var credentials: List[UInt8] = [0]
-    mut credentials.append_slice(username.bytes())
+    mut credentials.append_items(username.bytes())
     mut credentials.push(0)
-    mut credentials.append_slice(password.bytes())
+    mut credentials.append_items(password.bytes())
     let _ = command(stream, inbox: mut inbox, line: "AUTH PLAIN ${base64.encode(credentials)}", lowest: 235, highest: 235)?
     return Ok(Unit)
   }

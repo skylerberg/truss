@@ -3,7 +3,7 @@ fn counted(counter: mut UInt64) -> List[UInt64] {
   [1, 2, 3, 4]
 }
 
-test "a slice of a temporary evaluates the temporary once" {
+test "a range of a temporary evaluates the temporary once" {
   var counter: UInt64 = 0
   assert counted(mut counter)[1..].length() == 3
   assert counter == 1

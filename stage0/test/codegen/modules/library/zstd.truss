@@ -688,8 +688,8 @@ test "compress's output decompresses to its input" {
 
 test "decompress reads concatenated frames and skips skippable frames" {
   var stream = zstd.compress("first ".bytes())
-  mut stream.append_slice(bytes_of("5a2a4d1803000000010203"))
-  mut stream.append_slice(zstd.compress("second".bytes()))
+  mut stream.append_items(bytes_of("5a2a4d1803000000010203"))
+  mut stream.append_items(zstd.compress("second".bytes()))
   assert zstd.decompress(stream) is Ok(bytes) && String.from_utf8_lossy(bytes) == "first second"
 }
 

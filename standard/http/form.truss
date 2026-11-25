@@ -114,7 +114,7 @@ public fn Request.multipart(own self, header_limit: UInt64 = 16384) -> Result[Mu
     return Err(malformed("a multipart boundary that is empty or longer than 70 characters"))
   }
   var delimiter: List[UInt8] = [13, 10, 45, 45]
-  mut delimiter.append_slice(boundary.bytes())
+  mut delimiter.append_items(boundary.bytes())
   Ok(Multipart(body: own self.body, delimiter: own delimiter, buffer: [13, 10], section: Section.Preamble, header_limit: header_limit))
 }
 
@@ -333,7 +333,7 @@ public fn encode_multipart(fields: Form, files: List[FilePart] = []) -> Encoded
   }
   for file in files {
     push_text(mut body, text: "--${boundary}\r\nContent-Disposition: form-data; name=\"${quoted(file.name)}\"; filename=\"${quoted(file.filename)}\"\r\nContent-Type: ${file.content_type}\r\n\r\n")
-    mut body.append_slice(file.bytes)
+    mut body.append_items(file.bytes)
     push_text(mut body, text: "\r\n")
   }
   push_text(mut body, text: "--${boundary}--\r\n")

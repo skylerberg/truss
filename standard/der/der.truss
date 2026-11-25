@@ -159,7 +159,7 @@ fn push_length(output: mut List[UInt8], length: UInt64) {
 fn push_element(output: mut List[UInt8], tag: UInt8, content: List[UInt8]) {
   mut output.push(tag)
   push_length(mut output, length: content.length())
-  mut output.append_slice(content)
+  mut output.append_items(content)
 }
 
 public fn encode(value: Value) -> List[UInt8] {
@@ -169,7 +169,7 @@ public fn encode(value: Value) -> List[UInt8] {
     Integer(bytes) => push_element(mut output, tag: 2, content: bytes)
     BitString(unused_bits, bytes) => {
       var content: List[UInt8] = [unused_bits]
-      mut content.append_slice(bytes)
+      mut content.append_items(bytes)
       push_element(mut output, tag: 3, content: content)
     }
     OctetString(bytes) => push_element(mut output, tag: 4, content: bytes)
@@ -212,7 +212,7 @@ public fn unsigned_integer(bytes: List[UInt8]) -> Value {
   if start < bytes.length() && bytes[start] >= 128 {
     mut content.push(0)
   }
-  mut content.append_slice(bytes[start..])
+  mut content.append_items(bytes[start..])
   if content.is_empty() {
     mut content.push(0)
   }
@@ -234,7 +234,7 @@ public fn Value.unsigned_bytes(self, length: UInt64) -> Option[List[UInt8]] {
         return None
       }
       var padded: List[UInt8] = List.filled(0, count: length - digits.length())
-      mut padded.append_slice(digits)
+      mut padded.append_items(digits)
       Some(own padded)
     }
     _ => None

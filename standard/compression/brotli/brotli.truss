@@ -547,7 +547,7 @@ fn dictionary_word(stream: mut Stream, length: UInt64, word_id: UInt64, output: 
     }
   }
   append_affix(mut output, affix: intrinsic.convert(transform_prefixes[transform]))
-  mut output.append_slice(word)
+  mut output.append_items(word)
   append_affix(mut output, affix: intrinsic.convert(transform_suffixes[transform]))
   Ok(Unit)
 }
@@ -583,7 +583,7 @@ fn append_affix(output: mut List[UInt8], affix: UInt64) {
     let start = affix_starts[affix]
     let end = affix_starts[affix + 1]
     if start <= end && end <= affix_bytes.length() {
-      mut output.append_slice(affix_bytes[start..end])
+      mut output.append_items(affix_bytes[start..end])
     }
   }
 }
@@ -780,7 +780,7 @@ public fn decompress(input: List[UInt8], limit: UInt64 = 268435456) -> Result[Li
         if start > input.length() || length > input.length() - start {
           return malformed("an uncompressed meta-block past the end of the data")
         }
-        mut output.append_slice(input[start..start + length])
+        mut output.append_items(input[start..start + length])
         mut bits.skip_bytes(length)
       } else {
         decode_compressed(bits: mut bits, stream: mut stream, output: mut output, length: length)?

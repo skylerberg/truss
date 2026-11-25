@@ -124,18 +124,18 @@ fn push_text_escaped(output: mut List[UInt8], bytes: List[UInt8], is_attribute: 
       match entity_length(bytes, at: index) {
         Some(length) => {
           let end = index + length
-          mut output.append_slice(bytes[index..end])
+          mut output.append_items(bytes[index..end])
           index = end
           continue
         }
-        None => mut output.append_slice("&amp;".bytes())
+        None => mut output.append_items("&amp;".bytes())
       }
     } else if byte == 60 {
-      mut output.append_slice("&lt;".bytes())
+      mut output.append_items("&lt;".bytes())
     } else if byte == 62 {
-      mut output.append_slice("&gt;".bytes())
+      mut output.append_items("&gt;".bytes())
     } else if byte == 34 && is_attribute {
-      mut output.append_slice("&quot;".bytes())
+      mut output.append_items("&quot;".bytes())
     } else {
       mut output.push(byte)
     }
@@ -216,7 +216,7 @@ fn decoded_url(bytes: List[UInt8]) -> Option[String] {
         } else {
           return None
         }
-        mut decoded.append_slice(replacement.bytes())
+        mut decoded.append_items(replacement.bytes())
       }
       index = if has_semicolon { end + 1 } else { end }
       continue
@@ -385,7 +385,7 @@ fn skip_dropped(bytes: List[UInt8], start: UInt64, name: String) -> UInt64
 
 fn push_tag(output: mut List[UInt8], tag: Tag, policy: SanitizePolicy) {
   mut output.push(60)
-  mut output.append_slice(tag.name.bytes())
+  mut output.append_items(tag.name.bytes())
   for attribute in tag.attributes {
     let name = attribute.name
     if !is_attribute_allowed(policy, element: tag.name, name: name) {
@@ -395,15 +395,15 @@ fn push_tag(output: mut List[UInt8], tag: Tag, policy: SanitizePolicy) {
       continue
     }
     mut output.push(32)
-    mut output.append_slice(name.bytes())
-    mut output.append_slice("=\"".bytes())
+    mut output.append_items(name.bytes())
+    mut output.append_items("=\"".bytes())
     push_text_escaped(mut output, bytes: attribute.value, is_attribute: true)
     mut output.push(34)
   }
   if tag.name == "a" {
     match policy.link_rel {
       Some(rel) => {
-        mut output.append_slice(" rel=\"".bytes())
+        mut output.append_items(" rel=\"".bytes())
         push_text_escaped(mut output, bytes: rel.bytes(), is_attribute: true)
         mut output.push(34)
       }
@@ -414,8 +414,8 @@ fn push_tag(output: mut List[UInt8], tag: Tag, policy: SanitizePolicy) {
 }
 
 fn push_end_tag(output: mut List[UInt8], name: String) {
-  mut output.append_slice("</".bytes())
-  mut output.append_slice(name.bytes())
+  mut output.append_items("</".bytes())
+  mut output.append_items(name.bytes())
   mut output.push(62)
 }
 
@@ -498,7 +498,7 @@ public fn sanitize(input: String, policy: SanitizePolicy = SanitizePolicy()) -> 
         }
       }
       None => {
-        mut output.append_slice("&lt;".bytes())
+        mut output.append_items("&lt;".bytes())
         index += 1
       }
     }

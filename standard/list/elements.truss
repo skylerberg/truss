@@ -335,7 +335,7 @@ fn find_with_table[Element: Equal](haystack: List[Element], needle: List[Element
   if has_match { Some(first) } else { None }
 }
 
-public fn List[Element: Equal].find_slice(self, needle: List[Element]) -> Option[UInt64]
+public fn List[Element: Equal].find_sublist(self, needle: List[Element]) -> Option[UInt64]
   ensures match result {
     Some(index) => index + needle.length() <= self.length()
     None => true
