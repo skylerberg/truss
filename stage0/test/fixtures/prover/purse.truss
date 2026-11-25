@@ -1,0 +1,19 @@
+type Purse(coins: UInt64)
+  invariant coins <= 4611686018427387904
+  cost potential coins
+
+fn deposit(purse: mut Purse)
+  requires purse.coins <= 4611686018427386904
+  ensures purse.coins == old(purse.coins) + 1000
+  cost amortized time O(1)
+{
+  purse.coins = purse.coins + 1000
+}
+
+fn work(size: UInt64)
+  cost time O(size)
+{
+  for _ in 0..size {
+  }
+}
+

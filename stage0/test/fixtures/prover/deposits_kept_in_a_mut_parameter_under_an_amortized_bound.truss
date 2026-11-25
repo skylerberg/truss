@@ -1,0 +1,11 @@
+fn deposits(purse: mut Purse, count: UInt64)
+  requires purse.coins == 0
+  requires count <= 4503599627370496
+  cost amortized time O(count)
+{
+  for index in 0..count
+    invariant purse.coins == index * 1000
+  {
+    deposit(mut purse)
+  }
+}

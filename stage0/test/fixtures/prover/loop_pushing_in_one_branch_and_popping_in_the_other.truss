@@ -1,0 +1,13 @@
+fn recorded_entries(entries: List[Int64]) -> List[Int64]
+  cost amortized time O(entries.length())
+{
+  var recorded: List[Int64] = []
+  for entry in entries {
+    if entry == 0 {
+      let _ = mut recorded.pop()
+    } else {
+      mut recorded.push(entry)
+    }
+  }
+  recorded
+}

@@ -3,7 +3,14 @@ let zero = Logic.Integer Z.zero
 type target = Through of Logic.term | Capability of Path.t | Capability_method of Path.t * string
 type resource = Metric of Language.Metric.t | Calls of target
 type counting = Units | At_most | Exactly
-type counter = { resource : resource; counting : counting; amortized : bool }
+
+type counter = {
+  resource : resource;
+  counting : counting;
+  amortized : bool;
+  counts_potential : bool;
+}
+
 type counted = No_potential | Potential_change | Potential_growth
 type charge = { amount : Logic.term; counted : counted }
 
@@ -19,7 +26,13 @@ let make_operand_counter (metric : Language.Metric.t) =
     resource = Metric metric;
     counting = (match metric with Time -> Units | Allocations | Allocated_bytes -> At_most);
     amortized = false;
+    counts_potential = true;
   }
+
+let list_checking_counters counter =
+  match counter.counting with
+  | Units -> [ counter; { counter with counts_potential = false } ]
+  | At_most | Exactly -> [ counter ]
 
 let list_stated_bounds (costs : Types.cost list) (metric : Language.Metric.t) ~amortized =
   List.filter_map

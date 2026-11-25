@@ -4421,6 +4421,11 @@ test "a zero undoes the entry before it" {
   `recorded`. A function with a plain `cost` can call `push` too. The
   prover then counts the potential that `push` may spend, which is none for
   a list the function creates empty.
+- **Potential that a call saves pays for no step.** Under a plain `cost`, a
+  `push` that saves potential counts below its bound only to offset a later
+  call that spends that potential. Potential that the function drops,
+  returns, or overwrites pays for nothing, so each call still counts at
+  least its own bound.
 
 A loop needs a `cost` clause where that count fails: where it is too large,
 or where one iteration's cost depends on a value the loop mutates. A loop

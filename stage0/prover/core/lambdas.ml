@@ -465,7 +465,12 @@ let list_loop_counters context locals (body : Mir.body) =
                 match Contracts.find_resource cost ~locals with
                 | Some resource ->
                     counters :=
-                      ( { Costs.resource; counting = classify_counting cost; amortized = false },
+                      ( {
+                          Costs.resource;
+                          counting = classify_counting cost;
+                          amortized = false;
+                          counts_potential = true;
+                        },
                         condition )
                       :: !counters
                 | None -> Facts.raise_unsupported Whole_definition Calls_target))
@@ -485,6 +490,9 @@ let list_loop_counters context locals (body : Mir.body) =
   in
   visit body.code;
   List.rev !counters
+
+let list_checking_counters (context : State.context) counter =
+  if context.checks_without_potential then Costs.list_checking_counters counter else [ counter ]
 
 let assign_counters (context : State.context) (sources : (Costs.counter * Types.condition) list) =
   let counters = Contracts.deduplicate_counters (List.map fst sources) in
@@ -537,7 +545,12 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         match cost.resource with
         | Metric metric ->
             let counter =
-              { Costs.resource = Metric metric; counting; amortized = cost.amortized }
+              {
+                Costs.resource = Metric metric;
+                counting;
+                amortized = cost.amortized;
+                counts_potential = true;
+              }
             in
             Some (counter, cost.bound)
         | Calls _ -> None)
@@ -560,7 +573,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   let saved_counters = context.counters
   and saved_conditional_counters = context.conditional_counters in
   assign_counters context
-    (List.map
+    (List.concat_map
        (fun (_, (counter : Costs.counter)) ->
          let is_conditional =
            List.for_all
@@ -569,9 +582,14 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                || List.mem enclosing context.conditional_counters)
              context.counters
          in
-         (counter, if is_conditional then context.condition else []))
+         List.map
+           (fun checking -> (checking, if is_conditional then context.condition else []))
+           (list_checking_counters context counter))
        operand_counters
-    @ List.map (fun (counter, _) -> (counter, [])) promised
+    @ List.concat_map
+        (fun (counter, _) ->
+          List.map (fun checking -> (checking, [])) (list_checking_counters context counter))
+        promised
     @ list_loop_counters context inside.locals written.code);
   let inside =
     { inside with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
@@ -686,24 +704,26 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         List.iter
           (fun (exit_ : State.frame) ->
             List.iter
-              (fun (counter, (bound : Types.cost_bound)) ->
-                let spent = compute_spent exit_ counter in
-                let goal =
+              (fun ((counter : Costs.counter), (bound : Types.cost_bound)) ->
+                let is_within spent =
                   match bound with
                   | Order_of -> Logic.less_equal spent (Costs.bound (Logic.int 1))
                   | No_more_than limit -> Logic.less_equal spent (Logic.Integer limit)
                   | Exactly_cost limit -> Logic.equal spent (Logic.Integer limit)
                 in
-                Facts.oblige context exit_ location
-                  (Lambda_cost
-                     {
-                       counting =
-                         (match counter.counting with
-                         | Units | At_most -> Upper_bound
-                         | Exactly -> Exact);
-                       type_ = ty;
-                     })
-                  goal)
+                List.iter
+                  (fun checking ->
+                    Facts.oblige context exit_ location
+                      (Lambda_cost
+                         {
+                           counting =
+                             (match counter.counting with
+                             | Units | At_most -> Upper_bound
+                             | Exactly -> Exact);
+                           type_ = ty;
+                         })
+                      (is_within (compute_spent exit_ checking)))
+                  (list_checking_counters context counter))
               promised)
           exits;
         let facts =
@@ -712,9 +732,11 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         in
         List.filter_map
           (fun ((metric : Language.Metric.t), counter) ->
-            let spent = List.map (fun exit_ -> compute_spent exit_ counter) exits in
+            let list_spent exit_ =
+              List.map (compute_spent exit_) (list_checking_counters context counter)
+            in
             let most =
-              match spent with
+              match List.concat_map list_spent exits with
               | [] -> Costs.zero
               | first :: rest -> List.fold_left Costs.larger first rest
             in
@@ -722,12 +744,15 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
               (fun bound ->
                 ( metric,
                   ( bound,
-                    List.filter_map
-                      (fun ((exit_ : State.frame), spent) ->
-                        Facts.make_closed_obligation context exit_ location
-                          (Lambda_call_above_bound { metric })
-                          (Logic.less_equal spent bound))
-                      (List.combine exits spent) ) ))
+                    List.concat_map
+                      (fun (exit_ : State.frame) ->
+                        List.filter_map
+                          (fun spent ->
+                            Facts.make_closed_obligation context exit_ location
+                              (Lambda_call_above_bound { metric })
+                              (Logic.less_equal spent bound))
+                          (list_spent exit_))
+                      exits ) ))
               (Costs.find_cost_bound ~varies:(Facts.mentions_fresh_after context mark) ~facts most))
           operand_counters)
   in

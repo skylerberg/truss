@@ -299,8 +299,8 @@ let spend_enclosing_potential_change context ~before ~after run alternatives =
                   (compute_enclosing_potential_change context ~before ~after run place)))
            Costs.zero parts)
     in
-    Operations.spend context after (fun (counter : Costs.counter) ->
-        if counter.amortized then Lazy.force change else Costs.zero)
+    Operations.spend context after (fun counter ->
+        Operations.charge_potential context counter change)
 
 let write_alternatives context frame run alternatives new_value =
   match alternatives with
@@ -400,10 +400,9 @@ let forget_changes context run (frame : State.frame) (changed : State.changed_pa
       Costs.zero roots
   in
   let forgotten = Loops.havoc context frame changed in
-  Operations.spend context forgotten (fun (counter : Costs.counter) ->
-      if counter.amortized then
-        Costs.minus (Costs.at_least_zero (measure forgotten)) (measure frame)
-      else Costs.zero)
+  Operations.spend context forgotten (fun counter ->
+      Operations.charge_potential context counter
+        (lazy (Costs.minus (Costs.at_least_zero (measure forgotten)) (measure frame))))
 
 let read_operand context frame run (operand : Mir.operand) =
   match operand with
@@ -1030,7 +1029,8 @@ and read_statement context frame run (statement : Mir.statement) =
              frame
              (Mir.list_mut_provided_places provided))
           (fun (counter : Costs.counter) ->
-            if counter.amortized || counter.counting <> Units then Costs.zero
+            if counter.amortized || (not counter.counts_potential) || counter.counting <> Units then
+              Costs.zero
             else Lazy.force provider_potential)
       in
       let read =

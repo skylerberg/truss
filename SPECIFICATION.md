@@ -1384,6 +1384,16 @@ fn List[Element].push(mut self, item: own Element)
   the change in potential. A function that pushes only onto a list it
   creates empty therefore has a plain bound, since the list starts with no
   potential to spend.
+- **Potential that a call saves pays for no step.** Under a plain bound it
+  only offsets a later call that spends it. So an `O(...)` bound must also
+  hold when every call counts at its callee's bound and no operation counts
+  a change in potential. For an amortized bound, that count may spend the
+  potential that the `mut` and `own` parameters hold on entry, since the
+  caller pays for it. This prevents a false bound: potential that callees
+  save in a value that is dropped, kept under a plain bound, or spent by the
+  function's own code would otherwise pay for the steps of the calls that
+  saved it, and `count` calls of an `O(1)` amortized function would prove
+  `O(1)`.
 - **A capability method's `O(...)` bound counts the change in the potential
   of its provider,** whether or not it is `amortized`. An `impl` of the
   capability is checked so, and a caller counts the bound as stated. A plain

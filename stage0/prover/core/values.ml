@@ -515,9 +515,9 @@ let apply_construct context frame (site : Invocation.site) variant
         in
         check_built context frame site ty built;
         let frame =
-          Operations.spend context frame (fun (counter : Costs.counter) ->
-              if counter.amortized then Amounts.compute_declared_potential context frame ty built
-              else Costs.zero)
+          Operations.spend context frame (fun counter ->
+              Operations.charge_potential context counter
+                (lazy (Amounts.compute_declared_potential context frame ty built)))
         in
         (frame, built)
     | None -> (frame, Facts.arrive context frame "built" ty)

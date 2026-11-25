@@ -1,0 +1,18 @@
+fn raise(purse: mut Purse, count: UInt64)
+  requires purse.coins <= 1000000000
+  requires count <= 1000000
+  ensures purse.coins == old(purse.coins) + 1000 * count
+  cost amortized time O(count)
+{
+  purse.coins = purse.coins + 1000 * count
+}
+
+fn raised(count: UInt64) -> UInt64
+  requires count <= 1000000
+  cost time O(1)
+{
+  var purse = Purse(coins: 0)
+  raise(mut purse, count)
+  work(count)
+  0
+}

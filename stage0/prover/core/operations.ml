@@ -103,18 +103,45 @@ let declare_unknown_amount context frame (counter : Costs.counter) =
   Facts.assume context frame (Logic.less_equal (Costs.least_amount counter.resource) amount);
   amount
 
+let note_potential_counted (context : State.context) (counter : Costs.counter) change =
+  if counter.counting = Units && change <> Costs.zero then begin
+    context.has_counted_potential <- true;
+    List.iter
+      (fun loop_at ->
+        if not (List.mem (loop_at, counter) context.loops_counting_potential) then
+          context.loops_counting_potential <- (loop_at, counter) :: context.loops_counting_potential)
+      context.enclosing_loops
+  end;
+  change
+
+let charge_potential context (counter : Costs.counter) change =
+  if counter.amortized && counter.counts_potential then
+    note_potential_counted context counter (Lazy.force change)
+  else Costs.zero
+
 let spend_operation context frame ~potential_change ?(note = fun _ _ -> ())
     (charge_of : Costs.counter -> Costs.charge) =
   let change = Option.map Lazy.from_fun potential_change in
+  let charges = ref [] in
+  let find_charge (counter : Costs.counter) =
+    let counter = { counter with counts_potential = true } in
+    match List.assoc_opt counter !charges with
+    | Some charge -> charge
+    | None ->
+        let charge = charge_of counter in
+        charges := (counter, charge) :: !charges;
+        charge
+  in
   spend context frame (fun counter ->
-      let ({ amount; counted } : Costs.charge) = charge_of counter in
+      let ({ amount; counted } : Costs.charge) = find_charge counter in
       let find_change () =
         match Option.map Lazy.force change with
-        | change -> change
+        | change -> Option.map (note_potential_counted context counter) change
         | exception Facts.Unsupported _ -> None
       in
       let amount =
         match (counted, counter.amortized) with
+        | _ when not counter.counts_potential -> amount
         | No_potential, false | (Potential_change | Potential_growth), true -> amount
         | No_potential, true -> (
             match find_change () with

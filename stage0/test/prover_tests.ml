@@ -2012,6 +2012,48 @@ let () =
   Harness.test "a potential its invariant keeps at or above zero" (fun () ->
       expect_proven Fixtures.Prover.debt_potential)
 
+let () =
+  let purse = Fixtures.Prover.purse in
+  let expect_cost_not_proven text = expect_not_proven (purse ^ text) "prover.cost" in
+  Harness.test "potential that a loop saves in a local it drops pays for nothing" (fun () ->
+      expect_cost_not_proven Fixtures.Prover.deposits_dropped_after_a_loop);
+  Harness.test "potential that a `while` loop saves in a local it drops pays for nothing" (fun () ->
+      expect_cost_not_proven Fixtures.Prover.deposits_dropped_after_a_while_loop);
+  Harness.test "potential that a loop saves in a local it reassigns pays for nothing" (fun () ->
+      expect_cost_not_proven Fixtures.Prover.deposits_dropped_by_reassignment);
+  Harness.test "potential that a loop saves in a field of a local pays for nothing" (fun () ->
+      expect_cost_not_proven Fixtures.Prover.deposits_saved_in_a_field);
+  Harness.test "a plain bound takes no credit for the potential of the value it returns" (fun () ->
+      expect_cost_not_proven Fixtures.Prover.deposits_returned_under_a_plain_bound);
+  Harness.test "a plain bound takes no credit for the potential it keeps in a `mut` parameter"
+    (fun () ->
+      expect_cost_not_proven Fixtures.Prover.deposits_kept_in_a_mut_parameter_under_a_plain_bound);
+  Harness.test "potential passed `own` to a plain callee pays for nothing" (fun () ->
+      expect_cost_not_proven Fixtures.Prover.deposits_passed_own_to_a_plain_callee);
+  Harness.test "potential that one call saves pays for no other step" (fun () ->
+      expect_cost_not_proven Fixtures.Prover.raise_dropped_after_one_call);
+  Harness.test "potential that a lambda's loop saves in a local it drops pays for nothing"
+    (fun () -> expect_cost_not_proven Fixtures.Prover.deposits_dropped_in_a_lambda);
+  Harness.test "an amortized bound takes no credit for a write that spends saved potential"
+    (fun () ->
+      expect_cost_not_proven Fixtures.Prover.deposits_spent_by_a_write_under_an_amortized_bound);
+  Harness.test "an amortized bound takes no credit for a plain callee that spends saved potential"
+    (fun () ->
+      expect_cost_not_proven
+        Fixtures.Prover.deposits_spent_by_a_plain_callee_under_an_amortized_bound);
+  Harness.test "an amortized bound takes no credit for saved potential that a `mut` parameter loses"
+    (fun () ->
+      expect_cost_not_proven
+        Fixtures.Prover.deposits_spent_in_a_mut_parameter_under_an_amortized_bound);
+  Harness.test "potential that a loop saves pays for a later call that spends it" (fun () ->
+      expect_proven (purse ^ Fixtures.Prover.deposits_spent_by_a_later_call));
+  Harness.test "an amortized bound counts the potential that a loop saves in a `mut` parameter"
+    (fun () ->
+      expect_proven
+        (purse ^ Fixtures.Prover.deposits_kept_in_a_mut_parameter_under_an_amortized_bound));
+  Harness.test "an amortized bound counts the potential of the local it returns" (fun () ->
+      expect_proven (purse ^ Fixtures.Prover.deposits_returned_under_an_amortized_bound))
+
 let count_holes ?(in_ = fun (_ : Path.t) -> true) text =
   let packages = Support.setup [ ("app.main", text) ] in
   let prove_key =
@@ -2604,6 +2646,8 @@ let () =
       then Harness.fail "a message asks for a change to another package");
   Harness.test "a loop that pushes on one path is amortized linear" (fun () ->
       expect_proven Fixtures.Prover.loop_pushing_in_one_branch);
+  Harness.test "a loop that pushes on one path and pops on the other is amortized linear" (fun () ->
+      expect_proven Fixtures.Prover.loop_pushing_in_one_branch_and_popping_in_the_other);
   Harness.test "a loop that pushes on one path onto a fresh list is linear" (fun () ->
       expect_proven Fixtures.Prover.loop_pushing_in_one_branch_within_a_plain_bound);
   Harness.test "a loop that pushes on one path onto a `mut` parameter is amortized linear"

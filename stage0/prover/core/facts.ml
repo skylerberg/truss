@@ -983,6 +983,30 @@ let find_shared_potential_summands
               ))
             aligned )
 
+let split_shared_summands (values : (Logic.term * Logic.term) list) =
+  let linear = List.map (fun (on, value) -> (on, Costs.linearize value)) values in
+  let shared =
+    match linear with
+    | (_, (first_sums, _)) :: rest ->
+        List.filter
+          (fun (atom, coefficient) ->
+            List.for_all
+              (fun (_, (sums, _)) ->
+                match List.assoc_opt atom sums with
+                | Some other -> Z.equal other coefficient
+                | None -> false)
+              rest)
+          first_sums
+    | [] -> []
+  in
+  ( Costs.combine (shared, Z.zero),
+    List.map
+      (fun (on, (sums, constant)) ->
+        ( on,
+          Costs.combine
+            (List.filter (fun (atom, _) -> not (List.mem_assoc atom shared)) sums, constant) ))
+      linear )
+
 let merge context ?value_type ~condition
     (paths : (Logic.term * State.frame * Logic.term option) list) =
   let first = match paths with (_, first, _) :: _ -> first | [] -> raise_bug "no paths meet" in
@@ -1123,6 +1147,12 @@ let merge context ?value_type ~condition
           when List.for_all (fun (_, _, other) -> other == first_value || other = first_value) rest
           ->
             (key, first_value)
+        | _ when not key.counts_potential -> (
+            match split_shared_summands (List.map (fun (on, _, value) -> (on, value)) values) with
+            | shared, (_, first_rest) :: others
+              when List.for_all (fun (_, other) -> other = first_rest) others ->
+                (key, Costs.plus shared first_rest)
+            | shared, rests -> (key, Costs.plus shared (choose_amount rests)))
         | _ -> (
             match find_shared_potential_summands values with
             | None ->

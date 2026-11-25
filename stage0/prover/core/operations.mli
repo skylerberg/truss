@@ -7,6 +7,7 @@ val convert_from_integer :
 
 val spend : State.context -> State.frame -> (Costs.counter -> Logic.term) -> State.frame
 val declare_unknown_amount : State.context -> State.frame -> Costs.counter -> Logic.term
+val charge_potential : State.context -> Costs.counter -> Logic.term Lazy.t -> Logic.term
 
 val spend_operation :
   State.context ->

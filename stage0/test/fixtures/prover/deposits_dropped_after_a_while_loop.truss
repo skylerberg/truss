@@ -1,0 +1,16 @@
+fn deposits(count: UInt64) -> UInt64
+  requires count <= 4503599627370496
+  cost time O(1)
+{
+  var purse = Purse(coins: 0)
+  var index: UInt64 = 0
+  while index < count
+    invariant index <= count
+    invariant purse.coins == index * 1000
+    decreases count - index
+  {
+    deposit(mut purse)
+    index += 1
+  }
+  0
+}

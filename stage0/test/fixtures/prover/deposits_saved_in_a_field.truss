@@ -1,0 +1,14 @@
+type Wallet(purse: Purse, label: UInt64)
+
+fn deposits(count: UInt64) -> UInt64
+  requires count <= 4503599627370496
+  cost time O(1)
+{
+  var wallet = Wallet(purse: Purse(coins: 0), label: 7)
+  for index in 0..count
+    invariant wallet.purse.coins == index * 1000
+  {
+    deposit(mut wallet.purse)
+  }
+  wallet.label
+}

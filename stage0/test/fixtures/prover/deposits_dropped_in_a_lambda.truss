@@ -1,0 +1,20 @@
+fn run(body: (fn() -> UInt64 cost time O(1))) -> UInt64
+  cost time O(1)
+{
+  body()
+}
+
+fn deposits(count: UInt64) -> UInt64
+  requires count <= 4503599627370496
+  cost time O(1)
+{
+  run(fn() {
+    var purse = Purse(coins: 0)
+    for index in 0..count
+      invariant purse.coins == index * 1000
+    {
+      deposit(mut purse)
+    }
+    0
+  })
+}

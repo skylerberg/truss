@@ -152,6 +152,10 @@ type context = {
   mutable counters : Costs.counter list;
   mutable conditional_counters : Costs.counter list;
   mutable bounded_counters : Costs.counter list;
+  checks_without_potential : bool;
+  mutable has_counted_potential : bool;
+  mutable enclosing_loops : Core.origin list;
+  mutable loops_counting_potential : (Core.origin * Costs.counter) list;
   mutable recursive_costs_assumed : int;
   fresh_order : int Tables.Symbol_table.t;
   mutable logs : (Logic.term * bool) list;
