@@ -70,6 +70,58 @@ let havoc_mut (frame : State.frame) (values : State.passed list) ~list_modified 
     { after = frame; written = []; end_writes = ignore }
     values
 
+let oblige_preconditions (frame : State.frame) (callee : Callee.t) (contract : State.contract)
+    (values : State.passed list) ~location ~path ~substitution_of ~recursive_callee
+    ~read_entry_frame =
+  Option.iter
+    (fun recursive ->
+      Termination.check_recursive_call frame location ~path contract.callee_clauses
+        ~is_self_call:(Path.equal recursive frame.environment.node)
+        ~callee_entry:(read_entry_frame frame contract.callee_clauses)
+        ~argument_at:(lookup_argument_at_index values))
+    recursive_callee;
+  let oblige_each (clauses : State.clauses) (entry : State.frame) requirements ~make_obligation =
+    List.map
+      (fun (requirement : Mir.requirement) ->
+        let clause = requirement.clause in
+        let _, term = Validity.read_specification entry clause in
+        let fixes =
+          Fixes.list_required_fixes frame clauses requirement term values
+            ~type_names:(Fixes.list_type_names (substitution_of clauses))
+        in
+        make_obligation clause ~fixes
+          ~cited:(clauses.callee.key, clause.origin)
+          ~quoted:(Facts.quote clauses.callee clause.origin)
+          term;
+        term)
+      requirements
+  in
+  let call : Catalog.Prover.call = { at = location; callee = Some path } in
+  let precondition_clauses = Contracts.select_precondition_clauses contract in
+  let required =
+    if List.exists (Path.equal path) frame.callees_whose_requires_are_read then Logic.Boolean true
+    else
+      Logic.conjunction
+        (oblige_each precondition_clauses
+           {
+             (read_entry_frame frame precondition_clauses) with
+             callees_whose_requires_are_read = path :: frame.callees_whose_requires_are_read;
+           }
+           precondition_clauses.requires
+           ~make_obligation:(fun (clause : Mir.formula) ~fixes ~cited ~quoted term ->
+             Obligations.oblige ~cited ~fixes ~holds_when:clause.holds_when frame location
+               (Precondition_may_fail { clause = quoted; call })
+               term))
+  in
+  if not (frame.panics || Types.has_capability (Built_in Panic) callee.uses) then
+    ignore
+      (oblige_each contract.callee_clauses (read_entry_frame frame contract.callee_clauses)
+         contract.callee_clauses.panics_unless ~make_obligation:(fun _ ~fixes ~cited ~quoted term ->
+           Obligations.oblige ~cited ~fixes frame location
+             (Precondition_may_panic { clause = quoted; call })
+             term));
+  required
+
 let call_contract (frame : State.frame) (site : Invocation.site) (callee : Callee.t)
     (definition : Callee.definition) (contract : State.contract) (values : State.passed list)
     ~recursive_callee =
@@ -117,64 +169,11 @@ let call_contract (frame : State.frame) (site : Invocation.site) (callee : Calle
     Contracts.make_entry_frame base clauses ~arguments ~substitution:(substitution_of clauses)
   in
   let callee_clauses = contract.callee_clauses in
-  Option.iter
-    (fun recursive ->
-      Termination.check_recursive_call frame location ~path callee_clauses
-        ~is_self_call:(Path.equal recursive frame.environment.node)
-        ~callee_entry:(read_entry_frame frame callee_clauses)
-        ~argument_at:(lookup_argument_at_index values))
-    recursive_callee;
   let precondition_clauses = Contracts.select_precondition_clauses contract in
-  let read_required () =
-    let entry =
-      {
-        (read_entry_frame frame precondition_clauses) with
-        callees_whose_requires_are_read = path :: frame.callees_whose_requires_are_read;
-      }
-    in
-    List.map
-      (fun (requirement : Mir.requirement) ->
-        let clause = requirement.clause in
-        let _, term = Validity.read_specification entry clause in
-        let cited = Some (precondition_clauses.callee.key, clause.origin) in
-        let fixes =
-          Fixes.list_required_fixes frame precondition_clauses requirement term values
-            ~type_names:(Fixes.list_type_names (substitution_of precondition_clauses))
-        in
-        Obligations.oblige ?cited ~fixes ~holds_when:clause.holds_when frame location
-          (Precondition_may_fail
-             {
-               clause = Facts.quote precondition_clauses.callee clause.origin;
-               call = { at = location; callee = Some path };
-             })
-          term;
-        term)
-      precondition_clauses.requires
-  in
   let required =
-    if List.exists (Path.equal path) frame.callees_whose_requires_are_read then Logic.Boolean true
-    else Logic.conjunction (read_required ())
+    oblige_preconditions frame callee contract values ~location ~path ~substitution_of
+      ~recursive_callee ~read_entry_frame
   in
-  if not (frame.panics || Types.has_capability (Built_in Panic) callee.uses) then begin
-    let clauses = contract.callee_clauses in
-    let entry = read_entry_frame frame clauses in
-    List.iter
-      (fun (requirement : Mir.requirement) ->
-        let _, term = Validity.read_specification entry requirement.clause in
-        let fixes =
-          Fixes.list_required_fixes frame clauses requirement term values
-            ~type_names:(Fixes.list_type_names (substitution_of clauses))
-        in
-        let cited = Some (clauses.callee.key, requirement.clause.origin) in
-        Obligations.oblige ?cited ~fixes frame location
-          (Precondition_may_panic
-             {
-               clause = Facts.quote clauses.callee requirement.clause.origin;
-               call = { at = location; callee = Some path };
-             })
-          term)
-      clauses.panics_unless
-  end;
   let compute_required (base : State.frame) (clauses : State.clauses) =
     if clauses == precondition_clauses then required
     else
