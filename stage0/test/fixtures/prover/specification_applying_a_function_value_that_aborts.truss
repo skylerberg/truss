@@ -20,3 +20,11 @@ fn exploit(other: UInt64) -> UInt64
 {
   apply(never, other: other)
 }
+
+fn named_as_a_value(other: UInt64) -> UInt64 {
+  proof {
+    let read = never
+    assert read(0) == 5 && other == 7
+  }
+  other
+}

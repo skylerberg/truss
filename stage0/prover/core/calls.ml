@@ -75,18 +75,11 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
     ~recursive_callee =
   let path = definition.path and type_arguments = definition.type_arguments in
   let may_abort =
-    (context : State.context).lookups.may_abort path
-    || Option.is_some definition.trait_method
-       && Path.equal path definition.declaration
-       && not
-            (Types.states_no_allocation
-               (match Contracts.read_signature context definition.declaration with
-               | Some signature -> signature.costs
-               | None -> []))
+    Callee.may_abort context definition
     || Supplied.may_abort context callee definition contract values
   in
   let is_unspecified_application =
-    may_abort && ((frame : State.frame).is_ghost || context.is_specification)
+    may_abort && ((frame : State.frame).is_ghost || (context : State.context).is_specification)
   in
   let substitution_of = definition.substitution_of in
   let keep_holding_clauses clauses =
