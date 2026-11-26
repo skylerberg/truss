@@ -9,6 +9,44 @@ public fn storage_empty[Element]() -> intrinsic.Storage[Element]
   todo
 }
 
+public fn storage_with_capacity[Element](capacity: UInt64) -> intrinsic.Storage[Element]
+  ensures intrinsic.storage_length(result) == 0
+  ensures intrinsic.storage_capacity(result) == capacity
+  cost time O(1)
+  cost allocations == if capacity > 0 { 1 } else { 0 }
+{
+  todo
+}
+
+public fn storage_set_capacity[Element](storage: mut intrinsic.Storage[Element], capacity: UInt64)
+  requires capacity >= intrinsic.storage_length(storage)
+  ensures identical(intrinsic.storage_model(storage), old(intrinsic.storage_model(storage)))
+  ensures intrinsic.storage_capacity(storage) == capacity
+  cost time O(intrinsic.storage_length(storage))
+{
+  todo
+}
+
+public fn storage_from_array[Element, count: UInt64](array: own Array[Element, count]) -> intrinsic.Storage[Element]
+  ensures identical(intrinsic.storage_model(result), intrinsic.array_model(array))
+  ensures intrinsic.storage_length(result) == count
+  ensures intrinsic.storage_capacity(result) == count
+  cost time O(1)
+  cost allocations == if count > 0 { 1 } else { 0 }
+{
+  todo
+}
+
+public fn array_from_storage[Element, count: UInt64](storage: own intrinsic.Storage[Element]) -> Array[Element, count]
+  requires intrinsic.storage_length(storage) == count
+  ensures identical(intrinsic.array_model(result), intrinsic.storage_model(storage))
+  cost time O(1)
+  cost allocations == 0
+  cost allocated_bytes == 0
+{
+  todo
+}
+
 public fn storage_shorten[Element: Plain](storage: mut intrinsic.Storage[Element], length: UInt64)
   requires length <= intrinsic.storage_length(storage)
   ensures intrinsic.storage_capacity(storage) == old(intrinsic.storage_capacity(storage))

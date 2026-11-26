@@ -26,7 +26,6 @@ type requirement =
   | Ends_with_zero
   | Element_at_index
   | Range_within_storage
-  | Count_of_array
 
 type recursion_impl = Derives | Inherits
 

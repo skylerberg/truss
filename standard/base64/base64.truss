@@ -102,6 +102,9 @@ public fn encode(bytes: List[UInt8], alphabet: Alphabet = Alphabet.Standard, pad
       intrinsic.storage_push(mut output, value: 61)
       intrinsic.storage_push(mut output, value: 61)
     }
+    proof {
+      assert forall i in 0..intrinsic.storage_length(output) => intrinsic.storage_model(output)[i] <= 127
+    }
   } else if count - index == 2 {
     let first = bytes[index]
     let second = bytes[index + 1]
@@ -110,6 +113,9 @@ public fn encode(bytes: List[UInt8], alphabet: Alphabet = Alphabet.Standard, pad
     intrinsic.storage_push(mut output, value: symbol(second % 16 * 4, alphabet: alphabet))
     if padding {
       intrinsic.storage_push(mut output, value: 61)
+    }
+    proof {
+      assert forall i in 0..intrinsic.storage_length(output) => intrinsic.storage_model(output)[i] <= 127
     }
   }
   proof {

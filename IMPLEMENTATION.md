@@ -232,11 +232,15 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `Callee.resolve_target` resolves a call of one to its declaration, so the
   rules of a call prove its `requires` and assume its `ensures` and its
   costs, and `Mir.Call_edges` gives the call an edge to the declaration. The
-  contract is trusted: no proof compares it with the generated code.
+  contract is trusted: no proof compares it with the generated code. The
+  declaration of an operation that may abort, which `Intrinsic.may_abort`
+  lists, is an abort site. So its contract is no axiom and holds only of a
+  call that returned, and it needs no `requires` that the capacity is
+  within `core.maximum_length`.
 
   | Operations | Semantics |
   |---|---|
-  | `storage_empty`, `storage_shorten`, `storage_push`, `storage_pop`, `storage_insert`, `storage_remove`, `storage_swap`, `find_byte` | A contract in `standard.intrinsic_contracts` |
+  | `storage_empty`, `storage_with_capacity`, `storage_set_capacity`, `storage_from_array`, `array_from_storage`, `storage_shorten`, `storage_push`, `storage_pop`, `storage_insert`, `storage_remove`, `storage_swap`, `find_byte` | A contract in `standard.intrinsic_contracts` |
   | `storage_length`, `storage_capacity`, `storage_model`, `array_model` | Terms of the logic, which the contracts are written in |
   | Scalar operations | Terms of the logic, in `Operations` |
   | Every other buffer operation, and the runtime operations | `Intrinsics` |

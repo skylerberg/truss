@@ -80,7 +80,6 @@ let show_requirement = function
   | Ends_with_zero -> "end with a zero, which it reads up to"
   | Element_at_index -> "have an element at its index"
   | Range_within_storage -> "be given a range within the storage"
-  | Count_of_array -> "have as many elements as the array's count"
 
 let describe_difference = function
   | Prover.Upper_bound -> ("more than", "allows")

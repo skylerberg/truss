@@ -234,21 +234,11 @@ let compute_callee_amount ?(method_cost : (Language.Metric.t -> Logic.term) opti
         | Some (clause :: _) -> compute_amount clause
         | Some [] | None -> compute_method_amount ())
 
-let find_generic_argument context frame (operation : Intrinsic.operation) type_arguments name =
-  let generics = (Intrinsic_signatures.make_signature operation).generics in
-  List.find_map
-    (fun ((generic : Types.generic), argument) ->
-      match argument with
-      | Types.Value value when generic.generic.name = name ->
-          Some (Models.make_value_term context frame value)
-      | _ -> None)
-    (List.combine generics type_arguments)
-
 let compute_step_amount ?result context frame (callee : Callee.t) (values : State.passed list)
     (counter : Costs.counter) =
   let make_counted amount = Costs.make_counted_charge counter amount in
   match callee.target with
-  | Intrinsic { operation; type_arguments } -> (
+  | Intrinsic { operation; _ } -> (
       let cost = Intrinsic_signatures.classify_cost operation in
       let count amount = { Costs.amount; counted = No_potential } in
       let unknown () = make_counted (Counters.declare_unknown_amount context frame counter) in
@@ -277,24 +267,6 @@ let compute_step_amount ?result context frame (callee : Callee.t) (values : Stat
       | Metric (Allocations | Allocated_bytes) -> (
           match (cost.allocations, counter.resource, counter.counting) with
           | No_allocations, _, _ -> count Costs.zero
-          | One_if_positive amount, resource, counting -> (
-              let amount_term =
-                match amount with
-                | Argument position ->
-                    Option.map
-                      (fun (passed : State.passed) -> passed.term)
-                      (List.find_opt
-                         (fun (passed : State.passed) -> passed.position = position)
-                         values)
-                | Generic name -> find_generic_argument context frame operation type_arguments name
-              in
-              match amount_term with
-              | Some amount_term when resource = Metric Allocations || counting = Units ->
-                  count
-                    (Logic.ite
-                       (Logic.greater amount_term (Logic.int 0))
-                       (Logic.int 1) (Logic.int 0))
-              | _ -> unknown ())
           | Unknown_allocations, _, _ -> unknown ())
       | Calls _ -> make_counted Costs.zero)
   | Definition { capability_method = Some (capability, name); _ } -> (
