@@ -381,14 +381,15 @@ develop as well as make it easier to bootstrap the compiler in parts.
   parameter's contract: it runs a lambda's body against the contract, which
   it reads through `Callbacks.read_requires` and `Callbacks.read_ensures`,
   and gives every other value to `check_passed`.
-- **A branch of a `concurrent` or `parallel` block is read alone.** The
+- **`Forks` holds the rules of a `concurrent` or `parallel` block, and a
+  branch is read alone.** The
   branches run at the same time, so a fact that one learns is not a fact of
   another: a `return` in one branch can run before the guard of another.
-  `Reader` reads each branch from the entry of the block under a
+  `Forks.read` reads each branch from the entry of the block under a
   supposition of its own, and the branch's obligations and early exits come
   from that read. It then reads the branches in sequence, without
   obligations, for the frame at the end of the block, where every branch
-  has run. At an early exit of one branch, every other branch has not
+  has run. `Reader` gives it the reading of each branch. At an early exit of one branch, every other branch has not
   started or has ended in one of its outcomes, so the exit frame takes the
   values of the places that the branch mutates, and the cost that it spent,
   from a disjunction over those outcomes.
@@ -454,6 +455,17 @@ develop as well as make it easier to bootstrap the compiler in parts.
   returns the returns and the lent parts of the body, and a changed part
   carries the description of its root that a diagnostic shows.
 
+  Inside a body, a path that leaves the code being read is an `exit`: a
+  return, a `break`, a `continue`, an early exit of an iteration or of a
+  branch, a lent part. A jump leaves its exit with `leave`, and a
+  construct reads the code inside it with `collect_exits`, which gives it
+  the exits of that code as a list. The construct takes its own and passes
+  the rest on: a loop takes the breaks and the ends of its iterations
+  (`read_iteration`), a fork the exits of its branches, and a `provide`
+  block refreshes each exit that passes through it. An exit that reaches
+  the end of the body and is not a return or a lent part is a compiler bug.
+  `read_statement` gives each construct to a function of its own.
+
   | Module | Holds |
   |---|---|
   | `Query` | The query under construction |
@@ -462,6 +474,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `Fixes` | The fixes that a diagnostic offers |
   | `Obligations` | The obligations of a run, and which of them it makes |
   | `Joins` | The join of the paths that meet |
+  | `Forks` | The branches of a `concurrent` or `parallel` block: each alone, the end of the block, and what an early exit knows of the other branches |
   | `Cycles` | The recursion group and the proof group |
   | `Termination` | Measures, and the comparison of a recursive call |
   | `Contract_axioms` | The contract of a logic function as an axiom |
