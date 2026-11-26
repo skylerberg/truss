@@ -34,13 +34,13 @@ fn at_a_bound[Item: Measured](item: Item) -> UInt64 {
   item.size()
 }
 
-fn apply(change: fn(UInt64) -> UInt64, value: UInt64) -> UInt64
+fn apply(change: (fn(UInt64) -> UInt64 cost allocations == 0), value: UInt64) -> UInt64
   ensures result == change(value)
 {
   change(value)
 }
 
-fn given_its_parameter(change: fn(UInt64) -> UInt64, value: UInt64) -> UInt64 {
+fn given_its_parameter(change: (fn(UInt64) -> UInt64 cost allocations == 0), value: UInt64) -> UInt64 {
   proof {
     assert apply(change, value: value) == change(value)
   }

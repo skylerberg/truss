@@ -221,10 +221,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
   the contract of each such call that returned, so its own contract is an
   axiom only where those calls return. Such a call is an abort site unless
   the trait's method, or the function's type, states
-  `cost allocations == 0`. A function value without the clause is still no
-  abort site where the proof assumed nothing that the function could fail
-  to meet: the definition states no `ensures` for a function parameter, and
-  the function's result type has a value that is valid without a condition.
+  `cost allocations == 0`. A function value has no weaker condition: its
+  call leaves the relation of the value in the frame, which the definition's
+  own `ensures` can state of its result with `visit.ensures(...)`, and that
+  relation holds only of a call that returned.
   A trait's method on a type whose `impl` is known is a callee like any
   other: the method that the `impl` writes, derives or inherits has its own
   fact. So the fact of a definition depends on no code that a caller

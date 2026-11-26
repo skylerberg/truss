@@ -543,38 +543,7 @@ let list_invariant_clauses (lookups : lookups) type_ =
       List.map (fun (requirement : Tree.requirement) -> requirement.clause) clauses.invariants
   | None -> []
 
-let rec has_valid_value (lookups : lookups) ?(entered = []) (ty : Types.ty) =
-  match (Types.find_builtin ty, ty) with
-  | ( Some
-        ( Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | Float32 | Float64 | Bool
-        | Character | Unit | Integer ),
-      _ )
-  | None, Integer ->
-      true
-  | Some (Never | Array | Storage | View | Handle | Shared), _ -> false
-  | None, Named { path; arguments } when not (List.exists (Path.equal path) entered) -> (
-      let have_values fields =
-        List.for_all
-          (fun (field : Types.field) ->
-            has_valid_value lookups ~entered:(path :: entered) field.field_type)
-          fields
-      in
-      list_invariant_clauses lookups path = []
-      &&
-      match Interface.Definition.find_interface lookups.interface path with
-      | Some (Type_interface ({ shape = Record _; _ } as declared)) ->
-          Option.fold ~none:false ~some:have_values (Types.instantiate_fields declared arguments)
-      | Some (Type_interface ({ shape = Sum _; _ } as declared)) ->
-          List.exists
-            (fun (variant : Types.variant) -> have_values (Option.value ~default:[] variant.fields))
-            (Option.value ~default:[] (Types.instantiate_variants declared arguments))
-      | Some _ | None -> false)
-  | None, (Named _ | Parameter _ | Projection _ | Function _ | Never | Variable _ | Hole | Error _)
-    ->
-      false
-
-let is_abort_site (lookups : lookups) instance ~states_callback_ensures (statement : Tree.statement)
-    =
+let is_abort_site (lookups : lookups) instance (statement : Tree.statement) =
   let states_no_allocation declaration =
     match Interface.Impls.read_signature lookups.interface declaration with
     | Some signature -> Types.states_no_allocation signature.costs
@@ -598,9 +567,7 @@ let is_abort_site (lookups : lookups) instance ~states_callback_ensures (stateme
       | Some { target = Intrinsic { operation; _ }; _ } -> Intrinsic.may_abort operation
       | Some { target = Indirect called; _ } -> (
           match substitute_type lookups.interface instance (Walk.extract_operand_type called) with
-          | Function function_type ->
-              (not (Types.states_no_allocation function_type.costs))
-              && (states_callback_ensures || not (has_valid_value lookups function_type.output))
+          | Function function_type -> not (Types.states_no_allocation function_type.costs)
           | _ -> false)
       | Some { target = Trait_method { trait; name; receiver; _ } as target; _ } -> (
           let declaration = Path.Method { owner = trait.trait; name; receiver } in
@@ -617,7 +584,7 @@ let rec body_may_abort (lookups : lookups) instance ~lambdas (body : Tree.body) 
   Walk.iter_run_block
     (fun statement ->
       if
-        is_abort_site lookups instance ~states_callback_ensures:false statement
+        is_abort_site lookups instance statement
         || List.exists
              (function
                | Calls callee -> may_abort callee
@@ -642,16 +609,8 @@ let has_abort_site (lookups : lookups) path =
   match Intrinsic.find_contract_operation path with
   | Some operation -> Intrinsic.may_abort operation
   | None ->
-      let states_callback_ensures =
-        match Parts.read_contract lookups.mir path with
-        | Some { form = contract; _ } ->
-            List.exists
-              (fun (_, (callback : Tree.callback)) -> callback.ensures <> [])
-              contract.callbacks
-        | None -> false
-      in
       List.exists
-        (is_abort_site lookups (find_instance lookups path) ~states_callback_ensures)
+        (is_abort_site lookups (find_instance lookups path))
         (list_run_statements lookups path)
 
 let list_callees_that_run (lookups : lookups) path =

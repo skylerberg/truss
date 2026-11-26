@@ -3320,10 +3320,7 @@ an invariant, a law, or a proof.
   a function value runs code that its caller passes. Either may allocate,
   so the function is one that may run out of memory, unless the trait
   states `cost allocations == 0` for the method and the function value's
-  type states the same. A call of a function value needs no clause where it
-  gives the function no fact that the value could fail to meet: the
-  function states no `ensures` for a function parameter, and the value's
-  result type has a value that is valid without a condition.
+  type states the same.
   `Equal`, `Ordered`, `Hash` and `Countable` state the clause for their
   methods, so an `impl` of one of them allocates nothing in those methods.
 - A proof block, a loop's clauses, a theorem, and a function whose

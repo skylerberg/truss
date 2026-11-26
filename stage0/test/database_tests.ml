@@ -1075,17 +1075,13 @@ let () =
          }\n\n\
          fn count_read(read: fn() -> UInt64) -> UInt64 {\n\
         \  read()\n\
-         }\n\n\
-         fn count_read_with_an_ensures(read: (fn() -> UInt64 ensures result == 5)) -> UInt64 {\n\
-        \  read()\n\
          }\n"
       in
       expect_may_abort source ~of_:"size_of" ~expected:true;
       expect_may_abort source ~of_:"width_of" ~expected:false;
       expect_may_abort source ~of_:"length_read" ~expected:true;
       expect_may_abort source ~of_:"length_read_without_allocating" ~expected:false;
-      expect_may_abort source ~of_:"count_read" ~expected:false;
-      expect_may_abort source ~of_:"count_read_with_an_ensures" ~expected:true);
+      expect_may_abort source ~of_:"count_read" ~expected:true);
   Harness.test "a recursion group may abort where one member allocates" (fun () ->
       let source =
         "fn first(count: UInt64, items: mut List[Int64]) {\n\
