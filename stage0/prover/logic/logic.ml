@@ -784,7 +784,7 @@ let list_declared_symbols ~is_declared term =
   walk [] term;
   !symbols
 
-let prune ~find_signature query =
+let prune ~find_signature ~list_axioms query =
   let declared = Symbol_table.create 64 in
   let bodies = Symbol_table.create 8 in
   List.iter
@@ -795,14 +795,21 @@ let prune ~find_signature query =
           Symbol_table.replace bodies symbol body
       | Datatype _ -> ())
     query.declarations;
+  let without_axioms = ref [] in
   let is_declared name =
     Symbol_table.mem declared name
     || Option.is_some (find_signature name)
        && begin
          Symbol_table.replace declared name ();
+         without_axioms := name :: !without_axioms;
          true
        end
   in
+  List.iter
+    (function
+      | Definition { body; _ } -> ignore (list_declared_symbols ~is_declared body)
+      | Constant _ | Function _ | Datatype _ -> ())
+    query.declarations;
   let reached = Symbol_table.create 64 in
   let rec reach symbols =
     List.iter
@@ -852,15 +859,24 @@ let prune ~find_signature query =
         is_new)
       query.facts
   in
-  let query = { query with facts = distinct } in
-  let facts =
-    Array.of_list
-      (List.map
-         (fun fact ->
-           let symbols = list_declared_symbols ~is_declared fact in
-           (symbols, needs fact symbols))
-         query.facts)
+  let describe fact =
+    let symbols = list_declared_symbols ~is_declared fact in
+    (symbols, needs fact symbols)
   in
+  let stated = List.map describe distinct in
+  let take_axioms_of_new_symbols () =
+    let symbols = List.rev !without_axioms in
+    without_axioms := [];
+    List.concat_map list_axioms symbols
+  in
+  let rec describe_axioms described axioms =
+    match take_axioms_of_new_symbols () with
+    | [] -> (List.rev described, axioms)
+    | added -> describe_axioms (List.rev_append (List.map describe added) described) (axioms @ added)
+  in
+  let described_axioms, axioms = describe_axioms [] [] in
+  let query = { query with facts = axioms @ distinct } in
+  let facts = Array.of_list (described_axioms @ stated) in
   let is_needed = Array.make (Array.length facts) false in
   let changed = ref true in
   while !changed do
@@ -976,7 +992,11 @@ let list_conjunct_queries query =
   in
   match list_conjuncts query.goal with
   | [] | [ _ ] -> []
-  | goals -> List.map (fun goal -> prune ~find_signature:(fun _ -> None) { query with goal }) goals
+  | goals ->
+      List.map
+        (fun goal ->
+          prune ~find_signature:(fun _ -> None) ~list_axioms:(fun _ -> []) { query with goal })
+        goals
 
 let rec render_sort_name numbering = function
   | Int -> "Int"

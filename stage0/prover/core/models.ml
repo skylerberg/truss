@@ -69,19 +69,12 @@ let rec index_sequence (environment : State.environment) query element term inde
   | [] -> None
 
 and rank (environment : State.environment) query ty term =
-  let symbol = Logic.Symbol.Rank ty in
-  Query.run_once query (Non_negative_rank ty) (fun () ->
-      let each = Logic.Symbol.Variable { label = "ranked.value"; numbers = [] } in
-      Query.add_fact query
-        (Logic.forall
-           ( [ (each, Encoding.sort_of ty) ],
-             Logic.less_equal (Logic.int 0) (Logic.Apply (symbol, [ Logic.Symbol each ])) )));
   (match ty with
   | Types.Named { path; arguments = [ Types.Type element ] }
     when environment.ranking && Path.equal path Encoding.sequence_path ->
       ignore (index_sequence environment query element term (Logic.int 0))
   | _ -> ());
-  Logic.Apply (symbol, [ term ])
+  Logic.Apply (Logic.Symbol.Rank ty, [ term ])
 
 let make_finite_function query method_ ~arguments output inputs =
   let symbol =
@@ -95,15 +88,11 @@ let make_finite_function query method_ ~arguments output inputs =
     (Logic.Function (symbol, Encoding.sort_of finite :: List.map snd inputs, output));
   fun term -> Logic.Apply (symbol, term :: List.map fst inputs)
 
-let substitute_value_term query (value : Types.value) =
+let substitute_value_term (value : Types.value) =
   match value with
   | Known number -> Logic.Integer number
   | Value_parameter parameter ->
-      let symbol = Logic.Symbol.Generic_value { owner = parameter.owner; name = parameter.name } in
-      Query.run_once query (In_range symbol) (fun () ->
-          Query.add_fact query
-            (Encoding.make_in_range (Types.make_builtin UInt64) (Logic.Symbol symbol)));
-      Logic.Symbol symbol
+      Logic.Symbol (Logic.Symbol.Generic_value { owner = parameter.owner; name = parameter.name })
   | Value_variable _ -> Facts.raise_unsupported Whole_definition Unsolved_size
   | Value_error _ -> Facts.raise_bug "a value with an error, which no proof reaches"
 
@@ -168,7 +157,7 @@ let compute_model_function (environment : State.environment) query (ty : Types.t
                    ( [ (each, Encoding.sort_of ty) ],
                      Logic.equal
                        (make_sequence_length query element elements)
-                       (substitute_value_term query count) )))
+                       (substitute_value_term count) )))
       | _ -> ());
       Some (fun term -> Logic.Apply (symbol, [ term ]))
   | None -> None
@@ -234,8 +223,8 @@ let rec make_value_term (frame : State.frame) (value : Types.value) =
       match Types.find_argument parameter frame.substitution with
       | Some (Types.Value argument) when argument <> Value_parameter parameter ->
           make_value_term frame argument
-      | _ -> substitute_value_term frame.query value)
-  | Known _ | Value_variable _ | Value_error _ -> substitute_value_term frame.query value
+      | _ -> substitute_value_term value)
+  | Known _ | Value_variable _ | Value_error _ -> substitute_value_term value
 
 let make_array_model (context : State.context) (frame : State.frame) (ty : Types.ty) term =
   match ty with

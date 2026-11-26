@@ -132,14 +132,7 @@ let assume_unchanged_outside (frame : State.frame) element ~before ~after ~start
                ||| equal (at after index) (at before index))) ))
 
 let make_handle_descriptor handle = Logic.Apply (Logic.Symbol.Handle_descriptor, [ handle ])
-
-let make_libc_number (frame : State.frame) (number : Libc.number) =
-  let term = Logic.Symbol (Logic.Symbol.Libc_number number) in
-  Facts.assume frame
-    (Encoding.make_in_range
-       (Types.make_builtin (Intrinsic.convert_libc_scalar (Libc.classify_number number)))
-       term);
-  term
+let make_libc_number (number : Libc.number) = Logic.Symbol (Logic.Symbol.Libc_number number)
 
 let make_buffer_capacity element term =
   Logic.Apply
@@ -172,7 +165,7 @@ let call_libc (frame : State.frame) ~(site : Invocation.site) (function_ : Libc.
           (fun value -> if each = 1 then value else Logic.multiply (Logic.int each) value)
           (find_value by)
     | Exactly elements -> Some (Logic.int elements)
-    | Number number -> Some (make_libc_number frame number)
+    | Number number -> Some (make_libc_number number)
     | Through_zero -> None
   in
   let require requirement condition =
@@ -313,40 +306,7 @@ let append_element (frame : State.frame) element shorter appended =
        ));
   longer
 
-let make_byte_order query left right =
-  let sequence = Encoding.sort_of (Encoding.make_sequence_type (Types.make_builtin UInt8)) in
-  let symbol = Logic.Symbol.Compare_bytes_order in
-  let order first_term second_term = Logic.Apply (symbol, [ first_term; second_term ]) in
-  Query.run_once query (Total_order symbol) (fun () ->
-      let first_term = Logic.Symbol (Query.make_variable "bytes.first")
-      and second_term = Logic.Symbol (Query.make_variable "bytes.second")
-      and third_term = Logic.Symbol (Query.make_variable "bytes.third") in
-      let over names body = Logic.forall (List.map (fun name -> (name, sequence)) names, body) in
-      List.iter (Query.add_fact query)
-        (List.rev
-           [
-             over
-               [ Query.make_variable "bytes.first"; Query.make_variable "bytes.second" ]
-               Logic.(
-                 less_equal (int (-1)) (order first_term second_term)
-                 &&& less_equal (order first_term second_term) (int 1)
-                 &&& (equal (order first_term second_term) (int 0) ==> equal first_term second_term)
-                 &&& equal (order second_term first_term) (negate (order first_term second_term)));
-             over
-               [ Query.make_variable "bytes.first" ]
-               (Logic.equal (order first_term first_term) (Logic.int 0));
-             over
-               [
-                 Query.make_variable "bytes.first";
-                 Query.make_variable "bytes.second";
-                 Query.make_variable "bytes.third";
-               ]
-               Logic.(
-                 less (order first_term second_term) (int 0)
-                 &&& less (order second_term third_term) (int 0)
-                 ==> less (order first_term third_term) (int 0));
-           ]));
-  order left right
+let make_byte_order left right = Logic.Apply (Logic.Symbol.Compare_bytes_order, [ left; right ])
 
 let find_scalar_bytes element : int option =
   match Types.find_builtin element with
@@ -433,8 +393,7 @@ let translate_buffer_operation (context : State.context) (frame : State.frame)
         (all limit (Logic.int 0) (length before)
            (Logic.equal (at after (Logic.Symbol limit)) (at before (Logic.Symbol limit))));
       known
-  | Compare_bytes ->
-      make_byte_order context.query (storage (read_operand 0)) (storage (read_operand 1))
+  | Compare_bytes -> make_byte_order (storage (read_operand 0)) (storage (read_operand 1))
   | Storage_range ->
       let start = read_operand 1 and stop = read_operand 2 in
       let whole = storage (read_operand 0) and part = storage known in
@@ -508,22 +467,6 @@ let read_invariant (context : State.context) (frame : State.frame) (values : Sta
       | _ -> Encoding.arrive frame "holds" result_type)
   | _ -> Encoding.arrive frame "holds" result_type
 
-let make_system_flag query (runtime : Intrinsic.runtime) kind =
-  let make_symbol runtime = Logic.Symbol.System runtime in
-  Query.run_once query
-    (Exclusive (make_symbol runtime))
-    (fun () ->
-      List.iteri
-        (fun index first ->
-          List.iteri
-            (fun later second ->
-              if later > index then
-                Query.add_fact query
-                  Logic.(not_ (Symbol (make_symbol first) &&& Symbol (make_symbol second))))
-            kind)
-        kind);
-  Logic.Symbol (make_symbol runtime)
-
 let translate_runtime (context : State.context) (frame : State.frame) ~(site : Invocation.site)
     (runtime : Intrinsic.runtime) (values : State.passed list) ~changed result_type known =
   let operands = List.map (fun (passed : State.passed) -> passed.term) values in
@@ -533,15 +476,8 @@ let translate_runtime (context : State.context) (frame : State.frame) ~(site : I
       Validity.assume_valid context frame result_type (Lazy.force known);
       Lazy.force known
   | Libc function_ -> call_libc frame ~site function_ operands ~changed (Lazy.force known)
-  | Libc_number number -> make_libc_number frame number
-  | System_is_os _ ->
-      make_system_flag context.query runtime
-        (List.map (fun os -> Intrinsic.System_is_os os) Libc.oses)
-  | System_is_architecture _ ->
-      make_system_flag context.query runtime
-        (List.map
-           (fun architecture -> Intrinsic.System_is_architecture architecture)
-           Libc.architectures)
+  | Libc_number number -> make_libc_number number
+  | System_is_os _ | System_is_architecture _ -> Logic.Symbol (Logic.Symbol.System runtime)
   | Environment_entry ->
       let byte = Types.make_builtin UInt8 in
       let model = make_buffer_model Storage byte (Lazy.force known) in

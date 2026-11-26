@@ -31,6 +31,7 @@ val make_ordered_fresh_name : t -> string -> 'a Logic.Symbol.t
 val make_obligation :
   t ->
   find_signature:(Logic.symbol -> (Logic.sort list * Logic.sort) option) ->
+  list_axioms:(Logic.symbol -> Logic.term list) ->
   list_constructors:(Types.ty -> (Logic.symbol * (Logic.symbol * Logic.sort) list) list option) ->
   condition:Logic.term ->
   Obligation.location ->
