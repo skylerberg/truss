@@ -224,33 +224,33 @@ let find_lambda_definition (frame : State.frame) (function_type : Types.function
       let explored, supposed = Facts.suppose frame "explored" in
       let defined =
         let mark = Query.mark frame.query in
-        Counters.run_without_counters frame.query (fun () ->
-            try
-              let enter inside =
-                List.fold_left2
-                  (fun inside parameter (name, _) ->
-                    let info = written.code.locals.(parameter) in
-                    Facts.bind inside
-                      (Locals.make_key written.code.locals parameter)
-                      (Encoding.substitute_type inside info.type_)
-                      (Logic.Symbol name))
-                  inside written.code.parameters bound
-              in
-              match
-                run_lambda_body ~enter
-                  {
-                    supposed with
-                    bound = List.map fst bound @ frame.bound;
-                    makes_obligations = false;
-                    result = None;
-                  }
-                  ~lambdas:written.lambdas written.code
-                  ~type_:(compute_returned_type frame written.code)
-              with
-              | Some (_, defined) when not (Query.mentions_fresh_since frame.query mark defined) ->
-                  Some (Logic.replace ~from:explored ~into:(Logic.Boolean true) defined)
-              | Some _ | None -> None
-            with Facts.Unsupported _ -> None)
+        begin try
+          let enter inside =
+            List.fold_left2
+              (fun inside parameter (name, _) ->
+                let info = written.code.locals.(parameter) in
+                Facts.bind inside
+                  (Locals.make_key written.code.locals parameter)
+                  (Encoding.substitute_type inside info.type_)
+                  (Logic.Symbol name))
+              inside written.code.parameters bound
+          in
+          match
+            run_lambda_body ~enter
+              {
+                (Counters.stop_counting supposed) with
+                bound = List.map fst bound @ frame.bound;
+                makes_obligations = false;
+                result = None;
+              }
+              ~lambdas:written.lambdas written.code
+              ~type_:(compute_returned_type frame written.code)
+          with
+          | Some (_, defined) when not (Query.mentions_fresh_since frame.query mark defined) ->
+              Some (Logic.replace ~from:explored ~into:(Logic.Boolean true) defined)
+          | Some _ | None -> None
+        with Facts.Unsupported _ -> None
+        end
       in
       let quantified = List.map (fun (name, _, _) -> name) frame.binders in
       let enclosing_parameters =
@@ -367,81 +367,79 @@ let read_lambda ?(capture_free = false) (frame : State.frame) ~(site : Invocatio
   let premises = Query.list_facts_since frame.query start in
   let ended = ref [] in
   let inferred_bounds =
-    Fun.protect
-      ~finally:(fun () -> Counters.leave_lambda frame.query counters)
-      (fun () ->
-        let inside =
-          Obligations.set_panics
-            {
-              inside with
-              locals = remove_temporaries inside.locals;
-              terminates = Types.terminates function_type.uses;
-            }
-            ~panics:
-              (Conditions.may_panic frame.environment.lookups ~current:frame.environment.current
-                 ~condition:frame.environment.condition function_type.uses)
-        in
-        let inside =
-          List.fold_left2
-            (fun inside parameter argument ->
-              let info = written.code.locals.(parameter) in
-              Facts.bind inside
-                (Locals.make_key written.code.locals parameter)
-                (Encoding.substitute_type inside info.type_)
-                argument)
-            inside written.code.parameters arguments
-        in
-        let returns =
-          (frame.environment.run_body inside ~lambdas:written.lambdas written.code).returns
-        in
-        let exits = List.map (fun (exit_ : State.function_exit) -> exit_.frame) returns in
-        ended :=
-          List.map (fun (exit_ : State.function_exit) -> (exit_.frame, exit_.returned)) returns;
-        List.iter
-          (fun ((exit_ : State.frame), returned) ->
-            Option.iter
-              (fun term ->
-                Validity.check_valid exit_ location
-                  (Encoding.substitute_type frame function_type.output)
-                  term ~deep:true ~moment:Lambda_result)
-              returned;
-            List.iter2
-              (fun parameter (mode, input) ->
-                match (mode, written.code.locals.(parameter).kind) with
-                | Language.Mode.Mut, Source { local; _ } -> (
-                    match Locals.find_opt (Core_local local) exit_.locals with
-                    | Some term ->
-                        Validity.check_valid exit_ location
-                          (Encoding.substitute_type frame input)
-                          term ~deep:true ~moment:Lambda_mut_parameter
-                    | None -> ())
-                | _ -> ())
-              written.code.parameters function_type.inputs)
-          !ended;
-        List.iter
-          (fun ((exit_ : State.frame), returned) ->
-            let finals = read_exits exit_ in
-            let exits =
-              List.mapi
-                (fun index argument -> Option.value (List.assoc_opt index finals) ~default:argument)
-                arguments
-            in
-            let result =
-              match returned with
-              | Some result -> Some result
-              | None when not (Callbacks.returns_value function_type) ->
-                  Some (Logic.Apply (Logic.Symbol.Unit, []))
-              | None -> None
-            in
-            Option.iter
-              (fun result ->
-                List.iter
-                  (fun (promise, term) ->
-                    Obligations.oblige exit_ location (Lambda_promise { promise }) term)
-                  (Callbacks.read_ensures stated ~entries:arguments ~exits ~result))
-              result)
-          !ended;
-        Counters.check_lambda_exits frame.query counters exits location ~type_:ty ~mark:body)
+    begin
+      let inside =
+        Obligations.set_panics
+          {
+            inside with
+            locals = remove_temporaries inside.locals;
+            terminates = Types.terminates function_type.uses;
+          }
+          ~panics:
+            (Conditions.may_panic frame.environment.lookups ~current:frame.environment.current
+               ~condition:frame.environment.condition function_type.uses)
+      in
+      let inside =
+        List.fold_left2
+          (fun inside parameter argument ->
+            let info = written.code.locals.(parameter) in
+            Facts.bind inside
+              (Locals.make_key written.code.locals parameter)
+              (Encoding.substitute_type inside info.type_)
+              argument)
+          inside written.code.parameters arguments
+      in
+      let returns =
+        (frame.environment.run_body inside ~lambdas:written.lambdas written.code).returns
+      in
+      let exits = List.map (fun (exit_ : State.function_exit) -> exit_.frame) returns in
+      ended := List.map (fun (exit_ : State.function_exit) -> (exit_.frame, exit_.returned)) returns;
+      List.iter
+        (fun ((exit_ : State.frame), returned) ->
+          Option.iter
+            (fun term ->
+              Validity.check_valid exit_ location
+                (Encoding.substitute_type frame function_type.output)
+                term ~deep:true ~moment:Lambda_result)
+            returned;
+          List.iter2
+            (fun parameter (mode, input) ->
+              match (mode, written.code.locals.(parameter).kind) with
+              | Language.Mode.Mut, Source { local; _ } -> (
+                  match Locals.find_opt (Core_local local) exit_.locals with
+                  | Some term ->
+                      Validity.check_valid exit_ location
+                        (Encoding.substitute_type frame input)
+                        term ~deep:true ~moment:Lambda_mut_parameter
+                  | None -> ())
+              | _ -> ())
+            written.code.parameters function_type.inputs)
+        !ended;
+      List.iter
+        (fun ((exit_ : State.frame), returned) ->
+          let finals = read_exits exit_ in
+          let exits =
+            List.mapi
+              (fun index argument -> Option.value (List.assoc_opt index finals) ~default:argument)
+              arguments
+          in
+          let result =
+            match returned with
+            | Some result -> Some result
+            | None when not (Callbacks.returns_value function_type) ->
+                Some (Logic.Apply (Logic.Symbol.Unit, []))
+            | None -> None
+          in
+          Option.iter
+            (fun result ->
+              List.iter
+                (fun (promise, term) ->
+                  Obligations.oblige exit_ location (Lambda_promise { promise }) term)
+                (Callbacks.read_ensures stated ~entries:arguments ~exits ~result))
+            result)
+        !ended;
+      Counters.check_lambda_exits frame.query counters exits location ~type_:ty ~mark:body
+    end
   in
   let end_ = Query.mark frame.query in
   let shown = Query.list_facts_since frame.query body in

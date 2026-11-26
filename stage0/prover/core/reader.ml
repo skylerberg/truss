@@ -268,7 +268,7 @@ let write_alternatives (frame : State.frame) run alternatives ~check_element ~is
 
 let write_through (frame : State.frame) run (place : Mir.place) ~check_element ~is_valid new_value =
   let alternatives = resolve_aliases frame run place in
-  Potentials.spend_enclosing_change frame.query ~before:frame
+  Potentials.spend_enclosing_change ~before:frame
     ~after:(write_alternatives frame run alternatives ~check_element ~is_valid new_value)
     alternatives
     ~place_type:(fun at place -> compute_place_type at run place)
@@ -1162,10 +1162,7 @@ and read_statement (frame : State.frame) run (statement : Mir.statement) =
         Option.bind elements (fun (elements : Mir.elements) ->
             match find_lent_mode elements with
             | Mut ->
-                Some
-                  (fun at ->
-                    Counters.run_without_counters frame.query (fun () ->
-                        snd (read_value at run elements.count)))
+                Some (fun at -> snd (read_value (Counters.stop_counting at) run elements.count))
             | Read | Own -> None)
       in
       let run_body inside element =
@@ -1249,8 +1246,9 @@ and read_statement (frame : State.frame) run (statement : Mir.statement) =
                 | (Read | Own), Sequence_element { place; _ } ->
                     Some
                       (fun at ->
-                        Counters.run_without_counters frame.query (fun () ->
-                            read_place { at with makes_obligations = false } run place))
+                        read_place
+                          { (Counters.stop_counting at) with makes_obligations = false }
+                          run place)
                 | (Read | Own), Lent_by_call lent ->
                     Some
                       (fun at ->
@@ -1264,9 +1262,10 @@ and read_statement (frame : State.frame) run (statement : Mir.statement) =
                               | Basic (Lend { part; _ }) when part = lent -> frame
                               | _ -> lend frame rest)
                         in
-                        Counters.run_without_counters frame.query (fun () ->
-                            read_place (lend at after_bindings) run
-                              { root = Local lent; projections = [] })));
+                        read_place
+                          (lend (Counters.stop_counting at) after_bindings)
+                          run
+                          { root = Local lent; projections = [] }));
           bind_element;
           compute_changed_in =
             (fun frame ->

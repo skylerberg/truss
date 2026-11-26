@@ -2,15 +2,14 @@ exception Blocks_credited_potential of string list
 
 type lambda_bound = Logic.term * Obligation.t list
 
-val list_counters : Query.t -> Costs.counter list
-val run_counting : Query.t -> Costs.counter list -> (unit -> 'a) -> 'a
 val count_recursive_costs_assumed : Query.t -> int
 val note_recursive_cost_assumed : Query.t -> unit
 val find_lambda_captures : Query.t -> Logic.term -> Core.local list option
 val assumes_recursive_costs : Query.t -> Logic.term -> bool
 val take_lambda_cost : Query.t -> Logic.term -> Language.Metric.t -> lambda_bound option
 val lookup_spent : State.frame -> Costs.counter -> Logic.term
-val read_condition : State.environment -> Query.t -> Costs.counter -> Types.condition
+val stop_counting : State.frame -> State.frame
+val read_condition : State.frame -> Costs.counter -> Types.condition
 val spend : State.frame -> (Costs.counter -> Logic.term) -> State.frame
 val declare_unknown_amount : State.frame -> Costs.counter -> Logic.term
 val make_potential_credit : Query.t -> Logic.term -> Logic.term
@@ -40,12 +39,9 @@ val spend_quantifier :
 val enter_body :
   State.frame -> (Costs.counter * Types.condition) list -> body:Mir.body option -> State.frame
 
-val run_without_counters : Query.t -> (unit -> 'a) -> 'a
-
 type lambda_counters
 
 val enter_lambda : State.frame -> Types.function_type -> Mir.body -> lambda_counters * State.frame
-val leave_lambda : Query.t -> lambda_counters -> unit
 
 val check_lambda_exits :
   Query.t ->

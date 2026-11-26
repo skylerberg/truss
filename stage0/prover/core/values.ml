@@ -330,10 +330,7 @@ let evaluate_constant (frame : State.frame) path =
             Interface.Definition.read_constant_type frame.environment.lookups.interface path
           in
           Query.declare frame.query (Logic.Constant (symbol, Encoding.sort_of ty));
-          let _, defined_value =
-            Counters.run_without_counters frame.query (fun () ->
-                Lambdas.run_code empty code ~type_:ty)
-          in
+          let _, defined_value = Lambdas.run_code (Counters.stop_counting empty) code ~type_:ty in
           Query.add_fact frame.query (Logic.equal (Logic.Symbol symbol) defined_value));
       Logic.Symbol symbol
   | _ -> Facts.raise_bug "the constant %s has no initializer" (Path.show path)

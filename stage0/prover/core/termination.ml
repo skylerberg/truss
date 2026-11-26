@@ -192,8 +192,7 @@ let make_comparison_measure (head : State.frame) measure_operands =
       Some
         (fun (at : State.frame) ->
           let left, right =
-            Counters.run_without_counters at.query (fun () ->
-                read_operands { at with makes_obligations = false })
+            read_operands { (Counters.stop_counting at) with makes_obligations = false }
           in
           let distance from into = Logic.subtract into from in
           let through distance = Logic.add distance (Logic.int 1) in

@@ -90,8 +90,17 @@ let note_place (frame : State.frame) ~node ~origin value =
   end
 
 let run_as_specification (frame : State.frame) read =
-  Counters.run_without_counters frame.query (fun () ->
-      read (Obligations.set_panics frame ~panics:false))
+  let (after : State.frame), value =
+    read (Counters.stop_counting (Obligations.set_panics frame ~panics:false))
+  in
+  ( {
+      after with
+      spent = frame.spent;
+      conditional_counters = frame.conditional_counters;
+      panics = frame.panics;
+      can_declare_panic = frame.can_declare_panic;
+    },
+    value )
 
 let read_specification ?holds_when (frame : State.frame) (formula : Mir.formula) =
   let after, term =
@@ -102,13 +111,7 @@ let read_specification ?holds_when (frame : State.frame) (formula : Mir.formula)
       }
       (fun specification -> frame.environment.read_formula specification formula ~arguments:[])
   in
-  ( {
-      after with
-      panics = frame.panics;
-      can_declare_panic = frame.can_declare_panic;
-      obligation_condition = frame.obligation_condition;
-    },
-    term )
+  ({ after with obligation_condition = frame.obligation_condition }, term)
 
 let check_defined (frame : State.frame) ~holds_when (formula : Mir.formula) =
   ignore (read_specification ~holds_when frame formula)

@@ -3,8 +3,6 @@ exception Blocks_credited_potential of string list
 type lambda_bound = Logic.term * Obligation.t list
 
 type state = {
-  mutable counters : Costs.counter list;
-  mutable conditional_counters : Costs.counter list;
   mutable recursive_costs_assumed : int;
   mutable lambdas_assuming_recursive_costs : Logic.term list;
   mutable lambda_costs : ((Logic.term * Language.Metric.t) * lambda_bound) list;
@@ -18,8 +16,6 @@ type state = {
 let state =
   Private_state.make_key (fun () ->
       {
-        counters = [];
-        conditional_counters = [];
         recursive_costs_assumed = 0;
         lambdas_assuming_recursive_costs = [];
         lambda_costs = [];
@@ -30,19 +26,11 @@ let state =
       })
 
 let read_state query = Query.read_state query state
-let list_counters query = (read_state query).counters
 let count_recursive_costs_assumed query = (read_state query).recursive_costs_assumed
 
 let note_recursive_cost_assumed query =
   let state = read_state query in
   state.recursive_costs_assumed <- state.recursive_costs_assumed + 1
-
-let run_counting : 'a. Query.t -> Costs.counter list -> (unit -> 'a) -> 'a =
- fun query counters run ->
-  let state = read_state query in
-  let enclosing = state.counters in
-  state.counters <- counters;
-  Fun.protect ~finally:(fun () -> state.counters <- enclosing) run
 
 let find_lambda_captures query lambda = List.assoc_opt lambda (read_state query).lambda_captures
 
@@ -57,16 +45,14 @@ let take_lambda_cost query lambda metric =
   bound
 
 let lookup_spent (frame : State.frame) counter =
-  match List.assoc_opt counter frame.spent with Some spent -> spent | None -> Costs.zero
+  match List.assoc_opt counter frame.spent with
+  | Some spent -> spent
+  | None -> Facts.raise_bug "a frame is asked for the amount of a counter that it does not count"
 
-let start (frame : State.frame) =
-  {
-    frame with
-    spent = List.map (fun counter -> (counter, Costs.zero)) (read_state frame.query).counters;
-  }
+let stop_counting (frame : State.frame) = { frame with spent = []; conditional_counters = [] }
 
-let read_condition (environment : State.environment) (query : Query.t) counter =
-  if List.mem counter (read_state query).conditional_counters then environment.condition else []
+let read_condition (frame : State.frame) counter =
+  if List.mem counter frame.conditional_counters then frame.environment.condition else []
 
 let list_loop_counters (environment : State.environment) (query : Query.t) locals (body : Mir.body)
     =
@@ -115,26 +101,21 @@ let deduplicate counters =
     (fun distinct counter -> if List.mem counter distinct then distinct else distinct @ [ counter ])
     [] counters
 
-let assign (query : Query.t) (sources : (Costs.counter * Types.condition) list) =
+let count (frame : State.frame) (sources : (Costs.counter * Types.condition) list) =
   let counters = deduplicate (List.map fst sources) in
-  let state = read_state query in
-  state.counters <- counters;
-  state.conditional_counters <-
-    List.filter (fun counter -> not (List.mem (counter, []) sources)) counters
+  {
+    frame with
+    spent = List.map (fun counter -> (counter, Costs.zero)) counters;
+    conditional_counters =
+      List.filter (fun counter -> not (List.mem (counter, []) sources)) counters;
+  }
 
 let spend (frame : State.frame) (amount_of : Costs.counter -> Logic.term) =
-  if (read_state frame.query).counters = [] then frame
-  else
-    {
-      frame with
-      State.spent =
-        List.map
-          (fun (counter, term) ->
-            if List.mem counter (read_state frame.query).counters then
-              (counter, Logic.add term (amount_of counter))
-            else (counter, term))
-          frame.spent;
-    }
+  {
+    frame with
+    State.spent =
+      List.map (fun (counter, term) -> (counter, Logic.add term (amount_of counter))) frame.spent;
+  }
 
 let declare_unknown_amount (frame : State.frame) (counter : Costs.counter) =
   let amount = Facts.declare_fresh frame "spent" Logic.Int in
@@ -266,21 +247,16 @@ let spend_quantifier (frame : State.frame) ~count ~mark ~bound ~(before : State.
             if spent = Costs.zero then Costs.zero else declare_unknown_amount frame counter)
 
 let enter_body (frame : State.frame) sources ~body =
-  assign frame.query
+  count frame
     (sources
     @
     match body with
     | Some body -> list_loop_counters frame.environment frame.query frame.locals body
-    | None -> []);
-  start frame
-
-let run_without_counters query read = run_counting query [] read
+    | None -> [])
 
 type lambda_counters = {
   promised : (Costs.counter * Types.cost_bound) list;
   operand_counters : (Language.Metric.t * Costs.counter) list;
-  enclosing_counters : Costs.counter list;
-  enclosing_conditional_counters : Costs.counter list;
   recursive_costs_mark : int;
 }
 
@@ -309,43 +285,33 @@ let enter_lambda (inside : State.frame) (function_type : Types.function_type) (b
         let counter = Costs.make_operand_counter metric in
         let is_counted =
           List.exists
-            (fun (enclosing : Costs.counter) -> enclosing.resource = counter.resource)
-            (read_state inside.query).counters
+            (fun ((enclosing : Costs.counter), _) -> enclosing.resource = counter.resource)
+            inside.spent
         in
         if is_counted && Option.is_none (Costs.find_stated_operand function_type.costs metric) then
           Some (metric, counter)
         else None)
       Language.Metric.all
   in
-  let enclosing_counters = (read_state inside.query).counters
-  and enclosing_conditional_counters = (read_state inside.query).conditional_counters in
-  assign inside.query
-    (List.map
-       (fun (_, (counter : Costs.counter)) ->
-         let is_conditional =
-           List.for_all
-             (fun (enclosing : Costs.counter) ->
-               enclosing.resource <> counter.resource
-               || List.mem enclosing (read_state inside.query).conditional_counters)
-             (read_state inside.query).counters
-         in
-         (counter, if is_conditional then inside.environment.condition else []))
-       operand_counters
-    @ List.map (fun (counter, _) -> (counter, [])) promised
-    @ list_loop_counters inside.environment inside.query inside.locals body);
   ( {
       promised;
       operand_counters;
-      enclosing_counters;
-      enclosing_conditional_counters;
       recursive_costs_mark = (read_state inside.query).recursive_costs_assumed;
     },
-    start inside )
-
-let leave_lambda (query : Query.t) counters =
-  let state = read_state query in
-  state.counters <- counters.enclosing_counters;
-  state.conditional_counters <- counters.enclosing_conditional_counters
+    count inside
+      (List.map
+         (fun (_, (counter : Costs.counter)) ->
+           let is_conditional =
+             List.for_all
+               (fun ((enclosing : Costs.counter), _) ->
+                 enclosing.resource <> counter.resource
+                 || List.mem enclosing inside.conditional_counters)
+               inside.spent
+           in
+           (counter, if is_conditional then inside.environment.condition else []))
+         operand_counters
+      @ List.map (fun (counter, _) -> (counter, [])) promised
+      @ list_loop_counters inside.environment inside.query inside.locals body) )
 
 let check_lambda_exits (query : Query.t) counters (exits : State.frame list) location ~type_ ~mark =
   List.iter
