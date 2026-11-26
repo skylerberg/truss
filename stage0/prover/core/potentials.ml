@@ -313,7 +313,10 @@ let assume_element_potential_change context frame (sequence : Types.ty) ~before 
 
 let spend_declared_potential context frame ty term =
   Counters.spend context frame (fun (counter : Costs.counter) ->
-      if counter.amortized then compute_declared_potential context frame ty term else Costs.zero)
+      if counter.amortized then
+        Counters.count_declared_potential context ~of_:ty
+          (compute_declared_potential context frame ty term)
+      else Costs.zero)
 
 let compute_enclosing_change context ~(before : State.frame) ~(after : State.frame)
     (place : Mir.place) ~place_type ~read =
@@ -331,7 +334,8 @@ let compute_enclosing_change context ~(before : State.frame) ~(after : State.fra
            match projection with
            | Field _ | Variant_field _ ->
                Logic.add total
-                 (Logic.subtract (measure_declared after base) (measure_declared before base))
+                 (Counters.count_declared_potential context ~of_:(place_type after base)
+                    (Logic.subtract (measure_declared after base) (measure_declared before base)))
            | Element _ | Range _ -> total ))
        ([], Costs.zero) place.Mir.projections)
 
@@ -374,7 +378,8 @@ let spend_forgotten context roots ~(before : State.frame) ~(after : State.frame)
   in
   Counters.spend context after (fun (counter : Costs.counter) ->
       if counter.amortized then
-        Logic.subtract (Logic.at_least_zero (measure after)) (measure before)
+        Counters.count_whole_potential context
+          (Logic.subtract (Logic.at_least_zero (measure after)) (measure before))
       else Costs.zero)
 
 let spend_provided context frame potential =

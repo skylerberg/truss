@@ -1845,6 +1845,11 @@ let () =
   Harness.test "potential that a callee saved pays for no step of a plain bound" (fun () ->
       expect_codes Fixtures.Prover.false_plain_bounds_paid_for_by_saved_potential
         (List.init 9 (fun _ -> "prover.cost")));
+  Harness.test "potential that an amortized callee saved pays for no step of an amortized bound"
+    (fun () ->
+      expect_codes Fixtures.Prover.amortized_bound_paid_for_by_saved_potential [ "prover.cost" ]);
+  Harness.test "an amortized bound spends potential that no amortized callee of it saves" (fun () ->
+      expect_proven Fixtures.Prover.amortized_bounds_that_spend_held_potential);
   Harness.test "potential that a callee saved offsets potential that a later call spends" (fun () ->
       expect_proven Fixtures.Prover.true_bounds_that_pay_for_saved_potential);
   Harness.test "a specification learns nothing from a function that never returns" (fun () ->

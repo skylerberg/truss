@@ -159,6 +159,18 @@ develop as well as make it easier to bootstrap the compiler in parts.
   obligation is proven for both rates. `Loop_costs` credits the potential
   that a loop gained by the same term in a plain account.
 
+  An amortized account has the same exchange rate, for each type that
+  holds potential. The potential of a type is worth as many steps as the
+  largest unit of a function that takes credit for releasing it, so a
+  function whose callee's amortized bound covers a change in that type's
+  potential cannot also take that credit at one unit each.
+  `Counters.spend_operation` blocks the types that such a callee reaches,
+  and `Counters.count_held_potential` counts a decrease in a blocked class
+  as zero. A callee that blocks a class which the body already took credit
+  for raises `Counters.Blocks_credited_potential`, and
+  `Translate.run_blocking` translates the definition again with the class
+  blocked from the start, so no term in a query depends on a later call.
+
   | Rate | Account of a callee with an amortized bound | Rejects |
   |---|---|---|
   | 1 | Its bound less its potential change | A bound that ignores potential that the callee spent |

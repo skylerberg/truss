@@ -630,6 +630,17 @@ let has_method_cost (context : State.context) (definition : Callee.definition) =
       | None -> true)
   | None -> false
 
+let list_held_types context (values : State.passed list) ~result_type =
+  List.filter
+    (fun ty -> try Potentials.has_potential context ty with Facts.Unsupported _ -> true)
+    (result_type
+    :: List.filter_map
+         (fun (passed : State.passed) ->
+           match passed.mode with
+           | Language.Mode.Mut | Own -> Some passed.declared_type
+           | Read -> None)
+         values)
+
 let spend_copy ?literal (context : State.context) frame ~(declared : Types.ty) term =
   let ty = Types.erase_views declared in
   let literal =
@@ -668,6 +679,7 @@ let spend_copy ?literal (context : State.context) frame ~(declared : Types.ty) t
     in
     Counters.spend_operation context frame
       ~potential_change:(Some (fun () -> Potentials.compute_potential context frame declared term))
+      ~held:(fun () -> list_held_types context [] ~result_type:declared)
       (fun (counter : Costs.counter) ->
         let make_plain amount = { Costs.amount; counted = No_potential } in
         let make_unknown () =
@@ -756,7 +768,9 @@ let spend_contract_call (context : State.context) ~(before : State.frame) ~(afte
     | Metric _ | Calls _ -> ()
   in
   Counters.spend_operation context after ~potential_change:(Some compute_potential_change)
-    ~note:note_amount (fun counter ->
+    ~held:(fun () -> list_held_types context values ~result_type)
+    ~note:note_amount
+    (fun counter ->
       match (definition.capability_method, counter.resource) with
       | Some _, Calls _ -> compute_step_amount context after callee values counter
       | _ ->
@@ -766,6 +780,7 @@ let spend_contract_call (context : State.context) ~(before : State.frame) ~(afte
 
 let spend_call_without_a_contract context frame callee values =
   Counters.spend_operation context frame ~potential_change:None
+    ~held:(fun () -> list_held_types context values ~result_type:Types.unit)
     (compute_step_amount context frame callee values)
 
 let spend_derived_equality context frame (callee : Callee.t) values ~result_type ~result =
@@ -775,6 +790,7 @@ let spend_derived_equality context frame (callee : Callee.t) values ~result_type
          (fun () ->
            Potentials.compute_call_potential_change context ~before:frame ~after:frame values
              ~changed:[] ~result_type ~result))
+    ~held:(fun () -> list_held_types context values ~result_type)
     (compute_callee_amount
        ~method_cost:(fun metric -> compute_method_cost context frame metric callee)
        context frame ~is_recursive:false ~clauses:[]
@@ -789,6 +805,7 @@ let spend_indirect_call context ~before ~(after : State.frame) ~location functio
          (fun () ->
            Potentials.compute_call_potential_change context ~before ~after values ~changed
              ~result_type ~result))
+    ~held:(fun () -> list_held_types context values ~result_type)
     (compute_function_value_amount context after ~location function_type called ~values)
 
 let spend_intrinsic context frame callee operation (values : State.passed list) ~changed
@@ -807,4 +824,5 @@ let spend_intrinsic context frame callee operation (values : State.passed list) 
                       else None)
                     (List.combine values changed))
                ~result_type ~result))
+    ~held:(fun () -> list_held_types context values ~result_type)
     (compute_step_amount ~result context frame callee values)
