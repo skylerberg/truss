@@ -86,7 +86,9 @@ internal fn Source.compute_line_start(self, offset: UInt64) -> UInt64
   self.line_starts[self.compute_line_index(offset)]
 }
 
-internal fn Source.starts_line(self, offset: UInt64) -> Bool {
+internal fn Source.starts_line(self, offset: UInt64) -> Bool
+  ensures result == (offset == self.compute_line_start(offset))
+{
   offset == self.compute_line_start(offset)
 }
 
