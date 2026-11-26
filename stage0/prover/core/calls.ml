@@ -87,7 +87,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
     }
   in
   let is_logic_call =
-    contract.is_logic_function && Facts.remove_panic_condition callee.uses = Types.no_capabilities
+    contract.is_logic_function && Facts.remove_panic callee.uses = Types.no_capabilities
   in
   let values =
     if is_logic_call then
@@ -276,12 +276,18 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
       Fun.protect ~finally:(fun () -> context.instantiating <- List.tl context.instantiating) run
     end
   in
+  let returns_where_its_condition_holds =
+    not
+      (Conditions.may_panic_for_every_value context.lookups ~current:context.current
+         ~condition:context.condition callee.uses)
+  in
   let state_axiom (after : State.frame) applied =
-    Option.iter
-      (fun application ->
-        Contract_axioms.state context after application contract ~substitution_of ~result_type
-          ~group_member:callee.group_member ~is_on_bound_values)
-      applied
+    if returns_where_its_condition_holds then
+      Option.iter
+        (fun application ->
+          Contract_axioms.state context after application contract ~substitution_of ~result_type
+            ~group_member:callee.group_member ~is_on_bound_values)
+        applied
   in
   let assume_ensures (base : State.frame) (after : State.frame) ~changed ~applied ~result ~final
       is_kept =
