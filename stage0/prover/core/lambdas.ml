@@ -309,7 +309,7 @@ let find_lambda_definition (frame : State.frame) (function_type : Types.function
                 Encoding.make_in_range (Encoding.substitute_type frame value_type) application
               with
               | Logic.Boolean true -> ()
-              | range -> Facts.add_axiom frame (Logic.forall (bound, Logic.( ==> ) domain range)))
+              | range -> Facts.assume frame (Logic.forall (bound, Logic.( ==> ) domain range)))
           | None -> ());
           Some term
       | _ -> None)

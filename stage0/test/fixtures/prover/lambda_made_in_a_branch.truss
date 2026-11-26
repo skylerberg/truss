@@ -1,0 +1,16 @@
+fn use_it(f: fn(UInt8) -> UInt8) -> UInt8
+  ensures result == f(0)
+{
+  f(0)
+}
+
+fn guarded(limit: UInt8) -> UInt8
+  ensures result < 255
+{
+  if limit < 255 {
+    let _ = use_it(fn(_) { limit + 1 })
+    0
+  } else {
+    limit
+  }
+}
