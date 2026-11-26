@@ -3217,10 +3217,11 @@ theorem sorted_up_to(items: List[Int64], last: UInt64)
 
 ### Circular proofs
 
-A proof assumes the contract of each function that its definition calls and
-the invariant of each value that the definition uses. A proof that assumes a
-fact whose own proof assumes it back proves nothing: a false postcondition
-can be proven that way.
+A proof assumes the contract of each function that its definition calls, the
+invariant of each value that the definition uses, and the laws of each
+`impl` whose method it calls. A proof that assumes a fact whose own proof
+assumes it back proves nothing: a false postcondition can be proven that
+way.
 
 - The proof of a definition depends on these definitions, and on the
   definitions that their proofs depend on:
@@ -3232,6 +3233,16 @@ can be proven that way.
   | A value of a type of its own package: a parameter, a result, a local, or, for a type, a field | The type |
   | A value of a generic type | Each function that the invariant or the `potential` of the type calls at those type arguments, and the same for the types of its fields. Where a field's type is a generic type that holds the field, with other type arguments, every method of the `impl`s that those type arguments supply to its bounds |
   | An invariant or a `potential`, for a type | Each function that the clause calls and each constant it reads |
+  | A call of a trait's method that an `impl` resolves, in its body, in its contract, or in the laws that it proves | The `impl`, and the `impl` of each trait that the trait requires, for the laws that they prove |
+  | Laws to prove, for an `impl` | Its law proofs |
+
+- A proof assumes the laws of an `impl` only where the proof of those laws
+  does not depend on it. A theorem that a law proof calls is therefore
+  proven without the laws of that `impl`, and so is a method that the laws
+  call.
+- The proof of an `impl`'s laws, and each of its law proofs, assumes the
+  laws of the traits that its trait requires, and never the laws that the
+  `impl` proves.
 
 - A cycle of these dependencies is an error unless calls alone form it. A
   cycle of calls is a recursion, which a measure shows to end (see
@@ -3244,6 +3255,7 @@ can be proven that way.
   | A contract calls into the cycle, and no invariant does | The call in the contract |
   | A contract that a method takes from its trait calls into the cycle, and the method does not restate that call | The method |
   | The invariant of a generic type, or of the type of one of its fields, calls into the cycle at one instantiation only | The value of that type |
+  | A law proof, or a law that an `impl` proves, calls a method whose laws are proven from that `impl`'s own | The call in the law proof, or the `impl` where the law makes the call |
 
   `fn clamp(n: UInt64) -> UInt64 requires clamp(n) >= 0` is an error at the
   call in its `requires`. A recursive function's `ensures` may call the
@@ -3251,6 +3263,9 @@ can be proven that way.
   recursive call, so its measure is below the function's own on entry:
   `ensures result == f(n) + 1` in a function `f(n)` that `decreases n` is an
   error at the call.
+  `proof Equal.reflexive for Bad { let _ = value.compare(value) }` is an
+  error at the call: the call assumes the laws of `Ordered` for `Bad`, and
+  their proof assumes the laws of `Equal` for `Bad`.
 
 - A fact that relates two functions is not a clause of one where the
   contract of the other calls back. `Set.count` cannot ensure that every

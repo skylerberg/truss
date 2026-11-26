@@ -44,26 +44,6 @@ val oblige :
   Logic.term ->
   unit
 
-val reject_recursion_through_supplied_code :
-  State.context -> State.frame -> Obligation.location -> Mir.statement -> unit
-
-val find_group_member : State.context -> State.frame -> 'operand Core.target -> Path.t option
-
-val find_recursive_callee :
-  State.context -> State.frame -> Obligation.location -> 'operand Core.target -> Path.t option
-
-val is_evaluated_constant : State.context -> Path.t -> Mir.t -> bool
-val reject_constant_cycle : State.context -> State.frame -> Mir.t -> unit
-
-type circular_proof
-
-val list_circular_clauses : State.context -> State.frame -> type_:Types.ty -> circular_proof list
-val list_circular_contracts : State.context -> State.frame -> circular_proof list
-val reject_circular_proof : State.context -> State.frame -> circular_proof -> unit
-
-val reject_uncompared_recursion :
-  State.context -> State.frame -> Obligation.location -> Path.t option -> unit
-
 val make_closed_obligation :
   State.context ->
   State.frame ->

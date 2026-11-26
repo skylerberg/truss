@@ -397,7 +397,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     Option.iter
       (fun application ->
         Contract_axioms.state context after application contract ~substitution_of ~result_type
-          ~group_member:(Facts.find_group_member context frame invocation.callee)
+          ~group_member:(Cycles.find_group_member context frame invocation.callee)
           ~is_on_bound_values)
       applied;
     let is_in_axiom (clauses : State.clauses) (clause : Mir.formula) =
@@ -573,7 +573,9 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
          arguments)
       (Types.make_capability_substitution capability_parameters capability_arguments)
   in
-  let recursive_callee = Facts.find_recursive_callee context frame location invocation.callee in
+  let recursive_callee =
+    Termination.find_recursive_callee context frame location invocation.callee
+  in
   let with_contract ?(substitution_of = fun _ -> Types.no_substitution) ?(type_arguments = []) path
       = function
     | Some contract ->
@@ -755,5 +757,5 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
   match modelled with
   | By_contract (frame, result) -> Some (frame, result)
   | Without_contract result ->
-      Facts.reject_uncompared_recursion context frame location recursive_callee;
+      Termination.reject_uncompared_recursion context frame location recursive_callee;
       result

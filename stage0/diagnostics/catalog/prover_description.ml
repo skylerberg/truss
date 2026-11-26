@@ -156,6 +156,11 @@ let describe_circular_proof = function
         "A value of type `%s` is used here. The invariant of that type or of a part of it depends \
          on `%s`, whose proof depends on `%s`, so the invariant would be proven from itself."
         (Types.show type_) (show_callee dependency) (show_callee cyclic)
+  | Circular_laws { trait; type_ } ->
+      Printf.sprintf
+        "This assumes the laws of `%s` for `%s`, whose proof depends on this one, so a law would \
+         be proven from itself."
+        (Types.show_trait trait) (Types.show type_)
 
 let describe_unbounded = function
   | Prover.Unstated_costs { metric; callees; editable; counts_units } ->

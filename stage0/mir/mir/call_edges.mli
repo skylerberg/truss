@@ -38,6 +38,22 @@ type type_use = { type_ : Types.ty; origin : Core.origin option }
 type instance_use = { used : type_use; dependencies : Path.t list }
 
 val list_instance_uses : lookups -> Path.t -> instance_use list
+
+val list_law_proofs :
+  lookups ->
+  Path.package ->
+  Types.trait_reference ->
+  Types.ty ->
+  (string * Resolve.Names.key * Types.substitution) list
+
+type assumed_laws = {
+  impl : Path.t;
+  trait : Types.trait_reference;
+  type_ : Types.ty;
+  origin : Core.origin option;
+}
+
+val list_assumed_laws : lookups -> Path.t -> assumed_laws list
 val list_assumed_paths : lookups -> Path.t -> Path.t list
 val resolve_node : lookups -> Path.t -> Types.substitution -> Path.t
 val list_path_edges : lookups -> Path.t -> Path.t list

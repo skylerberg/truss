@@ -18,5 +18,6 @@ check_owners() {
 
 check_owners cost 'counters|cost_promises|potentials|amounts|loop_costs'
 check_owners axioms 'contract_axioms'
+check_owners termination 'termination'
 
 exit $status

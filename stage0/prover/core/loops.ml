@@ -154,26 +154,6 @@ let assume_invariants context frame clauses =
       Facts.assume context frame term)
     (Validity.list_invariants clauses)
 
-let find_measures (clauses : Mir.loop_clause list) =
-  List.find_map (function Mir.Decreases measures -> Some measures | _ -> None) clauses
-
-let read_measures context (at : State.frame) measures =
-  List.map
-    (fun measure ->
-      snd (Validity.read_specification context { at with makes_obligations = false } measure))
-    measures
-
-type measure = { read : State.frame -> Logic.term list; at_head : Logic.term list }
-type measured_clauses = { clauses : Mir.loop_clause list; measure : measure option }
-
-let read_measure_at_head ?implicit context (clauses : Mir.loop_clause list) ~(head : State.frame) =
-  let read =
-    match find_measures clauses with
-    | Some written -> Some (fun at -> read_measures context at written)
-    | None -> implicit
-  in
-  { clauses; measure = Option.map (fun read -> { read; at_head = read head }) read }
-
 let enter_loop ?holds context frame ~entry clauses ~changed =
   let holds = Option.value holds ~default:changed in
   let costs = Loop_costs.enter context frame ~entry clauses ~holds ~changed in
@@ -188,22 +168,17 @@ let end_scope ~(outer : State.frame) (frame : State.frame) =
 let leave_loop context frame frames =
   Option.map (end_scope ~outer:frame) (Facts.join_frames context frames)
 
-let end_iterations context (frame : State.frame) loop_at (measured : measured_clauses)
-    (start : loop_start) ~head ~(inside : State.frame) ~iterations ~iteration_bounds ~ends ~breaks
-    ~with_through =
+let end_iterations context (frame : State.frame) loop_at clauses measure (start : loop_start) ~head
+    ~(inside : State.frame) ~iterations ~iteration_bounds ~ends ~breaks ~with_through =
   let location = Facts.locate context frame.source loop_at in
   Loop_costs.check_iterations context loop_at head start.costs ~iterations ~iteration_bounds ~inside
     ~ends:(List.map with_through ends) ~breaks:(List.map with_through breaks);
   List.iter
     (fun (end_ : State.frame) ->
       let through = with_through end_ in
-      check_loop_clauses context through measured.clauses ~moment:After_iteration;
+      check_loop_clauses context through clauses ~moment:After_iteration;
       check_preserved_validity context end_ location start.preserved;
-      Option.iter
-        (fun measure ->
-          Facts.oblige context through location Loop_measure_may_not_decrease
-            (Logic.decreases_lexicographically measure.at_head (measure.read through)))
-        measured.measure)
+      Termination.check_loop_measure context through location measure)
     ends
 
 let declare_elements_so_far context (head : State.frame) ~element ~collection ~count yielded
@@ -259,8 +234,8 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_typ
   let inside = { (Loop_costs.spend_step context inside) with yielded = frame.yielded } in
   let ends, breaks = for_loop.run_body inside received.element in
   let with_through (exit_frame : State.frame) = { exit_frame with yielded = Some through } in
-  end_iterations context frame for_loop.for_at
-    (read_measure_at_head context clauses ~head)
+  end_iterations context frame for_loop.for_at clauses
+    (Termination.read_loop_measure context clauses ~head)
     loop ~head ~inside ~iterations:(Some iterations) ~iteration_bounds:most ~ends ~breaks
     ~with_through;
   let ended = received.advance (Facts.restrict head (Logic.not_ received.has_another)) in
@@ -404,10 +379,12 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     Types.Named { path = Well_known.make_path Option; arguments = [ Types.Type element_type ] }
   in
   let pulling : Invocation.site = { origin = next_origin; type_ = option_type } in
-  let measures = find_measures clauses in
-  if context.terminates && measures = None then
-    Facts.raise_bug "a loop over a cursor has no measure in a body that terminates";
-  let find_measured (at : State.frame) = Option.map (read_measures context at) measures in
+  let measures = Termination.find_written_measures clauses in
+  Termination.require_measure context ~loop:"a loop over a cursor"
+    ~is_measured:(Option.is_some measures);
+  let find_measured (at : State.frame) =
+    Option.map (Termination.read_measures context at) measures
+  in
   let entry_measure = match find_measured frame with Some [ entry ] -> Some entry | _ -> None in
   let next_costs =
     List.concat_map
@@ -448,7 +425,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       before)
     ~receive:(fun head before ->
       let cursor = cursor_access.read head in
-      let recursive_callee = Facts.find_recursive_callee context head location next.callee in
+      let recursive_callee = Termination.find_recursive_callee context head location next.callee in
       let after, pulled =
         Calls.call_contract ~recursive_callee ~lent_final:None context head pulling next path
           contract
@@ -575,8 +552,8 @@ let run_for_loop context frame (for_loop : for_loop) =
       let with_through (exit_frame : State.frame) =
         bind_at_index { exit_frame with yielded = Some through } (Logic.add index (Logic.int 1))
       in
-      end_iterations context frame for_loop.for_at
-        (read_measure_at_head context clauses ~head)
+      end_iterations context frame for_loop.for_at clauses
+        (Termination.read_loop_measure context clauses ~head)
         start ~head ~inside ~iterations:(Some iterations) ~iteration_bounds:[ count ] ~ends ~breaks
         ~with_through;
       List.iter
@@ -630,31 +607,17 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
   let inside =
     match entered with Some entered -> entered | None -> Facts.restrict head (Logic.Boolean false)
   in
-  let implicit =
-    match loop.measure_operands with
-    | Some (comparison, read_operands) when context.terminates ->
-        Some
-          (fun (at : State.frame) ->
-            let left, right =
-              Counters.run_without_counters context (fun () ->
-                  read_operands { at with makes_obligations = false })
-            in
-            let distance from into = Logic.subtract into from in
-            let through distance = Logic.add distance (Logic.int 1) in
-            match (comparison : Language.Comparison.t) with
-            | Less -> [ distance left right ]
-            | Less_equal -> [ through (distance left right) ]
-            | Greater -> [ distance right left ]
-            | Greater_equal -> [ through (distance right left) ]
-            | Equal | Not_equal -> Facts.raise_bug "an equality gives a loop its measure")
-    | Some _ | None -> None
+  let measure =
+    Termination.read_loop_measure
+      ?implicit:(Termination.make_comparison_measure context loop.measure_operands)
+      context clauses ~head
   in
-  let measured = read_measure_at_head ?implicit context clauses ~head in
-  if context.terminates && Option.is_none measured.measure then
-    Facts.raise_bug "a `while` loop has no measure in a body that terminates";
+  Termination.require_measure context ~loop:"a `while` loop" ~is_measured:(Option.is_some measure);
   let iteration_bounds =
     match
-      ( Option.map (fun measure -> (measure.at_head, measure.read frame)) measured.measure,
+      ( Option.map
+          (fun (measure : Termination.loop_measure) -> (measure.at_head, measure.read frame))
+          measure,
         iterations )
     with
     | Some ([ at_head ], [ on_entry ]), Some iterations ->
@@ -671,7 +634,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
     | _ -> []
   in
   let most = List.map Logic.at_least_zero iteration_bounds in
-  end_iterations context frame loop.while_at measured start ~head ~inside ~iterations
+  end_iterations context frame loop.while_at clauses measure start ~head ~inside ~iterations
     ~iteration_bounds ~ends ~breaks ~with_through:Fun.id;
   let failing =
     Option.bind tested (fun (at_condition, holds) ->

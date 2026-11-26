@@ -52,38 +52,11 @@ let list_todo_origins (lookups : Lookups.t) (key : Resolve.Names.key) =
 
 let list_law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference)
     (for_type : Types.ty) =
-  let is_same_argument (left : Types.argument) (right : Types.argument) =
-    match (left, right) with Type left, Type right -> Types.equal left right | _ -> left = right
-  in
-  let named_laws =
-    match (Interface.Impls.find_head for_type, lookups.interface.find_trait_header trait.trait) with
-    | Some type_head, Some header ->
-        List.concat_map
-          (fun law ->
-            lookups.interface.names.list_law_proofs package { trait = trait.trait; law; type_head })
-          header.laws
-    | _ -> []
-  in
-  List.filter_map
-    (fun (key : Resolve.Names.key) ->
-      match Interface.Definition.find_interface lookups.interface key.path with
-      | Some (Interface.Environment.Law_proof_interface proven) -> (
-          let variables =
-            List.map (fun (generic : Types.generic) -> generic.generic) proven.generics
-          in
-          match
-            Interface.Impls.match_type ~variables Types.no_substitution proven.for_type for_type
-          with
-          | Some renaming
-            when List.equal is_same_argument
-                   (List.map
-                      (Types.substitute_argument_erased renaming)
-                      proven.trait.trait_arguments)
-                   trait.trait_arguments ->
-              Some (proven.law, (read_source_at_key lookups key, renaming))
-          | _ -> None)
-      | _ -> Compiler_bug.raise_bug ~stage:"Prover" "%s is not a law proof" (Path.show key.path))
-    named_laws
+  List.map
+    (fun (law, key, renaming) -> (law, (read_source_at_key lookups key, renaming)))
+    (Mir.Call_edges.list_law_proofs
+       { interface = lookups.interface; mir = lookups.mir }
+       package trait for_type)
 
 let list_impl_holes (lookups : Lookups.t) (key : Resolve.Names.key) =
   List.concat_map
