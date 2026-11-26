@@ -16,8 +16,6 @@ have proven a program correct. Each chapter builds on the ones before it,
 so read them in order the first time. The appendices at the end are for
 looking things up.
 
-[DESIGN.md](DESIGN.md) gives the reason for each rule.
-
 ### What makes Truss different
 
 Four decisions shape the language, and you will meet each of them early.
@@ -97,9 +95,8 @@ runs Truss code. It needs two other programs on your `PATH`:
 Truss builds programs for Linux and macOS, on x86-64 and ARM64. A program
 built on x86-64 needs a CPU of the x86-64-v3 level, which Intel's CPUs have
 had since Haswell (2013) and AMD's since Excavator (2015). A project's
-manifest can name another level ([Projects](#projects)).
-[README.md](README.md) says how to build `truss` from this repository. Check
-that the toolchain runs:
+manifest can name another level ([Projects](#projects)). Check that the
+toolchain runs:
 
 ```text
 $ truss --version
@@ -2049,8 +2046,7 @@ Every release under one name is compatible with the ones before it, which its
 author promises: a public definition stays at its path, a `requires` gets no
 stronger, an `ensures` no weaker, and a cost no greater. An incompatible
 change is a new package, named with `_v2` after the old name, so both
-versions can be used in one build. [PACKAGES.md](PACKAGES.md) defines packages, versions, and the
-registry in full.
+versions can be used in one build.
 
 ## 7. Collections
 

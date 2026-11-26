@@ -2173,9 +2173,10 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 - In the clauses of a loop over a range, the loop variable is the index of
   the next iteration: in `for i in start..end`, `i` is `start` on entry and
   `end` where the loop ends, and `end + 1` after `start..=end`.
-- In the clauses of any other `for` loop, `visited` is the `Sequence` of the
-  values of the iterations before. The clauses cannot name the element. A
-  local named `visited` shadows the word.
+- In the clauses of every `for` loop, `visited` is the `Sequence` of the
+  values of the iterations before, which over a range are their indexes.
+  The clauses of a loop over anything but a range cannot name the element.
+  A local named `visited` shadows the word.
 - In a loop that reads a collection, `visited[i]` is the collection's
   element at position `i`: `items[i]` of a `List` or an `Array`, and
   otherwise the value of the collection's `element` at

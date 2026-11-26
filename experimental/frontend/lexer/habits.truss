@@ -12,14 +12,15 @@ type OperatorScan = LexedOperator(kind: token.Kind) | Ellipsis
 type StringFormScan = FormScanned(scan: ItemScan) | Skipped
 
 fn make_comment_deletion(scanner: Scanner, start: UInt64, stop: UInt64, line_break: Bool) -> source.Fix
-  uses Panic
+  requires start <= stop && scanner.is_boundary(start) && scanner.is_boundary(stop)
 {
-  source.make_fix("Delete the comment", edits: [scanner.remove_trivia(start, stop, line_break: line_break)])
+  let removal = scanner.plan_trivia_removal(start, stop)
+  source.make_fix("Delete the comment", edits: [scanner.remove_trivia(removal, offset: start, line_break: line_break)])
 }
 
 fn lex_line_comment(scanner: mut Scanner)
-  uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.line_is_blank
+  requires scanner.position < scanner.length
   ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
@@ -31,9 +32,9 @@ fn lex_line_comment(scanner: mut Scanner)
 }
 
 fn lex_block_comment(scanner: mut Scanner)
-  uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.line_is_blank,
     scanner.unterminated_at_end
+  requires scanner.is_at(scanner.position, byte: 47) && scanner.is_at(scanner.position + 1, byte: 42)
   ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
@@ -42,7 +43,8 @@ fn lex_block_comment(scanner: mut Scanner)
   var position = start + 2
   var is_closed = false
   while !scanner.is_at_end(position)
-    invariant start + 2 <= position
+    invariant start + 2 <= position && position <= scanner.length
+    invariant 1 <= depth && depth <= position - start
     decreases scanner.count_remaining(position)
   {
     if scanner.is_at(position, byte: 42) && scanner.is_at(position + 1, byte: 47) {
@@ -84,17 +86,18 @@ fn lex_block_comment(scanner: mut Scanner)
 }
 
 fn record_semicolon(scanner: mut Scanner)
-  uses Panic
   modifies scanner.position, scanner.line_is_blank, scanner.semicolons
+  requires scanner.is_at(scanner.position, byte: 59)
   ensures old(scanner.position) < scanner.position
 {
-  mut scanner.semicolons.push(scanner.position)
-  scanner.position += 1
+  let start = scanner.position
+  let semicolon = Semicolon(span: source.make_span(start, stop: start + 1), removal: scanner.plan_trivia_removal(start, stop: start + 1))
+  mut scanner.semicolons.push(semicolon)
+  scanner.position = start + 1
   scanner.line_is_blank = false
 }
 
 fn report_semicolons(scanner: mut Scanner, line_break: Bool)
-  uses Panic
   modifies scanner.diagnostics, scanner.first_line_break, scanner.semicolons
 {
   if scanner.semicolons.is_empty() {
@@ -102,18 +105,17 @@ fn report_semicolons(scanner: mut Scanner, line_break: Bool)
   }
   let semicolons = own scanner.semicolons
   scanner.semicolons = []
-  let first = semicolons.get(0).expect("a semicolon")
   if line_break && scanner.first_line_break.is_none() {
-    scanner.first_line_break = Some(source.make_span(first, stop: first + 1))
+    scanner.first_line_break = Some(semicolons[0].span)
   }
-  for start in semicolons
+  for semicolon in semicolons
   {
     let title = if line_break { "Replace the `;` with a line break" } else { "Remove the `;`" }
-    let fix = source.make_fix(title, edits: [scanner.remove_trivia(start, stop: start + 1, line_break: line_break)])
+    let fix = source.make_fix(title, edits: [scanner.remove_trivia(semicolon.removal, offset: semicolon.span.start, line_break: line_break)])
     report(
       mut scanner,
       code: "lexer.semicolon",
-      span: source.make_span(start, stop: start + 1),
+      span: semicolon.span,
       message: "Statements end at a line break. Truss has no `;`.",
       fixes: [own fix],
     )
@@ -121,8 +123,8 @@ fn report_semicolons(scanner: mut Scanner, line_break: Bool)
 }
 
 fn lex_attribute(scanner: mut Scanner)
-  uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.line_is_blank
+  requires scanner.position < scanner.length
   ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
@@ -138,7 +140,6 @@ fn lex_attribute(scanner: mut Scanner)
 }
 
 fn scan_comment(scanner: mut Scanner, inline: Bool) -> Bool
-  uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.line_is_blank,
     scanner.unterminated_at_end, scanner.semicolons
   ensures !result ==> scanner.position == old(scanner.position)
@@ -183,17 +184,14 @@ fn scan_comment(scanner: mut Scanner, inline: Bool) -> Bool
   false
 }
 
-fn replace_operator(scanner: mut Scanner, start: UInt64, length: UInt64, replacements: List[String], code: String, message: String)
-  uses Panic
+fn replace_operator(scanner: mut Scanner, span: source.Span, replacements: List[String], code: String, message: String)
   modifies scanner.diagnostics
 {
-  let span = source.make_span(start, stop: start + length)
   let fixes = scanner.list_code_fixes(span, codes: replacements)
   report(mut scanner, code, span, message, fixes: own fixes)
 }
 
 fn scan_operator(scanner: mut Scanner) -> Option[OperatorScan]
-  uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.line_is_blank
   ensures result is None ==> scanner.position == old(scanner.position)
   ensures result is Some(_) ==> old(scanner.position) < scanner.position
@@ -224,17 +222,17 @@ fn scan_operator(scanner: mut Scanner) -> Option[OperatorScan]
     return Some(OperatorScan.LexedOperator(token.Kind.Foreign(kind)))
   }
   if first == Some(58) && second == Some(58) {
-    replace_operator(mut scanner, start, length: 2, replacements: ["."], code: "lexer.path_separator", message: "Truss separates the names of a path with `.`, as in `json.parse` and `Shape.Circle`.")
+    replace_operator(mut scanner, span: source.make_span(start, stop: start + 2), replacements: ["."], code: "lexer.path_separator", message: "Truss separates the names of a path with `.`, as in `json.parse` and `Shape.Circle`.")
     scanner.position = start + 2
     return Some(OperatorScan.LexedOperator(token.Kind.Punctuation(token.Punctuation.Dot)))
   }
   if first == Some(46) && second == Some(46) && third == Some(60) {
-    replace_operator(mut scanner, start, length: 3, replacements: [".."], code: "lexer.foreign_operator", message: "Truss has no `..<`; write `..`.")
+    replace_operator(mut scanner, span: source.make_span(start, stop: start + 3), replacements: [".."], code: "lexer.foreign_operator", message: "Truss has no `..<`; write `..`.")
     scanner.position = start + 3
     return Some(OperatorScan.LexedOperator(token.Kind.Punctuation(token.Punctuation.DotDot)))
   }
   if first == Some(60) && second == Some(62) {
-    replace_operator(mut scanner, start, length: 2, replacements: ["!="], code: "lexer.foreign_operator", message: "Truss has no `<>`; write `!=`.")
+    replace_operator(mut scanner, span: source.make_span(start, stop: start + 2), replacements: ["!="], code: "lexer.foreign_operator", message: "Truss has no `<>`; write `!=`.")
     scanner.position = start + 2
     return Some(OperatorScan.LexedOperator(token.Kind.Punctuation(token.Punctuation.NotEqual)))
   }
@@ -245,8 +243,7 @@ fn scan_operator(scanner: mut Scanner) -> Option[OperatorScan]
     let kind = if is_equal { token.Punctuation.EqualEqual } else { token.Punctuation.NotEqual }
     replace_operator(
       mut scanner,
-      start,
-      length: 3,
+      span: source.make_span(start, stop: start + 3),
       replacements: [replacement.copy()],
       code: "lexer.strict_equality",
       message: "Truss has no `${written}`. `${replacement}` already compares values of the same type.",
@@ -262,15 +259,13 @@ fn scan_operator(scanner: mut Scanner) -> Option[OperatorScan]
   None
 }
 
-fn report_ellipsis(scanner: mut Scanner, start: UInt64, follows_operand: Bool, operand_follows: Bool) -> Option[token.Kind]
-  uses Panic
+fn report_ellipsis(scanner: mut Scanner, span: source.Span, follows_operand: Bool, operand_follows: Bool) -> Option[token.Kind]
   modifies scanner.diagnostics
 {
   if follows_operand && operand_follows {
     replace_operator(
       mut scanner,
-      start,
-      length: 3,
+      span,
       replacements: ["..", "..="],
       code: "lexer.foreign_operator",
       message: "Truss has no `...`. A range that leaves out its end is written `..`, and one that includes its end is written `..=`.",
@@ -280,8 +275,7 @@ fn report_ellipsis(scanner: mut Scanner, start: UInt64, follows_operand: Bool, o
   if !follows_operand && !operand_follows {
     replace_operator(
       mut scanner,
-      start,
-      length: 3,
+      span,
       replacements: ["todo"],
       code: "lexer.foreign_operator",
       message: "Truss has no `...`; code that is not written yet is `todo`.",
@@ -291,7 +285,7 @@ fn report_ellipsis(scanner: mut Scanner, start: UInt64, follows_operand: Bool, o
   report(
     mut scanner,
     code: "lexer.foreign_operator",
-    span: source.make_span(start, stop: start + 3),
+    span: span,
     message: "Truss has no `...`: it has no spread or rest operator, and a function takes a list where it takes any number of values.",
   )
   None

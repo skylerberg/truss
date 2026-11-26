@@ -12,7 +12,7 @@ def read_integers(name):
     return [int(item, 0) for item in read_array(name)]
 
 def emit_ranges(name, values):
-    lines = ['internal let %s: Array[UInt32, %d] = [' % (name, len(values))]
+    lines = ['let %s: Array[UInt32, %d] = [' % (name, len(values))]
     for start in range(0, len(values), 12):
         lines.append('  ' + ', '.join(str(value) for value in values[start:start + 12]) + ',')
     lines.append(']')
@@ -24,7 +24,7 @@ for name in ['xid_start', 'xid_continue', 'forbidden', 'bidi_control', 'control'
 
 keys = read_integers('forbidden_name_keys')
 values = [eval(item) for item in read_array('forbidden_name_values')]
-lines = ['internal fn find_forbidden_name(code: UInt32) -> Option[StringSlice] {', '  match code {']
+lines = ['fn find_forbidden_name(code: UInt32) -> Option[view String] {', '  match code {']
 for key, value in zip(keys, values):
     lines.append('    %d => Some("%s")' % (key, value))
 lines.append('    _ => None')

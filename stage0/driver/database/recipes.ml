@@ -380,9 +380,9 @@ let run_check_ownership database (row : Store.definition) =
   let key = Declarations.decode_key row.key in
   run_fact database Check_ownership Facts.ownership row ~id:row.id (fun recorder ->
       let result = Ownership.check (Lookups.make_ownership database recorder) key in
-      match result.diagnostics with
-      | [] -> (Value result.must_be_disjoint, [])
-      | descriptions -> (Failed, descriptions))
+      let is_error diagnostic = (Catalog.describe diagnostic).severity = Error in
+      if List.exists is_error result.diagnostics then (Failed, result.diagnostics)
+      else (Value result.must_be_disjoint, result.diagnostics))
 
 let run_generate_mir (database : Tracker.t) (row : Store.definition) =
   let path = (Declarations.decode_key row.key).path in
