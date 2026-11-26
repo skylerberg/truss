@@ -142,10 +142,10 @@ let list_loop_costs (frame : State.frame) (clauses : Mir.loop_clause list) ~held
       in
       let holds_when =
         if is_conditional_clause then frame.environment.condition
-        else Counters.read_condition frame.environment frame.query counter
+        else Counters.read_condition frame counter
       in
       { counter; entry; rule; measure_gained; holds_when })
-    (Counters.list_counters frame.query)
+    (List.map fst frame.spent)
 
 let read_amount ?holds_when (at : State.frame) (cost : Mir.cost) =
   match cost.bound with

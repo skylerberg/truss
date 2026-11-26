@@ -79,6 +79,7 @@ and frame = {
   visited : Logic.term option;
   final_result : Logic.term option;
   spent : (Costs.counter * Logic.term) list;
+  conditional_counters : Costs.counter list;
   aliases : (Logic.term * Mir.place) list Locals.t;
   lends : (Logic.term * (frame -> Logic.term -> frame)) list Locals.t;
   callbacks : (Logic.term * (Types.function_type * known_function)) list;

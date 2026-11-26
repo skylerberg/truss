@@ -71,6 +71,7 @@ let make_empty_frame (environment : State.environment) (query : Query.t) source 
     visited = None;
     final_result = None;
     spent = [];
+    conditional_counters = [];
   }
 
 let is_capability_implementation (lookups : Lookups.t) (path : Path.t) =

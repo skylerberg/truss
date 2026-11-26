@@ -356,7 +356,7 @@ let compute_function_value_amount (frame : State.frame) ~location
             let cost = make_cost () in
             if cost <> Costs.zero then
               Obligations.oblige
-                ~holds_when:(Counters.read_condition frame.environment frame.query counter)
+                ~holds_when:(Counters.read_condition frame counter)
                 frame location
                 (Upper_bound_in_exact_cost { metric; call = { at = location; callee = None } })
                 (Logic.equal cost Costs.zero);
@@ -419,6 +419,7 @@ let make_static_frame (frame : State.frame) source ~substitution ~self_type =
     visited = None;
     final_result = None;
     spent = [];
+    conditional_counters = [];
     aliases = Locals.empty;
     lends = Locals.empty;
   }
@@ -493,8 +494,7 @@ let find_body_cost (frame : State.frame) (metric : Language.Metric.t) path ~subs
             | None, Time -> None)
         | None -> None
       in
-      try Counters.run_counting frame.query [ counter ] find_spent
-      with Facts.Unsupported _ -> None)
+      try find_spent () with Facts.Unsupported _ -> None)
   | _ -> None
 
 let find_method_cost_bound (frame : State.frame) (metric : Language.Metric.t) (method_ : Path.t)
@@ -630,7 +630,7 @@ let spend_copy ?literal (frame : State.frame) ~(declared : Types.ty) term =
     | literal, _ -> literal
   in
   if
-    Counters.list_counters frame.query = []
+    frame.spent = []
     || Interface.Impls.is_plain frame.environment.lookups.interface
          ~list_bounds:frame.environment.bounds ty
        && not

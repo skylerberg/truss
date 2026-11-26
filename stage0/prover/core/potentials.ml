@@ -368,7 +368,7 @@ let compute_enclosing_change ~(before : State.frame) ~(after : State.frame) (pla
            | Element _ | Range _ -> total ))
        ([], Costs.zero) place.Mir.projections)
 
-let spend_enclosing_change (query : Query.t) ~before ~after alternatives ~place_type ~read =
+let spend_enclosing_change ~before ~(after : State.frame) alternatives ~place_type ~read =
   let parts =
     List.filter
       (fun (_, (place : Mir.place)) ->
@@ -377,10 +377,7 @@ let spend_enclosing_change (query : Query.t) ~before ~after alternatives ~place_
   in
   if
     parts = []
-    || not
-         (List.exists
-            (fun (counter : Costs.counter) -> counter.amortized)
-            (Counters.list_counters query))
+    || not (List.exists (fun ((counter : Costs.counter), _) -> counter.amortized) after.spent)
   then after
   else
     let change =

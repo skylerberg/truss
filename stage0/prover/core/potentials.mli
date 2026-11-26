@@ -44,7 +44,6 @@ val list_declared_fields :
 val spend_declared_potential : State.frame -> Types.ty -> Logic.term -> State.frame
 
 val spend_enclosing_change :
-  Query.t ->
   before:State.frame ->
   after:State.frame ->
   (Logic.term * Mir.place) list ->

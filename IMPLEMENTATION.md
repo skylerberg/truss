@@ -139,7 +139,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
 
   | Module | State |
   |---|---|
-  | `Counters` | The counters being counted, the bounds and captures of each lambda read, how many recursive costs were assumed, and the types whose saved potential is credited or blocked |
+  | `Counters` | The bounds and captures of each lambda read, how many recursive costs were assumed, and the types whose saved potential is credited or blocked |
   | `Cost_promises` | The call targets and the counters that the definition's own clauses bound |
   | `Amounts` | The amount of each call, which a loop's cost reads |
   | `Potentials` | Memo tables of the types that hold potential and of the buffers |
@@ -470,6 +470,12 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `is_reading_callback` | An operand is read as a function to call or to pass, where a function parameter does not escape |
   | `validating` | The invariant of a type is read, so that a value of the same type inside it is not unfolded again |
   | `callbacks` | The parameters of a definition or of a clause are bound |
+  | `spent`, `conditional_counters` | A body is read: the counters being counted are the keys of `spent`, so a frame says what it counts. `Counters.count` starts them for a definition and for a lambda, and `Counters.stop_counting` gives a specification a frame that counts nothing |
+
+  A read that returns a frame to its caller restores what it changed in one
+  place: `Validity.run_as_specification` gives the frame that it returns
+  the amounts and the panic flags of the frame that it was given, so a
+  frame that counts nothing cannot go on to run code.
 
 - **`Query` holds the query under construction.** Its declarations, facts,
   fresh names, scopes and posed obligations are fields of an abstract type,

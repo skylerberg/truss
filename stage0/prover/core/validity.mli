@@ -1,7 +1,9 @@
 type place_value = One of Logic.term | Run of Logic.term * Logic.term
 
 val note_place : State.frame -> node:Core.id -> origin:Core.origin -> place_value -> unit
-val run_as_specification : State.frame -> (State.frame -> 'a) -> 'a
+
+val run_as_specification :
+  State.frame -> (State.frame -> State.frame * 'value) -> State.frame * 'value
 
 val read_specification :
   ?holds_when:Types.condition -> State.frame -> Mir.formula -> State.frame * Logic.term
