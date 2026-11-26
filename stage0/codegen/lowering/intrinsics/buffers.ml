@@ -57,6 +57,17 @@ let lower (context : Context.t) (buffer : Intrinsic.buffer) =
     Emit_c.Ir_builder.emit builder
       (Assign (Storage.project_length storage, Binary (Add, Context.copy_length storage, amount)))
   in
+  let move_elements storage ~into ~from ~count =
+    if not (Memory_layout.has_zero_size env (read_element_type ())) then begin
+      let bytes = emit_uint64 (Binary (Multiply, emit_uint64 count, element_size ())) in
+      call Move_bytes
+        [
+          Address { place = Storage.index_element storage into; writable = true };
+          Address { place = Storage.index_element storage from; writable = true };
+          bytes;
+        ]
+    end
+  in
   match buffer with
   | Compare_bytes ->
       let left = read_place 0 and right = read_place 1 in
@@ -164,14 +175,8 @@ let lower (context : Context.t) (buffer : Intrinsic.buffer) =
         (Test (Greater_equal, Context.copy_length storage, Copy (Storage.project_capacity storage)))
         "an element inserted into a storage that has no room";
       let after = emit_uint64 (Binary (Add, index, Lowered.make_uint64_constant 1)) in
-      let tail_length = emit_uint64 (Binary (Subtract, Context.copy_length storage, index)) in
-      let bytes = emit_uint64 (Binary (Multiply, tail_length, element_size ())) in
-      call Move_bytes
-        [
-          Address { place = Storage.index_element storage after; writable = true };
-          Address { place = Storage.index_element storage index; writable = true };
-          bytes;
-        ];
+      move_elements storage ~into:after ~from:index
+        ~count:(Binary (Subtract, Context.copy_length storage, index));
       Emit_c.Ir_builder.emit builder
         (Assign (Storage.index_element storage index, Use (read_operand 2)));
       add_to_length storage (Lowered.make_uint64_constant 1)
@@ -181,14 +186,8 @@ let lower (context : Context.t) (buffer : Intrinsic.buffer) =
       let index = read_operand 1 in
       set (Use (Move (Storage.index_element storage index)));
       let after = emit_uint64 (Binary (Add, index, Lowered.make_uint64_constant 1)) in
-      let tail_length = emit_uint64 (Binary (Subtract, Context.copy_length storage, after)) in
-      let bytes = emit_uint64 (Binary (Multiply, tail_length, element_size ())) in
-      call Move_bytes
-        [
-          Address { place = Storage.index_element storage index; writable = true };
-          Address { place = Storage.index_element storage after; writable = true };
-          bytes;
-        ];
+      move_elements storage ~into:index ~from:after
+        ~count:(Binary (Subtract, Context.copy_length storage, after));
       Emit_c.Ir_builder.emit builder
         (Assign
            ( Storage.project_length storage,
