@@ -4609,7 +4609,7 @@ test "a fact proven by evaluation" {
 | The error says | Try |
 |---|---|
 | "may not hold" or "may overflow", and nothing about the solver | The facts in scope allow the failure: add a `requires`, an `if`, or a checked operation. If the code reads a callee's result or a variable that a loop changes, add an `ensures` to the callee or an `invariant` to the loop |
-| "This fails every time the code reaches it" | The code fails whenever it runs, so no `proof` block can help: change the code |
+| "This fails every time the code reaches it" | The facts on this path refute it, so no `proof` block about the step can help: change the code, or prove that the path is not taken |
 | "The solver reached its step limit before it decided whether this holds" | Break the step into smaller ones: an `assert` in a `proof` block, or a theorem |
 | An `ensures` "may not hold when the function returns here" | The path that ends at that return breaks the clause; the note points at the clause |
 | A `requires` of a callee "may not hold" | Find which fact the caller lacks; the note points at the clause |

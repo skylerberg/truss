@@ -1,5 +1,6 @@
 let version = "5.3.3"
 let steps = 1_000_000
+let refutation_steps = steps / 10
 let cardinality_bounds = [ 2; 3; 4 ]
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Solver" format
 
@@ -76,7 +77,7 @@ let parse_sexps text =
   in
   parse_all 0 []
 
-let header =
+let make_header ~steps =
   Printf.sprintf
     "(set-option :smt.random_seed 0)\n(set-option :sat.random_seed 0)\n(set-option :rlimit %d)\n"
     steps
@@ -165,13 +166,15 @@ let find () =
 
 let stop solver = solver.stop ()
 
-type request = { query : Logic.query; text : string }
+type request = { query : Logic.query; text : string; is_refutation : bool }
 
-let make_request query = { query; text = Logic.show_query query }
-let make_input text = header ^ text ^ info_request
-let show_input request = make_input request.text
+let make_request query = { query; text = Logic.show_query query; is_refutation = false }
+let make_refutation_request query = { query; text = Logic.show_query query; is_refutation = true }
+let count_steps request = if request.is_refutation then refutation_steps else steps
+let make_input ~steps text = make_header ~steps ^ text ^ info_request
+let show_input request = make_input ~steps:(count_steps request) request.text
 
-let read_unknown answers =
+let read_unknown ~steps answers =
   let find_info keyword =
     List.find_map
       (function List [ Atom name; Atom value ] when name = keyword -> Some value | _ -> None)
@@ -185,23 +188,23 @@ let read_unknown answers =
       | None -> raise_bug "Z3 counted `%s` steps" steps_used)
   | _ -> raise_bug "Z3 answered unknown without its reason and its count of steps"
 
-let read_answer output =
+let read_answer ~steps output =
   let answers = parse_sexps output in
   if List.exists (function List (Atom "error" :: _) -> true | _ -> false) answers then
     raise_bug "Z3 answered a query with `%s`" (String.trim output);
   match answers with
   | Atom "unsat" :: _ -> Proven
   | Atom "sat" :: _ -> Falsifiable
-  | Atom "unknown" :: answers -> Unknown (read_unknown answers)
+  | Atom "unknown" :: answers -> Unknown (read_unknown ~steps answers)
   | _ -> raise_bug "Z3's output `%s` is no answer" (String.trim output)
 
 type run = { input : string; output : string }
 type solved = { answer : answer; runs : run list }
 
 let solve solver ~find_output request =
-  let runs = ref [] in
+  let runs = ref [] and steps = count_steps request in
   let check text =
-    let input = make_input text in
+    let input = make_input ~steps text in
     let output =
       match find_output input with
       | Some output -> output
@@ -210,7 +213,7 @@ let solve solver ~find_output request =
           solver.answer_query input
     in
     runs := { input; output } :: !runs;
-    read_answer output
+    read_answer ~steps output
   in
   let is_proven_from_ground_facts () =
     List.exists Logic.has_quantifier request.query.facts
@@ -224,6 +227,7 @@ let solve solver ~find_output request =
   in
   let answer =
     match check request.text with
+    | Unknown _ as undecided when request.is_refutation -> undecided
     | Unknown _ when is_proven_from_ground_facts () -> Proven
     | Unknown Out_of_steps when is_proven_one_conjunct_at_a_time () -> Proven
     | Unknown _ as undecided when Logic.has_uninterpreted_sort request.query ->

@@ -209,7 +209,10 @@ let make_obligation query ~condition location obligation goal : Obligation.t =
     has_untriggered_written_fact =
       Logic.has_untriggered_fact pruned
         ~is_counted:(Tables.Term_table.mem query.written_quantifiers);
-    is_rejection = goal = Logic.Boolean false;
+    refutation =
+      (match goal with
+      | Logic.Boolean false -> None
+      | _ -> Some (Logic.( ==> ) condition (Logic.not_ goal)));
   }
 
 let add_obligation query obligation = query.obligations <- obligation :: query.obligations

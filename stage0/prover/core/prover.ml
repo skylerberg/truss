@@ -292,9 +292,6 @@ let pose_obligation runs site (obligation : Obligation.t) =
 
 let make_request ({ query; _ } : posed_obligation) = Solver.make_request query
 
-let make_refutation_request ({ query; _ } : posed_obligation) =
-  Solver.make_request { query with goal = Logic.not_ query.goal }
-
 type posed =
   | Unreadable of Catalog.Prover.t
   | Posed of { obligations : posed_obligation list; failed_evaluation : Catalog.Prover.t option }
@@ -334,20 +331,22 @@ let pose ~runs proof =
 let list_posed = function Unreadable _ -> [] | Posed { obligations; _ } -> obligations
 let list_requests posed = List.map make_request (list_posed posed)
 
-let is_refutable (posed : posed_obligation) = function
-  | Solver.Falsifiable -> not posed.obligation.is_rejection
-  | Proven | Unknown _ -> false
+let find_refutation (posed : posed_obligation) : Solver.answer -> Logic.term option = function
+  | Proven -> None
+  | Falsifiable | Unknown _ -> posed.obligation.refutation
 
 let list_refutation_requests posed answers =
   List.filter_map
-    (fun (obligation, answer) ->
-      if is_refutable obligation answer then Some (make_refutation_request obligation) else None)
+    (fun ((posed : posed_obligation), answer) ->
+      Option.map
+        (fun refutation -> Solver.make_refutation_request { posed.query with goal = refutation })
+        (find_refutation posed answer))
     (List.combine (list_posed posed) answers)
 
 let explain_failure (posed : posed_obligation) answer ~is_refuted : Catalog.Prover.failure option =
   match answer with
   | Solver.Proven -> None
-  | Falsifiable when is_refuted -> Some Refuted
+  | (Falsifiable | Unknown _) when is_refuted -> Some Refuted
   | Falsifiable -> Some (Falsifiable { failed_runs = posed.failed_runs })
   | Unknown unknown ->
       Some
@@ -372,7 +371,9 @@ let list_states posed ~answers ~refutations =
       List.map2
         (fun (posed : posed_obligation) answer ->
           let { site; obligation; _ } = posed in
-          let is_refuted = is_refutable posed answer && Queue.pop refutations = Solver.Proven in
+          let is_refuted =
+            Option.is_some (find_refutation posed answer) && Queue.pop refutations = Solver.Proven
+          in
           let explained = explain_failure posed answer ~is_refuted in
           {
             site;

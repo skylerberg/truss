@@ -24,7 +24,7 @@ type t = {
   fixes : Catalog.Prover.fix list;
   query : Logic.query;
   has_untriggered_written_fact : bool;
-  is_rejection : bool;
+  refutation : Logic.term option;
 }
 
 type outcome = {

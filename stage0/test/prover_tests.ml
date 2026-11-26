@@ -1686,6 +1686,19 @@ let () =
       expect_proven Fixtures.Prover.generic_tag_without_a_stated_check);
   Harness.test "an impl's from_template cannot require more than the tag's check" (fun () ->
       expect_not_proven Fixtures.Prover.shout_with_a_stronger_requires "prover.requires");
+  let fails_every_time = "This fails every time the code reaches it." in
+  let breaking_return = Fixtures.Prover.early_return_breaking_its_ensures in
+  Harness.test "an obligation that fails whenever its path is taken is refuted" (fun () ->
+      expect_not_proven breaking_return "prover.ensures" ~says:fails_every_time ~at:("return 8", 1));
+  Harness.test "an obligation that holds on some runs of its path is not refuted" (fun () ->
+      let message =
+        read_message (Support.apply_edit breaking_return ("return 8", "return number"))
+      in
+      if String.includes ~affix:fails_every_time message then Harness.fail "message %S" message);
+  Harness.test "an obligation that the solver cannot decide is refuted where its path refutes it"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.early_return_breaking_its_ensures_after_a_call
+        "prover.ensures" ~says:fails_every_time);
   Harness.test "an obligation that the facts refute says it fails every time it is reached"
     (fun () ->
       let message = read_message Fixtures.Prover.element_past_the_end_of_a_literal in
