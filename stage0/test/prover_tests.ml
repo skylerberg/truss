@@ -3512,6 +3512,8 @@ let () =
       expect_proven Fixtures.Prover.pair_ordering_theorem)
 
 let () =
+  Harness.test "a range's count and element, reversed or stepped, take constant time" (fun () ->
+      expect_proven Fixtures.Prover.range_count_and_element_in_constant_time);
   Harness.test "a string's characters collect into a list in time linear in its length" (fun () ->
       expect_proven Fixtures.Prover.characters_collected_in_linear_time);
   Harness.test "a copy of a string or a list costs time in its length and one allocation" (fun () ->
