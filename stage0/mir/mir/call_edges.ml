@@ -71,10 +71,23 @@ let is_self_of_enclosing_trait (type_ : Types.ty) =
   | Parameter self | Projection { base = Parameter self; _ } -> Types.is_self_parameter self
   | _ -> false
 
-let rec list_code_of_impl_for interface ((type_ : Types.ty), (bound : Types.trait_reference)) =
+let list_bounds_that_an_impl_assumes interface impl substitution =
+  let impl_interface = Interface.Definition.read_impl_interface interface impl in
+  Interface.Impls.list_required_bounds impl_interface.impl_generics substitution
+  @ Interface.Impls.list_associated_type_bounds interface impl_interface substitution
+
+let has_entered entered (trait : Types.trait_reference) type_ =
+  List.exists
+    (fun (entered_trait, entered_type) ->
+      Path.equal entered_trait trait.trait && Types.equal entered_type type_)
+    entered
+
+let rec list_code_of_impl_for ?(entered = []) interface
+    ((type_ : Types.ty), (bound : Types.trait_reference)) =
   List.concat_map
     (fun (required : Types.trait_reference) ->
       if is_self_of_enclosing_trait type_ then list_trait_methods interface required.trait
+      else if has_entered entered required type_ then []
       else
         match
           Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type:type_
@@ -83,10 +96,9 @@ let rec list_code_of_impl_for interface ((type_ : Types.ty), (bound : Types.trai
         | (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }) as
           evidence ->
             list_methods_of_evidence interface ~trait:required.trait evidence
-            @ List.concat_map (list_code_of_impl_for interface)
-                (Interface.Impls.list_required_bounds
-                   (Interface.Definition.read_impl_interface interface impl).impl_generics
-                   substitution)
+            @ List.concat_map
+                (list_code_of_impl_for ~entered:((required.trait, type_) :: entered) interface)
+                (list_bounds_that_an_impl_assumes interface impl substitution)
         | Bound -> [])
     (Interface.Properties.list_bound_closure interface ~self:type_ bound)
 
@@ -299,11 +311,7 @@ let rec list_laws_of_bound ?(entered = []) (interface : Interface.Lookups.t) ~se
     ~is_assumed_by_the_callee trait =
   List.concat_map
     (fun (required : Types.trait_reference) ->
-      let is_entered =
-        List.exists
-          (fun (trait, ty) -> Path.equal trait required.trait && Types.equal ty self_type)
-          entered
-      in
+      let is_entered = has_entered entered required self_type in
       let entered = (required.trait, self_type) :: entered in
       if is_entered then []
       else
@@ -330,23 +338,12 @@ let rec list_laws_of_bound ?(entered = []) (interface : Interface.Lookups.t) ~se
                  };
                ]
              else [])
-            @ list_laws_of_impl_generics ~entered interface impl substitution)
+            @ List.concat_map
+                (fun (assumed_of, assumed) ->
+                  list_laws_of_bound ~entered interface ~self_type:assumed_of
+                    ~is_assumed_by_the_callee:true assumed)
+                (list_bounds_that_an_impl_assumes interface impl substitution))
     (Interface.Properties.list_bound_closure interface ~self:self_type trait)
-
-and list_laws_of_impl_generics ~entered interface impl substitution =
-  let generics = (Interface.Definition.read_impl_interface interface impl).impl_generics in
-  List.concat_map
-    (fun (generic : Types.generic) ->
-      match Types.find_argument generic.generic substitution with
-      | Some (Type argument) ->
-          List.concat_map
-            (fun bound ->
-              list_laws_of_bound ~entered interface ~self_type:argument
-                ~is_assumed_by_the_callee:true
-                (Types.substitute_trait substitution bound))
-            (Types.list_bounds generics generic.generic)
-      | Some (Value _) | None -> [])
-    generics
 
 let list_laws_of_generics (interface : Interface.Lookups.t) instance path
     (instantiation : Types.instantiation) =
