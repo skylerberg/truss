@@ -231,8 +231,7 @@ let quantify_over (context : State.context) (frame : State.frame)
       let inner = bind inner each ty in
       make symbol
         (Encoding.declare_sort context ty)
-        (Logic.( &&& ) (Encoding.make_in_range ty each)
-           (Validity.make_validity context inner ~assuming:true ty each))
+        (Validity.make_validity context inner ~assuming:true ~includes_ranges:true ty each)
         inner each
   | Range_of_integers { low; high; inclusive; type_ } ->
       let inner = bind inner each type_ in

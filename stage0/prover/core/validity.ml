@@ -179,7 +179,7 @@ let apply_opaque_validity context ty term =
   Logic.Apply (symbol, [ term ])
 
 let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
-    ?(includes_invariants = true) ?(seen = []) ty term =
+    ?(includes_invariants = true) ?(includes_ranges = false) ?(seen = []) ty term =
   if List.exists (Types.equal ty) seen || List.exists (Types.equal ty) context.validity.validating
   then Logic.Boolean true
   else
@@ -212,7 +212,8 @@ let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
                    List.map
                      (fun (field, field_type) ->
                        let part =
-                         make_validity context frame ~assuming ~deep ~seen:(ty :: seen) field_type
+                         make_validity context frame ~assuming ~deep ~includes_ranges
+                           ~seen:(ty :: seen) field_type
                            (Encoding.select_field context ty variant field term)
                        in
                        match (variant, part) with
@@ -224,7 +225,7 @@ let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
                        | None, _ -> part)
                      fields)
                  shape)
-        | None -> Logic.Boolean true
+        | None -> if includes_ranges then Encoding.make_in_range ty term else Logic.Boolean true
     in
     Logic.( &&& ) invariants_hold fields
 
