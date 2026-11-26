@@ -122,12 +122,14 @@ develop as well as make it easier to bootstrap the compiler in parts.
 - **The cost modules hold the rules of cost checking.** A cost is ghost
   state of the one symbolic execution, so the modules that execute the MIR
   call the cost modules at each statement, and a new cost rule edits a cost
-  module. The state of cost checking is one record, `context.cost`.
+  module. The state of cost checking is one record, `context.cost`, and CI
+  rejects a use of it outside the cost modules.
 
   | Module | Holds |
   |---|---|
-  | `Costs` | The counters and the terms of an amount |
-  | `Counters` | The counters of a body: their assignment from cost clauses, spending, and the obligations at return |
+  | `Costs` | The counters, the terms of an amount, and the join of the amounts spent on two paths |
+  | `Counters` | The counters of a body: their assignment from cost clauses, and spending |
+  | `Cost_promises` | The cost clauses of a function as obligations at its return |
   | `Potentials` | The potential that a value holds |
   | `Amounts` | The amount that a call or an operation spends |
   | `Loop_costs` | The cost rules of a loop |

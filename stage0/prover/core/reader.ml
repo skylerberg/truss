@@ -510,7 +510,7 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
     match (invocation.lends, invocation.callee) with
     | Some Language.Mode.Mut, Intrinsic _ -> Facts.raise_bug "an intrinsic that lends `mut`"
     | Some Language.Mode.Mut, _ ->
-        ( Validity.run_without_costs context (fun () -> lend frame),
+        ( Counters.run_without_counters context (fun () -> lend frame),
           Some
             (fun frame final ->
               match lend ~leave_lent:(fun _ -> final) frame with
@@ -980,7 +980,7 @@ and read_statement context frame run (statement : Mir.statement) =
         lazy
           (List.fold_left
              (fun total (implementation : Mir.provided) ->
-               Logic.plus total
+               Logic.add total
                  (Potentials.compute_potential context frame
                     (Facts.substitute_type context frame implementation.type_)
                     (read_operand context
@@ -1212,7 +1212,7 @@ and read_statement context frame run (statement : Mir.statement) =
             | Mut ->
                 Some
                   (fun at ->
-                    Validity.run_without_costs context (fun () ->
+                    Counters.run_without_counters context (fun () ->
                         snd (read_value context at run elements.count)))
             | Read | Own -> None)
       in
@@ -1303,7 +1303,7 @@ and read_statement context frame run (statement : Mir.statement) =
                 | (Read | Own), Sequence_element { place; _ } ->
                     Some
                       (fun at ->
-                        Validity.run_without_costs context (fun () ->
+                        Counters.run_without_counters context (fun () ->
                             read_place context { at with makes_obligations = false } run place))
                 | (Read | Own), Lent_by_call lent ->
                     Some
@@ -1320,7 +1320,7 @@ and read_statement context frame run (statement : Mir.statement) =
                               | Basic (Lend { part; _ }) when part = lent -> frame
                               | _ -> lend frame rest)
                         in
-                        Validity.run_without_costs context (fun () ->
+                        Counters.run_without_counters context (fun () ->
                             read_place context (lend at after_bindings) run
                               { root = Local lent; projections = [] })));
           bind_element;

@@ -53,7 +53,7 @@ let measure_held_gains context (entry : State.frame) (changed : State.changed_pa
   let sum_held measure (at : State.frame) =
     List.fold_left
       (fun total (ty, read) ->
-        match read at with Some term -> Logic.plus total (measure at ty term) | None -> total)
+        match read at with Some term -> Logic.add total (measure at ty term) | None -> total)
       Costs.zero held
   in
   let measure_whole = sum_held (fun at ty term -> Potentials.compute_potential context at ty term)
@@ -67,12 +67,12 @@ let measure_held_gains context (entry : State.frame) (changed : State.changed_pa
      let rec measure_gained gain (at : State.frame) =
        match gain with
        | No_gain -> Costs.zero
-       | Whole_potential -> Logic.minus (measure_whole at) whole_on_entry
-       | Whole_potential_deducted -> Logic.minus whole_on_entry (measure_whole at)
+       | Whole_potential -> Logic.subtract (measure_whole at) whole_on_entry
+       | Whole_potential_deducted -> Logic.subtract whole_on_entry (measure_whole at)
        | Potential_without_elements ->
-           Logic.minus
+           Logic.subtract
              (measure_gained Whole_potential at)
-             (Logic.minus (measure_elements at) elements_on_entry)
+             (Logic.subtract (measure_elements at) elements_on_entry)
      in
      ( (if holds_potential then [ Whole_potential ] else [])
        @ (No_gain :: (if elements_on_entry = Costs.zero then [] else [ Potential_without_elements ])),
@@ -214,7 +214,8 @@ let enter_head context head loop ~iterations =
       match cost.rule with
       | Clause_bound { written; gained_at_head; _ } ->
           let since =
-            Logic.plus (Logic.minus at_head cost.entry)
+            Logic.add
+              (Logic.subtract at_head cost.entry)
               (Option.value gained_at_head ~default:Costs.zero)
           in
           let amount = read_amount context { head with makes_obligations = false } written in
@@ -224,8 +225,8 @@ let enter_head context head loop ~iterations =
             (fun (gain, per) ->
               Facts.assume context head
                 (make_count_bound ~counter:cost.counter
-                   ~at:(Logic.plus at_head (cost.measure_gained gain head))
-                   ~bound:(Logic.plus cost.entry (Logic.times iterations per))))
+                   ~at:(Logic.add at_head (cost.measure_gained gain head))
+                   ~bound:(Logic.add cost.entry (Logic.multiply iterations per))))
             rules)
     loop.costs;
   head
@@ -372,8 +373,8 @@ let check_iterations context loop_at (head : State.frame) loop ~iterations ~iter
             (fun (frame, moment) ->
               oblige_clause context frame cost clause.written ~moment
                 ~since:
-                  (Logic.plus
-                     (Logic.minus (Counters.lookup_spent frame cost.counter) cost.entry)
+                  (Logic.add
+                     (Logic.subtract (Counters.lookup_spent frame cost.counter) cost.entry)
                      (cost.measure_gained clause.gain frame)))
             (List.map (fun exit_frame -> (exit_frame, Catalog.Prover.After_iteration)) ends
             @ List.map (fun exit_frame -> (exit_frame, Catalog.Prover.Where_left)) breaks)
@@ -382,9 +383,9 @@ let check_iterations context loop_at (head : State.frame) loop ~iterations ~iter
           let measure_most (gain, per) =
             let gained_before = cost.measure_gained gain head in
             let measure_iteration (frame : State.frame) =
-              let gained = Logic.minus (cost.measure_gained gain frame) gained_before in
+              let gained = Logic.subtract (cost.measure_gained gain frame) gained_before in
               if gain = No_gain then measure_spent frame
-              else Logic.normalize_linear (Logic.plus (measure_spent frame) gained)
+              else Logic.normalize_linear (Logic.add (measure_spent frame) gained)
             in
             let spent = List.map measure_iteration frames in
             let amortize amount = Logic.normalize_linear (Costs.take_potential_as_zero amount) in
@@ -417,7 +418,7 @@ let check_iterations context loop_at (head : State.frame) loop ~iterations ~iter
               | Some (iterations, count)
                 when cost.counter.counting = Units && gain = No_gain && not spends_potential ->
                   let spent_at_head = Counters.lookup_spent head cost.counter in
-                  let bound = Logic.plus cost.entry (Logic.at_least_zero per) in
+                  let bound = Logic.add cost.entry (Logic.at_least_zero per) in
                   Facts.assume context head
                     Logic.(less_equal iterations (Integer count) ==> less_equal spent_at_head bound);
                   per_iteration.one_iteration_bound <- Some { spent_at_head; bound }
@@ -440,12 +441,6 @@ let check_iterations context loop_at (head : State.frame) loop ~iterations ~iter
                 (Logic.Boolean false)))
     loop.costs
 
-let list_facts (context : State.context) loop =
-  Fact_list.list_newest_since context.facts ~count:loop.facts_mark
-
-let list_upper_bounds context loop ~facts term =
-  Costs.list_upper_bounds ~varies:(Facts.mentions_fresh_after context loop.fresh_mark) ~facts term
-
 let leave context ~(clause_at : State.frame) (exit_ : State.frame) loop ~iterations ~most =
   let iterations = Option.value iterations ~default:Costs.zero in
   let assumes_recursive_costs = assumes_recursive_costs context loop in
@@ -464,13 +459,13 @@ let leave context ~(clause_at : State.frame) (exit_ : State.frame) loop ~iterati
               | Exactly -> amount
             in
             ( cost.counter,
-              Logic.plus
-                (Logic.minus (Logic.plus cost.entry counted) (cost.measure_gained gain clause_at))
+              Logic.add
+                (Logic.subtract (Logic.add cost.entry counted) (cost.measure_gained gain clause_at))
                 (Costs.since ~start:(Counters.lookup_spent clause_at cost.counter) at) )
         | Per_iteration { rules; one_iteration_bound } -> (
             List.iter
               (fun (gain, per) ->
-                let banked = Logic.plus at (cost.measure_gained gain exit_) in
+                let banked = Logic.add at (cost.measure_gained gain exit_) in
                 if cost.counter.counting <> Exactly then
                   List.iter
                     (fun most ->
@@ -478,19 +473,31 @@ let leave context ~(clause_at : State.frame) (exit_ : State.frame) loop ~iterati
                         Logic.(
                           conjunction
                             [
-                              less_equal banked (plus cost.entry (times iterations per));
+                              less_equal banked (add cost.entry (multiply iterations per));
                               less_equal (int 0) iterations;
                               less_equal iterations most;
                               less_equal (int 0) per;
                             ]
-                          ==> less_equal banked (plus cost.entry (times most per))))
+                          ==> less_equal banked (add cost.entry (multiply most per))))
                     most)
               rules;
             ( cost.counter,
               match one_iteration_bound with
               | Some { spent_at_head; bound } ->
-                  Logic.plus bound (Costs.since ~start:spent_at_head at)
+                  Logic.add bound (Costs.since ~start:spent_at_head at)
               | None -> at )))
       loop.costs
   in
   { exit_ with spent }
+
+let leave_counted (context : State.context) ~clause_at exit_ loop ~iterations ~most ~count ~since =
+  let facts =
+    Fact_list.list_newest_since context.facts ~count:since
+    @ Fact_list.list_newest_since context.facts ~count:loop.facts_mark
+  in
+  leave context ~clause_at exit_ loop ~iterations
+    ~most:
+      (most
+      @ Costs.list_upper_bounds
+          ~varies:(Facts.mentions_fresh_after context loop.fresh_mark)
+          ~facts count)

@@ -25,15 +25,6 @@ let make_float_equal left right =
 let make_float_less left right =
   Logic.(not_ (is_nan left) &&& is_nan right ||| Operation (Fp_lt, [ left; right ]))
 
-let rec compare_lexicographically before after =
-  match (before, after) with
-  | [ right ], [ left ] -> Logic.(less_equal (int 0) right &&& less left right)
-  | right :: before, left :: after ->
-      Logic.(
-        less_equal (int 0) right
-        &&& (less left right ||| (equal left right &&& compare_lexicographically before after)))
-  | _ -> Logic.Boolean true
-
 let compare_terms ty (compared : Language.Comparison.t) left right =
   if Facts.find_float_format ty <> None then
     match compared with
@@ -359,7 +350,7 @@ let rec map_each_value context (frame : State.frame) value make =
     | None -> ()
 
 let make_power_facts base exponent =
-  let power exponent = Logic.Apply (Logic.Symbol.Cost_power, [ base; exponent ]) in
+  let power exponent = Logic.Apply (Logic.Symbol.Integer_power, [ base; exponent ]) in
   let previous = Logic.subtract exponent (Logic.int 1) in
   ( Logic.
       [
@@ -376,7 +367,7 @@ let make_power_facts base exponent =
       previous ) )
 
 let make_power_order base left right =
-  let power exponent = Logic.Apply (Logic.Symbol.Cost_power, [ base; exponent ]) in
+  let power exponent = Logic.Apply (Logic.Symbol.Integer_power, [ base; exponent ]) in
   Logic.(
     greater_equal base (int 1)
     ==> (less_equal left right
@@ -385,7 +376,7 @@ let make_power_order base left right =
 
 let declare_power context frame base exponent =
   Facts.declare context
-    (Logic.Function (Logic.Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
+    (Logic.Function (Logic.Symbol.Integer_power, [ Logic.Int; Logic.Int ], Logic.Int));
   let add exponent =
     if not (List.mem (base, exponent) context.powers) then begin
       List.iter
@@ -411,10 +402,10 @@ let declare_power context frame base exponent =
     when Z.sign exponent_value >= 0 && Z.leq exponent_value (Z.of_int 256) ->
       Facts.add_frame_fact context frame
         (Logic.equal
-           (Logic.Apply (Logic.Symbol.Cost_power, [ base; exponent ]))
+           (Logic.Apply (Logic.Symbol.Integer_power, [ base; exponent ]))
            (Logic.Integer (Z.pow base_value (Z.to_int exponent_value))))
   | _ -> ());
-  Logic.Apply (Logic.Symbol.Cost_power, [ base; exponent ])
+  Logic.Apply (Logic.Symbol.Integer_power, [ base; exponent ])
 
 let translate_primitive_operation context (frame : State.frame) ~(site : Invocation.site)
     (operation : Intrinsic.scalar) types operands ~(arguments : Core.origin option list) ~fallback =
@@ -520,10 +511,11 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
                 Facts.assume context frame Logic.(less_equal left term &&& less_equal right term);
               Facts.assume context frame (at_most sum);
               Facts.declare context
-                (Logic.Function (Logic.Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
+                (Logic.Function (Logic.Symbol.Integer_power, [ Logic.Int; Logic.Int ], Logic.Int));
               let exponent = Logic.Symbol (Facts.make_variable "exponent") in
               let below value =
-                Logic.less value (Logic.Apply (Logic.Symbol.Cost_power, [ Logic.int 2; exponent ]))
+                Logic.less value
+                  (Logic.Apply (Logic.Symbol.Integer_power, [ Logic.int 2; exponent ]))
               in
               Facts.assume context frame
                 (Logic.forall

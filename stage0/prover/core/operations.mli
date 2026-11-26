@@ -1,5 +1,4 @@
 val make_float_literal : int * int -> float -> Logic.term
-val compare_lexicographically : Logic.term list -> Logic.term list -> Logic.term
 val compare_terms : Types.ty -> Language.Comparison.t -> Logic.term -> Logic.term -> Logic.term
 val check_widened : Obligation.location -> is_written:bool -> Types.ty -> Types.ty -> unit
 

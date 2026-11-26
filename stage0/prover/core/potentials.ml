@@ -201,7 +201,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (declared : Typ
                   sum_element_potentials context element sequence
                 else Costs.zero
               in
-              Facts.add_frame_fact context frame (Logic.equal held (Logic.plus slack elements))
+              Facts.add_frame_fact context frame (Logic.equal held (Logic.add slack elements))
           | None -> ())
       | _, Some shape -> (
           try
@@ -211,7 +211,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (declared : Typ
                 (compute_parts_potential context frame ~seen declared term)
             in
             Facts.add_frame_fact context frame
-              (Logic.equal held (Logic.plus declared_potential parts))
+              (Logic.equal held (Logic.add declared_potential parts))
           with Facts.Unsupported _ -> ())
       | _ -> ()
     end;
@@ -232,7 +232,7 @@ and compute_parts_potential context frame ~seen declared term (variant, fields) 
       in
       if has_potential context field_type then
         let part = Validity.select_field context ty variant field term in
-        Logic.plus total
+        Logic.add total
           (if List.exists (Types.equal field_type) (declared :: seen) then
              declare_held_symbol context field_type part
            else compute_potential context frame ~seen:(declared :: seen) field_type part)
@@ -256,7 +256,7 @@ let compute_elements_potential context (declared : Types.ty) term =
                 in
                 if List.exists (Types.equal field_type) (declared :: enclosing) then total
                 else
-                  Logic.plus total
+                  Logic.add total
                     (sum_elements ~enclosing:(declared :: enclosing) field_type
                        (Validity.select_field context ty variant field term)))
               Costs.zero fields
@@ -281,17 +281,18 @@ let compute_arguments_potential_change context ~(before : State.frame) ~(after :
       | Language.Mode.Mut -> (
           match List.assoc_opt passed.position changed with
           | Some later ->
-              Logic.plus total
-                (Logic.minus
+              Logic.add total
+                (Logic.subtract
                    (compute_potential context after passed.declared_type later)
                    (compute_potential context before passed.declared_type passed.term))
           | None -> total)
-      | Own -> Logic.minus total (compute_potential context before passed.declared_type passed.term)
+      | Own ->
+          Logic.subtract total (compute_potential context before passed.declared_type passed.term)
       | Read -> total)
     Costs.zero values
 
 let compute_call_potential_change context ~before ~after values ~changed ~result_type ~result =
-  Logic.plus
+  Logic.add
     (compute_arguments_potential_change context ~before ~after values ~changed)
     (compute_potential context after result_type result)
 
@@ -304,8 +305,8 @@ let assume_element_potential_change context frame (sequence : Types.ty) ~before 
           let sum term = sum_element_potentials context element (model_of term) in
           Facts.assume context frame
             (Logic.equal (sum after)
-               (Logic.plus
-                  (Logic.minus (sum before) (compute_potential context frame element replaced))
+               (Logic.add
+                  (Logic.subtract (sum before) (compute_potential context frame element replaced))
                   (compute_potential context frame element written)))
       with Facts.Unsupported _ -> ())
   | None -> ()
@@ -329,8 +330,8 @@ let compute_enclosing_change context ~(before : State.frame) ~(after : State.fra
          ( prefix @ [ projection ],
            match projection with
            | Field _ | Variant_field _ ->
-               Logic.plus total
-                 (Logic.minus (measure_declared after base) (measure_declared before base))
+               Logic.add total
+                 (Logic.subtract (measure_declared after base) (measure_declared before base))
            | Element _ | Range _ -> total ))
        ([], Costs.zero) place.Mir.projections)
 
@@ -350,7 +351,7 @@ let spend_enclosing_change (context : State.context) ~before ~after alternatives
       lazy
         (List.fold_left
            (fun total (condition, place) ->
-             Logic.plus total
+             Logic.add total
                (Costs.make_conditional_amount condition
                   (compute_enclosing_change context ~before ~after place ~place_type ~read)))
            Costs.zero parts)
@@ -367,12 +368,13 @@ let spend_forgotten context roots ~(before : State.frame) ~(after : State.frame)
           | Locals.Core_local Self -> at.self
           | root -> Locals.find_opt root at.locals
         with
-        | Some term -> Logic.plus total (compute_potential context at ty term)
+        | Some term -> Logic.add total (compute_potential context at ty term)
         | None -> total)
       Costs.zero roots
   in
   Counters.spend context after (fun (counter : Costs.counter) ->
-      if counter.amortized then Logic.minus (Logic.at_least_zero (measure after)) (measure before)
+      if counter.amortized then
+        Logic.subtract (Logic.at_least_zero (measure after)) (measure before)
       else Costs.zero)
 
 let spend_provided context frame potential =

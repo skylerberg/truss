@@ -246,7 +246,8 @@ let quantify_over (context : State.context) (frame : State.frame)
         Logic.(less_equal low each &&& (if inclusive then less_equal else less) each high)
       in
       let count =
-        if inclusive then Logic.plus (Logic.minus high low) (Logic.int 1) else Logic.minus high low
+        if inclusive then Logic.add (Logic.subtract high low) (Logic.int 1)
+        else Logic.subtract high low
       in
       make ~count symbol Int premise inner each
 

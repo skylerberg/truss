@@ -1,7 +1,7 @@
 let find_selected_place (context : State.context) selection =
   let shift offset : State.place_value -> State.place_value = function
-    | One index -> One (Logic.plus offset index)
-    | Run (start, stop) -> Run (Logic.plus offset start, Logic.plus offset stop)
+    | One index -> One (Logic.add offset index)
+    | Run (start, stop) -> Run (Logic.add offset start, Logic.add offset stop)
   in
   let rec find_from offset = function
     | [] -> Facts.raise_bug "a selection of no range or element"
@@ -11,7 +11,7 @@ let find_selected_place (context : State.context) selection =
           (List.assoc_opt innermost context.indexes)
     | range :: inner -> (
         match List.assoc_opt range context.indexes with
-        | Some { value = Run (start, _); _ } -> find_from (Logic.plus offset start) inner
+        | Some { value = Run (start, _); _ } -> find_from (Logic.add offset start) inner
         | Some { value = One _; _ } -> Facts.raise_bug "a selection that selects inside an element"
         | None -> None)
   in
@@ -57,12 +57,6 @@ let note_place (context : State.context) (frame : State.frame) ~node ~origin val
       context.disjoint
   end
 
-let run_without_costs : 'a. _ -> (unit -> 'a) -> 'a =
- fun (context : State.context) read ->
-  let saved = context.cost.counters in
-  context.cost.counters <- [];
-  Fun.protect ~finally:(fun () -> context.cost.counters <- saved) read
-
 let run_as_specification (context : State.context) read =
   let panics = context.panics and can_declare_panic = context.can_declare_panic in
   context.panics <- false;
@@ -71,7 +65,7 @@ let run_as_specification (context : State.context) read =
     ~finally:(fun () ->
       context.panics <- panics;
       context.can_declare_panic <- can_declare_panic)
-    (fun () -> run_without_costs context read)
+    (fun () -> Counters.run_without_counters context read)
 
 let read_specification (context : State.context) frame (formula : Mir.formula) =
   run_as_specification context (fun () -> context.read_formula frame formula ~arguments:[])

@@ -1010,53 +1010,17 @@ let merge context ?value_type ~condition
     | _ -> renamings
   in
   let spent =
-    List.map
-      (fun (key, term) ->
-        let values =
-          List.map
-            (fun (on, (frame : State.frame), _) ->
-              let renamings = list_renamings frame in
-              ( on,
-                renamings,
-                List.fold_left
-                  (fun amount (from, into) -> Logic.replace ~from ~into amount)
-                  (match List.assoc_opt key frame.spent with
-                  | Some spent_term -> spent_term
-                  | None -> term)
-                  renamings ))
-            paths
-        in
-        let choose_amount values =
-          match List.rev values with
-          | (_, last) :: earlier ->
-              List.fold_left
-                (fun otherwise (on, value) -> Logic.ite on value otherwise)
-                last earlier
-          | [] -> term
-        in
-        let name_amount choice =
-          if Logic.mentions first.bound choice || Costs.mentions_potential choice then choice
-          else
-            let symbol = declare_fresh context first "spent" Logic.Int in
-            add_frame_fact context first (Logic.equal symbol choice);
-            symbol
-        in
-        match values with
-        | (_, _, first_value) :: rest
-          when List.for_all (fun (_, _, other) -> other == first_value || other = first_value) rest
-          ->
-            (key, first_value)
-        | _ -> (
-            match Costs.find_shared_potential_summands values with
-            | None ->
-                ( key,
-                  name_amount (choose_amount (List.map (fun (on, _, value) -> (on, value)) values))
-                )
-            | Some (shared, (_, first_rest) :: others)
-              when List.for_all (fun (_, other) -> other = first_rest) others ->
-                (key, Logic.plus shared first_rest)
-            | Some (shared, rests) -> (key, Logic.plus shared (name_amount (choose_amount rests)))))
-      first.spent
+    Costs.join_spent first.spent
+      ~paths:
+        (List.map
+           (fun (on, (frame : State.frame), _) -> (on, list_renamings frame, frame.spent))
+           paths)
+      ~name:(fun amount ->
+        if Logic.mentions first.bound amount then amount
+        else
+          let symbol = declare_fresh context first "spent" Logic.Int in
+          add_frame_fact context first (Logic.equal symbol amount);
+          symbol)
   in
   let value =
     let values =

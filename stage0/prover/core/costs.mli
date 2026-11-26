@@ -40,6 +40,8 @@ val mentions_potential : Logic.term -> bool
 val list_potentials : Logic.term -> Logic.term list
 val take_potential_as_zero : Logic.term -> Logic.term
 
-val find_shared_potential_summands :
-  (Logic.term * (Logic.term * Logic.term) list * Logic.term) list ->
-  (Logic.term * (Logic.term * Logic.term) list) option
+val join_spent :
+  (counter * Logic.term) list ->
+  paths:(Logic.term * (Logic.term * Logic.term) list * (counter * Logic.term) list) list ->
+  name:(Logic.term -> Logic.term) ->
+  (counter * Logic.term) list

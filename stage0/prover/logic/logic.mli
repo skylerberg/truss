@@ -49,8 +49,8 @@ module Symbol : sig
     | Handle_descriptor
     | Compare_bytes_order
     | Cost_most
-    | Cost_log
-    | Cost_power
+    | Integer_log
+    | Integer_power
     | Reached of int
 end
 
@@ -138,9 +138,6 @@ val negate : term -> term
 val add : term -> term -> term
 val subtract : term -> term -> term
 val multiply : term -> term -> term
-val plus : term -> term -> term
-val minus : term -> term -> term
-val times : term -> term -> term
 val larger : term -> term -> term
 val at_least_zero : term -> term
 val linearize : term -> (term * Z.t) list * Z.t
@@ -156,6 +153,7 @@ val truncated_divide : term -> term -> term
 val truncated_remainder : term -> term -> term
 val integer_of_bits : is_signed:bool -> width:int -> term -> term
 val mentions : symbol list -> term -> bool
+val decreases_lexicographically : term list -> term list -> term
 val is_refuted : term -> bool
 val is_valid : term -> bool
 val list_free_constants : term -> symbol list
