@@ -37,6 +37,7 @@ val resolve :
   uses:Types.capability_set ->
   t
 
+val may_abort : State.context -> definition -> bool
 val is_update_step : State.context -> t -> bool
 val find_parameter_type : State.context -> t -> int -> Types.ty option
 

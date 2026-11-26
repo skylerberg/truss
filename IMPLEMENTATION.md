@@ -313,10 +313,17 @@ develop as well as make it easier to bootstrap the compiler in parts.
 
   | Use | Function | Rule |
   |---|---|---|
-  | Named as a value | `read_named_function` | States its definition and its relation once per query |
+  | Named as a value | `read_named_function` | States its relation once per query, and its definition where the function does not abort |
   | Passed for a parameter | `check_passed` | The parameter's `requires` imply its `requires`, and its `ensures` imply the parameter's |
   | Called | `check_called`, `assume_returned` | The call proves its `requires` and assumes its `ensures` |
   | Read where no function type states a `requires` | `check_read`, `check_passed` | Its `requires` hold for every argument |
+
+  The definition of a named function is its contract as an axiom, and the
+  relation holds only of a call that returned. So a function that may abort
+  has a relation and no definition: its application is a term that nothing
+  specifies, as its call in a specification is. `Callee.may_abort` decides
+  that for a call and for a function named as a value, and
+  `State.known_function` carries the answer with the contract.
 
   `Lambdas.make_passed_values` checks each argument of a call against its
   parameter's contract: it runs a lambda's body against the contract, which
