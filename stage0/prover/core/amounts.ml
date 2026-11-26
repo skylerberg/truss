@@ -309,10 +309,8 @@ let make_callback_cost (context : State.context) (frame : State.frame) (metric :
       let symbol = Logic.Symbol.Callback_cost { metric; sort } in
       let cost = Logic.Apply (symbol, [ term ]) in
       let least = Costs.least_amount (Metric metric) in
-      Facts.add_frame_fact frame (Logic.less_equal least cost);
-      let state_value value =
-        Facts.add_frame_fact frame (Logic.equal cost (Logic.larger least value))
-      in
+      Facts.add_axiom frame (Logic.less_equal least cost);
+      let state_value value = Facts.add_axiom frame (Logic.equal cost (Logic.larger least value)) in
       (match term with
       | Logic.Symbol (Function_value { callee; _ }) ->
           Option.iter state_value
@@ -396,7 +394,7 @@ let compute_construction_amount (frame : State.frame) (ty : Types.ty) variant
   | Metric Allocated_bytes when counter.counting = Units -> Logic.int 1
   | Metric Allocated_bytes ->
       let symbol = Logic.Symbol.Block_bytes { type_ = ty; variant } in
-      Facts.add_frame_fact frame (Logic.less_equal (Logic.int 1) (Logic.Symbol symbol));
+      Facts.add_axiom frame (Logic.less_equal (Logic.int 1) (Logic.Symbol symbol));
       Logic.Symbol symbol
   | Metric Time | Calls _ -> Costs.zero
 

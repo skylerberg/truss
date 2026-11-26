@@ -64,7 +64,7 @@ let close_over_binders (frame : State.frame) term =
              (Logic.conjunction (List.map (fun (_, _, premise) -> premise) outermost_first))
              term ))
 
-let add_frame_fact (frame : State.frame) term =
+let add_axiom (frame : State.frame) term =
   if not (Logic.mentions frame.bound term) then Query.add_fact frame.query term
   else Query.add_scoped_fact frame.query ~bound:frame.bound term
 

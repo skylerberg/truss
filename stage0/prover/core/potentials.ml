@@ -174,7 +174,7 @@ and compute_potential (context : State.context) (frame : State.frame) ?(seen = [
     let held = make_held_potential declared term in
     if (not (List.mem held context.cost.potentials)) && not (Logic.mentions frame.bound term) then begin
       context.cost.potentials <- held :: context.cost.potentials;
-      Facts.add_frame_fact frame
+      Facts.add_axiom frame
         Logic.(
           Validity.make_validity context frame ~assuming:true ty term ==> less_equal (int 0) held);
       match
@@ -186,7 +186,7 @@ and compute_potential (context : State.context) (frame : State.frame) ?(seen = [
               let sequence = model_of term in
               let slack = Intrinsics.make_buffer_slack ty term in
               let length = Models.make_sequence_length context.query element sequence in
-              Facts.add_frame_fact frame
+              Facts.add_axiom frame
                 Logic.(less_equal (int 0) slack &&& less_equal slack (multiply (int 2) length));
               (match (ty, kind) with
               | Types.Named { path; _ }, _ when Well_known.find_builtin_type path = Some Storage ->
@@ -195,17 +195,17 @@ and compute_potential (context : State.context) (frame : State.frame) ?(seen = [
                       (Logic.multiply (Logic.int 2) length)
                       (Intrinsics.make_buffer_capacity element term)
                   in
-                  Facts.add_frame_fact frame
+                  Facts.add_axiom frame
                     (Logic.equal slack
                        (Logic.ite (Logic.greater_equal saved (Logic.int 0)) saved (Logic.int 0)))
-              | _, Array -> Facts.add_frame_fact frame (Logic.equal slack (Logic.int 0))
+              | _, Array -> Facts.add_axiom frame (Logic.equal slack (Logic.int 0))
               | _ -> ());
               let elements =
                 if has_potential context (find_declared_element declared ~erased:element) then
                   sum_element_potentials context element sequence
                 else Costs.zero
               in
-              Facts.add_frame_fact frame (Logic.equal held (Logic.add slack elements))
+              Facts.add_axiom frame (Logic.equal held (Logic.add slack elements))
           | None -> ())
       | _, Some shape -> (
           try
@@ -214,7 +214,7 @@ and compute_potential (context : State.context) (frame : State.frame) ?(seen = [
               choose_by_variant ty term shape
                 (compute_parts_potential context frame ~seen declared term)
             in
-            Facts.add_frame_fact frame (Logic.equal held (Logic.add declared_potential parts))
+            Facts.add_axiom frame (Logic.equal held (Logic.add declared_potential parts))
           with Facts.Unsupported _ -> ())
       | _ -> ()
     end;

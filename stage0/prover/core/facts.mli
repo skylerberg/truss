@@ -18,7 +18,7 @@ val list_clauses : Mir.requirement list -> Mir.formula list
 val declare_value_symbol : State.frame -> Logic.symbol -> Logic.sort -> Logic.term
 val declare_fresh : State.frame -> string -> Logic.sort -> Logic.term
 val close_over_binders : State.frame -> Logic.term -> Logic.term option
-val add_frame_fact : State.frame -> Logic.term -> unit
+val add_axiom : State.frame -> Logic.term -> unit
 val assume : State.frame -> Logic.term -> unit
 val remove_panic : Types.capability_set -> Types.capability_set
 val locate : State.frame -> Core.origin -> Obligation.location

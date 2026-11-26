@@ -297,15 +297,14 @@ let find_lambda_definition (context : State.context) (frame : State.frame)
           in
           let application = Callbacks.apply_function function_type term entries in
           Tables.Symbol_table.replace context.lambda_definitions symbol defined;
-          Facts.add_frame_fact frame (Logic.forall (bound, Logic.equal application defined));
+          Facts.add_axiom frame (Logic.forall (bound, Logic.equal application defined));
           (match written.code.value_type with
           | Some value_type -> (
               match
                 Encoding.make_in_range (Encoding.substitute_type frame value_type) application
               with
               | Logic.Boolean true -> ()
-              | range ->
-                  Facts.add_frame_fact frame (Logic.forall (bound, Logic.( ==> ) domain range)))
+              | range -> Facts.add_axiom frame (Logic.forall (bound, Logic.( ==> ) domain range)))
           | None -> ());
           Some term
       | _ -> None)

@@ -400,7 +400,7 @@ let state_relation (context : State.context) (frame : State.frame)
     ensures <> []
     && not (List.exists (Query.mentions_fresh_since context.query mark) (premise :: ensures))
   then
-    Facts.add_frame_fact frame
+    Facts.add_axiom frame
       (Logic.forall ~trigger:[ holds ]
          (parameters, Logic.( ==> ) holds (Logic.( ==> ) premise (Logic.conjunction ensures))))
 
@@ -421,7 +421,7 @@ let state_definition (context : State.context) (frame : State.frame)
     { symbol; sorts; term = value; is_limited = false }
     contract ~substitution_of ~result_type:function_type.output ~group_member
     ~is_on_bound_values:true;
-  Facts.add_frame_fact frame
+  Facts.add_axiom frame
     (Logic.forall (parameters, Logic.equal (apply_function function_type term inputs) value))
 
 let read_named_function (context : State.context) (frame : State.frame) (site : Invocation.site)
@@ -445,7 +445,7 @@ let read_named_function (context : State.context) (frame : State.frame) (site : 
             if is_in_the_logic function_type && contract.is_logic_function then
               state_definition context frame function_type term ~path ~contract ~substitution_of
                 ~type_arguments ~group_member;
-            Option.iter (Facts.add_frame_fact frame) (find_logic_link function_type term)
+            Option.iter (Facts.add_axiom frame) (find_logic_link function_type term)
           end;
           state_relation context frame function_type term known);
       term
