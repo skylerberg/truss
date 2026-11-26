@@ -31,6 +31,56 @@ let () =
         ]);
   Harness.test "an impl may live with a type its trait's arguments name" (fun () ->
       expect_fine Fixtures.Package_checks.impl_from_user_id_for_int64);
+  Harness.test "an impl does not live with a type inside its trait's argument" (fun () ->
+      expect_one_diagnostic
+        "type UserId(number: Int64)\n\n\
+         impl From[List[UserId]] for Int64 {\n\
+        \  fn from(value: own List[UserId]) -> Int64 { todo }\n\
+         }\n"
+        "package.impl_location");
+  Harness.test "an impl may live with a type that any of its trait's arguments names" (fun () ->
+      let packages =
+        Support.setup
+          ~dependencies:[ ("app", "lib") ]
+          [
+            ("lib.join", "public trait Join[Left, Right] {}\n");
+            ( "app.main",
+              "use lib.join\n\n\
+               type Local(count: Int64)\n\n\
+               impl join.Join[Int64, Local] for Int64 {}\n" );
+          ]
+      in
+      match Support.list_codes (check packages (Support.parse_file "app.main")) with
+      | [] -> ()
+      | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
+  Harness.test "impls of an unknown type report only the unknown name" (fun () ->
+      expect_one_diagnostic
+        "trait Measure {}\n\n\
+         impl Measure for Int8 {}\n\n\
+         impl Measure for Missing {}\n\n\
+         impl Measure for UInt8 {}\n"
+        "resolve.unknown_name");
+  Harness.test "impls of a trait for one type with distinct trait arguments do not overlap"
+    (fun () ->
+      expect_fine
+        "trait Convert[Source] {}\n\n\
+         type Holder[Value](value: Value)\n\n\
+         impl Convert[Int64] for Holder[Value] {}\n\n\
+         impl Convert[List[Value]] for Holder[Value] {}\n");
+  Harness.test "impls overlap whatever their conditions" (fun () ->
+      expect_one_diagnostic
+        "trait Join[Left] {}\n\n\
+         type Pair[First, Second](first: First, second: Second)\n\n\
+         impl Join[First] for Pair[First: Equal, Second] {}\n\n\
+         impl Join[Second] for Pair[First, Second: Hash] {}\n"
+        "package.overlapping_impls");
+  Harness.test "a written impl overlaps a derived impl of its trait" (fun () ->
+      expect_one_diagnostic
+        "type Point(x: Int64) derives Equal\n\n\
+         impl Equal for Point {\n\
+        \  fn equal(self, other: Point) -> Bool { todo }\n\
+         }\n"
+        "package.overlapping_impls");
   Harness.test "two impls of a trait for one type constructor overlap when their arguments unify"
     (fun () ->
       let packages =

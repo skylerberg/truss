@@ -1,0 +1,9 @@
+type Holder[Value](value: Value)
+
+fn Holder[Value: Equal].same(self, other: Holder[Value]) -> Bool { todo }
+
+type Opaque(count: Int64)
+
+fn f(first: Holder[Opaque], second: Holder[Opaque]) -> Bool {
+  first.same(second)
+}

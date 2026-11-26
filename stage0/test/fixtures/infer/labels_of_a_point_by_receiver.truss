@@ -1,0 +1,20 @@
+trait Labeled {
+  fn label(self) -> Int64
+  fn label(own self) -> String
+}
+
+type Point(x: Int64)
+
+impl Labeled for Point {
+  fn label(self) -> Int64 { todo }
+  fn label(own self) -> String { todo }
+}
+
+fn f() {
+  let read: fn(Point) -> Int64 = Point.label
+  let owned: fn(own Point) -> String = Point.label
+  let first: fn(Point) -> Int64 = Point.label
+  let _ = read
+  let _ = owned
+  let _ = first
+}

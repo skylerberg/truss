@@ -3,6 +3,7 @@ module Lookups = Lookups
 type resolution = Tables.resolution =
   | Local_value of Syntax.id
   | Global of { path : Path.t; instantiation : Types.instantiation }
+  | Trait_method_value of Tables.trait_method
   | Field_access of { type_ : Types.ty; field : string }
   | Variant_value of { type_ : Types.ty; variant : string }
   | Type_name of Types.ty

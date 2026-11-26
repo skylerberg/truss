@@ -1,0 +1,28 @@
+trait Taker[Value] {
+  fn take(self, value: Value) -> Bool
+}
+
+trait Source {
+  type Item
+  type Sink: Taker[Self.Item]
+}
+
+type Box(count: Int64)
+
+impl Taker[Int64] for Box {
+  fn take(self, value: Int64) -> Bool { todo }
+}
+
+type Numbers(count: Int64)
+
+impl Source for Numbers {
+  type Item = Int64
+  type Sink = Box
+}
+
+type Flags(count: Int64)
+
+impl Source for Flags {
+  type Item = Bool
+  type Sink = Box
+}

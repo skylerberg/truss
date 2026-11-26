@@ -1,0 +1,11 @@
+trait First {
+  type Part
+}
+
+trait Second {
+  type Part
+}
+
+trait Both: First + Second {
+  fn part(self) -> Self.Part
+}

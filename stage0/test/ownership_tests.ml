@@ -690,6 +690,14 @@ let () =
       expect_fine (shout ^ Fixtures.Ownership.shout_of_a_copied_name);
       expect_fine (shout ^ Fixtures.Ownership.shout_of_an_own_name);
       expect_fine Fixtures.Ownership.plain_string_of_a_name);
+  Harness.test "a value of an associated type that `Plain` bounds is copied, not moved" (fun () ->
+      expect_fine
+        "trait Get {\n\
+        \  type Value: Plain\n\
+         }\n\n\
+         fn twice[Source: Get](value: Source.Value) -> List[Source.Value] {\n\
+        \  [value, value]\n\
+         }\n");
   Harness.test "a `Plain` place is copied, not moved" (fun () ->
       expect_fine Fixtures.Ownership.plain_place_passed_own);
   Harness.test "a place moved by an argument cannot be read by a later argument of the same call"

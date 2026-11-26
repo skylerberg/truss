@@ -1,0 +1,10 @@
+trait Pair {
+  type First
+  type Second
+}
+
+fn want_second[Value: Pair[Second = Int64]](value: Value) {}
+
+fn have_first[Value: Pair[First = Int64]](value: Value) {
+  want_second(value)
+}

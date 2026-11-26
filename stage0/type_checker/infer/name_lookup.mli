@@ -7,7 +7,24 @@ val classify_receiver_mode : Syntax.argument list -> Language.Mode.t
 val make_method_owner : State.state -> Types.ty -> Catalog.Inference.method_owner
 val check_name : State.state -> State.env -> Syntax.expression -> Resolve.head -> Types.ty
 val check_field : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
-val check_static_member : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
+
+val check_static_member :
+  State.state -> ?expected:Types.ty -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
+
+val check_trait_value_in_full :
+  State.state ->
+  ?expected:Types.ty ->
+  Syntax.expression ->
+  Path.t ->
+  trait_arguments:Types.argument list option ->
+  Syntax.name ->
+  Types.ty
+
+val resolve_member_overloads :
+  State.state ->
+  Types.ty ->
+  string ->
+  ((Path.receiver * overload) list Resolve.Names.lookup, Types.trait_reference list) Result.t
 
 val check_explicit_type_arguments :
   ?head:int ->
@@ -28,11 +45,14 @@ val finish_call :
   string list ->
   Types.ty
 
-val lookup_trait_static_methods :
+val find_method_of_an_unmet_impl :
   State.state ->
-  Path.t ->
+  Types.ty ->
   string ->
-  (Types.trait_reference * Types.trait_method) list Resolve.Names.lookup
+  Path.receiver ->
+  (Types.trait_reference * Types.trait_method) option
+
+val has_method_without_self : State.state -> Types.ty -> string -> bool
 
 val instantiate_trait_method :
   State.state ->
@@ -40,7 +60,7 @@ val instantiate_trait_method :
   self_type:Types.ty ->
   Types.trait_reference ->
   Types.trait_method ->
-  Instantiation.instance * Tables.callee
+  Instantiation.instance * Tables.trait_method
 
 val has_sealed_method : State.state -> Types.ty -> string -> bool
 

@@ -132,6 +132,7 @@ module Code = struct
     | Wrong_mode
     | Unknown_member
     | Ambiguous_method
+    | Ambiguous_associated
     | Private_field
     | Member_not_visible
     | Not_callable
@@ -176,7 +177,7 @@ module Code = struct
     | Condition_not_constant
     | Main_signature
     | No_real_implementation
-    | Duplicate_field
+    | Duplicate_member
     | Cannot_derive
     | Derives_inferred
     | Redeclared_method
@@ -202,6 +203,7 @@ module Code = struct
     | Not_a_field_path
     | Read_only_part
     | Repeated_part
+    | Repeated_derive
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
 
@@ -425,6 +427,7 @@ module Code = struct
     | Wrong_mode -> "wrong_mode"
     | Unknown_member -> "unknown_member"
     | Ambiguous_method -> "ambiguous_method"
+    | Ambiguous_associated -> "ambiguous_associated"
     | Private_field -> "private_field"
     | Member_not_visible -> "member_not_visible"
     | Not_callable -> "not_callable"
@@ -469,7 +472,7 @@ module Code = struct
     | Condition_not_constant -> "condition_not_constant"
     | Main_signature -> "main_signature"
     | No_real_implementation -> "no_real_implementation"
-    | Duplicate_field -> "duplicate_field"
+    | Duplicate_member -> "duplicate_member"
     | Cannot_derive -> "cannot_derive"
     | Derives_inferred -> "derives_inferred"
     | Redeclared_method -> "redeclared_method"
@@ -495,6 +498,7 @@ module Code = struct
     | Not_a_field_path -> "not_a_field_path"
     | Read_only_part -> "read_only_part"
     | Repeated_part -> "repeated_part"
+    | Repeated_derive -> "repeated_derive"
 
   let name_patterns_code code =
     match code with

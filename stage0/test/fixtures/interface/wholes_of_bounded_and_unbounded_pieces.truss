@@ -1,0 +1,25 @@
+trait Base {}
+
+trait Part {
+  type Piece: Base
+}
+
+trait Whole {
+  type Piece: Base
+}
+
+type Wrapper[Inner: Part](inner: Inner)
+
+impl Whole for Wrapper[Inner: Part] {
+  type Piece = Inner.Piece
+}
+
+trait Loose {
+  type Piece
+}
+
+type Bare[Inner: Loose](inner: Inner)
+
+impl Whole for Bare[Inner: Loose] {
+  type Piece = Inner.Piece
+}

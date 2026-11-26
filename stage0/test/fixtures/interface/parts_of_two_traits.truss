@@ -1,0 +1,15 @@
+trait First {
+  type Part
+}
+
+trait Second {
+  type Part
+}
+
+trait Both: First + Second {}
+
+fn take_through_both[Value: Both](part: Value.Part) {}
+
+fn take_through_each[Value: First + Second](part: Value.Part) {}
+
+fn take_named[Part, Value: First[Part = Part] + Second](part: Part) {}

@@ -53,18 +53,18 @@ let header : Interface.Environment.header Tracker.fact =
 
 let elaborated : Interface.Environment.elaborated_interface Tracker.fact =
   Tracker.make_fact ~stage:Elaborate ~table:"interface" ~id_column:"definition" ~fixed:[]
-    ~groups:[ (Interface, [ "value" ]); (Elaboration, [ "named"; "scope" ]) ]
+    ~groups:[ (Interface, [ "value" ]); (Elaboration, [ "applications"; "scope" ]) ]
     ~encode:(fun (elaborated : Interface.Environment.elaborated_interface) ->
       [
         Tracker.marshal elaborated.interface;
-        Tracker.marshal elaborated.named;
+        Tracker.marshal elaborated.applications;
         Tracker.marshal elaborated.scope;
       ])
     ~decode:(fun cells ->
       {
         interface = Tracker.unmarshal cells.(0);
         diagnostics = [];
-        named = Tracker.unmarshal cells.(1);
+        applications = Tracker.unmarshal cells.(1);
         scope = Tracker.unmarshal cells.(2);
       })
 

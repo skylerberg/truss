@@ -190,7 +190,6 @@ type t =
   | Several_indexes of { at : Core.origin }
   | Parameter_with_arguments of { at : Core.origin; name : string }
   | Type_arity of { at : Core.origin; type_path : Path.t; expected : int; given : int }
-  | Associated_in_type_arguments of { at : Core.origin }
   | Not_a_type_argument of { at : Core.origin }
   | Hidden_member of { at : Core.origin; hidden : Path.t; visibility : Language.Visibility.t }
   | No_receiver_overload of { at : Core.origin; name : string }

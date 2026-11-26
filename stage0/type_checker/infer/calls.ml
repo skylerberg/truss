@@ -289,7 +289,12 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
     Error
       (State.make_error_type state
          (Unknown_variant
-            { at = Written value.id; type_ = State.zonk state type_; variant; candidates = [] }))
+            {
+              at = Written value.id;
+              type_ = State.normalize_known state type_;
+              variant;
+              candidates = [];
+            }))
   in
   let fields =
     match variant with
@@ -362,12 +367,15 @@ and find_record_fields state at type_ =
   | type_ -> Error (report_not_a_record state at type_)
 
 and report_not_a_record state at type_ =
-  State.make_error_type state (Not_a_record_construction { at; type_ = State.zonk state type_ })
+  State.make_error_type state
+    (Not_a_record_construction { at; type_ = State.normalize_known state type_ })
 
 and find_opaque_error state at type_path type_ =
   if Members.are_fields_visible state.lookups ~package:state.package type_path then None
   else
-    Some (State.make_error_type state (Opaque_construction { at; type_ = State.zonk state type_ }))
+    Some
+      (State.make_error_type state
+         (Opaque_construction { at; type_ = State.normalize_known state type_ }))
 
 and make_field_parameters ~keeps_unlisted (fields : Types.field list) =
   List.map

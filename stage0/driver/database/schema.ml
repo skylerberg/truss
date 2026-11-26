@@ -84,7 +84,7 @@ let tables =
       [];
     fact_of_definition "header" (state ^ ", value BLOB");
     fact_of_definition "trait_header" (state ^ ", value BLOB");
-    fact_of_definition "interface" (state ^ ", value BLOB, named BLOB, scope BLOB");
+    fact_of_definition "interface" (state ^ ", value BLOB, applications BLOB, scope BLOB");
     fact_of_definition "signature_check" state;
     keyed_by_id "type_facts"
       ("path INTEGER PRIMARY KEY, " ^ state

@@ -31,7 +31,7 @@ let rec find_offending_expression (state : State.state) ~may_call ~bound (value 
   in
   let find_in_resolved () =
     match (state.tables.resolutions.(value.id), value.kind) with
-    | Some (Global _ | Variant_value _ | Type_name _), _ -> None
+    | Some (Global _ | Trait_method_value _ | Variant_value _ | Type_name _), _ -> None
     | Some (Local_value local), _ when List.mem local bound -> None
     | Some (Field_access _), Member (base, _) -> find_first [ base ]
     | _ -> Some value

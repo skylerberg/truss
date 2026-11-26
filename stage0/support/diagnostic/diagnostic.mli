@@ -132,6 +132,7 @@ module Code : sig
     | Wrong_mode
     | Unknown_member
     | Ambiguous_method
+    | Ambiguous_associated
     | Private_field
     | Member_not_visible
     | Not_callable
@@ -176,7 +177,7 @@ module Code : sig
     | Condition_not_constant
     | Main_signature
     | No_real_implementation
-    | Duplicate_field
+    | Duplicate_member
     | Cannot_derive
     | Derives_inferred
     | Redeclared_method
@@ -202,6 +203,7 @@ module Code : sig
     | Not_a_field_path
     | Read_only_part
     | Repeated_part
+    | Repeated_derive
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
 

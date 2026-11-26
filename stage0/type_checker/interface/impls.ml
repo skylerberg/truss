@@ -292,28 +292,6 @@ type obligation =
   | Bounds_associated_type of { name : string; chosen : Types.ty; bound : Types.trait_reference }
   | Requires of Types.trait_reference
 
-let list_obligations (trait : Types.trait_interface) (impl : Types.impl_interface) ~self =
-  let substitution = Types.make_trait_substitution trait.trait_generics ~self impl.implements in
-  List.map (fun declared -> Provides declared) trait.methods
-  @ List.concat_map
-      (fun (associated : Types.associated_type) ->
-        match List.assoc_opt associated.associated_name impl.implements.associated with
-        | None -> []
-        | Some chosen ->
-            List.map
-              (fun bound ->
-                Bounds_associated_type
-                  {
-                    name = associated.associated_name;
-                    chosen;
-                    bound = Types.substitute_trait substitution bound;
-                  })
-              associated.associated_bounds)
-      trait.associated_types
-  @ List.map
-      (fun required -> Requires (Types.substitute_trait substitution required))
-      trait.requires
-
 let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_conditions = true)
     (type_ : Types.ty) (wanted : Types.trait_reference) : solution option =
   let broken_trait =
@@ -383,6 +361,28 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
                 else None)
               (list_matching_impls lookups type_ wanted))
 
+and list_obligations lookups ~list_bounds (trait : Types.trait_interface)
+    (impl : Types.impl_interface) ~self =
+  let substitution = Types.make_trait_substitution trait.trait_generics ~self impl.implements in
+  let instantiate bound =
+    Types.map_trait
+      (normalize_in_impl lookups ~list_bounds impl)
+      (Types.substitute_trait substitution bound)
+  in
+  List.map (fun declared -> Provides declared) trait.methods
+  @ List.concat_map
+      (fun (associated : Types.associated_type) ->
+        match List.assoc_opt associated.associated_name impl.implements.associated with
+        | None -> []
+        | Some chosen ->
+            List.map
+              (fun bound ->
+                Bounds_associated_type
+                  { name = associated.associated_name; chosen; bound = instantiate bound })
+              associated.associated_bounds)
+      trait.associated_types
+  @ List.map (fun required -> Requires (instantiate required)) trait.requires
+
 and derives_impl_for_view lookups ~list_bounds ~depth ~checks_conditions ~(view : Types.ty)
     (impl : Path.t) impl_substitution =
   match Definition.find_impl_interface lookups impl with
@@ -403,7 +403,8 @@ and derives_impl_for_view lookups ~list_bounds ~depth ~checks_conditions ~(view 
                   || forwards_to_viewed_method lookups trait viewed_impl declared
               | Bounds_associated_type { chosen; bound; _ } -> implements chosen bound
               | Requires required -> implements view required)
-            (list_obligations trait viewed_impl ~self:(Types.make_view viewed_impl.for_type))
+            (list_obligations lookups ~list_bounds trait viewed_impl
+               ~self:(Types.make_view viewed_impl.for_type))
       | Some _ | None -> false)
 
 and forwards_to_viewed_method lookups (trait : Types.trait_interface)
@@ -460,9 +461,7 @@ and list_matching_bounds lookups ~list_bounds (type_ : Types.ty) (wanted : Types
            match (wanted, actual) with
            | Types.Type wanted, Types.Type actual ->
                Types.is_open_type wanted || Types.is_open_type actual
-               || Types.equal
-                    (normalize lookups ~list_bounds wanted)
-                    (normalize lookups ~list_bounds actual)
+               || Types.equal (normalize lookups ~list_bounds wanted) actual
            | Types.Value wanted, Types.Value actual ->
                is_open_value wanted || is_open_value actual || wanted = actual
            | _ -> false)
@@ -470,11 +469,22 @@ and list_matching_bounds lookups ~list_bounds (type_ : Types.ty) (wanted : Types
   in
   List.filter
     (fun (bound : Types.trait_reference) ->
-      Path.equal bound.trait wanted.trait
-      && arguments_match bound.trait_arguments
+      arguments_match bound.trait_arguments
       && has_matching_associated_types lookups ~list_bounds wanted ~base:(Some type_)
            bound.associated)
-    (Properties.list_known_bounds lookups ~list_bounds type_)
+    (List.filter_map
+       (fun (bound : Types.trait_reference) ->
+         if Path.equal bound.trait wanted.trait then
+           Some
+             {
+               bound with
+               trait_arguments =
+                 List.map
+                   (Types.map_argument (normalize lookups ~list_bounds))
+                   bound.trait_arguments;
+             }
+         else None)
+       (Properties.list_known_bounds lookups ~list_bounds type_))
 
 and has_matching_associated_types lookups ~list_bounds (wanted : Types.trait_reference) ~base fixed
     =

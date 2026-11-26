@@ -1,0 +1,17 @@
+trait Get {
+  type Value
+}
+
+impl Get for Int64 {
+  type Value = Bool
+}
+
+type Holder[Source: Get](source: Source, value: Source.Value)
+
+fn build() -> Holder[Int64] {
+  Holder(source: 1, value: true)
+}
+
+fn build_generic[Source: Get](source: own Source, value: own Source.Value) -> Holder[Source] {
+  Holder(source: own source, value: own value)
+}

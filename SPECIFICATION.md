@@ -510,6 +510,13 @@ bound             = path_type { "+" path_type } ;
 - A generic function cannot call itself, or a function in a cycle with it,
   with a type argument built from its own type parameters, and a generic
   type cannot contain itself with other arguments.
+- **A type's or a trait's arguments meet the bounds of its parameters**
+  wherever it is written, the head of an `impl` or of a method included.
+  Where `type Sorted[Element: Ordered]`, the head
+  `impl Display for Sorted[Element]` is an error, and is written
+  `impl Display for Sorted[Element: Ordered]`. Where
+  `trait Getter[Value: Display]`, `impl Getter[Point] for Box` needs
+  `Point: Display`.
 
 ### Invariants
 
@@ -1628,6 +1635,14 @@ fn List[Element].zip[Other](self, other: List[Other]) -> Zipped[Element, Other]
 - A method is a function declared as `fn Type.name`. One whose first
   parameter is `self` can be called with a dot, and every method can be
   called through its type's name: `List.length(names)` is `names.length()`.
+- **A method named as a value is the function that calls it,** with `self`
+  as its first input: `Point.size` is `fn(Point) -> Int64`. A trait's
+  method is named through a type that implements the trait, as
+  `Point.size`, through a type parameter that a bound gives the trait, as
+  `Value.size`, or through the trait, as `Measure.size`, whose `Self` the
+  expected type decides. Of overloads by receiver mode, the value is the one
+  whose `self` has the mode of the expected type's first input, and
+  otherwise the first of no `self`, `self`, `mut self`, and `own self`.
 - `self` has the type named before the dot, and is written `self`,
   `mut self`, or `own self`.
 - The type's generic parameters go before the dot, with any bounds the
@@ -2859,6 +2874,8 @@ trait Ordered: Equal {
 
 - A `law` holds for every implementation and every set of values that meets
   its `requires`.
+- A trait declares each associated type, capability set, and law once, and
+  an `impl` defines each associated type and capability set once.
 - A trait's contracts bind every `impl` and are proven for each.
 - **An `impl`'s method has its trait's signature.** It restates that
   signature: the generic parameters with their bounds; the parameters with
@@ -2948,10 +2965,24 @@ trait IntoCursor {
 
 - A trait's associated type is chosen by each `impl`, with
   `type Key = ...`, which appears only in an `impl`.
+- **An `impl`'s associated type may name one that the `impl` defines
+  before it,** as in `type Items = List[Self.Item]`, and an associated type
+  of a trait that the trait requires. It cannot name itself or one that the
+  `impl` defines after it. An associated capability set follows the same
+  rule.
 - **A bound on an associated type holds for every `impl`.** The type that an
   `impl` chooses for `type Cursor: Cursor` implements `Cursor`, so code
   bounded by `Source: IntoCursor` calls `Cursor`'s methods on
   `Source.Cursor`.
+- **An associated type's name picks one trait.** `Value.Part` and
+  `Self.Part` name the `Part` of the one trait among the bounds, and the
+  traits they require, that declares `Part`. Two traits that declare it,
+  or two instances of one trait such as `Add[Int64]` and `Add[UInt64]`,
+  make the name ambiguous, unless every one of them fixes it to one type,
+  as `FixedWidthInteger` fixes the `Output` of each operator trait it
+  requires to `Self`. A type parameter fixed by one bound names one of
+  them: `[Part, Value: First[Part = Part] + Second]`. The same holds for
+  an associated capability set.
 
 ### Associated capability sets
 
@@ -3020,6 +3051,7 @@ type Priority =
 
 - Every field has the trait, and a derived trait's required traits are
   derived too: `Ordered` and `Hash` need a derived `Equal`.
+- A type derives each trait once.
 - A generic type has a derived trait only where its parameters do.
 - A derived implementation satisfies the trait's laws; a hand-written one
   proves them.

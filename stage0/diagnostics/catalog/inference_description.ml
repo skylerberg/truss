@@ -619,11 +619,6 @@ let describe : Inference.t -> Nodes.description = function
               (Types.show (Named { path = type_path; arguments = [] }))
               (show_count expected "argument" "arguments")
               (show_count given "is" "are")))
-  | Associated_in_type_arguments { at = origin } ->
-      make Arity (Build.at origin)
-        (say
-           "An associated type is fixed in a bound, as in `Source: Cursor[Element = Int64]`, not \
-            among type arguments in an expression.")
   | Not_a_type_argument { at = origin } ->
       make Not_a_type (Build.at origin) (say "A type argument is a type, or a `UInt64` value.")
   | Hidden_member { at = origin; hidden; visibility } ->

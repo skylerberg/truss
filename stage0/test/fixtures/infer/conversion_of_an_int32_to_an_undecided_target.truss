@@ -1,0 +1,17 @@
+trait Convert[Target] {
+  fn convert(self) -> Target
+}
+
+impl Convert[Int8] for Int32 {
+  fn convert(self) -> Int8 { todo }
+}
+
+impl Convert[Int16] for Int32 {
+  fn convert(self) -> Int16 { todo }
+}
+
+fn take[Source: Convert[Target], Target: Default](source: Source, target: Target) {}
+
+fn f(value: Int32) {
+  take(value, Default.default())
+}

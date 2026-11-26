@@ -243,15 +243,17 @@ let record_condition state id (written : Syntax.condition option) =
   state.tables.conditions.(id) <- condition;
   condition
 
+let has_projection_of_unknown state type_ =
+  Types.exists
+    (function
+      | Types.Projection _ as projection -> Unify.list_unknowns state.unifier projection <> []
+      | _ -> false)
+    type_
+
 let normalize state type_ =
   let zonked = zonk state type_ in
-  if
-    Types.exists
-      (function
-        | Types.Projection _ as projection -> Unify.list_unknowns state.unifier projection <> []
-        | _ -> false)
-      zonked
-  then raise_bug "`%s` holds a projection of an unknown" (Types.show zonked);
+  if has_projection_of_unknown state zonked then
+    raise_bug "`%s` holds a projection of an unknown" (Types.show zonked);
   Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state) zonked
 
 let check_compiled_binding state (id : Syntax.id) =
@@ -379,9 +381,9 @@ let unify_as_hint state actual expected =
 let normalize_trait state trait =
   Types.map_trait (normalize state) (Unify.zonk_trait state.unifier trait)
 
-let find_evidence state type_ trait =
+let find_evidence ?checks_conditions state type_ trait =
   Interface.Impls.find_evidence state.lookups.interface ~list_bounds:(lookup_bounds state)
-    (normalize state type_) (normalize_trait state trait)
+    ?checks_conditions (normalize state type_) (normalize_trait state trait)
 
 let elaborate state id elaboration = state.tables.elaborations.(id) <- Some elaboration
 
@@ -417,10 +419,14 @@ let declare_compiled state env (name : Syntax.name) type_ ~binding ~mode =
 let find_target state (name : Syntax.name) = state.resolved.names.(name.id)
 let find_head state (value : Syntax.expression) = Resolve.find_head state.resolved value
 
+let normalize_known state type_ =
+  let zonked = zonk state type_ in
+  if has_projection_of_unknown state zonked then zonked else normalize state zonked
+
 let make_shown state type_ : Catalog.Inference.shown =
   match find_domain state type_ with
   | Some domain -> if is_float_domain domain then Some_float else Some_integer
-  | None -> Exactly (zonk state type_)
+  | None -> Exactly (normalize_known state type_)
 
 let note_mode_keyword state (written : Syntax.expression) (mode : Syntax.mode)
     (operand : Syntax.expression) =

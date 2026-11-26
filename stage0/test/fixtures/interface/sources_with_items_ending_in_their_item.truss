@@ -1,0 +1,28 @@
+trait Ends {
+  type Element
+}
+
+trait Source {
+  type Item
+  type Items: Ends[Element = Self.Item]
+}
+
+type Flags(count: Int64)
+
+impl Ends for Flags {
+  type Element = Bool
+}
+
+type Switches(count: Int64)
+
+impl Source for Switches {
+  type Item = Bool
+  type Items = Flags
+}
+
+type Numbers(count: Int64)
+
+impl Source for Numbers {
+  type Item = Int64
+  type Items = Flags
+}

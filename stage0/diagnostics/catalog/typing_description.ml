@@ -113,11 +113,35 @@ let describe : Typing.t -> Nodes.description = function
         (say
            (Printf.sprintf "No bound of `%s` declares an %s `%s`." parameter
               (show_associated associated) name))
-  | Self_defined_capability_set { at = origin; name } ->
-      make Unknown_associated_capability (Build.at origin)
+  | Ambiguous_associated { at = origin; base; name; associated; traits } ->
+      let listed =
+        String.concat ", " (List.map (fun trait -> "`" ^ Types.show_trait trait ^ "`") traits)
+      in
+      let advice =
+        match (associated, base, traits) with
+        | Associated_type, Parameter parameter, first :: _
+          when not (Types.is_self_parameter parameter) ->
+            Printf.sprintf
+              " Name it through a type parameter that one of them fixes, as in `%s: %s[%s]`."
+              parameter.name (Path.show_name first.trait)
+              (String.concat ", "
+                 (List.map Types.show_argument first.trait_arguments @ [ name ^ " = " ^ name ]))
+        | _ -> ""
+      in
+      make Ambiguous_associated (Build.at origin)
+        (say
+           (Printf.sprintf "More than one trait gives `%s` an %s `%s`: %s.%s" (Types.show base)
+              (show_associated associated) name listed advice))
+  | Self_defined_associated { at = origin; name; associated } ->
+      make
+        (match associated with
+        | Associated_type -> Unknown_associated_type
+        | Associated_capability_set -> Unknown_associated_capability)
+        (Build.at origin)
         (say
            (Printf.sprintf
-              "`%s` is defined from itself, or from a set that this `impl` defines after it." name))
+              "`%s` is defined from itself, or from an %s that this `impl` defines after it." name
+              (show_associated associated)))
   | Arity { at = origin; written; expected; given } ->
       make Arity (Build.at origin)
         (tick written
@@ -141,6 +165,11 @@ let describe : Typing.t -> Nodes.description = function
                 Printf.sprintf "'s parameter `%s` is a `UInt64` value, not a type." parameter
             | Type_for_value -> Printf.sprintf "'s parameter `%s` is a type, not a value." parameter)
         )
+  | Constraint_in_type_arguments { at = origin } ->
+      make Arity (Build.at origin)
+        (say
+           "An associated type is fixed in a bound, as in `Source: Cursor[Element = Int64]`, not \
+            among type arguments.")
   | Arguments_to_parameter { at = origin; written } ->
       make Arity (Build.at origin)
         (tick written @ say " is a generic parameter, which takes no arguments.")
@@ -283,13 +312,16 @@ let describe : Typing.t -> Nodes.description = function
         (say
            (Printf.sprintf "`%s` declares no %s `%s`." (Path.show_name trait)
               (show_associated associated) name))
-  | Capability_set_defined_twice { at = origin; name } ->
-      make Extra_member (Build.at origin)
+  | Defined_twice { at = origin; name; associated } ->
+      make Duplicate_member (Build.at origin)
         (say
-           (Printf.sprintf
-              "This `impl` already defines `%s`. List every capability in one definition, \
-               separated by commas."
-              name))
+           (match associated with
+           | Associated_type -> Printf.sprintf "This `impl` already defines `%s`." name
+           | Associated_capability_set ->
+               Printf.sprintf
+                 "This `impl` already defines `%s`. List every capability in one definition, \
+                  separated by commas."
+                 name))
   | Missing_required_impl { at = origin; trait; required; for_type } ->
       make Missing_required_impl (Build.at origin)
         (say
@@ -374,10 +406,12 @@ let describe : Typing.t -> Nodes.description = function
                without one, so it could panic where that condition holds. Declare `uses Panic \
                unless` a condition that `%s`'s implies."
               (Path.show_name trait) name name (Path.show_name trait)))
-  | Bound_unmet { at = origin; type_; argument; bound } ->
+  | Bound_unmet { at = origin; definition; arguments; argument; bound } ->
       make Unsatisfied_bound (Build.at origin)
         (say
-           (Printf.sprintf "`%s` needs `%s: %s`, which does not hold here." (Types.show type_)
+           (Printf.sprintf "`%s[%s]` needs `%s: %s`, which does not hold here."
+              (Path.show_name definition)
+              (String.concat ", " (List.map Types.show_argument arguments))
               (Types.show argument) (Types.show_trait bound)))
   | Private_in_public { at = origin; path } ->
       make Private_in_public (Build.at origin)
@@ -419,11 +453,16 @@ let describe : Typing.t -> Nodes.description = function
         (say
            "`main` must have exactly the signature `fn main(arguments: List[String]) -> ExitCode`.")
   | Duplicate_member { at = origin; member_kind; name } ->
-      make Duplicate_field (Build.at origin)
-        (say
-           (Printf.sprintf "Another %s of this type is already named `%s`."
-              (match member_kind with Field_member -> "field" | Variant_member -> "variant")
-              name))
+      let member, container =
+        match member_kind with
+        | Field_member -> ("field", "type")
+        | Variant_member -> ("variant", "type")
+        | Associated_type_member -> ("associated type", "trait")
+        | Capability_set_member -> ("associated capability set", "trait")
+        | Law_member -> ("law", "trait")
+      in
+      make Duplicate_member (Build.at origin)
+        (say (Printf.sprintf "Another %s of this %s is already named `%s`." member container name))
   | Not_derivable { at = origin; written } ->
       make Not_derivable (Build.at origin)
         (say
@@ -440,6 +479,10 @@ let describe : Typing.t -> Nodes.description = function
         @ say
             " holds for this type is derived from its fields, which are visible. Only an opaque \
              type declares it.")
+  | Repeated_derive { at = origin; written; entry; siblings } ->
+      make Repeated_derive (Build.at origin)
+        ~fixes:[ { title = say "Remove it."; edits = [ Build.remove_entry entry siblings ] } ]
+        (say "The type already derives " @ tick written @ say ".")
   | Field_not_derivable { at = origin; written } ->
       make Cannot_derive (Build.at origin)
         (say "A field of this type is not " @ tick written @ say ", so the type cannot be.")

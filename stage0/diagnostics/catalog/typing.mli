@@ -5,7 +5,7 @@ type recursion =
   | Capability_set of Types.capability
 
 type count_error = Not_uint64 | Uncomputable
-type associated = Associated_type | Associated_capability_set
+type associated = Types.associated_kind = Associated_type | Associated_capability_set
 type kind_mismatch = Value_for_type | Type_for_value
 
 type value_condition =
@@ -14,7 +14,13 @@ type value_condition =
   | Not_panic of Types.capability list
 
 type recipient = Main | Test
-type member_kind = Field_member | Variant_member
+
+type member_kind =
+  | Field_member
+  | Variant_member
+  | Associated_type_member
+  | Capability_set_member
+  | Law_member
 
 type t =
   | Recursion_limit of { limit : int; recursion : recursion }
@@ -26,13 +32,20 @@ type t =
       name : string;
       associated : associated;
     }
+  | Ambiguous_associated of {
+      at : Core.origin;
+      base : Types.ty;
+      name : string;
+      associated : associated;
+      traits : Types.trait_reference list;
+    }
   | Unbounded_associated of {
       at : Core.origin;
       parameter : string;
       name : string;
       associated : associated;
     }
-  | Self_defined_capability_set of { at : Core.origin; name : string }
+  | Self_defined_associated of { at : Core.origin; name : string; associated : associated }
   | Arity of {
       at : Core.origin;
       written : Core.origin Description.range;
@@ -52,6 +65,7 @@ type t =
       mismatch : kind_mismatch;
     }
   | Arguments_to_parameter of { at : Core.origin; written : Core.origin Description.range }
+  | Constraint_in_type_arguments of { at : Core.origin }
   | Count_error of { at : Core.origin; error : count_error }
   | Trait_as_type of { at : Core.origin; written : Core.origin Description.range }
   | Capability_as_type of { at : Core.origin; written : Core.origin Description.range }
@@ -110,7 +124,7 @@ type t =
       chosen : Types.ty;
     }
   | Extra_associated of { at : Core.origin; trait : Path.t; name : string; associated : associated }
-  | Capability_set_defined_twice of { at : Core.origin; name : string }
+  | Defined_twice of { at : Core.origin; name : string; associated : associated }
   | Missing_required_impl of {
       at : Core.origin;
       trait : Path.t;
@@ -147,7 +161,8 @@ type t =
   | Panic_beyond_condition of { at : Core.origin; name : string; trait : Path.t }
   | Bound_unmet of {
       at : Core.origin;
-      type_ : Types.ty;
+      definition : Path.t;
+      arguments : Types.argument list;
       argument : Types.ty;
       bound : Types.trait_reference;
     }
@@ -164,6 +179,12 @@ type t =
   | Duplicate_member of { at : Core.origin; member_kind : member_kind; name : string }
   | Not_derivable of { at : Core.origin; written : Core.origin Description.range }
   | Derives_inferred of {
+      at : Core.origin;
+      written : Core.origin Description.range;
+      entry : Core.origin Description.range;
+      siblings : Core.origin Description.siblings;
+    }
+  | Repeated_derive of {
       at : Core.origin;
       written : Core.origin Description.range;
       entry : Core.origin Description.range;

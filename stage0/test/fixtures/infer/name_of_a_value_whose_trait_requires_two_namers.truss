@@ -1,0 +1,13 @@
+trait First {
+  fn name(self) -> Int64
+}
+
+trait Second {
+  fn name(self) -> Int64
+}
+
+trait Both: First + Second {}
+
+fn f[Value: Both](value: Value) -> Int64 {
+  value.name()
+}

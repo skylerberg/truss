@@ -180,42 +180,37 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
                              for_type = impl.for_type;
                            })
                   | Some evidence -> check_evidence_grants evidence))
-            (Impls.list_obligations trait impl ~self:impl.for_type);
+            (Impls.list_obligations lookups ~list_bounds:(Checking.list_bounds state) trait impl
+               ~self:impl.for_type);
+          let check_definition defined (name : Syntax.name) associated ~is_declared =
+            if not is_declared then
+              Checking.report state
+                (Extra_associated
+                   {
+                     at = Written name.id;
+                     trait = impl.implements.trait;
+                     name = name.text;
+                     associated;
+                   })
+            else if List.mem (associated, name.text) defined then
+              Checking.report state
+                (Defined_twice { at = Written name.id; name = name.text; associated });
+            (associated, name.text) :: defined
+          in
           ignore
             (List.fold_left
                (fun defined (line : Syntax.impl_member Syntax.node) ->
                  match line.kind with
                  | Associated_definition (name, _) ->
-                     if
-                       not
+                     check_definition defined name Associated_type
+                       ~is_declared:
                          (List.exists
                             (fun (associated : Types.associated_type) ->
                               associated.associated_name = name.text)
                             trait.associated_types)
-                     then
-                       Checking.report state
-                         (Extra_associated
-                            {
-                              at = Written name.id;
-                              trait = impl.implements.trait;
-                              name = name.text;
-                              associated = Associated_type;
-                            });
-                     defined
                  | Capability_definition (name, _) ->
-                     if not (List.mem name.text trait.associated_capabilities) then
-                       Checking.report state
-                         (Extra_associated
-                            {
-                              at = Written name.id;
-                              trait = impl.implements.trait;
-                              name = name.text;
-                              associated = Associated_capability_set;
-                            })
-                     else if List.mem name.text defined then
-                       Checking.report state
-                         (Capability_set_defined_twice { at = Written name.id; name = name.text });
-                     name.text :: defined
+                     check_definition defined name Associated_capability_set
+                       ~is_declared:(List.mem name.text trait.associated_capabilities)
                  | Impl_member_error -> defined)
                [] written_members);
           if (not trait.is_capability) && impl.impl_uses <> Types.no_capabilities then

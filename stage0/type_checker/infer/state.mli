@@ -144,6 +144,7 @@ val list_class_log : state -> int -> logged list
 val find_class_origin : state -> int -> (int * origin) option
 val lookup_bounds : state -> Interface.Properties.Bounds.t
 val normalize : state -> Types.ty -> Types.ty
+val normalize_known : state -> Types.ty -> Types.ty
 val find_domain : state -> Types.ty -> Language.Builtin_type.t list option
 val is_float_domain : Language.Builtin_type.t list -> bool
 val is_within : state -> Types.ty -> Language.Builtin_type.t list -> bool
@@ -173,7 +174,14 @@ val finalize_argument : state -> Types.argument -> Types.argument
 val unify : ?modulo_views:bool -> state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
 val normalize_trait : state -> Types.trait_reference -> Types.trait_reference
-val find_evidence : state -> Types.ty -> Types.trait_reference -> Interface.Impls.solution option
+
+val find_evidence :
+  ?checks_conditions:bool ->
+  state ->
+  Types.ty ->
+  Types.trait_reference ->
+  Interface.Impls.solution option
+
 val elaborate : state -> Syntax.id -> Tables.elaboration -> unit
 
 val decide_property :
