@@ -46,6 +46,9 @@ val list_no_bounds : bounds
 val list_required_bounds :
   Types.generic list -> Types.substitution -> (Types.ty * Types.trait_reference) list
 
+val list_associated_type_bounds :
+  Lookups.t -> Types.impl_interface -> Types.substitution -> (Types.ty * Types.trait_reference) list
+
 type method_code =
   | Method_of_impl of { impl : Path.t; substitution : Types.substitution }
   | Declaration_for_view

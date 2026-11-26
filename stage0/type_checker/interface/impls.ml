@@ -169,6 +169,27 @@ let list_required_bounds (generics : Types.generic list) (substitution : Types.s
       | _ -> [])
     generics
 
+let list_associated_type_bounds lookups (impl : Types.impl_interface)
+    (substitution : Types.substitution) =
+  match Definition.find_trait_interface lookups impl.implements.trait with
+  | None -> []
+  | Some trait ->
+      let implements = Types.substitute_trait substitution impl.implements in
+      let of_trait =
+        Types.make_trait_substitution trait.trait_generics
+          ~self:(Types.substitute substitution impl.for_type)
+          implements
+      in
+      List.concat_map
+        (fun (associated : Types.associated_type) ->
+          match List.assoc_opt associated.associated_name implements.associated with
+          | Some chosen ->
+              List.map
+                (fun bound -> (chosen, Types.substitute_trait of_trait bound))
+                associated.associated_bounds
+          | None -> [])
+        trait.associated_types
+
 let list_impl_bounds lookups (impl : Types.impl_interface) ~(list_bounds : bounds) : bounds =
   Properties.Bounds.override list_bounds
     ~for_:

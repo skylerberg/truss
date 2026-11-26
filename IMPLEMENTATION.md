@@ -327,7 +327,11 @@ develop as well as make it easier to bootstrap the compiler in parts.
   proof that assumes a fact whose own proof assumes it back.** Every fact
   that a proof takes from another definition is an edge of the proof graph,
   which `Mir.Call_edges` lists: a callee's contract, a type's invariant, and
-  the laws of an `impl`. `Laws` assumes no law of an `impl` in the proof
+  the laws of an `impl`. An `impl` that satisfies a bound brings the impls
+  behind every bound that it assumes in turn, which
+  `Call_edges.list_bounds_that_an_impl_assumes` lists: the bounds of its
+  generics, and the bounds that its trait declares on the associated types
+  that it chooses. `Laws` assumes no law of an `impl` in the proof
   group of the definition being proven. A law that a callee's proof assumes
   cannot be left out that way, so `Cycles.list_circular_proofs` reports it,
   and every definition runs that one check, whatever its kind.

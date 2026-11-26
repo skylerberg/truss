@@ -335,6 +335,11 @@ let () =
     (fun () ->
       expect_codes Fixtures.Prover.law_proven_through_a_derived_impl_that_assumes_it
         [ "prover.circular_proof" ]);
+  Harness.test
+    "a law and a recursion that reach an impl through an associated type's bound are found"
+    (fun () ->
+      expect_codes Fixtures.Prover.edges_through_an_associated_type_bound
+        [ "prover.circular_proof"; "prover.termination" ]);
   Harness.test "a law is not proven through a generic impl that assumes its bound's laws" (fun () ->
       expect_codes Fixtures.Prover.law_proven_through_a_generic_impl_that_assumes_it
         [ "prover.circular_proof" ]);
