@@ -419,15 +419,6 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
           position
   in
   let read_operand position = (read_passed position).term in
-  let read_array_count (array_type : Types.ty) =
-    match array_type with
-    | Types.Named { arguments = [ _; Types.Value count ]; _ } ->
-        Models.make_value_term context frame count
-    | _ ->
-        Facts.raise_bug "`%s` on `%s`, which has no count"
-          (Intrinsic.show_operation (Buffer operation))
-          (Types.show array_type)
-  in
   let length sequence = Models.make_sequence_length context element sequence in
   let capacity term = make_buffer_capacity context element term in
   let storage = model_storage context frame element in
@@ -450,21 +441,11 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
   | Array_model ->
       let array = read_passed 0 in
       Models.make_array_model context frame array.type_ array.term
-  | Storage_with_capacity ->
-      Facts.assume context frame
-        Logic.(equal (length (storage known)) (int 0) &&& equal (capacity known) (read_operand 0));
-      known
   | Storage_length -> length (storage (read_operand 0))
   | Storage_capacity ->
       let buffer = read_operand 0 in
       ignore (storage buffer);
       capacity buffer
-  | Storage_set_capacity ->
-      let buffer = read_operand 0 and room = read_operand 1 in
-      require (Logic.greater_equal room (length (storage buffer)));
-      Facts.assume context frame (Logic.equal (read_changed_storage ()) (storage buffer));
-      Facts.assume context frame (Logic.equal (capacity (List.hd changed)) room);
-      known
   | Storage_lengthen ->
       if
         Option.is_none (Types.find_integer_bits element)
@@ -518,27 +499,11 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
               &&& (greater length (int 0) ==> greater_equal known (int 1)));
           known
       | None -> known)
-  | Storage_empty | Storage_shorten | Storage_push | Storage_pop | Storage_insert | Storage_remove
-  | Storage_swap | Find_byte ->
+  | Storage_empty | Storage_with_capacity | Storage_set_capacity | Storage_shorten | Storage_push
+  | Storage_pop | Storage_insert | Storage_remove | Storage_swap | Storage_from_array
+  | Array_from_storage | Find_byte ->
       Facts.raise_bug "`%s`, whose semantics is its contract, read as a term"
         (Intrinsic.show_operation (Buffer operation))
-  | Storage_from_array ->
-      let array = read_passed 0 in
-      let elements = make_buffer_model context Storage element known in
-      let count = read_array_count array.type_ in
-      Facts.assume context frame
-        Logic.(
-          equal elements (Models.make_array_model context frame array.type_ array.term)
-          &&& equal (length elements) count
-          &&& equal (capacity known) count);
-      known
-  | Array_from_storage ->
-      let elements = make_buffer_model context Storage element (read_operand 0) in
-      require ~requirement:Count_of_array
-        (Logic.equal (length elements) (read_array_count result_type));
-      Facts.assume context frame
-        (Logic.equal (Models.make_array_model context frame result_type known) elements);
-      known
 
 let translate_lend context frame ~(site : Invocation.site) (lend : Intrinsic.lend) types
     (values : State.passed list) =

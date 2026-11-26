@@ -535,12 +535,15 @@ let list_run_statements (lookups : lookups) path =
   !statements
 
 let has_abort_site (lookups : lookups) path =
-  List.exists
-    (fun statement ->
-      match Walk.find_callee statement with
-      | Some { target = Intrinsic { operation; _ }; _ } -> Intrinsic.may_abort operation
-      | Some _ | None -> false)
-    (list_run_statements lookups path)
+  match Intrinsic.find_contract_operation path with
+  | Some operation -> Intrinsic.may_abort operation
+  | None ->
+      List.exists
+        (fun statement ->
+          match Walk.find_callee statement with
+          | Some { target = Intrinsic { operation; _ }; _ } -> Intrinsic.may_abort operation
+          | Some _ | None -> false)
+        (list_run_statements lookups path)
 
 let list_callees_that_run (lookups : lookups) path =
   let instance = find_instance lookups path in
