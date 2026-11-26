@@ -1200,6 +1200,57 @@ let () =
     "a part lent `mut` to a `match` is written back before an arm that binds no name assigns the \
      lender" (fun () ->
       expect_proven Fixtures.Prover.cell_assigned_by_an_arm_after_lending_its_part_mut);
+  let raised_before_lending = Fixtures.Prover.counter_raised_before_its_count_is_lent in
+  Harness.test "a caller assumes a clause on the lent part in the state where the method lends"
+    (fun () -> expect_not_proven raised_before_lending "prover.ensures" ~at:("seen", 2));
+  Harness.test "a clause on the lent part that names the entry state tells a caller the part"
+    (fun () ->
+      expect_proven
+        (List.fold_left Support.apply_edit raised_before_lending
+           [
+             ("ensures result == self.count", "ensures result == old(self.count) + 1");
+             ("ensures result == 3", "ensures result == 4");
+           ]));
+  Harness.test "a clause that names `final(result)` holds when the lend ends and may name `result`"
+    (fun () -> expect_proven Fixtures.Prover.counter_slot_naming_the_lent_and_the_final_part);
+  let slotted = Fixtures.Prover.counter_implementing_a_lending_trait_method in
+  Harness.test
+    "an impl of a lending trait method proves the trait's `ensures`, and a caller through a bound \
+     assumes them" (fun () ->
+      expect_proven
+        (slotted
+       ^ "\n\
+          fn raise[Holder: Slotted](holder: mut Holder)\n\
+         \  ensures holder.count() == 4\n\
+          {\n\
+         \  mut holder.slot() = 4\n\
+          }\n"));
+  Harness.test "a trait's clause on the lent part is checked where the impl lends" (fun () ->
+      let kept = "ensures result == old(self.count())" in
+      expect_not_proven
+        (Support.apply_edit slotted (kept, kept ^ " + 1"))
+        "prover.ensures" ~at:("self.count\n  }\n}", 1)
+        ~says:"The trait's `result == old(self.count()) + 1` may not hold for the part lent here.");
+  Harness.test "a trait's clause on `final(result)` is checked when the impl's lend ends" (fun () ->
+      let kept = "ensures self.count() == final(result)" in
+      expect_not_proven
+        (Support.apply_edit slotted (kept, kept ^ " + 1"))
+        "prover.ensures"
+        ~says:
+          "The trait's `self.count() == final(result) + 1` may not hold when the method ends here.");
+  Harness.test "a method that lends `mut` a part with an invariant assumes the caller left it valid"
+    (fun () -> expect_proven Fixtures.Prover.holder_lending_a_part_with_an_invariant);
+  Harness.test
+    "a proof reads a receiver whose part is lent `mut` as the method left it where it lent"
+    (fun () -> expect_proven Fixtures.Prover.deque_read_while_its_element_is_lent);
+  Harness.test
+    "a restated clause of a lending method is proven where it lends and when its lend ends"
+    (fun () ->
+      let restated = Fixtures.Prover.restated_lending_clause_that_the_contract_does_not_give in
+      let given = "    ensures result == old(self.count)\n" in
+      expect_not_proven restated "prover.ensures" ~says:"`self.count() == final(result)`";
+      expect_proven
+        (Support.apply_edit restated (given, given ^ "    ensures self.count == final(result)\n")));
   Harness.test "a lending method that lends a part it does not promise" (fun () ->
       expect_not_proven Fixtures.Prover.couple_larger_lending_first "prover.ensures"
         ~fixed:

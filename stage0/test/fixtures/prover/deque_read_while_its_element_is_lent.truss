@@ -1,0 +1,11 @@
+use standard.collections
+
+fn clear(items: mut collections.Deque[Int64]) {
+  let length = items.length()
+  for item in mut items {
+    item = 0
+    proof {
+      assert items.length() == length
+    }
+  }
+}

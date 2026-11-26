@@ -266,8 +266,11 @@ let mentions_specification (formula : Mir.formula) is_one =
 let mentions_result (clause : Mir.formula) =
   mentions_specification clause (function Result -> true | _ -> false)
 
-let mentions_history (clause : Mir.formula) =
-  mentions_specification clause (function Yielded -> true | _ -> false)
+let mentions_visited (clause : Mir.formula) =
+  mentions_specification clause (function Visited -> true | _ -> false)
+
+let mentions_final_result (clause : Mir.formula) =
+  mentions_specification clause (function Final_result -> true | _ -> false)
 
 let find_promiser (lookups : Lookups.t) (source : State.source) : Catalog.Prover.promiser =
   match source.key with
@@ -300,6 +303,8 @@ let make_entry_frame frame (clauses : State.clauses) ~arguments ~substitution =
     old_self = Option.map fst self;
     self_type = Option.map (fun (_, ty) -> Types.substitute_erased substitution ty) self;
     result = None;
+    visited = None;
+    final_result = None;
     makes_obligations = false;
     substitution;
   }

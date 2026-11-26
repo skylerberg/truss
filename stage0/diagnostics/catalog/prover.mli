@@ -3,15 +3,7 @@ type location = Node of Core.origin | Whole_definition
 type call = { at : location; callee : Path.t option }
 type counting = Upper_bound | Exact
 type moment = On_entry | After_iteration | Where_left
-
-type value =
-  | Named of string
-  | Quoted of quoted
-  | Temporary
-  | Self_value
-  | Compiler_local
-  | Lent_part
-
+type value = Named of string | Quoted of quoted | Temporary | Self_value | Compiler_local
 type changed_part = { root : value; fields : string list }
 
 type invariant_moment =
@@ -77,6 +69,7 @@ type unbounded =
   | Unbounded_iteration
 
 type promiser = Trait_promiser | Capability_promiser
+type postcondition_moment = At_return | Where_lent | At_lend_end
 
 type promise =
   | Own_promise of { counting : counting; clause : quoted }
@@ -139,13 +132,10 @@ type obligation =
   | Float_conversion of { at : quoted; target : Types.ty }
   | Not_a_scalar_value of { at : quoted }
   | Unreachable_reached
-  | Lent_part_ensures of { clause : quoted }
   | Cost_promise of promise
   | Impl_precondition of { clause : quoted }
   | Impl_panic_condition of { clause : quoted }
-  | Ensures_at_method_end of { clause : quoted }
-  | Ensures_at_return of { clause : quoted }
-  | Promiser_ensures of { promiser : promiser; clause : quoted }
+  | Postcondition of { clause : quoted; promiser : promiser option; moment : postcondition_moment }
   | Law_may_fail of { trait : Types.trait_reference; law : string; for_type : Types.ty }
   | Restated_contract of {
       for_type : Types.ty;

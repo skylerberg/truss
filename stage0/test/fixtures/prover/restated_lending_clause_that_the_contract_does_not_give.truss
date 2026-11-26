@@ -1,0 +1,29 @@
+trait Slotted {
+  fn slot(mut self) lends mut Int64
+}
+
+trait Counted: Slotted {
+  fn count(self) -> Int64
+
+  fn slot(mut self) lends mut Int64
+    ensures result == old(self.count())
+    ensures self.count() == final(result)
+}
+
+type Counter(count: Int64)
+
+impl Slotted for Counter {
+  fn slot(mut self) lends mut Int64
+    ensures result == old(self.count)
+  {
+    mut self.count
+  }
+}
+
+impl Counted for Counter {
+  fn count(self) -> Int64
+    ensures result == self.count
+  {
+    self.count
+  }
+}

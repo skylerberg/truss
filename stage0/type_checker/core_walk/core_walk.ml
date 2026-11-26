@@ -65,8 +65,8 @@ let walk_loop_clause visit (written : Core.loop_clause Core.conditional) =
 let walk_expression_children visit (node : Core.expression) =
   match node.kind with
   | Integer _ | Float _ | Boolean _ | Literal _ | Function_value _ | Value_parameter _
-  | Parameter_default _ | Break | Continue | Todo | Unreachable | Result | Current_target | Yielded
-  | Method_cost _ ->
+  | Parameter_default _ | Break | Continue | Todo | Unreachable | Result | Current_target | Visited
+  | Final_result | Method_cost _ ->
       ()
   | Use core_place -> walk_place visit core_place
   | Copy value -> walk_operand visit value

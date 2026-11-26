@@ -110,7 +110,8 @@ and choice =
 and specification =
   | Result
   | Entry of local
-  | Yielded
+  | Visited
+  | Final_result
   | Identical of operand * operand
   | Applied of {
       function_ : Core.specification_function;

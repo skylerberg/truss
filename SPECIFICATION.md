@@ -1776,11 +1776,16 @@ impl IterableMut for List[Element] {
 }
 ```
 
-- **A clause that mentions `result` holds where the method lends,** where
-  `result` is the lent part, and the caller may rely on it.
+- **A clause that mentions `result` and not `final(result)` holds where the
+  method lends,** where `result` is the lent part, and the caller may rely
+  on it. A parameter in it has its value where the method lends, so a
+  caller knows a `mut` parameter there only by `old`.
 - **Every other clause holds when the lend ends.**
 - **`final(result)` is the part as the caller left it,** as `old(value)` is
-  a value when the method was called.
+  a value when the method was called. In a clause that mentions it,
+  `result` is still the part as the method lent it.
+- **The caller leaves a part lent `mut` meeting its invariant,** and the
+  method relies on that when the lend ends.
 
 ### Cursors
 

@@ -420,7 +420,8 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
         in
         hold (Specification (Map entries))
     | Result -> hold (Specification Result)
-    | Yielded -> hold (Specification Yielded)
+    | Visited -> hold (Specification Visited)
+    | Final_result -> hold (Specification Final_result)
     | Old inner -> Emitter.run_in_old builder (fun () -> lower_expression builder inner)
     | Identical (first, second) ->
         let* first, second = evaluate_pair builder first second in

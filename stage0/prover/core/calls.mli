@@ -8,6 +8,12 @@ val add_restated_clauses :
   State.contract ->
   State.contract
 
+type applied = {
+  frame : State.frame;
+  result : Logic.term;
+  end_lend : (State.frame -> Logic.term -> State.frame) option;
+}
+
 val call_contract :
   State.context ->
   State.frame ->
@@ -17,13 +23,11 @@ val call_contract :
   State.contract ->
   State.passed list ->
   recursive_callee:Path.t option ->
-  lent_final:(Logic.term -> Logic.term) option ->
   substitution_of:(State.clauses -> Types.substitution) ->
   type_arguments:Types.argument list ->
-  State.frame * Logic.term
+  applied
 
 val apply_call :
-  ?leave_lent:(Logic.term -> Logic.term) ->
   State.context ->
   State.frame ->
   Invocation.site ->
@@ -31,3 +35,12 @@ val apply_call :
   through:(Types.ty * Logic.term * Invocation.shape) option ->
   State.passed list ->
   (State.frame * Logic.term) option
+
+val apply_lend :
+  State.context ->
+  State.frame ->
+  Invocation.site ->
+  Invocation.t ->
+  through:(Types.ty * Logic.term * Invocation.shape) option ->
+  State.passed list ->
+  applied option

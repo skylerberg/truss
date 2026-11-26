@@ -522,35 +522,21 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
   let invocation = make_invocation call.callee ~lends:(Some mode) in
   let site : Invocation.site = { origin = call.origin; type_ = run.infos.(part).type_ } in
   let values = evaluate_call_values context frame run invocation call.arguments in
-  let lend ?leave_lent frame =
-    Calls.apply_call ?leave_lent context frame site invocation ~through:None values
-  in
-  let lent, write_back =
-    match (invocation.lends, invocation.callee) with
-    | Some Language.Mode.Mut, Intrinsic _ -> Facts.raise_bug "an intrinsic that lends `mut`"
-    | Some Language.Mode.Mut, _ ->
-        ( Counters.run_without_counters context (fun () -> lend frame),
-          Some
-            (fun frame final ->
-              match lend ~leave_lent:(fun _ -> final) frame with
-              | Some (after, _) -> after
-              | None -> frame) )
-    | _ -> (lend frame, None)
-  in
   Option.map
-    (fun (after, term) ->
-      let lent = write_place context after run { root = Local part; projections = [] } term in
-      match write_back with
-      | Some write_back ->
+    (fun ({ frame = after; result; end_lend } : Calls.applied) ->
+      let lent = write_place context after run { root = Local part; projections = [] } result in
+      match (end_lend, mode) with
+      | Some end_lend, _ ->
           {
             lent with
             lends =
               Locals.add (Locals.make_key run.infos part)
-                [ (Logic.Boolean true, write_back) ]
+                [ (Logic.Boolean true, end_lend) ]
                 lent.lends;
           }
-      | None -> lent)
-    lent
+      | None, Language.Mode.Mut -> Facts.raise_bug "a `mut` lend that no call ends"
+      | None, (Read | Own) -> lent)
+    (Calls.apply_lend context frame site invocation ~through:None values)
 
 let compute_target_type context frame run (target : Mir.place) =
   match target with
@@ -635,37 +621,6 @@ let record_todo (context : State.context) (frame : State.frame) origin =
 
 let oblige_unreachable context frame location =
   Obligations.oblige context frame location Unreachable_reached (Logic.Boolean false)
-
-let lend_part context (frame : State.frame) origin (mode : Language.Mode.t) ~handed ~lends
-    ~write_back =
-  let location = Facts.locate context frame.source origin in
-  match (context.lending, frame.yielded_so_far) with
-  | Some { part_type; part_postconditions; _ }, Some before ->
-      List.iter
-        (fun (clause : Mir.formula) ->
-          let _, term =
-            Validity.read_specification context
-              { frame with result = Some handed; yielded = Some before }
-              clause
-          in
-          Obligations.oblige context frame
-            (Facts.locate context frame.source clause.origin)
-            (Lent_part_ensures { clause = Facts.quote frame.source clause.origin })
-            term)
-        part_postconditions;
-      Validity.check_valid context frame location part_type handed ~deep:true ~moment:Part_lent;
-      let frame, part_after =
-        if mode = Language.Mode.Mut && lends then
-          let part_after = Encoding.arrive context frame "lent" part_type in
-          (write_back frame part_after, part_after)
-        else (frame, handed)
-      in
-      Some
-        {
-          frame with
-          yielded_so_far = Some (Intrinsics.append_part context frame part_type before part_after);
-        }
-  | _ -> Facts.raise_unsupported location Lent_part_outside_lending_method
 
 let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(site : Invocation.site)
     =
@@ -772,13 +727,13 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
               Facts.raise_bug "`%s` reads the entry value of %s, which the prover did not bind"
                 (Resolve.Names.show_key frame.source.key)
                 (describe_local run.infos.(local).kind)))
-  | Specification Yielded -> (
-      match (frame.yielded, frame.yielded_so_far) with
-      | Some yielded, _ -> (frame, yielded)
-      | None, Some yielded_so_far when Facts.is_home context frame.source -> (frame, yielded_so_far)
-      | _ ->
-          Facts.raise_bug "`%s` reads `yielded` outside a lending method"
+  | Specification Visited -> (
+      match frame.visited with
+      | Some visited -> (frame, visited)
+      | None ->
+          Facts.raise_bug "`%s` reads `visited` outside a loop's clause"
             (Resolve.Names.show_key frame.source.key))
+  | Specification Final_result -> (frame, Lending.read_final_result frame)
   | Specification (Identical (first, second)) ->
       let first_value = translate_operand first and second_value = translate_operand second in
       Values.assume_extensional context frame
@@ -1027,8 +982,9 @@ and read_statement context frame run (statement : Mir.statement) =
         | Part operand -> compute_operand_type context frame operand
         | Built { type_; _ } -> Encoding.substitute_type context frame type_
       in
-      lend_part context frame origin mode ~handed ~lends:(lends_places part)
-        ~write_back:(fun frame after -> write_back_part context run part_type part frame after)
+      Some
+        (Lending.lend_part context frame origin mode ~handed ~lends_places:(lends_places part)
+           ~write_back:(fun frame final -> write_back_part context run part_type part frame final))
   | Jump jump ->
       (match jump with
       | Return returned ->
@@ -1389,25 +1345,24 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
       if frame.makes_obligations then
         List.iter
           (fun local ->
-            match
-              (run.infos.(local), Locals.find_opt (Locals.make_key run.infos local) frame.locals)
-            with
-            | ( { kind = (Source { is_var = true; _ } | Temporary) as kind; type_; origin; _ },
-                Some term )
-              when Hashtbl.mem run.changed_in_place local ->
+            let info = run.infos.(local) in
+            let moment : Catalog.Prover.invariant_moment option =
+              match info.kind with
+              | Temporary -> Some Built_here
+              | Source { is_var = true; local; _ } ->
+                  Some
+                    (At_scope_end
+                       (match Mir.find_local_name local with
+                       | Some name -> Named name
+                       | None -> Compiler_local))
+              | Source { is_var = false; _ } | Lent _ -> None
+            in
+            match (moment, Locals.find_opt (Locals.make_key run.infos local) frame.locals) with
+            | Some moment, Some term when Hashtbl.mem run.changed_in_place local ->
                 Validity.check_valid context frame
-                  (Facts.locate context frame.source origin)
-                  (Encoding.substitute_type context frame type_)
-                  term ~deep:true
-                  ~moment:
-                    (match kind with
-                    | Temporary -> Built_here
-                    | Source { local; _ } ->
-                        At_scope_end
-                          (match Mir.find_local_name local with
-                          | Some name -> Named name
-                          | None -> Compiler_local)
-                    | Lent _ -> At_scope_end Lent_part)
+                  (Facts.locate context frame.source info.origin)
+                  (Encoding.substitute_type context frame info.type_)
+                  term ~deep:true ~moment
             | _ -> ())
           locals;
       let frame =

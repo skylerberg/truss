@@ -84,7 +84,7 @@ type conversion =
 type specification_call =
   | Old
   | Identical
-  | Final of { part : Types.ty }
+  | Final
   | Specification_function of Core.specification_function
   | Method_cost of {
       metric : Language.Metric.t;

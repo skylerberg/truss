@@ -28,7 +28,8 @@ let list_nested_blocks (statement : Tree.statement) : Tree.block list =
               | Convert _ | Copy _ | Function_value _ | Lambda _ | Value_parameter _
               | Parameter_default _
               | Specification
-                  (Result | Entry _ | Yielded | Identical _ | Applied _ | Method_cost _ | Map _) );
+                  ( Result | Entry _ | Visited | Final_result | Identical _ | Applied _
+                  | Method_cost _ | Map _ ) );
             _;
           }
       | Call _ | Lend _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _
@@ -91,7 +92,8 @@ let visit_rvalue visit origin (rvalue : Tree.rvalue) =
       visit_operand start;
       visit_operand stop
   | Function_value _ | Value_parameter _ | Parameter_default _
-  | Specification (Result | Entry _ | Yielded | Quantified { range = Over_type _; _ }) ->
+  | Specification (Result | Entry _ | Visited | Final_result | Quantified { range = Over_type _; _ })
+    ->
       ()
 
 let visit_statement_places visit (statement : Tree.statement) =

@@ -279,34 +279,34 @@ let make_each_sum context element relation =
           Callbacks.apply_function context (measure_type element) (Logic.Symbol measure) [ value ])
     )
 
-let make_empty_parts context frame element =
-  let parts =
+let make_empty_sequence context frame element =
+  let empty =
     Facts.declare_fresh context frame "parts"
       (Encoding.declare_sort context (Models.make_sequence_type element))
   in
   Facts.assume context frame
-    (Logic.equal (Models.make_sequence_length context element parts) (Logic.int 0));
+    (Logic.equal (Models.make_sequence_length context element empty) (Logic.int 0));
   Facts.assume context frame
-    (make_each_sum context element (fun sum _ -> Logic.equal (sum parts) (Logic.int 0)));
-  parts
+    (make_each_sum context element (fun sum _ -> Logic.equal (sum empty) (Logic.int 0)));
+  empty
 
-let append_part context frame element parts part =
+let append_element context frame element shorter appended =
   let longer =
     Facts.declare_fresh context frame "parts"
       (Encoding.declare_sort context (Models.make_sequence_type element))
   in
-  let length = Models.make_sequence_length context element parts in
+  let length = Models.make_sequence_length context element shorter in
   Facts.assume context frame
     Logic.(
       greater_equal length (int 0)
       &&& equal (Models.make_sequence_length context element longer) (add length (int 1)));
   (match (Models.index_sequence context element longer length, frame.bound) with
-  | Some last, _ -> Facts.assume context frame (Logic.equal last part)
+  | Some last, _ -> Facts.assume context frame (Logic.equal last appended)
   | None, _ -> ());
   let index = Facts.make_fresh_name context "index" in
   (match
      ( Models.index_sequence context element longer (Logic.Symbol index),
-       Models.index_sequence context element parts (Logic.Symbol index) )
+       Models.index_sequence context element shorter (Logic.Symbol index) )
    with
   | Some after, Some before ->
       Facts.assume context frame
@@ -323,9 +323,9 @@ let append_part context frame element parts part =
          Logic.equal
            (make_sequence_sum context element longer (Logic.Symbol measure))
            (Logic.add
-              (make_sequence_sum context element parts (Logic.Symbol measure))
+              (make_sequence_sum context element shorter (Logic.Symbol measure))
               (Callbacks.apply_function context (measure_type element) (Logic.Symbol measure)
-                 [ part ])) ));
+                 [ appended ])) ));
   longer
 
 let make_byte_order context left right =
@@ -523,14 +523,14 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       let buffer = read_operand 0 in
       require (Logic.less (length (storage buffer)) (capacity buffer));
       assume_capacity_kept ();
-      let longer = append_part context frame element (storage buffer) (read_operand 1) in
+      let longer = append_element context frame element (storage buffer) (read_operand 1) in
       Facts.assume context frame (Logic.equal (read_changed_storage ()) longer);
       known
   | Storage_pop ->
       let buffer = read_operand 0 in
       require ~requirement:Element_to_pop (Logic.greater (length (storage buffer)) (Logic.int 0));
       assume_capacity_kept ();
-      let longer = append_part context frame element (read_changed_storage ()) known in
+      let longer = append_element context frame element (read_changed_storage ()) known in
       Facts.assume context frame (Logic.equal (storage buffer) longer);
       known
   | Storage_insert ->

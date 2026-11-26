@@ -181,12 +181,12 @@ let end_iterations context (frame : State.frame) loop_at clauses measure (start 
       Termination.check_loop_measure context through location measure)
     ends
 
-let declare_elements_so_far context (head : State.frame) ~element ~collection ~count yielded
+let declare_elements_so_far context (head : State.frame) ~element ~collection ~count visited
     find_element_at =
   let symbol = Facts.make_fresh_name context "position" in
   let position = Logic.Symbol symbol in
   let premise = Logic.(less_equal (int 0) position &&& less position count) in
-  (match Models.index_sequence context element yielded position with
+  (match Models.index_sequence context element visited position with
   | Some earlier ->
       let _, same, with_facts =
         Models.run_under_binder context
@@ -204,7 +204,7 @@ let declare_elements_so_far context (head : State.frame) ~element ~collection ~c
   | Some read ->
       let collection_type, collected = read head in
       Option.iter
-        (Values.assume_extensional context head (Models.make_sequence_type element) yielded)
+        (Values.assume_extensional context head (Models.make_sequence_type element) visited)
         (Models.find_model context
            (Encoding.substitute_type context head collection_type)
            collected ~element)
@@ -214,7 +214,7 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_typ
     ~start ~receive =
   let clauses = for_loop.for_clauses in
   let entry =
-    { frame with State.yielded = Some (Intrinsics.make_empty_parts context frame element_type) }
+    { frame with State.visited = Some (Intrinsics.make_empty_sequence context frame element_type) }
   in
   check_loop_clauses context entry clauses ~moment:On_entry;
   let loop = enter_loop ~holds context frame ~entry clauses ~changed in
@@ -223,7 +223,7 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_typ
   let iterations = Models.make_sequence_length context element_type before in
   let head =
     Loop_costs.enter_head context
-      { head with yielded = Some before }
+      { head with visited = Some before }
       costs ~iterations:(Some iterations)
   in
   assume_invariants context head clauses;
@@ -231,9 +231,9 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_typ
   let received = receive head before in
   let through = received.through in
   let inside = received.advance (Facts.restrict head received.has_another) in
-  let inside = { (Loop_costs.spend_step context inside) with yielded = frame.yielded } in
+  let inside = { (Loop_costs.spend_step context inside) with visited = frame.visited } in
   let ends, breaks = for_loop.run_body inside received.element in
-  let with_through (exit_frame : State.frame) = { exit_frame with yielded = Some through } in
+  let with_through (exit_frame : State.frame) = { exit_frame with visited = Some through } in
   end_iterations context frame for_loop.for_at clauses
     (Termination.read_loop_measure context clauses ~head)
     loop ~head ~inside ~iterations:(Some iterations) ~iteration_bounds:most ~ends ~breaks
@@ -241,7 +241,7 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_typ
   let ended = received.advance (Facts.restrict head (Logic.not_ received.has_another)) in
   let exit_ =
     Loop_costs.leave_counted context ~clause_at:head
-      { ended with yielded = Some before }
+      { ended with visited = Some before }
       costs ~iterations:(Some iterations) ~most ~count:iterations ~since:ended_mark
   in
   let left =
@@ -257,27 +257,27 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_typ
   in
   leave_loop context frame
     (List.map
-       (fun (exit_frame : State.frame) -> { exit_frame with yielded = frame.yielded })
+       (fun (exit_frame : State.frame) -> { exit_frame with visited = frame.visited })
        (exit_ :: left))
 
 let cursor_trait : Path.t = Well_known.make_path Cursor
 
-let declare_some_parts context frame element =
-  let parts =
+let declare_visited context frame element =
+  let visited =
     Facts.declare_fresh context frame "parts"
       (Encoding.declare_sort context (Models.make_sequence_type element))
   in
   Facts.assume context frame
-    Logic.(greater_equal (Models.make_sequence_length context element parts) (int 0));
-  parts
+    Logic.(greater_equal (Models.make_sequence_length context element visited) (int 0));
+  visited
 
 let names_visited (clauses : Mir.loop_clause list) =
   List.exists
     (function
-      | Mir.Invariant invariant -> Contracts.mentions_history invariant
-      | Decreases measures -> List.exists Contracts.mentions_history measures
+      | Mir.Invariant invariant -> Contracts.mentions_visited invariant
+      | Decreases measures -> List.exists Contracts.mentions_visited measures
       | Cost { bound = Order_of bound | At_most bound | Exactly bound; _ } ->
-          Contracts.mentions_history bound)
+          Contracts.mentions_visited bound)
     clauses
 
 let assume_visited_is_a_prefix context (head : State.frame) ~element ~visited ~entry_model ~model =
@@ -409,7 +409,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     ~changed:(for_loop.compute_changed_in frame)
     ~holds ~most:(Option.to_list entry_measure)
     ~start:(fun head ->
-      let before = declare_some_parts context head element_type in
+      let before = declare_visited context head element_type in
       (match (entry_measure, find_measured head) with
       | Some entry, Some [ now ] ->
           Facts.assume context head
@@ -426,9 +426,8 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     ~receive:(fun head before ->
       let cursor = cursor_access.read head in
       let recursive_callee = Termination.find_recursive_callee context head location next.callee in
-      let after, pulled =
-        Calls.call_contract ~recursive_callee ~lent_final:None context head pulling next path
-          contract
+      let ({ frame = after; result = pulled; _ } : Calls.applied) =
+        Calls.call_contract ~recursive_callee context head pulling next path contract
           [
             {
               position = 0;
@@ -465,7 +464,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       {
         has_another;
         element;
-        through = Intrinsics.append_part context inside element_type before element;
+        through = Intrinsics.append_element context inside element_type before element;
         advance =
           (fun (frame : State.frame) ->
             let now = cursor_access.read after in
@@ -488,11 +487,11 @@ let run_for_loop context frame (for_loop : for_loop) =
           (fun element_of -> element_of (for_loop.bind_element at position))
           for_loop.element_call
       in
-      let outer_yielded = frame.yielded in
+      let outer_visited = frame.visited in
       let bind_at_index (exit_frame : State.frame) next = for_loop.bind_element exit_frame next in
       let entry =
         bind_at_index
-          { frame with yielded = Some (Intrinsics.make_empty_parts context frame element) }
+          { frame with visited = Some (Intrinsics.make_empty_sequence context frame element) }
           low
       in
       check_loop_clauses context entry clauses ~moment:On_entry;
@@ -508,7 +507,7 @@ let run_for_loop context frame (for_loop : for_loop) =
       let iterations = Facts.declare_fresh context head "iterations" Logic.Int in
       Facts.assume context head
         Logic.(less_equal (int 0) iterations &&& less_equal iterations (at_least_zero count));
-      let before = declare_some_parts context head element in
+      let before = declare_visited context head element in
       Facts.assume context head
         (Logic.equal (Models.make_sequence_length context element before) iterations);
       (let position = Facts.make_fresh_name context "index" in
@@ -516,14 +515,14 @@ let run_for_loop context frame (for_loop : for_loop) =
          if over_positions then None
          else Models.index_sequence context element before (Logic.Symbol position)
        with
-       | Some yielded_index ->
+       | Some visited_index ->
            Facts.assume context head
              (Logic.forall
                 ( [ (position, Logic.Int) ],
                   Logic.(
                     less_equal (int 0) (Symbol position)
                     &&& less (Symbol position) iterations
-                    ==> equal yielded_index (add low (Symbol position))) ))
+                    ==> equal visited_index (add low (Symbol position))) ))
        | None -> ());
       Option.iter
         (fun _ ->
@@ -533,7 +532,7 @@ let run_for_loop context frame (for_loop : for_loop) =
       let index = Logic.add low iterations in
       let head =
         Loop_costs.enter_head context
-          (bind_at_index { head with yielded = Some before } index)
+          (bind_at_index { head with visited = Some before } index)
           costs ~iterations:(Some iterations)
       in
       assume_invariants context head clauses;
@@ -544,18 +543,18 @@ let run_for_loop context frame (for_loop : for_loop) =
         (find_kept_count { head with makes_obligations = false });
       let inside = Facts.restrict head (Logic.less iterations count) in
       let through =
-        Intrinsics.append_part context inside element before
+        Intrinsics.append_element context inside element before
           (if over_positions then
              match find_element_at { inside with makes_obligations = false } index with
              | Some lent -> lent
              | None -> Encoding.arrive context inside "element" element
            else index)
       in
-      let inside = { inside with yielded = outer_yielded } in
+      let inside = { inside with visited = outer_visited } in
       let inside = Loop_costs.spend_step context inside in
       let ends, breaks = for_loop.run_body inside index in
       let with_through (exit_frame : State.frame) =
-        bind_at_index { exit_frame with yielded = Some through } (Logic.add index (Logic.int 1))
+        bind_at_index { exit_frame with visited = Some through } (Logic.add index (Logic.int 1))
       in
       end_iterations context frame for_loop.for_at clauses
         (Termination.read_loop_measure context clauses ~head)
@@ -586,7 +585,7 @@ let run_for_loop context frame (for_loop : for_loop) =
       in
       leave_loop context frame
         (List.map
-           (fun (exit_frame : State.frame) -> { exit_frame with yielded = outer_yielded })
+           (fun (exit_frame : State.frame) -> { exit_frame with visited = outer_visited })
            (exit_ :: left))
   | Over_cursor { cursor; cursor_type; next; next_origin } ->
       prove_cursor_loop ~for_loop context frame cursor next ~cursor_type ~next_origin

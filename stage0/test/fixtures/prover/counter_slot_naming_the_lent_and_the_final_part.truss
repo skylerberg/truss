@@ -1,0 +1,15 @@
+type Counter(count: Int64)
+
+fn Counter.slot(mut self) lends mut Int64
+  ensures result == old(self.count)
+  ensures self.count - old(self.count) == final(result) - result
+{
+  mut self.count
+}
+
+fn raise(counter: mut Counter)
+  requires counter.count == 3
+  ensures counter.count == 4
+{
+  mut counter.slot() = 4
+}

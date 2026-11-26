@@ -22,6 +22,12 @@ let name_term context ty term =
         Facts.add_fact context (Logic.equal named term));
     named
 
+type applied = {
+  frame : State.frame;
+  result : Logic.term;
+  end_lend : (State.frame -> Logic.term -> State.frame) option;
+}
+
 type havoc = {
   after : State.frame;
   written : (int * Logic.term) list;
@@ -81,8 +87,8 @@ let add_restated_clauses (context : State.context) ~self_type ~bind trait name r
   }
 
 let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
-    path (contract : State.contract) (values : State.passed list) ~recursive_callee ~lent_final
-    ~substitution_of ~type_arguments =
+    path (contract : State.contract) (values : State.passed list) ~recursive_callee ~substitution_of
+    ~type_arguments =
   let substitution_of (clauses : State.clauses) =
     Types.combine_substitutions (substitution_of clauses) clauses.bindings
   in
@@ -137,20 +143,20 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       clauses.parameters
   in
   let arguments = List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values in
-  let read_entry_frame (clauses : State.clauses) =
-    Contracts.make_entry_frame frame clauses ~arguments ~substitution:(substitution_of clauses)
+  let read_entry_frame (base : State.frame) (clauses : State.clauses) =
+    Contracts.make_entry_frame base clauses ~arguments ~substitution:(substitution_of clauses)
   in
   let callee_clauses = contract.callee_clauses in
   Option.iter
     (fun recursive ->
       Termination.check_recursive_call context frame location ~path callee_clauses
         ~is_self_call:(Path.equal recursive context.node)
-        ~callee_entry:(read_entry_frame callee_clauses)
+        ~callee_entry:(read_entry_frame frame callee_clauses)
         ~argument_at:(lookup_argument_at_index values))
     recursive_callee;
   let precondition_clauses = Contracts.select_precondition_clauses contract in
   let read_required () =
-    let entry = read_entry_frame precondition_clauses in
+    let entry = read_entry_frame frame precondition_clauses in
     List.map
       (fun (requirement : Mir.requirement) ->
         let clause = requirement.clause in
@@ -185,7 +191,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   if not (Obligations.may_panic context || Types.has_capability (Built_in Panic) invocation.uses)
   then begin
     let clauses = contract.callee_clauses in
-    let entry = read_entry_frame clauses in
+    let entry = read_entry_frame frame clauses in
     List.iter
       (fun (requirement : Mir.requirement) ->
         let _, term = Validity.read_specification context entry requirement.clause in
@@ -203,195 +209,205 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           term)
       clauses.panics_unless
   end;
-  let compute_required (clauses : State.clauses) =
+  let compute_required (base : State.frame) (clauses : State.clauses) =
     if clauses == precondition_clauses then required
     else
       Logic.conjunction
         (List.map
            (fun requirement ->
-             snd (Validity.read_specification context (read_entry_frame clauses) requirement))
+             snd (Validity.read_specification context (read_entry_frame base clauses) requirement))
            (Facts.list_clauses clauses.requires))
   in
-  let havoc =
-    havoc_mut context frame values ~list_modified:(Contracts.list_modified_parts context path)
-  in
-  let after = havoc.after and changed = List.rev havoc.written in
   let in_quantifier = is_logic_call && frame.binders <> [] in
-  let state term =
-    if in_quantifier then Facts.add_frame_fact context after term
-    else Facts.assume context after term
-  in
   let callee_bindings = list_bindings callee_clauses in
   let callee_arguments = List.filter_map snd callee_bindings in
-  let is_on_bound_values = List.exists (Logic.mentions after.bound) callee_arguments in
+  let is_on_bound_values = List.exists (Logic.mentions frame.bound) callee_arguments in
   let declared_result_type = Encoding.substitute_declared_type context frame site.type_ in
   let result_type = Types.erase_views declared_result_type in
   let definition = ref None in
-  let applied =
-    if is_logic_call && List.length callee_arguments = List.length callee_bindings then begin
-      let sorts =
-        List.mapi
-          (fun index ((parameter : Mir.parameter), _) ->
-            match List.find_opt (fun (passed : State.passed) -> passed.position = index) values with
-            | Some passed -> Encoding.declare_sort context passed.type_
-            | None ->
-                Encoding.declare_sort context
-                  (Types.erase_views
-                     ((Interface.Impls.normalize context.lookups.interface
-                         ~list_bounds:context.bounds)
-                        (Types.substitute (substitution_of callee_clauses) parameter.type_))))
-          callee_bindings
-      in
-      let function_symbol =
-        Contract_axioms.declare_function context ~path ~type_arguments ~sorts ~result_type
-      in
-      (match (path, callee_bindings) with
-      | Method { owner = Impl { trait; _ } as impl; name; receiver }, [ (self, _) ]
-        when self.local = Self
-             && Well_known.is_method Model_model (Method { owner = trait.path; name; receiver }) ->
-          Models.rank_model context
-            (Types.erase_views
-               ((Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
-                  (Types.substitute (substitution_of callee_clauses) self.type_)))
-            ~model:result_type ~impl function_symbol
-      | _ -> ());
-      Some
-        (Contract_axioms.apply context after ~path ~type_arguments ~sorts ~result_type
-           ~arguments:callee_arguments ~is_on_bound_values)
-    end
-    else None
-  in
-  let result =
-    match applied with
-    | Some application -> application.term
-    | None -> Encoding.arrive context after "result" result_type
-  in
-  Validity.assume_valid context after result_type result;
-  let left_valid =
-    match (contract.result_kind, invocation.lends, lent_final) with
-    | `Lends, Some Language.Mode.Mut, Some leave ->
+  let list_modified = Contracts.list_modified_parts context path in
+  let make_result (after : State.frame) =
+    let applied =
+      if is_logic_call && List.length callee_arguments = List.length callee_bindings then begin
+        let sorts =
+          List.mapi
+            (fun index ((parameter : Mir.parameter), _) ->
+              match
+                List.find_opt (fun (passed : State.passed) -> passed.position = index) values
+              with
+              | Some passed -> Encoding.declare_sort context passed.type_
+              | None ->
+                  Encoding.declare_sort context
+                    (Types.erase_views
+                       ((Interface.Impls.normalize context.lookups.interface
+                           ~list_bounds:context.bounds)
+                          (Types.substitute (substitution_of callee_clauses) parameter.type_))))
+            callee_bindings
+        in
+        let function_symbol =
+          Contract_axioms.declare_function context ~path ~type_arguments ~sorts ~result_type
+        in
+        (match (path, callee_bindings) with
+        | Method { owner = Impl { trait; _ } as impl; name; receiver }, [ (self, _) ]
+          when self.local = Self
+               && Well_known.is_method Model_model (Method { owner = trait.path; name; receiver })
+          ->
+            Models.rank_model context
+              (Types.erase_views
+                 ((Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
+                    (Types.substitute (substitution_of callee_clauses) self.type_)))
+              ~model:result_type ~impl function_symbol
+        | _ -> ());
         Some
-          ( Validity.make_validity context after ~assuming:false ~deep:true result_type
-              (leave result),
-            leave )
-    | _ -> None
+          (Contract_axioms.apply context after ~path ~type_arguments ~sorts ~result_type
+             ~arguments:callee_arguments ~is_on_bound_values)
+      end
+      else None
+    in
+    let result =
+      match applied with
+      | Some application -> application.term
+      | None -> Encoding.arrive context after "result" result_type
+    in
+    Validity.assume_valid context after result_type result;
+    (applied, result)
   in
-  let check_left () =
-    match left_valid with
-    | Some (_, leave) ->
-        Validity.check_valid context after location result_type (leave result) ~deep:true
-          ~moment:When_lend_ends
-    | None -> ()
+  let assume_changed_validity (after : State.frame) ~changed ~left_valid =
+    List.iter
+      (fun (passed : State.passed) ->
+        if passed.mode = Language.Mode.Mut then
+          match List.assoc_opt passed.position changed with
+          | Some term ->
+              let valid =
+                Validity.make_validity context after ~assuming:true
+                  ~includes_invariants:(not passed.is_step_self) passed.type_ term
+              in
+              Facts.assume context after
+                (match left_valid with Some left -> Logic.( ==> ) left valid | None -> valid)
+          | None -> ())
+      values
   in
-  List.iter
-    (fun (passed : State.passed) ->
-      if passed.mode = Language.Mode.Mut then
-        match List.assoc_opt passed.position changed with
-        | Some term ->
-            let valid =
-              Validity.make_validity context after ~assuming:true
-                ~includes_invariants:(not passed.is_step_self) passed.type_ term
-            in
-            Facts.assume context after
-              (match left_valid with Some (left, _) -> Logic.( ==> ) left valid | None -> valid)
-        | None -> ())
-    values;
-  if not (List.exists (Path.equal path) context.instantiating) then begin
-    context.instantiating <- path :: context.instantiating;
+  let run_instantiating run =
+    if not (List.exists (Path.equal path) context.instantiating) then begin
+      context.instantiating <- path :: context.instantiating;
+      Fun.protect ~finally:(fun () -> context.instantiating <- List.tl context.instantiating) run
+    end
+  in
+  let state_axiom (after : State.frame) applied =
     Option.iter
       (fun application ->
         Contract_axioms.state context after application contract ~substitution_of ~result_type
           ~group_member:(Cycles.find_group_member context frame invocation.callee)
           ~is_on_bound_values)
-      applied;
+      applied
+  in
+  let assume_ensures (base : State.frame) (after : State.frame) ~changed ~applied ~result ~final
+      is_kept =
     let is_in_axiom (clauses : State.clauses) (clause : Mir.formula) =
       match applied with
-      | Some application ->
+      | Some (application : Contract_axioms.application) ->
           application.is_limited || Contract_axioms.states context application clauses clause
       | None -> false
     in
-    let assume_ensures is_kept =
-      List.iter
-        (fun (clauses : State.clauses) ->
-          let exits =
-            List.map
-              (fun (position, entry) ->
-                (position, Option.value (List.assoc_opt position changed) ~default:entry))
-              arguments
-          in
-          let entry_frame = read_entry_frame clauses in
-          let is_unbound_in_quantifier = in_quantifier && not is_on_bound_values in
-          let ensures_frame =
-            {
-              (Contracts.make_exit_frame frame clauses ~entries:arguments ~exits
-                 ~result:(Some result) ~substitution:(substitution_of clauses))
-              with
-              condition = (if is_unbound_in_quantifier then Logic.Boolean true else after.condition);
-              bound = (if is_unbound_in_quantifier then [] else frame.bound);
-              binders = (if is_unbound_in_quantifier then [] else frame.binders);
-            }
-          in
-          let ensures_frame =
-            match contract.result_kind with
-            | `Lends when List.exists Contracts.mentions_history clauses.ensures ->
-                let left = match lent_final with Some leave -> leave result | None -> result in
-                let none = Intrinsics.make_empty_parts context after result_type in
-                {
-                  ensures_frame with
-                  yielded = Some (Intrinsics.append_part context after result_type none left);
-                }
-            | `Lends | `Returns -> ensures_frame
-          in
-          List.iter
-            (fun (clause : Mir.formula) ->
-              if is_kept clause && not (is_in_axiom clauses clause) then
-                let frame_for_clause =
-                  if contract.result_kind = `Lends && Contracts.mentions_result clause then
-                    {
-                      ensures_frame with
-                      locals = entry_frame.locals;
-                      self = entry_frame.self;
-                      yielded = None;
-                    }
-                  else ensures_frame
-                in
-                match Validity.read_specification context frame_for_clause clause with
-                | _, term ->
-                    (match (applied, !definition) with
-                    | Some application, None ->
-                        definition := Contract_axioms.find_definition application term
-                    | _ -> ());
-                    state (Logic.( ==> ) (compute_required clauses) term)
-                | exception Facts.Unsupported _ -> ())
-            clauses.ensures)
-        (Contracts.list_declared_clauses contract)
+    let state term =
+      if in_quantifier then Facts.add_frame_fact context after term
+      else Facts.assume context after term
     in
-    let is_about_part clause = contract.result_kind <> `Lends || Contracts.mentions_result clause in
-    assume_ensures is_about_part;
-    check_left ();
-    assume_ensures (fun clause -> not (is_about_part clause));
-    context.instantiating <- List.tl context.instantiating
-  end
-  else check_left ();
-  Option.iter
-    (fun application ->
-      Contract_axioms.assume_hypotheses context after application ~arguments:callee_arguments)
-    applied;
-  let after =
-    Amounts.spend_contract_call context ~before:frame ~after site invocation path contract values
-      ~changed ~result ~result_type:declared_result_type ~lent_final
-      ~is_recursive:(Option.is_some recursive_callee) ~bind_frame:(fun clauses ->
-        { (read_entry_frame clauses) with result = Some result; condition = after.condition })
+    List.iter
+      (fun (clauses : State.clauses) ->
+        let exits =
+          List.map
+            (fun (position, entry) ->
+              (position, Option.value (List.assoc_opt position changed) ~default:entry))
+            arguments
+        in
+        let is_unbound_in_quantifier = in_quantifier && not is_on_bound_values in
+        let ensures_frame =
+          {
+            (Contracts.make_exit_frame base clauses ~entries:arguments ~exits ~result:(Some result)
+               ~substitution:(substitution_of clauses))
+            with
+            condition = (if is_unbound_in_quantifier then Logic.Boolean true else after.condition);
+            bound = (if is_unbound_in_quantifier then [] else base.bound);
+            binders = (if is_unbound_in_quantifier then [] else base.binders);
+          }
+        in
+        let ensures_frame =
+          match final with
+          | Some final -> Lending.bind_final ensures_frame final
+          | None -> ensures_frame
+        in
+        List.iter
+          (fun (clause : Mir.formula) ->
+            if is_kept clause && not (is_in_axiom clauses clause) then
+              match Validity.read_specification context ensures_frame clause with
+              | _, term ->
+                  (match (applied, !definition) with
+                  | Some application, None ->
+                      definition := Contract_axioms.find_definition application term
+                  | _ -> ());
+                  state (Logic.( ==> ) (compute_required base clauses) term)
+              | exception Facts.Unsupported _ -> ())
+          clauses.ensures)
+      (Contracts.list_declared_clauses contract)
   in
-  havoc.end_writes after;
-  (after, Option.value !definition ~default:result)
+  let assume_hypotheses (after : State.frame) applied =
+    Option.iter
+      (fun application ->
+        Contract_axioms.assume_hypotheses context after application ~arguments:callee_arguments)
+      applied
+  in
+  let spend ~(before : State.frame) ~(after : State.frame) ~changed ~result ~final =
+    Amounts.spend_contract_call context ~before ~after site invocation path contract values ~changed
+      ~result ~result_type:declared_result_type ~final
+      ~is_recursive:(Option.is_some recursive_callee) ~bind_frame:(fun clauses ->
+        { (read_entry_frame before clauses) with result = Some result; condition = after.condition })
+  in
+  let havoc = havoc_mut context frame values ~list_modified in
+  let after = havoc.after and changed = List.rev havoc.written in
+  let applied, result = make_result after in
+  assume_changed_validity after ~changed ~left_valid:None;
+  run_instantiating (fun () ->
+      state_axiom after applied;
+      match contract.result_kind with
+      | `Lends ->
+          let assume = assume_ensures frame after ~changed ~applied ~result ~final:(Some result) in
+          assume Lending.holds_where_lent;
+          assume (fun clause -> not (Lending.holds_where_lent clause))
+      | `Returns -> assume_ensures frame after ~changed ~applied ~result ~final:None (fun _ -> true));
+  assume_hypotheses after applied;
+  match (contract.result_kind, invocation.lends) with
+  | `Lends, Some Language.Mode.Mut ->
+      havoc.end_writes after;
+      let end_lend (ended : State.frame) final =
+        let havoc = havoc_mut context ended values ~list_modified in
+        let after = havoc.after and changed = List.rev havoc.written in
+        assume_changed_validity after ~changed
+          ~left_valid:
+            (Some
+               (Validity.make_validity context after ~assuming:false ~deep:true result_type final));
+        Validity.check_valid context after location result_type final ~deep:true
+          ~moment:When_lend_ends;
+        run_instantiating (fun () ->
+            assume_ensures ended after ~changed ~applied ~result ~final:(Some final) (fun clause ->
+                not (Lending.holds_where_lent clause)));
+        let after = spend ~before:ended ~after ~changed ~result ~final:(Some final) in
+        havoc.end_writes after;
+        after
+      in
+      { frame = after; result = Option.value !definition ~default:result; end_lend = Some end_lend }
+  | (`Lends | `Returns), _ ->
+      let after = spend ~before:frame ~after ~changed ~result ~final:None in
+      havoc.end_writes after;
+      { frame = after; result = Option.value !definition ~default:result; end_lend = None }
 
 type modelled =
-  | By_contract of (State.frame * Logic.term)
+  | By_contract of applied
   | Without_contract of (State.frame * Logic.term) option
+  | Lent_without_contract of applied
 
-let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site)
-    (invocation : Invocation.t) ~through (values : State.passed list) =
+let apply_lend context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
+    ~through (values : State.passed list) =
   let location = Facts.locate context frame.source site.origin in
   (match Obligations.find_ruled_out_panic context with
   | Some condition
@@ -471,15 +487,39 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
       = function
     | Some contract ->
         By_contract
-          (call_contract ~recursive_callee ~lent_final:leave_lent context frame site invocation path
-             contract values ~substitution_of ~type_arguments)
-    | None ->
-        let havoc =
-          havoc_mut context frame values ~list_modified:(Contracts.list_modified_parts context path)
+          (call_contract ~recursive_callee context frame site invocation path contract values
+             ~substitution_of ~type_arguments)
+    | None -> (
+        let havoc_and_spend frame =
+          let havoc =
+            havoc_mut context frame values
+              ~list_modified:(Contracts.list_modified_parts context path)
+          in
+          let frame = Amounts.spend_call_without_a_contract context havoc.after invocation values in
+          havoc.end_writes frame;
+          frame
         in
-        let frame = Amounts.spend_call_without_a_contract context havoc.after invocation values in
-        havoc.end_writes frame;
-        Without_contract (Some (frame, Encoding.arrive context frame "result" result_type))
+        match invocation.lends with
+        | Some Language.Mode.Mut ->
+            let frame =
+              (havoc_mut context frame values
+                 ~list_modified:(Contracts.list_modified_parts context path))
+                .after
+            in
+            Lent_without_contract
+              {
+                frame;
+                result = Encoding.arrive context frame "result" result_type;
+                end_lend =
+                  Some
+                    (fun ended final ->
+                      Validity.check_valid context ended location result_type final ~deep:true
+                        ~moment:When_lend_ends;
+                      havoc_and_spend ended);
+              }
+        | Some (Read | Own) | None ->
+            let frame = havoc_and_spend frame in
+            Without_contract (Some (frame, Encoding.arrive context frame "result" result_type)))
   in
   let modelled =
     match invocation.callee with
@@ -635,7 +675,15 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         Without_contract (Some (frame, result))
   in
   match modelled with
-  | By_contract (frame, result) -> Some (frame, result)
-  | Without_contract result ->
+  | By_contract applied -> Some applied
+  | Without_contract returned ->
       Termination.reject_uncompared_recursion context frame location recursive_callee;
-      result
+      Option.map (fun (frame, result) -> { frame; result; end_lend = None }) returned
+  | Lent_without_contract applied ->
+      Termination.reject_uncompared_recursion context frame location recursive_callee;
+      Some applied
+
+let apply_call context frame site invocation ~through values =
+  Option.map
+    (fun { frame; result; _ } -> (frame, result))
+    (apply_lend context frame site invocation ~through values)

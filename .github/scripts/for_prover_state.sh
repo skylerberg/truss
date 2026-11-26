@@ -21,6 +21,7 @@ check_owners axioms 'contract_axioms'
 check_owners termination 'termination'
 check_owners validity 'validity'
 check_owners callbacks 'callbacks'
+check_owners lending 'lending'
 check_owners policy 'obligations'
 
 exit $status

@@ -56,7 +56,8 @@ val find_method_contract :
 val find_integer_literal : Mir.formula -> Z.t option
 val mentions_specification : Mir.formula -> (Mir.specification -> bool) -> bool
 val mentions_result : Mir.formula -> bool
-val mentions_history : Mir.formula -> bool
+val mentions_visited : Mir.formula -> bool
+val mentions_final_result : Mir.formula -> bool
 val find_promiser : Lookups.t -> State.source -> Catalog.Prover.promiser
 
 val make_entry_frame :

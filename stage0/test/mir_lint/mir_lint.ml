@@ -36,7 +36,7 @@ let rec list_rvalue_locals : Mir.rvalue -> Mir.local list = function
   | Lambda { captures; _ } ->
       List.concat_map (fun (capture : Mir.capture) -> list_place_locals capture.place) captures
   | Function_value _ | Value_parameter _ | Parameter_default _ -> []
-  | Specification (Result | Yielded) -> []
+  | Specification (Result | Visited | Final_result) -> []
   | Specification (Entry local) -> [ local ]
   | Specification (Identical (first, second)) ->
       list_operand_locals first @ list_operand_locals second

@@ -1,0 +1,16 @@
+type Positive(value: Int64)
+  invariant value > 0
+
+type Holder(first: Positive, second: Positive)
+
+fn Holder.slot(mut self) lends mut Positive
+  ensures self.first.value == final(result).value
+{
+  mut self.first
+}
+
+fn replace(holder: mut Holder)
+  ensures holder.first.value == 9
+{
+  mut holder.slot() = Positive(value: 9)
+}
