@@ -4389,6 +4389,9 @@ let () =
         "prover.requires");
   Harness.test "an element of a storage at an index below its length proves" (fun () ->
       expect_proven_in_standard Fixtures.Prover.storage_read_at_a_checked_index);
+  Harness.test "a storage read outside its bounds behind a false guard proves nothing" (fun () ->
+      expect_not_proven_in_standard Fixtures.Prover.storage_read_behind_a_false_guard
+        "prover.ensures");
   Harness.test "a storage is popped only when it holds an element" (fun () ->
       expect_not_proven_in_standard Fixtures.Prover.storage_popped_without_a_length
         "prover.requires" ~says:"for this call to `storage_pop`"

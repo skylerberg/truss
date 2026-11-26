@@ -378,14 +378,8 @@ let require_precondition (frame : State.frame) (site : Invocation.site) requirem
   if frame.makes_obligations then
     Obligations.oblige frame (Facts.locate frame site.origin)
       (Intrinsic_requirement { at = Facts.quote frame.source site.origin; requirement })
-      condition
-  else Facts.assume frame condition
-
-let require_element (frame : State.frame) site element index sequence =
-  require_precondition frame site Element_at_index
-    Logic.(
-      less_equal (int 0) index
-      &&& less index (Models.make_sequence_length frame.query element sequence))
+      condition;
+  Facts.restrict_unless_proven frame condition
 
 let translate_buffer_operation (context : State.context) (frame : State.frame)
     ~(site : Invocation.site) (operation : Intrinsic.buffer) element (values : State.passed list)
@@ -404,9 +398,6 @@ let translate_buffer_operation (context : State.context) (frame : State.frame)
   let storage = model_storage frame element in
   let require ?(requirement = Catalog.Prover.Room_written) condition =
     require_precondition frame site requirement condition
-  in
-  let assume_capacity_kept () =
-    Facts.assume frame (Logic.equal (capacity (List.hd changed)) (capacity (read_operand 0)))
   in
   let at = index_element context.environment context.query element in
   let make_index_name () = Query.make_fresh_name context.query "index" in
@@ -434,11 +425,11 @@ let translate_buffer_operation (context : State.context) (frame : State.frame)
           (Types.show element);
       let buffer = read_operand 0 and by = read_operand 1 in
       let before = storage buffer and after = read_changed_storage () in
-      require (Logic.less_equal (Logic.add (length before) by) (capacity buffer));
-      assume_capacity_kept ();
+      let defined = require (Logic.less_equal (Logic.add (length before) by) (capacity buffer)) in
+      Facts.assume defined (Logic.equal (capacity (List.hd changed)) (capacity buffer));
       let limit = make_index_name () in
-      Facts.assume frame (Logic.equal (length after) (Logic.add (length before) by));
-      Facts.assume frame
+      Facts.assume defined (Logic.equal (length after) (Logic.add (length before) by));
+      Facts.assume defined
         (all limit (Logic.int 0) (length before)
            (Logic.equal (at after (Logic.Symbol limit)) (at before (Logic.Symbol limit))));
       known
@@ -447,12 +438,14 @@ let translate_buffer_operation (context : State.context) (frame : State.frame)
   | Storage_range ->
       let start = read_operand 1 and stop = read_operand 2 in
       let whole = storage (read_operand 0) and part = storage known in
-      require ~requirement:Range_within_storage
-        Logic.(
-          less_equal (int 0) start &&& less_equal start stop &&& less_equal stop (length whole));
+      let defined =
+        require ~requirement:Range_within_storage
+          Logic.(
+            less_equal (int 0) start &&& less_equal start stop &&& less_equal stop (length whole))
+      in
       let limit = make_index_name () in
-      Facts.assume frame (Logic.equal (length part) (Logic.subtract stop start));
-      Facts.assume frame
+      Facts.assume defined (Logic.equal (length part) (Logic.subtract stop start));
+      Facts.assume defined
         (all limit (Logic.int 0) (length part)
            (Logic.equal (at part (Logic.Symbol limit))
               (at whole (Logic.add start (Logic.Symbol limit)))));
@@ -488,7 +481,12 @@ let translate_lend (frame : State.frame) ~(site : Invocation.site) (lend : Intri
   match (types, values) with
   | element :: _, [ container; index ] ->
       let sequence = match lend with Storage_at -> model_storage frame element container.term in
-      require_element frame site element index.term sequence;
+      let (_ : State.frame) =
+        require_precondition frame site Element_at_index
+          Logic.(
+            less_equal (int 0) index.term
+            &&& less index.term (Models.make_sequence_length frame.query element sequence))
+      in
       index_element frame.environment frame.query element sequence index.term
   | _ ->
       Facts.raise_bug "`%s` without an element type, a container, and an index"
