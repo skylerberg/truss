@@ -66,7 +66,7 @@ let make_potential_measure (query : Query.t) element =
   let term = Logic.Symbol symbol in
   Query.run_once query (Potential_of term) begin fun () ->
       let each = Logic.Symbol.Variable { label = "potential.element"; numbers = [] } in
-      Query.add_fact query
+      Query.add_theorem query ~because:(Defines term)
         (Logic.forall
            ( [ (each, Encoding.sort_of element) ],
              Logic.equal
@@ -190,7 +190,8 @@ and compute_potential (frame : State.frame) ?(seen = []) (declared : Types.ty) t
     let held = make_held_potential declared term in
     if not (Logic.mentions frame.bound term) then
       Query.run_once frame.query (Potential_of held) begin fun () ->
-          Facts.add_axiom frame
+          Facts.add_theorem frame
+            ~because:(match ty with Named { path; _ } -> Proven_by path | _ -> Lemma)
             Logic.(Validity.make_validity frame ~assuming:true ty term ==> less_equal (int 0) held);
           match
             ( find_potential_clause frame.environment ty,
@@ -202,20 +203,20 @@ and compute_potential (frame : State.frame) ?(seen = []) (declared : Types.ty) t
                   let sequence = model_of term in
                   let slack = Intrinsics.make_buffer_slack ty term in
                   let length = Models.make_sequence_length element sequence in
-                  Facts.add_axiom frame
-                    Logic.(less_equal (int 0) slack &&& less_equal slack (multiply (int 2) length));
                   (match (ty, kind) with
                   | Types.Named { path; _ }, _ when Well_known.find_builtin_type path = Some Storage
                     ->
-                      let saved =
-                        Logic.subtract
-                          (Logic.multiply (Logic.int 2) length)
-                          (Intrinsics.make_buffer_capacity element term)
-                      in
+                      let capacity = Intrinsics.make_buffer_capacity element term in
+                      Facts.add_theorem frame ~because:(Specifies capacity)
+                        (Logic.less_equal (Logic.int 0) capacity);
+                      let saved = Logic.subtract (Logic.multiply (Logic.int 2) length) capacity in
                       Facts.define frame slack
                         (Logic.ite (Logic.greater_equal saved (Logic.int 0)) saved (Logic.int 0))
                   | _, Array -> Facts.define frame slack (Logic.int 0)
-                  | _ -> ());
+                  | _ ->
+                      Facts.add_theorem frame ~because:(Specifies slack)
+                        Logic.(
+                          less_equal (int 0) slack &&& less_equal slack (multiply (int 2) length)));
                   let elements =
                     if
                       has_potential frame.environment frame.query

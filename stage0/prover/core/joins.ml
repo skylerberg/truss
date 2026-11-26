@@ -83,7 +83,8 @@ let merge ?value_type ~condition (paths : (Logic.term * State.frame * Logic.term
         let symbol = Facts.declare_fresh first prefix sort in
         List.iter
           (fun (_, (frame : State.frame), term) ->
-            Facts.add_axiom first (Logic.( ==> ) frame.condition (Logic.equal symbol term)))
+            Facts.add_theorem first ~because:(Specifies symbol)
+              (Logic.( ==> ) frame.condition (Logic.equal symbol term)))
           values;
         symbol
   in

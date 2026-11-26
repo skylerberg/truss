@@ -19,7 +19,7 @@ let name_term query ty term =
     let named = Logic.Symbol symbol in
     Query.run_once query (Value_of symbol) (fun () ->
         Query.declare query (Logic.Constant (symbol, Encoding.sort_of ty));
-        Query.add_fact query (Logic.equal named term));
+        Query.define query named term);
     named
 
 type applied = {

@@ -4,6 +4,7 @@ type t = {
   definitions : unit Tables.Symbol_table.t;
   stated : unit Tables.Stated_table.t;
   defined_terms : Logic.term Tables.Term_table.t;
+  specified_terms : unit Tables.Term_table.t;
   mutable facts : Fact_list.t;
   mutable scopes : (Logic.symbol * Logic.term list ref) list;
   quantifier_facts : Logic.term list Tables.Term_table.t;
@@ -24,6 +25,7 @@ let create () =
     definitions = Tables.Symbol_table.create 8;
     stated = Tables.Stated_table.create 64;
     defined_terms = Tables.Term_table.create 16;
+    specified_terms = Tables.Term_table.create 16;
     facts = Fact_list.empty;
     scopes = [];
     quantifier_facts = Tables.Term_table.create 16;
@@ -60,15 +62,40 @@ let declare query (declaration : Logic.declaration) =
 let find_argument_sorts query symbol = Tables.Symbol_table.find_opt query.declared symbol
 let list_defined_symbols query = List.of_seq (Tables.Symbol_table.to_seq_keys query.definitions)
 let add_fact query fact = query.facts <- Fact_list.add fact query.facts
+let assume query ~under fact = add_fact query (Logic.( ==> ) under fact)
+
+type reason =
+  | Defines of Logic.term
+  | Specifies of Logic.term
+  | Lemma
+  | Proven_by of Path.t
+  | Hypothesis
+  | Generalizes_an_execution
+
+let add_theorem query ~because theorem =
+  match because with
+  | Defines subject -> (
+      if Tables.Term_table.mem query.specified_terms subject then
+        Compiler_bug.raise_bug ~stage:"Prover"
+          "`%s` is defined by `%s` after a fact about it was stated, which may contradict it"
+          (Logic.show_term subject) (Logic.show_term theorem);
+      match Tables.Term_table.find_opt query.defined_terms subject with
+      | Some earlier ->
+          if earlier <> theorem then
+            Compiler_bug.raise_bug ~stage:"Prover" "`%s` is defined by `%s` and again by `%s`"
+              (Logic.show_term subject) (Logic.show_term earlier) (Logic.show_term theorem)
+      | None ->
+          Tables.Term_table.replace query.defined_terms subject theorem;
+          add_fact query theorem)
+  | Specifies subject ->
+      if not (Tables.Term_table.mem query.defined_terms subject) then begin
+        Tables.Term_table.replace query.specified_terms subject ();
+        add_fact query theorem
+      end
+  | Lemma | Proven_by _ | Hypothesis | Generalizes_an_execution -> add_fact query theorem
 
 let define query defined value =
-  (match Tables.Term_table.find_opt query.defined_terms defined with
-  | Some earlier ->
-      if earlier <> value then
-        Compiler_bug.raise_bug ~stage:"Prover" "`%s` is defined as `%s` and again as `%s`"
-          (Logic.show_term defined) (Logic.show_term earlier) (Logic.show_term value)
-  | None -> Tables.Term_table.replace query.defined_terms defined value);
-  add_fact query (Logic.equal defined value)
+  add_theorem query ~because:(Defines defined) (Logic.equal defined value)
 
 type mark = { declaration_count : int; fact_count : int; fresh_count : int }
 
@@ -104,7 +131,8 @@ let run_once query stated make =
 let run_without_facts query run =
   let facts = query.facts
   and stated = Tables.Stated_table.copy query.stated
-  and defined_terms = Tables.Term_table.copy query.defined_terms in
+  and defined_terms = Tables.Term_table.copy query.defined_terms
+  and specified_terms = Tables.Term_table.copy query.specified_terms in
   query.facts <- Fact_list.empty;
   Fun.protect
     ~finally:(fun () ->
@@ -112,7 +140,9 @@ let run_without_facts query run =
       Tables.Stated_table.reset query.stated;
       Tables.Stated_table.iter (Tables.Stated_table.replace query.stated) stated;
       Tables.Term_table.reset query.defined_terms;
-      Tables.Term_table.iter (Tables.Term_table.replace query.defined_terms) defined_terms)
+      Tables.Term_table.iter (Tables.Term_table.replace query.defined_terms) defined_terms;
+      Tables.Term_table.reset query.specified_terms;
+      Tables.Term_table.iter (Tables.Term_table.replace query.specified_terms) specified_terms)
     run
 
 let run_in_scope query symbols run =

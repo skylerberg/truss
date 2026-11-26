@@ -465,7 +465,7 @@ let leave ~(clause_at : State.frame) (exit_ : State.frame) loop ~iterations ~mos
                 if cost.counter.counting <> Exactly then
                   List.iter
                     (fun most ->
-                      Facts.add_axiom exit_
+                      Facts.add_theorem exit_ ~because:Lemma
                         Logic.(
                           conjunction
                             [

@@ -61,7 +61,7 @@ let rec index_sequence (environment : State.environment) query element term inde
                     &&& less position (make_sequence_length element ranked)
                     ==> less below (rank environment query sequence ranked)) )
             in
-            Query.add_fact query fact);
+            Query.add_theorem query ~because:Lemma fact);
       Some (at term index)
   | [] -> None
 
@@ -115,7 +115,7 @@ let rank_model (environment : State.environment) query (ty : Types.ty) ~(model :
                 (rank environment query model (Logic.Apply (symbol, [ Logic.Symbol each ])))
                 (rank environment query ty (Logic.Symbol each)) )
         in
-        Query.add_fact query fact)
+        Query.add_theorem query ~because:Lemma fact)
 
 let model_trait : Types.trait_reference =
   { trait = Well_known.make_path Model; trait_arguments = []; associated = [] }
@@ -149,7 +149,7 @@ let compute_model_function (environment : State.environment) query (ty : Types.t
           Query.run_once query (Array_length symbol) (fun () ->
               let each = Logic.Symbol.Variable { label = "array.value"; numbers = [] } in
               let elements = Logic.Apply (symbol, [ Logic.Symbol each ]) in
-              Query.add_fact query
+              Query.add_theorem query ~because:Lemma
                 (Logic.forall
                    ( [ (each, Encoding.sort_of ty) ],
                      Logic.equal

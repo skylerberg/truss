@@ -364,7 +364,8 @@ let find_logic_link (function_type : Types.function_type) term =
            Logic.equal holds (Logic.equal result (apply_function function_type term entries)) ))
   else None
 
-let state_relation (frame : State.frame) (function_type : Types.function_type) term known =
+let state_relation (frame : State.frame) (function_type : Types.function_type) term known ~proven_by
+    =
   let { inputs; changed; returned; entries; exits; result } =
     make_relation_variables function_type ~label:"named" ~numbers:[]
   in
@@ -391,7 +392,7 @@ let state_relation (frame : State.frame) (function_type : Types.function_type) t
     ensures <> []
     && not (List.exists (Query.mentions_fresh_since frame.query mark) (premise :: ensures))
   then
-    Facts.add_axiom frame
+    Facts.add_theorem frame ~because:(Proven_by proven_by)
       (Logic.forall ~trigger:[ holds ]
          (parameters, Logic.( ==> ) holds (Logic.( ==> ) premise (Logic.conjunction ensures))))
 
@@ -411,7 +412,7 @@ let state_definition (frame : State.frame) (function_type : Types.function_type)
     { symbol; sorts; term = value; is_limited = false }
     contract ~substitution_of ~result_type:function_type.output ~group_member
     ~is_on_bound_values:true;
-  Facts.add_axiom frame
+  Facts.add_theorem frame ~because:(Defines term)
     (Logic.forall (parameters, Logic.equal (apply_function function_type term inputs) value))
 
 let read_named_function (frame : State.frame) (site : Invocation.site) path instantiation
@@ -435,8 +436,10 @@ let read_named_function (frame : State.frame) (site : Invocation.site) path inst
             if is_in_the_logic function_type && contract.is_logic_function then
               state_definition frame function_type term ~path ~contract ~substitution_of
                 ~type_arguments ~group_member;
-            Option.iter (Facts.add_axiom frame) (find_logic_link function_type term)
+            Option.iter
+              (Facts.add_theorem frame ~because:Lemma)
+              (find_logic_link function_type term)
           end;
-          state_relation frame function_type term known);
+          state_relation frame function_type term known ~proven_by:path);
       term
   | _ -> Facts.raise_unsupported location Unreadable_function_value

@@ -82,7 +82,7 @@ let apply (frame : State.frame) ~path ~type_arguments ~sorts ~result_type ~argum
           let parameters = make_numbered_parameters "linked" sorts in
           let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
           let applied = Logic.Apply (function_symbol, inputs) in
-          Query.add_fact frame.query
+          Query.add_theorem frame.query ~because:(Defines (Logic.Symbol limited))
             (Logic.forall ~trigger:[ applied ]
                (parameters, Logic.equal applied (Logic.Apply (limited, inputs)))));
       limited
@@ -94,7 +94,7 @@ let apply (frame : State.frame) ~path ~type_arguments ~sorts ~result_type ~argum
   if Encoding.find_bounds result_type <> None && is_on_bound_values then
     Query.run_once frame.query (In_range symbol) (fun () ->
         let parameters = make_numbered_parameters "ranged" sorts in
-        Query.add_fact frame.query
+        Query.add_theorem frame.query ~because:(Proven_by path)
           (Logic.forall
              ( parameters,
                Encoding.make_in_range result_type
@@ -274,7 +274,7 @@ let state_with_trigger (outer : State.frame) (application : application) (contra
                          (Logic.Apply (unspecified, inputs));
                    })
           | None ->
-              Query.add_fact outer.query
+              Query.add_theorem outer.query ~because:(Proven_by callee_clauses.callee.definition)
                 (Logic.forall
                    ~trigger:(if is_triggered then [ applied ] else [])
                    ( parameters,
