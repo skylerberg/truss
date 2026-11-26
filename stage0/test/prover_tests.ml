@@ -1817,6 +1817,8 @@ let () =
   Harness.test "a call in a quantifier over no value gives no fact outside the quantifier"
     (fun () ->
       expect_codes Fixtures.Prover.recursive_call_in_a_quantifier_over_no_value [ "prover.ensures" ]);
+  Harness.test "two calls of a function that may panic give one result for one argument" (fun () ->
+      expect_proven Fixtures.Prover.function_that_may_panic_called_twice);
   Harness.test "the contract of a function that can panic is assumed only where it returns"
     (fun () ->
       expect_codes Fixtures.Prover.contract_of_a_function_that_panics_assumed_where_it_panics

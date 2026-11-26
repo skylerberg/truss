@@ -27,7 +27,7 @@ val mentions_fresh_since : State.context -> Query.mark -> Logic.term -> bool
 val close_over_binders : State.frame -> Logic.term -> Logic.term option
 val add_frame_fact : State.context -> State.frame -> Logic.term -> unit
 val assume : State.context -> State.frame -> Logic.term -> unit
-val remove_panic_condition : Types.capability_set -> Types.capability_set
+val remove_panic : Types.capability_set -> Types.capability_set
 val locate : State.context -> State.source -> Core.origin -> Obligation.location
 val add_hole : State.context -> Resolve.Names.key * Obligation.location -> unit
 val quote : State.source -> Core.origin -> Catalog.Prover.quoted

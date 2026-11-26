@@ -98,9 +98,11 @@ let locate (context : State.context) (source : State.source) origin =
 let add_hole (context : State.context) hole =
   if not (List.mem hole context.holes) then context.holes <- hole :: context.holes
 
-let remove_panic_condition (uses : Types.capability_set) =
+let remove_panic (uses : Types.capability_set) =
   Types.replace_capabilities
-    (function Types.Capability_unless_values _ -> Some Types.no_capabilities | _ -> None)
+    (function
+      | Types.Capability_unless_values _ | Types.Built_in Panic -> Some Types.no_capabilities
+      | _ -> None)
     uses
 
 let quote (source : State.source) origin : Catalog.Prover.quoted = { key = source.key; origin }

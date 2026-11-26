@@ -1,0 +1,22 @@
+fn limit(n: UInt64) -> UInt64
+  uses Panic
+{
+  n
+}
+
+fn count(n: UInt64) -> UInt64
+  uses Panic
+{
+  var index: UInt64 = 0
+  while index < limit(n) {
+    index += 1
+  }
+  index
+}
+
+fn same(n: UInt64) -> Bool
+  uses Panic
+  ensures result
+{
+  limit(n) == limit(n)
+}
