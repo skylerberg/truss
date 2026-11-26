@@ -45,7 +45,7 @@ val enter_lambda :
 val leave_lambda : State.context -> lambda_counters -> unit
 
 val check_lambda_exits :
-  State.context ->
+  Query.t ->
   lambda_counters ->
   State.frame list ->
   Obligation.location ->

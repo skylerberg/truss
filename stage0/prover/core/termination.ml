@@ -120,7 +120,7 @@ let find_induction_premise (context : State.context) (clauses : State.clauses) ~
   | Smaller_measures smaller | Smaller_part { smaller; _ } -> Some smaller
   | Unmeasured | Uncompared -> None
 
-let find_recursive_callee (context : State.context) (frame : State.frame) location group_member =
+let find_recursive_callee (frame : State.frame) location group_member =
   let reject target impl =
     Obligations.oblige frame location
       (Recursion_through_impl { call = { at = location; callee = Some target }; impl })
@@ -129,7 +129,7 @@ let find_recursive_callee (context : State.context) (frame : State.frame) locati
   in
   match group_member with
   | Some target when frame.makes_obligations -> (
-      match context.environment.lookups.mir.find_form_origin target with
+      match frame.environment.lookups.mir.find_form_origin target with
       | Some (Derived _, _) when frame.terminates -> reject target Derives
       | Some (Inherited _, _) when frame.terminates -> reject target Inherits
       | Some ((Written _ | Derived _ | Inherited _), _) | None -> Some target)
@@ -144,13 +144,13 @@ let reject_uncompared_recursion (frame : State.frame) location recursive_callee 
           (Logic.Boolean false))
       recursive_callee
 
-let reject_recursion_through_supplied_code (context : State.context) (frame : State.frame) location
+let reject_recursion_through_supplied_code (frame : State.frame) location
     (statement : Mir.statement) =
   let reject supplied =
     Obligations.oblige frame location (Recursion_through_supply supplied) (Logic.Boolean false)
   in
   let reject_supply (supplier : Mir.Call_edges.supplier) code =
-    let recursive = List.filter (Cycles.is_in_recursion_group context.environment) code in
+    let recursive = List.filter (Cycles.is_in_recursion_group frame.environment) code in
     (match supplier with
     | Named_function path when List.exists (Path.equal path) recursive ->
         reject (Named_function path)
@@ -171,7 +171,7 @@ let reject_recursion_through_supplied_code (context : State.context) (frame : St
     List.iter
       (fun (edge : Mir.Call_edges.edge) ->
         match edge with Calls _ -> () | Supplies { supplier; code } -> reject_supply supplier code)
-      (Mir.Call_edges.list_statement_edges context.environment.lookups.interface frame.substitution
+      (Mir.Call_edges.list_statement_edges frame.environment.lookups.interface frame.substitution
          statement)
 
 type loop_measure = { read : State.frame -> Logic.term list; at_head : Logic.term list }

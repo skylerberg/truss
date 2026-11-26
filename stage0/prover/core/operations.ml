@@ -88,17 +88,17 @@ let find_written_equal (environment : State.environment) (query : Query.t) ty le
       | _ -> None)
   | _ -> None
 
-let make_derived_equal (context : State.context) (frame : State.frame) (ty : Types.ty) left right =
+let make_derived_equal (frame : State.frame) (ty : Types.ty) left right =
   let symbol = Logic.Symbol.Equal ty in
   let equal = Logic.Apply (symbol, [ left; right ]) in
   (match
-     ( Encoding.find_visible_type context.environment ty,
-       Encoding.find_constructors context.environment ty )
+     ( Encoding.find_visible_type frame.environment ty,
+       Encoding.find_constructors frame.environment ty )
    with
   | Some (interface, _), Some shape
     when List.exists Encoding.is_standard_equal interface.derives
          && not (Logic.mentions frame.bound equal) ->
-      Query.run_once context.query (Derived_equality equal) @@ fun () ->
+      Query.run_once frame.query (Derived_equality equal) @@ fun () ->
       let fields_equal (variant, fields) =
         Logic.conjunction
           (List.map
@@ -106,14 +106,12 @@ let make_derived_equal (context : State.context) (frame : State.frame) (ty : Typ
                let selector = Encoding.make_selector_symbol ty variant field in
                let left = Logic.Apply (selector, [ left ])
                and right = Logic.Apply (selector, [ right ]) in
-               if Encoding.is_equality_identity context.environment field_type then
+               if Encoding.is_equality_identity frame.environment field_type then
                  Logic.equal left right
                else if Encoding.find_float_format field_type <> None then
                  make_float_equal left right
                else
-                 match
-                   find_written_equal context.environment context.query field_type left right
-                 with
+                 match find_written_equal frame.environment frame.query field_type left right with
                  | Some equal -> equal
                  | None ->
                      let symbol = Logic.Symbol.Equal field_type in
@@ -137,13 +135,13 @@ let make_derived_equal (context : State.context) (frame : State.frame) (ty : Typ
   | _ -> ());
   equal
 
-let make_equality (context : State.context) (frame : State.frame) (ty : Types.ty) left right =
-  if Encoding.is_equality_identity context.environment ty then Logic.equal left right
+let make_equality (frame : State.frame) (ty : Types.ty) left right =
+  if Encoding.is_equality_identity frame.environment ty then Logic.equal left right
   else if Encoding.find_float_format ty <> None then make_float_equal left right
   else
-    match find_written_equal context.environment context.query ty left right with
+    match find_written_equal frame.environment frame.query ty left right with
     | Some equal -> equal
-    | None -> make_derived_equal context frame ty left right
+    | None -> make_derived_equal frame ty left right
 
 let find_width (ty : Types.ty) = Option.map fst (Types.find_integer_bits ty)
 
