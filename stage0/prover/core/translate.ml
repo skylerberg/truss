@@ -77,6 +77,7 @@ let make_empty_frame source =
     self_type = None;
     aliases = Locals.empty;
     lends = Locals.empty;
+    callbacks = [];
     visited = None;
     final_result = None;
     spent = [];
@@ -229,14 +230,16 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
-  Callbacks.declare_own context start
-    (List.filter_map
-       (fun (position, callback) ->
-         Option.map
-           (fun (parameter : Mir.parameter) ->
-             (parameter.local, Facts.read_parameter_name parameter, callback))
-           (List.nth_opt parameters position))
-       contract.callbacks);
+  let start =
+    Callbacks.declare_own context start
+      (List.filter_map
+         (fun (position, callback) ->
+           Option.map
+             (fun (parameter : Mir.parameter) ->
+               (parameter.local, Facts.read_parameter_name parameter, callback))
+             (List.nth_opt parameters position))
+         contract.callbacks)
+  in
   Termination.enter_definition context start;
   let trait_declaration =
     match (Interface.Impls.find_implemented_method lookups.interface path, path) with

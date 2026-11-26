@@ -1,23 +1,30 @@
-let make_state () : State.callback_state = { known = []; is_reading = false }
+let make_state () : State.callback_state = { named = []; is_reading = false }
 
-let note_known (context : State.context) term function_type known =
-  if not (List.mem_assoc term context.callbacks.known) then
-    context.callbacks.known <- (term, (function_type, known)) :: context.callbacks.known
+let note_named (context : State.context) term function_type known =
+  if not (List.mem_assoc term context.callbacks.named) then
+    context.callbacks.named <- (term, (function_type, known)) :: context.callbacks.named
 
-let find_known (context : State.context) term =
-  Option.map snd (List.assoc_opt term context.callbacks.known)
+let find_typed (context : State.context) (frame : State.frame) term =
+  match List.assoc_opt term frame.callbacks with
+  | Some _ as own -> own
+  | None -> List.assoc_opt term context.callbacks.named
+
+let find_known context frame term = Option.map snd (find_typed context frame term)
 
 let declare_own context (frame : State.frame) own =
-  List.iter
-    (fun (local, name, callback) ->
+  List.fold_left
+    (fun (frame : State.frame) (local, name, callback) ->
       match
         ( Locals.find_opt (Core_local local) frame.locals,
           Encoding.find_local_type context frame (Core_local local) )
       with
       | Some term, Some (Types.Function function_type) ->
-          note_known context term function_type (Own { name; callback })
+          {
+            frame with
+            callbacks = (term, (function_type, State.Own { name; callback })) :: frame.callbacks;
+          }
       | _ -> Facts.raise_bug "the callback parameter `%s` is not a function bound at entry" name)
-    own
+    frame own
 
 let apply_function context (function_type : Types.function_type) callee arguments =
   let inputs =
@@ -294,7 +301,7 @@ let check_escaping context frame location known (function_type : Types.function_
 
 let check_read (context : State.context) (frame : State.frame) term =
   if frame.makes_obligations && not context.callbacks.is_reading then
-    match List.assoc_opt term context.callbacks.known with
+    match find_typed context frame term with
     | Some (function_type, (Own { callback = { requires = first :: _; _ }; _ } as known)) ->
         check_escaping context frame
           (Facts.locate context frame.source first.origin)
@@ -303,7 +310,7 @@ let check_read (context : State.context) (frame : State.frame) term =
 
 let check_passed context (frame : State.frame) ~at (callee : Callee.t) (passed : State.passed)
     ~arguments =
-  let known = find_known context passed.term in
+  let known = find_known context frame passed.term in
   let location = Facts.locate context frame.source (Option.value passed.origin ~default:at) in
   match (Callee.find_parameter_type context callee passed.position, passed.type_) with
   | Some (Types.Function expected), _ ->
@@ -354,7 +361,12 @@ let check_called context (frame : State.frame) (site : Invocation.site) called a
       check_requires context frame
         (Facts.locate context frame.source site.origin)
         known ~use:Called arguments)
-    (find_known context called)
+    (find_known context frame called)
+
+let list_called_requires context (frame : State.frame) called arguments =
+  match find_known context frame called with
+  | Some known -> List.map snd (list_requires context frame known arguments)
+  | None -> []
 
 let assume_returned context frame (function_type : Types.function_type) called ~entries ~exits
     ~result =
@@ -364,7 +376,7 @@ let assume_returned context frame (function_type : Types.function_type) called ~
     (fun known ->
       List.iter (Facts.assume context frame)
         (list_ensures context frame known ~entries ~exits ~result))
-    (find_known context called)
+    (find_known context frame called)
 
 let find_logic_link context (function_type : Types.function_type) term =
   if is_in_the_logic function_type && returns_value function_type then
@@ -446,7 +458,7 @@ let read_named_function (context : State.context) (frame : State.frame) (site : 
       let symbol = Logic.Symbol.Function_value { callee = path; type_arguments } in
       Facts.declare context (Logic.Constant (symbol, Encoding.declare_sort context type_));
       let term = Logic.Symbol symbol in
-      note_known context term function_type known;
+      note_named context term function_type known;
       Facts.run_once context (Value_of symbol) (fun () ->
           if not may_abort then begin
             if is_in_the_logic function_type && contract.is_logic_function then

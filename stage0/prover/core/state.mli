@@ -26,6 +26,17 @@ type known_callee = {
   known_clauses : (Interface.form_origin * clauses option) option Lazy.t;
 }
 
+type known_function =
+  | Named of {
+      path : Path.t;
+      contract : contract;
+      substitution_of : clauses -> Types.substitution;
+      type_arguments : Types.argument list;
+      group_member : Path.t option;
+      may_abort : bool;
+    }
+  | Own of { name : string; callback : Mir.callback }
+
 type frame = {
   source : source;
   locals : Logic.term Locals.t;
@@ -46,6 +57,7 @@ type frame = {
   spent : (Costs.counter * Logic.term) list;
   aliases : (Logic.term * Mir.place) list Locals.t;
   lends : (Logic.term * (frame -> Logic.term -> frame)) list Locals.t;
+  callbacks : (Logic.term * (Types.function_type * known_function)) list;
 }
 
 type changed_part = { root : Locals.local; declared_root_type : Types.ty; fields : string list }
@@ -135,7 +147,6 @@ type open_axiom = {
   parameters : Logic.symbol list;
   mutable hypotheses : Logic.term list;
   mutable at_calls : (frame -> (Logic.term -> Logic.term) -> unit) list;
-  mutable required : Logic.term;
 }
 
 type axiom_state = {
@@ -159,19 +170,8 @@ type validity_state = {
   valid_values : (Types.ty * Logic.term) list Tables.Term_table.t;
 }
 
-type known_function =
-  | Named of {
-      path : Path.t;
-      contract : contract;
-      substitution_of : clauses -> Types.substitution;
-      type_arguments : Types.argument list;
-      group_member : Path.t option;
-      may_abort : bool;
-    }
-  | Own of { name : string; callback : Mir.callback }
-
 type callback_state = {
-  mutable known : (Logic.term * (Types.function_type * known_function)) list;
+  mutable named : (Logic.term * (Types.function_type * known_function)) list;
   mutable is_reading : bool;
 }
 

@@ -421,6 +421,7 @@ let make_static_frame (frame : State.frame) source ~substitution ~self_type =
     spent = [];
     aliases = Locals.empty;
     lends = Locals.empty;
+    callbacks = [];
   }
 
 let is_static ~has_own_generics (amount : Mir.formula) =

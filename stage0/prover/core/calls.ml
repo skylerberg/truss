@@ -236,7 +236,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
       | Some application -> application.term
       | None -> Encoding.arrive context after "result" result_type
     in
-    if not is_unspecified_application then Validity.assume_valid context after result_type result;
+    if not is_unspecified_application then
+      Validity.assume_valid context (Facts.restrict_unless_proven after required) result_type result;
     (applied, result)
   in
   let assume_changed_validity (after : State.frame) ~changed ~left_valid =
@@ -522,13 +523,16 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
         let entries = List.map (fun (passed : State.passed) -> passed.term) values in
         Callbacks.check_called context frame site called entries;
         let before = frame in
+        let is_defined =
+          Logic.conjunction (Callbacks.list_called_requires context before called entries)
+        in
         let havoc = havoc_whole_arguments frame in
         let frame = havoc.after in
         let result =
           if Callbacks.is_in_the_logic function_type then begin
             let term = Callbacks.apply_function context function_type called entries in
             Facts.assume context
-              (Contract_axioms.restrict_to_requires context frame)
+              (Facts.restrict_unless_proven frame is_defined)
               (Encoding.make_in_range result_type term);
             term
           end
@@ -540,7 +544,7 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
         in
         if not is_unspecified_application then
           Validity.assume_valid context
-            (Contract_axioms.restrict_to_requires context frame)
+            (Facts.restrict_unless_proven frame is_defined)
             result_type result;
         let frame =
           Amounts.spend_indirect_call context ~before ~after:frame ~location function_type called
@@ -548,7 +552,7 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
         in
         if not is_unspecified_application then
           Callbacks.assume_returned context
-            (Contract_axioms.restrict_to_requires context frame)
+            (Facts.restrict_unless_proven frame is_defined)
             function_type called ~entries
             ~exits:(List.map (find_written havoc) values)
             ~result;
