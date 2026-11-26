@@ -278,7 +278,7 @@ type assumed_laws = {
 let states_laws (interface : Interface.Lookups.t) trait =
   match interface.find_trait_header trait with Some header -> header.laws <> [] | None -> false
 
-let list_field_types (interface : Interface.Lookups.t) (ty : Types.ty) =
+let list_instance_field_types (interface : Interface.Lookups.t) (ty : Types.ty) =
   match Types.strip_view ty with
   | Named { path; arguments } -> (
       match Interface.Definition.find_interface interface path with
@@ -314,7 +314,7 @@ let rec list_laws_of_bound ?(entered = []) (interface : Interface.Lookups.t) ~se
               (fun field_type ->
                 list_laws_of_bound ~entered interface ~self_type:field_type
                   ~is_assumed_by_the_callee:true required)
-              (list_field_types interface self_type)
+              (list_instance_field_types interface self_type)
         | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
             (if states_laws interface required.trait then
                [

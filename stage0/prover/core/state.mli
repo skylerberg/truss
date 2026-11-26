@@ -122,6 +122,8 @@ type cost_state = {
   mutable call_targets : (Logic.term * Core.local) list;
   mutable call_amounts : call_amount list;
   mutable potentials : Logic.term list;
+  mutable credited_holders : string list;
+  mutable blocked_holders : string list;
   holds_potential : bool Tables.Type_table.t;
   buffers : buffer option Tables.Type_table.t;
 }

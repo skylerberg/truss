@@ -1,4 +1,6 @@
-let make_state () : State.cost_state =
+exception Blocks_credited_potential of string list
+
+let make_state ?(blocked_holders = []) () : State.cost_state =
   {
     counters = [];
     conditional_counters = [];
@@ -11,6 +13,8 @@ let make_state () : State.cost_state =
     call_targets = [];
     call_amounts = [];
     potentials = [];
+    credited_holders = [];
+    blocked_holders;
     holds_potential = Tables.Type_table.create 16;
     buffers = Tables.Type_table.create 16;
   }
@@ -114,7 +118,50 @@ let make_potential_credit (context : State.context) change =
     (Logic.combine_linear (List.map (fun (part, factor) -> (credit part, factor)) sums, Z.zero))
     (if Z.equal constant Z.zero then Costs.zero else credit (Logic.Integer constant))
 
-let spend_operation context frame ~potential_change ?(note = fun _ _ -> ())
+let whole_values = "*"
+
+let count_held_potential (context : State.context) ~holder change =
+  if List.mem holder context.cost.blocked_holders then Logic.at_least_zero change
+  else begin
+    if change <> Costs.zero && not (List.mem holder context.cost.credited_holders) then
+      context.cost.credited_holders <- holder :: context.cost.credited_holders;
+    change
+  end
+
+let count_declared_potential context ~(of_ : Types.ty) change =
+  match Types.erase_views of_ with
+  | Named { path; _ } -> count_held_potential context ~holder:(Path.show path) change
+  | _ -> count_held_potential context ~holder:whole_values change
+
+let count_whole_potential context change = count_held_potential context ~holder:whole_values change
+
+let rec list_reached_types (context : State.context) ?(entered = []) (ty : Types.ty) =
+  match Types.erase_views ty with
+  | Named { path; arguments } when not (List.exists (Path.equal path) entered) ->
+      Path.show path
+      :: List.concat_map
+           (list_reached_types context ~entered:(path :: entered))
+           (Mir.Call_edges.list_instance_field_types context.lookups.interface ty
+           @ List.filter_map (function Types.Type argument -> Some argument | _ -> None) arguments)
+  | _ -> []
+
+let block_saved_potential (context : State.context) (held : Types.ty list) =
+  let blocked = context.cost.blocked_holders in
+  match
+    List.filter
+      (fun holder -> not (List.mem holder blocked))
+      (List.sort_uniq String.compare
+         (match List.concat_map (list_reached_types context) held with
+         | [] -> []
+         | reached -> whole_values :: reached))
+  with
+  | [] -> ()
+  | reached ->
+      if List.exists (fun holder -> List.mem holder context.cost.credited_holders) reached then
+        raise (Blocks_credited_potential (reached @ blocked));
+      context.cost.blocked_holders <- reached @ blocked
+
+let spend_operation context frame ~potential_change ~held ?(note = fun _ _ -> ())
     (charge_of : Costs.counter -> Costs.charge) =
   let change = Option.map Lazy.from_fun potential_change in
   spend context frame (fun counter ->
@@ -126,10 +173,13 @@ let spend_operation context frame ~potential_change ?(note = fun _ _ -> ())
       in
       let amount =
         match (counted, counter.amortized) with
-        | No_potential, false | (Potential_change | Potential_growth), true -> amount
+        | No_potential, false -> amount
+        | (Potential_change | Potential_growth), true ->
+            block_saved_potential context (held ());
+            amount
         | No_potential, true -> (
             match find_change () with
-            | Some change -> Logic.add amount change
+            | Some change -> Logic.add amount (count_whole_potential context change)
             | None -> declare_unknown_amount context frame counter)
         | Potential_change, false -> (
             match find_change () with
