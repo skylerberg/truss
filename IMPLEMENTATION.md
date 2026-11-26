@@ -431,8 +431,8 @@ develop as well as make it easier to bootstrap the compiler in parts.
 
 - **`Query` holds the query under construction.** Its declarations, facts,
   fresh names, scopes and posed obligations are fields of an abstract type,
-  `context.query`, so no other module writes them: a module marks the facts
-  with `Query.count_facts` and reads the ones added since, and a module that
+  `Query.t`, so no other module writes them: a module marks the query with
+  `Query.mark` and reads the facts added since, and a module that
   reads code under a binder takes the facts of that scope from
   `Query.run_in_scope`.
 - **A term is built without the query.** The sort of a type is
@@ -534,7 +534,7 @@ unchecked.
 Code names each module by its path, such as `Resolve.Names` or
 `Emit_c.Ir_builder`, so a reader finds a definition without searching for the
 module a short name stands for. Code has no `open`: a name from another
-module is qualified, as in `Facts.find_visible_type`, and no `open` can
+module is qualified, as in `Encoding.find_visible_type`, and no `open` can
 shadow a name in scope. Code has no module alias either. Many modules share a name,
 such as the scanner's `Names` and `Resolve.Names`, so an alias's short name
 does not say which module it is. A library's main module exposes a
