@@ -31,7 +31,7 @@ val spend_contract_call :
   changed:(int * Logic.term) list ->
   result:Logic.term ->
   result_type:Types.ty ->
-  lent_final:(Logic.term -> Logic.term) option ->
+  final:Logic.term option ->
   is_recursive:bool ->
   bind_frame:(State.clauses -> State.frame) ->
   State.frame

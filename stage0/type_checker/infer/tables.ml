@@ -92,7 +92,7 @@ type conversion =
 type specification_call =
   | Old
   | Identical
-  | Final of { part : Types.ty }
+  | Final
   | Specification_function of Core.specification_function
   | Method_cost of {
       metric : Language.Metric.t;
@@ -254,14 +254,13 @@ let map ~map_type ~map_argument ~map_capabilities (tables : t) : t =
                interpolation_type = map_type interpolation_type;
                conversions = List.map (Option.map map_call) conversions;
              })
-    | Specification_call (Final { part }) -> Specification_call (Final { part = map_type part })
     | Specification_call (Method_cost cost) ->
         Specification_call
           (Method_cost
              { cost with trait = map_trait cost.trait; self_type = map_type cost.self_type })
     | Loop loop -> Loop (map_loop loop)
     | ( Literal _ | Record_update _ | Lambda _ | Discarded
-      | Specification_call (Old | Identical | Specification_function _) ) as elaboration ->
+      | Specification_call (Old | Identical | Final | Specification_function _) ) as elaboration ->
         elaboration
   in
   let map_entries table transform = Array.map (Option.map transform) table in
@@ -359,13 +358,12 @@ let list_arguments_at (tables : t) id =
   | Some (Template (Tagged { from_template; interpolation_type; conversions })) ->
       (Types.Type interpolation_type :: list_call from_template)
       @ List.concat_map (Option.fold ~none:[] ~some:list_call) conversions
-  | Some (Specification_call (Final { part })) -> [ Types.Type part ]
   | Some (Specification_call (Method_cost { trait; self_type; _ })) ->
       Types.Type self_type :: list_trait trait
   | Some (Loop loop) -> list_loop loop
   | Some
       ( Literal _ | Record_update _ | Lambda _ | Discarded
-      | Specification_call (Old | Identical | Specification_function _) )
+      | Specification_call (Old | Identical | Final | Specification_function _) )
   | None ->
       []
 

@@ -41,8 +41,8 @@ type frame = {
   binders : (Logic.symbol * Logic.sort * Logic.term) list;
   substitution : Types.substitution;
   self_type : Types.ty option;
-  yielded : Logic.term option;
-  yielded_so_far : Logic.term option;
+  visited : Logic.term option;
+  final_result : Logic.term option;
   spent : (Costs.counter * Logic.term) list;
   aliases : (Logic.term * Mir.place) list Locals.t;
   lends : (Logic.term * (frame -> Logic.term -> frame)) list Locals.t;
@@ -125,11 +125,8 @@ type cost_state = {
   buffers : buffer option Tables.Type_table.t;
 }
 
-type lending = {
-  part_type : Types.ty;
-  part_postconditions : Mir.formula list;
-  return_postconditions : Mir.formula list;
-}
+type lent_part = { lent_frame : frame; lent_origin : Core.origin }
+type lending_state = { mutable part_type : Types.ty option; mutable lent_parts : lent_part list }
 
 type open_axiom = {
   parameters : Logic.symbol list;
@@ -193,7 +190,7 @@ type context = {
   policy : obligation_policy;
   disjoint : (Core.id list * Core.id list) list;
   mutable indexes : (Core.id * noted_place) list;
-  mutable lending : lending option;
+  lending : lending_state;
   home : Resolve.Names.key;
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   cost : cost_state;

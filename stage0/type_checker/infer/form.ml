@@ -515,7 +515,8 @@ let is_executable form (condition : Core.expression) =
           if node.type_ = Types.Integer then executable := false;
           match node.kind with
           | Quantified { binder = Over_type _; _ }
-          | Result | Old _ | Yielded | Identical _ | Specification_function _ | Method_cost _
+          | Result | Old _ | Visited | Final_result | Identical _ | Specification_function _
+          | Method_cost _
           | Convert { conversion = To_integer | From_integer; _ } ->
               executable := false
           | _ -> ());
@@ -931,7 +932,7 @@ and build_name form env (value : Syntax.expression) : Core.kind =
              origin = Written value.id;
            })
   | Some { target = Result_value; _ } -> Result
-  | Some { target = Visited; _ } -> Yielded
+  | Some { target = Visited; _ } -> Visited
   | Some _ | None -> raise_bug "%s is not a value and has no core node" (show_node value.id)
 
 and build_member form env (value : Syntax.expression) base (member : Syntax.name) : Core.kind =
@@ -1021,27 +1022,7 @@ and build_specification_call form env (value : Syntax.expression) (arguments : S
           let first = build_expression form env first.value in
           Identical (first, build_expression form env second.value)
       | _ -> raise_bug "`identical` does not have two arguments")
-  | Final { part } -> build_final form value ~part
-
-and build_final form (value : Syntax.expression) ~part : Core.kind =
-  let parts : Types.ty =
-    Named { path = Well_known.make_path Sequence; arguments = [ Types.Type part ] }
-  in
-  let make = make_synthetic_expression form ~origin:(make_rewrite_origin value.id) in
-  let build_read_argument = Operands.build_argument Read in
-  let first =
-    make part
-      (Call
-         (make_call form
-            ~callee:(make_method_target form Index_at ~self_type:parts)
-            ~arguments:
-              [
-                build_read_argument (make parts Yielded);
-                build_read_argument (make Types.Integer (Integer Z.zero));
-              ]
-            ~lends:(Some Read)))
-  in
-  Use (Lent first)
+  | Final -> Final_result
 
 and build_default_argument form ~construct (callee : Core.operand Core.target) ~position :
     Core.argument =

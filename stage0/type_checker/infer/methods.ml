@@ -48,7 +48,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
           ignore (Hooks.check_expression state env argument.value);
           let part = State.normalize state part in
           state.tables.resolutions.(value.id) <- Some Specification_value;
-          State.elaborate state value.id (Specification_call (Final { part }));
+          State.elaborate state value.id (Specification_call Final);
           part
       | _ ->
           Calls.check_arguments_alone state env arguments

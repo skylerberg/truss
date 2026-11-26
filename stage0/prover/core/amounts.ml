@@ -459,8 +459,8 @@ let make_static_frame (frame : State.frame) source ~substitution ~self_type =
     binders = [];
     substitution;
     self_type = Some self_type;
-    yielded = None;
-    yielded_so_far = None;
+    visited = None;
+    final_result = None;
     spent = [];
     aliases = Locals.empty;
     lends = Locals.empty;
@@ -479,7 +479,7 @@ let is_static ~has_own_generics (amount : Mir.formula) =
     (not !reads_a_parameter)
     && not
          (Contracts.mentions_specification amount (function
-           | Result | Entry _ | Yielded -> true
+           | Result | Entry _ | Visited | Final_result -> true
            | Identical _ | Applied _ | Method_cost _ | Map _ | Quantified _ -> false))
 
 let find_static_bound context frame (metric : Language.Metric.t) (clauses : State.clauses)
@@ -725,18 +725,17 @@ let spend_wait_for_tasks context frame =
 
 let spend_contract_call (context : State.context) ~(before : State.frame) ~(after : State.frame)
     (site : Invocation.site) (invocation : Invocation.t) path (contract : State.contract)
-    (values : State.passed list) ~changed ~result ~result_type ~lent_final ~is_recursive ~bind_frame
-    =
+    (values : State.passed list) ~changed ~result ~result_type ~final ~is_recursive ~bind_frame =
   let compute_potential_change () =
     Logic.add
       (Potentials.compute_arguments_potential_change context ~before ~after values ~changed)
       (match contract.result_kind with
       | `Lends -> (
-          match lent_final with
-          | Some leave ->
+          match final with
+          | Some final ->
               Logic.subtract
                 (Potentials.compute_potential context after result_type result)
-                (Potentials.compute_potential context after result_type (leave result))
+                (Potentials.compute_potential context after result_type final)
           | None -> Costs.zero)
       | `Returns -> Potentials.compute_potential context after result_type result)
   in

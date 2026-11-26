@@ -5043,10 +5043,11 @@ test "a lent part" {
 - `lends mut Item` lends the part `mut`, and the body writes `mut` on the
   place it lends.
 - No code of the method runs after it lends.
-- A clause of a lending method that mentions `result` holds where the
-  method lends, and every other clause holds when the lend ends. The
-  `ensures` here promises that the shelf keeps its length while the caller
-  changes the item, so the test can still index it afterward.
+- A clause of a lending method that mentions `result` and not
+  `final(result)` holds where the method lends, and every other clause
+  holds when the lend ends. The `ensures` here promises that the shelf
+  keeps its length while the caller changes the item, so the test can still
+  index it afterward.
 - In an `ensures`, `final(result)` is the part as the caller left it.
 - A lending method is not a value: a function type cannot lend, since its
   caller could keep the part too long.

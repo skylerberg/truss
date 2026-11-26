@@ -44,7 +44,6 @@ let describe_value = function
   | Temporary -> [ Text "a temporary" ]
   | Self_value -> [ Text "`self`" ]
   | Compiler_local -> [ Text "a local that the compiler introduces" ]
-  | Lent_part -> [ Text "a lent part" ]
 
 let describe_changed_part { Prover.root; fields } =
   let suffix = String.concat "" (List.map (fun field -> "." ^ field) fields) in
@@ -52,7 +51,7 @@ let describe_changed_part { Prover.root; fields } =
   | Named name -> [ Description.Text (Printf.sprintf "`%s%s`" name suffix) ]
   | Self_value -> [ Text (Printf.sprintf "`self%s`" suffix) ]
   | Quoted quoted -> [ Text "`"; quote_in quoted; Text (suffix ^ "`") ]
-  | Temporary | Compiler_local | Lent_part -> describe_value root
+  | Temporary | Compiler_local -> describe_value root
 
 let describe_invariant_moment = function
   | Prover.When_lend_ends -> say "when the lend of this part ends"
@@ -467,7 +466,6 @@ let describe_obligation = function
   | Not_a_scalar_value { at } ->
       tick at @ [ Text " may not be a Unicode scalar value, which a `Character` must be." ]
   | Unreachable_reached -> say "This `unreachable` may be reached."
-  | Lent_part_ensures { clause } -> tick clause @ [ Text " may not hold for the part lent here." ]
   | Cost_promise promise -> describe_promise promise
   | Impl_precondition { clause } ->
       tick clause
@@ -484,16 +482,22 @@ let describe_obligation = function
              `Panic` proves only the trait's condition, so this `impl` could panic in code that \
              has no `Panic`.";
         ]
-  | Ensures_at_method_end { clause } ->
-      tick clause @ [ Text " may not hold when the method ends here." ]
-  | Ensures_at_return { clause } ->
-      tick clause @ [ Text " may not hold when the function returns here." ]
-  | Promiser_ensures { promiser; clause } ->
-      [
-        Text (Printf.sprintf "The %s's `" (show_promiser promiser));
-        quote_in clause;
-        Text "` may not hold when the method returns here.";
-      ]
+  | Postcondition { clause; promiser; moment } -> (
+      let failure =
+        match (moment, promiser) with
+        | Where_lent, _ -> " may not hold for the part lent here."
+        | At_lend_end, _ -> " may not hold when the method ends here."
+        | At_return, None -> " may not hold when the function returns here."
+        | At_return, Some _ -> " may not hold when the method returns here."
+      in
+      match promiser with
+      | None -> tick clause @ [ Text failure ]
+      | Some promiser ->
+          [
+            Text (Printf.sprintf "The %s's `" (show_promiser promiser));
+            quote_in clause;
+            Text ("`" ^ failure);
+          ])
   | Law_may_fail { trait; law; for_type } ->
       say
         (Printf.sprintf "The law `%s.%s` may not hold for `%s`." (Types.show_trait trait) law
@@ -586,9 +590,7 @@ let find_code : Prover.obligation -> Diagnostic.Code.prover = function
   | Invariant_may_fail _ | Preserved_invariant _ | Derived_default_invariant | Loop_invariant _
   | Visited_out_of_order | Element_count_changes ->
       Invariant
-  | Lambda_promise _ | Lent_part_ensures _ | Ensures_at_method_end _ | Ensures_at_return _
-  | Promiser_ensures _ | Restated_contract _ | Callback_promise _ ->
-      Ensures
+  | Lambda_promise _ | Postcondition _ | Restated_contract _ | Callback_promise _ -> Ensures
   | Out_of_range _ -> Out_of_range
   | Divisor_may_be_zero _ -> Division
   | Division_overflow _ | Overflow _ -> Overflow

@@ -33,7 +33,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       termination = Termination.make_state ~terminates ~measures;
       validity = Validity.make_state ();
       callbacks = Callbacks.make_state ();
-      lending = None;
+      lending = Lending.make_state ();
       cost = Counters.make_state ();
       logs = [];
       powers = [];
@@ -76,8 +76,8 @@ let make_empty_frame source =
     self_type = None;
     aliases = Locals.empty;
     lends = Locals.empty;
-    yielded = None;
-    yielded_so_far = None;
+    visited = None;
+    final_result = None;
     spent = [];
   }
 
@@ -270,19 +270,12 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   let start = { start with old_locals = start.locals; old_self = start.self } in
   Termination.enter_definition context start;
   let output = Option.map (Encoding.substitute_type context start) output in
-  let start =
+  let lends =
     match signature with
     | Some { output = Lends (_, part); _ } ->
-        context.lending <-
-          Some
-            {
-              part_type = part;
-              part_postconditions = List.filter Contracts.mentions_result declared_ensures;
-              return_postconditions =
-                List.filter (fun clause -> not (Contracts.mentions_result clause)) declared_ensures;
-            };
-        { start with yielded_so_far = Some (Intrinsics.make_empty_parts context start part) }
-    | _ -> start
+        Lending.enter_method context ~part_type:(Encoding.substitute_type context start part);
+        true
+    | Some { output = Returns _; _ } | None -> false
   in
   let list_values (at : State.frame) =
     List.filter_map
@@ -298,15 +291,20 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
     match inherited with
     | Some ((clauses : State.clauses), substitution) when has_trait_frame ->
         let number terms = List.mapi (fun position term -> (position, term)) terms in
+        let inside =
+          {
+            (Contracts.make_exit_frame at clauses ~entries:(number entry_terms)
+               ~exits:(number (list_paired_values at))
+               ~result ~substitution)
+            with
+            old_self = start.self;
+          }
+        in
         Some
           ( clauses,
-            {
-              (Contracts.make_exit_frame at clauses ~entries:(number entry_terms)
-                 ~exits:(number (list_paired_values at))
-                 ~result ~substitution)
-              with
-              old_self = start.self;
-            } )
+            match at.final_result with
+            | Some final -> Lending.bind_final inside final
+            | None -> inside )
     | _ -> None
   in
   let trait_requires =
@@ -411,9 +409,56 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
         parameter.mode = Language.Mode.Mut && parameter.local = Self)
       parameters
   in
+  let check_declared_ensures (frame : State.frame) location ~is_checked ~moment =
+    List.iter
+      (fun (ensured : Mir.formula) ->
+        if is_checked ensured then
+          let _, term =
+            Obligations.with_condition context ensured.holds_when (fun () ->
+                Validity.read_specification context frame ensured)
+          in
+          Obligations.oblige ~holds_when:ensured.holds_when ~cited:(source.key, ensured.origin)
+            context frame location
+            (Postcondition { clause = Facts.quote source ensured.origin; promiser = None; moment })
+            term)
+      declared_ensures
+  in
+  let check_inherited_ensures (frame : State.frame) location ~is_checked ~moment =
+    match find_trait_frame frame ~result:frame.result with
+    | Some (clauses, inside) ->
+        let under_trait = Facts.restrict frame trait_requires in
+        List.iter
+          (fun (clause : Mir.formula) ->
+            if is_checked clause then
+              let _, term = Validity.read_specification context inside clause in
+              Obligations.oblige ~holds_when:clause.holds_when
+                ~cited:(clauses.callee.key, clause.origin)
+                context under_trait location
+                (Postcondition
+                   {
+                     clause = Facts.quote clauses.callee clause.origin;
+                     promiser = Some (Contracts.find_promiser lookups clauses.callee);
+                     moment;
+                   })
+                term)
+          clauses.ensures
+    | None -> ()
+  in
+  List.iter
+    (fun ({ lent_frame; lent_origin } : State.lent_part) ->
+      let location = Facts.locate context lent_frame.source lent_origin in
+      check_declared_ensures lent_frame location ~is_checked:Lending.holds_where_lent
+        ~moment:Where_lent;
+      check_inherited_ensures lent_frame location ~is_checked:Lending.holds_where_lent
+        ~moment:Where_lent)
+    (Lending.list_lent_parts context);
+  let holds_at_exit clause = not (lends && Lending.holds_where_lent clause) in
+  let exit_moment : Catalog.Prover.postcondition_moment =
+    if lends then At_lend_end else At_return
+  in
   List.iter
     (fun ({ frame; returned; return_origin } : State.function_exit) ->
-      let frame = { frame with result = returned } in
+      let frame = if lends then frame else { frame with result = returned } in
       let exit_location = Facts.locate context frame.source return_origin in
       (match (returned, output) with
       | Some term, Some output ->
@@ -436,32 +481,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
           Validity.check_valid context frame exit_location self_type self ~deep:true
             ~includes_invariants:(not is_update_step) ~moment:Self_at_return
       | _ -> ());
-      (match (context.lending, frame.yielded_so_far) with
-      | Some { return_postconditions; _ }, Some yielded_so_far ->
-          List.iter
-            (fun (ensured : Mir.formula) ->
-              let _, term =
-                Validity.read_specification context
-                  { frame with yielded = Some yielded_so_far }
-                  ensured
-              in
-              Obligations.oblige ~holds_when:ensured.holds_when ~cited:(source.key, ensured.origin)
-                context frame exit_location
-                (Ensures_at_method_end { clause = Facts.quote source ensured.origin })
-                term)
-            return_postconditions
-      | _ ->
-          List.iter
-            (fun (ensured : Mir.formula) ->
-              let _, term =
-                Obligations.with_condition context ensured.holds_when (fun () ->
-                    Validity.read_specification context frame ensured)
-              in
-              Obligations.oblige ~holds_when:ensured.holds_when ~cited:(source.key, ensured.origin)
-                context frame exit_location
-                (Ensures_at_return { clause = Facts.quote source ensured.origin })
-                term)
-            declared_ensures);
+      check_declared_ensures frame exit_location ~is_checked:holds_at_exit ~moment:exit_moment;
       let under_trait = Facts.restrict frame trait_requires in
       List.iter
         (fun (promise : Cost_promises.promise) ->
@@ -478,22 +498,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
               ~at:{ frame with locals = frame.old_locals; self = frame.old_self; result = returned }
               ~location:exit_location)
         promised;
-      match find_trait_frame frame ~result:returned with
-      | Some (clauses, inside) ->
-          List.iter
-            (fun (clause : Mir.formula) ->
-              let _, term = Validity.read_specification context inside clause in
-              Obligations.oblige ~holds_when:clause.holds_when
-                ~cited:(clauses.callee.key, clause.origin)
-                context under_trait exit_location
-                (Promiser_ensures
-                   {
-                     promiser = Contracts.find_promiser lookups clauses.callee;
-                     clause = Facts.quote clauses.callee clause.origin;
-                   })
-                term)
-            clauses.ensures
-      | _ -> ())
+      check_inherited_ensures frame exit_location ~is_checked:holds_at_exit ~moment:exit_moment)
     returns;
   (make_outcome context, context.skipped_conditions)
 
@@ -763,7 +768,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
               uses = Types.substitute_capabilities subtrait_substitution signature.uses;
             }
           in
-          let after, result =
+          let ({ frame = lent; result; end_lend } : Calls.applied) =
             Calls.call_contract context entry
               { origin = at; type_ = result_type }
               invocation method_path contract
@@ -791,35 +796,59 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
                      term = read_place parameter entry;
                    })
                  clauses.parameters)
-              ~recursive_callee:None ~lent_final:None
+              ~recursive_callee:None
               ~substitution_of:(fun _ -> callee_substitution)
               ~type_arguments:
                 (Facts.list_method_type_arguments ~self_type:for_type generic_arguments)
           in
-          let exit_ = reading after and entry_reading = reading entry in
-          let ensuring =
-            {
-              exit_ with
-              old_locals = entry_reading.locals;
-              old_self = entry_reading.self;
-              result = Some result;
-            }
+          let entry_reading = reading entry and location = Facts.locate context start.source at in
+          let check_restated (after : State.frame) ~final ~is_checked =
+            let ensuring =
+              {
+                (reading after) with
+                old_locals = entry_reading.locals;
+                old_self = entry_reading.self;
+                result = Some result;
+              }
+            in
+            let ensuring =
+              match final with Some final -> Lending.bind_final ensuring final | None -> ensuring
+            in
+            List.iter
+              (fun (clause : Mir.formula) ->
+                if is_checked clause then
+                  let _, term = Validity.read_specification context ensuring clause in
+                  Obligations.oblige context after location
+                    (Restated_contract
+                       {
+                         for_type;
+                         name;
+                         clause = Facts.quote clauses.callee clause.origin;
+                         trait;
+                         declared;
+                       })
+                    term)
+              clauses.ensures
           in
-          let location = Facts.locate context start.source at in
-          List.iter
-            (fun (clause : Mir.formula) ->
-              let _, term = Validity.read_specification context ensuring clause in
-              Obligations.oblige context after location
-                (Restated_contract
-                   {
-                     for_type;
-                     name;
-                     clause = Facts.quote clauses.callee clause.origin;
-                     trait;
-                     declared;
-                   })
-                term)
-            clauses.ensures;
+          let after =
+            match signature.output with
+            | Returns _ ->
+                check_restated lent ~final:None ~is_checked:(fun _ -> true);
+                lent
+            | Lends _ ->
+                check_restated lent ~final:None ~is_checked:Lending.holds_where_lent;
+                let final, after =
+                  match end_lend with
+                  | Some end_lend ->
+                      let final = Encoding.arrive context lent "final" result_type in
+                      Validity.assume_valid context lent result_type final;
+                      (final, end_lend lent final)
+                  | None -> (result, lent)
+                in
+                check_restated after ~final:(Some final) ~is_checked:(fun clause ->
+                    not (Lending.holds_where_lent clause));
+                after
+          in
           List.iter
             (fun promise ->
               Cost_promises.check_promise context after promise ~at:entry_reading ~location

@@ -182,6 +182,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `Contract_axioms` | The contract of a logic function as an axiom |
   | `Validity` | The invariant of a value, and each check of it |
   | `Callbacks` | A function passed as a value |
+  | `Lending` | The contract of a lending method: where each clause holds, and the part as the caller left it |
   | `Laws` | The laws of a trait |
 
 - **`Query` holds the query under construction.** Its declarations, facts,
@@ -197,6 +198,17 @@ develop as well as make it easier to bootstrap the compiler in parts.
   after its postconditions: an element is checked there, and a step's
   `self` is a value not known to be valid until then. Its state is one
   record, `context.validity`.
+- **`Lending` decides where each clause of a lending method holds.**
+  `Lending.holds_where_lent` separates the clauses on the lent part from
+  the clauses that hold when the lend ends, and the method's proof and
+  every caller read a clause in the state that it names. A method's proof
+  records each part it lends in `context.lending`, and `Translate` checks
+  the method's own clauses and its trait's at each lent part and at each
+  exit. `Calls.call_contract` gives a `mut` lend two moments: it assumes
+  the clauses on the lent part where the method lends, and returns the end
+  of the lend, which takes the part as the caller left it, checks its
+  invariant, and assumes the other clauses. `visited` and `final(result)`
+  are separate MIR nodes, and each reads its own field of the frame.
 - **The solver keeps Z3 running.** `Solver` starts one `z3 -in` process for
   each domain that solves, gives each query to an idle process, and sends
   `(reset)` after the answer, so a query costs no launch. A process that was

@@ -171,18 +171,21 @@ let merge context ?value_type ~condition
       | Some ty -> Some (define "value" (Encoding.declare_sort context ty) values)
       | None -> Some (choose values)
   in
-  let yielded_so_far =
-    match (context.lending, find_held (fun frame -> frame.yielded_so_far)) with
-    | Some { part_type; _ }, Some values ->
-        Some
-          (define "parts"
-             (Encoding.declare_sort context
-                (Types.Named
-                   { path = Well_known.make_path Sequence; arguments = [ Types.Type part_type ] }))
-             values)
-    | _ -> first.yielded_so_far
+  let merge_part pick =
+    match (Lending.find_part_sort context, find_held pick) with
+    | Some sort, Some values -> Some (define "part" sort values)
+    | _ -> pick first
   in
-  ({ merged with locals; types; spent; self; yielded_so_far }, value)
+  ( {
+      merged with
+      locals;
+      types;
+      spent;
+      self;
+      result = merge_part (fun frame -> frame.result);
+      final_result = merge_part (fun frame -> frame.final_result);
+    },
+    value )
 
 let join context ?value_type frames =
   match frames with
