@@ -15,6 +15,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
           disjoint = lookups.list_must_be_disjoint home;
           inherits_precondition;
           ranking = terminates && measures = [] && lookups.list_recursion_group node <> [];
+          terminates;
           policy = Obligations.make_policy ~keeps_termination ~keeps_failures ~panic_condition;
           visible_types = Tables.Type_table.create 16;
           callees = Tables.Path_table.create 16;
@@ -26,10 +27,9 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       laws_assumed = [];
       local_names = Tables.Local_table.create 16;
       local_origins = Tables.Local_table.create 16;
-      returns = [];
       query = Query.create ();
       axioms = Contract_axioms.make_state ();
-      termination = Termination.make_state ~terminates ~measures;
+      termination = Termination.make_state ~measures;
       validity = Validity.make_state ();
       callbacks = Callbacks.make_state ();
       lending = Lending.make_state ();
@@ -89,6 +89,7 @@ let make_empty_frame (environment : State.environment) (query : Query.t) source 
     obligation_condition = [];
     is_reading_callback = false;
     validating = [];
+    terminates = environment.terminates;
     visited = None;
     final_result = None;
     spent = [];
@@ -389,8 +390,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
     (fun (measure : Mir.formula) ->
       Validity.check_defined context start ~holds_when:measure.holds_when measure)
     measures;
-  Reader.read_body context start ~lambdas:mir.lambdas mir.body;
-  let returns = List.rev context.returns in
+  let returns = List.rev (Reader.read_body context start ~lambdas:mir.lambdas mir.body) in
   let mut_parameters =
     List.filter
       (fun (parameter : Mir.parameter) ->

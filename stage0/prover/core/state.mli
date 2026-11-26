@@ -53,6 +53,7 @@ type environment = {
   disjoint : (Core.id list * Core.id list) list;
   inherits_precondition : bool;
   ranking : bool;
+  terminates : bool;
   policy : obligation_policy;
   visible_types : (Types.type_interface * Types.substitution) option Tables.Type_table.t;
   callees : known_callee Tables.Path_table.t;
@@ -91,6 +92,7 @@ type frame = {
   obligation_condition : Types.condition;
   is_reading_callback : bool;
   validating : Types.ty list;
+  terminates : bool;
 }
 
 type changed_part = { root : Locals.local; declared_root_type : Types.ty; fields : string list }
@@ -178,7 +180,6 @@ type axiom_state = {
 type definition_entry = { entry_frame : frame; entry_measures : Logic.term list }
 
 type termination_state = {
-  mutable terminates : bool;
   measures : Mir.formula list;
   mutable definition_entry : definition_entry option;
 }
@@ -194,7 +195,6 @@ type context = {
   environment : environment;
   local_names : string Tables.Local_table.t;
   local_origins : Core.origin Tables.Local_table.t;
-  mutable returns : function_exit list;
   query : Query.t;
   axioms : axiom_state;
   termination : termination_state;
@@ -212,6 +212,6 @@ type context = {
   mutable holes : (Resolve.Names.key * Obligation.location) list;
   mutable unfinished : Logic.term list;
   mutable skipped_conditions : Types.condition list;
-  run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;
+  run_body : frame -> lambdas:Mir.body array -> Mir.body -> function_exit list;
   read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;
 }

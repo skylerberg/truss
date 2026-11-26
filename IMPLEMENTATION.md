@@ -419,6 +419,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   |---|---|
   | `is_ghost` | A specification, a proof block or an evaluated assertion is read |
   | `panics`, `can_declare_panic` | The code being read may panic, and may be given `uses Panic` as a fix |
+  | `terminates` | The code being read must terminate: the definition's own flag, or a lambda's inside its body |
   | `obligation_condition` | A clause that holds under a condition is read, so that an obligation made while reading it is one of that condition |
   | `requires_being_read` | One `requires` clause of the definition is read, so that a fix is placed before it |
   | `callees_whose_requires_are_read` | The `requires` of a callee are read, so that a call to the same callee inside them reads none |
