@@ -721,6 +721,9 @@ let () =
         "capabilities.not_available"
         ~says:(loop_needs_run_forever ^ ", or implement `FiniteCursor` for `Countdown`.")
         ~at:("for value", 1));
+  Harness.test "a loop whose condition compares floats has no measure" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.while_loop_comparing_floats
+        "capabilities.not_available" ~says:(loop_needs_run_forever ^ ".") ~at:("while", 1));
   Harness.test "a function that uses RunForever holds a loop without a measure" (fun () ->
       expect_fine Fixtures.Capabilities.while_loop_without_a_measure_using_run_forever);
   Harness.test "a call of a function that uses RunForever uses it" (fun () ->

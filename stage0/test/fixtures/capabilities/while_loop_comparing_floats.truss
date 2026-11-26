@@ -1,0 +1,7 @@
+fn climb(start: Float64) -> Float64 {
+  var height = start
+  while height < 10.0 {
+    height = height + 1.0
+  }
+  height
+}

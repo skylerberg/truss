@@ -2178,10 +2178,13 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   a loop over a cursor of type `Items: Cursor` uses
   `RunForever unless Items: FiniteCursor`.
 - In a function without `RunForever`, a `while` loop that states no measure,
-  and whose condition compares two sides that mutate nothing with `<`, `<=`,
-  `>`, or `>=`, has the distance between them as its measure. So does one
-  whose condition is a chain of `&&` that begins with such a comparison, as
-  in `while at < text.length() && text.byte(at) == 32`.
+  and whose condition compares two integers or two characters that mutate
+  nothing with `<`, `<=`, `>`, or `>=`, has the distance between them as its
+  measure. So does one whose condition is a chain of `&&` that begins with
+  such a comparison, as in
+  `while at < text.length() && text.byte(at) == 32`. A comparison of floats
+  gives no measure: the distance between two floats is no integer, and adding
+  to a large float can leave it unchanged.
 - **A loop without a measure uses `RunForever`** (see
   [Termination](#termination)). A `for` loop over a range or over a
   collection's elements always terminates.
