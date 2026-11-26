@@ -167,7 +167,7 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
                   let required =
                     List.map
                       (fun requirement -> find_readable_clause context mark requirement inside)
-                      (Facts.list_clauses clauses.requires)
+                      (Facts.list_clauses (clauses.requires @ clauses.panics_unless))
                   in
                   if List.mem None required then None
                   else

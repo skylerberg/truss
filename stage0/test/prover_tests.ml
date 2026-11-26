@@ -1762,6 +1762,10 @@ let () =
   Harness.test "a quantifier over a range of characters ranges over no surrogate" (fun () ->
       expect_proven quantified;
       expect_not_proven (Support.apply_edit quantified ("  false\n", "  true\n")) "prover.ensures");
+  Harness.test "the contract of a function that can panic is assumed only where it returns"
+    (fun () ->
+      expect_codes Fixtures.Prover.contract_of_a_function_that_panics_assumed_where_it_panics
+        [ "prover.overflow" ]);
   Harness.test "a capability's method keeps its ensures" (fun () ->
       expect_proven (dice ^ Fixtures.Prover.dice_roll_ensured_at_most_six));
   Harness.test "two calls of a capability's method may differ" (fun () ->
