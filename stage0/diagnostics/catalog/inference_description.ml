@@ -1021,13 +1021,12 @@ let describe : Inference.t -> Nodes.description = function
       make String_addition (Build.at origin)
         ~fixes:
           (match join with
-          | Some (left, right) ->
+          | Some pieces ->
               [
                 fix "Join them with interpolation."
                   [
                     Build.replace origin
-                      ((Description.Text "\"" :: write_piece left)
-                      @ write_piece right @ [ Text "\"" ]);
+                      ((Description.Text "\"" :: List.concat_map write_piece pieces) @ [ Text "\"" ]);
                   ];
               ]
           | None -> [])

@@ -901,6 +901,11 @@ let () =
   Harness.test "+ on strings is an error with a fix to interpolation" (fun () ->
       expect_one_diagnostic Fixtures.Infer.string_plus_a_string "types.string_addition"
         ~fixed:("name + \"!\"", "\"${name}!\""));
+  Harness.test "+ on an empty string and a string is fixed to the interpolation of the string"
+    (fun () ->
+      expect_one_diagnostic
+        (Support.apply_edit Fixtures.Infer.string_plus_a_string ("name + \"!\"", "\"\" + name"))
+        "types.string_addition" ~fixed:("\"\" + name", "\"${name}\""));
   Harness.test "an operator chooses the impl by both operands" (fun () ->
       let text = Fixtures.Infer.additions_of_meters_and_integers in
       match locate_core_call text "length + extra" 1 with
