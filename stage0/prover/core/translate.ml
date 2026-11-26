@@ -679,37 +679,33 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
             Facts.raise_bug "the restated method `%s` has no signature" (Path.show restated_path)
       in
       let subtrait_substitution = Contracts.make_trait_substitution lookups trait for_type in
-      let method_path = Path.Method { owner = impl; name; receiver } in
-      let generic_arguments =
-        List.map
-          (fun (generic : Types.generic) -> Types.Type (Types.Parameter generic.generic))
-          signature.generics
+      let callee =
+        Callee.resolve context start
+          (Trait_method
+             {
+               trait = declared;
+               name;
+               receiver;
+               self_type = for_type;
+               instantiation =
+                 {
+                   type_arguments =
+                     List.map
+                       (fun (generic : Types.generic) ->
+                         Types.Type (Types.Parameter generic.generic))
+                       signature.generics;
+                   capability_arguments = [];
+                 };
+               evidence;
+             })
+          ~lends:(match signature.output with Lends (mode, _) -> Some mode | Returns _ -> None)
+          ~uses:(Types.substitute_capabilities subtrait_substitution signature.uses)
       in
-      let callee_substitution =
-        let generics =
-          match Interface.Impls.read_signature lookups.interface method_path with
-          | Some (implemented : Types.signature) ->
-              List.map (fun (generic : Types.generic) -> generic.generic) implemented.generics
-          | None -> []
-        in
-        let fixed =
-          Types.combine_substitutions substitution
-            (Contracts.make_trait_substitution lookups declared for_type)
-        in
-        let unbound =
-          List.filter (fun generic -> Option.is_none (Types.find_argument generic fixed)) generics
-        in
-        if List.length unbound <> List.length generic_arguments then
-          Facts.raise_bug "`%s` and the method `%s` that it restates take different generics"
-            (Path.show restated_path) (Path.show method_path);
-        List.fold_left2
-          (fun substitution parameter argument ->
-            Types.bind_argument parameter argument substitution)
-          fixed unbound generic_arguments
-      in
-      match Contracts.find_method_contract context declared name receiver evidence with
-      | None -> Facts.raise_bug "`%s` has no contract" (Path.show method_path)
-      | Some contract ->
+      match callee.target with
+      | Function_value | Intrinsic _ | Definition { contract = None; _ } ->
+          Facts.raise_bug "the method that `%s` restates has no contract" (Path.show restated_path)
+      | Definition ({ contract = Some contract; _ } as definition) ->
+          let contract = { contract with restated_clauses = [] } in
           let read_place (parameter : Mir.parameter) (frame : State.frame) =
             match parameter.local with
             | Self -> Option.get frame.self
@@ -750,28 +746,10 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
             Types.substitute_erased subtrait_substitution
               (Types.extract_result_type signature.output)
           in
-          let invocation : Invocation.t =
-            {
-              callee =
-                Trait_method
-                  {
-                    trait = declared;
-                    name;
-                    receiver;
-                    self_type = for_type;
-                    instantiation =
-                      { type_arguments = generic_arguments; capability_arguments = [] };
-                    evidence;
-                  };
-              lends =
-                (match signature.output with Lends (mode, _) -> Some mode | Returns _ -> None);
-              uses = Types.substitute_capabilities subtrait_substitution signature.uses;
-            }
-          in
           let ({ frame = lent; result; end_lend } : Calls.applied) =
             Calls.call_contract context entry
               { origin = at; type_ = result_type }
-              invocation method_path contract
+              callee definition contract
               (List.mapi
                  (fun position (parameter : Mir.parameter) : State.passed ->
                    {
@@ -797,9 +775,6 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
                    })
                  clauses.parameters)
               ~recursive_callee:None
-              ~substitution_of:(fun _ -> callee_substitution)
-              ~type_arguments:
-                (Facts.list_method_type_arguments ~self_type:for_type generic_arguments)
           in
           let entry_reading = reading entry and location = Facts.locate context start.source at in
           let check_restated (after : State.frame) ~final ~is_checked =

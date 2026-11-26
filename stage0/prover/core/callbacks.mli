@@ -48,7 +48,7 @@ val run_reading_callback : State.context -> (unit -> 'a) -> 'a
 val list_callback_facts :
   State.context ->
   State.frame ->
-  Invocation.t ->
+  Callee.t ->
   int ->
   (int * Logic.term) list ->
   Logic.term list ->
@@ -57,7 +57,7 @@ val list_callback_facts :
 val list_callback_promises :
   State.context ->
   State.frame ->
-  Invocation.t ->
+  Callee.t ->
   int ->
   (int * Logic.term) list ->
   entries:Logic.term list ->
@@ -78,7 +78,7 @@ val check_callback_promises :
   State.context ->
   State.frame ->
   location:Obligation.location ->
-  Invocation.t ->
+  Callee.t ->
   State.passed ->
   unpromised:Catalog.Prover.unpromised ->
   assume:
@@ -103,7 +103,7 @@ val check_forwarded_callback :
   State.context ->
   State.frame ->
   Invocation.site ->
-  Invocation.t ->
+  Callee.t ->
   State.passed ->
   Core.local ->
   State.passed list ->
@@ -120,7 +120,7 @@ val check_callback_requires :
 val check_named_callback :
   State.context ->
   State.frame ->
-  Invocation.t ->
+  Callee.t ->
   State.passed ->
   origin:Core.origin ->
   Path.t ->

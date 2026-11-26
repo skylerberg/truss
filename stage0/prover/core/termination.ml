@@ -60,7 +60,15 @@ let compare_with_entry (context : State.context) (clauses : State.clauses) ~is_s
     ~callee_entry ~argument_at =
   match (context.termination.measures, clauses.decreases) with
   | [], [] when context.termination.terminates && is_self_call -> (
-      match list_structural_parameters context (read_entry context).entry_frame clauses with
+      let entry = (read_entry context).entry_frame in
+      let is_passed_at_its_type ((parameter : Mir.parameter), ty, _, _) =
+        Types.equal
+          (Encoding.substitute_type context entry ty)
+          (Encoding.substitute_type context callee_entry parameter.type_)
+      in
+      match
+        List.filter is_passed_at_its_type (list_structural_parameters context entry clauses)
+      with
       | [] -> Unmeasured
       | parts ->
           let before = List.map (fun (_, ty, value, _) -> Models.rank context ty value) parts in

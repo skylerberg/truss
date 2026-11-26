@@ -505,8 +505,7 @@ let translate_lambda context (frame : State.frame) ~(site : Invocation.site)
     (frame, term)
   else read_lambda context frame ~site written ~list_facts ~list_promises
 
-let make_passed_values context frame (invocation : Invocation.t)
-    (arguments : State.call_argument list) =
+let make_passed_values context frame (callee : Callee.t) (arguments : State.call_argument list) =
   let known =
     List.filter_map
       (function
@@ -520,9 +519,8 @@ let make_passed_values context frame (invocation : Invocation.t)
       | Lambda_argument { position; mode; site; lambda = written } ->
           let _, term =
             translate_lambda context frame ~site written
-              ~list_facts:(Callbacks.list_callback_facts context frame invocation position known)
-              ~list_promises:
-                (Callbacks.list_callback_promises context frame invocation position known)
+              ~list_facts:(Callbacks.list_callback_facts context frame callee position known)
+              ~list_promises:(Callbacks.list_callback_promises context frame callee position known)
           in
           {
             position;

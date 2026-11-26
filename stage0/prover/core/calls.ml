@@ -70,27 +70,12 @@ let havoc_mut context (frame : State.frame) (values : State.passed list) ~list_m
     { after = frame; written = []; end_writes = ignore }
     values
 
-let add_restated_clauses (context : State.context) ~self_type ~bind trait name receiver
-    (contract : State.contract) =
-  {
-    contract with
-    restated_clauses =
-      List.map
-        (fun ((subtrait : Types.trait_reference), (clauses : State.clauses)) ->
-          {
-            clauses with
-            bindings = bind subtrait (Path.Method { owner = subtrait.trait; name; receiver });
-          })
-        (Contracts.list_restated_clauses context
-           ~packages:(Operations.list_impl_packages context self_type)
-           ~self_type trait name receiver);
-  }
-
-let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
-    path (contract : State.contract) (values : State.passed list) ~recursive_callee ~substitution_of
-    ~type_arguments =
+let call_contract context (frame : State.frame) (site : Invocation.site) (callee : Callee.t)
+    (definition : Callee.definition) (contract : State.contract) (values : State.passed list)
+    ~recursive_callee =
+  let path = definition.path and type_arguments = definition.type_arguments in
   let substitution_of (clauses : State.clauses) =
-    Types.combine_substitutions (substitution_of clauses) clauses.bindings
+    Types.combine_substitutions (definition.substitution_of clauses) clauses.bindings
   in
   let find_clause_condition (clauses : State.clauses) holds_when =
     Conditions.find_obligation_condition
@@ -119,8 +104,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     }
   in
   let is_logic_call =
-    contract.is_logic_function
-    && Facts.remove_panic_condition invocation.uses = Types.no_capabilities
+    contract.is_logic_function && Facts.remove_panic_condition callee.uses = Types.no_capabilities
   in
   let values =
     if is_logic_call then
@@ -188,8 +172,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         (fun () -> Logic.conjunction (read_required ()))
     end
   in
-  if not (Obligations.may_panic context || Types.has_capability (Built_in Panic) invocation.uses)
-  then begin
+  if not (Obligations.may_panic context || Types.has_capability (Built_in Panic) callee.uses) then begin
     let clauses = contract.callee_clauses in
     let entry = read_entry_frame frame clauses in
     List.iter
@@ -224,7 +207,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let is_on_bound_values = List.exists (Logic.mentions frame.bound) callee_arguments in
   let declared_result_type = Encoding.substitute_declared_type context frame site.type_ in
   let result_type = Types.erase_views declared_result_type in
-  let definition = ref None in
+  let defining_term = ref None in
   let list_modified = Contracts.list_modified_parts context path in
   let make_result (after : State.frame) =
     let applied =
@@ -297,7 +280,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     Option.iter
       (fun application ->
         Contract_axioms.state context after application contract ~substitution_of ~result_type
-          ~group_member:(Cycles.find_group_member context frame invocation.callee)
+          ~group_member:(Cycles.find_group_member context frame callee.written)
           ~is_on_bound_values)
       applied
   in
@@ -342,9 +325,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             if is_kept clause && not (is_in_axiom clauses clause) then
               match Validity.read_specification context ensures_frame clause with
               | _, term ->
-                  (match (applied, !definition) with
+                  (match (applied, !defining_term) with
                   | Some application, None ->
-                      definition := Contract_axioms.find_definition application term
+                      defining_term := Contract_axioms.find_definition application term
                   | _ -> ());
                   state (Logic.( ==> ) (compute_required base clauses) term)
               | exception Facts.Unsupported _ -> ())
@@ -358,8 +341,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       applied
   in
   let spend ~(before : State.frame) ~(after : State.frame) ~changed ~result ~final =
-    Amounts.spend_contract_call context ~before ~after site invocation path contract values ~changed
-      ~result ~result_type:declared_result_type ~final
+    Amounts.spend_contract_call context ~before ~after site callee definition contract values
+      ~changed ~result ~result_type:declared_result_type ~final
       ~is_recursive:(Option.is_some recursive_callee) ~bind_frame:(fun clauses ->
         { (read_entry_frame before clauses) with result = Some result; condition = after.condition })
   in
@@ -376,7 +359,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           assume (fun clause -> not (Lending.holds_where_lent clause))
       | `Returns -> assume_ensures frame after ~changed ~applied ~result ~final:None (fun _ -> true));
   assume_hypotheses after applied;
-  match (contract.result_kind, invocation.lends) with
+  match (contract.result_kind, callee.lends) with
   | `Lends, Some Language.Mode.Mut ->
       havoc.end_writes after;
       let end_lend (ended : State.frame) final =
@@ -395,24 +378,28 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         havoc.end_writes after;
         after
       in
-      { frame = after; result = Option.value !definition ~default:result; end_lend = Some end_lend }
+      {
+        frame = after;
+        result = Option.value !defining_term ~default:result;
+        end_lend = Some end_lend;
+      }
   | (`Lends | `Returns), _ ->
       let after = spend ~before:frame ~after ~changed ~result ~final:None in
       havoc.end_writes after;
-      { frame = after; result = Option.value !definition ~default:result; end_lend = None }
+      { frame = after; result = Option.value !defining_term ~default:result; end_lend = None }
 
 type modelled =
   | By_contract of applied
   | Without_contract of (State.frame * Logic.term) option
   | Lent_without_contract of applied
 
-let apply_lend context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
-    ~through (values : State.passed list) =
+let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : Callee.t) ~through
+    (values : State.passed list) =
   let location = Facts.locate context frame.source site.origin in
   (match Obligations.find_ruled_out_panic context with
   | Some condition
     when Conditions.may_panic_for_every_value context.lookups ~current:context.current
-           ~condition:context.condition invocation.uses ->
+           ~condition:context.condition callee.uses ->
       Obligations.oblige context frame location
         (Panics_where_ruled_out { call = { at = location; callee = None }; condition })
         (Logic.Boolean false)
@@ -423,21 +410,21 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (invocatio
       | Named_function { origin; path; _ } -> (
           match Contracts.find_function_contract context path with
           | Some contract ->
-              Callbacks.check_named_callback context frame invocation passed ~origin path contract
+              Callbacks.check_named_callback context frame callee passed ~origin path contract
                 values
           | None -> ())
       | Forwarded local ->
-          Callbacks.check_forwarded_callback context frame site invocation passed local values
+          Callbacks.check_forwarded_callback context frame site callee passed local values
       | Other ->
-          Callbacks.check_callback_promises context frame ~location invocation passed
+          Callbacks.check_callback_promises context frame ~location callee passed
             ~unpromised:Nothing_promises ~assume:Callbacks.assume_nothing values
       | Lambda -> ())
     values;
   let declared_result_type = Encoding.substitute_declared_type context frame site.type_ in
   let result_type = Types.erase_views declared_result_type in
-  (match invocation.callee with
+  (match callee.target with
   | Intrinsic _ -> ()
-  | _ ->
+  | Definition _ | Function_value ->
       List.iter
         (fun (passed : State.passed) ->
           Validity.check_valid context frame location passed.type_ passed.term ~deep:true
@@ -445,67 +432,23 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (invocatio
             ~moment:(When_passed { at = location; callee = None }))
         values);
   let havoc_whole_arguments frame = havoc_mut context frame values ~list_modified:(fun _ -> None) in
-  let list_arguments (type_arguments : Types.argument list) =
-    List.map
-      (fun argument ->
-        match Types.substitute_argument_erased frame.substitution argument with
-        | Types.Type ty -> Types.Type (Encoding.substitute_type context frame ty)
-        | other -> other)
-      type_arguments
-  in
-  let list_capability_arguments (instantiation : Types.instantiation) =
-    List.map
-      (fun (name, argument) -> (name, Types.substitute_capabilities frame.substitution argument))
-      instantiation.capability_arguments
-  in
-  let bind_callee path arguments capability_arguments ~fixed =
-    let generics, capability_parameters =
-      match Contracts.read_signature context path with
-      | Some (signature : Types.signature) ->
-          ( List.map (fun (generic : Types.generic) -> generic.generic) signature.generics,
-            signature.capability_parameters )
-      | None -> ([], [])
-    in
-    let rec bind_remaining substitution parameters arguments =
-      match (parameters, arguments) with
-      | parameter :: parameters, argument :: arguments ->
-          bind_remaining (Types.bind_argument parameter argument substitution) parameters arguments
-      | _ -> substitution
-    in
-    Types.combine_substitutions
-      (bind_remaining fixed
-         (List.filter
-            (fun parameter -> Option.is_none (Types.find_argument parameter fixed))
-            generics)
-         arguments)
-      (Types.make_capability_substitution capability_parameters capability_arguments)
-  in
-  let recursive_callee =
-    Termination.find_recursive_callee context frame location invocation.callee
-  in
-  let with_contract ?(substitution_of = fun _ -> Types.no_substitution) ?(type_arguments = []) path
-      = function
+  let recursive_callee = Termination.find_recursive_callee context frame location callee.written in
+  let call_definition (definition : Callee.definition) =
+    match definition.contract with
     | Some contract ->
         By_contract
-          (call_contract ~recursive_callee context frame site invocation path contract values
-             ~substitution_of ~type_arguments)
+          (call_contract ~recursive_callee context frame site callee definition contract values)
     | None -> (
+        let list_modified = Contracts.list_modified_parts context definition.path in
         let havoc_and_spend frame =
-          let havoc =
-            havoc_mut context frame values
-              ~list_modified:(Contracts.list_modified_parts context path)
-          in
-          let frame = Amounts.spend_call_without_a_contract context havoc.after invocation values in
+          let havoc = havoc_mut context frame values ~list_modified in
+          let frame = Amounts.spend_call_without_a_contract context havoc.after callee values in
           havoc.end_writes frame;
           frame
         in
-        match invocation.lends with
+        match callee.lends with
         | Some Language.Mode.Mut ->
-            let frame =
-              (havoc_mut context frame values
-                 ~list_modified:(Contracts.list_modified_parts context path))
-                .after
-            in
+            let frame = (havoc_mut context frame values ~list_modified).after in
             Lent_without_contract
               {
                 frame;
@@ -522,32 +465,16 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (invocatio
             Without_contract (Some (frame, Encoding.arrive context frame "result" result_type)))
   in
   let modelled =
-    match invocation.callee with
-    | Function { path; instantiation } ->
-        let arguments = list_arguments instantiation.type_arguments in
-        let substitution =
-          bind_callee path arguments
-            (list_capability_arguments instantiation)
-            ~fixed:Types.no_substitution
-        in
-        with_contract
-          ~substitution_of:(fun _ -> substitution)
-          ~type_arguments:arguments path
-          (Contracts.find_function_contract context path)
-    | Trait_method { trait; name; receiver; evidence; self_type; instantiation } -> (
-        let arguments = list_arguments instantiation.type_arguments in
-        let capability_arguments = list_capability_arguments instantiation in
-        let evidence =
-          Interface.Impls.resolve_evidence context.lookups.interface frame.substitution ~self_type
-            ~trait evidence
-        in
-        let self_type = Encoding.substitute_type context frame self_type in
-        let trait = { trait with trait_arguments = list_arguments trait.trait_arguments } in
+    match callee.target with
+    | Definition
+        ({ trait_method = Some { trait; self_type; evidence; name; receiver }; _ } as definition)
+      -> (
         Laws.assume_laws context frame trait self_type;
-        let list_operands () = List.map (fun (passed : State.passed) -> passed.term) values in
-        let trait_path = Path.Method { owner = trait.trait; name; receiver } in
-        let method_ = Well_known.find_method trait_path in
-        match (method_, evidence, list_operands ()) with
+        let operands = List.map (fun (passed : State.passed) -> passed.term) values in
+        let method_ =
+          Well_known.find_method (Path.Method { owner = trait.trait; name; receiver })
+        in
+        match (method_, evidence, operands) with
         | ( Some
               ( Fixed_width_integer_minimum_value | Fixed_width_integer_maximum_value
               | Fixed_width_integer_bit_width ),
@@ -571,38 +498,14 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (invocatio
             (Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ }),
             [ left; right ] ) ->
             let spent =
-              Amounts.spend_derived_equality context frame invocation values
+              Amounts.spend_derived_equality context frame callee values
                 ~result_type:declared_result_type ~result:(Logic.equal left right)
             in
             Without_contract
               (Some (spent, Operations.make_equality context frame self_type left right))
-        | _ ->
-            let trait_substitution =
-              bind_callee trait_path arguments capability_arguments
-                ~fixed:(Contracts.make_trait_substitution context.lookups trait self_type)
-            in
-            let path, callee_substitution =
-              match evidence with
-              | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
-                  let path = Path.Method { owner = impl; name; receiver } in
-                  (path, bind_callee path arguments capability_arguments ~fixed:substitution)
-              | Bound -> (trait_path, trait_substitution)
-            in
-            let compute_substitution (clauses : State.clauses) =
-              if clauses.inherited then trait_substitution else callee_substitution
-            in
-            let bind_restated subtrait restated =
-              bind_callee restated arguments capability_arguments
-                ~fixed:(Contracts.make_trait_substitution context.lookups subtrait self_type)
-            in
-            with_contract ~substitution_of:compute_substitution
-              ~type_arguments:(Facts.list_method_type_arguments ~self_type arguments)
-              path
-              (Option.map
-                 (add_restated_clauses context ~self_type ~bind:bind_restated trait.trait name
-                    receiver)
-                 (Contracts.find_method_contract context trait name receiver evidence)))
-    | Indirect () ->
+        | _ -> call_definition definition)
+    | Definition definition -> call_definition definition
+    | Function_value ->
         Callbacks.check_callback_requires context frame site through values;
         let before = frame in
         let havoc = havoc_whole_arguments frame in
@@ -645,10 +548,6 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (invocatio
           values;
         havoc.end_writes frame;
         Without_contract (Some (frame, result))
-    | Capability_method { capability; name } ->
-        with_contract
-          (Path.make_capability_method capability name)
-          (Contracts.find_capability_contract context capability name)
     | Intrinsic { operation; type_arguments } ->
         let havoc =
           match operation with
@@ -668,7 +567,7 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (invocatio
             result_type
         in
         let frame =
-          Amounts.spend_intrinsic context frame invocation operation values ~changed
+          Amounts.spend_intrinsic context frame callee operation values ~changed
             ~result_type:declared_result_type ~result
         in
         havoc.end_writes frame;
@@ -683,7 +582,7 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (invocatio
       Termination.reject_uncompared_recursion context frame location recursive_callee;
       Some applied
 
-let apply_call context frame site invocation ~through values =
+let apply_call context frame site callee ~through values =
   Option.map
     (fun { frame; result; _ } -> (frame, result))
-    (apply_lend context frame site invocation ~through values)
+    (apply_lend context frame site callee ~through values)

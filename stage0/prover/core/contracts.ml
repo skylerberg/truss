@@ -108,14 +108,6 @@ let find_callee (context : State.context) path : State.known_callee =
 
 let read_signature context path = Lazy.force (find_callee context path).known_signature
 
-let is_update_step context (invocation : Invocation.t) =
-  match invocation.callee with
-  | Function { path; _ } -> (
-      match read_signature context path with
-      | Some signature -> signature.is_update_step
-      | None -> false)
-  | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
-
 let list_modified_parts context path position =
   Option.bind (read_signature context path) (fun signature ->
       Types.list_modified_parts signature position)
