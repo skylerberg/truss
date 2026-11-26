@@ -14,6 +14,17 @@ let expect_accepted_after prefix name body =
   Harness.test name (fun () -> expect_fine (prefix ^ body))
 
 let () =
+  Harness.test "a value of a type that contains itself in place is passed to a call" (fun () ->
+      expect_fine
+        "public type Tree =\n\
+        \  | Leaf\n\
+        \  | Node(left: Tree)\n\n\
+         public fn is_leaf(tree: Tree) -> Bool {\n\
+        \  tree is Leaf\n\
+         }\n\n\
+         public fn is_empty(tree: Tree) -> Bool {\n\
+        \  is_leaf(tree)\n\
+         }\n");
   Harness.test "a body changes only the parts that its modifies clause names" (fun () ->
       let scanner =
         "public type Region(first: UInt64, stop: UInt64)\n\
