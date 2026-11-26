@@ -154,14 +154,14 @@ internal fn make_token(kind: Kind, span: source.Span) -> Token {
 internal type Decimal(significand: String, exponent: String)
   derives Equal
 
-internal fn normalize_decimal(significand: String, exponent: own math.BigInteger) -> Decimal
-  uses Panic
-{
+internal fn normalize_decimal(significand: String, exponent: own math.BigInteger) -> Decimal {
   if significand == "0" {
     return Decimal(significand: "0", exponent: "0")
   }
   var stop = significand.length()
-  while stop > 1 && significand.byte(stop - 1) == 48 {
+  while stop > 1 && significand.byte(stop - 1) == 48
+    invariant stop <= significand.length() && significand.is_boundary(stop)
+  {
     stop -= 1
   }
   let zeros = significand.length() - stop
@@ -503,9 +503,7 @@ internal fn joins(left: UInt8, right: UInt8) -> Bool {
     || (is_operator_byte(left) && is_operator_byte(right))
 }
 
-internal fn joins_neighbor(before: Option[UInt8], after: Option[UInt8], code: String) -> Bool
-  uses Panic
-{
+internal fn joins_neighbor(before: Option[UInt8], after: Option[UInt8], code: String) -> Bool {
   if code.is_empty() {
     return match before, after {
       Some(left), Some(right) => joins(left, right)

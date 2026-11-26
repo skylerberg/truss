@@ -233,7 +233,18 @@ let read_selector : Logic.symbol -> string = function
 let find_natural atom =
   if atom <> "" && String.for_all Char.Ascii.is_digit atom then Some (Z.of_string atom) else None
 
+let rec expand_lets bindings : Solver.sexp -> Solver.sexp = function
+  | List [ Atom "let"; List definitions; body ] ->
+      let bind scope : Solver.sexp -> (string * Solver.sexp) list = function
+        | List [ Atom name; value ] -> (name, expand_lets bindings value) :: scope
+        | _ -> Facts.raise_bug "the model binds a `let` without a name and a value"
+      in
+      expand_lets (List.fold_left bind bindings definitions) body
+  | Atom atom as term -> Option.value (List.assoc_opt atom bindings) ~default:term
+  | List terms -> List (List.map (expand_lets bindings) terms)
+
 let rec read_model_value members : Solver.sexp -> Catalog.Model_value.t = function
+  | List [ Atom "let"; _; _ ] as term -> read_model_value members (expand_lets [] term)
   | List [ Atom "fp"; Atom sign; Atom exponent; Atom fraction ] -> read_float sign exponent fraction
   | List [ Atom "_"; Atom special; Atom exponent_width; Atom _ ] ->
       read_special_float special exponent_width

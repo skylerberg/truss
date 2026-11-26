@@ -1065,6 +1065,13 @@ let () =
       let actual = read_message (shape ^ Fixtures.Prover.circle_radius_plus_one) in
       if not (String.includes ~affix:"`shape` is Circle(radius: 9223372036854775807)" actual) then
         Harness.fail "message %S" actual);
+  Harness.test "a counterexample shows a value that the solver writes with `let`" (fun () ->
+      let actual = read_message Fixtures.Prover.sum_of_fields_nested_in_options in
+      if
+        not
+          (String.includes
+             ~affix:"`tree` is Tree(branch: Some(value: Branch(leaf: Some(value: Leaf(" actual)
+      then Harness.fail "message %S" actual);
   Harness.test "a counterexample shows a record by its fields, and a Bool by its value" (fun () ->
       let record = read_message (point ^ Fixtures.Prover.increment_of_a_point_coordinate)
       and flag = read_message Fixtures.Prover.increment_under_a_flag in
@@ -1281,6 +1288,19 @@ let () =
           \  advance(mut scanner)\n\
            }\n")
          "prover.ensures");
+   Harness.test "a modifies entry that the body never changes leaves the proof to run" (fun () ->
+       let packages =
+         Support.setup [ ("app.main", Fixtures.Prover.increment_under_an_unchanged_modifies_entry) ]
+       in
+       let file = Support.parse_file "app.main" in
+       (match Support.list_codes (check packages file) with
+       | [ "usage.unmodified_part" ] -> ()
+       | codes -> Harness.fail "checking: %s" (String.concat ", " codes));
+       match
+         Support.list_codes (Support.list_proof_diagnostics (Support.make_database packages) file)
+       with
+       | [ "prover.overflow" ] -> ()
+       | codes -> Harness.fail "proving: %s" (String.concat ", " codes));
    Harness.test "a loop keeps the parts that its body and its callees do not change" (fun () ->
        let loop ~body =
          scanner

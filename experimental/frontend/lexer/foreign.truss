@@ -3,6 +3,10 @@ use frontend.token
 
 type Confusable = SpaceConfusable | Spelled(spelling: view String) | OpeningQuote(closing: view String)
   derives Equal
+  invariant match self {
+    Spelled(spelling) => !spelling.is_empty()
+    _ => true
+  }
 
 fn find_confusable(code: UInt32) -> Option[Confusable] {
   if code >= 8192 && code <= 8202 {
@@ -62,16 +66,18 @@ fn find_confusable_token(spelling: String) -> Option[token.Kind] {
 }
 
 fn follows_joining_confusable(scanner: Scanner, start: UInt64, replacement: String) -> Bool
-  uses Panic
+  requires start <= scanner.length && !replacement.is_empty()
 {
   if start == 0 {
     return false
   }
   var index = start - 1
-  while index > 0 && (scanner.lookup(index) & 192) == 128 {
+  while index > 0 && !scanner.is_boundary(index)
+    invariant index < start
+  {
     index -= 1
   }
-  match find_confusable(scanner.decode(index).code) {
+  match find_confusable(scanner.character_at(index).code()) {
     Some(confusable) => match confusable {
       Spelled(spelling) => token.joins(spelling.byte(spelling.length() - 1), right: replacement.byte(0))
       SpaceConfusable | OpeningQuote(_) => false
@@ -80,12 +86,13 @@ fn follows_joining_confusable(scanner: Scanner, start: UInt64, replacement: Stri
   }
 }
 
-fn report_confusable(scanner: mut Scanner, start: UInt64, length: UInt64, replacement: String, name: String)
-  uses Panic
+fn report_confusable(scanner: mut Scanner, length: UInt64, replacement: String, name: String)
   modifies scanner.diagnostics, scanner.position, scanner.line_is_blank
-  requires scanner.position <= start + length
-  ensures scanner.position == start + length
+  requires scanner.position < scanner.length && !replacement.is_empty()
+  requires scanner.position + length <= scanner.length && scanner.is_boundary(scanner.position + length)
+  ensures scanner.position == old(scanner.position) + length
 {
+  let start = scanner.position
   let span = source.make_span(start, stop: start + length)
   let fixes = if follows_joining_confusable(scanner, start, replacement) {
     []
@@ -104,25 +111,25 @@ fn report_confusable(scanner: mut Scanner, start: UInt64, length: UInt64, replac
   scanner.line_is_blank = false
 }
 
-fn scan_confusable(scanner: mut Scanner, code: UInt32, length: UInt64) -> Option[ConfusableScan]
-  uses Panic
+fn scan_confusable(scanner: mut Scanner) -> Option[ConfusableScan]
   modifies scanner.diagnostics, scanner.position, scanner.line_is_blank, scanner.tables
-  requires 1 <= length
+  requires scanner.position < scanner.length
   ensures result is Some(_) ==> old(scanner.position) < scanner.position
-  ensures old(scanner.position) <= scanner.position
+  ensures result is None ==> scanner.position == old(scanner.position)
 {
-  let start = scanner.position
-  let Some(confusable) = find_confusable(code) else {
+  let character = scanner.character_at(scanner.position)
+  let length = character.utf8_length()
+  let Some(confusable) = find_confusable(character.code()) else {
     return None
   }
   match confusable {
     SpaceConfusable => {
-      report_confusable(mut scanner, start, length, replacement: " ", name: "the space character")
+      report_confusable(mut scanner, length, replacement: " ", name: "the space character")
       Some(ConfusableScan.Spaced)
     }
     Spelled(spelling) => match find_confusable_token(spelling) {
       Some(kind) => {
-        report_confusable(mut scanner, start, length, replacement: spelling, name: "`${spelling}`")
+        report_confusable(mut scanner, length, replacement: spelling, name: "`${spelling}`")
         Some(ConfusableScan.LexedConfusable(kind))
       }
       None => None
@@ -134,34 +141,31 @@ fn scan_confusable(scanner: mut Scanner, code: UInt32, length: UInt64) -> Option
   }
 }
 
-fn are_hexadecimal_digits(scanner: Scanner, position: UInt64, count: UInt64) -> Bool
-  uses Panic
+fn read_hexadecimal(scanner: Scanner, position: UInt64, count: UInt64) -> Option[UInt32]
+  requires position <= scanner.length && 1 <= count && count <= 8
+  ensures result is Some(_) ==> position + count <= scanner.length && scanner.is_boundary(position + count)
 {
-  for index in 0..count {
+  var value: UInt32 = 0
+  for index in 0..count
+    invariant position + index <= scanner.length
+    invariant 0 < index ==> scanner.is_boundary(position + index)
+  {
     if !scanner.is_hexadecimal_digit_at(position + index) {
-      return false
+      return None
     }
+    value = (value << 4) | UInt32.from_integer(hexadecimal_value(scanner.lookup(position + index)))
   }
-  true
+  Some(value)
 }
 
-fn read_hexadecimal(scanner: Scanner, position: UInt64, count: UInt64) -> UInt64
-  uses Panic
-{
-  var value: UInt64 = 0
-  for index in 0..count {
-    value = value * 16 + UInt64.from_integer(hexadecimal_value(scanner.lookup(position + index)))
-  }
-  value
-}
-
-fn report_foreign_escape(scanner: mut Scanner, buffer: mut String, start: UInt64, stop: UInt64, value: UInt32) -> Bool
-  uses Panic
+fn report_foreign_escape(scanner: mut Scanner, buffer: mut String, stop: UInt64, value: UInt32) -> Bool
   modifies scanner.diagnostics, scanner.position
-  requires scanner.position <= stop
+  requires scanner.position < stop && stop <= scanner.length && scanner.is_boundary(stop)
+  requires value <= 1114111 && (value < 55296 || 57343 < value)
   ensures scanner.position == stop
   ensures result
 {
+  let start = scanner.position
   let replacement = "\\u{${format_hexadecimal(value, minimum_digits: 1)}}"
   let written = scanner.text(start, stop)
   report(
@@ -171,34 +175,28 @@ fn report_foreign_escape(scanner: mut Scanner, buffer: mut String, start: UInt64
     message: "`${written}` is not an escape in Truss. A character is written by its code point: `${replacement}`.",
     fixes: [source.make_fix("Write `${replacement}`", edits: [source.replace(source.make_span(start, stop), replacement)])],
   )
-  match Character.try_from_code(value) {
-    Ok(character) => mut buffer.push_character(character)
-    Err(_) => Panic.crash("a foreign escape names a scalar value")
-  }
+  mut buffer.push_character(Character.from_code(value))
   scanner.position = stop
   true
 }
 
-fn check_hexadecimal_escape(scanner: mut Scanner, buffer: mut String, start: UInt64, count: UInt64) -> Bool
-  uses Panic
+fn check_hexadecimal_escape(scanner: mut Scanner, buffer: mut String, count: UInt64) -> Bool
   modifies scanner.diagnostics, scanner.position
-  requires scanner.position <= start
+  requires scanner.position + 2 <= scanner.length && 1 <= count && count <= 8
   ensures result ==> old(scanner.position) < scanner.position
   ensures !result ==> scanner.position == old(scanner.position)
-  ensures old(scanner.position) <= scanner.position
 {
-  if !are_hexadecimal_digits(scanner, position: start + 2, count: count) {
+  let digits = scanner.position + 2
+  let Some(value) = read_hexadecimal(scanner, position: digits, count: count) else {
     return false
   }
-  let value = read_hexadecimal(scanner, position: start + 2, count: count)
   if value > 1114111 || (value >= 55296 && value <= 57343) {
     return false
   }
-  report_foreign_escape(mut scanner, mut buffer, start, stop: start + 2 + count, value: UInt32.from_integer(value))
+  report_foreign_escape(mut scanner, mut buffer, stop: digits + count, value: value)
 }
 
 fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
-  uses Panic
   modifies scanner.diagnostics, scanner.position
   ensures result ==> old(scanner.position) < scanner.position
   ensures !result ==> scanner.position == old(scanner.position)
@@ -210,13 +208,13 @@ fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
   }
   let escaped = scanner.lookup(start + 1)
   if escaped == 117 && !scanner.is_at(start + 2, byte: 123) {
-    return check_hexadecimal_escape(mut scanner, mut buffer, start, count: 4)
+    return check_hexadecimal_escape(mut scanner, mut buffer, count: 4)
   }
   if escaped == 120 {
-    return check_hexadecimal_escape(mut scanner, mut buffer, start, count: 2)
+    return check_hexadecimal_escape(mut scanner, mut buffer, count: 2)
   }
   if escaped == 85 {
-    return check_hexadecimal_escape(mut scanner, mut buffer, start, count: 8)
+    return check_hexadecimal_escape(mut scanner, mut buffer, count: 8)
   }
   let control: Option[UInt32] = if escaped == 97 {
     Some(7)
@@ -232,12 +230,14 @@ fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
     None
   }
   if control is Some(value) {
-    return report_foreign_escape(mut scanner, mut buffer, start, stop: start + 2, value: value)
+    return report_foreign_escape(mut scanner, mut buffer, stop: start + 2, value: value)
   }
   if escaped == 40 {
     let content = start + 2
     var close = content
-    while close < scanner.length && (is_ascii_name_byte(scanner.lookup(close)) || scanner.lookup(close) == 46) {
+    while close < scanner.length && (is_ascii_name_byte(scanner.lookup(close)) || scanner.lookup(close) == 46)
+      invariant content <= close && scanner.is_boundary(close)
+    {
       close += 1
     }
     if !scanner.is_at(close, byte: 41) || close <= content {
@@ -277,16 +277,14 @@ fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
   false
 }
 
-fn touches_word_before(scanner: Scanner, index: UInt64) -> Bool
-  uses Panic
-{
+fn touches_word_before(scanner: Scanner, index: UInt64) -> Bool {
   match scanner.previous {
     Some(previous) => if previous.stop != index {
       false
     } else {
       match previous.kind {
         Upper(_) | Lower(_) | Underscore | Keyword(_) | Reserved(_) => true
-        Integer(_) | Float(_) => index > 0 && is_ascii_name_byte(scanner.lookup(index - 1))
+        Integer(_) | Float(_) => index > 0 && index <= scanner.length && is_ascii_name_byte(scanner.lookup(index - 1))
         _ => false
       }
     }
@@ -294,24 +292,18 @@ fn touches_word_before(scanner: Scanner, index: UInt64) -> Bool
   }
 }
 
-fn quote_joins_before(scanner: Scanner, index: UInt64) -> Bool
-  uses Panic
-{
+fn quote_joins_before(scanner: Scanner, index: UInt64) -> Bool {
   touches_word_before(scanner, index) || (index > 0 && scanner.is_at(index - 1, byte: 34))
 }
 
 fn is_name_character(scanner: Scanner, position: UInt64) -> Bool
-  uses Panic
+  requires scanner.is_boundary(position)
 {
   if scanner.is_at_end(position) {
     return false
   }
-  let decoded = scanner.decode(position)
-  if !decoded.is_valid {
-    return false
-  }
   let current = scanner.lookup(position)
-  if is_ascii(current) { is_ascii_name_byte(current) } else { is_xid_continue(decoded.code) }
+  if is_ascii(current) { is_ascii_name_byte(current) } else { is_xid_continue(scanner.character_at(position).code()) }
 }
 
 fn is_simple_escape(byte: UInt8) -> Bool {
@@ -319,8 +311,8 @@ fn is_simple_escape(byte: UInt8) -> Bool {
 }
 
 fn find_character_literal_end(scanner: Scanner, start: UInt64, after_prefix: Bool = false) -> Option[UInt64]
-  uses Panic
-  ensures !(result is Some(stop) && stop <= start)
+  requires scanner.is_at(start, byte: 39)
+  ensures !(result is Some(stop) && !(start + 3 <= stop && scanner.is_at(stop - 1, byte: 39)))
 {
   if !after_prefix && touches_word_before(scanner, index: start) {
     return None
@@ -343,8 +335,8 @@ fn find_character_literal_end(scanner: Scanner, start: UInt64, after_prefix: Boo
       None
     }
   } else {
-    let decoded = scanner.decode(content)
-    if !decoded.is_valid || is_forbidden(decoded.code) { None } else { Some(content + decoded.length) }
+    let character = scanner.character_at(content)
+    if is_forbidden(character.code()) { None } else { Some(content + character.utf8_length()) }
   }
   match close {
     Some(position) => if scanner.is_at(position, byte: 39) && !is_name_character(scanner, position: position + 1) {
@@ -400,9 +392,8 @@ fn decode_character_escape(content: String) -> String
 fn lex_character_literal(scanner: mut Scanner, tag: String, literal_start: UInt64, stop: UInt64) -> token.Kind
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.tables
-  requires scanner.position <= stop
-  ensures stop <= scanner.position
-  ensures old(scanner.position) <= scanner.position
+  requires scanner.is_at(scanner.position, byte: 39) && scanner.position + 3 <= stop && scanner.is_at(stop - 1, byte: 39)
+  ensures scanner.position == stop
 {
   let start = scanner.position
   let content = scanner.text(start + 1, stop: stop - 1)
@@ -436,6 +427,7 @@ fn is_format_plain(byte: UInt8) -> Bool {
 
 fn format_field_edits(scanner: Scanner, start: UInt64, stop: UInt64) -> Option[List[source.Edit]]
   uses Panic
+  requires stop <= scanner.length
 {
   var edits: List[source.Edit] = []
   var position = start
@@ -592,9 +584,9 @@ fn report_prefixed_string(scanner: mut Scanner, start: UInt64, quote_start: UInt
 }
 
 fn read_hash_raw_text(scanner: mut Scanner, text_start: UInt64, text_stop: UInt64) -> String
-  uses Panic
   modifies scanner.diagnostics, scanner.position
-  requires scanner.position <= text_start
+  requires scanner.position <= text_start && text_start <= text_stop && text_stop <= scanner.length
+  requires scanner.is_boundary(text_start)
   ensures old(scanner.position) <= scanner.position
 {
   var buffer = String.with_capacity(text_stop - text_start)
@@ -609,23 +601,22 @@ fn read_hash_raw_text(scanner: mut Scanner, text_start: UInt64, text_stop: UInt6
   buffer
 }
 
-fn can_write_as_raw(scanner: Scanner, start: UInt64, written: StringSlice) -> Bool
-  uses Panic
-{
+fn can_write_as_raw(scanner: Scanner, start: UInt64, written: String) -> Bool {
   !written.contains("\${") && !quote_joins_before(scanner, index: start) && !written.starts_with("\"") && !written.ends_with("\"")
 }
 
 fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token.Kind]
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.tables
+  requires scanner.is_at(scanner.position, byte: 35)
   ensures old(scanner.position) <= scanner.position
 {
   let hashes = scanner.run_length(scanner.position, byte: 35)
-  let text_start = scanner.position + hashes + 1
-  let line_end = scanner.compute_end_of_line(text_start)
-  if !scanner.is_at(text_start - 1, byte: 34) {
+  if !scanner.is_at(scanner.position + hashes, byte: 34) {
     return None
   }
+  let text_start = scanner.position + hashes + 1
+  let line_end = scanner.compute_end_of_line(text_start)
   var close: Option[UInt64] = None
   var position = text_start
   while position < line_end {
@@ -688,6 +679,7 @@ fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token.Kind]
 
 fn find_closing_delimiter(scanner: Scanner, start: UInt64, delimiter: UInt8) -> Option[UInt64]
   uses Panic
+  ensures !(result is Some(close) && !scanner.is_at(close, byte: delimiter))
 {
   var position = start + 1
   while !scanner.is_end_of_line(position)
@@ -708,6 +700,7 @@ fn open_quoted_string(scanner: mut Scanner, nesting: UInt64, inline: Bool, delim
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
     scanner.semicolons, scanner.tables
+  requires scanner.is_at(scanner.position, byte: delimiter) && is_ascii(delimiter)
   ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
@@ -761,11 +754,11 @@ fn report_quoted_string(scanner: mut Scanner, start: UInt64, delimiter: UInt8, s
 }
 
 fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing: String) -> Option[token.Kind]
-  uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.tables
   requires 1 <= opening_length
+  requires scanner.position + opening_length <= scanner.length && scanner.is_boundary(scanner.position + opening_length)
   ensures result is Some(_) ==> old(scanner.position) < scanner.position
-  ensures old(scanner.position) <= scanner.position
+  ensures result is None ==> scanner.position == old(scanner.position)
 {
   let start = scanner.position
   let text_start = start + opening_length
@@ -838,7 +831,7 @@ fn scan_string_form(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Opti
     if !is_apostrophe && starts_name {
       var name_end = start + 1
       while scanner.is_ascii_name_byte_at(name_end)
-        invariant start + 1 <= name_end
+        invariant start + 1 <= name_end && scanner.is_boundary(name_end)
         decreases scanner.count_remaining(name_end)
       {
         name_end += 1
@@ -872,6 +865,7 @@ fn lex_after_name(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UI
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
     scanner.unterminated_at_end, scanner.semicolons, scanner.tables
+  requires start < scanner.position && scanner.is_boundary(start)
   ensures old(scanner.position) <= scanner.position
 {
   let Lower(_) = name else {
