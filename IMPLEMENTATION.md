@@ -328,10 +328,15 @@ develop as well as make it easier to bootstrap the compiler in parts.
   that a proof takes from another definition is an edge of the proof graph,
   which `Mir.Call_edges` lists: a callee's contract, a type's invariant, and
   the laws of an `impl`. An `impl` that satisfies a bound brings the impls
-  behind every bound that it assumes in turn, which
-  `Call_edges.list_bounds_that_an_impl_assumes` lists: the bounds of its
-  generics, and the bounds that its trait declares on the associated types
-  that it chooses. `Laws` assumes no law of an `impl` in the proof
+  behind every bound that it assumes in turn. One walk lists them for the
+  code that a call supplies and for the laws that a callee assumes,
+  `Call_edges.list_satisfied_bounds`, so a new way for one `impl` to rely
+  on another is written once, in `list_bounds_that_evidence_assumes`: the
+  bounds of its generics, and the bounds that its trait declares on the
+  associated types that it chooses. The walks differ in one place. A
+  derived method is a node with edges of its own, so its code needs only
+  the bounds of the type's parameters; a derived `impl`'s laws have no
+  proof of their own, so they rest on the laws of every field's type. `Laws` assumes no law of an `impl` in the proof
   group of the definition being proven. A law that a callee's proof assumes
   cannot be left out that way, so `Cycles.list_circular_proofs` reports it,
   and every definition runs that one check, whatever its kind.
