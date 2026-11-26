@@ -1,0 +1,5 @@
+public fn successors(values: List[UInt64]) -> List[UInt64]
+  cost time O(values.length())
+{
+  values.map(fn(value) { value.saturating_add(1) })
+}

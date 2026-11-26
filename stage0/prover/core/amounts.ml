@@ -548,7 +548,10 @@ let find_method_cost_bound (frame : State.frame) (metric : Language.Metric.t) (m
                       parameter.mode <> Language.Mode.Mut || not (holds parameter.type_))
                     signature.parameters
                   && (match signature.receiver with Some (Mut, ty) -> not (holds ty) | _ -> true)
-                  && match signature.output with Returns ty -> not (holds ty) | _ -> false
+                  &&
+                  match signature.output with
+                  | Returns ty -> not (holds ty)
+                  | Lends (_, part) -> not (holds (Types.substitute substitution part))
                 in
                 let stated_bound =
                   if includes_potential_made && not makes_no_potential then None
