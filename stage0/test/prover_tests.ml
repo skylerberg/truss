@@ -49,31 +49,12 @@ let () =
             "fn f(count: UInt8) -> UInt8\n  requires count <= UInt8.maximum - 1\n{" )
         ~alternatives:
           [ ("fn f(count: UInt8) -> UInt8 {", "fn f(count: UInt8) -> UInt8\n  uses Panic\n{") ]);
-  Harness.test "an overflow's counterexample names the value" (fun () ->
-      let actual = read_message Fixtures.Prover.addition_that_can_overflow in
-      if not (String.includes ~affix:"`count` is 255" actual) then Harness.fail "message %S" actual);
-  Harness.test "a counterexample names a value that a pattern binds" (fun () ->
-      let actual = read_message Fixtures.Prover.increment_of_a_matched_count in
-      if not (String.includes ~affix:"`count` is 255" actual) then Harness.fail "message %S" actual);
-  Harness.test "a counterexample the solver misses is found in a model of few elements" (fun () ->
+  Harness.test "a failure the solver leaves undecided is found in a model of few elements"
+    (fun () ->
       let actual = read_message Fixtures.Prover.addition_under_an_exists_in_a_forall in
-      if not (String.includes ~affix:"`value` is 9223372036854775807" actual) then
-        Harness.fail "message %S" actual);
-  Harness.test "a word count's counterexample names the count" (fun () ->
-      let actual = read_message Fixtures.Prover.increment_of_a_word_count in
-      if not (String.includes ~affix:"`count` is 9223372036854775807" actual) then
-        Harness.fail "message %S" actual);
-  Harness.test "a counterexample leaves out the local that a `for` loop introduces" (fun () ->
-      let actual = read_message Fixtures.Prover.increment_of_a_word_count in
-      if String.includes ~affix:"`position` is" actual then Harness.fail "message %S" actual);
-  Harness.test "a counterexample names a local that the code declares" (fun () ->
-      let actual = read_message Fixtures.Prover.addition_to_a_local_named_position in
-      if not (String.includes ~affix:"`position` is" actual) then Harness.fail "message %S" actual);
-  Harness.test "a counterexample leaves out a value that nothing constrains" (fun () ->
-      let actual = read_message Fixtures.Prover.increment_under_a_long_name in
       if
-        String.includes ~affix:"`name` is" actual
-        || not (String.includes ~affix:"`count` is 255" actual)
+        (not (String.includes ~affix:"may overflow" actual))
+        || String.includes ~affix:"decided whether this holds" actual
       then Harness.fail "message %S" actual);
   Harness.test "an obligation that the solver runs out of steps on says so" (fun () ->
       let actual = read_message Fixtures.Prover.sum_of_two_cubes in
@@ -1061,29 +1042,6 @@ let () =
         (shape ^ Fixtures.Prover.circle_radius_squared)
         "prover.overflow"
         ~fixed:("fn f(shape: Shape) -> Int64 {", "fn f(shape: Shape) -> Int64\n  uses Panic\n{"));
-  Harness.test "a counterexample shows a variant by its name" (fun () ->
-      let actual = read_message (shape ^ Fixtures.Prover.circle_radius_plus_one) in
-      if not (String.includes ~affix:"`shape` is Circle(radius: 9223372036854775807)" actual) then
-        Harness.fail "message %S" actual);
-  Harness.test "a counterexample shows a record by its fields, and a Bool by its value" (fun () ->
-      let record = read_message (point ^ Fixtures.Prover.increment_of_a_point_coordinate)
-      and flag = read_message Fixtures.Prover.increment_under_a_flag in
-      if not (String.includes ~affix:"`point` is Point(x: 9223372036854775807, y: 3)" record) then
-        Harness.fail "message %S" record;
-      if not (String.includes ~affix:"`flag` is true" flag) then Harness.fail "message %S" flag);
-  Harness.test "a counterexample's path leaves out an if on a Bool local whose value it shows"
-    (fun () ->
-      List.iter
-        (fun (fixture, shown) ->
-          let actual = read_message fixture in
-          if
-            (not (String.includes ~affix:shown actual))
-            || String.includes ~affix:"On that path" actual
-          then Harness.fail "message %S" actual)
-        [
-          (Fixtures.Prover.increment_under_a_flag, "`flag` is true");
-          (Fixtures.Prover.increment_unless_a_flag, "`flag` is false");
-        ]);
   Harness.test "a requires fix states a negated comparison as the opposite comparison" (fun () ->
       expect_not_proven
         (point ^ Fixtures.Prover.point_kept_off_a_corner)
@@ -1152,7 +1110,7 @@ let () =
   Harness.test "a call through a bound knows its trait's ensures, not an impl's stronger one"
     (fun () ->
       let text = measured ^ Fixtures.Prover.box_measure_ensured_at_least_ten in
-      expect_not_proven text "prover.ensures" ~at:("result >= 10", 3))
+      expect_not_proven text "prover.ensures" ~at:("shape.measure()", 1))
 
 let each_index = Fixtures.Prover.each_index
 
@@ -1431,8 +1389,11 @@ let () =
       expect_not_proven Fixtures.Prover.holder_defaulting_to_an_invalid_positive "prover.invariant");
   Harness.test "a parameter meets its invariant" (fun () ->
       expect_proven (span ^ Fixtures.Prover.span_parameter_ensured_ordered));
-  Harness.test "a mut parameter must meet its invariant when the function returns" (fun () ->
-      expect_not_proven (span ^ Fixtures.Prover.span_high_assigned_below_low) "prover.invariant");
+  Harness.test "a mut parameter must meet its invariant at the return that ends the function"
+    (fun () ->
+      expect_not_proven
+        (span ^ Fixtures.Prover.span_high_assigned_below_low)
+        "prover.invariant" ~at:("range.high = range.low - 1", 1));
   Harness.test "a body may break an invariant between calls" (fun () ->
       expect_proven (span ^ Fixtures.Prover.span_low_assigned_above_high));
   Harness.test "a var must meet its invariant when its scope ends" (fun () ->
@@ -1539,7 +1500,7 @@ let () =
         "prover.assertion");
   Harness.test "a bit-vector assertion states its hypotheses" (fun () ->
       expect_proven Fixtures.Prover.bit_vector_assertion_with_its_hypothesis);
-  Harness.test "a bitwise fact that does not hold has a counterexample" (fun () ->
+  Harness.test "a bitwise fact that does not hold is not proven" (fun () ->
       expect_not_proven Fixtures.Prover.low_bit_ensured_zero "prover.ensures")
 
 let () =
@@ -1656,11 +1617,7 @@ let () =
   Harness.test "equal points have equal fields" (fun () ->
       expect_proven Fixtures.Prover.float_points_compared_by_field);
   Harness.test "points equal by their fields are not identical" (fun () ->
-      expect_not_proven Fixtures.Prover.float_points_equal_and_identical "prover.ensures");
-  Harness.test "a float counterexample is written as Truss writes floats" (fun () ->
-      let actual = read_message Fixtures.Prover.float_times_zero in
-      if not (String.includes ~affix:"infinity" actual || String.includes ~affix:"NaN" actual) then
-        Harness.fail "message %S" actual)
+      expect_not_proven Fixtures.Prover.float_points_equal_and_identical "prover.ensures")
 
 let dice = Fixtures.Prover.dice
 
@@ -3112,42 +3069,36 @@ let () =
         Harness.fail "message %S" actual)
 
 let () =
-  Harness.test "a counterexample says which way each if on its path goes" (fun () ->
-      let actual = read_message Fixtures.Prover.step_up_or_down in
-      if
-        not
-          (String.includes ~affix:"`up` is true" actual
-          && String.includes ~affix:"On that path, `count > 100` is true." actual)
-      then Harness.fail "message %S" actual);
-  Harness.test "a counterexample says which arm of a match its path takes" (fun () ->
-      let actual = read_message Fixtures.Prover.bump_of_an_option in
-      if not (String.includes ~affix:"On that path, the arm `Some(count)` is taken." actual) then
-        Harness.fail "message %S" actual);
-  let expect_overflow_naming_no_path text =
-    let actual = read_message text in
-    if
-      (not (String.includes ~affix:"may overflow" actual))
-      || String.includes ~affix:"On that path" actual
-    then Harness.fail "message %S" actual
+  let read_span text (span : Source.span) = String.sub text span.start (span.stop - span.start) in
+  let list_failures text =
+    List.map
+      (fun ({ code; span; notes; _ } : Diagnostic.t) ->
+        ( Diagnostic.Code.name code,
+          read_span text span,
+          List.map (fun (cited, _) -> read_span text cited) notes ))
+      (list_diagnostics text)
   in
-  Harness.test "a counterexample names no arm of a match with one arm" (fun () ->
-      expect_overflow_naming_no_path Fixtures.Prover.sum_of_a_pair);
-  Harness.test "a counterexample names no arm for a `for` loop over a call's result" (fun () ->
-      expect_overflow_naming_no_path Fixtures.Prover.sum_over_an_enumeration);
-  Harness.test "a counterexample names no arm for a `for` loop that moves each element out"
-    (fun () -> expect_overflow_naming_no_path Fixtures.Prover.sum_over_an_owned_list);
-  Harness.test "a counterexample names no arm for a `?`" (fun () ->
-      expect_overflow_naming_no_path Fixtures.Prover.question_mark_on_an_option);
+  let show_failures failures =
+    String.concat "; "
+      (List.map
+         (fun (code, shown, cited) ->
+           Printf.sprintf "%s at `%s` citing [%s]" code shown (String.concat ", " cited))
+         failures)
+  in
+  Harness.test "an ensures that an early return breaks is reported at the `?` that returns"
+    (fun () ->
+      match list_failures Fixtures.Prover.checked_through_two_tries with
+      | [ ("prover.ensures", "check_even(low)?", [ "result.is_ok()" ]) ] -> ()
+      | failures -> Harness.fail "%s" (show_failures failures));
+  Harness.test "an ensures that the `else` of a `let ... else` breaks is reported at its `return`"
+    (fun () ->
+      match list_failures Fixtures.Prover.found_or_zero with
+      | [ ("prover.ensures", "return 0", [ "result > 0" ]) ] -> ()
+      | failures -> Harness.fail "%s" (show_failures failures));
   let expect_message_saying text says =
     let actual = read_message text in
     if not (String.includes ~affix:says actual) then Harness.fail "message %S" actual
   in
-  Harness.test "a counterexample names the `?` that returns early" (fun () ->
-      expect_message_saying Fixtures.Prover.checked_through_two_tries
-        "On that path, `check_even(low)?` returns early.");
-  Harness.test "a counterexample says when a `let ... else` runs its `else`" (fun () ->
-      expect_message_saying Fixtures.Prover.found_or_zero
-        "On that path, `Some(found)` does not match, so the `else` runs.");
   let expect_messages_saying text expected =
     let packages = Support.setup [ ("app.main", text) ] in
     let messages =
@@ -3302,9 +3253,6 @@ let () =
       expect_proven Fixtures.Prover.concurrent_block_bumping_two_counts)
 
 let () =
-  Harness.test "a counterexample gives the values of the locals where it fails" (fun () ->
-      let text = read_message Fixtures.Prover.element_read_at_a_branch_local in
-      if not (String.includes ~affix:"`at` is" text) then Harness.fail "%s" text);
   Harness.test "a file's proof states list proven and unproven obligations" (fun () ->
       let packages =
         Support.setup [ ("app.main", Fixtures.Prover.element_sum_with_one_unchecked_index) ]
@@ -3603,35 +3551,6 @@ let () =
       in
       if answers <> [ Solver.Proven; Solver.Proven ] then
         Harness.fail "a constant of another sort under the same name was not proven");
-  test "Z3 is asked for values only of a query that it answers with `sat`" (fun () ->
-      let request =
-        Solver.make_request
-          ~symbols:[ Logic.Symbol.Variable { label = "compared"; numbers = [] } ]
-          (make_self_comparison Logic.Less_equal)
-      in
-      match (solve_one (find_solver ()) request).runs with
-      | [ { output; _ } ] ->
-          if String.includes ~affix:"error" output then Harness.fail "reported the output %S" output
-      | runs -> Harness.fail "reported %d runs" (List.length runs));
-  test "a requested term of a datatype that the query does not mention costs no other value"
-    (fun () ->
-      let compared = Logic.Symbol.Variable { label = "compared"; numbers = [] } in
-      let unmentioned =
-        Types.Named { path = Support.make_top_path "app.main" "Flag"; arguments = [] }
-      in
-      let constructor = Logic.Symbol.Constructor { type_ = unmentioned; variant = None } in
-      let query = make_self_comparison Logic.Less in
-      let request =
-        Solver.make_request ~symbols:[ compared ]
-          ~terms:[ (Logic.Symbol.Reached 0, Logic.Apply (constructor, [])) ]
-          {
-            query with
-            declarations = Logic.Datatype (unmentioned, [ (constructor, []) ]) :: query.declarations;
-          }
-      in
-      match (solve_one (find_solver ()) request).answer with
-      | Counterexample [ (symbol, _) ] when symbol = compared -> ()
-      | _ -> Harness.fail "expected a counterexample with the value of `compared`");
   let find_obligation_query text code =
     let packages = Support.setup [ ("app.main", text) ] in
     let key = List.hd (Support.list_declarations packages (Support.parse_module "app.main")) in
@@ -3686,16 +3605,10 @@ let () =
       match expect_answered_from_runs (Solver.make_request power_of_itself_is_three) with
       | Unknown (Incomplete _) -> ()
       | _ -> Harness.fail "expected an unknown answer with Z3's reason");
-  test "a counterexample's values are read back from its stored runs" (fun () ->
-      match
-        expect_answered_from_runs
-          (Solver.make_request
-             ~symbols:[ Logic.Symbol.Variable { label = "compared"; numbers = [] } ]
-             ~terms:[ (Logic.Symbol.Reached 0, Logic.int (-1)) ]
-             (make_self_comparison Logic.Less))
-      with
-      | Counterexample (_ :: _ :: _) -> ()
-      | _ -> Harness.fail "expected a counterexample with both values");
+  test "a falsifiable answer is read back from its stored runs" (fun () ->
+      match expect_answered_from_runs (Solver.make_request (make_self_comparison Logic.Less)) with
+      | Falsifiable -> ()
+      | _ -> Harness.fail "expected a falsifiable answer");
   test "an obligation that the solver stops on before the step limit names Z3's reason" (fun () ->
       let solver =
         Solver.For_testing.make ~run_z3:(fun _ ->
@@ -4201,8 +4114,8 @@ let () =
       let actual = read_message Fixtures.Prover.exact_allocations_that_are_one_short in
       if
         actual
-        <> "This may spend more or less than `cost allocations == 2` states. This fails every time \
-            the code reaches it."
+        <> "The function may spend more or less than `cost allocations == 2` states before it \
+            returns here. This fails every time the code reaches it."
       then Harness.fail "message %S" actual)
 
 let () =

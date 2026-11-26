@@ -79,7 +79,6 @@ nowhere else.
 | `Path.t`, `Types.ty`, `Types.signature`, `Types.capability`, `Types.condition` | The printer of that type, called by the catalog |
 | A name, such as a field or a label | The name, in backquotes |
 | `Code.t`, such as the prover's suggested `requires` | Truss code, printed by the prover's description with one precedence table |
-| `Model_value.t`, a value in a counterexample | A Truss value, printed by the prover's description |
 | `Patterns.witness`, a value a `match` misses | A pattern, printed by the pattern family's description |
 | A count, a keyword, a mode | Written by the catalog |
 

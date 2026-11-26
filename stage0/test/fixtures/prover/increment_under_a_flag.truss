@@ -1,3 +1,0 @@
-fn f(flag: Bool, count: UInt8) -> UInt8 {
-  if flag { count + 1 } else { 0 }
-}

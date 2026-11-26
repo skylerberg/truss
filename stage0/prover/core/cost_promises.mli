@@ -22,6 +22,7 @@ val check_promise_amounts :
 
 val check_promise :
   ?restated:Types.ty * string * Types.trait_reference * Types.trait_reference ->
+  ?cited:Resolve.Names.key * Core.origin ->
   State.context ->
   State.frame ->
   promise ->

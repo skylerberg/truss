@@ -55,7 +55,7 @@ let check_promise_amounts context (start : State.frame) promises ~output =
               ~holds_when:promise.clause.holds_when amount)
     promises
 
-let check_promise ?restated (context : State.context) (frame : State.frame) promise
+let check_promise ?restated ?cited (context : State.context) (frame : State.frame) promise
     ~(at : State.frame) ~location =
   let spent = Counters.lookup_spent frame promise.counter in
   let amount =
@@ -72,7 +72,7 @@ let check_promise ?restated (context : State.context) (frame : State.frame) prom
   let counting : Catalog.Prover.counting =
     match promise.counter.counting with Units | At_most -> Upper_bound | Exactly -> Exact
   and clause = Facts.quote promise.written_in promise.clause.origin in
-  Facts.oblige context frame location ~holds_when:promise.clause.holds_when
+  Facts.oblige ?cited context frame location ~holds_when:promise.clause.holds_when
     ~can_be_required:(promise.counter.counting <> Units)
     (Cost_promise
        (match restated with

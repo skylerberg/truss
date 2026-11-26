@@ -193,25 +193,11 @@ type failed_run =
   | Constant_run of { path : Path.t; stop : Codegen.stop }
   | Assertion_run of Codegen.stop
 
-type path_note =
-  | Arm_taken of Core.origin list
-  | Condition_holds of {
-      condition : Core.origin;
-      holds : bool;
-      tested_local : (Core.local * bool) option;
-    }
-  | Else_runs of Core.origin
-  | Returns_early of Core.origin
-
 type unknown = Out_of_steps | Incomplete of string
 
 type failure =
   | Refuted
-  | Counterexample of {
-      values : (string * Model_value.t) list;
-      path : path_note list;
-      failed_runs : failed_run list;
-    }
+  | Falsifiable of { failed_runs : failed_run list }
   | Undecided of { unknown : unknown; has_untriggered_fact : bool; failed_runs : failed_run list }
 
 type required =

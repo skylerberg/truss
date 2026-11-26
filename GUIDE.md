@@ -700,7 +700,7 @@ fn add(left: UInt8, right: UInt8) -> UInt8 {
 ```
 
 ```text
-main.truss:2:3: error[prover.overflow]: `left + right` may overflow `UInt8`. For example, when `left` is 255, `right` is 1. It can also be checked first with an `if`, or done with the checked operation.
+main.truss:2:3: error[prover.overflow]: `left + right` may overflow `UInt8`. It can also be checked first with an `if`, or done with the checked operation.
   |   left + right
   |   ^^^^^^^^^^^^
   fix: Add `requires left + right <= UInt8.maximum`
@@ -709,8 +709,8 @@ main.truss:2:3: error[prover.overflow]: `left + right` may overflow `UInt8`. For
 1 error
 ```
 
-The prover found inputs for which the addition overflows, and the message
-lists the ways to fix it. Each makes a different promise:
+Nothing in scope bounds `left` or `right`, so the prover cannot rule out an
+overflow, and the message lists the ways to fix it. Each makes a different promise:
 
 ```truss
 fn add_small(left: UInt8, right: UInt8) -> UInt8
@@ -2628,7 +2628,7 @@ too, and only the first approach meets it: you must show the point cannot be
 reached.
 
 ```text
-main.truss:2:24: error[prover.unreachable]: This `unreachable` may be reached. For example, when `flag` is false. On that path, `flag` is false.
+main.truss:2:24: error[prover.unreachable]: This `unreachable` may be reached.
   |   if flag { 1 } else { unreachable }
   |                        ^^^^^^^^^^^
 
@@ -3967,14 +3967,15 @@ one holds.
 
 The prover is Z3, an SMT solver. You never call it directly. `truss check`
 turns each promise into a question for Z3, and reports each one Z3 cannot
-answer as an error, often with a counterexample: values for which the promise
-fails.
+prove as an error at the code that must keep it.
 
 ### Preconditions and postconditions
 
 A `requires` clause is a *precondition*: every caller proves it. An
 `ensures` clause is a *postcondition*: the function's body proves it, and
-every caller may rely on it. `result` names the returned value.
+every caller may rely on it. `result` names the returned value. A
+postcondition that may not hold is reported at the return that breaks it,
+with a note at the clause.
 
 ```truss
 fn double(value: Int64) -> Int64
@@ -4002,16 +4003,13 @@ inside `double` when it checks `quadruple`. Without `ensures result == value
 `double` again:
 
 ```text
-main.truss:10:3: error[prover.requires]: `value >= -1000 && value <= 1000` may not hold for this call to `double`. For example, when `value` is 0.
+main.truss:10:3: error[prover.requires]: `value >= -1000 && value <= 1000` may not hold for this call to `double`.
   |   double(double(value))
   |   ^^^^^^^^^^^^^^^^^^^^^
   note: main.truss:2:12: This is the clause that must hold.
 
 1 error
 ```
-
-The counterexample shows how little the caller knows: even when `value` is
-0, nothing bounds what `double(0)` returns.
 
 This rule is what makes Truss scale. Each function is proven once, against
 the signatures it calls, and an edit to a body never invalidates the proofs
@@ -4175,16 +4173,15 @@ In [Chapter 3](#integer-overflow), an accumulating sum would not compile.
 This is why:
 
 ```text
-main.truss:6:5: error[prover.overflow]: `total += value` may overflow `UInt64`. For example, when `limit` is 2, `total` is 18446744073709551615, `value` is 1. It can also be checked first with an `if`, or done with the checked operation.
+main.truss:6:5: error[prover.overflow]: `total += value` may overflow `UInt64`. It can also be checked first with an `if`, or done with the checked operation.
   |     total += value
   |     ^^^^^^^^^^^^^^
 
 1 error
 ```
 
-The counterexample has `total` at the largest `UInt64` after one iteration,
-because nothing said otherwise. A loop invariant says how large `total` can
-be:
+After the first iteration, `total` may be any `UInt64`, because nothing said
+otherwise. A loop invariant says how large `total` can be:
 
 ```truss
 fn sum_below(limit: UInt64) -> UInt64
@@ -4282,7 +4279,7 @@ A recursion without a measure is an error. A function `countdown` that
 calls itself on `count / 2`, which is not a part of `count`, states none:
 
 ```text
-main.truss:2:30: error[prover.termination]: This recursive call may not end: give the function a `decreases` clause for the prover to show that the recursion ends. For example, when `count` is 1. On that path, `count == 0` is false.
+main.truss:2:30: error[prover.termination]: This recursive call may not end: give the function a `decreases` clause for the prover to show that the recursion ends.
   |   if count == 0 { 0 } else { countdown(count / 2) }
   |                              ^^^^^^^^^^^^^^^^^^^^
 
@@ -4326,7 +4323,7 @@ test "a loop measured by its comparison" {
 Without `power >= 1` in the invariant:
 
 ```text
-main.truss:5:3: error[prover.termination]: This loop's measure may not decrease. For example, when `limit` is 0, `power` is 0.
+main.truss:5:3: error[prover.termination]: This loop's measure may not decrease.
   |   while power <= limit
   |   ^^^^^^^^^^^^^^^^^^^^
 
@@ -4615,10 +4612,10 @@ test "a fact proven by evaluation" {
 
 | The error says | Try |
 |---|---|
-| A counterexample, such as "when `count` is 255" | The promise really fails for those values: add a `requires`, an `if`, or a checked operation |
+| "may not hold" or "may overflow", and nothing about the solver | The facts in scope allow the failure: add a `requires`, an `if`, or a checked operation. If the code reads a callee's result or a variable that a loop changes, add an `ensures` to the callee or an `invariant` to the loop |
 | "This fails every time the code reaches it" | The code fails whenever it runs, so no `proof` block can help: change the code |
-| "a value the prover knows nothing more about" | A callee's result or a loop variable is unconstrained: add an `ensures` to the callee, or an `invariant` to the loop |
-| "The solver ran out of steps, so it may hold but needs help" | Break the step into smaller ones: an `assert` in a `proof` block, or a theorem |
+| "The solver reached its step limit before it decided whether this holds" | Break the step into smaller ones: an `assert` in a `proof` block, or a theorem |
+| An `ensures` "may not hold when the function returns here" | The path that ends at that return breaks the clause; the note points at the clause |
 | A `requires` of a callee "may not hold" | Find which fact the caller lacks; the note points at the clause |
 | A `forall` "may not hold", though a theorem proves its body for one value | Call the theorem in the quantifier's body, then state the body, as `doubles_are_even` does |
 

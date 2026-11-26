@@ -603,17 +603,6 @@ let bind_parts context (frame : State.frame) run =
       | _ -> frame)
     frame.aliases frame
 
-let note_path (context : State.context) (frame : State.frame) (note : Mir.path_note) =
-  if frame.makes_obligations && Facts.is_home context frame.source then
-    let tested =
-      match note with
-      | Condition_holds { tested_local = Some (local, value); _ } ->
-          Option.map (fun term -> (term, value)) (Locals.find_opt (Core_local local) frame.locals)
-      | Condition_holds { tested_local = None; _ } | Arm_taken _ | Else_runs _ | Returns_early _ ->
-          None
-    in
-    context.path_notes <- { note; reached = frame.condition; tested } :: context.path_notes
-
 let refresh_place context frame ty (place : State.passed_place) =
   let fresh_value = Facts.arrive context frame "changed" ty in
   let frame = place.write frame fresh_value in
@@ -943,7 +932,9 @@ and read_providing (context : State.context) run provided ~refresh read =
     | [] -> Facts.raise_bug "the exits before a `provide` block are gone after it"
   in
   context.returns <-
-    refresh_since ~before:returns (fun (frame, value) -> (refresh frame, value)) context.returns;
+    refresh_since ~before:returns
+      (fun (exit_ : State.function_exit) -> { exit_ with frame = refresh exit_.frame })
+      context.returns;
   List.iter
     (fun ((exits : loop_exits), breaks, ends) ->
       exits.breaks <- refresh_since ~before:breaks refresh exits.breaks;
@@ -1027,7 +1018,12 @@ and read_statement context frame run (statement : Mir.statement) =
       (match jump with
       | Return returned ->
           context.returns <-
-            (frame, Option.map (read_operand context frame run) returned) :: context.returns
+            {
+              frame;
+              returned = Option.map (read_operand context frame run) returned;
+              return_origin = statement.origin;
+            }
+            :: context.returns
       | Break -> (
           match run.loops with
           | exits :: _ -> exits.breaks <- frame :: exits.breaks
@@ -1503,9 +1499,6 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
                   };
               })
         holds;
-      Some frame
-  | Path_note note ->
-      note_path context frame note;
       Some frame
 
 and read_call_statement context frame run ~destination (call : Mir.call) =

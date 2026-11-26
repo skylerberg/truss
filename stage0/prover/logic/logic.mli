@@ -51,7 +51,6 @@ module Symbol : sig
     | Cost_most
     | Integer_log
     | Integer_power
-    | Reached of int
 end
 
 type rounding_mode = Nearest_ties_to_even | Toward_positive | Toward_negative | Toward_zero
@@ -168,12 +167,4 @@ val prune : query -> query
 val list_conjunct_queries : query -> query list
 val show_query : ?cardinality_bound:int -> query -> string
 val has_uninterpreted_sort : query -> bool
-
-type rendering
-
-val render : query -> rendering
-val rendered_text : rendering -> string
-val render_term : rendering -> term -> string option
-val list_symbols : rendering -> (symbol * string) list
-val list_members : query -> (string * (symbol * symbol list)) list
 val show_symbol : symbol -> string
