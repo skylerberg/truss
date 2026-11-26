@@ -1012,6 +1012,10 @@ let unmark_stale store ~stage ~id =
     [ Integer stage; Integer id ];
   Sql.count_changes store.sql > 0
 
+let is_stale store ~stage ~id =
+  Sql.has_row store.sql "SELECT 1 FROM main.stale WHERE stage = ?1 AND id = ?2"
+    [ Integer stage; Integer id ]
+
 type unit_entity =
   | File_unit
   | Module_unit

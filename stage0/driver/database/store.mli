@@ -190,6 +190,7 @@ val count_differing_rows : t -> other:schema -> (string * int) list
 val keep_for_dependents : t -> markers:int -> unit
 val mark_stale : t -> stage:int -> id:int -> unit
 val unmark_stale : t -> stage:int -> id:int -> bool
+val is_stale : t -> stage:int -> id:int -> bool
 
 type unit_entity =
   | File_unit
