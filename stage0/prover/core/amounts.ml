@@ -24,7 +24,7 @@ let compute_promised_amount (frame : State.frame) (counter : Costs.counter) (bou
       if exact_target then amount else declare_bounded_amount frame amount
   | Order_of _, _ -> Counters.declare_unknown_amount frame counter
 
-let make_may_be_target (context : State.context) frame term ty target =
+let make_may_be_target (context : State.context) (frame : State.frame) term ty target =
   if term = target then Logic.Boolean true
   else
     match List.assoc_opt target context.cost.call_targets with
@@ -44,7 +44,8 @@ let lambda_captures_target (context : State.context) lambda target =
   | Some captured, Some local -> List.mem local captured
   | _ -> false
 
-let make_reach_formula (context : State.context) frame (values : State.passed list) term =
+let make_reach_formula (context : State.context) (frame : State.frame) (values : State.passed list)
+    term =
   Logic.disjunction
     (List.map
        (fun (passed : State.passed) ->
@@ -235,7 +236,7 @@ let compute_callee_amount ?(method_cost : (Language.Metric.t -> Logic.term) opti
         | Some (clause :: _) -> compute_amount clause
         | Some [] | None -> compute_method_amount ())
 
-let compute_step_amount ?result (context : State.context) frame (callee : Callee.t)
+let compute_step_amount ?result (context : State.context) (frame : State.frame) (callee : Callee.t)
     (values : State.passed list) (counter : Costs.counter) =
   let make_counted amount = Costs.make_counted_charge counter amount in
   match callee.target with
@@ -294,8 +295,8 @@ let compute_step_amount ?result (context : State.context) frame (callee : Callee
               (Counters.declare_unknown_amount frame counter)
         | Metric _ -> Counters.declare_unknown_amount frame counter)
 
-let make_callback_cost (context : State.context) frame (metric : Language.Metric.t) (ty : Types.ty)
-    term =
+let make_callback_cost (context : State.context) (frame : State.frame) (metric : Language.Metric.t)
+    (ty : Types.ty) term =
   let stated_by_type =
     match ty with
     | Types.Function { costs; _ } -> Costs.find_stated_operand costs metric
@@ -327,7 +328,7 @@ let make_callback_cost (context : State.context) frame (metric : Language.Metric
       | None -> ());
       cost
 
-let compute_function_value_amount (context : State.context) frame ~location
+let compute_function_value_amount (context : State.context) (frame : State.frame) ~location
     (function_type : Types.function_type) callee_term ~values (counter : Costs.counter) =
   let make_counted amount = Costs.make_counted_charge counter amount in
   let compute_call_amount metric =
@@ -353,7 +354,7 @@ let compute_function_value_amount (context : State.context) frame ~location
             if cost <> Costs.zero then
               Obligations.oblige
                 ~holds_when:(Counters.read_condition context counter)
-                context frame location
+                frame location
                 (Upper_bound_in_exact_cost { metric; call = { at = location; callee = None } })
                 (Logic.equal cost Costs.zero);
             make_plain cost)
@@ -438,7 +439,7 @@ let is_static ~has_own_generics (amount : Mir.formula) =
            | Result | Entry _ | Visited | Final_result -> true
            | Identical _ | Applied _ | Method_cost _ | Map _ | Quantified _ -> false))
 
-let find_static_bound (context : State.context) frame (metric : Language.Metric.t)
+let find_static_bound (context : State.context) (frame : State.frame) (metric : Language.Metric.t)
     (clauses : State.clauses) ~has_own_generics ~substitution ~self_type =
   let counter = Costs.make_operand_counter metric in
   let substitution = Types.combine_substitutions substitution clauses.bindings in
@@ -468,8 +469,8 @@ let find_static_bound (context : State.context) frame (metric : Language.Metric.
         | (Units | At_most | Exactly), (Order_of _ | At_most _ | Exactly _) -> None)
     clauses.costs
 
-let find_body_cost (context : State.context) frame (metric : Language.Metric.t) path ~substitution
-    ~self_type =
+let find_body_cost (context : State.context) (frame : State.frame) (metric : Language.Metric.t) path
+    ~substitution ~self_type =
   match
     ( Contracts.find_source context.environment.lookups path,
       Mir.read_code context.environment.lookups.mir path )
@@ -501,8 +502,8 @@ let find_body_cost (context : State.context) frame (metric : Language.Metric.t) 
       with Facts.Unsupported _ -> None)
   | _ -> None
 
-let find_method_cost_bound (context : State.context) frame (metric : Language.Metric.t)
-    (method_ : Path.t) ~trait_arguments self_type =
+let find_method_cost_bound (context : State.context) (frame : State.frame)
+    (metric : Language.Metric.t) (method_ : Path.t) ~trait_arguments self_type =
   let holds ty = try Potentials.has_potential context ty with Facts.Unsupported _ -> true in
   let includes_potential_made = metric = Time in
   match method_ with
@@ -577,7 +578,7 @@ let find_method_cost_bound (context : State.context) frame (metric : Language.Me
         | None -> None)
   | _ -> None
 
-let declare_method_cost (context : State.context) frame (metric : Language.Metric.t)
+let declare_method_cost (context : State.context) (frame : State.frame) (metric : Language.Metric.t)
     (method_ : Path.t) ~trait_arguments self_type =
   let symbol = Logic.Symbol.Method_cost { metric; method_; trait_arguments; self_type } in
   Query.run_once context.query (Method_cost_bound symbol) (fun () ->
@@ -590,7 +591,7 @@ let declare_method_cost (context : State.context) frame (metric : Language.Metri
         (find_method_cost_bound context frame metric method_ ~trait_arguments self_type));
   Logic.Symbol symbol
 
-let compute_method_cost (context : State.context) frame (metric : Language.Metric.t)
+let compute_method_cost (context : State.context) (frame : State.frame) (metric : Language.Metric.t)
     (callee : Callee.t) =
   match callee.target with
   | Definition { trait_method = Some { trait; name; receiver; self_type; _ }; _ } ->
@@ -620,7 +621,8 @@ let list_held_types (context : State.context) (values : State.passed list) ~resu
            | Read -> None)
          values)
 
-let spend_copy ?literal (context : State.context) frame ~(declared : Types.ty) term =
+let spend_copy ?literal (context : State.context) (frame : State.frame) ~(declared : Types.ty) term
+    =
   let ty = Types.erase_views declared in
   let literal =
     match (literal, ty) with
@@ -691,7 +693,7 @@ let spend_copy ?literal (context : State.context) frame ~(declared : Types.ty) t
             make_plain (compute_amount_within frame counter (declare_copy_cost metric))
         | _, Metric Time, (At_most | Exactly) | None, Calls _, _ -> make_unknown ())
 
-let spend_wait_for_tasks (context : State.context) frame =
+let spend_wait_for_tasks (context : State.context) (frame : State.frame) =
   Counters.spend context frame (fun (counter : Costs.counter) ->
       match counter.resource with
       | Metric Time -> Counters.declare_unknown_amount frame counter
@@ -761,13 +763,13 @@ let spend_contract_call (context : State.context) ~(before : State.frame) ~(afte
             ~clauses:declared_clauses ~bind_frame ~uses:callee.uses ~values
             ~counts_provider_potential counter)
 
-let spend_call_without_a_contract (context : State.context) frame callee values =
+let spend_call_without_a_contract (context : State.context) (frame : State.frame) callee values =
   Counters.spend_operation context frame ~potential_change:None
     ~held:(fun () -> list_held_types context values ~result_type:Types.unit)
     (compute_step_amount context frame callee values)
 
-let spend_derived_equality (context : State.context) frame (callee : Callee.t) values ~result_type
-    ~result =
+let spend_derived_equality (context : State.context) (frame : State.frame) (callee : Callee.t)
+    values ~result_type ~result =
   Counters.spend_operation context frame
     ~potential_change:
       (Some
@@ -792,8 +794,8 @@ let spend_indirect_call (context : State.context) ~before ~(after : State.frame)
     ~held:(fun () -> list_held_types context values ~result_type)
     (compute_function_value_amount context after ~location function_type called ~values)
 
-let spend_intrinsic (context : State.context) frame callee operation (values : State.passed list)
-    ~changed ~result_type ~result =
+let spend_intrinsic (context : State.context) (frame : State.frame) callee operation
+    (values : State.passed list) ~changed ~result_type ~result =
   Counters.spend_operation context frame
     ~potential_change:
       (Some

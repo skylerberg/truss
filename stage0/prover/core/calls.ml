@@ -138,10 +138,10 @@ let call_contract (context : State.context) (frame : State.frame) (site : Invoca
         let _, term = Validity.read_specification context entry clause in
         let cited = Some (precondition_clauses.callee.key, clause.origin) in
         let fixes =
-          Fixes.list_required_fixes context frame precondition_clauses requirement term values
+          Fixes.list_required_fixes frame precondition_clauses requirement term values
             ~type_names:(Fixes.list_type_names (substitution_of precondition_clauses))
         in
-        Obligations.oblige ?cited ~fixes ~holds_when:clause.holds_when context frame location
+        Obligations.oblige ?cited ~fixes ~holds_when:clause.holds_when frame location
           (Precondition_may_fail
              {
                clause = Facts.quote precondition_clauses.callee clause.origin;
@@ -162,11 +162,11 @@ let call_contract (context : State.context) (frame : State.frame) (site : Invoca
       (fun (requirement : Mir.requirement) ->
         let _, term = Validity.read_specification context entry requirement.clause in
         let fixes =
-          Fixes.list_required_fixes context frame clauses requirement term values
+          Fixes.list_required_fixes frame clauses requirement term values
             ~type_names:(Fixes.list_type_names (substitution_of clauses))
         in
         let cited = Some (clauses.callee.key, requirement.clause.origin) in
-        Obligations.oblige ?cited ~fixes context frame location
+        Obligations.oblige ?cited ~fixes frame location
           (Precondition_may_panic
              {
                clause = Facts.quote clauses.callee requirement.clause.origin;
@@ -422,7 +422,7 @@ let apply_lend (context : State.context) (frame : State.frame) (site : Invocatio
     when Conditions.may_panic_for_every_value context.environment.lookups
            ~current:context.environment.current ~condition:context.environment.condition callee.uses
     ->
-      Obligations.oblige context frame location
+      Obligations.oblige frame location
         (Panics_where_ruled_out { call = { at = location; callee = None }; condition })
         (Logic.Boolean false)
   | Some _ | None -> ());
@@ -595,7 +595,7 @@ let apply_lend (context : State.context) (frame : State.frame) (site : Invocatio
       Termination.reject_uncompared_recursion context frame location recursive_callee;
       Some applied
 
-let apply_call (context : State.context) frame site callee ~through values =
+let apply_call (context : State.context) (frame : State.frame) site callee ~through values =
   Option.map
     (fun { frame; result; _ } -> (frame, result))
     (apply_lend context frame site callee ~through values)

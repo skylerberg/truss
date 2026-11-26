@@ -167,7 +167,7 @@ let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.f
       | Some (returned, Some term) -> Some ({ frame with spent = returned.spent }, term)
       | Some (_, None) | None -> None)
 
-let run_code (context : State.context) frame (code : Mir.t) ~type_ =
+let run_code (context : State.context) (frame : State.frame) (code : Mir.t) ~type_ =
   match run_lambda_body context frame ~lambdas:code.lambdas code.body ~type_ with
   | Some returned -> returned
   | None -> (frame, Encoding.arrive frame "unfinished" type_)
@@ -338,7 +338,7 @@ let read_lambda ?(capture_free = false) (context : State.context) (frame : State
       ~may_abort:context.environment.lookups.may_abort
   in
   if frame.makes_obligations && Types.states_no_allocation function_type.costs && may_abort then
-    Obligations.oblige context frame location (May_not_return_under_no_allocation This_lambda)
+    Obligations.oblige frame location (May_not_return_under_no_allocation This_lambda)
       (Logic.Boolean false);
   let states_application = Callbacks.is_in_the_logic function_type && not may_abort in
   let called, supposed = Facts.suppose frame "called" in
@@ -443,7 +443,7 @@ let read_lambda ?(capture_free = false) (context : State.context) (frame : State
               (fun result ->
                 List.iter
                   (fun (promise, term) ->
-                    Obligations.oblige context exit_ location (Lambda_promise { promise }) term)
+                    Obligations.oblige exit_ location (Lambda_promise { promise }) term)
                   (Callbacks.read_ensures context stated ~entries:arguments ~exits ~result))
               result)
           !ended;
@@ -502,7 +502,7 @@ let translate_lambda (context : State.context) (frame : State.frame) ~(site : In
     (frame, term)
   else read_lambda context frame ~site written ~stated
 
-let make_passed_values (context : State.context) frame ~at (callee : Callee.t)
+let make_passed_values (context : State.context) (frame : State.frame) ~at (callee : Callee.t)
     (arguments : State.call_argument list) =
   let values =
     List.filter_map

@@ -49,6 +49,4 @@ val read_loop_measure :
   loop_measure option
 
 val require_measure : State.context -> loop:string -> is_measured:bool -> unit
-
-val check_loop_measure :
-  State.context -> State.frame -> Obligation.location -> loop_measure option -> unit
+val check_loop_measure : State.frame -> Obligation.location -> loop_measure option -> unit

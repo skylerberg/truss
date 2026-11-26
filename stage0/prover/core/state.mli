@@ -62,6 +62,7 @@ type frame = {
   environment : environment;
   query : Query.t;
   source : source;
+  entry : (Logic.symbol * string option) list;
   locals : Logic.term Locals.t;
   types : Types.ty Locals.t;
   old_locals : Logic.term Locals.t;
@@ -191,7 +192,6 @@ type callback_state = { mutable named : (Logic.term * (Types.function_type * kno
 
 type context = {
   environment : environment;
-  mutable parameter_names : (Logic.symbol * string) list;
   local_names : string Tables.Local_table.t;
   local_origins : Core.origin Tables.Local_table.t;
   mutable returns : function_exit list;
@@ -209,7 +209,6 @@ type context = {
   lambda_definitions : Logic.term Tables.Symbol_table.t;
   models : (Logic.term -> Logic.term) option Tables.Model_table.t;
   mutable equalities : Logic.term list;
-  mutable entry : Logic.symbol list;
   mutable holes : (Resolve.Names.key * Obligation.location) list;
   mutable unfinished : Logic.term list;
   mutable skipped_conditions : Types.condition list;

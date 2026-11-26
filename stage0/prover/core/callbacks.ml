@@ -9,7 +9,8 @@ let find_typed (context : State.context) (frame : State.frame) term =
   | Some _ as own -> own
   | None -> List.assoc_opt term context.callbacks.named
 
-let find_known (context : State.context) frame term = Option.map snd (find_typed context frame term)
+let find_known (context : State.context) (frame : State.frame) term =
+  Option.map snd (find_typed context frame term)
 
 let declare_own (frame : State.frame) own =
   List.fold_left
@@ -134,7 +135,7 @@ let is_in_the_logic (function_type : Types.function_type) =
   function_type.uses = Types.no_capabilities
   && List.for_all (fun (mode, _) -> mode <> Language.Mode.Mut) function_type.inputs
 
-let declare_arguments (context : State.context) frame inputs =
+let declare_arguments (context : State.context) (frame : State.frame) inputs =
   List.map
     (fun (_, input) ->
       let input = Encoding.substitute_type frame input in
@@ -143,7 +144,8 @@ let declare_arguments (context : State.context) frame inputs =
       term)
     inputs
 
-let declare_results (context : State.context) frame (function_type : Types.function_type) entries =
+let declare_results (context : State.context) (frame : State.frame)
+    (function_type : Types.function_type) entries =
   let exits =
     List.map2
       (fun ((mode : Language.Mode.t), input) entry ->
@@ -261,8 +263,8 @@ let has_requires : State.known_function -> bool = function
 
 type use = Called | Not_called of Catalog.Prover.function_use
 
-let check_requires (context : State.context) frame location (known : State.known_function) ~use
-    arguments =
+let check_requires (context : State.context) (frame : State.frame) location
+    (known : State.known_function) ~use arguments =
   let describe clause : Catalog.Prover.obligation =
     match (use, known) with
     | Called, Named { path; _ } ->
@@ -275,10 +277,10 @@ let check_requires (context : State.context) frame location (known : State.known
         Function_requirement { function_ = Callback_parameter name; use; clause }
   in
   List.iter
-    (fun (clause, term) -> Obligations.oblige context frame location (describe clause) term)
+    (fun (clause, term) -> Obligations.oblige frame location (describe clause) term)
     (list_requires context frame known arguments)
 
-let check_escaping (context : State.context) frame location known
+let check_escaping (context : State.context) (frame : State.frame) location known
     (function_type : Types.function_type) =
   if has_requires known then
     let _, supposed = Facts.suppose frame "called" in
@@ -330,9 +332,7 @@ let check_passed (context : State.context) (frame : State.frame) ~at (callee : C
           in
           List.iter
             (fun (promise, term) ->
-              Obligations.oblige context at_call location
-                (Callback_promise { promise; unpromised })
-                term)
+              Obligations.oblige at_call location (Callback_promise { promise; unpromised }) term)
             (read_ensures context stated ~entries ~exits ~result)
         end
       end
@@ -352,8 +352,8 @@ let list_called_requires (context : State.context) (frame : State.frame) called 
   | Some known -> List.map snd (list_requires context frame known arguments)
   | None -> []
 
-let assume_returned (context : State.context) frame (function_type : Types.function_type) called
-    ~entries ~exits ~result =
+let assume_returned (context : State.context) (frame : State.frame)
+    (function_type : Types.function_type) called ~entries ~exits ~result =
   Facts.assume frame (make_callback_ensures function_type called ~entries ~exits ~result);
   Option.iter
     (fun known ->
@@ -434,8 +434,8 @@ let read_named_function (context : State.context) (frame : State.frame) (site : 
       if frame.makes_obligations && not is_argument then
         check_escaping context frame location known function_type;
       if frame.makes_obligations && Types.states_no_allocation function_type.costs && may_abort then
-        Obligations.oblige context frame location
-          (May_not_return_under_no_allocation (Named_function path)) (Logic.Boolean false);
+        Obligations.oblige frame location (May_not_return_under_no_allocation (Named_function path))
+          (Logic.Boolean false);
       let symbol = Logic.Symbol.Function_value { callee = path; type_arguments } in
       Query.declare context.query (Logic.Constant (symbol, Encoding.sort_of type_));
       let term = Logic.Symbol symbol in

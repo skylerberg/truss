@@ -159,7 +159,7 @@ let make_clause_bound (counter : Costs.counter) ~since ~amount =
 let oblige_clause (context : State.context) (frame : State.frame) cost (written : Mir.cost) ~moment
     ~since =
   let amount = read_amount ~holds_when:cost.holds_when context frame written in
-  Obligations.oblige ~holds_when:cost.holds_when context frame
+  Obligations.oblige ~holds_when:cost.holds_when frame
     (Facts.locate frame written.origin)
     (Loop_cost_clause { clause = Facts.quote frame.source written.origin; moment })
     (make_clause_bound cost.counter ~since ~amount)
@@ -167,7 +167,7 @@ let oblige_clause (context : State.context) (frame : State.frame) cost (written 
 let make_count_bound ~(counter : Costs.counter) ~at ~bound =
   if counter.counting = Exactly then Logic.equal at bound else Logic.less_equal at bound
 
-let check_entry (context : State.context) frame costs =
+let check_entry (context : State.context) (frame : State.frame) costs =
   List.iter
     (fun cost ->
       match cost.rule with
@@ -201,7 +201,7 @@ let declare_iterations (head : State.frame) loop =
   end
   else None
 
-let enter_head (context : State.context) head loop ~iterations =
+let enter_head (context : State.context) (head : State.frame) loop ~iterations =
   let iterations = Option.value iterations ~default:Costs.zero in
   let head =
     {
@@ -238,7 +238,8 @@ let make_step_cost (counter : Costs.counter) =
   | Metric Time -> Logic.int 1
   | Metric (Allocations | Allocated_bytes) | Calls _ -> Costs.zero
 
-let spend_step (context : State.context) frame = Counters.spend context frame make_step_cost
+let spend_step (context : State.context) (frame : State.frame) =
+  Counters.spend context frame make_step_cost
 
 let find_constant_count bounds =
   List.find_map
@@ -266,7 +267,7 @@ let explain_uncounted_potential (environment : State.environment) (call : State.
       is_editable = is_written_in_home_package environment call.callee;
     }
 
-let describe_part (context : State.context) frame (part : State.changed_part) :
+let describe_part (context : State.context) (frame : State.frame) (part : State.changed_part) :
     Catalog.Prover.changed_part =
   { root = Facts.describe_local context frame part.root; fields = part.fields }
 
@@ -425,7 +426,7 @@ let check_iterations (context : State.context) loop_at (head : State.frame) loop
               | _ -> ());
               List.iter2
                 (fun (frame : State.frame) spent ->
-                  Obligations.oblige ~holds_when:cost.holds_when context frame location
+                  Obligations.oblige ~holds_when:cost.holds_when frame location
                     Iteration_above_inferred_bound
                     (make_count_bound ~counter:cost.counter ~at:spent ~bound:per))
                 frames spent
@@ -435,7 +436,7 @@ let check_iterations (context : State.context) loop_at (head : State.frame) loop
                 | [] -> []
                 | first :: rest -> List.filter (fun part -> List.for_all (List.mem part) rest) first
               in
-              Obligations.oblige ~holds_when:cost.holds_when context head location
+              Obligations.oblige ~holds_when:cost.holds_when head location
                 (Unbounded_iteration_cost
                    (explain_unbounded_iteration context head cost.counter ~changed:loop.changed
                       ~parts))

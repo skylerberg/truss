@@ -105,7 +105,7 @@ let describe_local : Mir.local_kind -> string = function
   | Temporary -> "a temporary"
   | Lent _ -> "a lent part"
 
-let read_root (context : State.context) frame run (root : Mir.root) =
+let read_root (context : State.context) (frame : State.frame) run (root : Mir.root) =
   match root with
   | Constant path -> Values.evaluate_constant context frame path
   | Literal { value; type_ } ->
@@ -128,7 +128,7 @@ let read_root (context : State.context) frame run (root : Mir.root) =
                 (Resolve.Names.show_key frame.source.key)
                 (describe_local run.infos.(local).kind)))
 
-let rec read_resolved (context : State.context) frame run (place : Mir.place) =
+let rec read_resolved (context : State.context) (frame : State.frame) run (place : Mir.place) =
   let _, term =
     List.fold_left
       (fun (prefix, term) (projection : Mir.projection) ->
@@ -164,7 +164,7 @@ let rec read_resolved (context : State.context) frame run (place : Mir.place) =
   in
   term
 
-and read_index (context : State.context) frame run (index : Mir.operand) =
+and read_index (context : State.context) (frame : State.frame) run (index : Mir.operand) =
   match index with
   | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> (
       match (read_resolved context frame run place, frame.bound) with
@@ -177,7 +177,7 @@ and read_index (context : State.context) frame run (index : Mir.operand) =
   | Immediate { value = Unit | Float _ | Boolean _; _ } ->
       Facts.raise_bug "an index that is not an integer"
 
-let read_place (context : State.context) frame run (place : Mir.place) =
+let read_place (context : State.context) (frame : State.frame) run (place : Mir.place) =
   match resolve_aliases frame run place with
   | [ (_, place) ] -> read_resolved context frame run place
   | alternatives -> (
@@ -190,8 +190,8 @@ let read_place (context : State.context) frame run (place : Mir.place) =
             later
       | [] -> Facts.raise_bug "a place that is no place")
 
-let write_resolved (context : State.context) frame run (place : Mir.place) ~check_element ~is_valid
-    new_value =
+let write_resolved (context : State.context) (frame : State.frame) run (place : Mir.place)
+    ~check_element ~is_valid new_value =
   let rec rebuild prefix whole = function
     | [] -> new_value
     | (projection : Mir.projection) :: rest -> (
@@ -242,8 +242,8 @@ let write_resolved (context : State.context) frame run (place : Mir.place) ~chec
       | Core_local Self -> { frame with self = Some whole }
       | key -> Facts.bind frame key (Encoding.substitute_type frame run.infos.(local).type_) whole)
 
-let write_alternatives (context : State.context) frame run alternatives ~check_element ~is_valid
-    new_value =
+let write_alternatives (context : State.context) (frame : State.frame) run alternatives
+    ~check_element ~is_valid new_value =
   let write_resolved frame place =
     write_resolved context frame run place ~check_element ~is_valid new_value
   in
@@ -271,8 +271,8 @@ let write_alternatives (context : State.context) frame run alternatives ~check_e
                   | _ -> written)))
         frame alternatives
 
-let write_through (context : State.context) frame run (place : Mir.place) ~check_element ~is_valid
-    new_value =
+let write_through (context : State.context) (frame : State.frame) run (place : Mir.place)
+    ~check_element ~is_valid new_value =
   let alternatives = resolve_aliases frame run place in
   Potentials.spend_enclosing_change context ~before:frame
     ~after:(write_alternatives context frame run alternatives ~check_element ~is_valid new_value)
@@ -285,12 +285,13 @@ let check_changed_element (context : State.context) (frame : State.frame) ~origi
   Validity.check_valid context frame (Facts.locate frame origin) element_type element ~deep:true
     ~moment:Element_changed
 
-let write_place (context : State.context) frame run place new_value =
+let write_place (context : State.context) (frame : State.frame) run place new_value =
   write_through context frame run place
     ~check_element:(check_changed_element context frame)
     ~is_valid:true new_value
 
-let write_place_until_its_write_ends (context : State.context) frame run place ~is_valid new_value =
+let write_place_until_its_write_ends (context : State.context) (frame : State.frame) run place
+    ~is_valid new_value =
   let changed_elements = ref [] in
   let written =
     write_through context frame run place ~is_valid new_value
@@ -369,7 +370,7 @@ let forget_changes (context : State.context) run (frame : State.frame)
   in
   Potentials.spend_forgotten context roots ~before:frame ~after:(Loops.havoc frame changed)
 
-let read_operand (context : State.context) frame run (operand : Mir.operand) =
+let read_operand (context : State.context) (frame : State.frame) run (operand : Mir.operand) =
   match operand with
   | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> read_place context frame run place
   | Immediate { value; type_ } -> (
@@ -403,7 +404,7 @@ let find_argument_place (context : State.context) run (mode : Language.Mode.t) (
   | Mut, Borrow { place; _ } -> Some (make_passed_place context run place)
   | Mut, (Use _ | Take _ | Immediate _) | (Read | Own), _ -> None
 
-let evaluate_call_values (context : State.context) frame run ~at (callee : Callee.t)
+let evaluate_call_values (context : State.context) (frame : State.frame) run ~at (callee : Callee.t)
     (arguments : Mir.argument list) =
   Lambdas.make_passed_values context frame ~at callee
     (List.mapi
@@ -432,7 +433,7 @@ let evaluate_call_values (context : State.context) frame run ~at (callee : Calle
                })
        arguments)
 
-let read_call (context : State.context) frame run (call : Mir.call) ~result_type =
+let read_call (context : State.context) (frame : State.frame) run (call : Mir.call) ~result_type =
   match (call.callee.target, call.arguments) with
   | ( Trait_method { trait; name; receiver; _ },
       [
@@ -494,7 +495,8 @@ let compute_target_type (frame : State.frame) run (target : Mir.place) =
 let lends_places (part : Mir.yielded) =
   match part with Built _ | Part (Borrow _) -> true | Part (Use _ | Take _ | Immediate _) -> false
 
-let rec read_yielded_value (context : State.context) frame run ~origin (part : Mir.yielded) =
+let rec read_yielded_value (context : State.context) (frame : State.frame) run ~origin
+    (part : Mir.yielded) =
   match part with
   | Part operand -> (frame, read_operand context frame run operand)
   | Built { variant; fields; type_ } ->
@@ -556,7 +558,7 @@ let bind_parts (context : State.context) (frame : State.frame) run =
       | _ -> frame)
     frame.aliases frame
 
-let refresh_place (context : State.context) frame ty (place : State.passed_place) =
+let refresh_place (context : State.context) (frame : State.frame) ty (place : State.passed_place) =
   let fresh_value = Encoding.arrive frame "changed" ty in
   let frame, end_write = place.write frame ~is_valid:true fresh_value in
   end_write frame;
@@ -567,8 +569,8 @@ let record_todo (context : State.context) (frame : State.frame) origin =
   Facts.add_hole context (frame.source.key, Obligation.Node origin);
   if frame.is_ghost then context.unfinished <- frame.condition :: context.unfinished
 
-let oblige_unreachable (context : State.context) frame location =
-  Obligations.oblige context frame location Unreachable_reached (Logic.Boolean false)
+let oblige_unreachable frame location =
+  Obligations.oblige frame location Unreachable_reached (Logic.Boolean false)
 
 let rec read_rvalue (context : State.context) (frame : State.frame) run (value : Mir.rvalue)
     ~(site : Invocation.site) =
@@ -626,7 +628,7 @@ let rec read_rvalue (context : State.context) (frame : State.frame) run (value :
       ({ frame with spent = declared.spent }, term)
   | Convert { conversion = To_integer | To_view; value; _ } -> (frame, translate_operand value)
   | Convert { conversion = From_integer; value; _ } ->
-      (frame, Operations.convert_from_integer context frame site (translate_operand value))
+      (frame, Operations.convert_from_integer frame site (translate_operand value))
   | Function_value { path; instantiation; is_argument } ->
       (frame, Callbacks.read_named_function context frame site path instantiation ~is_argument)
   | Operation { operation; operands; type_arguments } ->
@@ -714,8 +716,8 @@ let rec read_rvalue (context : State.context) (frame : State.frame) run (value :
       in
       translate_quantifier_value context frame run quantifier range ~parameter ~matches ~body
 
-and translate_quantifier_value (context : State.context) frame run quantifier range ~parameter
-    ~(matches : Mir.block) ~(body : Mir.block) =
+and translate_quantifier_value (context : State.context) (frame : State.frame) run quantifier range
+    ~parameter ~(matches : Mir.block) ~(body : Mir.block) =
   Models.quantify_over context frame quantifier range
     ~bind:(fun inner value ty -> Facts.bind inner (Locals.make_key run.infos parameter) ty value)
     ~read:(fun body_frame _ ->
@@ -726,7 +728,8 @@ and translate_quantifier_value (context : State.context) frame run quantifier ra
         | Forall -> Logic.( ==> ) matched holds
         | Exists -> Logic.( &&& ) matched holds ))
 
-and read_statements (context : State.context) frame run (statements : Mir.statement list) =
+and read_statements (context : State.context) (frame : State.frame) run
+    (statements : Mir.statement list) =
   List.fold_left
     (fun frame statement ->
       Option.bind frame (fun frame ->
@@ -735,7 +738,7 @@ and read_statements (context : State.context) frame run (statements : Mir.statem
             (read_statement context frame run statement)))
     (Some frame) statements
 
-and read_block (context : State.context) frame run (block : Mir.block) =
+and read_block (context : State.context) (frame : State.frame) run (block : Mir.block) =
   Option.map
     (fun after ->
       match block.value with
@@ -743,7 +746,7 @@ and read_block (context : State.context) frame run (block : Mir.block) =
       | None -> Facts.raise_bug "a block with no value, whose end control reaches")
     (read_statements context frame run block.statements)
 
-and read_value (context : State.context) frame run (block : Mir.block) =
+and read_value (context : State.context) (frame : State.frame) run (block : Mir.block) =
   match read_block context frame run block with
   | Some read -> read
   | None -> Facts.raise_unsupported Whole_definition Nonreturning_specification_call
@@ -774,7 +777,7 @@ and merge_alternatives (context : State.context) ~outer ~condition (entered, rea
             (entered_otherwise, after_otherwise),
           Logic.ite condition value value_otherwise )
 
-and read_choice (context : State.context) frame run (choice : Mir.choice) =
+and read_choice (context : State.context) (frame : State.frame) run (choice : Mir.choice) =
   match choice with
   | Conditional { condition; then_; else_ } -> (
       match read_block context frame run condition with
@@ -865,7 +868,7 @@ and read_providing (context : State.context) run ~refresh read =
     cancelled;
   read
 
-and read_statement (context : State.context) frame run (statement : Mir.statement) =
+and read_statement (context : State.context) (frame : State.frame) run (statement : Mir.statement) =
   let location = Facts.locate frame statement.origin in
   Termination.reject_recursion_through_supplied_code context frame location statement;
   match statement.kind with
@@ -881,7 +884,7 @@ and read_statement (context : State.context) frame run (statement : Mir.statemen
           names
       in
       let frame, term = read_value context frame run code in
-      Assertions.check_assertion context frame ~origin:statement.origin
+      Assertions.check_assertion frame ~origin:statement.origin
         ~bit_vector:(Some (named, fun isolated -> snd (read_value context isolated run code)))
         term;
       Some frame
@@ -981,7 +984,7 @@ and read_statement (context : State.context) frame run (statement : Mir.statemen
               | Some exits -> exits.breaks <- frame :: exits.breaks
               | None -> Facts.raise_bug "an early exit of an iteration that is not around it"))
       | Unreachable -> ()
-      | Written_unreachable -> oblige_unreachable context frame location
+      | Written_unreachable -> oblige_unreachable frame location
       | Todo -> record_todo context frame statement.origin);
       None
   | Fork { fork; concurrent; branches } ->
@@ -1253,7 +1256,8 @@ and read_statement (context : State.context) frame run (statement : Mir.statemen
       if loop.schedule = Concurrent then Option.map (Amounts.spend_wait_for_tasks context) ended
       else ended
 
-and read_basic (context : State.context) frame run (statement : Mir.statement) (basic : Mir.basic) =
+and read_basic (context : State.context) (frame : State.frame) run (statement : Mir.statement)
+    (basic : Mir.basic) =
   match basic with
   | Assign
       {
@@ -1354,7 +1358,7 @@ and read_basic (context : State.context) frame run (statement : Mir.statement) (
         }
   | Lend { part; call } -> read_lend context frame run part call
   | Assert condition ->
-      Assertions.check_assertion context frame ~origin:statement.origin ~bit_vector:None
+      Assertions.check_assertion frame ~origin:statement.origin ~bit_vector:None
         (read_operand context frame run condition);
       Some frame
   | Ghost_assert { condition; by_bit_vector } ->
@@ -1368,7 +1372,7 @@ and read_basic (context : State.context) frame run (statement : Mir.statement) (
                 Facts.raise_bug "an assertion's formula that takes no local")
           condition.parameters
       in
-      Assertions.check_assertion context frame ~origin:condition.origin
+      Assertions.check_assertion frame ~origin:condition.origin
         ~bit_vector:
           (if by_bit_vector then
              Some
@@ -1395,7 +1399,7 @@ and read_basic (context : State.context) frame run (statement : Mir.statement) (
       in
       Facts.assume frame (Logic.equal (Logic.Symbol symbol) holds);
       let location = Facts.locate frame statement.origin in
-      Obligations.oblige ~is_proven_by_evaluation:true context frame location
+      Obligations.oblige ~is_proven_by_evaluation:true frame location
         (match statement.origin with
         | Written _ -> Assertion_may_fail { clause = Facts.quote frame.source statement.origin }
         | Desugared _ ->
@@ -1419,7 +1423,8 @@ and read_basic (context : State.context) frame run (statement : Mir.statement) (
         holds;
       Some frame
 
-and read_call_statement (context : State.context) frame run ~destination (call : Mir.call) =
+and read_call_statement (context : State.context) (frame : State.frame) run ~destination
+    (call : Mir.call) =
   let result_type =
     match destination with
     | Some destination -> compute_target_type frame run destination
@@ -1479,7 +1484,8 @@ let read_formula (context : State.context) (frame : State.frame) (formula : Mir.
       | None when Types.equal formula.type_ Types.bool -> (frame, Logic.Boolean true)
       | None -> (frame, Encoding.arrive frame "unfinished" formula.type_))
 
-let read_body (context : State.context) start ~(lambdas : Mir.body array) (body : Mir.body) =
+let read_body (context : State.context) (start : State.frame) ~(lambdas : Mir.body array)
+    (body : Mir.body) =
   let run = make_run ~locals:body.locals ~lambdas in
   let start = { start with State.aliases = Locals.empty; lends = Locals.empty } in
   let rec list_returned_locals (block : Mir.block) =

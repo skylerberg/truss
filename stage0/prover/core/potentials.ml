@@ -112,7 +112,8 @@ let find_potential_clause (context : State.context) (ty : Types.ty) =
   | Some (source, { potential = Some potential; _ }) -> Some (source, potential)
   | _ -> None
 
-let compute_declared_potential (context : State.context) frame (ty : Types.ty) term =
+let compute_declared_potential (context : State.context) (frame : State.frame) (ty : Types.ty) term
+    =
   match find_potential_clause context ty with
   | Some (source, written) ->
       snd
@@ -224,7 +225,8 @@ and compute_potential (context : State.context) (frame : State.frame) ?(seen = [
     | _ -> held
   end
 
-and compute_parts_potential (context : State.context) frame ~seen declared term (variant, fields) =
+and compute_parts_potential (context : State.context) (frame : State.frame) ~seen declared term
+    (variant, fields) =
   let ty = Types.erase_views declared in
   let declared_fields =
     Option.value ~default:[] (list_declared_fields context.environment declared)
@@ -304,8 +306,8 @@ let compute_call_potential_change (context : State.context) ~before ~after value
     (compute_arguments_potential_change context ~before ~after values ~changed)
     (compute_potential context after result_type result)
 
-let assume_element_potential_change (context : State.context) frame (sequence : Types.ty) ~before
-    ~after ~replaced ~written =
+let assume_element_potential_change (context : State.context) (frame : State.frame)
+    (sequence : Types.ty) ~before ~after ~replaced ~written =
   match find_buffer context sequence with
   | Some { element; model_of; _ } -> (
       try
@@ -319,7 +321,7 @@ let assume_element_potential_change (context : State.context) frame (sequence : 
       with Facts.Unsupported _ -> ())
   | None -> ()
 
-let spend_declared_potential (context : State.context) frame ty term =
+let spend_declared_potential (context : State.context) (frame : State.frame) ty term =
   Counters.spend context frame (fun (counter : Costs.counter) ->
       if counter.amortized then
         Counters.count_declared_potential context ~of_:ty
@@ -390,6 +392,6 @@ let spend_forgotten (context : State.context) roots ~(before : State.frame) ~(af
           (Logic.subtract (Logic.at_least_zero (measure after)) (measure before))
       else Costs.zero)
 
-let spend_provided (context : State.context) frame potential =
+let spend_provided (context : State.context) (frame : State.frame) potential =
   Counters.spend context frame (fun (counter : Costs.counter) ->
       if counter.amortized || counter.counting <> Units then Costs.zero else Lazy.force potential)

@@ -13,7 +13,6 @@ val oblige :
   ?can_be_required:bool ->
   ?is_proven_by_evaluation:bool ->
   ?holds_when:Types.condition ->
-  State.context ->
   State.frame ->
   Obligation.location ->
   Catalog.Prover.obligation ->

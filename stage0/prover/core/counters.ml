@@ -162,8 +162,8 @@ let block_saved_potential (context : State.context) (held : Types.ty list) =
         raise (Blocks_credited_potential (reached @ blocked));
       context.cost.blocked_holders <- reached @ blocked
 
-let spend_operation (context : State.context) frame ~potential_change ~held ?(note = fun _ _ -> ())
-    (charge_of : Costs.counter -> Costs.charge) =
+let spend_operation (context : State.context) (frame : State.frame) ~potential_change ~held
+    ?(note = fun _ _ -> ()) (charge_of : Costs.counter -> Costs.charge) =
   let change = Option.map Lazy.from_fun potential_change in
   spend context frame (fun counter ->
       let ({ amount; counted } : Costs.charge) = charge_of counter in
@@ -196,8 +196,8 @@ let spend_operation (context : State.context) frame ~potential_change ~held ?(no
       note counter amount;
       amount)
 
-let spend_quantifier (context : State.context) frame ~count ~mark ~bound ~(before : State.frame)
-    ~(after : State.frame) =
+let spend_quantifier (context : State.context) (frame : State.frame) ~count ~mark ~bound
+    ~(before : State.frame) ~(after : State.frame) =
   spend context frame (fun counter ->
       let spent =
         match (List.assoc_opt counter before.spent, List.assoc_opt counter after.spent) with
@@ -311,7 +311,7 @@ let check_lambda_exits (context : State.context) counters (exits : State.frame l
             | No_more_than limit -> Logic.less_equal spent (Logic.Integer limit)
             | Exactly_cost limit -> Logic.equal spent (Logic.Integer limit)
           in
-          Obligations.oblige context exit_ location
+          Obligations.oblige exit_ location
             (Lambda_cost
                {
                  counting =

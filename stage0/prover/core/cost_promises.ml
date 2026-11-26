@@ -35,7 +35,7 @@ let list_promises (context : State.context) (source : State.source) locals (cost
           Some { counter; clause = cost; written_in = source; inherited })
     costs
 
-let enter_definition (context : State.context) frame promises ~body =
+let enter_definition (context : State.context) (frame : State.frame) promises ~body =
   Counters.enter_body context frame
     (List.map (fun promise -> (promise.counter, promise.clause.holds_when)) promises)
     ~body
@@ -75,7 +75,7 @@ let check_promise ?restated ?cited (context : State.context) (frame : State.fram
   let counting : Catalog.Prover.counting =
     match promise.counter.counting with Units | At_most -> Upper_bound | Exactly -> Exact
   and clause = Facts.quote promise.written_in promise.clause.origin in
-  Obligations.oblige ?cited context frame location ~holds_when:promise.clause.holds_when
+  Obligations.oblige ?cited frame location ~holds_when:promise.clause.holds_when
     ~can_be_required:(promise.counter.counting <> Units)
     (Cost_promise
        (match restated with

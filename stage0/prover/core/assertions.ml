@@ -130,13 +130,13 @@ let assert_bit_vector (frame : State.frame) ~named ~origin ~(read : State.frame 
       Query.add_obligation frame.query
         { obligation with query = add_bitwise_definitions obligation.query; cited })
 
-let check_assertion (context : State.context) frame ~origin ~bit_vector term =
+let check_assertion (frame : State.frame) ~origin ~bit_vector term =
   (match bit_vector with
-  | Some (named, read) when not (is_test context.environment) ->
+  | Some (named, read) when not (is_test frame.environment) ->
       assert_bit_vector frame ~named ~origin ~read
   | _ -> ());
-  if is_test context.environment || bit_vector <> None then Facts.assume frame term
+  if is_test frame.environment || bit_vector <> None then Facts.assume frame term
   else
-    Obligations.oblige context frame (Facts.locate frame origin)
+    Obligations.oblige frame (Facts.locate frame origin)
       (Assertion_may_fail { clause = Facts.quote frame.source origin })
       term
