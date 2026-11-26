@@ -883,6 +883,9 @@ let run_find_aborts database (row : Store.definition) =
   let path = (Declarations.decode_key row.key).path in
   run_fact database Find_aborts Facts.aborts_outside_group row ~id:row.path (fun recorder ->
       let lookups = Lookups.make_call_edges database recorder in
+      ignore
+        (Tracker.find_value database recorder Facts.call_node.whole (Path.locate_package path)
+           ~id:row.path);
       let has_aborting_callee () =
         let members =
           Option.value ~default:[]
