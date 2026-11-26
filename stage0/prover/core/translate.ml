@@ -481,25 +481,13 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
     returns;
   (make_outcome context, context.skipped_conditions)
 
-let find_circular_contract (lookups : Lookups.t) (source : State.source) ~path =
+let find_circular_proof (lookups : Lookups.t) (source : State.source) ~path =
   let context =
     make_context lookups ~home:source.key ~current:path ~terminates:false ~measures:[]
       ~inherits_precondition:false
   in
   let start = make_empty_frame context.environment context.query source in
-  match Cycles.list_circular_contracts start with
-  | [] -> None
-  | circular ->
-      List.iter (Cycles.reject_circular_proof start) circular;
-      Some (make_outcome context)
-
-let find_circular_laws (lookups : Lookups.t) (source : State.source) ~path =
-  let context =
-    make_context lookups ~home:source.key ~current:path ~terminates:false ~measures:[]
-      ~inherits_precondition:false
-  in
-  let start = make_empty_frame context.environment context.query source in
-  match Cycles.list_circular_laws start with
+  match Cycles.list_circular_proofs start with
   | [] -> None
   | circular ->
       List.iter (Cycles.reject_circular_proof start) circular;
@@ -507,7 +495,7 @@ let find_circular_laws (lookups : Lookups.t) (source : State.source) ~path =
 
 let translate_function ?(substitution = Types.no_substitution) (lookups : Lookups.t)
     (source : State.source) ~path =
-  match find_circular_contract lookups source ~path with
+  match find_circular_proof lookups source ~path with
   | Some outcome -> outcome
   | None ->
       let run ?(assumes_panic_condition = false) condition =

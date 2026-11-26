@@ -320,7 +320,9 @@ develop as well as make it easier to bootstrap the compiler in parts.
   that a proof takes from another definition is an edge of the proof graph,
   which `Mir.Call_edges` lists: a callee's contract, a type's invariant, and
   the laws of an `impl`. `Laws` assumes no law of an `impl` in the proof
-  group of the definition being proven.
+  group of the definition being proven. A law that a callee's proof assumes
+  cannot be left out that way, so `Cycles.list_circular_proofs` reports it,
+  and every definition runs that one check, whatever its kind.
 - **`Callbacks` holds the rules of a function value.** A function value has
   two terms in the logic: its application, where its type uses no capability
   and has no `mut` input, and the relation that holds of the arguments and

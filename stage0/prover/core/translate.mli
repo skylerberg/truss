@@ -1,4 +1,4 @@
-val find_circular_laws : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome option
+val find_circular_proof : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome option
 
 val translate_function :
   ?substitution:Types.substitution -> Lookups.t -> State.source -> path:Path.t -> Obligation.outcome
