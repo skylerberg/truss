@@ -1,0 +1,22 @@
+use standard.intrinsic
+
+fn element(storage: intrinsic.Storage[UInt8], index: UInt64) -> UInt8
+  requires index < intrinsic.storage_length(storage)
+  ensures result == intrinsic.storage_at(storage, index: index)
+{
+  intrinsic.storage_at(storage, index: index)
+}
+
+fn guarded(storage: intrinsic.Storage[UInt8], flag: Bool) -> UInt8
+  requires !flag
+  ensures flag ==> result == element(storage, index: 3)
+{
+  0
+}
+
+fn probe(storage: intrinsic.Storage[UInt8]) -> UInt8
+  requires intrinsic.storage_length(storage) == 0
+  ensures intrinsic.storage_length(storage) > 3
+{
+  guarded(storage, flag: false)
+}

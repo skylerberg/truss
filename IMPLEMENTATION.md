@@ -193,11 +193,13 @@ develop as well as make it easier to bootstrap the compiler in parts.
   fact about `capacity`; and a call in a lambda's body, explored where the
   lambda was made, gave the code around the lambda the callee's `ensures`
   about a captured value.
-- **The facts of a partial term are assumed under its precondition.** Three
+- **The facts of a partial term are assumed under its precondition.** Four
   terms denote a value only where a condition holds: an application of a
   function value, under the `requires` of its contract; an element at an
-  index, under the bounds; and a call's result, under the callee's
-  `requires`. A frame that makes obligations proves the condition before it
+  index, under the bounds; a call's result, under the callee's `requires`;
+  and the result of an intrinsic, under the intrinsic's precondition, which
+  `Intrinsics.require_precondition` obliges and never assumes. A frame that
+  makes obligations proves the condition before it
   reads the term, and an obligation that is made is assumed, so the term's
   facts are stated in that frame as they are. A frame that makes none reads
   a clause of another definition and proves nothing, so it takes the
