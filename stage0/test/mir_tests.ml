@@ -385,7 +385,8 @@ let () =
               walk_successors basic.statements
           in
           walk [] failed);
-  Harness.test "a functional body's one jump is its return, and its graph branches" (fun () ->
+  Harness.test "a body's final `if` returns its value in each branch, and its graph branches"
+    (fun () ->
       let built, graph = lower_tree_and_graph Fixtures.Mir.if_else_on_two_comparisons in
       let chosen = ref 0 and jumps = ref [] in
       Mir.iter_code
@@ -395,9 +396,9 @@ let () =
           | Jump jump -> jumps := jump :: !jumps
           | _ -> ())
         built;
-      if !chosen = 0 then Harness.fail "the body holds no value that chooses between blocks";
+      if !chosen = 0 then Harness.fail "the body holds no choice between blocks";
       (match !jumps with
-      | [ Return (Some _) ] -> ()
+      | [ Return (Some _); Return (Some _) ] -> ()
       | jumps -> Harness.fail "the body holds %d jumps" (List.length jumps));
       if
         not
@@ -920,7 +921,14 @@ let () =
       let body, moves =
         analyse_moves
           (moves_program
-         ^ "fn g(moved: Bool) {\n  let kept = text()\n  if moved {\n    take(own kept)\n  }\n}\n")
+         ^ "fn g(moved: Bool) {\n\
+           \  let kept = text()\n\
+           \  if moved {\n\
+           \    take(own kept)\n\
+           \  }\n\
+           \  let last = text()\n\
+           \  take(own last)\n\
+            }\n")
       in
       let path : Moves.path = { local = locate_named body "kept"; projections = [] } in
       Harness.expect_string ~expected:"maybe"

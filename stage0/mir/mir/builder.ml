@@ -196,7 +196,7 @@ let lower_condition_block builder build : Tree.block option =
       Emitter.mark_unreachable builder;
       None
 
-let rec lower_expression builder (node : Core.expression) : Tree.operand option =
+let rec lower_expression ?final_return builder (node : Core.expression) : Tree.operand option =
   let origin = node.origin in
   let hold value = Emitter.hold builder node.type_ origin value in
   if not (Emitter.reaches builder) then None
@@ -281,11 +281,13 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
     | If { condition = tested; then_; else_ } ->
         let scope = Emitter.make_block_scope () in
         let* condition = lower_condition builder scope tested in
-        let result = allocate_value_local builder node in
+        let result = allocate_value_local ?final_return builder node in
         let lower_branch run (body : Core.block option) =
           Emitter.build_block builder (fun () ->
               run (fun () ->
-                  match (Option.map (lower_block builder) body, result) with
+                  match
+                    (Option.map (lower_branch ?final_return builder ~enclosing:origin) body, result)
+                  with
                   | Some (Some value), Some local ->
                       Emitter.assign builder (Emitter.make_local_place local) (Operand value) origin;
                       Some
@@ -305,8 +307,10 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
             else_
         in
         lower_choice builder node [ then_; else_ ] (Tree.Conditional { condition; then_; else_ })
-    | Match { scrutinees; arms } -> match_ builder node scrutinees arms
-    | Block inner -> Emitter.run_in_value_scope builder origin (fun () -> lower_block builder inner)
+    | Match { scrutinees; arms } -> match_ ?final_return builder node scrutinees arms
+    | Block inner ->
+        Emitter.run_in_value_scope builder origin (fun () ->
+            lower_branch ?final_return builder inner ~enclosing:origin)
     | Provide { implementations; body } ->
         let* provided =
           In_order.run builder
@@ -698,9 +702,10 @@ and lower_call_value builder (node : Core.expression) (called : Core.call) =
           (Use { place = Emitter.make_local_place local; type_ = node.type_; origin = node.origin })
 
 and lower_choice builder (node : Core.expression) (blocks : Tree.block list) choice =
-  let type_ = if diverges node.type_ then Types.unit else node.type_ in
+  let has_value = List.exists (fun (block : Tree.block) -> block.value <> None) blocks in
+  let type_ = if has_value && not (diverges node.type_) then node.type_ else Types.unit in
   let held = Emitter.hold_choice builder type_ node.origin choice in
-  if List.exists (fun (block : Tree.block) -> block.value <> None) blocks then held
+  if has_value then held
   else begin
     Emitter.mark_unreachable builder;
     None
@@ -777,8 +782,8 @@ and match_patterns ?(covers = false) ?owned builder (patterns : Core.pattern lis
   in
   lower_alternatives (expand_patterns patterns)
 
-and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : Tree.operand option
-    =
+and match_ ?final_return builder (node : Core.expression) scrutinees (arms : Core.arm list) :
+    Tree.operand option =
   let origin = node.origin in
   let scrutinee_values, scrutinee_lends =
     Emitter.run_in_scrutinee_frame builder (fun () ->
@@ -804,7 +809,7 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
   let* scrutinee_values = scrutinee_values in
   let evaluated = List.map fst scrutinee_values in
   let scrutinee_places = List.map snd scrutinee_values in
-  let result = allocate_value_local builder node in
+  let result = allocate_value_local ?final_return builder node in
   let unmatched_ends = ref [] in
   let lower_case (arm : Core.arm) : Tree.case =
     let scope = Emitter.make_arm_scope ~scrutinee:scrutinee_lends in
@@ -840,7 +845,7 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
     let value =
       Emitter.build_block builder (fun () ->
           Emitter.run_in_guarded_block builder scope arm.origin (fun () ->
-              match (lower_block builder arm.body, result) with
+              match (lower_branch ?final_return builder arm.body ~enclosing:arm.origin, result) with
               | Some value, Some local ->
                   Emitter.assign builder (Emitter.make_local_place local) (Operand value) arm.origin;
                   Some
@@ -853,8 +858,8 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
   let cases = List.map lower_case arms in
   lower_choice builder node (List.map (fun (case : Tree.case) -> case.value) cases) (Cases cases)
 
-and allocate_value_local builder (node : Core.expression) =
-  if is_unit node.type_ || diverges node.type_ then None
+and allocate_value_local ?final_return builder (node : Core.expression) =
+  if Option.is_some final_return || is_unit node.type_ || diverges node.type_ then None
   else Some (Emitter.allocate_temporary builder node.type_ node.origin)
 
 and lower_block builder (body : Core.block) : Tree.operand option =
@@ -863,6 +868,30 @@ and lower_block builder (body : Core.block) : Tree.operand option =
   | Some value -> lower_expression builder value
   | None -> if Emitter.reaches builder then Some Emitter.unit_value else None
 
+and lower_branch ?final_return builder (body : Core.block) ~enclosing : Tree.operand option =
+  match final_return with
+  | Some return_ ->
+      lower_final_block builder body ~return_ ~enclosing;
+      None
+  | None -> lower_block builder body
+
+and lower_final_block builder (body : Core.block) ~return_ ~enclosing =
+  let lower_final (value : Core.expression) ~return_ =
+    Emitter.run_in_statement builder value.origin (fun () ->
+        Option.iter (return_ value.origin) (lower_expression ~final_return:return_ builder value))
+  in
+  match (body.value, List.rev body.statements) with
+  | Some value, _ ->
+      List.iter (lower_statement builder) body.statements;
+      lower_final value ~return_
+  | None, { kind = Evaluate ({ kind = If _ | Match _ | Block _; _ } as discarded); _ } :: earlier ->
+      List.iter (lower_statement builder) (List.rev earlier);
+      lower_final discarded ~return_:(fun origin _ -> return_ origin Emitter.unit_value)
+  | None, _ ->
+      List.iter (lower_statement builder) body.statements;
+      if Emitter.reaches builder then
+        return_ (compute_end_origin ~enclosing body) Emitter.unit_value
+
 and compute_end_origin ~(enclosing : Core.origin) (body : Core.block) : Core.origin =
   match (body.value, List.rev body.statements) with
   | Some value, _ -> value.origin
@@ -870,13 +899,8 @@ and compute_end_origin ~(enclosing : Core.origin) (body : Core.block) : Core.ori
   | None, [] -> enclosing
 
 and lower_body builder (body : Core.block) ~returns ~origin =
-  let return_ value = Emitter.return_ builder (if returns then Some value else None) origin in
-  List.iter (lower_statement builder) body.statements;
-  match body.value with
-  | Some value ->
-      Emitter.run_in_statement builder value.origin (fun () ->
-          Option.iter return_ (lower_expression builder value))
-  | None -> if Emitter.reaches builder then return_ Emitter.unit_value
+  lower_final_block builder body ~enclosing:origin ~return_:(fun origin value ->
+      Emitter.return_ builder (if returns then Some value else None) origin)
 
 and lower_scrutinee builder (matched : Core.operand) : Tree.place option =
   match matched with

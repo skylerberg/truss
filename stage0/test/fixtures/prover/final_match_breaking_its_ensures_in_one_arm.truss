@@ -1,0 +1,8 @@
+fn choose(number: Int64) -> Int64
+  ensures result == 7
+{
+  match number {
+    0 => 7
+    _ => 8
+  }
+}

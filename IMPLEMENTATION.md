@@ -116,6 +116,12 @@ develop as well as make it easier to bootstrap the compiler in parts.
   records each fact where it has it, and no stage finds a loop in the
   control-flow graph. A stage that needs a value in another state runs the
   MIR's statements in that state.
+- **A body's final expression returns in each branch.** The builder lowers
+  the final `if`, `match` or block of a body in tail position: each branch
+  returns its own value where it has one, and its end where it has none,
+  and no value joins. An obligation checked at a return is then checked on
+  the path of one branch, where it is located and can be refuted, and a
+  value moved on one branch needs no drop flag.
 
 ### The prover
 

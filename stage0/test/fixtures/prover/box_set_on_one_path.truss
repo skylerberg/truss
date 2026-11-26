@@ -6,4 +6,5 @@ fn Box.set(mut self, flag: Bool)
   if flag {
     self.value = 1
   }
+  self.value = self.value * 1
 }
