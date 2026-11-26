@@ -11,6 +11,8 @@ val find_constructors :
   State.context -> Types.ty -> (string option * (string * Types.ty) list) list option
 
 val sort_of : Types.ty -> Logic.sort
+val sequence_path : Path.t
+val make_sequence_type : Types.ty -> Types.ty
 
 val list_constructors :
   State.context -> Types.ty -> (Logic.symbol * (Logic.symbol * Logic.sort) list) list option

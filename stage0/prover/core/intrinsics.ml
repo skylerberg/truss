@@ -1,8 +1,6 @@
 let make_sequence_range context element sequence ~start ~stop =
-  let sequence_sort = Encoding.sort_of (Models.make_sequence_type element) in
+  let sequence_sort = Encoding.sort_of (Encoding.make_sequence_type element) in
   let symbol = Logic.Symbol.Sequence_range element in
-  Facts.declare context
-    (Logic.Function (symbol, [ sequence_sort; Logic.Int; Logic.Int ], sequence_sort));
   let range_of whole low high = Logic.Apply (symbol, [ whole; low; high ]) in
   Facts.run_once context (Range_elements element) (fun () ->
       let variable label = Logic.Symbol.Variable { label; numbers = [] } in
@@ -64,7 +62,7 @@ let apply_range context (frame : State.frame) ~node (site : Invocation.site) ~(b
   in
   let is_sequence =
     match base_type with
-    | Types.Named { path; _ } -> Path.equal path Models.sequence_path
+    | Types.Named { path; _ } -> Path.equal path Encoding.sequence_path
     | _ -> false
   in
   let model =
@@ -130,35 +128,22 @@ let assume_unchanged_outside context frame element ~before ~after ~start ~stop =
            ==> (less_equal start index &&& less index stop
                ||| equal (at after index) (at before index))) ))
 
-let handle_descriptor context handle =
-  let handle_sort = Encoding.sort_of (Types.make_builtin Handle) in
-  Facts.declare context
-    (Logic.Function (Logic.Symbol.Handle_descriptor, [ handle_sort ], Logic.Int));
-  Logic.Apply (Logic.Symbol.Handle_descriptor, [ handle ])
+let make_handle_descriptor handle = Logic.Apply (Logic.Symbol.Handle_descriptor, [ handle ])
 
 let declare_libc_number context frame (number : Libc.number) =
-  let symbol = Logic.Symbol.Libc_number number in
-  Facts.declare context (Logic.Constant (symbol, Logic.Int));
-  let term = Logic.Symbol symbol in
+  let term = Logic.Symbol (Logic.Symbol.Libc_number number) in
   Facts.assume context frame
     (Encoding.make_in_range
        (Types.make_builtin (Intrinsic.convert_libc_scalar (Libc.classify_number number)))
        term);
   term
 
-let make_buffer_capacity context element term =
-  let ty = Types.make_builtin Storage ~arguments:[ Type element ] in
-  let symbol = Logic.Symbol.Capacity ty in
-  Facts.declare context (Logic.Function (symbol, [ Encoding.sort_of ty ], Logic.Int));
-  Logic.Apply (symbol, [ term ])
+let make_buffer_capacity element term =
+  Logic.Apply
+    (Logic.Symbol.Capacity (Types.make_builtin Storage ~arguments:[ Type element ]), [ term ])
 
-let make_buffer_model context (builtin : Language.Builtin_type.t) element term =
-  let ty = Types.make_builtin builtin ~arguments:[ Type element ] in
-  let symbol = Logic.Symbol.Model ty in
-  Facts.declare context
-    (Logic.Function
-       (symbol, [ Encoding.sort_of ty ], Encoding.sort_of (Models.make_sequence_type element)));
-  Logic.Apply (symbol, [ term ])
+let make_buffer_model (builtin : Language.Builtin_type.t) element term =
+  Logic.Apply (Logic.Symbol.Model (Types.make_builtin builtin ~arguments:[ Type element ]), [ term ])
 
 let call_libc context frame ~(site : Invocation.site) (function_ : Libc.function_) operands ~changed
     known =
@@ -202,8 +187,8 @@ let call_libc context frame ~(site : Invocation.site) (function_ : Libc.function
           Some before,
           Some after ) -> (
           let element = make_element_type scalar in
-          let model term = make_buffer_model context Storage element term in
-          let capacity term = make_buffer_capacity context element term in
+          let model term = make_buffer_model Storage element term in
+          let capacity term = make_buffer_capacity element term in
           Facts.assume context frame
             Logic.(
               equal (length element (model after)) (length element (model before))
@@ -223,7 +208,7 @@ let call_libc context frame ~(site : Invocation.site) (function_ : Libc.function
           | _, None -> ())
       | Some (Libc.Elements (scalar, extent)), Some view, _ -> (
           let element = make_element_type scalar in
-          let elements = make_buffer_model context Storage element view in
+          let elements = make_buffer_model Storage element view in
           match count extent with
           | Some counted ->
               require Elements_read (Logic.less_equal counted (length element elements))
@@ -261,7 +246,7 @@ let make_sequence_sum context element term measure =
     (Logic.Function
        ( symbol,
          [
-           Encoding.sort_of (Models.make_sequence_type element);
+           Encoding.sort_of (Encoding.make_sequence_type element);
            Encoding.sort_of (Types.Function (measure_type element));
          ],
          Logic.Int ));
@@ -274,12 +259,12 @@ let make_each_sum context element relation =
       relation
         (fun sequence -> make_sequence_sum context element sequence (Logic.Symbol measure))
         (fun value ->
-          Callbacks.apply_function context (measure_type element) (Logic.Symbol measure) [ value ])
-    )
+          Callbacks.apply_function (measure_type element) (Logic.Symbol measure) [ value ]) )
 
 let make_empty_sequence context frame element =
   let empty =
-    Facts.declare_fresh context frame "parts" (Encoding.sort_of (Models.make_sequence_type element))
+    Facts.declare_fresh context frame "parts"
+      (Encoding.sort_of (Encoding.make_sequence_type element))
   in
   Facts.assume context frame
     (Logic.equal (Models.make_sequence_length context element empty) (Logic.int 0));
@@ -289,7 +274,8 @@ let make_empty_sequence context frame element =
 
 let append_element context frame element shorter appended =
   let longer =
-    Facts.declare_fresh context frame "parts" (Encoding.sort_of (Models.make_sequence_type element))
+    Facts.declare_fresh context frame "parts"
+      (Encoding.sort_of (Encoding.make_sequence_type element))
   in
   let length = Models.make_sequence_length context element shorter in
   Facts.assume context frame
@@ -320,46 +306,43 @@ let append_element context frame element shorter appended =
            (make_sequence_sum context element longer (Logic.Symbol measure))
            (Logic.add
               (make_sequence_sum context element shorter (Logic.Symbol measure))
-              (Callbacks.apply_function context (measure_type element) (Logic.Symbol measure)
-                 [ appended ])) ));
+              (Callbacks.apply_function (measure_type element) (Logic.Symbol measure) [ appended ]))
+       ));
   longer
 
 let make_byte_order context left right =
-  let sequence = Encoding.sort_of (Models.make_sequence_type (Types.make_builtin UInt8)) in
+  let sequence = Encoding.sort_of (Encoding.make_sequence_type (Types.make_builtin UInt8)) in
   let symbol = Logic.Symbol.Compare_bytes_order in
-  let first = Option.is_none (Facts.find_argument_sorts context symbol) in
-  Facts.declare context (Logic.Function (symbol, [ sequence; sequence ], Logic.Int));
   let order first_term second_term = Logic.Apply (symbol, [ first_term; second_term ]) in
-  if first then begin
-    let first_term = Logic.Symbol (Facts.make_variable "bytes.first")
-    and second_term = Logic.Symbol (Facts.make_variable "bytes.second")
-    and third_term = Logic.Symbol (Facts.make_variable "bytes.third") in
-    let over names body = Logic.forall (List.map (fun name -> (name, sequence)) names, body) in
-    List.iter (Facts.add_fact context)
-      (List.rev
-         [
-           over
-             [ Facts.make_variable "bytes.first"; Facts.make_variable "bytes.second" ]
-             Logic.(
-               less_equal (int (-1)) (order first_term second_term)
-               &&& less_equal (order first_term second_term) (int 1)
-               &&& (equal (order first_term second_term) (int 0) ==> equal first_term second_term)
-               &&& equal (order second_term first_term) (negate (order first_term second_term)));
-           over
-             [ Facts.make_variable "bytes.first" ]
-             (Logic.equal (order first_term first_term) (Logic.int 0));
-           over
-             [
-               Facts.make_variable "bytes.first";
-               Facts.make_variable "bytes.second";
-               Facts.make_variable "bytes.third";
-             ]
-             Logic.(
-               less (order first_term second_term) (int 0)
-               &&& less (order second_term third_term) (int 0)
-               ==> less (order first_term third_term) (int 0));
-         ])
-  end;
+  Facts.run_once context (Total_order symbol) (fun () ->
+      let first_term = Logic.Symbol (Facts.make_variable "bytes.first")
+      and second_term = Logic.Symbol (Facts.make_variable "bytes.second")
+      and third_term = Logic.Symbol (Facts.make_variable "bytes.third") in
+      let over names body = Logic.forall (List.map (fun name -> (name, sequence)) names, body) in
+      List.iter (Facts.add_fact context)
+        (List.rev
+           [
+             over
+               [ Facts.make_variable "bytes.first"; Facts.make_variable "bytes.second" ]
+               Logic.(
+                 less_equal (int (-1)) (order first_term second_term)
+                 &&& less_equal (order first_term second_term) (int 1)
+                 &&& (equal (order first_term second_term) (int 0) ==> equal first_term second_term)
+                 &&& equal (order second_term first_term) (negate (order first_term second_term)));
+             over
+               [ Facts.make_variable "bytes.first" ]
+               (Logic.equal (order first_term first_term) (Logic.int 0));
+             over
+               [
+                 Facts.make_variable "bytes.first";
+                 Facts.make_variable "bytes.second";
+                 Facts.make_variable "bytes.third";
+               ]
+               Logic.(
+                 less (order first_term second_term) (int 0)
+                 &&& less (order second_term third_term) (int 0)
+                 ==> less (order first_term third_term) (int 0));
+           ]));
   order left right
 
 let find_scalar_bytes element : int option =
@@ -374,14 +357,14 @@ let make_length_in_range value =
   Logic.(less_equal (int 0) value &&& Encoding.make_in_range (Types.make_builtin Int64) value)
 
 let model_buffer context frame (builtin : Language.Builtin_type.t) element term =
-  let sequence = make_buffer_model context builtin element term in
+  let sequence = make_buffer_model builtin element term in
   Facts.assume context frame
     (make_length_in_range (Models.make_sequence_length context element sequence));
   sequence
 
 let model_storage context frame element term =
   let sequence = model_buffer context frame Storage element term in
-  let capacity = make_buffer_capacity context element term in
+  let capacity = make_buffer_capacity element term in
   Facts.assume context frame
     Logic.(
       less_equal (Models.make_sequence_length context element sequence) capacity
@@ -414,7 +397,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
   in
   let read_operand position = (read_passed position).term in
   let length sequence = Models.make_sequence_length context element sequence in
-  let capacity term = make_buffer_capacity context element term in
+  let capacity term = make_buffer_capacity element term in
   let storage = model_storage context frame element in
   let require ?(requirement = Catalog.Prover.Room_written) condition =
     require_precondition context frame site requirement condition
@@ -484,7 +467,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       | Some bytes ->
           let length =
             Models.make_sequence_length context element
-              (make_buffer_model context Storage element (read_operand 0))
+              (make_buffer_model Storage element (read_operand 0))
           in
           Facts.assume context frame
             Logic.(
@@ -529,9 +512,6 @@ let read_invariant context (frame : State.frame) (values : State.passed list) re
 
 let declare_system context (runtime : Intrinsic.runtime) kind =
   let make_symbol runtime = Logic.Symbol.System runtime in
-  List.iter
-    (fun other -> Facts.declare context (Logic.Constant (make_symbol other, Logic.Bool)))
-    kind;
   Facts.run_once context
     (Exclusive (make_symbol runtime))
     (fun () ->
@@ -565,7 +545,7 @@ let translate_runtime context frame ~(site : Invocation.site) (runtime : Intrins
            Libc.architectures)
   | Environment_entry ->
       let byte = Types.make_builtin UInt8 in
-      let model = make_buffer_model context Storage byte (Lazy.force known) in
+      let model = make_buffer_model Storage byte (Lazy.force known) in
       let length = Models.make_sequence_length context byte model in
       (match
          Models.index_sequence context byte model (Logic.Symbol (Facts.make_variable "entry.index"))
@@ -584,13 +564,13 @@ let translate_runtime context frame ~(site : Invocation.site) (runtime : Intrins
       match operands with
       | [ descriptor ] ->
           Facts.assume context frame
-            (Logic.equal (handle_descriptor context (Lazy.force known)) descriptor);
+            (Logic.equal (make_handle_descriptor (Lazy.force known)) descriptor);
           Lazy.force known
       | _ -> Lazy.force known)
   | Handle_descriptor -> (
       match operands with
       | [ handle ] ->
-          let descriptor = handle_descriptor context handle in
+          let descriptor = make_handle_descriptor handle in
           Facts.assume context frame (Encoding.make_in_range (Types.make_builtin Int32) descriptor);
           descriptor
       | _ -> Lazy.force known)
@@ -654,10 +634,7 @@ let keeps_potential : Intrinsic.operation -> bool = function
     ->
       false
 
-let declare_buffer_slack context (ty : Types.ty) term =
-  let symbol = Logic.Symbol.Slack ty in
-  Facts.declare context (Logic.Function (symbol, [ Encoding.sort_of ty ], Logic.Int));
-  Logic.Apply (symbol, [ term ])
+let make_buffer_slack (ty : Types.ty) term = Logic.Apply (Logic.Symbol.Slack ty, [ term ])
 
 let find_sequence_element context frame (sequence : Types.ty) =
   match Types.strip_view sequence with
@@ -715,12 +692,10 @@ let write_sequence context frame (sequence : Types.ty) before ~write_model =
         if not (Types.is_builtin Storage buffer_type) then
           Facts.raise_bug "the field of `%s` is no buffer" (Types.show sequence);
         write_model
-          ~before:(make_buffer_model context Storage element buffer)
-          ~after:(make_buffer_model context Storage element written);
+          ~before:(make_buffer_model Storage element buffer)
+          ~after:(make_buffer_model Storage element written);
         Facts.assume context frame
-          (Logic.equal
-             (make_buffer_capacity context element written)
-             (make_buffer_capacity context element buffer));
+          (Logic.equal (make_buffer_capacity element written) (make_buffer_capacity element buffer));
         let after = Logic.Apply (Encoding.make_constructor_symbol sequence None, [ written ]) in
         write_model
           ~before:(find_sequence_model context frame sequence before)
@@ -732,9 +707,7 @@ let write_sequence context frame (sequence : Types.ty) before ~write_model =
           ~before:(find_sequence_model context frame sequence before)
           ~after:(find_sequence_model context frame sequence after);
         Facts.assume context frame
-          (Logic.equal
-             (declare_buffer_slack context sequence after)
-             (declare_buffer_slack context sequence before));
+          (Logic.equal (make_buffer_slack sequence after) (make_buffer_slack sequence before));
         after
     | _, Some _ -> Facts.raise_bug "a sequence `%s` with more than one field" (Types.show sequence)
   in
@@ -772,12 +745,10 @@ let replace_elements context frame (sequence : Types.ty) before =
   if Types.is_builtin Storage sequence then begin
     let after = Encoding.arrive context frame "changed" sequence in
     keep_length
-      ~before:(make_buffer_model context Storage element before)
-      ~after:(make_buffer_model context Storage element after);
+      ~before:(make_buffer_model Storage element before)
+      ~after:(make_buffer_model Storage element after);
     Facts.assume context frame
-      (Logic.equal
-         (make_buffer_capacity context element after)
-         (make_buffer_capacity context element before));
+      (Logic.equal (make_buffer_capacity element after) (make_buffer_capacity element before));
     after
   end
   else write_sequence context frame sequence before ~write_model:keep_length

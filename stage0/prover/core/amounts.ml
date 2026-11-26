@@ -258,7 +258,7 @@ let compute_step_amount ?result context frame (callee : Callee.t) (values : Stat
                       | Some Storage ->
                           count
                             (Models.make_sequence_length context element
-                               (Intrinsics.make_buffer_model context Storage element passed.term))
+                               (Intrinsics.make_buffer_model Storage element passed.term))
                       | _ -> unknown ())
                   | _ -> unknown ())
               | None -> unknown ())
@@ -307,7 +307,6 @@ let make_callback_cost (context : State.context) frame (metric : Language.Metric
   | None ->
       let sort = Encoding.sort_of ty in
       let symbol = Logic.Symbol.Callback_cost { metric; sort } in
-      Facts.declare context (Logic.Function (symbol, [ sort ], Logic.Int));
       let cost = Logic.Apply (symbol, [ term ]) in
       let least = Costs.least_amount (Metric metric) in
       Facts.add_frame_fact context frame (Logic.less_equal least cost);
@@ -396,7 +395,6 @@ let compute_construction_amount context frame (ty : Types.ty) variant (counter :
   | Metric Allocated_bytes when counter.counting = Units -> Logic.int 1
   | Metric Allocated_bytes ->
       let symbol = Logic.Symbol.Block_bytes { type_ = ty; variant } in
-      Facts.declare context (Logic.Constant (symbol, Logic.Int));
       Facts.add_frame_fact context frame (Logic.less_equal (Logic.int 1) (Logic.Symbol symbol));
       Logic.Symbol symbol
   | Metric Time | Calls _ -> Costs.zero
@@ -576,7 +574,6 @@ let declare_method_cost context frame (metric : Language.Metric.t) (method_ : Pa
     ~trait_arguments self_type =
   let symbol = Logic.Symbol.Method_cost { metric; method_; trait_arguments; self_type } in
   Facts.run_once context (Method_cost_bound symbol) (fun () ->
-      Facts.declare context (Logic.Constant (symbol, Logic.Int));
       let least = Costs.least_amount (Metric metric) in
       Facts.add_fact context (Logic.less_equal least (Logic.Symbol symbol));
       Option.iter

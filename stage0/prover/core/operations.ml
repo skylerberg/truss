@@ -90,9 +90,7 @@ let find_written_equal context ty left right =
   | _ -> None
 
 let make_derived_equal context (frame : State.frame) (ty : Types.ty) left right =
-  let sort = Encoding.sort_of ty in
   let symbol = Logic.Symbol.Equal ty in
-  Facts.declare context (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
   let equal = Logic.Apply (symbol, [ left; right ]) in
   (match (Encoding.find_visible_type context ty, Encoding.find_constructors context ty) with
   | Some (interface, _), Some shape
@@ -115,11 +113,6 @@ let make_derived_equal context (frame : State.frame) (ty : Types.ty) left right 
                  | Some equal -> equal
                  | None ->
                      let symbol = Logic.Symbol.Equal field_type in
-                     Facts.declare context
-                       (Logic.Function
-                          ( symbol,
-                            [ Encoding.sort_of field_type; Encoding.sort_of field_type ],
-                            Logic.Bool ));
                      Logic.Apply (symbol, [ left; right ]))
              fields)
       in
@@ -245,9 +238,7 @@ let make_power_order base left right =
         ==> less_equal (power left) (power right)
         &&& (less_equal right left ==> less_equal (power right) (power left))))
 
-let declare_power context frame base exponent =
-  Facts.declare context
-    (Logic.Function (Logic.Symbol.Integer_power, [ Logic.Int; Logic.Int ], Logic.Int));
+let declare_power (context : State.context) frame base exponent =
   let add exponent =
     if not (List.mem (base, exponent) context.powers) then begin
       List.iter
@@ -383,8 +374,6 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
               if operation = Bit_or then
                 Facts.assume context frame Logic.(less_equal left term &&& less_equal right term);
               Facts.assume context frame (at_most sum);
-              Facts.declare context
-                (Logic.Function (Logic.Symbol.Integer_power, [ Logic.Int; Logic.Int ], Logic.Int));
               let exponent = Logic.Symbol (Facts.make_variable "exponent") in
               let below value =
                 Logic.less value
@@ -437,7 +426,6 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
       | Some bits ->
           let count counted value =
             let symbol = Logic.Symbol.Bit_count { count = counted; width = bits } in
-            Facts.declare context (Logic.Function (symbol, [ Logic.Int ], Logic.Int));
             Logic.Apply (symbol, [ value ])
           in
           let term = count operation value in

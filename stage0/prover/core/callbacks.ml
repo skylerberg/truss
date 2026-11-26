@@ -26,12 +26,11 @@ let declare_own context (frame : State.frame) own =
       | _ -> Facts.raise_bug "the callback parameter `%s` is not a function bound at entry" name)
     frame own
 
-let apply_function context (function_type : Types.function_type) callee arguments =
+let apply_function (function_type : Types.function_type) callee arguments =
   let inputs = List.map (fun (_, input) -> Encoding.sort_of input) function_type.inputs in
   let output = Encoding.sort_of function_type.output in
   let value_sort = Encoding.sort_of (Types.Function function_type) in
   let symbol = Logic.Symbol.Apply ((value_sort :: inputs) @ [ output ]) in
-  Facts.declare context (Logic.Function (symbol, value_sort :: inputs, output));
   Logic.Apply (symbol, callee :: arguments)
 
 let returns_value (function_type : Types.function_type) =
@@ -88,8 +87,7 @@ let make_relation_variables (function_type : Types.function_type) ~label ~number
   in
   { inputs; changed; returned; entries; exits; result }
 
-let make_callback_ensures context (function_type : Types.function_type) callee ~entries ~exits
-    ~result =
+let make_callback_ensures (function_type : Types.function_type) callee ~entries ~exits ~result =
   let sorts =
     Encoding.sort_of (Types.Function function_type)
     :: List.concat_map
@@ -108,10 +106,9 @@ let make_callback_ensures context (function_type : Types.function_type) callee ~
     @ if returns_value function_type then [ result ] else []
   in
   let symbol = Logic.Symbol.Callback_ensures sorts in
-  Facts.declare context (Logic.Function (symbol, sorts, Logic.Bool));
   Logic.Apply (symbol, callee :: arguments)
 
-let apply_callback_ensures context (function_type : Types.function_type) values =
+let apply_callback_ensures (function_type : Types.function_type) values =
   let rec split inputs arguments ~entries ~exits =
     match (inputs, arguments) with
     | [], rest -> (List.rev entries, List.rev exits, rest)
@@ -126,9 +123,9 @@ let apply_callback_ensures context (function_type : Types.function_type) values 
   | callee :: arguments -> (
       let entries, exits, rest = split function_type.inputs arguments ~entries:[] ~exits:[] in
       match rest with
-      | [ result ] -> make_callback_ensures context function_type callee ~entries ~exits ~result
+      | [ result ] -> make_callback_ensures function_type callee ~entries ~exits ~result
       | [] when not (returns_value function_type) ->
-          make_callback_ensures context function_type callee ~entries ~exits
+          make_callback_ensures function_type callee ~entries ~exits
             ~result:(Logic.Apply (Logic.Symbol.Unit, []))
       | _ -> Facts.raise_bug "`.ensures` with arguments that do not match its function type")
   | [] -> Facts.raise_bug "`.ensures` without the function it describes"
@@ -357,25 +354,23 @@ let list_called_requires context (frame : State.frame) called arguments =
 
 let assume_returned context frame (function_type : Types.function_type) called ~entries ~exits
     ~result =
-  Facts.assume context frame
-    (make_callback_ensures context function_type called ~entries ~exits ~result);
+  Facts.assume context frame (make_callback_ensures function_type called ~entries ~exits ~result);
   Option.iter
     (fun known ->
       List.iter (Facts.assume context frame)
         (list_ensures context frame known ~entries ~exits ~result))
     (find_known context frame called)
 
-let find_logic_link context (function_type : Types.function_type) term =
+let find_logic_link (function_type : Types.function_type) term =
   if is_in_the_logic function_type && returns_value function_type then
     let { inputs; returned; entries; result; _ } =
       make_relation_variables function_type ~label:"relation" ~numbers:[]
     in
-    let holds = make_callback_ensures context function_type term ~entries ~exits:entries ~result in
+    let holds = make_callback_ensures function_type term ~entries ~exits:entries ~result in
     Some
       (Logic.forall ~trigger:[ holds ]
          ( inputs @ returned,
-           Logic.equal holds
-             (Logic.equal result (apply_function context function_type term entries)) ))
+           Logic.equal holds (Logic.equal result (apply_function function_type term entries)) ))
   else None
 
 let state_relation context (frame : State.frame) (function_type : Types.function_type) term known =
@@ -383,7 +378,7 @@ let state_relation context (frame : State.frame) (function_type : Types.function
     make_relation_variables function_type ~label:"named" ~numbers:[]
   in
   let parameters = inputs @ List.map snd changed @ returned in
-  let holds = make_callback_ensures context function_type term ~entries ~exits ~result in
+  let holds = make_callback_ensures function_type term ~entries ~exits ~result in
   let mark = Query.mark context.State.query in
   let bound = List.map fst parameters in
   let is_inside_the_relation fact =
@@ -426,8 +421,7 @@ let state_definition context (frame : State.frame) (function_type : Types.functi
     contract ~substitution_of ~result_type:function_type.output ~group_member
     ~is_on_bound_values:true;
   Facts.add_frame_fact context frame
-    (Logic.forall
-       (parameters, Logic.equal (apply_function context function_type term inputs) value))
+    (Logic.forall (parameters, Logic.equal (apply_function function_type term inputs) value))
 
 let read_named_function (context : State.context) (frame : State.frame) (site : Invocation.site)
     path instantiation ~is_argument =
@@ -450,9 +444,7 @@ let read_named_function (context : State.context) (frame : State.frame) (site : 
             if is_in_the_logic function_type && contract.is_logic_function then
               state_definition context frame function_type term ~path ~contract ~substitution_of
                 ~type_arguments ~group_member;
-            Option.iter
-              (Facts.add_frame_fact context frame)
-              (find_logic_link context function_type term)
+            Option.iter (Facts.add_frame_fact context frame) (find_logic_link function_type term)
           end;
           state_relation context frame function_type term known);
       term

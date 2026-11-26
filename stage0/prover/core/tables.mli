@@ -5,6 +5,7 @@ type stated =
   | Contract_of of Logic.symbol
   | Limited_link of Logic.symbol
   | Exclusive of Logic.symbol
+  | Total_order of Logic.symbol
   | Array_length of Logic.symbol
   | Ranked_model of Logic.symbol
   | Ranked_elements of Types.ty

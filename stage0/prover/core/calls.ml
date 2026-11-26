@@ -526,7 +526,7 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
         let frame = havoc.after in
         let result =
           if Callbacks.is_in_the_logic function_type then begin
-            let term = Callbacks.apply_function context function_type called entries in
+            let term = Callbacks.apply_function function_type called entries in
             Facts.assume context
               (Facts.restrict_unless_proven frame is_defined)
               (Encoding.make_in_range result_type term);

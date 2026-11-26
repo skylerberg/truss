@@ -203,7 +203,7 @@ let declare_elements_so_far context (head : State.frame) ~element ~collection ~c
   | Some read ->
       let collection_type, collected = read head in
       Option.iter
-        (Values.assume_extensional context head (Models.make_sequence_type element) visited)
+        (Values.assume_extensional context head (Encoding.make_sequence_type element) visited)
         (Models.find_model context
            (Encoding.substitute_type context head collection_type)
            collected ~element)
@@ -261,7 +261,8 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_typ
 
 let declare_visited context frame element =
   let visited =
-    Facts.declare_fresh context frame "parts" (Encoding.sort_of (Models.make_sequence_type element))
+    Facts.declare_fresh context frame "parts"
+      (Encoding.sort_of (Encoding.make_sequence_type element))
   in
   Facts.assume context frame
     Logic.(greater_equal (Models.make_sequence_length context element visited) (int 0));
@@ -296,7 +297,9 @@ let assume_visited_is_a_prefix context (head : State.frame) ~element ~visited ~e
           &&& forall
                 ( [ (position, Int) ],
                   is_below (length model) ==> equal remaining_value entry_value_ahead ));
-      Values.assume_extensional context head (Models.make_sequence_type element) visited entry_model
+      Values.assume_extensional context head
+        (Encoding.make_sequence_type element)
+        visited entry_model
   | _ -> ()
 
 let oblige_next_gives_the_model context (after : State.frame) location ~element ~has_another ~pulled

@@ -7,7 +7,7 @@ let find_ruled_out_panic (context : State.context) (frame : State.frame) =
 let set_panics (frame : State.frame) ~panics = { frame with panics; can_declare_panic = false }
 
 let make_obligation (context : State.context) (frame : State.frame) location obligation goal =
-  Query.make_obligation context.query
+  Query.make_obligation context.query ~find_signature:Signatures.find_signature
     ~list_constructors:(Encoding.list_constructors context)
     ~condition:frame.condition location obligation goal
 

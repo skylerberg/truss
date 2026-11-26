@@ -76,7 +76,7 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
   let lift = make_lifting context frame ~called ~arguments ~start ~end_ parameters in
   let premise = lift (Logic.conjunction premises) in
   let applied_here =
-    Callbacks.apply_function context function_type term
+    Callbacks.apply_function function_type term
       (List.map (fun (name, _) -> Logic.Symbol name) parameters)
   in
   let statements =
@@ -104,7 +104,7 @@ let add_lambda_relation (context : State.context) (frame : State.frame) ~capture
   in
   let parameters = inputs @ List.map snd changed @ returned in
   let lift = make_lifting context frame ~called ~arguments ~start ~end_ parameters in
-  let holds = Callbacks.make_callback_ensures context function_type term ~entries ~exits ~result in
+  let holds = Callbacks.make_callback_ensures function_type term ~entries ~exits ~result in
   let premise = lift (Logic.conjunction premises) in
   let exited =
     List.map
@@ -303,7 +303,7 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
               Facts.declare_value_symbol context frame symbol sort
             else Facts.declare_value_symbol context { frame with binders = [] } symbol sort
           in
-          let application = Callbacks.apply_function context function_type term entries in
+          let application = Callbacks.apply_function function_type term entries in
           Tables.Symbol_table.replace context.lambda_definitions symbol defined;
           Facts.add_frame_fact context frame (Logic.forall (bound, Logic.equal application defined));
           (match written.code.value_type with
@@ -473,7 +473,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   if states_application then
     Option.iter
       (add_quantified_fact context frame ~capture_free)
-      (Callbacks.find_logic_link context function_type term)
+      (Callbacks.find_logic_link function_type term)
   else
     add_lambda_relation context frame ~capture_free function_type term ~called ~arguments ~start
       ~end_ ~premises ~shown ~ended:!ended ~read_exits;
