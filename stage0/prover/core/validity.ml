@@ -1,7 +1,7 @@
 let find_selected_place (context : State.context) selection =
   let shift offset : State.place_value -> State.place_value = function
-    | One index -> One (Logic.plus offset index)
-    | Run (start, stop) -> Run (Logic.plus offset start, Logic.plus offset stop)
+    | One index -> One (Logic.add offset index)
+    | Run (start, stop) -> Run (Logic.add offset start, Logic.add offset stop)
   in
   let rec find_from offset = function
     | [] -> Facts.raise_bug "a selection of no range or element"
@@ -11,7 +11,7 @@ let find_selected_place (context : State.context) selection =
           (List.assoc_opt innermost context.indexes)
     | range :: inner -> (
         match List.assoc_opt range context.indexes with
-        | Some { value = Run (start, _); _ } -> find_from (Logic.plus offset start) inner
+        | Some { value = Run (start, _); _ } -> find_from (Logic.add offset start) inner
         | Some { value = One _; _ } -> Facts.raise_bug "a selection that selects inside an element"
         | None -> None)
   in

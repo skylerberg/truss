@@ -15,7 +15,7 @@ let compute_promised_amount (context : State.context) frame (counter : Costs.cou
       let amount = evaluate amount in
       if is_recursive_call then
         let hypothesis = Logic.at_least_zero (Costs.bound amount) in
-        if counter.resource = Metric Time then Logic.plus hypothesis (Logic.int 1) else hypothesis
+        if counter.resource = Metric Time then Logic.add hypothesis (Logic.int 1) else hypothesis
       else Costs.units (if is_converted then amount else Costs.reduce_constants amount)
   | (At_most amount | Exactly amount), Units -> Logic.at_least_zero (evaluate amount)
   | At_most amount, (At_most | Exactly) -> declare_bounded_amount context frame (evaluate amount)
@@ -210,7 +210,7 @@ let compute_callee_amount ?(method_cost : (Language.Metric.t -> Logic.term) opti
             when (not captured) && List.length clauses >= List.length receiving && receiving <> []
             ->
               List.fold_left
-                (fun total clause -> Logic.plus total (compute_amount clause).amount)
+                (fun total clause -> Logic.add total (compute_amount clause).amount)
                 Costs.zero clauses
           | _ ->
               Costs.make_conditional_amount reaches
@@ -220,7 +220,7 @@ let compute_callee_amount ?(method_cost : (Language.Metric.t -> Logic.term) opti
           match (method_cost, counter.resource, counter.counting) with
           | Some compute_cost, Metric Time, Units ->
               {
-                Costs.amount = Logic.plus (compute_cost Time) (Logic.int 1);
+                Costs.amount = Logic.add (compute_cost Time) (Logic.int 1);
                 counted = Potential_growth;
               }
           | Some compute_cost, Metric ((Allocations | Allocated_bytes) as metric), _ ->
@@ -533,8 +533,7 @@ let find_body_cost (context : State.context) frame (metric : Language.Metric.t) 
             match (List.assoc_opt counter finished.spent, metric) with
             | Some spent, Time ->
                 Some
-                  (Logic.plus spent
-                     (Potentials.compute_potential context finished self_type result))
+                  (Logic.add spent (Potentials.compute_potential context finished self_type result))
             | spent, (Allocations | Allocated_bytes) -> spent
             | None, Time -> None)
         | None -> None
@@ -697,10 +696,10 @@ let spend_copy ?literal (context : State.context) frame ~(declared : Types.ty) t
         in
         match (literal, counter.resource, counter.counting) with
         | None, Metric Time, Units when Option.is_some (compute_elements_cost Time) ->
-            make_plain (Logic.plus (Option.get (compute_elements_cost Time)) (Logic.int 1))
+            make_plain (Logic.add (Option.get (compute_elements_cost Time)) (Logic.int 1))
         | _, Metric Time, Units ->
             let time = match literal with Some _ -> Costs.zero | None -> declare_copy_cost Time in
-            { Costs.amount = Logic.plus time (Logic.int 1); counted = Potential_change }
+            { Costs.amount = Logic.add time (Logic.int 1); counted = Potential_change }
         | Some literal, Metric (Allocations | Allocated_bytes), Units
         | Some literal, Metric Allocations, _ ->
             make_plain
@@ -713,7 +712,7 @@ let spend_copy ?literal (context : State.context) frame ~(declared : Types.ty) t
         | None, Metric Allocations, _ when Option.is_some (compute_elements_cost Allocations) ->
             make_plain
               (compute_amount_within context frame counter
-                 (Logic.plus (Option.get (compute_elements_cost Allocations)) (Logic.int 1)))
+                 (Logic.add (Option.get (compute_elements_cost Allocations)) (Logic.int 1)))
         | None, Metric ((Allocations | Allocated_bytes) as metric), _ ->
             make_plain (compute_amount_within context frame counter (declare_copy_cost metric))
         | _, Metric Time, (At_most | Exactly) | None, Calls _, _ -> make_unknown ())
@@ -729,13 +728,13 @@ let spend_contract_call (context : State.context) ~(before : State.frame) ~(afte
     (values : State.passed list) ~changed ~result ~result_type ~lent_final ~is_recursive ~bind_frame
     =
   let compute_potential_change () =
-    Logic.plus
+    Logic.add
       (Potentials.compute_arguments_potential_change context ~before ~after values ~changed)
       (match contract.result_kind with
       | `Lends -> (
           match lent_final with
           | Some leave ->
-              Logic.minus
+              Logic.subtract
                 (Potentials.compute_potential context after result_type result)
                 (Potentials.compute_potential context after result_type (leave result))
           | None -> Costs.zero)

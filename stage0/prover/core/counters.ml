@@ -84,7 +84,7 @@ let spend (context : State.context) (frame : State.frame) (amount_of : Costs.cou
         List.map
           (fun (counter, term) ->
             if List.mem counter context.cost.counters then
-              (counter, Logic.plus term (amount_of counter))
+              (counter, Logic.add term (amount_of counter))
             else (counter, term))
           frame.spent;
     }
@@ -109,13 +109,13 @@ let spend_operation context frame ~potential_change ?(note = fun _ _ -> ())
         | No_potential, false | (Potential_change | Potential_growth), true -> amount
         | No_potential, true -> (
             match find_change () with
-            | Some change -> Logic.plus amount change
+            | Some change -> Logic.add amount change
             | None -> declare_unknown_amount context frame counter)
         | Potential_change, false -> (
-            match find_change () with Some change -> Logic.minus amount change | None -> amount)
+            match find_change () with Some change -> Logic.subtract amount change | None -> amount)
         | Potential_growth, false -> (
             match find_change () with
-            | Some change -> Logic.minus amount (Logic.at_least_zero change)
+            | Some change -> Logic.subtract amount (Logic.at_least_zero change)
             | None -> amount)
       in
       note counter amount;
@@ -134,8 +134,8 @@ let spend_quantifier context frame ~count ~fresh_mark ~bound ~(before : State.fr
       else
         match counter.counting with
         | Units ->
-            Logic.plus
-              (Logic.times (Logic.at_least_zero count) (Logic.plus spent (Logic.int 1)))
+            Logic.add
+              (Logic.multiply (Logic.at_least_zero count) (Logic.add spent (Logic.int 1)))
               (Logic.int 1)
         | At_most | Exactly ->
             if spent = Costs.zero then Costs.zero else declare_unknown_amount context frame counter)

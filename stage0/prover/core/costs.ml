@@ -78,7 +78,7 @@ let bound bound_function =
     (Logic.multiply (Logic.Integer (Z.shift_left Z.one 17)) bound_function)
     (Logic.Integer (Z.shift_left Z.one 16))
 
-let units amount = Logic.plus (Logic.at_least_zero amount) (Logic.int 1)
+let units amount = Logic.add (Logic.at_least_zero amount) (Logic.int 1)
 
 let reduce_constants amount =
   let sums, constant = Logic.linearize amount in
@@ -95,7 +95,7 @@ let rec since ~start total =
   match total with
   | Logic.Operation (Ite, [ condition; left; right ]) ->
       Logic.ite condition (since ~start left) (since ~start right)
-  | _ -> Logic.normalize_linear (Logic.minus total start)
+  | _ -> Logic.normalize_linear (Logic.subtract total start)
 
 type polarity = Grows | Shrinks | Both
 
@@ -147,7 +147,8 @@ let list_varying_parts varies term =
           walk (if Z.sign factor >= 0 then polarity else flip polarity) inner
       | Logic.Operation (Multiply, arguments)
       | Logic.Apply
-          ((Logic.Symbol.Cost_most | Logic.Symbol.Cost_log | Logic.Symbol.Cost_power), arguments) ->
+          ( (Logic.Symbol.Cost_most | Logic.Symbol.Integer_log | Logic.Symbol.Integer_power),
+            arguments ) ->
           List.iter (walk polarity) arguments
       | _ -> add term polarity
   in
@@ -326,9 +327,9 @@ let find_shared_potential_summands
               ( on,
                 renamings,
                 Logic.linearize
-                  (Logic.plus
+                  (Logic.add
                      (Logic.combine_linear (sums, constant))
-                     (Logic.times (Logic.Integer difference) (Logic.minus atom on_path))) ))
+                     (Logic.multiply (Logic.Integer difference) (Logic.subtract atom on_path))) ))
           linear
   in
   let is_misaligned atom =
@@ -401,7 +402,6 @@ let join_spent spent ~paths ~name =
                 name_amount (choose_amount (List.map (fun (on, _, value) -> (on, value)) values)) )
           | Some (shared, (_, first_rest) :: others)
             when List.for_all (fun (_, other) -> other = first_rest) others ->
-              (counter, Logic.plus shared first_rest)
-          | Some (shared, rests) -> (counter, Logic.plus shared (name_amount (choose_amount rests)))
-          ))
+              (counter, Logic.add shared first_rest)
+          | Some (shared, rests) -> (counter, Logic.add shared (name_amount (choose_amount rests)))))
     spent

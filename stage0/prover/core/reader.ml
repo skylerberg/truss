@@ -980,7 +980,7 @@ and read_statement context frame run (statement : Mir.statement) =
         lazy
           (List.fold_left
              (fun total (implementation : Mir.provided) ->
-               Logic.plus total
+               Logic.add total
                  (Potentials.compute_potential context frame
                     (Facts.substitute_type context frame implementation.type_)
                     (read_operand context

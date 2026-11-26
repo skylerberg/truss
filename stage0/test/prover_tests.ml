@@ -3453,6 +3453,25 @@ let () =
       with
       | [] -> ()
       | states -> Harness.fail "%d obligations about the invariant" (List.length states));
+  Harness.test "a sum, a difference and a product of constants are constants" (fun () ->
+      let unknown = Logic.Symbol (Logic.Symbol.Variable { label = "unknown"; numbers = [] }) in
+      if
+        Logic.add (Logic.int 0) unknown <> unknown
+        || Logic.subtract unknown unknown <> Logic.int 0
+        || Logic.multiply unknown (Logic.int 1) <> unknown
+        || Logic.add (Logic.int 2) (Logic.multiply (Logic.int 3) (Logic.int 4)) <> Logic.int 14
+      then Harness.fail "a constructor kept an operation on a constant");
+  Harness.test "a comparison is decided where its sides differ by a constant inside an application"
+    (fun () ->
+      let unknown = Logic.Symbol (Logic.Symbol.Variable { label = "unknown"; numbers = [] }) in
+      let apply argument =
+        Logic.Apply (Logic.Symbol.Variable { label = "function"; numbers = [] }, [ argument ])
+      in
+      let with_a_zero = apply (Logic.Operation (Add, [ unknown; Logic.int 0 ])) in
+      if not (Logic.is_refuted (Logic.less with_a_zero (apply unknown))) then
+        Harness.fail "a term below itself is not refuted";
+      if not (Logic.is_valid (Logic.less_equal with_a_zero (apply unknown))) then
+        Harness.fail "a term at most itself is not valid");
   Harness.test "two facts that differ only deep inside hash differently" (fun () ->
       let make_symbol label = Logic.Symbol (Logic.Symbol.Variable { label; numbers = [] }) in
       let nest last =

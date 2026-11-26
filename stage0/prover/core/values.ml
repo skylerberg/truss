@@ -512,7 +512,7 @@ let make_text_match context location ty term text =
   | None -> Facts.raise_unsupported location (String_pattern_on ty)
 
 let make_log_facts number ~halving =
-  let log number = Logic.Apply (Logic.Symbol.Cost_log, [ number ]) in
+  let log number = Logic.Apply (Logic.Symbol.Integer_log, [ number ]) in
   let basic =
     Logic.(
       less_equal (int 0) (log number)
@@ -526,14 +526,14 @@ let make_log_facts number ~halving =
   else ([ basic ], None)
 
 let make_log_order left right =
-  let log number = Logic.Apply (Logic.Symbol.Cost_log, [ number ]) in
+  let log number = Logic.Apply (Logic.Symbol.Integer_log, [ number ]) in
   Logic.(
     less_equal left right
     ==> less_equal (log left) (log right)
     &&& (less_equal right left ==> less_equal (log right) (log left)))
 
 let declare_log context frame log_argument =
-  Facts.declare context (Logic.Function (Logic.Symbol.Cost_log, [ Logic.Int ], Logic.Int));
+  Facts.declare context (Logic.Function (Logic.Symbol.Integer_log, [ Logic.Int ], Logic.Int));
   let rec add log_argument ~halving =
     match List.assoc_opt log_argument context.logs with
     | Some true -> ()
@@ -554,10 +554,10 @@ let declare_log context frame log_argument =
   | Logic.Integer limit ->
       Facts.add_frame_fact context frame
         (Logic.equal
-           (Logic.Apply (Logic.Symbol.Cost_log, [ log_argument ]))
+           (Logic.Apply (Logic.Symbol.Integer_log, [ log_argument ]))
            (Logic.int (if Z.sign limit <= 0 then 0 else Z.numbits limit)))
   | _ -> ());
-  Logic.Apply (Logic.Symbol.Cost_log, [ log_argument ])
+  Logic.Apply (Logic.Symbol.Integer_log, [ log_argument ])
 
 let apply_specification_function context frame ~location (measure : Core.specification_function)
     values ~unconverted ~types =
