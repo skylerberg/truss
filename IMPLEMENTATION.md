@@ -175,6 +175,21 @@ develop as well as make it easier to bootstrap the compiler in parts.
   |---|---|---|
   | 1 | Its bound less its potential change | A bound that ignores potential that the callee spent |
   | 0 | Its bound | A bound whose steps are paid for by potential that the callee saved |
+- **A supposed execution is read under a condition that nothing asserts.**
+  A fact of a frame is assumed wherever the frame's condition holds, so a
+  fact about code that may not run must not enter a frame that does. The
+  prover reads three executions that it only supposes: a lambda's body,
+  where the lambda is made; a call of a function passed for a parameter,
+  where its contract is compared with the parameter's; and the return of a
+  definition, where a cost clause that names `result` is checked to be
+  defined. `Facts.suppose` makes the frame for each: it restricts the frame
+  by a new Boolean, so every fact and obligation of the supposed execution
+  has that Boolean as a premise, and the query stays satisfiable where the
+  execution is impossible. Two false proofs came from a supposed value in a
+  frame that runs: the `ensures` of a function that never returns, which no
+  result meets, denied the `requires` it was assumed under; and the
+  invariant of a supposed result of type `Room[capacity]` gave the body a
+  fact about `capacity`.
 - **A contract is resolved once, and its three readers differ only in what
   they prove and what they assume.** The rules are those of modular
   verification with pre- and postconditions. A definition is proven against

@@ -1,0 +1,14 @@
+type Room[capacity: UInt64](used: UInt64)
+  invariant self.used < capacity
+
+fn empty_room[capacity: UInt64]() -> Room[capacity]
+  cost time O(1)
+{
+  Room(used: 0)
+}
+
+fn empty_room_costed_by_its_result[capacity: UInt64]() -> Room[capacity]
+  cost time O(1 + result.used)
+{
+  Room(used: 0)
+}

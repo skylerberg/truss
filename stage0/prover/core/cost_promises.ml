@@ -43,16 +43,16 @@ let check_promise_amounts context (start : State.frame) promises ~output =
       if not promise.inherited then
         match promise.clause.bound with
         | Order_of amount | At_most amount | Exactly amount ->
-            let result =
-              Option.map
-                (fun output ->
-                  let result = Encoding.arrive context start "result" output in
-                  Validity.assume_valid context start output result;
-                  result)
-                output
+            let at_return =
+              match output with
+              | Some output when Contracts.mentions_result amount ->
+                  let _, returned = Facts.suppose context start "returned" in
+                  let result = Encoding.arrive context returned "result" output in
+                  Validity.assume_valid context returned output result;
+                  { returned with result = Some result }
+              | Some _ | None -> start
             in
-            Validity.check_defined context { start with result }
-              ~holds_when:promise.clause.holds_when amount)
+            Validity.check_defined context at_return ~holds_when:promise.clause.holds_when amount)
     promises
 
 let check_promise ?restated ?cited (context : State.context) (frame : State.frame) promise

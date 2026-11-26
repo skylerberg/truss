@@ -1870,6 +1870,14 @@ let () =
   Harness.test "a specification learns nothing from a function value that may abort" (fun () ->
       expect_codes Fixtures.Prover.specification_applying_a_function_value_that_aborts
         [ "prover.assertion"; "prover.assertion" ]);
+  Harness.test "a function that never returns, passed for a parameter, gives its caller no fact"
+    (fun () ->
+      expect_codes Fixtures.Prover.function_that_never_returns_passed_for_a_parameter
+        [ "prover.ensures" ]);
+  Harness.test "a cost clause gives a function's proof no fact about the type of its result"
+    (fun () ->
+      expect_codes Fixtures.Prover.room_built_under_a_cost_clause
+        [ "prover.invariant"; "prover.invariant" ]);
   Harness.test "a call that returned from a function that may abort keeps its contract" (fun () ->
       expect_proven Fixtures.Prover.call_that_returned_from_a_function_that_may_abort);
   Harness.test "a specification learns nothing from a generic function whose bound's method aborts"

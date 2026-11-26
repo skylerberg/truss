@@ -287,9 +287,10 @@ let check_requires context frame location (known : State.known_function) ~use ar
 
 let check_escaping context frame location known (function_type : Types.function_type) =
   if has_requires known then
-    check_requires context frame location known
+    let _, supposed = Facts.suppose context frame "called" in
+    check_requires context supposed location known
       ~use:(Not_called (Used_as_value (Types.Function function_type)))
-      (declare_arguments context frame function_type.inputs)
+      (declare_arguments context supposed function_type.inputs)
 
 let check_read (context : State.context) (frame : State.frame) term =
   if frame.makes_obligations && not context.callbacks.is_reading then
@@ -311,9 +312,10 @@ let check_passed context (frame : State.frame) ~at (callee : Callee.t) (passed :
         match stated with Some (_, _, { ensures = _ :: _; _ }) -> true | Some _ | None -> false
       in
       if promises || Option.fold ~none:false ~some:has_requires known then begin
-        let entries = declare_arguments context frame expected.inputs in
+        let _, supposed = Facts.suppose context frame "called" in
+        let entries = declare_arguments context supposed expected.inputs in
         let at_call =
-          Facts.restrict frame
+          Facts.restrict supposed
             (Logic.conjunction (List.map snd (read_requires context stated entries)))
         in
         Option.iter
@@ -322,7 +324,7 @@ let check_passed context (frame : State.frame) ~at (callee : Callee.t) (passed :
               entries)
           known;
         if promises then begin
-          let exits, result = declare_results context frame expected entries in
+          let exits, result = declare_results context supposed expected entries in
           Option.iter
             (fun known ->
               List.iter (Facts.assume context at_call)
