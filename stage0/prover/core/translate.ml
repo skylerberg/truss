@@ -97,9 +97,85 @@ let rec run_blocking ?blocked_holders translate =
   with Counters.Blocks_credited_potential blocked_holders ->
     run_blocking ~blocked_holders translate
 
-let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : Lookups.t)
-    (source : State.source) ~path =
-  run_blocking @@ fun ?blocked_holders () ->
+let bind_parameters (empty : State.frame) (parameters : Mir.parameter list) ~is_update_step =
+  let bound =
+    List.fold_left
+      (fun frame (parameter : Mir.parameter) ->
+        match parameter.local with
+        | Self ->
+            let self_type = Encoding.substitute_type frame parameter.type_ in
+            let self = Encoding.arrive frame "self" self_type in
+            Validity.assume_valid frame ~includes_invariants:(not is_update_step) self_type self;
+            { (note_entry frame self ~name:None) with self = Some self; self_type = Some self_type }
+        | local ->
+            let ty = Encoding.substitute_type frame parameter.type_ in
+            let name = Facts.read_parameter_name parameter in
+            let term = Encoding.arrive frame ("parameter." ^ name) ty in
+            Validity.assume_valid frame ty term;
+            Facts.bind (note_entry frame term ~name:(Some name)) (Core_local local) ty term)
+      empty parameters
+  in
+  { bound with old_locals = bound.locals; old_self = bound.self }
+
+let check_clauses_against_the_trait (start : State.frame) (source : State.source)
+    ~(own : State.clauses) ~(inherited : (State.clauses * Types.substitution) option)
+    ~trait_requires ~read_in =
+  let environment = start.environment in
+  let declared_requires = Facts.list_clauses own.requires in
+  if environment.inherits_precondition then
+    if declared_requires = [] then Facts.assume start trait_requires
+    else
+      ignore
+        (List.fold_left
+           (fun frame (requirement : Mir.formula) ->
+             let frame, term =
+               Validity.read_specification ~holds_when:requirement.holds_when frame requirement
+             in
+             Obligations.oblige ~holds_when:requirement.holds_when frame
+               (Facts.locate frame requirement.origin)
+               (Impl_precondition { clause = Facts.quote source requirement.origin })
+               term;
+             frame)
+           (Facts.restrict start trait_requires)
+           declared_requires);
+  if own.panics_unless <> [] then
+    match inherited with
+    | Some (clauses, _) when clauses.panics_unless <> [] ->
+        let trait_condition =
+          Logic.conjunction
+            (List.map
+               (fun (requirement : Mir.requirement) ->
+                 snd (Validity.read_specification (read_in start clauses) requirement.clause))
+               clauses.panics_unless)
+        in
+        ignore
+          (List.fold_left
+             (fun frame (requirement : Mir.requirement) ->
+               let frame, term = Validity.read_specification frame requirement.clause in
+               Obligations.oblige frame
+                 (Facts.locate frame requirement.clause.origin)
+                 (Impl_panic_condition { clause = Facts.quote source requirement.clause.origin })
+                 term;
+               frame)
+             (Facts.restrict (Facts.restrict start trait_requires) trait_condition)
+             own.panics_unless)
+    | Some _ | None -> ()
+
+type entered_function = {
+  start : State.frame;
+  code : Mir.t;
+  parameters : Mir.parameter list;
+  output : Types.ty option;
+  is_update_step : bool;
+  inherited : (State.clauses * Types.substitution) option;
+  promises : Contracts.promise list;
+  promised : Cost_promises.promise list;
+  trait_requires : Logic.term;
+  read_in : ?result:Logic.term option -> State.frame -> State.clauses -> State.frame;
+}
+
+let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_holders
+    (lookups : Lookups.t) (source : State.source) ~path (query : Query.t) =
   let contract =
     match Mir.read_contract lookups.mir path with
     | Some { form; _ } -> form
@@ -148,7 +224,6 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
       (fun (measure : Mir.formula) -> implies condition measure.holds_when)
       contract.decreases
   in
-  let query = Query.create () in
   let environment =
     make_environment lookups ~condition ~keeps_termination ~keeps_failures ?panic_condition
       ?blocked_holders ~home ~current:path
@@ -195,20 +270,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
   in
   let output = match signature with Some { output = Returns ty; _ } -> Some ty | _ -> None in
   let start =
-    List.fold_left
-      (fun frame (parameter : Mir.parameter) ->
-        match parameter.local with
-        | Self ->
-            let self_type = Encoding.substitute_type frame parameter.type_ in
-            let self = Encoding.arrive frame "self" self_type in
-            Validity.assume_valid frame ~includes_invariants:(not is_update_step) self_type self;
-            { (note_entry frame self ~name:None) with self = Some self; self_type = Some self_type }
-        | local ->
-            let ty = Encoding.substitute_type frame parameter.type_ in
-            let name = Facts.read_parameter_name parameter in
-            let term = Encoding.arrive frame ("parameter." ^ name) ty in
-            Validity.assume_valid frame ty term;
-            Facts.bind (note_entry frame term ~name:(Some name)) (Core_local local) ty term)
+    bind_parameters
       {
         (make_empty_frame environment query source) with
         substitution;
@@ -216,9 +278,8 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
         panics;
         can_declare_panic;
       }
-      parameters
+      parameters ~is_update_step
   in
-  let start = { start with old_locals = start.locals; old_self = start.self } in
   let start =
     Callbacks.bind_own start
       (List.filter_map
@@ -254,7 +315,6 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
         { start with lent_part_type = Some (Encoding.substitute_type start part) }
     | Some { output = Returns _; _ } | None -> start
   in
-  let lends = Option.is_some start.lent_part_type in
   let list_values (at : State.frame) =
     List.filter_map
       (fun (parameter : Mir.parameter) ->
@@ -306,45 +366,8 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
       promises
   in
   let start = Cost_promises.enter_definition start promised ~body:(Some mir.body) in
+  check_clauses_against_the_trait start source ~own ~inherited ~trait_requires ~read_in;
   let declared_requires = Facts.list_clauses own.requires in
-  if environment.inherits_precondition then
-    if declared_requires = [] then Facts.assume start trait_requires
-    else
-      ignore
-        (List.fold_left
-           (fun frame (requirement : Mir.formula) ->
-             let frame, term =
-               Validity.read_specification ~holds_when:requirement.holds_when frame requirement
-             in
-             Obligations.oblige ~holds_when:requirement.holds_when frame
-               (Facts.locate frame requirement.origin)
-               (Impl_precondition { clause = Facts.quote source requirement.origin })
-               term;
-             frame)
-           (Facts.restrict start trait_requires)
-           declared_requires);
-  (if own.panics_unless <> [] then
-     match inherited with
-     | Some (clauses, _) when clauses.panics_unless <> [] ->
-         let trait_condition =
-           Logic.conjunction
-             (List.map
-                (fun (requirement : Mir.requirement) ->
-                  snd (Validity.read_specification (read_in start clauses) requirement.clause))
-                clauses.panics_unless)
-         in
-         ignore
-           (List.fold_left
-              (fun frame (requirement : Mir.requirement) ->
-                let frame, term = Validity.read_specification frame requirement.clause in
-                Obligations.oblige frame
-                  (Facts.locate frame requirement.clause.origin)
-                  (Impl_panic_condition { clause = Facts.quote source requirement.clause.origin })
-                  term;
-                frame)
-              (Facts.restrict (Facts.restrict start trait_requires) trait_condition)
-              own.panics_unless)
-     | Some _ | None -> ());
   let start =
     List.fold_left
       (fun frame (requirement : Mir.formula) ->
@@ -368,96 +391,113 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
     (fun (measure : Mir.formula) ->
       Validity.check_defined start ~holds_when:measure.holds_when measure)
     measures;
-  let exits = Reader.read_body start ~lambdas:mir.lambdas mir.body in
-  let returns = List.rev exits.returns in
-  let mut_parameters =
-    List.filter
-      (fun (parameter : Mir.parameter) ->
-        parameter.mode = Language.Mode.Mut && parameter.local <> Self)
-      parameters
-  in
-  let mut_self =
-    List.exists
-      (fun (parameter : Mir.parameter) ->
-        parameter.mode = Language.Mode.Mut && parameter.local = Self)
-      parameters
-  in
-  let check_promises (frame : State.frame) location ~is_checked ~moment =
-    List.iter
-      (fun ({ made_by; proven_under } : Contracts.promise) ->
-        let inside = read_in frame made_by
-        and under = if proven_under.inherited then Facts.restrict frame trait_requires else frame in
-        List.iter
-          (fun (ensured : Mir.formula) ->
-            if is_checked ensured then
-              let _, term =
-                Validity.read_specification ~holds_when:ensured.holds_when inside ensured
-              in
-              Obligations.oblige ~holds_when:ensured.holds_when
-                ~cited:(made_by.callee.key, ensured.origin)
-                under location
-                (Postcondition
-                   {
-                     clause = Facts.quote made_by.callee ensured.origin;
-                     promiser =
-                       (if made_by.inherited then
-                          Some (Contracts.find_promiser lookups made_by.callee)
-                        else None);
-                     moment;
-                   })
-                term)
-          made_by.ensures)
-      promises
+  {
+    start;
+    code = mir;
+    parameters;
+    output;
+    is_update_step;
+    inherited;
+    promises;
+    promised;
+    trait_requires;
+    read_in;
+  }
+
+let check_promises (lookups : Lookups.t) entered (frame : State.frame) location ~is_checked ~moment
+    =
+  List.iter
+    (fun ({ made_by; proven_under } : Contracts.promise) ->
+      let inside = entered.read_in frame made_by
+      and under =
+        if proven_under.inherited then Facts.restrict frame entered.trait_requires else frame
+      in
+      List.iter
+        (fun (ensured : Mir.formula) ->
+          if is_checked ensured then
+            let _, term =
+              Validity.read_specification ~holds_when:ensured.holds_when inside ensured
+            in
+            Obligations.oblige ~holds_when:ensured.holds_when
+              ~cited:(made_by.callee.key, ensured.origin)
+              under location
+              (Postcondition
+                 {
+                   clause = Facts.quote made_by.callee ensured.origin;
+                   promiser =
+                     (if made_by.inherited then
+                        Some (Contracts.find_promiser lookups made_by.callee)
+                      else None);
+                   moment;
+                 })
+              term)
+        made_by.ensures)
+    entered.promises
+
+let check_lent_part lookups entered ({ lent_frame; lent_origin } : State.lent_part) =
+  check_promises lookups entered lent_frame
+    (Facts.locate lent_frame lent_origin)
+    ~is_checked:Lending.holds_where_lent ~moment:Where_lent
+
+let check_return lookups entered ({ frame; returned; return_origin } : State.function_exit) =
+  let lends = Option.is_some entered.start.lent_part_type in
+  let frame = if lends then frame else { frame with result = returned } in
+  let exit_location = Facts.locate frame return_origin in
+  (match (returned, entered.output) with
+  | Some term, Some output ->
+      Validity.check_valid frame exit_location output term ~deep:true ~moment:Returned_value
+  | _ -> ());
+  let is_mut (parameter : Mir.parameter) = parameter.mode = Language.Mode.Mut in
+  let mut_self, mut_parameters =
+    List.partition
+      (fun (parameter : Mir.parameter) -> parameter.local = Self)
+      (List.filter is_mut entered.parameters)
   in
   List.iter
-    (fun ({ lent_frame; lent_origin } : State.lent_part) ->
-      let location = Facts.locate lent_frame lent_origin in
-      check_promises lent_frame location ~is_checked:Lending.holds_where_lent ~moment:Where_lent)
-    (List.rev exits.lends);
-  let holds_at_exit clause = not (lends && Lending.holds_where_lent clause) in
-  let exit_moment : Catalog.Prover.postcondition_moment =
-    if lends then At_lend_end else At_return
-  in
+    (fun (parameter : Mir.parameter) ->
+      match
+        ( Locals.find_opt (Core_local parameter.local) frame.locals,
+          Encoding.find_local_type frame (Core_local parameter.local) )
+      with
+      | Some term, Some ty ->
+          Validity.check_valid frame exit_location ty term ~deep:true
+            ~moment:(Mut_parameter_at_return (Facts.read_parameter_name parameter))
+      | _ -> ())
+    mut_parameters;
+  (match (mut_self, frame.self, frame.self_type) with
+  | _ :: _, Some self, Some self_type ->
+      Validity.check_valid frame exit_location self_type self ~deep:true
+        ~includes_invariants:(not entered.is_update_step) ~moment:Self_at_return
+  | _ -> ());
+  check_promises lookups entered frame exit_location
+    ~is_checked:(fun clause -> not (lends && Lending.holds_where_lent clause))
+    ~moment:(if lends then At_lend_end else At_return);
+  let under_trait = Facts.restrict frame entered.trait_requires in
   List.iter
-    (fun ({ frame; returned; return_origin } : State.function_exit) ->
-      let frame = if lends then frame else { frame with result = returned } in
-      let exit_location = Facts.locate frame return_origin in
-      (match (returned, output) with
-      | Some term, Some output ->
-          Validity.check_valid frame exit_location output term ~deep:true ~moment:Returned_value
-      | _ -> ());
-      List.iter
-        (fun (parameter : Mir.parameter) ->
-          match
-            ( Locals.find_opt (Core_local parameter.local) frame.locals,
-              Encoding.find_local_type frame (Core_local parameter.local) )
-          with
-          | Some term, Some ty ->
-              Validity.check_valid frame exit_location ty term ~deep:true
-                ~moment:(Mut_parameter_at_return (Facts.read_parameter_name parameter))
-          | _ -> ())
-        mut_parameters;
-      (match (mut_self, frame.self, frame.self_type) with
-      | true, Some self, Some self_type ->
-          Validity.check_valid frame exit_location self_type self ~deep:true
-            ~includes_invariants:(not is_update_step) ~moment:Self_at_return
-      | _ -> ());
-      check_promises frame exit_location ~is_checked:holds_at_exit ~moment:exit_moment;
-      let under_trait = Facts.restrict frame trait_requires in
-      List.iter
-        (fun (promise : Cost_promises.promise) ->
-          let cited = (promise.written_in.key, promise.clause.origin) in
-          if promise.inherited then
-            let inside = read_in ~result:returned frame (fst (Option.get inherited)) in
-            Cost_promises.check_promise ~cited under_trait promise
-              ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
-              ~location:exit_location
-          else
-            Cost_promises.check_promise ~cited frame promise
-              ~at:{ frame with locals = frame.old_locals; self = frame.old_self; result = returned }
-              ~location:exit_location)
-        promised)
-    returns;
+    (fun (promise : Cost_promises.promise) ->
+      let cited = (promise.written_in.key, promise.clause.origin) in
+      if promise.inherited then
+        let inside = entered.read_in ~result:returned frame (fst (Option.get entered.inherited)) in
+        Cost_promises.check_promise ~cited under_trait promise
+          ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
+          ~location:exit_location
+      else
+        Cost_promises.check_promise ~cited frame promise
+          ~at:{ frame with locals = frame.old_locals; self = frame.old_self; result = returned }
+          ~location:exit_location)
+    entered.promised
+
+let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : Lookups.t)
+    (source : State.source) ~path =
+  run_blocking @@ fun ?blocked_holders () ->
+  let query = Query.create () in
+  let entered =
+    enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_holders lookups source
+      ~path query
+  in
+  let exits = Reader.read_body entered.start ~lambdas:entered.code.lambdas entered.code.body in
+  List.iter (check_lent_part lookups entered) (List.rev exits.lends);
+  List.iter (check_return lookups entered) (List.rev exits.returns);
   (make_outcome query, Conditions.list_undecided query)
 
 let find_circular_proof (lookups : Lookups.t) (source : State.source) ~path =
