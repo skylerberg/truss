@@ -388,6 +388,9 @@ let () =
   Harness.test "a quantifier's binding named result shadows the return value in ensures" (fun () ->
       expect_binding_reference Fixtures.Resolve.ensures_binding_result_in_a_quantifier
         ~use:("result", 2) ~binding:("result", 1));
+  Harness.test "a loop's cost clause does not name the return value" (fun () ->
+      expect_one_diagnostic Fixtures.Resolve.loop_cost_naming_result "resolve.unknown_name"
+        ~at:("result", 1));
   Harness.test "a function type's requires in an ensures does not name the return value" (fun () ->
       expect_one_diagnostic Fixtures.Resolve.function_type_requires_naming_result_in_an_ensures
         "resolve.unknown_name" ~at:("result", 1));
