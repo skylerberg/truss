@@ -1,9 +1,14 @@
+let make_deletion cursor ~start ~stop ~line_break : Syntax_catalog.Lexing.fix =
+  { action = Delete_comment; edits = [ Source_text.remove_trivia cursor ~start ~stop ~line_break ] }
+
 let lex_line_comment (cursor : Cursor.t) =
   let start = cursor.position in
   let stop = Cursor.compute_end_of_line cursor start in
+  let deletion = make_deletion cursor ~start ~stop ~line_break:false in
   cursor.position <- stop;
   cursor.line_is_blank <- false;
-  Cursor.report cursor (Source.make_span start stop) (Comment { is_closed = true })
+  Cursor.report cursor ~fixes:[ deletion ] (Source.make_span start stop)
+    (Comment { is_closed = true })
 
 let lex_block_comment (cursor : Cursor.t) =
   let start = cursor.position in
@@ -22,6 +27,11 @@ let lex_block_comment (cursor : Cursor.t) =
     end
   in
   let stop, closed = loop 1 (start + 2) in
+  let fixes =
+    if closed then
+      [ make_deletion cursor ~start ~stop ~line_break:(Option.is_some !first_line_break) ]
+    else []
+  in
   cursor.position <- stop;
   if not closed then cursor.unterminated_at_end <- true;
   cursor.line_is_blank <- false;
@@ -29,7 +39,7 @@ let lex_block_comment (cursor : Cursor.t) =
   | Some line_break when cursor.first_line_break = None ->
       cursor.first_line_break <- Some line_break
   | _ -> ());
-  Cursor.report cursor (Source.make_span start stop) (Comment { is_closed = closed })
+  Cursor.report cursor ~fixes (Source.make_span start stop) (Comment { is_closed = closed })
 
 let record_semicolon (cursor : Cursor.t) =
   cursor.semicolons <- cursor.position :: cursor.semicolons;
