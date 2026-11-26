@@ -163,6 +163,27 @@ develop as well as make it easier to bootstrap the compiler in parts.
   and `Contracts.make_exit_frame` to the values at return, with the entry
   values as `old`. A call, a callback, a contract axiom and the clauses a
   method takes from its trait all read through them.
+- **Each rule of the prover has one owner module, and each record of its
+  state one owner.** `Reader`, `Calls`, `Loops` and `Lambdas` execute the
+  MIR and call an owner at each statement, so a new rule edits its owner.
+  An owner's state is an abstract type or a record of `State.context` that
+  `for_prover_state.sh` lets only the owner use.
+
+  | Module | Holds |
+  |---|---|
+  | `Query` | The query under construction |
+  | `Facts` | The facts of a frame, the source of a clause, and the constructs that the prover cannot read |
+  | `Encoding` | A type in the logic: its sort, its range, its constructors and fields, and the types of a frame's locals |
+  | `Fixes` | The fixes that a diagnostic offers |
+  | `Obligations` | The obligations of a run, and which of them it makes |
+  | `Joins` | The join of the paths that meet |
+  | `Cycles` | The recursion group and the proof group |
+  | `Termination` | Measures, and the comparison of a recursive call |
+  | `Contract_axioms` | The contract of a logic function as an axiom |
+  | `Validity` | The invariant of a value, and each check of it |
+  | `Callbacks` | A function passed as a value |
+  | `Laws` | The laws of a trait |
+
 - **`Query` holds the query under construction.** Its declarations, facts,
   fresh names, scopes and posed obligations are fields of an abstract type,
   `context.query`, so no other module writes them: a module marks the facts

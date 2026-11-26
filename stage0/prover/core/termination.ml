@@ -37,7 +37,7 @@ let list_structural_parameters context (entry : State.frame) (clauses : State.cl
          | local -> (
              match
                ( Locals.find_opt (Core_local local) entry.old_locals,
-                 Facts.find_local_type context entry (Core_local local) )
+                 Encoding.find_local_type context entry (Core_local local) )
              with
              | Some value, Some ty when is_datatype ty -> [ (parameter, ty, value, index) ]
              | _ -> []))
@@ -88,15 +88,15 @@ let check_recursive_call (context : State.context) (frame : State.frame) locatio
     (clauses : State.clauses) ~is_self_call ~callee_entry ~argument_at =
   match compare_with_entry context clauses ~is_self_call ~callee_entry ~argument_at with
   | Smaller_part { compared; smaller } ->
-      Facts.oblige context frame location
+      Obligations.oblige context frame location
         (Recursion_not_on_part { call = { at = location; callee = Some path }; compared })
         smaller
   | Unmeasured ->
-      Facts.oblige context frame location
+      Obligations.oblige context frame location
         (Recursion_may_not_end { call = { at = location; callee = Some path }; is_self_call })
         (Logic.Boolean false)
   | Smaller_measures smaller ->
-      Facts.oblige context frame location
+      Obligations.oblige context frame location
         (Measure_may_not_decrease
            {
              call = { at = location; callee = None };
@@ -116,7 +116,7 @@ let find_induction_premise context (clauses : State.clauses) ~is_self_call ~call
 
 let find_recursive_callee (context : State.context) (frame : State.frame) location callee =
   let reject target impl =
-    Facts.oblige context frame location
+    Obligations.oblige context frame location
       (Recursion_through_impl { call = { at = location; callee = Some target }; impl })
       (Logic.Boolean false);
     None
@@ -133,7 +133,7 @@ let reject_uncompared_recursion (context : State.context) frame location recursi
   if context.termination.terminates then
     Option.iter
       (fun callee ->
-        Facts.oblige context frame location
+        Obligations.oblige context frame location
           (Uncompared_recursion { call = { at = location; callee = Some callee } })
           (Logic.Boolean false))
       recursive_callee
@@ -141,7 +141,8 @@ let reject_uncompared_recursion (context : State.context) frame location recursi
 let reject_recursion_through_supplied_code (context : State.context) (frame : State.frame) location
     (statement : Mir.statement) =
   let reject supplied =
-    Facts.oblige context frame location (Recursion_through_supply supplied) (Logic.Boolean false)
+    Obligations.oblige context frame location (Recursion_through_supply supplied)
+      (Logic.Boolean false)
   in
   let reject_supply (supplier : Mir.Call_edges.supplier) code =
     let recursive = List.filter (Cycles.is_in_recursion_group context) code in
@@ -212,6 +213,6 @@ let require_measure (context : State.context) ~loop ~is_measured =
 let check_loop_measure context (frame : State.frame) location measure =
   Option.iter
     (fun measure ->
-      Facts.oblige context frame location Loop_measure_may_not_decrease
+      Obligations.oblige context frame location Loop_measure_may_not_decrease
         (Logic.decreases_lexicographically measure.at_head (measure.read frame)))
     measure

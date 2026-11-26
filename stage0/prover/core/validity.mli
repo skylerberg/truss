@@ -9,24 +9,6 @@ val read_specification : State.context -> State.frame -> Mir.formula -> State.fr
 val check_defined :
   State.context -> State.frame -> holds_when:Types.condition -> Mir.formula -> unit
 
-val select_field : State.context -> Types.ty -> string option -> string -> Logic.term -> Logic.term
-
-val replace_field :
-  State.context -> Types.ty -> string option -> string -> Logic.term -> Logic.term -> Logic.term
-
-val find_root : State.context -> State.frame -> Locals.local -> (Types.ty * Logic.term) option
-
-val find_changed_part :
-  State.context -> State.frame -> State.changed_part -> (Types.ty * Logic.term) option
-
-val replace_part :
-  State.context ->
-  Types.ty ->
-  Logic.term ->
-  string list ->
-  (Types.ty -> Logic.term -> Logic.term) ->
-  Logic.term option
-
 val make_type_frame :
   State.context -> State.frame -> State.source -> Types.ty -> self:Logic.term option -> State.frame
 

@@ -1,0 +1,297 @@
+let find_signature (context : State.context) =
+  match context.lookups.interface.names.read_definition context.home with
+  | { kind = Function { signature; body; _ }; _ } -> Some (signature, body)
+  | _ -> None
+
+let make_panic_fix (context : State.context) : Catalog.Prover.fix list =
+  match find_signature context with
+  | Some (signature, body) when not context.inherits_precondition ->
+      [
+        (match
+           ( List.find_opt
+               (fun (clause : Syntax.clause) ->
+                 match clause.kind with Uses _ -> true | _ -> false)
+               signature.clauses,
+             signature.clauses )
+         with
+        | Some uses, _ -> Add_panic_to_uses (Written uses.id)
+        | None, first :: _ -> Add_panic (Before_clause (Written first.id))
+        | None, [] -> Add_panic (Before_body (Written body.id)));
+      ]
+  | Some _ | None -> []
+
+let find_parameter_name (context : State.context) symbol =
+  if List.mem symbol context.entry then
+    match List.assoc_opt symbol context.parameter_names with
+    | Some name -> Some name
+    | None -> Some "self"
+  else None
+
+let collect_codes codes = if List.mem None codes then None else Some (List.filter_map Fun.id codes)
+
+let rec find_value_code context : Logic.term -> Catalog.Code.t option = function
+  | Logic.Operation (Add, (_ :: _ :: _ as parts)) ->
+      Option.map (fun parts -> Catalog.Code.Sum parts) (find_value_codes context parts)
+  | Logic.Operation (Multiply, (_ :: _ :: _ as parts)) ->
+      Option.map (fun parts -> Catalog.Code.Product parts) (find_value_codes context parts)
+  | Logic.Operation (Subtract, [ left; right ]) -> (
+      match (find_value_code context left, find_value_code context right) with
+      | Some left, Some right -> Some (Difference (left, right))
+      | _ -> None)
+  | Logic.Operation (Negate, [ Logic.Operation (Negate, [ inner ]) ]) ->
+      find_value_code context inner
+  | Logic.Operation (Negate, [ inner ]) ->
+      Option.map (fun inner -> Catalog.Code.Negated inner) (find_value_code context inner)
+  | Logic.Apply (Logic.Symbol.Field { field; variant = None; _ }, [ receiver ]) ->
+      Option.map
+        (fun receiver -> Catalog.Code.Field { receiver; field })
+        (find_value_code context receiver)
+  | Logic.Symbol symbol ->
+      Option.map (fun name -> Catalog.Code.Name name) (find_parameter_name context symbol)
+  | Logic.Integer value -> Some (Integer value)
+  | Logic.Boolean value -> Some (Boolean value)
+  | _ -> None
+
+and find_value_codes context parts = collect_codes (List.map (find_value_code context) parts)
+
+let find_comparison_operator : Logic.operator -> Language.Comparison.t option = function
+  | Less -> Some Less
+  | Less_equal -> Some Less_equal
+  | Greater -> Some Greater
+  | Greater_equal -> Some Greater_equal
+  | Equal -> Some Equal
+  | _ -> None
+
+let find_goal_code context term =
+  let rec find_goal (term : Logic.term) : Catalog.Code.t option =
+    match term with
+    | Operation (And, parts) -> (
+        match List.filter (fun part -> not (Logic.is_valid part)) parts with
+        | [] -> None
+        | [ part ] -> find_goal part
+        | parts ->
+            Option.map
+              (fun parts -> Catalog.Code.All parts)
+              (collect_codes (List.map find_goal parts)))
+    | Operation (Or, parts) ->
+        Option.map (fun parts -> Catalog.Code.Any parts) (collect_codes (List.map find_goal parts))
+    | Operation (Not, [ inner ]) ->
+        Option.map (fun inner -> Catalog.Code.Not inner) (find_goal inner)
+    | Operation (Implies, [ premise; conclusion ]) -> (
+        match (find_goal premise, find_goal conclusion) with
+        | Some premise, Some conclusion -> Some (Implies { premise; conclusion })
+        | _ -> None)
+    | Operation (operator, [ left; right ]) -> (
+        match find_comparison_operator operator with
+        | Some comparison -> find_comparison left comparison right
+        | None -> find_value_code context term)
+    | term -> find_value_code context term
+  and find_comparison left comparison right =
+    match (find_value_code context left, find_value_code context right) with
+    | Some left, Some right -> Some (Catalog.Code.Compared { left; comparison; right })
+    | _ -> None
+  in
+  if
+    List.exists (fun symbol -> List.mem symbol context.State.entry) (Logic.list_free_constants term)
+  then find_goal term
+  else None
+
+let read_requires_clause (signature : Syntax.signature) (origin : Core.origin) =
+  let expression = match origin with Written id | Desugared { construct = id; _ } -> id in
+  match
+    List.find_opt
+      (fun (clause : Syntax.clause) ->
+        match clause.kind with Requires written -> written.id = expression | _ -> false)
+      signature.clauses
+  with
+  | Some clause -> clause
+  | None -> Facts.raise_bug "a `requires` is read that the signature does not write"
+
+let add_requires (context : State.context) (frame : State.frame) required : Catalog.Prover.fix list
+    =
+  match find_signature context with
+  | Some (signature, body) when not context.inherits_precondition ->
+      let place : Catalog.Prover.clause_place =
+        match context.requires_clause_being_read with
+        | Some origin -> Before_clause (Written (read_requires_clause signature origin).id)
+        | None -> Before_body (Written body.id)
+      in
+      [
+        Add_requires
+          {
+            place;
+            required;
+            premise =
+              (match frame.condition with
+              | Logic.Boolean true -> None
+              | condition -> find_goal_code context condition);
+            condition = context.condition;
+          };
+      ]
+  | Some _ | None -> []
+
+let find_parameter_code (context : State.context) (frame : State.frame) term =
+  if
+    Facts.is_home context frame.source
+    && (not (Logic.has_quantifier term))
+    &&
+    match Logic.list_free_constants term with
+    | _ :: _ as names -> List.for_all (fun name -> List.mem name context.entry) names
+    | [] -> false
+  then find_value_code context term
+  else None
+
+let find_integer_limits ty = if Types.is_builtin Character ty then None else Encoding.find_bounds ty
+let make_limit ty limit = Catalog.Code.Limit { type_ = ty; limit }
+let make_comparison left comparison right = Catalog.Code.Compared { left; comparison; right }
+
+let make_range_fix context frame ty term =
+  match (find_integer_limits ty, find_parameter_code context frame term) with
+  | Some (low, _), Some value ->
+      let least = if Z.sign low = 0 then Catalog.Code.Integer Z.zero else make_limit ty Minimum in
+      add_requires context frame
+        [
+          Clause
+            (All
+               [
+                 make_comparison least Less_equal value;
+                 make_comparison value Less_equal (make_limit ty Maximum);
+               ]);
+        ]
+  | _ -> []
+
+let make_overflow_fix context frame ty (operation : Intrinsic.scalar) left right exact =
+  match find_integer_limits ty with
+  | None -> []
+  | Some (low, high) -> (
+      let is_unsigned = Z.sign low = 0 in
+      let bound_on_left =
+        match (right, find_parameter_code context frame left) with
+        | Logic.Integer amount, Some value -> (
+            let magnitude = Catalog.Code.Integer (Z.abs amount) in
+            let bound_by comparison bound written =
+              if Z.leq low bound && Z.leq bound high then
+                Some (make_comparison value comparison written)
+              else None
+            in
+            match operation with
+            | Add when Z.sign amount > 0 ->
+                bound_by Less_equal (Z.sub high amount)
+                  (Difference (make_limit ty Maximum, magnitude))
+            | Add when Z.sign amount < 0 ->
+                bound_by Greater_equal (Z.sub low amount) (Sum [ make_limit ty Minimum; magnitude ])
+            | Subtract when Z.sign amount > 0 && is_unsigned ->
+                bound_by Greater_equal amount magnitude
+            | Subtract when Z.sign amount > 0 ->
+                bound_by Greater_equal (Z.add low amount) (Sum [ make_limit ty Minimum; magnitude ])
+            | Subtract when Z.sign amount < 0 ->
+                bound_by Less_equal (Z.add high amount)
+                  (Difference (make_limit ty Maximum, magnitude))
+            | Multiply when Z.sign amount > 0 && is_unsigned ->
+                bound_by Less_equal (Z.div high amount)
+                  (Quotient (make_limit ty Maximum, magnitude))
+            | _ -> None)
+        | _ -> None
+      in
+      match (bound_on_left, operation) with
+      | Some required, _ -> add_requires context frame [ Clause required ]
+      | None, (Add | Multiply) when is_unsigned -> (
+          match find_parameter_code context frame exact with
+          | Some value ->
+              add_requires context frame
+                [ Clause (make_comparison value Less_equal (make_limit ty Maximum)) ]
+          | None -> [])
+      | None, Subtract when is_unsigned -> []
+      | None, _ -> make_range_fix context frame ty exact)
+
+let make_division_overflow_fix context frame ty left right =
+  match (find_integer_limits ty, find_parameter_code context frame left) with
+  | Some _, Some dividend -> (
+      let dividend_not_minimum = make_comparison dividend Not_equal (make_limit ty Minimum) in
+      match right with
+      | Logic.Integer divisor when Z.equal divisor Z.minus_one ->
+          add_requires context frame [ Clause dividend_not_minimum ]
+      | _ -> (
+          match find_parameter_code context frame right with
+          | Some divisor ->
+              add_requires context frame
+                [
+                  Clause
+                    (Any
+                       [
+                         dividend_not_minimum;
+                         make_comparison divisor Not_equal (Integer Z.minus_one);
+                       ]);
+                ]
+          | None -> []))
+  | _ -> []
+
+let make_negation_fix context frame ty inner =
+  match (find_integer_limits ty, find_parameter_code context frame inner) with
+  | Some _, Some value ->
+      add_requires context frame
+        [ Clause (make_comparison value Not_equal (make_limit ty Minimum)) ]
+  | _ -> []
+
+let list_type_names substitution =
+  let named =
+    List.fold_left
+      (fun named ((parameter : Types.parameter), ty) ->
+        if
+          List.exists
+            (fun (other, other_type) -> other = parameter.name && Types.equal other_type ty)
+            named
+        then named
+        else named @ [ (parameter.name, ty) ])
+      []
+      (Types.list_type_arguments substitution)
+  in
+  List.filter
+    (fun (name, _) -> List.length (List.filter (fun (other, _) -> other = name) named) = 1)
+    named
+
+let list_required_fixes (context : State.context) (frame : State.frame) (clauses : State.clauses)
+    (requirement : Mir.requirement) term (values : State.passed list) ~type_names =
+  let clause = requirement.clause in
+  let is_fixed name =
+    List.mem name context.entry
+    ||
+    match name with
+    | Logic.Symbol.Constant _ | Evaluated (Constant_value _) | Literal _ -> true
+    | _ -> false
+  in
+  let list_written () =
+    List.filter_map
+      (fun (index, (parameter : Mir.parameter)) ->
+        Option.bind
+          (List.find_opt (fun (passed : State.passed) -> passed.position = index) values)
+          (fun (passed : State.passed) ->
+            Option.map (fun code -> (parameter.local, code)) (find_value_code context passed.term)))
+      (List.mapi (fun index parameter -> (index, parameter)) clauses.parameters)
+  in
+  if
+    Facts.is_home context frame.source
+    && List.for_all is_fixed (Logic.list_free_constants term)
+    && List.exists (fun name -> List.mem name context.entry) (Logic.list_free_constants term)
+    && not (Logic.is_refuted term)
+  then begin
+    let written = list_written () in
+    let replacements =
+      List.map
+        (fun (local, origin) ->
+          Option.map (fun code -> (origin, code)) (List.assoc_opt local written))
+        requirement.names
+    in
+    if List.for_all Option.is_some replacements then
+      add_requires context frame
+        [
+          Substituted_clause
+            {
+              clause = { key = clauses.callee.key; origin = clause.origin };
+              replacements = List.filter_map Fun.id replacements;
+              type_names;
+            };
+        ]
+    else []
+  end
+  else []

@@ -65,7 +65,7 @@ let havoc context frame (changed : State.changed_part list) =
         | Core_local Self -> Option.map (fun whole -> (frame.self_type, whole)) frame.self
         | root ->
             Option.map
-              (fun whole -> (Facts.find_local_type context frame root, whole))
+              (fun whole -> (Encoding.find_local_type context frame root, whole))
               (Locals.find_opt root frame.locals)
       in
       match held with
@@ -73,8 +73,8 @@ let havoc context frame (changed : State.changed_part list) =
       | Some (None, _) -> Facts.raise_bug "a loop changes a local that has a value and no type"
       | Some (Some ty, whole) -> (
           match
-            Validity.replace_part context ty whole part.fields (fun part_type _ ->
-                Facts.arrive context frame "loop" part_type)
+            Encoding.replace_part context ty whole part.fields (fun part_type _ ->
+                Encoding.arrive context frame "loop" part_type)
           with
           | None ->
               Facts.raise_bug "a loop changes a field of `%s`, whose fields the prover cannot see"
@@ -88,7 +88,7 @@ let havoc context frame (changed : State.changed_part list) =
 let list_validity_obligations context (entry : State.frame) (changed : State.changed_part list) =
   List.filter_map
     (fun root ->
-      match Validity.find_root context entry root with
+      match Encoding.find_root context entry root with
       | Some (ty, before) -> (
           match Validity.make_validity context entry ~assuming:false ~deep:true ty before with
           | Logic.Boolean true -> None
@@ -97,7 +97,7 @@ let list_validity_obligations context (entry : State.frame) (changed : State.cha
                 ( Facts.describe_local context entry root,
                   ty,
                   valid,
-                  fun (at : State.frame) -> Option.map snd (Validity.find_root context at root) ))
+                  fun (at : State.frame) -> Option.map snd (Encoding.find_root context at root) ))
       | None -> None)
     (List.sort_uniq compare (List.map (fun (part : State.changed_part) -> part.root) changed))
 
@@ -117,7 +117,7 @@ let check_preserved_validity context end_ location preserved =
     (fun (described, ty, valid_on_entry, read) ->
       match read end_ with
       | Some term ->
-          Facts.oblige context end_ location
+          Obligations.oblige context end_ location
             (Preserved_invariant { type_ = ty; value = described })
             (Logic.( ==> ) valid_on_entry
                (Validity.make_validity context end_ ~assuming:false ~deep:true ty term))
@@ -130,10 +130,10 @@ let check_loop_clauses context frame clauses ~moment =
       match clause with
       | Invariant invariant ->
           let _, term =
-            Conditions.with_obligation_condition context invariant.holds_when (fun () ->
+            Obligations.with_condition context invariant.holds_when (fun () ->
                 Validity.read_specification context frame invariant)
           in
-          Facts.oblige ~holds_when:invariant.holds_when context frame
+          Obligations.oblige ~holds_when:invariant.holds_when context frame
             (Facts.locate context frame.source invariant.origin)
             (Loop_invariant { clause = Facts.quote frame.source invariant.origin; moment })
             term
@@ -166,7 +166,7 @@ let end_scope ~(outer : State.frame) (frame : State.frame) =
   { frame with locals = Locals.filter (fun id _ -> Locals.mem id outer.locals) frame.locals }
 
 let leave_loop context frame frames =
-  Option.map (end_scope ~outer:frame) (Facts.join_frames context frames)
+  Option.map (end_scope ~outer:frame) (Joins.join_frames context frames)
 
 let end_iterations context (frame : State.frame) loop_at clauses measure (start : loop_start) ~head
     ~(inside : State.frame) ~iterations ~iteration_bounds ~ends ~breaks ~with_through =
@@ -206,7 +206,7 @@ let declare_elements_so_far context (head : State.frame) ~element ~collection ~c
       Option.iter
         (Values.assume_extensional context head (Models.make_sequence_type element) yielded)
         (Models.find_model context
-           (Facts.substitute_type context head collection_type)
+           (Encoding.substitute_type context head collection_type)
            collected ~element)
   | None -> ()
 
@@ -265,7 +265,7 @@ let cursor_trait : Path.t = Well_known.make_path Cursor
 let declare_some_parts context frame element =
   let parts =
     Facts.declare_fresh context frame "parts"
-      (Facts.declare_sort context (Models.make_sequence_type element))
+      (Encoding.declare_sort context (Models.make_sequence_type element))
   in
   Facts.assume context frame
     Logic.(greater_equal (Models.make_sequence_length context element parts) (int 0));
@@ -314,7 +314,7 @@ let oblige_next_gives_the_model context (after : State.frame) location ~element 
       Models.index_sequence context element model (Logic.add index (Logic.int 1)) )
   with
   | Some first, Some value_after, Some value_ahead ->
-      Facts.oblige context after location Visited_out_of_order
+      Obligations.oblige context after location Visited_out_of_order
         Logic.(
           has_another
           ==> (greater (length model) (int 0)
@@ -333,11 +333,11 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   let location = Facts.locate context frame.source for_loop.for_at in
   let clauses = for_loop.for_clauses in
   ignore (cursor_access.read frame);
-  let element_type = Facts.substitute_type context frame for_loop.element_type in
+  let element_type = Encoding.substitute_type context frame for_loop.element_type in
   let find_model (at : State.frame) =
     if names_visited clauses then
       Models.find_model context
-        (Facts.substitute_type context frame cursor_type)
+        (Encoding.substitute_type context frame cursor_type)
         (cursor_access.read at) ~element:element_type
     else None
   in
@@ -350,7 +350,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
             ~self_type:cursor_type ~trait evidence )
     | _ -> Facts.raise_bug "a loop over `%s` pulls no `Cursor`" (Types.show cursor_type)
   in
-  let self_type = Facts.substitute_type context frame cursor_type in
+  let self_type = Encoding.substitute_type context frame cursor_type in
   let self_binding =
     Types.bind_argument
       (Types.make_self_parameter cursor_trait)
@@ -446,10 +446,12 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
           ~type_arguments:[ Types.Type cursor_type ]
       in
       let some_variant = Some (Well_known.show_variant Option_some) in
-      let has_another = Logic.Is (Facts.make_constructor_symbol option_type some_variant, pulled) in
+      let has_another =
+        Logic.Is (Encoding.make_constructor_symbol option_type some_variant, pulled)
+      in
       let element =
         Logic.Apply
-          ( Facts.make_selector_symbol option_type some_variant
+          ( Encoding.make_selector_symbol option_type some_variant
               (Well_known.show_field Option_some_value),
             [ pulled ] )
       in
@@ -477,7 +479,7 @@ let run_for_loop context frame (for_loop : for_loop) =
   match for_loop.iterable with
   | Over_range { low; high; inclusive } ->
       let element =
-        Facts.substitute_type context frame
+        Encoding.substitute_type context frame
           (Option.value for_loop.lent_element ~default:for_loop.element_type)
       in
       let over_positions = Option.is_some for_loop.lent_element in
@@ -546,7 +548,7 @@ let run_for_loop context frame (for_loop : for_loop) =
           (if over_positions then
              match find_element_at { inside with makes_obligations = false } index with
              | Some lent -> lent
-             | None -> Facts.arrive context inside "element" element
+             | None -> Encoding.arrive context inside "element" element
            else index)
       in
       let inside = { inside with yielded = outer_yielded } in
@@ -562,7 +564,7 @@ let run_for_loop context frame (for_loop : for_loop) =
       List.iter
         (fun (end_ : State.frame) ->
           Option.iter
-            (Facts.oblige context end_
+            (Obligations.oblige context end_
                (Facts.locate context frame.source for_loop.for_at)
                Element_count_changes)
             (find_kept_count end_))
@@ -646,7 +648,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
              (Facts.restrict at_condition (Logic.not_ holds))
              costs ~iterations ~most))
   in
-  Facts.join_frames context
+  Joins.join_frames context
     (Option.to_list failing
     @ List.map
         (fun (leaving : State.frame) ->

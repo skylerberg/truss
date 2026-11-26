@@ -39,7 +39,7 @@ type application = {
 
 let declare_function context ~path ~type_arguments ~sorts ~result_type =
   let symbol = Logic.Symbol.Function { callee = path; type_arguments } in
-  let result_sort = Facts.declare_sort context result_type in
+  let result_sort = Encoding.declare_sort context result_type in
   Facts.declare context (Logic.Function (symbol, sorts, result_sort));
   symbol
 
@@ -54,7 +54,7 @@ let apply (context : State.context) (frame : State.frame) ~path ~type_arguments 
     if is_limited then begin
       let limited = Logic.Symbol.Limited { callee = path; type_arguments } in
       Facts.declare context
-        (Logic.Function (limited, sorts, Facts.declare_sort context result_type));
+        (Logic.Function (limited, sorts, Encoding.declare_sort context result_type));
       Facts.run_once context (Limited_link function_symbol) (fun () ->
           let parameters = make_numbered_parameters "linked" sorts in
           let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
@@ -67,14 +67,14 @@ let apply (context : State.context) (frame : State.frame) ~path ~type_arguments 
     else function_symbol
   in
   let term = Logic.Apply (symbol, arguments) in
-  Facts.assume context frame (Facts.make_in_range result_type term);
-  if Facts.find_bounds result_type <> None && is_on_bound_values then
+  Facts.assume context frame (Encoding.make_in_range result_type term);
+  if Encoding.find_bounds result_type <> None && is_on_bound_values then
     Facts.run_once context (In_range symbol) (fun () ->
         let parameters = make_numbered_parameters "ranged" sorts in
         Facts.add_fact context
           (Logic.forall
              ( parameters,
-               Facts.make_in_range result_type
+               Encoding.make_in_range result_type
                  (Logic.Apply (symbol, List.map (fun (name, _) -> Logic.Symbol name) parameters)) )));
   { symbol; sorts; term; is_limited }
 
@@ -150,7 +150,7 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
                      let ty =
                        Types.substitute_erased (substitution_of callee_clauses) parameter.type_
                      in
-                     Logic.( &&& ) (Facts.make_in_range ty input)
+                     Logic.( &&& ) (Encoding.make_in_range ty input)
                        (Validity.make_validity context outside ~assuming:true ty input))
                    callee_clauses.parameters inputs)
             in
@@ -206,7 +206,7 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
                 let defined_by body =
                   if
                     Logic.mentions [ symbol ] body
-                    || Facts.find_bounds result_type <> None
+                    || Encoding.find_bounds result_type <> None
                     || not (has_quantifier_through_definitions body)
                   then None
                   else Some (required, body)
@@ -231,7 +231,7 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
           match definition with
           | Some (required, body) ->
               let unspecified = Logic.Symbol.Unspecified symbol
-              and result_sort = Facts.declare_sort context result_type in
+              and result_sort = Encoding.declare_sort context result_type in
               Facts.declare context (Logic.Function (unspecified, sorts, result_sort));
               Facts.declare context
                 (Logic.Definition

@@ -60,12 +60,14 @@ let make_law_fact (context : State.context) (frame : State.frame) source ~substi
       in
       let range =
         Logic.conjunction
-          (List.map2 (fun symbol ty -> Facts.make_in_range ty (Logic.Symbol symbol)) symbols types)
+          (List.map2
+             (fun symbol ty -> Encoding.make_in_range ty (Logic.Symbol symbol))
+             symbols types)
       in
       let _, holds = Validity.read_specification context inside law.states in
       Some
         (Logic.forall
-           ( List.map2 (fun symbol ty -> (symbol, Facts.declare_sort context ty)) symbols types,
+           ( List.map2 (fun symbol ty -> (symbol, Encoding.declare_sort context ty)) symbols types,
              Logic.( ==> ) (Logic.( &&& ) range premise) holds ))
     with Facts.Unsupported _ -> None
   end
@@ -77,7 +79,7 @@ let assume_laws (context : State.context) frame (trait : Types.trait_reference) 
   List.iter
     (fun (required : Types.trait_reference) ->
       let key = (required, ty) in
-      let impl = Option.map fst (Facts.find_impl context required ty) in
+      let impl = Option.map fst (Encoding.find_impl context required ty) in
       let is_proven_with_this_proof =
         match impl with Some impl -> Cycles.is_in_proof_cycle context impl | None -> false
       in

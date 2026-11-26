@@ -40,7 +40,8 @@ let make_sequence_length context element term =
       }
   in
   Facts.declare context
-    (Logic.Function (symbol, [ Facts.declare_sort context (make_sequence_type element) ], Logic.Int));
+    (Logic.Function
+       (symbol, [ Encoding.declare_sort context (make_sequence_type element) ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
 let rec index_sequence (context : State.context) element term index =
@@ -61,10 +62,10 @@ let rec index_sequence (context : State.context) element term index =
       Facts.declare context
         (Logic.Function
            ( symbol,
-             [ Facts.declare_sort context sequence; Logic.Int ],
-             Facts.declare_sort context element ));
+             [ Encoding.declare_sort context sequence; Logic.Int ],
+             Encoding.declare_sort context element ));
       let at sequence index = Logic.Apply (symbol, [ sequence; index ]) in
-      if context.ranking && Facts.find_constructors context element <> None then
+      if context.ranking && Encoding.find_constructors context element <> None then
         Facts.run_once context (Ranked_elements sequence) (fun () ->
             let each = Logic.Symbol.Variable { label = "ranked.sequence"; numbers = [] }
             and index = Logic.Symbol.Variable { label = "ranked.index"; numbers = [] } in
@@ -72,7 +73,7 @@ let rec index_sequence (context : State.context) element term index =
             let below = rank context element (at ranked position) in
             let fact =
               Logic.forall
-                ( [ (each, Facts.declare_sort context sequence); (index, Logic.Int) ],
+                ( [ (each, Encoding.declare_sort context sequence); (index, Logic.Int) ],
                   Logic.(
                     less_equal (int 0) position
                     &&& less position (make_sequence_length context element ranked)
@@ -84,12 +85,12 @@ let rec index_sequence (context : State.context) element term index =
 
 and rank context ty term =
   let symbol = Logic.Symbol.Rank ty in
-  Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
+  Facts.declare context (Logic.Function (symbol, [ Encoding.declare_sort context ty ], Logic.Int));
   Facts.run_once context (Non_negative_rank ty) (fun () ->
       let each = Logic.Symbol.Variable { label = "ranked.value"; numbers = [] } in
       Facts.add_fact context
         (Logic.forall
-           ( [ (each, Facts.declare_sort context ty) ],
+           ( [ (each, Encoding.declare_sort context ty) ],
              Logic.less_equal (Logic.int 0) (Logic.Apply (symbol, [ Logic.Symbol each ])) )));
   (match ty with
   | Types.Named { path; arguments = [ Types.Type element ] }
@@ -107,7 +108,7 @@ let make_finite_function context method_ ~arguments output inputs =
     Types.Named { path = Well_known.make_path (Well_known.locate_method method_).owner; arguments }
   in
   Facts.declare context
-    (Logic.Function (symbol, Facts.declare_sort context finite :: List.map snd inputs, output));
+    (Logic.Function (symbol, Encoding.declare_sort context finite :: List.map snd inputs, output));
   fun term -> Logic.Apply (symbol, term :: List.map fst inputs)
 
 let substitute_value_term context (value : Types.value) =
@@ -118,7 +119,7 @@ let substitute_value_term context (value : Types.value) =
       Facts.run_once context (In_range symbol) (fun () ->
           Facts.declare context (Logic.Constant (symbol, Int));
           Facts.add_fact context
-            (Facts.make_in_range (Types.make_builtin UInt64) (Logic.Symbol symbol)));
+            (Encoding.make_in_range (Types.make_builtin UInt64) (Logic.Symbol symbol)));
       Logic.Symbol symbol
   | Value_variable _ -> Facts.raise_unsupported Whole_definition Unsolved_size
   | Value_error _ -> Facts.raise_bug "a value with an error, which no proof reaches"
@@ -139,7 +140,7 @@ let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) ~im
         let each = Logic.Symbol.Variable { label = "ranked.value"; numbers = [] } in
         let fact =
           Logic.forall
-            ( [ (each, Facts.declare_sort context ty) ],
+            ( [ (each, Encoding.declare_sort context ty) ],
               Logic.less_equal
                 (rank context model (Logic.Apply (symbol, [ Logic.Symbol each ])))
                 (rank context ty (Logic.Symbol each)) )
@@ -157,7 +158,7 @@ let find_model_impl (context : State.context) (ty : Types.ty) ~(model : Types.ty
          (Projection
             { base = ty; trait = model_trait; name = Well_known.show_associated Model_value }))
   in
-  if value = model then Option.map fst (Facts.find_impl context model_trait ty) else None
+  if value = model then Option.map fst (Encoding.find_impl context model_trait ty) else None
 
 let compute_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   match find_model_impl context ty ~model with
@@ -170,7 +171,8 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
           }
       in
       Facts.declare context
-        (Logic.Function (symbol, [ Facts.declare_sort context ty ], Facts.declare_sort context model));
+        (Logic.Function
+           (symbol, [ Encoding.declare_sort context ty ], Encoding.declare_sort context model));
       rank_model context ty ~model ~impl symbol;
       (match ty with
       | Types.Named { path; arguments = [ Types.Type element; Types.Value count ] }
@@ -180,7 +182,7 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
               let elements = Logic.Apply (symbol, [ Logic.Symbol each ]) in
               Facts.add_fact context
                 (Logic.forall
-                   ( [ (each, Facts.declare_sort context ty) ],
+                   ( [ (each, Encoding.declare_sort context ty) ],
                      Logic.equal
                        (make_sequence_length context element elements)
                        (substitute_value_term context count) )))
@@ -233,8 +235,9 @@ let quantify_over (context : State.context) (frame : State.frame)
   match range with
   | Range_of_type ty ->
       let inner = bind inner each ty in
-      make symbol (Facts.declare_sort context ty)
-        (Logic.( &&& ) (Facts.make_in_range ty each)
+      make symbol
+        (Encoding.declare_sort context ty)
+        (Logic.( &&& ) (Encoding.make_in_range ty each)
            (Validity.make_validity context inner ~assuming:true ty each))
         inner each
   | Range_of_integers { low; high; inclusive; type_ } ->

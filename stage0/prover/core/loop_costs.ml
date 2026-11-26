@@ -45,9 +45,9 @@ let measure_held_gains context (entry : State.frame) (changed : State.changed_pa
         Option.map
           (fun _ ->
             ( read_declared_part_type context part,
-              fun (at : State.frame) -> Option.map snd (Validity.find_changed_part context at part)
+              fun (at : State.frame) -> Option.map snd (Encoding.find_changed_part context at part)
             ))
-          (Validity.find_changed_part context entry part))
+          (Encoding.find_changed_part context entry part))
       changed
   in
   let sum_held measure (at : State.frame) =
@@ -153,7 +153,7 @@ let make_clause_bound (counter : Costs.counter) ~since ~amount =
 
 let oblige_clause context (frame : State.frame) cost (written : Mir.cost) ~moment ~since =
   let amount = read_amount context frame written in
-  Facts.oblige context frame
+  Obligations.oblige context frame
     (Facts.locate context frame.source written.origin)
     (Loop_cost_clause { clause = Facts.quote frame.source written.origin; moment })
     (make_clause_bound cost.counter ~since ~amount)
@@ -164,7 +164,7 @@ let make_count_bound ~(counter : Costs.counter) ~at ~bound =
 let check_entry context frame costs =
   List.iter
     (fun cost ->
-      Conditions.with_obligation_condition context cost.holds_when @@ fun () ->
+      Obligations.with_condition context cost.holds_when @@ fun () ->
       match cost.rule with
       | Clause_bound { written; _ } ->
           oblige_clause context frame cost written ~moment:On_entry ~since:Costs.zero
@@ -279,7 +279,7 @@ let explain_changing_cost context (head : State.frame) (call : State.call_amount
       values =
         List.filter_map
           (fun part ->
-            if is_mentioned (Validity.find_changed_part context head part) then
+            if is_mentioned (Encoding.find_changed_part context head part) then
               Some (describe_part context head part)
             else None)
           changed;
@@ -335,7 +335,7 @@ let check_iterations context loop_at (head : State.frame) loop ~iterations ~iter
   in
   List.iter
     (fun cost ->
-      Conditions.with_obligation_condition context cost.holds_when @@ fun () ->
+      Obligations.with_condition context cost.holds_when @@ fun () ->
       let measure_spent (frame : State.frame) =
         Costs.since
           ~start:(Counters.lookup_spent head cost.counter)
@@ -423,7 +423,7 @@ let check_iterations context loop_at (head : State.frame) loop ~iterations ~iter
               | _ -> ());
               List.iter2
                 (fun (frame : State.frame) spent ->
-                  Facts.oblige context frame location Iteration_above_inferred_bound
+                  Obligations.oblige context frame location Iteration_above_inferred_bound
                     (make_count_bound ~counter:cost.counter ~at:spent ~bound:per))
                 frames spent
           | Error unbounded ->
@@ -432,7 +432,7 @@ let check_iterations context loop_at (head : State.frame) loop ~iterations ~iter
                 | [] -> []
                 | first :: rest -> List.filter (fun part -> List.for_all (List.mem part) rest) first
               in
-              Facts.oblige context head location
+              Obligations.oblige context head location
                 (Unbounded_iteration_cost
                    (explain_unbounded_iteration context head cost.counter ~changed:loop.changed
                       ~parts))

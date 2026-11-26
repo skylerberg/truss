@@ -113,9 +113,9 @@ let assert_bit_vector (context : State.context) frame ~named ~origin
         List.fold_left
           (fun (inside : State.frame) (local, ty) ->
             let symbol =
-              Facts.declare_fresh context inside "asserted" (Facts.declare_sort context ty)
+              Facts.declare_fresh context inside "asserted" (Encoding.declare_sort context ty)
             in
-            Facts.assume context inside (Facts.make_in_range ty symbol);
+            Facts.assume context inside (Encoding.make_in_range ty symbol);
             match local with
             | Core.Self -> { inside with self = Some symbol }
             | _ -> { inside with locals = Locals.add (Core_local local) symbol inside.locals })
@@ -123,7 +123,7 @@ let assert_bit_vector (context : State.context) frame ~named ~origin
       in
       let term = read isolated in
       let obligation =
-        Facts.make_obligation context
+        Obligations.make_obligation context
           { isolated with makes_obligations = true }
           (Facts.locate context frame.source origin)
           (Bit_vector_assertion_may_fail { clause = Facts.quote frame.source origin })
@@ -142,7 +142,7 @@ let check_assertion context frame ~origin ~bit_vector term =
   | _ -> ());
   if is_test context || bit_vector <> None then Facts.assume context frame term
   else
-    Facts.oblige context frame
+    Obligations.oblige context frame
       (Facts.locate context frame.source origin)
       (Assertion_may_fail { clause = Facts.quote frame.source origin })
       term

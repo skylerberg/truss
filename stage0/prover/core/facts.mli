@@ -24,91 +24,13 @@ val mentions_fresh_after : State.context -> int -> Logic.term -> bool
 val close_over_binders : State.frame -> Logic.term -> Logic.term option
 val add_frame_fact : State.context -> State.frame -> Logic.term -> unit
 val assume : State.context -> State.frame -> Logic.term -> unit
-
-val add_requires :
-  State.context -> State.frame -> Catalog.Prover.required list -> Catalog.Prover.fix list
-
-val find_value_code : State.context -> Logic.term -> Catalog.Code.t option
 val remove_panic_condition : Types.capability_set -> Types.capability_set
-
-val oblige :
-  ?cited:Resolve.Names.key * Core.origin ->
-  ?fixes:Catalog.Prover.fix list ->
-  ?can_be_required:bool ->
-  ?is_proven_by_evaluation:bool ->
-  ?holds_when:Types.condition ->
-  State.context ->
-  State.frame ->
-  Obligation.location ->
-  Catalog.Prover.obligation ->
-  Logic.term ->
-  unit
-
-val make_closed_obligation :
-  State.context ->
-  State.frame ->
-  Obligation.location ->
-  Catalog.Prover.obligation ->
-  Logic.term ->
-  Obligation.t option
-
-val make_obligation :
-  State.context ->
-  State.frame ->
-  Obligation.location ->
-  Catalog.Prover.obligation ->
-  Logic.term ->
-  Obligation.t
-
 val locate : State.context -> State.source -> Core.origin -> Obligation.location
 val add_hole : State.context -> Resolve.Names.key * Obligation.location -> unit
 val quote : State.source -> Core.origin -> Catalog.Prover.quoted
 val describe_local : State.context -> State.frame -> Locals.local -> Catalog.Prover.value
 val is_home : State.context -> State.source -> bool
 val is_in_home_package : State.context -> State.source -> bool
-val find_bounds : Types.ty -> (Z.t * Z.t) option
-val find_float_format : Types.ty -> (int * int) option
-val make_constructor_symbol : Types.ty -> string option -> 'a Logic.Symbol.t
-val make_selector_symbol : Types.ty -> string option -> string -> 'a Logic.Symbol.t
-val is_standard_equal : Path.t -> bool
-
-val find_visible_type :
-  State.context -> Types.ty -> (Types.type_interface * Types.substitution) option
-
-val find_constructors :
-  State.context -> Types.ty -> (string option * (string * Types.ty) list) list option
-
-val declare_sort : State.context -> Types.ty -> Logic.sort
-val is_equality_identity : State.context -> ?seen:Types.ty list -> Types.ty -> bool
-val make_in_range : Types.ty -> Logic.term -> Logic.term
 val run_once : State.context -> State.stated -> (unit -> unit) -> unit
-val arrive : State.context -> State.frame -> string -> Types.ty -> Logic.term
 val bind : State.frame -> Locals.key -> Types.ty -> Logic.term -> State.frame
-
-val list_definition_bounds :
-  Lookups.t -> current:Path.t -> condition:Types.condition -> Interface.Impls.bounds
-
-val substitute_declared_type : State.context -> State.frame -> Types.ty -> Types.ty
-val substitute_type : State.context -> State.frame -> Types.ty -> Types.ty
-
-val find_impl :
-  State.context -> Types.trait_reference -> Types.ty -> (Path.t * Types.substitution) option
-
-val find_local_type : State.context -> State.frame -> Locals.key -> Types.ty option
 val restrict : State.frame -> Logic.term -> State.frame
-val name_path_condition : State.context -> State.frame -> Logic.term -> Logic.term
-
-val merge :
-  State.context ->
-  ?value_type:Types.ty ->
-  condition:Logic.term ->
-  (Logic.term * State.frame * Logic.term option) list ->
-  State.frame * Logic.term option
-
-val join :
-  State.context ->
-  ?value_type:Types.ty ->
-  (State.frame * Logic.term option) list ->
-  (State.frame * Logic.term option) option
-
-val join_frames : State.context -> State.frame list -> State.frame option

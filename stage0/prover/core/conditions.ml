@@ -2,7 +2,7 @@ type decision = Always | In_run of Types.condition | Elsewhere
 
 let implies (lookups : Lookups.t) ~current premise conclusion =
   Interface.Impls.implies_condition lookups.interface
-    ~list_bounds:(Facts.list_definition_bounds lookups ~current ~condition:[])
+    ~list_bounds:(Encoding.list_definition_bounds lookups ~current ~condition:[])
     premise conclusion
 
 let may_panic_for_every_value lookups ~current ~condition (uses : Types.capability_set) =
@@ -23,7 +23,7 @@ let decide (context : State.context) ~substitution (holds_when : Types.condition
       match
         Interface.Impls.decide_condition context.lookups.interface
           ~list_bounds:
-            (Facts.list_definition_bounds context.lookups ~current:context.current ~condition:[])
+            (Encoding.list_definition_bounds context.lookups ~current:context.current ~condition:[])
           (Types.substitute_condition substitution holds_when)
       with
       | None -> Elsewhere
@@ -46,8 +46,3 @@ let find_obligation_condition = function
   | Always -> Some []
   | In_run undecided -> Some undecided
   | Elsewhere -> None
-
-let with_obligation_condition (context : State.context) condition run =
-  let outer = context.obligation_condition in
-  context.obligation_condition <- condition;
-  Fun.protect ~finally:(fun () -> context.obligation_condition <- outer) run

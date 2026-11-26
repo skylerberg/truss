@@ -164,7 +164,7 @@ let make_parameter_symbols context (frame : State.frame) (function_type : Types.
   List.mapi
     (fun index (_, input) ->
       ( Logic.Symbol.Variable { label = "parameter"; numbers = [ depth; index ] },
-        Facts.declare_sort context (Facts.substitute_type context frame input) ))
+        Encoding.declare_sort context (Encoding.substitute_type context frame input) ))
     function_type.inputs
 
 let remove_temporaries locals =
@@ -174,22 +174,16 @@ let remove_temporaries locals =
 
 let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.frame)
     ~(lambdas : Mir.body array) (body : Mir.body) ~type_ =
-  let saved_returns = context.returns
-  and saved_panics = context.panics
-  and saved_can_declare_panic = context.can_declare_panic in
+  let saved_returns = context.returns in
   context.returns <- [];
-  context.panics <- false;
-  context.can_declare_panic <- false;
+  Obligations.run_with_panics context ~panics:false @@ fun () ->
   Fun.protect
-    ~finally:(fun () ->
-      context.returns <- saved_returns;
-      context.panics <- saved_panics;
-      context.can_declare_panic <- saved_can_declare_panic)
+    ~finally:(fun () -> context.returns <- saved_returns)
     (fun () ->
       let inside = enter { frame with locals = remove_temporaries frame.locals } in
       Facts.run_in_source context frame.source (fun () -> context.run_body inside ~lambdas body);
       match
-        Facts.join context ~value_type:type_
+        Joins.join context ~value_type:type_
           (List.rev_map
              (fun (exit_ : State.function_exit) -> (exit_.frame, exit_.returned))
              context.returns)
@@ -200,7 +194,7 @@ let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.f
 let run_code context frame (code : Mir.t) ~type_ =
   match run_lambda_body context frame ~lambdas:code.lambdas code.body ~type_ with
   | Some returned -> returned
-  | None -> (frame, Facts.arrive context frame "unfinished" type_)
+  | None -> (frame, Encoding.arrive context frame "unfinished" type_)
 
 let compute_returned_type context frame (body : Mir.body) =
   let rec find_returned_type (block : Mir.block) =
@@ -208,7 +202,7 @@ let compute_returned_type context frame (body : Mir.body) =
       (fun (statement : Mir.statement) ->
         match statement.kind with
         | Jump (Return (Some value)) ->
-            Some (Facts.substitute_type context frame (Mir.extract_operand_type value))
+            Some (Encoding.substitute_type context frame (Mir.extract_operand_type value))
         | _ -> List.find_map find_returned_type (Mir.list_nested_blocks statement))
       block.statements
   in
@@ -263,7 +257,7 @@ let find_lambda_definition context frame (function_type : Types.function_type)
                     let info = written.code.locals.(parameter) in
                     Facts.bind inside
                       (Locals.make_key written.code.locals parameter)
-                      (Facts.substitute_type context inside info.type_)
+                      (Encoding.substitute_type context inside info.type_)
                       (Logic.Symbol name))
                   inside written.code.parameters bound
               in
@@ -303,7 +297,7 @@ let find_lambda_definition context frame (function_type : Types.function_type)
           let symbol =
             Logic.Symbol.Lambda { sorts = List.map snd bound; definition = named_by_position }
           in
-          let sort = Facts.declare_sort context (Types.Function function_type) in
+          let sort = Encoding.declare_sort context (Types.Function function_type) in
           let term =
             if Logic.mentions frame.bound defined then
               Facts.declare_value_symbol context frame symbol sort
@@ -318,13 +312,15 @@ let find_lambda_definition context frame (function_type : Types.function_type)
           (match written.code.value_type with
           | Some value_type -> (
               match
-                Facts.make_in_range (Facts.substitute_type context frame value_type) application
+                Encoding.make_in_range
+                  (Encoding.substitute_type context frame value_type)
+                  application
               with
               | Logic.Boolean true -> ()
               | range -> (
                   let find_argument_in_range (name, _) (_, input) =
                     Validity.find_parts_in_range context
-                      (Facts.substitute_type context frame input)
+                      (Encoding.substitute_type context frame input)
                       (Logic.Symbol name)
                   in
                   match List.map2 find_argument_in_range bound function_type.inputs with
@@ -344,7 +340,7 @@ let find_lambda_definition context frame (function_type : Types.function_type)
 let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : Invocation.site)
     (written : State.lambda_code) ~list_facts ~list_promises =
   let location = Facts.locate context frame.source site.origin in
-  let ty = Facts.substitute_type context frame site.type_ in
+  let ty = Encoding.substitute_type context frame site.type_ in
   let function_type =
     match ty with
     | Types.Function function_type -> function_type
@@ -360,8 +356,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   let arguments =
     List.map
       (fun (_, input) ->
-        let input = Facts.substitute_type context frame input in
-        let argument = Facts.arrive context inside "argument" input in
+        let input = Encoding.substitute_type context frame input in
+        let argument = Encoding.arrive context inside "argument" input in
         Validity.assume_valid context inside input argument;
         argument)
       function_type.inputs
@@ -386,21 +382,18 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
       (Query.list_facts_since context.query ~count:start_facts)
   in
   let ended = ref [] in
-  let saved_returns = context.returns
-  and saved_panics = context.panics
-  and saved_can_declare_panic = context.can_declare_panic in
+  let saved_returns = context.returns in
   context.returns <- [];
-  context.can_declare_panic <- false;
-  context.panics <-
-    Conditions.may_panic context.lookups ~current:context.current ~condition:context.condition
-      function_type.uses;
   let inferred_bounds =
+    Obligations.run_with_panics context
+      ~panics:
+        (Conditions.may_panic context.lookups ~current:context.current ~condition:context.condition
+           function_type.uses)
+    @@ fun () ->
     Termination.run_in_lambda context function_type @@ fun () ->
     Fun.protect
       ~finally:(fun () ->
         context.returns <- saved_returns;
-        context.panics <- saved_panics;
-        context.can_declare_panic <- saved_can_declare_panic;
         Counters.leave_lambda context counters)
       (fun () ->
         let inside = { inside with locals = remove_temporaries inside.locals } in
@@ -410,7 +403,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
               let info = written.code.locals.(parameter) in
               Facts.bind inside
                 (Locals.make_key written.code.locals parameter)
-                (Facts.substitute_type context inside info.type_)
+                (Encoding.substitute_type context inside info.type_)
                 argument)
             inside written.code.parameters arguments
         in
@@ -425,7 +418,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
             Option.iter
               (fun term ->
                 Validity.check_valid context exit_ location
-                  (Facts.substitute_type context frame function_type.output)
+                  (Encoding.substitute_type context frame function_type.output)
                   term ~deep:true ~moment:Lambda_result)
               returned;
             List.iter2
@@ -435,7 +428,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                     match Locals.find_opt (Core_local local) exit_.locals with
                     | Some term ->
                         Validity.check_valid context exit_ location
-                          (Facts.substitute_type context frame input)
+                          (Encoding.substitute_type context frame input)
                           term ~deep:true ~moment:Lambda_mut_parameter
                     | None -> ())
                 | _ -> ())
@@ -460,7 +453,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
               (fun result ->
                 List.iter
                   (fun (quoted, promise) ->
-                    Facts.oblige context exit_ location
+                    Obligations.oblige context exit_ location
                       (Lambda_promise { promise = quoted })
                       promise)
                   (list_promises ~entries:arguments ~exits ~result))
@@ -475,7 +468,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
     match find_lambda_definition context frame function_type written with
     | Some term -> term
     | None ->
-        let term = Facts.arrive context frame "lambda" ty in
+        let term = Encoding.arrive context frame "lambda" ty in
         if Callbacks.is_in_the_logic function_type then
           add_lambda_facts context frame ~capture_free function_type term ~called ~arguments
             ~start_fresh ~end_fresh ~start_declarations ~premises ~shown ~ended:!ended;
@@ -538,8 +531,8 @@ let make_passed_values context frame (invocation : Invocation.t)
             origin = Some site.origin;
             passed_place = None;
             is_step_self = false;
-            type_ = Facts.substitute_type context frame site.type_;
-            declared_type = Facts.substitute_declared_type context frame site.type_;
+            type_ = Encoding.substitute_type context frame site.type_;
+            declared_type = Encoding.substitute_declared_type context frame site.type_;
             term;
           })
     arguments
