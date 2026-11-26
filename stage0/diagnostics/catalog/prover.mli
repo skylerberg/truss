@@ -83,7 +83,8 @@ type promise =
       declared : Types.trait_reference;
     }
 
-type callback_reason = Used_as_unpromising_value | Passed_for_unpromising_parameter
+type function_value = Named_function of Path.t | Callback_parameter of string
+type function_use = Passed_for_parameter | Used_as_value of Types.ty
 
 type unpromised =
   | Nothing_promises
@@ -117,7 +118,6 @@ type obligation =
   | Lambda_cost of { counting : counting; type_ : Types.ty }
   | Lambda_call_above_bound of { metric : Language.Metric.t }
   | Callback_precondition of { clause : quoted; call : call; name : string }
-  | Parameter_contract of { path : Path.t; clause : quoted }
   | Loop_cost_clause of { clause : quoted; moment : moment }
   | Iteration_above_inferred_bound
   | Unbounded_iteration_cost of unbounded
@@ -146,10 +146,9 @@ type obligation =
     }
   | Negative_potential of { type_ : Types.ty }
   | May_alias of { first : quoted; second : quoted }
-  | Callback_requirement of { name : string; reason : callback_reason; clause : quoted }
+  | Function_requirement of { function_ : function_value; use : function_use; clause : quoted }
   | Callback_promise of { promise : quoted; unpromised : unpromised }
   | Duplicate_key of { key : quoted option }
-  | Value_contract of { path : Path.t; type_ : Types.ty; clause : quoted }
 
 type construct =
   | Potential_of_elements
@@ -163,7 +162,6 @@ type construct =
   | Negation_of of Types.ty
   | Shift_of of Types.ty
   | Range_of of Types.ty
-  | Unreadable_parameter_type
   | Unreadable_cursor of Types.ty
   | Field of string
   | Alternatives_binding_mut

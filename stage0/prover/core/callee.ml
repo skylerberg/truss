@@ -81,6 +81,9 @@ let add_restated_clauses (context : State.context) (method_ : trait_method) inst
            ~self_type:method_.self_type method_.trait.trait method_.name method_.receiver);
   }
 
+let bind_clauses substitution_of (clauses : State.clauses) =
+  Types.combine_substitutions (substitution_of clauses) clauses.bindings
+
 let resolve_target (context : State.context) (frame : State.frame) (written : _ Core.target) =
   let substitute_instantiation (instantiation : Types.instantiation) : Types.instantiation =
     {
@@ -100,7 +103,7 @@ let resolve_target (context : State.context) (frame : State.frame) (written : _ 
         {
           path;
           contract = Contracts.find_function_contract context path;
-          substitution_of = (fun _ -> substitution);
+          substitution_of = bind_clauses (fun _ -> substitution);
           type_arguments = instantiation.type_arguments;
           declaration = path;
           declaration_substitution = substitution;
@@ -146,7 +149,8 @@ let resolve_target (context : State.context) (frame : State.frame) (written : _ 
               (add_restated_clauses context method_ instantiation)
               (Contracts.find_method_contract context method_.trait name receiver evidence);
           substitution_of =
-            (fun clauses -> if clauses.inherited then declaration_substitution else substitution);
+            bind_clauses (fun clauses ->
+                if clauses.inherited then declaration_substitution else substitution);
           type_arguments =
             Facts.list_method_type_arguments method_.trait ~self_type:method_.self_type
               instantiation.type_arguments;
@@ -161,7 +165,7 @@ let resolve_target (context : State.context) (frame : State.frame) (written : _ 
         {
           path;
           contract = Contracts.find_capability_contract context capability name;
-          substitution_of = (fun _ -> Types.no_substitution);
+          substitution_of = bind_clauses (fun _ -> Types.no_substitution);
           type_arguments = [];
           declaration = path;
           declaration_substitution = Types.no_substitution;

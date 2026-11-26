@@ -411,15 +411,6 @@ let describe_obligation = function
       tick clause
       @ (Description.Text " may not hold for " :: describe_call call)
       @ [ Text (Printf.sprintf " through `%s`." name) ]
-  | Parameter_contract { path; clause } ->
-      [
-        Text
-          (Printf.sprintf
-             "`%s` may not accept every argument this parameter's type promises it: its `"
-             (Path.show path));
-        quote_in clause;
-        Text "` may not hold.";
-      ]
   | Loop_cost_clause { clause; moment } ->
       [
         Text "The loop's `";
@@ -524,15 +515,19 @@ let describe_obligation = function
         quote_in second;
         Text "` may reach the same elements, which are used together.";
       ]
-  | Callback_requirement { name; reason; clause } ->
+  | Function_requirement { function_; use; clause } ->
       [
         Text
-          (Printf.sprintf "`%s` %s, so its `" name
-             (match reason with
-             | Used_as_unpromising_value ->
-                 "is used as a value whose type promises nothing of its arguments"
-             | Passed_for_unpromising_parameter ->
-                 "is passed for a parameter that may not promise its `requires`"));
+          (Printf.sprintf "`%s` is %s, so its `"
+             (match function_ with
+             | Named_function path -> Path.show path
+             | Callback_parameter name -> name)
+             (match use with
+             | Used_as_value type_ ->
+                 Printf.sprintf "used as a value of `%s`, a type that states no `requires`"
+                   (Types.show type_)
+             | Passed_for_parameter ->
+                 "passed for a parameter whose type may not imply its `requires`"));
         quote_in clause;
         Text "` may not hold.";
       ]
@@ -558,15 +553,6 @@ let describe_obligation = function
         (match key with Some key -> quote_in key | None -> Text "this key");
         Text "` may equal an earlier key of this map.";
       ]
-  | Value_contract { path; type_; clause } ->
-      [
-        Text
-          (Printf.sprintf
-             "`%s` is used as a value of `%s`, which promises nothing of its arguments, so its `"
-             (Path.show path) (Types.show type_));
-        quote_in clause;
-        Text "` may not hold.";
-      ]
 
 let find_code : Prover.obligation -> Diagnostic.Code.prover = function
   | Assertion_may_fail _ | Bit_vector_assertion_may_fail _ | Desugared_assertion_may_fail _ ->
@@ -577,9 +563,8 @@ let find_code : Prover.obligation -> Diagnostic.Code.prover = function
       Termination
   | Constant_cycle _ -> Constant_cycle
   | Circular_proof _ -> Circular_proof
-  | Precondition_may_fail _ | Intrinsic_requirement _ | Callback_precondition _
-  | Parameter_contract _ | Float_conversion _ | Not_a_scalar_value _ | Impl_precondition _
-  | Impl_panic_condition _ | Callback_requirement _ | Value_contract _ ->
+  | Precondition_may_fail _ | Intrinsic_requirement _ | Callback_precondition _ | Float_conversion _
+  | Not_a_scalar_value _ | Impl_precondition _ | Impl_panic_condition _ | Function_requirement _ ->
       Requires
   | Precondition_may_panic _ | Panics_where_ruled_out _ -> Panic
   | Upper_bound_in_exact_cost _ | Lambda_cost _ | Lambda_call_above_bound _ | Loop_cost_clause _
@@ -783,8 +768,6 @@ let show_construct = function
   | Negation_of type_ -> Printf.sprintf "negating a value of `%s`" (Types.show type_)
   | Shift_of type_ -> Printf.sprintf "a shift of `%s`" (Types.show type_)
   | Range_of type_ -> Printf.sprintf "a range of `%s`" (Types.show type_)
-  | Unreadable_parameter_type ->
-      "a function passed for a parameter whose type the prover cannot read"
   | Unreadable_cursor type_ ->
       Printf.sprintf "a loop over `%s`, whose `next` the prover cannot read" (Types.show type_)
   | Field field -> Printf.sprintf "the field `%s`" field

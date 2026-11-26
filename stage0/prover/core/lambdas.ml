@@ -143,30 +143,6 @@ let add_lambda_relation (context : State.context) (frame : State.frame) ~capture
            (parameters, Logic.( ==> ) holds (Logic.( ==> ) premise statement))))
     statements
 
-let add_logic_relation (context : State.context) (frame : State.frame) ~capture_free
-    (function_type : Types.function_type) term =
-  if Callbacks.returns_value function_type then begin
-    let ({ inputs; returned; entries; result; _ } : Callbacks.relation_variables) =
-      Callbacks.make_relation_variables context function_type ~label:"relation" ~numbers:[]
-    in
-    let holds =
-      Callbacks.make_callback_ensures context function_type term ~entries ~exits:entries ~result
-    in
-    add_quantified_fact context frame ~capture_free
-      (Logic.forall ~trigger:[ holds ]
-         ( inputs @ returned,
-           Logic.equal holds
-             (Logic.equal result (Callbacks.apply_function context function_type term entries)) ))
-  end
-
-let make_parameter_symbols context (frame : State.frame) (function_type : Types.function_type) =
-  let depth = List.length frame.bound in
-  List.mapi
-    (fun index (_, input) ->
-      ( Logic.Symbol.Variable { label = "parameter"; numbers = [ depth; index ] },
-        Encoding.declare_sort context (Encoding.substitute_type context frame input) ))
-    function_type.inputs
-
 let remove_temporaries locals =
   Locals.filter
     (fun key _ -> match key with Locals.Mir_local _ -> false | Core_local _ -> true)
@@ -242,11 +218,14 @@ let canonicalize_binders term =
   in
   walk [] term
 
-let find_lambda_definition context frame (function_type : Types.function_type)
+let find_lambda_definition context (frame : State.frame) (function_type : Types.function_type)
     (written : State.lambda_code) =
   match written.code.is_functional with
   | true when Callbacks.is_in_the_logic function_type -> (
-      let bound = make_parameter_symbols context frame function_type in
+      let bound =
+        Callbacks.make_input_variables context function_type ~label:"parameter"
+          ~numbers:[ List.length frame.bound ]
+      in
       let defined =
         let mark = Query.count_fresh context.query in
         Counters.run_without_counters context (fun () ->
@@ -338,7 +317,7 @@ let find_lambda_definition context frame (function_type : Types.function_type)
   | _ -> None
 
 let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : Invocation.site)
-    (written : State.lambda_code) ~list_facts ~list_promises =
+    (written : State.lambda_code) ~stated =
   let location = Facts.locate context frame.source site.origin in
   let ty = Encoding.substitute_type context frame site.type_ in
   let function_type =
@@ -362,7 +341,9 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         argument)
       function_type.inputs
   in
-  List.iter (Facts.assume context inside) (list_facts arguments);
+  List.iter
+    (fun (_, required) -> Facts.assume context inside required)
+    (Callbacks.read_requires context stated arguments);
   let counters, inside = Counters.enter_lambda context inside function_type written.code in
   let read_exits (exit_ : State.frame) =
     List.filter_map
@@ -452,11 +433,9 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
             Option.iter
               (fun result ->
                 List.iter
-                  (fun (quoted, promise) ->
-                    Obligations.oblige context exit_ location
-                      (Lambda_promise { promise = quoted })
-                      promise)
-                  (list_promises ~entries:arguments ~exits ~result))
+                  (fun (promise, term) ->
+                    Obligations.oblige context exit_ location (Lambda_promise { promise }) term)
+                  (Callbacks.read_ensures context stated ~entries:arguments ~exits ~result))
               result)
           !ended;
         Counters.check_lambda_exits context counters exits location ~type_:ty ~fresh_mark:mark
@@ -474,9 +453,10 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
             ~start_fresh ~end_fresh ~start_declarations ~premises ~shown ~ended:!ended;
         term
   in
-  if Callbacks.is_in_the_logic function_type then
-    add_logic_relation context frame ~capture_free function_type term
-  else
+  Option.iter
+    (add_quantified_fact context frame ~capture_free)
+    (Callbacks.find_logic_link context function_type term);
+  if not (Callbacks.is_in_the_logic function_type) then
     add_lambda_relation context frame ~capture_free function_type term ~called ~arguments
       ~start_fresh ~end_fresh ~start_declarations ~premises ~shown ~ended:!ended ~read_exits;
   Counters.note_lambda context counters term ~captures:(list_captured_locals written)
@@ -484,7 +464,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   (frame, term)
 
 let translate_lambda context (frame : State.frame) ~(site : Invocation.site)
-    (written : State.lambda_code) ~list_facts ~list_promises =
+    (written : State.lambda_code) ~stated =
   let find_captured (local : Core.local) =
     match local with Self -> frame.self | local -> Locals.find_opt (Core_local local) frame.locals
   in
@@ -500,37 +480,38 @@ let translate_lambda context (frame : State.frame) ~(site : Invocation.site)
     let _, term =
       read_lambda ~capture_free:true context
         { frame with binders = []; condition = Logic.Boolean true }
-        ~site written ~list_facts ~list_promises
+        ~site written ~stated
     in
     (frame, term)
-  else read_lambda context frame ~site written ~list_facts ~list_promises
+  else read_lambda context frame ~site written ~stated
 
 let make_passed_values context frame (callee : Callee.t) (arguments : State.call_argument list) =
-  let known =
+  let values =
     List.filter_map
       (function
         | State.Value_argument (passed : State.passed) -> Some (passed.position, passed.term)
         | Lambda_argument _ -> None)
       arguments
   in
-  List.map
-    (function
-      | State.Value_argument passed -> passed
-      | Lambda_argument { position; mode; site; lambda = written } ->
-          let _, term =
-            translate_lambda context frame ~site written
-              ~list_facts:(Callbacks.list_callback_facts context frame callee position known)
-              ~list_promises:(Callbacks.list_callback_promises context frame callee position known)
-          in
-          {
-            position;
-            mode;
-            shape = Lambda;
-            origin = Some site.origin;
-            passed_place = None;
-            is_step_self = false;
-            type_ = Encoding.substitute_type context frame site.type_;
-            declared_type = Encoding.substitute_declared_type context frame site.type_;
-            term;
-          })
-    arguments
+  snd
+    (List.fold_left_map
+       (fun known -> function
+         | State.Value_argument passed -> (known, passed)
+         | Lambda_argument { position; mode; site; lambda = written } ->
+             let _, term =
+               translate_lambda context frame ~site written
+                 ~stated:(Callee.find_callback context frame callee position ~known)
+             in
+             ( (position, term) :: known,
+               {
+                 State.position;
+                 mode;
+                 shape = Lambda;
+                 origin = Some site.origin;
+                 passed_place = None;
+                 is_step_self = false;
+                 type_ = Encoding.substitute_type context frame site.type_;
+                 declared_type = Encoding.substitute_declared_type context frame site.type_;
+                 term;
+               } ))
+       values arguments)

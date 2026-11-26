@@ -164,12 +164,26 @@ develop as well as make it easier to bootstrap the compiler in parts.
   which `Mir.Call_edges` lists: a callee's contract, a type's invariant, and
   the laws of an `impl`. `Laws` assumes no law of an `impl` in the proof
   group of the definition being proven.
-- **`Callbacks` holds the rules of a function passed as a value.** The
-  contract that a callee declares for a callback parameter, the promises a
-  caller proves of the function it passes, the relation that a function
-  value's `ensures` states, and the check of a callback that escapes are its
-  functions, and its state is one record, `context.callbacks`. `Lambdas`
-  reads a lambda's body and calls `Callbacks` for the relation's variables.
+- **`Callbacks` holds the rules of a function value.** A function value has
+  two terms in the logic: its application, where its type uses no capability
+  and has no `mut` input, and the relation that holds of the arguments and
+  the result of each of its calls, which `visit.ensures(...)` reads.
+  `Callbacks` knows the contract of two function values: a named function,
+  whose definition `Callee` resolves at the type arguments written, and a
+  callback parameter of the definition being proven. Every other function
+  value promises nothing. Each use of a function value reads that contract
+  in one function:
+
+  | Use | Function | Rule |
+  |---|---|---|
+  | Named as a value | `read_named_function` | States its definition and its relation once per query |
+  | Passed for a parameter | `check_passed` | The parameter's `requires` imply its `requires`, and its `ensures` imply the parameter's |
+  | Called | `check_called`, `assume_returned` | The call proves its `requires` and assumes its `ensures` |
+  | Used where no function type states a `requires` | `check_escaping_callback`, `check_passed` | Its `requires` hold for every argument |
+
+  `Lambdas` runs a lambda's body against the parameter's contract, which it
+  reads through `Callbacks.read_requires` and `Callbacks.read_ensures`. The
+  state of `Callbacks` is one record, `context.callbacks`.
 - **One function builds the frame that reads a callee's clause.**
   `Contracts.make_entry_frame` binds a clause's parameters to the arguments,
   and `Contracts.make_exit_frame` to the values at return, with the entry
@@ -194,7 +208,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `Contract_axioms` | The contract of a logic function as an axiom |
   | `Validity` | The invariant of a value, and each check of it |
   | `Callee` | The callee of a call: the definition that it runs, its contract, its substitutions and the key of its logic symbol |
-  | `Callbacks` | A function passed as a value |
+  | `Callbacks` | A function value: its terms, its contract, and each use of it |
   | `Lending` | The contract of a lending method: where each clause holds, and the part as the caller left it |
   | `Laws` | The laws of a trait |
 

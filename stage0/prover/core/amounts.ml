@@ -777,18 +777,15 @@ let spend_derived_equality context frame (callee : Callee.t) values ~result_type
        ~bind_frame:(fun _ -> frame)
        ~uses:callee.uses ~values ~counts_provider_potential:false)
 
-let spend_indirect_call context ~before ~(after : State.frame) ~location through
+let spend_indirect_call context ~before ~(after : State.frame) ~location function_type called
     (values : State.passed list) ~changed ~result_type ~result =
-  match through with
-  | Some (Types.Function function_type, callee_term, _) ->
-      Counters.spend_operation context after
-        ~potential_change:
-          (Some
-             (fun () ->
-               Potentials.compute_call_potential_change context ~before ~after values ~changed
-                 ~result_type ~result))
-        (compute_function_value_amount context after ~location function_type callee_term ~values)
-  | _ -> Counters.spend context after (Counters.declare_unknown_amount context after)
+  Counters.spend_operation context after
+    ~potential_change:
+      (Some
+         (fun () ->
+           Potentials.compute_call_potential_change context ~before ~after values ~changed
+             ~result_type ~result))
+    (compute_function_value_amount context after ~location function_type called ~values)
 
 let spend_intrinsic context frame callee operation (values : State.passed list) ~changed
     ~result_type ~result =

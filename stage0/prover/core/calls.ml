@@ -74,9 +74,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
     (definition : Callee.definition) (contract : State.contract) (values : State.passed list)
     ~recursive_callee =
   let path = definition.path and type_arguments = definition.type_arguments in
-  let substitution_of (clauses : State.clauses) =
-    Types.combine_substitutions (definition.substitution_of clauses) clauses.bindings
-  in
+  let substitution_of = definition.substitution_of in
   let find_clause_condition (clauses : State.clauses) holds_when =
     Conditions.find_obligation_condition
       (Conditions.decide context ~substitution:(substitution_of clauses) holds_when)
@@ -414,21 +412,9 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
         (Panics_where_ruled_out { call = { at = location; callee = None }; condition })
         (Logic.Boolean false)
   | Some _ | None -> ());
+  let arguments = List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values in
   List.iter
-    (fun (passed : State.passed) ->
-      match passed.shape with
-      | Named_function { origin; path; _ } -> (
-          match Contracts.find_function_contract context path with
-          | Some contract ->
-              Callbacks.check_named_callback context frame callee passed ~origin path contract
-                values
-          | None -> ())
-      | Forwarded local ->
-          Callbacks.check_forwarded_callback context frame site callee passed local values
-      | Other ->
-          Callbacks.check_callback_promises context frame ~location callee passed
-            ~unpromised:Nothing_promises ~assume:Callbacks.assume_nothing values
-      | Lambda -> ())
+    (fun passed -> Callbacks.check_passed context frame site callee passed ~arguments)
     values;
   let declared_result_type = Encoding.substitute_declared_type context frame site.type_ in
   let result_type = Types.erase_views declared_result_type in
@@ -518,40 +504,32 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
         | _ -> call_definition definition)
     | Definition definition -> call_definition definition
     | Function_value ->
-        Callbacks.check_callback_requires context frame site through values;
+        let function_type, called, shape =
+          match through with
+          | Some (Types.Function function_type, called, shape) -> (function_type, called, shape)
+          | Some _ | None -> Facts.raise_bug "a call through a value that is not a function"
+        in
+        let entries = List.map (fun (passed : State.passed) -> passed.term) values in
+        Callbacks.check_called context frame site shape entries;
         let before = frame in
         let havoc = havoc_whole_arguments frame in
         let frame = havoc.after in
         let result =
-          match through with
-          | Some (Types.Function function_type, callee_term, _)
-            when Callbacks.is_in_the_logic function_type ->
-              let term =
-                Callbacks.apply_function context function_type callee_term
-                  (List.map (fun (passed : State.passed) -> passed.term) values)
-              in
-              Facts.assume context frame (Encoding.make_in_range result_type term);
-              term
-          | _ -> Encoding.arrive context frame "result" result_type
+          if Callbacks.is_in_the_logic function_type then begin
+            let term = Callbacks.apply_function context function_type called entries in
+            Facts.assume context frame (Encoding.make_in_range result_type term);
+            term
+          end
+          else Encoding.arrive context frame "result" result_type
         in
         Validity.assume_valid context frame result_type result;
         let frame =
-          Amounts.spend_indirect_call context ~before ~after:frame ~location through values
-            ~changed:(List.rev havoc.written) ~result_type:declared_result_type ~result
+          Amounts.spend_indirect_call context ~before ~after:frame ~location function_type called
+            values ~changed:(List.rev havoc.written) ~result_type:declared_result_type ~result
         in
-        (match through with
-        | Some (Types.Function function_type, callee_term, shape)
-          when List.length function_type.inputs = List.length values -> (
-            let entries = List.map (fun (passed : State.passed) -> passed.term) values in
-            let exits = List.map (find_written havoc) values in
-            Facts.assume context frame
-              (Callbacks.make_callback_ensures context function_type callee_term ~entries ~exits
-                 ~result);
-            match shape with
-            | Invocation.Forwarded local ->
-                Callbacks.assume_own_callback_ensures context frame local ~entries ~exits ~result
-            | Named_function _ | Lambda | Other -> ())
-        | _ -> ());
+        Callbacks.assume_returned context frame function_type called shape ~entries
+          ~exits:(List.map (find_written havoc) values)
+          ~result;
         List.iter
           (fun (passed : State.passed) ->
             Option.iter
