@@ -1,0 +1,5 @@
+fn has_one_between() -> Bool
+  ensures result == (exists between in Character"\u{D7FF}"..=Character"\u{E000}" => between != Character"\u{D7FF}" && between != Character"\u{E000}")
+{
+  false
+}

@@ -86,6 +86,7 @@ val erase_argument_views : argument -> argument
 val erase_trait_views : trait_reference -> trait_reference
 val find_integer_bits : ty -> (int * bool) option
 val find_integer_range : ty -> (Z.t * Z.t) option
+val list_value_ranges : ty -> (Z.t * Z.t) list
 val is_integer_type : ty -> bool
 val signed_integer_types : Language.Builtin_type.t list
 val unsigned_integer_types : Language.Builtin_type.t list

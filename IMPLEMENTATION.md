@@ -116,6 +116,12 @@ develop as well as make it easier to bootstrap the compiler in parts.
   records each fact where it has it, and no stage finds a loop in the
   control-flow graph. A stage that needs a value in another state runs the
   MIR's statements in that state.
+- **The values of a type have one definition.** `Types.list_value_ranges`
+  gives the ranges of an integer type and of `Character`, whose two ranges
+  leave out the surrogates. The pattern checker splits them, the prover
+  derives a value's range, the count of a range's values and the value at
+  an offset from them, and the code generator's range loop skips the gap
+  between them.
 - **A body's final expression returns in each branch.** The builder lowers
   the final `if`, `match` or block of a body in tail position: each branch
   returns its own value where it has one, and its end where it has none,

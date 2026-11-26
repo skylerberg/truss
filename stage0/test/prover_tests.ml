@@ -1729,6 +1729,16 @@ let () =
 let dice = Fixtures.Prover.dice
 
 let () =
+  let counting = Fixtures.Prover.loop_over_characters_across_the_surrogates in
+  Harness.test "a loop over a range of characters visits no surrogate" (fun () ->
+      expect_proven counting;
+      expect_not_proven
+        (Support.apply_edit counting ("result == 2", "result == 2050"))
+        "prover.ensures");
+  let quantified = Fixtures.Prover.quantifier_over_characters_across_the_surrogates in
+  Harness.test "a quantifier over a range of characters ranges over no surrogate" (fun () ->
+      expect_proven quantified;
+      expect_not_proven (Support.apply_edit quantified ("  false\n", "  true\n")) "prover.ensures");
   Harness.test "a capability's method keeps its ensures" (fun () ->
       expect_proven (dice ^ Fixtures.Prover.dice_roll_ensured_at_most_six));
   Harness.test "two calls of a capability's method may differ" (fun () ->
@@ -4121,7 +4131,7 @@ let () =
         ~fixed:
           ( "fn character(code: UInt32) -> Character {",
             "fn character(code: UInt32) -> Character\n\
-            \  requires (0 <= code && code <= 1114111) && !(55296 <= code && code <= 57343)\n\
+            \  requires (0 <= code && code <= 55295) || (57344 <= code && code <= 1114111)\n\
              {" ))
 
 let () =

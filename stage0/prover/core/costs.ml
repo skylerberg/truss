@@ -178,7 +178,9 @@ let is_type_end = function
           || Z.equal value (Z.pred (Z.shift_right power 1))
           || Z.equal value (Z.neg (Z.shift_right power 1)))
         [ 8; 16; 32; 64 ]
-      || Z.equal value (Z.of_int 0x10FFFF)
+      || List.exists
+           (fun (_, high) -> Z.equal value high)
+           (Types.list_value_ranges (Types.make_builtin Character))
   | _ -> false
 
 let find_part_bound ~varies ~facts part polarity =

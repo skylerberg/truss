@@ -1,6 +1,43 @@
 let find_bounds (ty : Types.ty) =
-  if Types.is_builtin Character ty then Some (Z.zero, Z.of_int 0x10FFFF)
-  else Types.find_integer_range ty
+  match Types.list_value_ranges ty with
+  | [] -> None
+  | (low, _) :: _ as ranges -> Some (low, snd (List.nth ranges (List.length ranges - 1)))
+
+let rec list_gaps = function
+  | (_, high) :: ((low, _) :: _ as later) -> (Z.succ high, Z.pred low) :: list_gaps later
+  | [ _ ] | [] -> []
+
+let sum_gaps ty ~is_counted =
+  List.fold_left
+    (fun total (low, high) ->
+      Logic.add total
+        (Logic.ite
+           (is_counted (Logic.Integer low) (Logic.Integer high))
+           (Logic.Integer (Z.succ (Z.sub high low)))
+           (Logic.int 0)))
+    (Logic.int 0)
+    (list_gaps (Types.list_value_ranges ty))
+
+let make_in_values ty term ~low ~high ~inclusive =
+  List.fold_left
+    (fun between (gap_low, gap_high) ->
+      Logic.(
+        between &&& not_ (less_equal (Integer gap_low) term &&& less_equal term (Integer gap_high))))
+    Logic.(less_equal low term &&& (if inclusive then less_equal else less) term high)
+    (list_gaps (Types.list_value_ranges ty))
+
+let count_values ty ~low ~high ~inclusive =
+  Logic.subtract
+    (if inclusive then Logic.add (Logic.subtract high low) (Logic.int 1)
+     else Logic.subtract high low)
+    (sum_gaps ty ~is_counted:(fun gap_low gap_high ->
+         Logic.(less low gap_low &&& greater high gap_high)))
+
+let offset_value ty ~low offset =
+  let unskipped = Logic.add low offset in
+  Logic.add unskipped
+    (sum_gaps ty ~is_counted:(fun gap_low _ ->
+         Logic.(less low gap_low &&& greater_equal unskipped gap_low)))
 
 let is_numeric (ty : Types.ty) = match ty with Types.Integer -> true | _ -> find_bounds ty <> None
 
@@ -104,13 +141,14 @@ let rec is_equality_identity context ?(seen = []) (ty : Types.ty) =
   | _ -> false
 
 let make_in_range ty term =
-  match find_bounds ty with
-  | Some (low, high) ->
-      let in_bounds = Logic.(less_equal (Integer low) term &&& less_equal term (Integer high)) in
-      if Types.is_builtin Character ty then
-        Logic.(in_bounds &&& not_ (less_equal (int 0xD800) term &&& less_equal term (int 0xDFFF)))
-      else in_bounds
-  | None -> Logic.Boolean true
+  match Types.list_value_ranges ty with
+  | [] -> Logic.Boolean true
+  | ranges ->
+      Logic.disjunction
+        (List.map
+           (fun (low, high) ->
+             Logic.(less_equal (Integer low) term &&& less_equal term (Integer high)))
+           ranges)
 
 let arrive context frame prefix ty =
   let value = Facts.declare_fresh context frame prefix (declare_sort context ty) in
