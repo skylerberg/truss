@@ -10,7 +10,11 @@ val find_visible_type :
 val find_constructors :
   State.context -> Types.ty -> (string option * (string * Types.ty) list) list option
 
-val declare_sort : State.context -> Types.ty -> Logic.sort
+val sort_of : Types.ty -> Logic.sort
+
+val list_constructors :
+  State.context -> Types.ty -> (Logic.symbol * (Logic.symbol * Logic.sort) list) list option
+
 val is_equality_identity : State.context -> ?seen:Types.ty list -> Types.ty -> bool
 val make_in_range : Types.ty -> Logic.term -> Logic.term
 

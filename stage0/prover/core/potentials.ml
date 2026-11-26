@@ -1,6 +1,6 @@
 let declare_held_symbol context ty term =
   let symbol = Logic.Symbol.Potential ty in
-  Facts.declare context (Logic.Function (symbol, [ Encoding.declare_sort context ty ], Logic.Int));
+  Facts.declare context (Logic.Function (symbol, [ Encoding.sort_of ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
 let compute_buffer context (ty : Types.ty) : State.buffer option =
@@ -48,15 +48,14 @@ let find_buffer (context : State.context) (ty : Types.ty) =
 let declare_potential_measure context element =
   let symbol = Logic.Symbol.Potential_measure element in
   let measure = Intrinsics.measure_type element in
-  Facts.declare context
-    (Logic.Constant (symbol, Encoding.declare_sort context (Types.Function measure)));
+  Facts.declare context (Logic.Constant (symbol, Encoding.sort_of (Types.Function measure)));
   let term = Logic.Symbol symbol in
   if not (List.mem term context.cost.potentials) then begin
     context.cost.potentials <- term :: context.cost.potentials;
     let each = Logic.Symbol.Variable { label = "potential.element"; numbers = [] } in
     Facts.add_fact context
       (Logic.forall
-         ( [ (each, Encoding.declare_sort context element) ],
+         ( [ (each, Encoding.sort_of element) ],
            Logic.equal
              (Callbacks.apply_function context measure term [ Logic.Symbol each ])
              (declare_held_symbol context element (Logic.Symbol each)) ))

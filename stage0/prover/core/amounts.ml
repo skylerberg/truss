@@ -30,8 +30,8 @@ let make_may_be_target (context : State.context) frame term ty target =
     match List.assoc_opt target context.cost.call_targets with
     | Some local -> (
         match (ty, Encoding.find_local_type context frame (Core_local local)) with
-        | Types.Function _, Some target_type
-          when Encoding.declare_sort context ty = Encoding.declare_sort context target_type ->
+        | Types.Function _, Some target_type when Encoding.sort_of ty = Encoding.sort_of target_type
+          ->
             Logic.equal term target
         | _ -> Logic.Boolean false)
     | None -> Logic.Boolean false
@@ -305,7 +305,7 @@ let make_callback_cost (context : State.context) frame (metric : Language.Metric
   match stated_by_type with
   | Some stated -> stated
   | None ->
-      let sort = Encoding.declare_sort context ty in
+      let sort = Encoding.sort_of ty in
       let symbol = Logic.Symbol.Callback_cost { metric; sort } in
       Facts.declare context (Logic.Function (symbol, [ sort ], Logic.Int));
       let cost = Logic.Apply (symbol, [ term ]) in

@@ -10,11 +10,7 @@ val returns_value : Types.function_type -> bool
 val is_in_the_logic : Types.function_type -> bool
 
 val make_input_variables :
-  State.context ->
-  Types.function_type ->
-  label:string ->
-  numbers:int list ->
-  (Logic.symbol * Logic.sort) list
+  Types.function_type -> label:string -> numbers:int list -> (Logic.symbol * Logic.sort) list
 
 type relation_variables = {
   inputs : (Logic.symbol * Logic.sort) list;
@@ -26,7 +22,7 @@ type relation_variables = {
 }
 
 val make_relation_variables :
-  State.context -> Types.function_type -> label:string -> numbers:int list -> relation_variables
+  Types.function_type -> label:string -> numbers:int list -> relation_variables
 
 val make_callback_ensures :
   State.context ->

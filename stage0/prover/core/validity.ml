@@ -185,7 +185,7 @@ let names_private_definition context ~current (clause : Mir.formula) =
 
 let apply_opaque_validity context ty term =
   let symbol = Logic.Symbol.Valid ty in
-  Facts.declare context (Logic.Function (symbol, [ Encoding.declare_sort context ty ], Logic.Bool));
+  Facts.declare context (Logic.Function (symbol, [ Encoding.sort_of ty ], Logic.Bool));
   Logic.Apply (symbol, [ term ])
 
 let rec make_validity (context : State.context) (frame : State.frame) ~assuming ?(deep = true)

@@ -18,7 +18,7 @@ let name_term context ty term =
     let symbol = Logic.Symbol.Named_term term in
     let named = Logic.Symbol symbol in
     Facts.run_once context (Value_of symbol) (fun () ->
-        Facts.declare context (Logic.Constant (symbol, Encoding.declare_sort context ty));
+        Facts.declare context (Logic.Constant (symbol, Encoding.sort_of ty));
         Facts.add_fact context (Logic.equal named term));
     named
 
@@ -199,9 +199,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
               match
                 List.find_opt (fun (passed : State.passed) -> passed.position = index) values
               with
-              | Some passed -> Encoding.declare_sort context passed.type_
+              | Some passed -> Encoding.sort_of passed.type_
               | None ->
-                  Encoding.declare_sort context
+                  Encoding.sort_of
                     (Types.erase_views
                        ((Interface.Impls.normalize context.lookups.interface
                            ~list_bounds:context.bounds)

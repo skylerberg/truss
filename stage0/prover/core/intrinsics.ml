@@ -1,5 +1,5 @@
 let make_sequence_range context element sequence ~start ~stop =
-  let sequence_sort = Encoding.declare_sort context (Models.make_sequence_type element) in
+  let sequence_sort = Encoding.sort_of (Models.make_sequence_type element) in
   let symbol = Logic.Symbol.Sequence_range element in
   Facts.declare context
     (Logic.Function (symbol, [ sequence_sort; Logic.Int; Logic.Int ], sequence_sort));
@@ -100,8 +100,8 @@ let apply_range context (frame : State.frame) ~node (site : Invocation.site) ~(b
     Facts.declare context
       (Logic.Function
          ( symbol,
-           [ Encoding.declare_sort context base_type; Logic.Int; Logic.Int ],
-           Encoding.declare_sort context range_type_of_site ));
+           [ Encoding.sort_of base_type; Logic.Int; Logic.Int ],
+           Encoding.sort_of range_type_of_site ));
     let viewed = Logic.Apply (symbol, [ collection; low; high ]) in
     Facts.assume context frame (Encoding.make_in_range range_type_of_site viewed);
     (match Models.find_model context range_type_of_site viewed ~element with
@@ -131,7 +131,7 @@ let assume_unchanged_outside context frame element ~before ~after ~start ~stop =
                ||| equal (at after index) (at before index))) ))
 
 let handle_descriptor context handle =
-  let handle_sort = Encoding.declare_sort context (Types.make_builtin Handle) in
+  let handle_sort = Encoding.sort_of (Types.make_builtin Handle) in
   Facts.declare context
     (Logic.Function (Logic.Symbol.Handle_descriptor, [ handle_sort ], Logic.Int));
   Logic.Apply (Logic.Symbol.Handle_descriptor, [ handle ])
@@ -149,7 +149,7 @@ let declare_libc_number context frame (number : Libc.number) =
 let make_buffer_capacity context element term =
   let ty = Types.make_builtin Storage ~arguments:[ Type element ] in
   let symbol = Logic.Symbol.Capacity ty in
-  Facts.declare context (Logic.Function (symbol, [ Encoding.declare_sort context ty ], Logic.Int));
+  Facts.declare context (Logic.Function (symbol, [ Encoding.sort_of ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
 let make_buffer_model context (builtin : Language.Builtin_type.t) element term =
@@ -157,9 +157,7 @@ let make_buffer_model context (builtin : Language.Builtin_type.t) element term =
   let symbol = Logic.Symbol.Model ty in
   Facts.declare context
     (Logic.Function
-       ( symbol,
-         [ Encoding.declare_sort context ty ],
-         Encoding.declare_sort context (Models.make_sequence_type element) ));
+       (symbol, [ Encoding.sort_of ty ], Encoding.sort_of (Models.make_sequence_type element)));
   Logic.Apply (symbol, [ term ])
 
 let call_libc context frame ~(site : Invocation.site) (function_ : Libc.function_) operands ~changed
@@ -263,8 +261,8 @@ let make_sequence_sum context element term measure =
     (Logic.Function
        ( symbol,
          [
-           Encoding.declare_sort context (Models.make_sequence_type element);
-           Encoding.declare_sort context (Types.Function (measure_type element));
+           Encoding.sort_of (Models.make_sequence_type element);
+           Encoding.sort_of (Types.Function (measure_type element));
          ],
          Logic.Int ));
   Logic.Apply (symbol, [ term; measure ])
@@ -272,7 +270,7 @@ let make_sequence_sum context element term measure =
 let make_each_sum context element relation =
   let measure = Facts.make_fresh_name context "measure" in
   Logic.forall
-    ( [ (measure, Encoding.declare_sort context (Types.Function (measure_type element))) ],
+    ( [ (measure, Encoding.sort_of (Types.Function (measure_type element))) ],
       relation
         (fun sequence -> make_sequence_sum context element sequence (Logic.Symbol measure))
         (fun value ->
@@ -281,8 +279,7 @@ let make_each_sum context element relation =
 
 let make_empty_sequence context frame element =
   let empty =
-    Facts.declare_fresh context frame "parts"
-      (Encoding.declare_sort context (Models.make_sequence_type element))
+    Facts.declare_fresh context frame "parts" (Encoding.sort_of (Models.make_sequence_type element))
   in
   Facts.assume context frame
     (Logic.equal (Models.make_sequence_length context element empty) (Logic.int 0));
@@ -292,8 +289,7 @@ let make_empty_sequence context frame element =
 
 let append_element context frame element shorter appended =
   let longer =
-    Facts.declare_fresh context frame "parts"
-      (Encoding.declare_sort context (Models.make_sequence_type element))
+    Facts.declare_fresh context frame "parts" (Encoding.sort_of (Models.make_sequence_type element))
   in
   let length = Models.make_sequence_length context element shorter in
   Facts.assume context frame
@@ -319,7 +315,7 @@ let append_element context frame element shorter appended =
   let measure = Facts.make_fresh_name context "measure" in
   Facts.assume context frame
     (Logic.forall
-       ( [ (measure, Encoding.declare_sort context (Types.Function (measure_type element))) ],
+       ( [ (measure, Encoding.sort_of (Types.Function (measure_type element))) ],
          Logic.equal
            (make_sequence_sum context element longer (Logic.Symbol measure))
            (Logic.add
@@ -329,9 +325,7 @@ let append_element context frame element shorter appended =
   longer
 
 let make_byte_order context left right =
-  let sequence =
-    Encoding.declare_sort context (Models.make_sequence_type (Types.make_builtin UInt8))
-  in
+  let sequence = Encoding.sort_of (Models.make_sequence_type (Types.make_builtin UInt8)) in
   let symbol = Logic.Symbol.Compare_bytes_order in
   let first = Option.is_none (Facts.find_argument_sorts context symbol) in
   Facts.declare context (Logic.Function (symbol, [ sequence; sequence ], Logic.Int));
@@ -478,7 +472,6 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
               (at whole (Logic.add start (Logic.Symbol limit)))));
       known
   | Storage_as ->
-      ignore (Encoding.declare_sort context result_type);
       let built =
         Logic.Apply (Encoding.make_constructor_symbol result_type None, [ read_operand 0 ])
       in
@@ -663,7 +656,7 @@ let keeps_potential : Intrinsic.operation -> bool = function
 
 let declare_buffer_slack context (ty : Types.ty) term =
   let symbol = Logic.Symbol.Slack ty in
-  Facts.declare context (Logic.Function (symbol, [ Encoding.declare_sort context ty ], Logic.Int));
+  Facts.declare context (Logic.Function (symbol, [ Encoding.sort_of ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
 let find_sequence_element context frame (sequence : Types.ty) =
@@ -717,7 +710,6 @@ let write_sequence context frame (sequence : Types.ty) before ~write_model =
           ~after:(Models.make_array_model context frame sequence after);
         after
     | _, Some [ (None, [ (field, buffer_type) ]) ] ->
-        ignore (Encoding.declare_sort context sequence);
         let buffer = Encoding.select_field context sequence None field before in
         let written = Encoding.arrive context frame "changed" buffer_type in
         if not (Types.is_builtin Storage buffer_type) then

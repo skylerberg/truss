@@ -135,7 +135,6 @@ let rec read_resolved context frame run (place : Mir.place) =
         let project_field variant field =
           if Encoding.find_constructors context base_type = None then
             Facts.raise_unsupported Whole_definition (Hidden_field_of base_type);
-          ignore (Encoding.declare_sort context base_type);
           Values.project_field context frame base_type variant field
             (compute_place_type context frame run projected)
             term
@@ -373,9 +372,7 @@ let read_operand context frame run (operand : Mir.operand) =
   | Immediate { value; type_ } -> (
       let ty = Encoding.substitute_type context frame type_ in
       match value with
-      | Unit ->
-          ignore (Encoding.declare_sort context Types.unit);
-          Logic.Apply (Logic.Symbol.Unit, [])
+      | Unit -> Logic.Apply (Logic.Symbol.Unit, [])
       | Integer number -> Logic.Integer number
       | Float number -> (
           match Encoding.find_float_format ty with
@@ -585,7 +582,6 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Not inner -> (frame, Logic.not_ (translate_operand inner))
   | Is_variant { place; variant } ->
       let ty = compute_place_type context frame run place in
-      ignore (Encoding.declare_sort context ty);
       if Encoding.find_constructors context ty = None then
         Facts.raise_unsupported location (Hidden_variant_of ty);
       ( frame,

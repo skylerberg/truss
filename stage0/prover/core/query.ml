@@ -2,7 +2,6 @@ type t = {
   mutable declarations : Logic.declaration list;
   declared : Logic.sort list Tables.Symbol_table.t;
   definitions : unit Tables.Symbol_table.t;
-  datatypes : unit Tables.Type_table.t;
   stated : unit Tables.Stated_table.t;
   mutable facts : Fact_list.t;
   mutable scopes : (Logic.symbol * Logic.term list ref) list;
@@ -20,7 +19,6 @@ let create () =
     declarations = [];
     declared = Tables.Symbol_table.create 64;
     definitions = Tables.Symbol_table.create 8;
-    datatypes = Tables.Type_table.create 16;
     stated = Tables.Stated_table.create 64;
     facts = Fact_list.empty;
     scopes = [];
@@ -50,14 +48,7 @@ let declare query (declaration : Logic.declaration) =
         Tables.Symbol_table.replace query.definitions symbol ();
         query.declarations <- declaration :: query.declarations
       end
-  | Datatype _ -> invalid_arg "Query.declare: a datatype is declared by its sort"
-
-let has_datatype query ty = Tables.Type_table.mem query.datatypes ty
-
-let declare_datatype query ty list_constructors =
-  Tables.Type_table.replace query.datatypes ty ();
-  let constructors = list_constructors () in
-  query.declarations <- Logic.Datatype (ty, constructors) :: query.declarations
+  | Datatype _ -> invalid_arg "Query.declare: a datatype is derived from its sort"
 
 let find_argument_sorts query symbol = Tables.Symbol_table.find_opt query.declared symbol
 let list_defined_symbols query = List.of_seq (Tables.Symbol_table.to_seq_keys query.definitions)
@@ -201,14 +192,15 @@ let mentions_fresh_since query since term =
   in
   walk term
 
-let make_obligation query ~condition location obligation goal : Obligation.t =
+let make_obligation query ~list_constructors ~condition location obligation goal : Obligation.t =
   let pruned =
-    Logic.prune
-      {
-        declarations = List.rev query.declarations;
-        facts = Fact_list.list_oldest_first query.facts;
-        goal = Logic.( ==> ) condition goal;
-      }
+    Logic.declare_datatypes ~list_constructors
+      (Logic.prune
+         {
+           declarations = List.rev query.declarations;
+           facts = Fact_list.list_oldest_first query.facts;
+           goal = Logic.( ==> ) condition goal;
+         })
   in
   {
     obligation;

@@ -110,7 +110,7 @@ let merge context ?value_type ~condition
         | Some values ->
             let sort =
               match Encoding.find_local_type context first id with
-              | Some ty -> Encoding.declare_sort context ty
+              | Some ty -> Encoding.sort_of ty
               | None -> (
                   match values with (_, _, Logic.Boolean _) :: _ -> Logic.Bool | _ -> Logic.Int)
             in
@@ -133,7 +133,7 @@ let merge context ?value_type ~condition
   in
   let self =
     match (first.self_type, find_held (fun frame -> frame.self)) with
-    | Some ty, Some values -> Some (define "self" (Encoding.declare_sort context ty) values)
+    | Some ty, Some values -> Some (define "self" (Encoding.sort_of ty) values)
     | _ -> first.self
   in
   let list_renamings (frame : State.frame) =
@@ -172,7 +172,7 @@ let merge context ?value_type ~condition
     if values = [] || List.length values <> List.length paths then None
     else
       match value_type with
-      | Some ty -> Some (define "value" (Encoding.declare_sort context ty) values)
+      | Some ty -> Some (define "value" (Encoding.sort_of ty) values)
       | None -> Some (choose values)
   in
   let merge_part pick =
