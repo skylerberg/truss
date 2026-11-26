@@ -5,7 +5,7 @@ type HashIndex(places: List[UInt64], slots: List[Slot], overflow: Tree)
 fn hash_of[Key: Hash](key: Key) -> UInt64
   ensures result == key.hash(Hasher.new()).finish()
   cost time O(1 + time(Key.hash))
-  cost allocations <= allocations(Key.hash)
+  cost allocations == 0
 {
   key.hash(Hasher.new()).finish()
 }
@@ -227,8 +227,7 @@ fn HashIndex.find[Key: Hash + Ordered](self, keys: List[Key], key: Key) -> UInt6
   ensures result == keys.length() ==>
     forall position in 0..keys.length() => !(keys.model()[position] == key)
   cost time O(time(Key.hash) + 16 * (1 + time(Key.equal)) + (1 + self.overflow.height()) * (1 + time(Key.compare)))
-  cost allocations <= allocations(Key.hash) + 16 * allocations(Key.equal)
-    + (1 + self.overflow.height()) * allocations(Key.compare)
+  cost allocations == 0
 {
   let capacity = self.slots.length()
   if capacity == 0 {
@@ -249,7 +248,7 @@ fn HashIndex.find[Key: Hash + Ordered](self, keys: List[Key], key: Key) -> UInt6
         step <= distance(home, slot: self.places.model()[position] - 1, capacity: capacity)
     decreases limit - step
     cost time O(step * (1 + time(Key.equal)))
-    cost allocations <= step * allocations(Key.equal)
+    cost allocations == 0
   {
     let slot = if home + step < capacity { home + step } else { home + step - capacity }
     let occupant = self.slots[slot].occupant

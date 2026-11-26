@@ -22,11 +22,8 @@ val generated_mir : (Mir.body_part * Mir.contract_part) Tracker.fact
 val call_node : Path.t list Tracker.fact
 val recursion_group : Path.t list Tracker.fact
 val proof_group : Path.t list Tracker.fact
-
-type abort = { aborts : bool; bound_methods_run : Path.t list }
-
-val aborts_outside_group : abort Tracker.fact
-val may_abort : abort Tracker.fact
+val aborts_outside_group : bool Tracker.fact
+val may_abort : bool Tracker.fact
 val usage_check : unit Tracker.fact
 val ownership : (Core.id list * Core.id list) list Tracker.fact
 val dependency_use : bool Tracker.fact

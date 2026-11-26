@@ -1,5 +1,6 @@
 trait Size {
   fn size(self) -> Int64
+    cost allocations == 0
 
   law at_least_one(value: Self) {
     value.size() >= 1

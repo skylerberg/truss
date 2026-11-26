@@ -3,9 +3,6 @@ type resolution = { target : Path.t option; supplied : Path.t list Lazy.t }
 
 val resolve_callee : Interface.Lookups.t -> Types.substitution -> 'operand Core.target -> resolution
 
-val find_method_of_evidence :
-  Interface.Lookups.t -> trait:Path.t -> Types.evidence -> Types.trait_method -> Path.t option
-
 type supplier = Call | Named_function of Path.t | Provide
 type edge = Calls of Path.t | Supplies of { supplier : supplier; code : Path.t list }
 
@@ -63,7 +60,6 @@ val resolve_node : lookups -> Path.t -> Types.substitution -> Path.t
 val list_path_edges : lookups -> Path.t -> Path.t list
 val is_specification_only : lookups -> Path.t -> bool
 val has_abort_site : lookups -> Path.t -> bool
-val has_valid_value : lookups -> ?entered:Path.t list -> Types.ty -> bool
 
 val body_may_abort :
   lookups ->
@@ -74,5 +70,4 @@ val body_may_abort :
   bool
 
 val list_callees_that_run : lookups -> Path.t -> Path.t list
-val list_bound_methods_run : lookups -> Path.t -> Path.t list
 val list_instance_field_types : Interface.Lookups.t -> Types.ty -> Types.ty list

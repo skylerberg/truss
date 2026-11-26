@@ -1875,12 +1875,12 @@ let () =
   Harness.test "a specification learns nothing from a generic function whose bound's method aborts"
     (fun () ->
       expect_codes Fixtures.Prover.specification_naming_a_generic_function_whose_bound_aborts
-        (List.init 5 (fun _ -> "prover.assertion")));
+        [ "prover.assertion"; "prover.assertion" ]);
   Harness.test "a specification learns nothing from a function given a function that may abort"
     (fun () ->
       expect_codes Fixtures.Prover.specification_naming_a_function_given_a_function_that_aborts
         [ "prover.assertion"; "prover.assertion" ]);
-  Harness.test "a generic function keeps its contract where the methods of its bound return"
+  Harness.test "a generic function keeps its contract where its bound's methods state no allocation"
     (fun () ->
       expect_proven Fixtures.Prover.specification_naming_a_generic_function_whose_bound_returns);
   Harness.test "a function that may abort, named only in a proof, leaves a contract an axiom"
@@ -3013,8 +3013,9 @@ let () =
       expect_a_message_saying
         ~says:
           "`never() == 5 && other == 7` may not hold. A specification learns nothing here from the \
-           contract of `never`, since the call may not return: the function, or code supplied to \
-           it, may run out of memory."
+           contract of `never`, since the call may not return: the function may run out of memory, \
+           or it calls a method of a bound or a function value that does not state `cost \
+           allocations == 0`."
         (list_diagnostics Fixtures.Prover.specification_naming_a_function_that_aborts);
       expect_a_message_saying
         ~says:"the contract of `rendered_length`, since the call may not return"

@@ -216,46 +216,31 @@ develop as well as make it easier to bootstrap the compiler in parts.
   function passed then proves. A scalar result keeps its range, since a
   value in range exists for every argument.
 
-  A definition also runs the code supplied to it: the methods of the `impl`
-  that satisfies each bound of its generics, and each function passed to
-  it. Its proof assumed that code's contract after each call that returned,
-  so its own contract is an axiom only at arguments where that contract
-  holds of the supplied code as a function of the logic.
-  `Supplied.may_abort` decides that at each call, and the call rule then
-  treats the callee as one that may abort. The abort fact of a definition
-  also lists the trait methods that it runs through a bound, in its own code
-  or a callee's, and only those are judged. A supplied method counts where a
-  call of it through the bound assumes a fact that the method could fail to
-  meet: an `ensures`, declared or restated by a trait of the bound, a lent
-  part, or a result of a type with no value that is valid without a
-  condition. A method with a body in its trait that returns shows that its
-  declared contract can be met, so it counts only for a restated `ensures`.
-  For an `impl`, the `may_abort` of each such method decides, and then the
-  methods that it runs in turn. For a bound of the enclosing definition no
-  `impl` is known, so each such method has to state `cost allocations == 0`.
-  A function passed by name is decided by its `may_abort` and by the code
-  supplied to it in turn, a lambda is a term of the logic, and any other
-  function value counts where the callee's parameter states an `ensures`
-  for it. The rule reads the contract of a trait's declaration and no
-  `impl`'s, so a proof relies on no `impl` method through it. A
-  specification-only callee runs nothing.
+  A definition's own code also calls code that it cannot read: a method
+  through a bound of its generics, and a function value. Its proof assumed
+  the contract of each such call that returned, so its own contract is an
+  axiom only where those calls return. Such a call is an abort site unless
+  the trait's method, or the function's type, states
+  `cost allocations == 0`. A function value without the clause is still no
+  abort site where the proof assumed nothing that the function could fail
+  to meet: the definition states no `ensures` for a function parameter, and
+  the function's result type has a value that is valid without a condition.
+  A trait's method on a type whose `impl` is known is a callee like any
+  other: the method that the `impl` writes, derives or inherits has its own
+  fact. So the fact of a definition depends on no code that a caller
+  supplies, and a call is judged by the callee's fact alone.
 
   A storage of capacity zero allocates nothing, so the call that builds one,
   which an empty list literal makes, is no abort site.
 
-  Where no code is known, `cost allocations == 0` stands for "returns": at a
-  bound of the enclosing definition and at a function value that is no
-  lambda and no named function. Three obligations make that hold of code
+  So `cost allocations == 0` stands for "returns" on a trait's method and on
+  a function's type. Three obligations make that hold of code
   that could reach `intrinsic.crash`, which allocates nothing. An `impl`
   method whose trait states the clause for it, and a function that states
   it and is named as a value, are rejected where their `may_abort` holds. A
   lambda whose type states it is rejected where its body, or a lambda made
   in its body, holds an abort site or calls a function that may abort. So
   every function value of such a type was made from code that returns.
-  The call of a function value that is no parameter of its definition has no
-  call site that judges the value, so it is an abort site of the definition
-  where the function's result type has no value that is valid without a
-  condition, since the call assumes that the result is valid.
 
   `Query.note_withheld` records each call whose contract a specification
   did not learn, by the symbol of its function. An obligation keeps the

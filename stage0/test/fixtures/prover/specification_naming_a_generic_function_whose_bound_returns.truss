@@ -49,6 +49,7 @@ fn given_its_parameter(change: fn(UInt64) -> UInt64, value: UInt64) -> UInt64 {
 
 trait Labelled {
   fn width(self) -> UInt64
+    cost allocations == 0
 
   fn label(self) -> String
     ensures result.length() == self.width()

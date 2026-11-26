@@ -152,7 +152,7 @@ impl Equal for Array[Element: Equal, count: UInt64] {
   fn equal(self, other: Array[Element, count]) -> Bool
     ensures result == (forall i in 0..count => self.model()[i] == other.model()[i])
     cost time O(count * time(Element.equal))
-    cost allocations <= count * allocations(Element.equal)
+    cost allocations == 0
   {
     self[..] == other[..]
   }
@@ -162,7 +162,7 @@ impl Ordered for Array[Element: Ordered, count: UInt64] {
   fn compare(self, other: Array[Element, count]) -> Ordering
     ensures result == list.lexicographic(self.model(), second: other.model(), from: 0)
     cost time O(count * time(Element.compare))
-    cost allocations <= count * allocations(Element.compare)
+    cost allocations == 0
   {
     self[..].compare(other[..])
   }
@@ -184,7 +184,7 @@ impl Hash for Array[Element: Hash, count: UInt64] {
   fn hash(self, hasher: Hasher) -> Hasher
     ensures identical(result, list.hash_elements(hasher.write(count), items: self.model(), count: count))
     cost time O(count * time(Element.hash))
-    cost allocations <= count * allocations(Element.hash)
+    cost allocations == 0
   {
     self[..].hash(hasher)
   }

@@ -573,13 +573,12 @@ let rec has_valid_value (lookups : lookups) ?(entered = []) (ty : Types.ty) =
     ->
       false
 
-let is_abort_site (lookups : lookups) instance ~parameters (statement : Tree.statement) =
-  let is_parameter : Tree.operand -> bool = function
-    | Use { place = { root = Local local; projections = [] }; _ }
-    | Borrow { place = { root = Local local; projections = [] }; _ }
-    | Take { place = { root = Local local; projections = [] }; _ } ->
-        List.mem local parameters
-    | Use _ | Borrow _ | Take _ | Immediate _ -> false
+let is_abort_site (lookups : lookups) instance ~states_callback_ensures (statement : Tree.statement)
+    =
+  let states_no_allocation declaration =
+    match Interface.Impls.read_signature lookups.interface declaration with
+    | Some signature -> Types.states_no_allocation signature.costs
+    | None -> false
   in
   match statement.kind with
   | Basic
@@ -597,13 +596,18 @@ let is_abort_site (lookups : lookups) instance ~parameters (statement : Tree.sta
   | _ -> (
       match Walk.find_callee statement with
       | Some { target = Intrinsic { operation; _ }; _ } -> Intrinsic.may_abort operation
-      | Some { target = Indirect called; _ } when not (is_parameter called) -> (
+      | Some { target = Indirect called; _ } -> (
           match substitute_type lookups.interface instance (Walk.extract_operand_type called) with
           | Function function_type ->
               (not (Types.states_no_allocation function_type.costs))
-              && not (has_valid_value lookups function_type.output)
+              && (states_callback_ensures || not (has_valid_value lookups function_type.output))
           | _ -> false)
-      | Some _ | None -> false)
+      | Some { target = Trait_method { trait; name; receiver; _ } as target; _ } -> (
+          let declaration = Path.Method { owner = trait.trait; name; receiver } in
+          match (resolve_callee lookups.interface instance target).target with
+          | Some resolved when not (Path.equal resolved declaration) -> false
+          | Some _ | None -> not (states_no_allocation declaration))
+      | Some { target = Function _ | Capability_method _; _ } | None -> false)
 
 let rec body_may_abort (lookups : lookups) instance ~lambdas (body : Tree.body) ~may_abort =
   let nested_may_abort index =
@@ -613,7 +617,7 @@ let rec body_may_abort (lookups : lookups) instance ~lambdas (body : Tree.body) 
   Walk.iter_run_block
     (fun statement ->
       if
-        is_abort_site lookups instance ~parameters:body.parameters statement
+        is_abort_site lookups instance ~states_callback_ensures:false statement
         || List.exists
              (function
                | Calls callee -> may_abort callee
@@ -638,26 +642,17 @@ let has_abort_site (lookups : lookups) path =
   match Intrinsic.find_contract_operation path with
   | Some operation -> Intrinsic.may_abort operation
   | None ->
-      let parameters =
-        match find_code lookups path with Some code -> code.body.parameters | None -> []
+      let states_callback_ensures =
+        match Parts.read_contract lookups.mir path with
+        | Some { form = contract; _ } ->
+            List.exists
+              (fun (_, (callback : Tree.callback)) -> callback.ensures <> [])
+              contract.callbacks
+        | None -> false
       in
       List.exists
-        (is_abort_site lookups (find_instance lookups path) ~parameters)
+        (is_abort_site lookups (find_instance lookups path) ~states_callback_ensures)
         (list_run_statements lookups path)
-
-let list_bound_methods_run (lookups : lookups) path =
-  let instance = find_instance lookups path in
-  List.sort_uniq Path.compare
-    (List.filter_map
-       (fun statement ->
-         match Walk.find_callee statement with
-         | Some { target = Trait_method { trait; name; receiver; _ } as target; _ } -> (
-             let declaration = Path.Method { owner = trait.trait; name; receiver } in
-             match (resolve_callee lookups.interface instance target).target with
-             | Some resolved when not (Path.equal resolved declaration) -> None
-             | Some _ | None -> Some declaration)
-         | Some _ | None -> None)
-       (list_run_statements lookups path))
 
 let list_callees_that_run (lookups : lookups) path =
   let instance = find_instance lookups path in
