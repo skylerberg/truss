@@ -803,21 +803,14 @@ let spend_derived_equality context frame (invocation : Invocation.t) values ~res
        ~uses:invocation.uses ~values ~counts_provider_potential:false)
 
 let spend_indirect_call context ~before ~(after : State.frame) ~location through
-    (values : State.passed list) ~result_type ~result =
+    (values : State.passed list) ~changed ~result_type ~result =
   match through with
   | Some (Types.Function function_type, callee_term, _) ->
       Counters.spend_operation context after
         ~potential_change:
           (Some
              (fun () ->
-               Potentials.compute_call_potential_change context ~before ~after values
-                 ~changed:
-                   (List.filter_map
-                      (fun (passed : State.passed) ->
-                        match (passed.mode, passed.passed_place) with
-                        | Language.Mode.Mut, Some place -> Some (passed.position, place.read after)
-                        | _ -> None)
-                      values)
+               Potentials.compute_call_potential_change context ~before ~after values ~changed
                  ~result_type ~result))
         (compute_function_value_amount context after ~location function_type callee_term ~values)
   | _ -> Counters.spend context after (Counters.declare_unknown_amount context after)

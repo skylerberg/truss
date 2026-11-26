@@ -55,6 +55,7 @@ val spend_indirect_call :
   location:Obligation.location ->
   (Types.ty * Logic.term * Invocation.shape) option ->
   State.passed list ->
+  changed:(int * Logic.term) list ->
   result_type:Types.ty ->
   result:Logic.term ->
   State.frame

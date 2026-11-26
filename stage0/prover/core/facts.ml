@@ -559,9 +559,6 @@ let arrive context frame prefix ty =
   assume context frame (make_in_range ty value);
   value
 
-let read_or_arrive context frame prefix ty read =
-  try read frame with Unsupported _ -> arrive context frame prefix ty
-
 let bind (frame : State.frame) local ty term =
   {
     frame with

@@ -813,11 +813,13 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
                            Some
                              {
                                read = read_place parameter;
-                               write = write_place parameter;
-                               note_changed_in_place = (fun () -> ());
+                               write =
+                                 (fun frame ~is_valid:_ term ->
+                                   (write_place parameter frame term, ignore));
                              }
                        | Read | Own -> None);
                      type_ = Types.substitute_erased subtrait_substitution parameter.type_;
+                     is_step_self = false;
                      declared_type = Types.substitute subtrait_substitution parameter.type_;
                      term = read_place parameter entry;
                    })

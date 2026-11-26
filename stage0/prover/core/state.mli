@@ -55,8 +55,7 @@ type function_exit = { frame : frame; returned : Logic.term option; return_origi
 
 type passed_place = {
   read : frame -> Logic.term;
-  write : frame -> Logic.term -> frame;
-  note_changed_in_place : unit -> unit;
+  write : frame -> is_valid:bool -> Logic.term -> frame * (frame -> unit);
 }
 
 type passed = {
@@ -65,6 +64,7 @@ type passed = {
   shape : Invocation.shape;
   origin : Core.origin option;
   passed_place : passed_place option;
+  is_step_self : bool;
   type_ : Types.ty;
   declared_type : Types.ty;
   term : Logic.term;

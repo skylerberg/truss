@@ -2296,6 +2296,18 @@ let () =
       expect_not_proven Fixtures.Prover.span_low_raised_through_a_lend "prover.invariant");
   Harness.test "an element mutated through a lend that keeps its invariant proves" (fun () ->
       expect_proven Fixtures.Prover.span_high_raised_through_a_lend);
+  Harness.test "an element meets its invariant when a step on it returns" (fun () ->
+      expect_not_proven Fixtures.Prover.step_on_a_list_element_breaking_its_invariant
+        "prover.invariant";
+      expect_not_proven Fixtures.Prover.step_on_the_element_of_a_loop_breaking_its_invariant
+        "prover.invariant");
+  Harness.test "a step on an element that restores its invariant proves" (fun () ->
+      expect_proven Fixtures.Prover.step_on_a_list_element_restoring_its_invariant);
+  Harness.test "an element's invariant is proven from the ensures of a call that changes a part"
+    (fun () ->
+      expect_proven Fixtures.Prover.call_changing_a_part_of_a_list_element_within_its_invariant;
+      expect_not_proven Fixtures.Prover.call_changing_a_part_of_a_list_element_past_its_invariant
+        "prover.invariant");
   Harness.test "a lent part meets its invariant" (fun () ->
       let packages = Support.setup [ ("app.main", Fixtures.Prover.positive_lent_by_a_source) ] in
       let messages =

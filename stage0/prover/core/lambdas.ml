@@ -644,6 +644,7 @@ let make_passed_values context frame (invocation : Invocation.t)
             shape = Lambda;
             origin = Some site.origin;
             passed_place = None;
+            is_step_self = false;
             type_ = Facts.substitute_type context frame site.type_;
             declared_type = Facts.substitute_declared_type context frame site.type_;
             term;

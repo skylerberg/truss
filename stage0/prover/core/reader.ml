@@ -202,7 +202,7 @@ let read_place context frame run (place : Mir.place) =
             later
       | [] -> Facts.raise_bug "a place that is no place")
 
-let write_resolved context frame run (place : Mir.place) new_value =
+let write_resolved context frame run (place : Mir.place) ~check_element ~is_valid new_value =
   let rec rebuild prefix whole = function
     | [] -> new_value
     | (projection : Mir.projection) :: rest -> (
@@ -225,12 +225,7 @@ let write_resolved context frame run (place : Mir.place) new_value =
               Intrinsics.read_sequence_element context frame base_type whole index ~node ~origin
             in
             let element = rebuilt replaced in
-            (match rest with
-            | [] -> ()
-            | _ :: _ ->
-                Validity.check_valid context frame
-                  (Facts.locate context frame.source origin)
-                  part_type element ~deep:true ~moment:Element_changed);
+            if rest <> [] || not is_valid then check_element ~origin part_type element;
             let after =
               Intrinsics.write_sequence_element context frame base_type whole index element
             in
@@ -250,25 +245,27 @@ let write_resolved context frame run (place : Mir.place) new_value =
   match place.Mir.root with
   | Constant _ | Literal _ -> Facts.raise_unsupported Whole_definition Constant_assignment
   | Local local -> (
+      if place.Mir.projections <> [] || not is_valid then
+        Hashtbl.replace run.changed_in_place local ();
       let whole =
         if place.Mir.projections = [] then new_value
-        else begin
-          Hashtbl.replace run.changed_in_place local ();
-          rebuild [] (read_root context frame run place.Mir.root) place.Mir.projections
-        end
+        else rebuild [] (read_root context frame run place.Mir.root) place.Mir.projections
       in
       match Locals.make_key run.infos local with
       | Core_local Self -> { frame with self = Some whole }
       | key ->
           Facts.bind frame key (Facts.substitute_type context frame run.infos.(local).type_) whole)
 
-let write_alternatives context frame run alternatives new_value =
+let write_alternatives context frame run alternatives ~check_element ~is_valid new_value =
+  let write_resolved frame place =
+    write_resolved context frame run place ~check_element ~is_valid new_value
+  in
   match alternatives with
-  | [ (_, place) ] -> write_resolved context frame run place new_value
+  | [ (_, place) ] -> write_resolved frame place
   | alternatives ->
       List.fold_left
         (fun frame (condition, (place : Mir.place)) ->
-          let written = write_resolved context frame run place new_value in
+          let written = write_resolved frame place in
           match place.Mir.root with
           | Constant _ | Literal _ -> written
           | Local local -> (
@@ -287,13 +284,37 @@ let write_alternatives context frame run alternatives new_value =
                   | _ -> written)))
         frame alternatives
 
-let write_place context frame run (place : Mir.place) new_value =
+let write_through context frame run (place : Mir.place) ~check_element ~is_valid new_value =
   let alternatives = resolve_aliases frame run place in
   Potentials.spend_enclosing_change context ~before:frame
-    ~after:(write_alternatives context frame run alternatives new_value)
+    ~after:(write_alternatives context frame run alternatives ~check_element ~is_valid new_value)
     alternatives
     ~place_type:(fun at place -> compute_place_type context at run place)
     ~read:(fun at place -> read_resolved context at run place)
+
+let check_changed_element context (frame : State.frame) ~origin element_type element =
+  Validity.check_valid context frame
+    (Facts.locate context frame.source origin)
+    element_type element ~deep:true ~moment:Element_changed
+
+let write_place context frame run place new_value =
+  write_through context frame run place
+    ~check_element:(check_changed_element context frame)
+    ~is_valid:true new_value
+
+let write_place_until_its_write_ends context frame run place ~is_valid new_value =
+  let changed_elements = ref [] in
+  let written =
+    write_through context frame run place ~is_valid new_value
+      ~check_element:(fun ~origin element_type element ->
+        changed_elements := (origin, element_type, element) :: !changed_elements)
+  in
+  ( written,
+    fun (after : State.frame) ->
+      List.iter
+        (fun (origin, element_type, element) ->
+          check_changed_element context after ~origin element_type element)
+        (List.rev !changed_elements) )
 
 let compute_changes ?(also = []) context run (frame : State.frame) (blocks : Mir.block list) =
   let is_bound : Locals.local -> bool = function
@@ -391,12 +412,7 @@ let make_passed_place context run place =
   {
     State.read =
       (fun frame -> read_place context { frame with makes_obligations = false } run place);
-    write = (fun frame term -> write_place context frame run place term);
-    note_changed_in_place =
-      (fun () ->
-        match place.root with
-        | Local local -> Hashtbl.replace run.changed_in_place local ()
-        | Constant _ | Literal _ -> ());
+    write = (fun frame -> write_place_until_its_write_ends context frame run place);
   }
 
 let find_held_callback context run held (value : Mir.rvalue) =
@@ -452,6 +468,7 @@ let evaluate_call_values context frame run (invocation : Invocation.t)
                  shape = classify_shape run ?function_ value;
                  origin = find_operand_origin value;
                  passed_place = find_argument_place context run mode value;
+                 is_step_self = position = 0 && Contracts.is_update_step context invocation;
                  type_ = compute_operand_type context frame value;
                  declared_type =
                    Facts.substitute_declared_type context frame (Mir.extract_operand_type value);
@@ -605,7 +622,8 @@ let bind_parts context (frame : State.frame) run =
 
 let refresh_place context frame ty (place : State.passed_place) =
   let fresh_value = Facts.arrive context frame "changed" ty in
-  let frame = place.write frame fresh_value in
+  let frame, end_write = place.write frame ~is_valid:true fresh_value in
+  end_write frame;
   Validity.assume_valid context frame ty fresh_value;
   frame
 

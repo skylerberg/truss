@@ -1,0 +1,13 @@
+public type Span(low: UInt8, high: UInt8)
+  invariant low <= high
+
+fn Span.break_it(mut self) {
+  self.low = 100
+  self.high = 0
+}
+
+public fn shrink(spans: mut List[Span])
+  requires spans.length() > 0
+{
+  mut spans[0].break_it()
+}
