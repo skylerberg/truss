@@ -643,6 +643,10 @@ let () =
     (fun () ->
       expect_not_proven Fixtures.Prover.finite_cursor_whose_next_does_not_decrease_remaining
         "prover.ensures");
+  Harness.test "a restated method is proven under the precondition of the method that it restates"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.restated_method_whose_declaration_requires "prover.ensures"
+        ~says:"The contract of `Crawler`'s `step` may not imply `result >= by`");
   Harness.test "a restated clause is proven of the receiver that the method changes" (fun () ->
       expect_not_proven Fixtures.Prover.restated_clause_that_the_changed_receiver_breaks
         "prover.ensures");
