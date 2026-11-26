@@ -1319,6 +1319,7 @@ Rules: [Method lookup](SPECIFICATION.md#method-lookup).
 | Two candidates for one name are an error, never a silent choice. | In Rust a type's own method wins over a trait's, so adding a method can silently change an existing call. In Truss an upgrade can break a call only with an error that names both candidates. A release that only adds names is still compatible, because otherwise no type could ever gain a method. |
 | An `Array` has the methods of the `List` of its elements. | `self` is a parameter, and an `Array` converts to the range of all its elements. Without the rule, every method of a `List` needs a forwarding method on `Array`, whose contract is stated and proven a second time. |
 | An `Array`'s own method hides the `List` method of the same name and mode. | The array can do better where its length is a constant. Both are written in one package, so no other package can change which one a call reaches. |
+| A trait's method named as a value is the lambda that calls it. | Dispatch, capabilities, contracts, and costs are then the call's, so no stage after type checking has a second kind of function value. |
 
 ### Dispatch
 

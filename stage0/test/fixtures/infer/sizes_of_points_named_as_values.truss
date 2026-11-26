@@ -1,0 +1,37 @@
+trait Measure {
+  fn size(self) -> Int64
+}
+
+trait Make {
+  fn make() -> Self
+}
+
+type Point(x: Int64)
+
+impl Measure for Point {
+  fn size(self) -> Int64 { self.x }
+}
+
+impl Make for Point {
+  fn make() -> Point { Point(x: 1) }
+}
+
+fn through_the_type(point: Point) -> Int64 {
+  let size = Point.size
+  size(point)
+}
+
+fn through_a_bound[Value: Measure](value: Value) -> Int64 {
+  let size = Value.size
+  size(value)
+}
+
+fn through_the_trait(point: Point) -> Int64 {
+  let size: fn(Point) -> Int64 = Measure.size
+  size(point)
+}
+
+fn without_self() -> Point {
+  let make = Point.make
+  make()
+}

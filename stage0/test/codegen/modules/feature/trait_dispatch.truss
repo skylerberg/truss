@@ -231,3 +231,42 @@ test "a provided generic method runs through a bound that gives the trait's argu
   assert couple.first == 1
   assert couple.second == "two"
 }
+
+trait Bump {
+  fn bump(mut self)
+}
+
+impl Bump for Marker {
+  fn bump(mut self) { self.at = 9 }
+}
+
+fn apply[Value](function: fn(Value) -> Int64, value: Value) -> Int64 {
+  function(value)
+}
+
+fn positions[Value: Positioned](value: Value) -> Int64 {
+  apply(Value.position, value)
+}
+
+test "a trait's method named as a value runs the impl that the type or the bound chooses" {
+  let position = Marker.position
+  assert position(Marker(at: 3)) == 3
+  let named: fn(Marker) -> Int64 = Positioned.position
+  assert named(Marker(at: 4)) == 4
+  assert positions(Marker(at: 6)) == 6
+  let make = Small.make
+  assert make(2).value == 2
+  var marker = Marker(at: 1)
+  let bump = Marker.bump
+  bump(mut marker)
+  assert marker.position() == 9
+}
+
+test "a built-in operation named as a value runs the operation" uses Panic {
+  let add: (fn(Int64, Int64) -> Int64 uses Panic) = Int64.add
+  assert add(2, 3) == 5
+  let copy = String.copy
+  assert copy("text") == "text"
+  let equal: fn(Int64, Int64) -> Bool = Int64.equal
+  assert equal(1, 1)
+}

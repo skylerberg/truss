@@ -2428,6 +2428,39 @@ let () =
       expect_one_diagnostic
         (shape ^ Fixtures.Infer.area_of_a_holder_of_integers)
         "types.unsatisfied_bound");
+  Harness.test "a trait's method is a value through a type, a bound, or the trait" (fun () ->
+      expect_fine Fixtures.Infer.sizes_of_points_named_as_values);
+  Harness.test "a method named as a value is the overload whose `self` the expected type takes"
+    (fun () -> expect_fine Fixtures.Infer.labels_of_a_point_by_receiver);
+  Harness.test "a method that two traits give a type is an ambiguous value" (fun () ->
+      expect_one_diagnostic
+        "trait First {\n\
+        \  fn name(self) -> Int64\n\
+         }\n\n\
+         trait Second {\n\
+        \  fn name(self) -> Int64\n\
+         }\n\n\
+         type Point(x: Int64)\n\n\
+         impl First for Point {\n\
+        \  fn name(self) -> Int64 { 1 }\n\
+         }\n\n\
+         impl Second for Point {\n\
+        \  fn name(self) -> Int64 { 2 }\n\
+         }\n\n\
+         fn f() {\n\
+        \  let _ = Point.name\n\
+         }\n"
+        "types.ambiguous_method" ~says:"`First`, `Second`");
+  Harness.test "a trait's method named as a value needs the type's impl" (fun () ->
+      expect_one_diagnostic
+        "trait Measure {\n\
+        \  fn size(self) -> Int64\n\
+         }\n\n\
+         type Point(x: Int64)\n\n\
+         fn f() {\n\
+        \  let _: fn(Point) -> Int64 = Measure.size\n\
+         }\n"
+        "types.no_impl" ~says:"`Point` does not implement `Measure`.");
   Harness.test "a method used as a value must meet its bounds" (fun () ->
       expect_one_diagnostic
         (shape ^ Fixtures.Infer.fits_of_a_point_as_a_value)

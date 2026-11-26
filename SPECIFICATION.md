@@ -1634,6 +1634,14 @@ fn List[Element].zip[Other](self, other: List[Other]) -> Zipped[Element, Other]
 - A method is a function declared as `fn Type.name`. One whose first
   parameter is `self` can be called with a dot, and every method can be
   called through its type's name: `List.length(names)` is `names.length()`.
+- **A method named as a value is the function that calls it,** with `self`
+  as its first input: `Point.size` is `fn(Point) -> Int64`. A trait's
+  method is named through a type that implements the trait, as
+  `Point.size`, through a type parameter that a bound gives the trait, as
+  `Value.size`, or through the trait, as `Measure.size`, whose `Self` the
+  expected type decides. Of overloads by receiver mode, the value is the one
+  whose `self` has the mode of the expected type's first input, and
+  otherwise the first of no `self`, `self`, `mut self`, and `own self`.
 - `self` has the type named before the dot, and is written `self`,
   `mut self`, or `own self`.
 - The type's generic parameters go before the dot, with any bounds the

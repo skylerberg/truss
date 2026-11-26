@@ -99,7 +99,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Member (base, member) -> (
       match State.find_head state value with
       | Some resolution -> Name_lookup.check_name state env value resolution
-      | None -> check_member_value state env value base member)
+      | None -> check_member_value state env ?expected value base member)
   | Bracket (base, items) -> check_bracket state env ?expected value base items
   | Call (callee, arguments) -> Methods.check_call state env ?expected value callee arguments
   | Try inner -> Operators.try_ state env value inner
@@ -208,11 +208,13 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Block body -> Values.check_block state env ?expected body
   | Expression_error -> Types.Error Catalog.reported_elsewhere
 
-and check_member_value state env (value : Syntax.expression) (base : Syntax.expression)
+and check_member_value state env ?expected (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) =
   match Instantiation.find_static state base with
-  | Some (Static_type type_) -> Name_lookup.check_static_member state value type_ member
-  | Some (Static_trait _ | Static_capability _) ->
+  | Some (Static_type type_) -> Name_lookup.check_static_member state ?expected value type_ member
+  | Some (Static_trait (trait, trait_arguments)) ->
+      Name_lookup.check_trait_value_in_full state ?expected value trait ~trait_arguments member
+  | Some (Static_capability _) ->
       State.make_error_type state
         (Static_method_as_value { at = Written value.id; name = member.text })
   | None -> (
