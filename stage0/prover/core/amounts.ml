@@ -29,9 +29,9 @@ let make_may_be_target (context : State.context) frame term ty target =
   else
     match List.assoc_opt target context.cost.call_targets with
     | Some local -> (
-        match (ty, Facts.find_local_type context frame (Core_local local)) with
+        match (ty, Encoding.find_local_type context frame (Core_local local)) with
         | Types.Function _, Some target_type
-          when Facts.declare_sort context ty = Facts.declare_sort context target_type ->
+          when Encoding.declare_sort context ty = Encoding.declare_sort context target_type ->
             Logic.equal term target
         | _ -> Logic.Boolean false)
     | None -> Logic.Boolean false
@@ -347,7 +347,7 @@ let make_callback_cost (context : State.context) frame (metric : Language.Metric
   match stated_by_type with
   | Some stated -> stated
   | None ->
-      let sort = Facts.declare_sort context ty in
+      let sort = Encoding.declare_sort context ty in
       let symbol = Logic.Symbol.Callback_cost { metric; sort } in
       Facts.declare context (Logic.Function (symbol, [ sort ], Logic.Int));
       let cost = Logic.Apply (symbol, [ term ]) in
@@ -396,7 +396,7 @@ let compute_function_value_amount context frame ~location (function_type : Types
         | _, Exactly ->
             let cost = make_cost () in
             if cost <> Costs.zero then
-              Facts.oblige
+              Obligations.oblige
                 ~holds_when:(Counters.read_condition context counter)
                 context frame location
                 (Upper_bound_in_exact_cost { metric; call = { at = location; callee = None } })
@@ -556,7 +556,7 @@ let find_method_cost_bound context frame (metric : Language.Metric.t) (method_ :
         else None
       else
         let reference : Types.trait_reference = { trait; trait_arguments; associated = [] } in
-        match Facts.find_impl context reference self_type with
+        match Encoding.find_impl context reference self_type with
         | Some (impl, substitution) -> (
             let path = Path.Method { owner = impl; name; receiver } in
             match Contracts.read_signature context path with
@@ -631,13 +631,13 @@ let compute_method_cost context frame (metric : Language.Metric.t) (callee : Inv
   match callee with
   | Trait_method { trait; name; receiver; self_type; _ } ->
       let substitute_argument : Types.argument -> Types.argument = function
-        | Type type_ -> Type (Facts.substitute_type context frame type_)
+        | Type type_ -> Type (Encoding.substitute_type context frame type_)
         | argument -> Types.substitute_argument_erased frame.substitution argument
       in
       declare_method_cost context frame metric
         (Path.Method { owner = trait.trait; name; receiver })
         ~trait_arguments:(List.map substitute_argument trait.trait_arguments)
-        (Facts.substitute_type context frame self_type)
+        (Encoding.substitute_type context frame self_type)
   | _ -> Facts.raise_unsupported Whole_definition (Metric_of_non_trait_method metric)
 
 let has_method_cost (context : State.context) (callee : Invocation.callee) (path : Path.t) =

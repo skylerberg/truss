@@ -46,7 +46,7 @@ let check_promise_amounts context (start : State.frame) promises ~output =
             let result =
               Option.map
                 (fun output ->
-                  let result = Facts.arrive context start "result" output in
+                  let result = Encoding.arrive context start "result" output in
                   Validity.assume_valid context start output result;
                   result)
                 output
@@ -72,7 +72,7 @@ let check_promise ?restated ?cited (context : State.context) (frame : State.fram
   let counting : Catalog.Prover.counting =
     match promise.counter.counting with Units | At_most -> Upper_bound | Exactly -> Exact
   and clause = Facts.quote promise.written_in promise.clause.origin in
-  Facts.oblige ?cited context frame location ~holds_when:promise.clause.holds_when
+  Obligations.oblige ?cited context frame location ~holds_when:promise.clause.holds_when
     ~can_be_required:(promise.counter.counting <> Units)
     (Cost_promise
        (match restated with

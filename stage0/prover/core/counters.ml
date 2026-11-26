@@ -236,7 +236,7 @@ let check_lambda_exits context counters (exits : State.frame list) location ~typ
             | No_more_than limit -> Logic.less_equal spent (Logic.Integer limit)
             | Exactly_cost limit -> Logic.equal spent (Logic.Integer limit)
           in
-          Facts.oblige context exit_ location
+          Obligations.oblige context exit_ location
             (Lambda_cost
                {
                  counting =
@@ -264,7 +264,7 @@ let check_lambda_exits context counters (exits : State.frame list) location ~typ
             ( bound,
               List.filter_map
                 (fun ((exit_ : State.frame), spent) ->
-                  Facts.make_closed_obligation context exit_ location
+                  Obligations.make_closed_obligation context exit_ location
                     (Lambda_call_above_bound { metric })
                     (Logic.less_equal spent bound))
                 (List.combine exits spent) ) ))

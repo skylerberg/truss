@@ -5,13 +5,10 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
   let rec context =
     {
       State.condition;
-      bounds = Facts.list_definition_bounds lookups ~current ~condition;
-      keeps_termination;
-      keeps_failures;
-      panics;
-      can_declare_panic;
-      panic_condition;
-      obligation_condition = [];
+      bounds = Encoding.list_definition_bounds lookups ~current ~condition;
+      policy =
+        Obligations.make_policy ~keeps_termination ~keeps_failures ~panics ~can_declare_panic
+          ~panic_condition;
       requires_clause_being_read = None;
       skipped_conditions = [];
       run_body = (fun frame ~lambdas body -> Reader.read_body context frame ~lambdas body);
@@ -100,7 +97,7 @@ let read_requires (context : State.context) frame (requirement : Mir.formula) =
   Fun.protect
     ~finally:(fun () -> context.requires_clause_being_read <- outer)
     (fun () ->
-      Conditions.with_obligation_condition context requirement.holds_when (fun () ->
+      Obligations.with_condition context requirement.holds_when (fun () ->
           Validity.read_specification context frame requirement))
 
 let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_condition
@@ -248,8 +245,8 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
       (fun frame (parameter : Mir.parameter) ->
         match parameter.local with
         | Self ->
-            let self_type = Facts.substitute_type context frame parameter.type_ in
-            let self = Facts.arrive context frame "self" self_type in
+            let self_type = Encoding.substitute_type context frame parameter.type_ in
+            let self = Encoding.arrive context frame "self" self_type in
             (match self with
             | Logic.Symbol symbol -> context.entry <- symbol :: context.entry
             | _ -> ());
@@ -257,9 +254,9 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
               self;
             { frame with self = Some self; self_type = Some self_type }
         | local ->
-            let ty = Facts.substitute_type context frame parameter.type_ in
+            let ty = Encoding.substitute_type context frame parameter.type_ in
             let name = Facts.read_parameter_name parameter in
-            let term = Facts.arrive context frame ("parameter." ^ name) ty in
+            let term = Encoding.arrive context frame ("parameter." ^ name) ty in
             (match term with
             | Logic.Symbol symbol ->
                 context.parameter_names <- (symbol, name) :: context.parameter_names;
@@ -272,7 +269,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
   Termination.enter_definition context start;
-  let output = Option.map (Facts.substitute_type context start) output in
+  let output = Option.map (Encoding.substitute_type context start) output in
   let start =
     match signature with
     | Some { output = Lends (_, part); _ } ->
@@ -345,10 +342,10 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
         (List.fold_left
            (fun frame (requirement : Mir.formula) ->
              let frame, term =
-               Conditions.with_obligation_condition context requirement.holds_when (fun () ->
+               Obligations.with_condition context requirement.holds_when (fun () ->
                    Validity.read_specification context frame requirement)
              in
-             Facts.oblige ~holds_when:requirement.holds_when context frame
+             Obligations.oblige ~holds_when:requirement.holds_when context frame
                (Facts.locate context frame.source requirement.origin)
                (Impl_precondition { clause = Facts.quote source requirement.origin })
                term;
@@ -369,7 +366,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
            (List.fold_left
               (fun frame (requirement : Mir.requirement) ->
                 let frame, term = Validity.read_specification context frame requirement.clause in
-                Facts.oblige context frame
+                Obligations.oblige context frame
                   (Facts.locate context frame.source requirement.clause.origin)
                   (Impl_panic_condition { clause = Facts.quote source requirement.clause.origin })
                   term;
@@ -427,7 +424,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
         (fun (parameter : Mir.parameter) ->
           match
             ( Locals.find_opt (Core_local parameter.local) frame.locals,
-              Facts.find_local_type context frame (Core_local parameter.local) )
+              Encoding.find_local_type context frame (Core_local parameter.local) )
           with
           | Some term, Some ty ->
               Validity.check_valid context frame exit_location ty term ~deep:true
@@ -448,7 +445,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                   { frame with yielded = Some yielded_so_far }
                   ensured
               in
-              Facts.oblige ~holds_when:ensured.holds_when ~cited:(source.key, ensured.origin)
+              Obligations.oblige ~holds_when:ensured.holds_when ~cited:(source.key, ensured.origin)
                 context frame exit_location
                 (Ensures_at_method_end { clause = Facts.quote source ensured.origin })
                 term)
@@ -457,10 +454,10 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
           List.iter
             (fun (ensured : Mir.formula) ->
               let _, term =
-                Conditions.with_obligation_condition context ensured.holds_when (fun () ->
+                Obligations.with_condition context ensured.holds_when (fun () ->
                     Validity.read_specification context frame ensured)
               in
-              Facts.oblige ~holds_when:ensured.holds_when ~cited:(source.key, ensured.origin)
+              Obligations.oblige ~holds_when:ensured.holds_when ~cited:(source.key, ensured.origin)
                 context frame exit_location
                 (Ensures_at_return { clause = Facts.quote source ensured.origin })
                 term)
@@ -486,7 +483,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
           List.iter
             (fun (clause : Mir.formula) ->
               let _, term = Validity.read_specification context inside clause in
-              Facts.oblige ~holds_when:clause.holds_when
+              Obligations.oblige ~holds_when:clause.holds_when
                 ~cited:(clauses.callee.key, clause.origin)
                 context under_trait exit_location
                 (Promiser_ensures
@@ -584,7 +581,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
         let terms =
           List.map
             (fun ty ->
-              let term = Facts.arrive context start "law" ty in
+              let term = Encoding.arrive context start "law" ty in
               Validity.assume_valid context start ty term;
               term)
             types
@@ -641,7 +638,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
                proofs)
         in
         let _, holds = Validity.read_specification context inside law.states in
-        Facts.oblige context start at (Law_may_fail { trait; law = law.name; for_type }) holds
+        Obligations.oblige context start at (Law_may_fail { trait; law = law.name; for_type }) holds
       end)
     (Laws.list_laws context trait.trait);
   make_outcome context
@@ -722,7 +719,9 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
               (fun (frame : State.frame) (parameter : Mir.parameter) ->
                 let ty = Types.substitute_erased subtrait_substitution parameter.type_ in
                 let term =
-                  Facts.arrive context frame ("parameter." ^ Facts.read_parameter_name parameter) ty
+                  Encoding.arrive context frame
+                    ("parameter." ^ Facts.read_parameter_name parameter)
+                    ty
                 in
                 Validity.assume_valid context frame ty term;
                 write_place parameter frame term)
@@ -810,7 +809,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
           List.iter
             (fun (clause : Mir.formula) ->
               let _, term = Validity.read_specification context ensuring clause in
-              Facts.oblige context after location
+              Obligations.oblige context after location
                 (Restated_contract
                    {
                      for_type;
@@ -882,13 +881,13 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
             (fun (default : Mir.t Mir.field_default) ->
               ignore
                 (Lambdas.run_code context start default.value
-                   ~type_:(Facts.substitute_type context start default.type_)))
+                   ~type_:(Encoding.substitute_type context start default.type_)))
             defaults
       | Some { form = Parameter_defaults _; _ } | None -> ());
       match Cycles.list_circular_clauses context start ~type_:ty with
       | _ :: _ as circular -> List.iter (Cycles.reject_circular_proof context start) circular
       | [] ->
-          let value_ = Facts.arrive context start "value" ty in
+          let value_ = Encoding.arrive context start "value" ty in
           Facts.assume context start
             (Validity.make_validity context start ~assuming:true ~includes_invariants:false ty
                value_);
@@ -901,7 +900,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
           Option.iter
             (fun (written : Mir.formula) ->
               let _, potential_term = Validity.read_specification context at_value written in
-              Facts.oblige context at_value
+              Obligations.oblige context at_value
                 (Facts.locate context at_value.source written.origin)
                 (Negative_potential { type_ = ty })
                 (Logic.less_equal (Logic.int 0) potential_term))

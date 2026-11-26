@@ -163,6 +163,15 @@ type callback_state = {
   mutable is_reading : bool;
 }
 
+type obligation_policy = {
+  mutable panics : bool;
+  mutable can_declare_panic : bool;
+  panic_condition : Catalog.Prover.quoted list option;
+  keeps_termination : bool;
+  keeps_failures : bool;
+  mutable obligation_condition : Types.condition;
+}
+
 type context = {
   lookups : Lookups.t;
   current : Path.t;
@@ -181,6 +190,7 @@ type context = {
   termination : termination_state;
   validity : validity_state;
   callbacks : callback_state;
+  policy : obligation_policy;
   disjoint : (Core.id list * Core.id list) list;
   mutable indexes : (Core.id * noted_place) list;
   mutable lending : lending option;
@@ -199,12 +209,6 @@ type context = {
   ranking : bool;
   condition : Types.condition;
   bounds : Interface.Impls.bounds;
-  keeps_termination : bool;
-  keeps_failures : bool;
-  mutable panics : bool;
-  mutable can_declare_panic : bool;
-  panic_condition : Catalog.Prover.quoted list option;
-  mutable obligation_condition : Types.condition;
   mutable requires_clause_being_read : Core.origin option;
   mutable skipped_conditions : Types.condition list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;

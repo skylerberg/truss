@@ -1,6 +1,6 @@
 let declare_held_symbol context ty term =
   let symbol = Logic.Symbol.Potential ty in
-  Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
+  Facts.declare context (Logic.Function (symbol, [ Encoding.declare_sort context ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
 let compute_buffer context (ty : Types.ty) : State.buffer option =
@@ -49,14 +49,14 @@ let declare_potential_measure context element =
   let symbol = Logic.Symbol.Potential_measure element in
   let measure = Intrinsics.measure_type element in
   Facts.declare context
-    (Logic.Constant (symbol, Facts.declare_sort context (Types.Function measure)));
+    (Logic.Constant (symbol, Encoding.declare_sort context (Types.Function measure)));
   let term = Logic.Symbol symbol in
   if not (List.mem term context.cost.potentials) then begin
     context.cost.potentials <- term :: context.cost.potentials;
     let each = Logic.Symbol.Variable { label = "potential.element"; numbers = [] } in
     Facts.add_fact context
       (Logic.forall
-         ( [ (each, Facts.declare_sort context element) ],
+         ( [ (each, Encoding.declare_sort context element) ],
            Logic.equal
              (Callbacks.apply_function context measure term [ Logic.Symbol each ])
              (declare_held_symbol context element (Logic.Symbol each)) ))
@@ -75,7 +75,7 @@ let choose_by_variant ty term shape compute_variant =
           List.fold_left
             (fun otherwise ((variant, _) as one) ->
               Logic.ite
-                (Logic.Is (Facts.make_constructor_symbol ty variant, term))
+                (Logic.Is (Encoding.make_constructor_symbol ty variant, term))
                 (compute_variant one) otherwise)
             (compute_variant last) earlier
       | [] -> Costs.zero)
@@ -175,7 +175,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (declared : Typ
       Facts.add_frame_fact context frame
         Logic.(
           Validity.make_validity context frame ~assuming:true ty term ==> less_equal (int 0) held);
-      match (find_potential_clause context ty, Facts.find_constructors context ty) with
+      match (find_potential_clause context ty, Encoding.find_constructors context ty) with
       | None, None when Option.is_some (find_buffer context ty) -> (
           match find_buffer context ty with
           | Some { kind; element; model_of } ->
@@ -215,7 +215,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (declared : Typ
           with Facts.Unsupported _ -> ())
       | _ -> ()
     end;
-    match (find_potential_clause context ty, Facts.find_constructors context ty) with
+    match (find_potential_clause context ty, Encoding.find_constructors context ty) with
     | None, Some [ (None, fields) ] -> (
         try compute_parts_potential context frame ~seen declared term (None, fields)
         with Facts.Unsupported _ -> held)
@@ -231,7 +231,7 @@ and compute_parts_potential context frame ~seen declared term (variant, fields) 
         Option.value ~default:erased_field_type (List.assoc_opt (variant, field) declared_fields)
       in
       if has_potential context field_type then
-        let part = Validity.select_field context ty variant field term in
+        let part = Encoding.select_field context ty variant field term in
         Logic.add total
           (if List.exists (Types.equal field_type) (declared :: seen) then
              declare_held_symbol context field_type part
@@ -244,7 +244,7 @@ let compute_elements_potential context (declared : Types.ty) term =
     if not (has_potential context declared) then Costs.zero
     else
       let ty = Types.erase_views declared in
-      match Facts.find_constructors context ty with
+      match Encoding.find_constructors context ty with
       | Some shape -> (
           let declared_fields = Option.value ~default:[] (list_declared_fields context declared) in
           let sum_fields (variant, fields) =
@@ -258,7 +258,7 @@ let compute_elements_potential context (declared : Types.ty) term =
                 else
                   Logic.add total
                     (sum_elements ~enclosing:(declared :: enclosing) field_type
-                       (Validity.select_field context ty variant field term)))
+                       (Encoding.select_field context ty variant field term)))
               Costs.zero fields
           in
           try choose_by_variant ty term shape sum_fields with Facts.Unsupported _ -> Costs.zero)

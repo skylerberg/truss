@@ -3,9 +3,11 @@ let declare_own (context : State.context) own = context.callbacks.own <- own
 let is_reading (context : State.context) = context.callbacks.is_reading
 
 let apply_function context (function_type : Types.function_type) callee arguments =
-  let inputs = List.map (fun (_, input) -> Facts.declare_sort context input) function_type.inputs in
-  let output = Facts.declare_sort context function_type.output in
-  let value_sort = Facts.declare_sort context (Types.Function function_type) in
+  let inputs =
+    List.map (fun (_, input) -> Encoding.declare_sort context input) function_type.inputs
+  in
+  let output = Encoding.declare_sort context function_type.output in
+  let value_sort = Encoding.declare_sort context (Types.Function function_type) in
   let symbol = Logic.Symbol.Apply ((value_sort :: inputs) @ [ output ]) in
   Facts.declare context (Logic.Function (symbol, value_sort :: inputs, output));
   Logic.Apply (symbol, callee :: arguments)
@@ -17,7 +19,7 @@ let make_input_variables context (function_type : Types.function_type) ~label ~n
   List.mapi
     (fun index (_, input) ->
       ( Facts.make_variable (label ^ ".argument") ~numbers:(numbers @ [ index ]),
-        Facts.declare_sort context input ))
+        Encoding.declare_sort context input ))
     function_type.inputs
 
 type relation_variables = {
@@ -39,7 +41,7 @@ let make_relation_variables context (function_type : Types.function_type) ~label
             Some
               ( index,
                 ( Facts.make_variable (label ^ ".changed") ~numbers:(numbers @ [ index ]),
-                  Facts.declare_sort context input ) )
+                  Encoding.declare_sort context input ) )
         | Read | Own -> None)
       (List.mapi (fun index input -> (index, input)) function_type.inputs)
   in
@@ -47,7 +49,7 @@ let make_relation_variables context (function_type : Types.function_type) ~label
     if returns_value function_type then
       [
         ( Facts.make_variable (label ^ ".result") ~numbers,
-          Facts.declare_sort context function_type.output );
+          Encoding.declare_sort context function_type.output );
       ]
     else []
   in
@@ -70,14 +72,15 @@ let make_relation_variables context (function_type : Types.function_type) ~label
 let make_callback_ensures context (function_type : Types.function_type) callee ~entries ~exits
     ~result =
   let sorts =
-    Facts.declare_sort context (Types.Function function_type)
+    Encoding.declare_sort context (Types.Function function_type)
     :: List.concat_map
          (fun ((mode : Language.Mode.t), input) ->
-           let sort = Facts.declare_sort context input in
+           let sort = Encoding.declare_sort context input in
            match mode with Mut -> [ sort; sort ] | Read | Own -> [ sort ])
          function_type.inputs
     @
-    if returns_value function_type then [ Facts.declare_sort context function_type.output ] else []
+    if returns_value function_type then [ Encoding.declare_sort context function_type.output ]
+    else []
   in
   let arguments =
     List.concat
@@ -120,8 +123,8 @@ let is_in_the_logic (function_type : Types.function_type) =
 let declare_callback_arguments context frame inputs =
   List.map
     (fun (_, input) ->
-      let input = Facts.substitute_type context frame input in
-      let term = Facts.arrive context frame "argument" input in
+      let input = Encoding.substitute_type context frame input in
+      let term = Encoding.arrive context frame "argument" input in
       Validity.assume_valid context frame input term;
       term)
     inputs
@@ -159,14 +162,14 @@ let check_callback_contract context frame location ~name inputs requires argumen
   let inside = make_callback_contract_frame frame inputs arguments in
   List.iter
     (fun (clause : Mir.formula) ->
-      Facts.oblige context (Facts.restrict frame promised) location
+      Obligations.oblige context (Facts.restrict frame promised) location
         (Callback_requirement { name; reason; clause = Facts.quote frame.source clause.origin })
         (snd (Validity.read_specification context inside clause)))
     requires
 
 let check_escaping_callback context frame local =
   match
-    (find_own_callback context local, Facts.find_local_type context frame (Core_local local))
+    (find_own_callback context local, Encoding.find_local_type context frame (Core_local local))
   with
   | ( Some (name, ({ inputs; requires = _ :: _ as requires; _ } : Mir.callback)),
       Some (Types.Function function_type) )
@@ -210,7 +213,7 @@ let find_callee_declaration (context : State.context) frame (invocation : Invoca
             signature,
             Types.combine_substitutions
               (Contracts.make_trait_substitution context.lookups trait
-                 (Facts.substitute_type context frame self_type))
+                 (Encoding.substitute_type context frame self_type))
               (make_callee_substitution frame signature instantiation) ))
         (read path)
   | Capability_method _ | Intrinsic _ | Indirect _ -> None
@@ -267,15 +270,15 @@ let declare_callback_results context frame (function_type : Types.function_type)
       (fun ((mode : Language.Mode.t), input) entry ->
         match mode with
         | Mut ->
-            let input = Facts.substitute_type context frame input in
-            let exit_ = Facts.arrive context frame "changed" input in
+            let input = Encoding.substitute_type context frame input in
+            let exit_ = Encoding.arrive context frame "changed" input in
             Validity.assume_valid context frame input exit_;
             exit_
         | Read | Own -> entry)
       function_type.inputs entries
   in
-  let output = Facts.substitute_type context frame function_type.output in
-  let result = Facts.arrive context frame "result" output in
+  let output = Encoding.substitute_type context frame function_type.output in
+  let result = Encoding.arrive context frame "result" output in
   Validity.assume_valid context frame output result;
   (exits, result)
 
@@ -309,7 +312,7 @@ let check_callback_promises context frame ~location (invocation : Invocation.t)
       assume at_call expected ~entries ~exits ~result;
       List.iter
         (fun (quoted, promise) ->
-          Facts.oblige context at_call location
+          Obligations.oblige context at_call location
             (Callback_promise { promise = quoted; unpromised })
             promise)
         (list_callback_promises context frame invocation passed.position known ~entries ~exits
@@ -364,7 +367,7 @@ let check_callback_requires context frame (site : Invocation.site) through
           in
           List.iter
             (fun (clause : Mir.formula) ->
-              Facts.oblige context frame
+              Obligations.oblige context frame
                 (Facts.locate context frame.source site.origin)
                 (Callback_precondition
                    {
@@ -431,7 +434,8 @@ let add_named_relation context frame (expected : Types.function_type) callee_ter
           Logic.conjunction
             (List.map2
                (fun (_, input) entry ->
-                 Logic.( &&& ) (Facts.make_in_range input entry)
+                 Logic.( &&& )
+                   (Encoding.make_in_range input entry)
                    (Validity.make_validity context frame ~assuming:true input entry))
                expected.inputs entries
             @ read_named_requires context frame clauses ~entries)
@@ -467,7 +471,7 @@ let check_named_callback context (frame : State.frame) (invocation : Invocation.
         in
         List.iter
           (fun (requirement : Mir.formula) ->
-            Facts.oblige context at_call location
+            Obligations.oblige context at_call location
               (Parameter_contract
                  { path; clause = Facts.quote callee_clauses.callee requirement.origin })
               (snd (Validity.read_specification context inside requirement)))

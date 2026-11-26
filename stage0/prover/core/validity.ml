@@ -71,7 +71,7 @@ let note_place (context : State.context) (frame : State.frame) ~node ~origin val
                         Logic.less_equal other_stop other_start;
                       ]
               in
-              Facts.oblige context frame
+              Obligations.oblige context frame
                 (Facts.locate context frame.source origin)
                 (May_alias { first = quote first; second = quote second })
                 apart
@@ -80,81 +80,19 @@ let note_place (context : State.context) (frame : State.frame) ~node ~origin val
   end
 
 let run_as_specification (context : State.context) read =
-  let panics = context.panics and can_declare_panic = context.can_declare_panic in
-  context.panics <- false;
-  context.can_declare_panic <- false;
-  Fun.protect
-    ~finally:(fun () ->
-      context.panics <- panics;
-      context.can_declare_panic <- can_declare_panic)
-    (fun () -> Counters.run_without_counters context read)
+  Obligations.run_with_panics context ~panics:false (fun () ->
+      Counters.run_without_counters context read)
 
 let read_specification (context : State.context) frame (formula : Mir.formula) =
   run_as_specification context (fun () -> context.read_formula frame formula ~arguments:[])
 
 let check_defined context frame ~holds_when (formula : Mir.formula) =
-  Conditions.with_obligation_condition context holds_when (fun () ->
+  Obligations.with_condition context holds_when (fun () ->
       ignore (read_specification context frame formula))
-
-let select_field context ty variant field term =
-  match (term, Facts.find_constructors context ty) with
-  | Logic.Apply (name, arguments), Some shape when name = Facts.make_constructor_symbol ty variant
-    -> (
-      let fields = Option.value (List.assoc_opt variant shape) ~default:[] in
-      match List.find_index (fun (named, _) -> named = field) fields with
-      | Some index when index < List.length arguments -> List.nth arguments index
-      | _ -> Logic.Apply (Facts.make_selector_symbol ty variant field, [ term ]))
-  | _ -> Logic.Apply (Facts.make_selector_symbol ty variant field, [ term ])
-
-let replace_field context ty variant field whole new_value =
-  match Option.bind (Facts.find_constructors context ty) (List.assoc_opt variant) with
-  | Some fields ->
-      Logic.Apply
-        ( Facts.make_constructor_symbol ty variant,
-          List.map
-            (fun (name, _) ->
-              if name = field then new_value else select_field context ty variant name whole)
-            fields )
-  | None -> Facts.raise_unsupported Whole_definition (Fields_of ty)
-
-let find_record_field_type context ty field =
-  match Facts.find_constructors context ty with
-  | Some [ (None, fields) ] -> List.assoc_opt field fields
-  | Some _ | None -> None
-
-let rec find_part context ty term = function
-  | [] -> Some (ty, term)
-  | field :: fields ->
-      Option.bind (find_record_field_type context ty field) (fun field_type ->
-          find_part context field_type (select_field context ty None field term) fields)
-
-let find_root context (frame : State.frame) : Locals.local -> (Types.ty * Logic.term) option =
-  function
-  | Core_local Self -> (
-      match (frame.self_type, frame.self) with Some ty, Some term -> Some (ty, term) | _ -> None)
-  | root -> (
-      match (Facts.find_local_type context frame root, Locals.find_opt root frame.locals) with
-      | Some ty, Some term -> Some (ty, term)
-      | _ -> None)
-
-let find_changed_part context frame (part : State.changed_part) =
-  Option.bind (find_root context frame part.root) (fun (ty, term) ->
-      find_part context ty term part.fields)
-
-let rec replace_part context ty whole fields make_part =
-  match fields with
-  | [] -> Some (make_part ty whole)
-  | field :: fields ->
-      Option.bind (find_record_field_type context ty field) (fun field_type ->
-          Option.map
-            (replace_field context ty None field whole)
-            (replace_part context field_type
-               (select_field context ty None field whole)
-               fields make_part))
 
 let make_type_frame context frame source (ty : Types.ty) ~self =
   let substitution =
-    match Facts.find_visible_type context ty with
+    match Encoding.find_visible_type context ty with
     | Some (_, substitution) -> substitution
     | None -> Types.no_substitution
   in
@@ -237,7 +175,7 @@ let names_private_definition context ~current (clause : Mir.formula) =
 
 let apply_opaque_validity context ty term =
   let symbol = Logic.Symbol.Valid ty in
-  Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Bool));
+  Facts.declare context (Logic.Function (symbol, [ Encoding.declare_sort context ty ], Logic.Bool));
   Logic.Apply (symbol, [ term ])
 
 let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
@@ -251,7 +189,7 @@ let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
     let invariants_hold =
       match find_invariants context ty with
       | _ when not includes_invariants -> Logic.Boolean true
-      | Some _ when Facts.find_constructors context ty = None -> Logic.Boolean true
+      | Some _ when Encoding.find_constructors context ty = None -> Logic.Boolean true
       | Some (source, written) -> (
           let current = find_module context context.current in
           let hidden, shown = List.partition (names_private_definition context ~current) written in
@@ -266,7 +204,7 @@ let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
     let fields =
       if not deep then Logic.Boolean true
       else
-        match Facts.find_constructors context ty with
+        match Encoding.find_constructors context ty with
         | Some shape ->
             Logic.conjunction
               (List.concat_map
@@ -275,13 +213,13 @@ let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
                      (fun (field, field_type) ->
                        let part =
                          make_validity context frame ~assuming ~deep ~seen:(ty :: seen) field_type
-                           (select_field context ty variant field term)
+                           (Encoding.select_field context ty variant field term)
                        in
                        match (variant, part) with
                        | _, Logic.Boolean true -> part
                        | Some name_, _ ->
                            Logic.( ==> )
-                             (Logic.Is (Facts.make_constructor_symbol ty (Some name_), term))
+                             (Logic.Is (Encoding.make_constructor_symbol ty (Some name_), term))
                              part
                        | None, _ -> part)
                      fields)
@@ -293,7 +231,7 @@ let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
 let rec find_parts_in_range context ?(seen = []) ty term =
   if List.exists (Types.equal ty) seen || Option.is_some (find_invariants context ty) then None
   else
-    match Facts.find_constructors context ty with
+    match Encoding.find_constructors context ty with
     | Some shape ->
         let parts =
           List.concat_map
@@ -306,10 +244,10 @@ let rec find_parts_in_range context ?(seen = []) ty term =
                       | _, Logic.Boolean true | None, _ -> part
                       | Some name_, _ ->
                           Logic.( ==> )
-                            (Logic.Is (Facts.make_constructor_symbol ty (Some name_), term))
+                            (Logic.Is (Encoding.make_constructor_symbol ty (Some name_), term))
                             part)
                     (find_parts_in_range context ~seen:(ty :: seen) field_type
-                       (select_field context ty variant field term)))
+                       (Encoding.select_field context ty variant field term)))
                 fields)
             shape
         in
@@ -318,10 +256,10 @@ let rec find_parts_in_range context ?(seen = []) ty term =
         else None
     | None ->
         if
-          Option.is_some (Facts.find_bounds ty)
-          || Option.is_some (Facts.find_float_format ty)
+          Option.is_some (Encoding.find_bounds ty)
+          || Option.is_some (Encoding.find_float_format ty)
           || Types.is_builtin Bool ty || Types.is_builtin Unit ty
-        then Some (Facts.make_in_range ty term)
+        then Some (Encoding.make_in_range ty term)
         else None
 
 let assume_valid ?(includes_invariants = true) context frame ty term =
@@ -335,6 +273,6 @@ let check_valid ?(includes_invariants = true) context (frame : State.frame) loca
     match make_validity context frame ~assuming:false ~deep ~includes_invariants ty term with
     | Logic.Boolean true -> ()
     | valid ->
-        Facts.oblige context frame location (Invariant_may_fail { type_ = ty; moment }) valid;
+        Obligations.oblige context frame location (Invariant_may_fail { type_ = ty; moment }) valid;
         if deep && includes_invariants && frame.makes_obligations then
           note_valid context frame ty term

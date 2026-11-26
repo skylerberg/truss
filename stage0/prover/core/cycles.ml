@@ -63,7 +63,7 @@ let reject_constant_cycle (context : State.context) (frame : State.frame) (code 
     List.iter
       (fun (dependency : Mir.Call_edges.dependency) ->
         if is_in_recursion_group context dependency.path then
-          Facts.oblige context frame (Node dependency.origin)
+          Obligations.oblige context frame (Node dependency.origin)
             (Constant_cycle
                { cyclic = context.node; dependency = make_catalog_dependency dependency })
             (Logic.Boolean false))
@@ -117,7 +117,7 @@ let list_impls_of_required_traits (context : State.context) =
   match Interface.Definition.find_impl_interface context.lookups.interface context.node with
   | Some impl ->
       List.filter_map
-        (fun required -> Option.map fst (Facts.find_impl context required impl.for_type))
+        (fun required -> Option.map fst (Encoding.find_impl context required impl.for_type))
         (Interface.Properties.list_bound_closure context.lookups.interface ~self:impl.for_type
            impl.implements)
   | None -> []
@@ -195,4 +195,5 @@ let list_circular_contracts (context : State.context) frame =
         if List.exists (has_circular_clause lookups group) group then [] else circular
 
 let reject_circular_proof context frame (circular : circular_proof) =
-  Facts.oblige context frame circular.location (Circular_proof circular.proof) (Logic.Boolean false)
+  Obligations.oblige context frame circular.location (Circular_proof circular.proof)
+    (Logic.Boolean false)
