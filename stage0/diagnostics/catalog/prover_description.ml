@@ -612,7 +612,7 @@ let describe_failed_runs failed_runs =
                (describe_stop_sentence stop)))
     failed_runs
 
-let describe_failure = function
+let describe_failure (code : Diagnostic.Code.prover) = function
   | Prover.Refuted -> say " This fails every time the code reaches it."
   | Falsifiable { failed_runs } -> describe_failed_runs failed_runs
   | Undecided { unknown; has_untriggered_fact; failed_runs } ->
@@ -625,7 +625,14 @@ let describe_failure = function
                  " The solver's decision procedures are incomplete for this query, so it stopped \
                   without deciding whether this holds. Z3 gives the reason `%s`."
                  reason)
-        ^ " If the code is correct, a `proof` block or a theorem can lead the solver to the proof."
+        ^ (match code with
+          | Cost ->
+              " A bound that is too small ends this way too, since only a large input exceeds it \
+               and the solver does not search for one. If the bound is right, a `proof` block or a \
+               theorem can lead the solver to the proof."
+          | _ ->
+              " If the code is correct, a `proof` block or a theorem can lead the solver to the \
+               proof.")
         ^
         if has_untriggered_fact then
           " A quantified fact in the query has no trigger, so an `assert` of that fact at the term \
@@ -824,7 +831,7 @@ let describe : Prover.t -> Nodes.description = function
   | Unproven { location; instance; obligation; failure; fixes; withheld; cited = _ } ->
       let code = find_code obligation in
       make code (locate location) ~fixes:(List.map describe_fix fixes)
-        (describe_instance instance @ describe_obligation obligation @ describe_failure failure
+        (describe_instance instance @ describe_obligation obligation @ describe_failure code failure
        @ describe_withheld withheld @ advise_other_ways code)
   | Unreadable { location; construct; foreign } ->
       make Unsupported (locate location)
