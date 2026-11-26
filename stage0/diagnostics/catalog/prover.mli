@@ -24,11 +24,7 @@ type requirement =
   | Elements_mutated
   | Elements_read
   | Ends_with_zero
-  | Elements_at_both_indexes
-  | Length_within_storage
-  | Element_to_pop
   | Element_at_index
-  | Index_within_length
   | Range_within_storage
   | Count_of_array
 

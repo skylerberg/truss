@@ -78,11 +78,7 @@ let show_requirement = function
   | Elements_mutated -> "have the elements it mutates"
   | Elements_read -> "have the elements it reads"
   | Ends_with_zero -> "end with a zero, which it reads up to"
-  | Elements_at_both_indexes -> "have elements at both of its indexes"
-  | Length_within_storage -> "be given a length at most the storage's"
-  | Element_to_pop -> "have an element to pop"
   | Element_at_index -> "have an element at its index"
-  | Index_within_length -> "be given an index at most the storage's length"
   | Range_within_storage -> "be given a range within the storage"
   | Count_of_array -> "have as many elements as the array's count"
 

@@ -84,7 +84,7 @@ let add_restated_clauses (context : State.context) (method_ : trait_method) inst
 let bind_clauses substitution_of (clauses : State.clauses) =
   Types.combine_substitutions (substitution_of clauses) clauses.bindings
 
-let resolve_target (context : State.context) (frame : State.frame) (written : _ Core.target) =
+let rec resolve_target (context : State.context) (frame : State.frame) (written : _ Core.target) =
   let substitute_instantiation (instantiation : Types.instantiation) : Types.instantiation =
     {
       type_arguments = substitute_arguments context frame instantiation.type_arguments;
@@ -173,6 +173,13 @@ let resolve_target (context : State.context) (frame : State.frame) (written : _ 
           capability_method = Some (capability, name);
         }
   | Indirect _ -> Function_value
+  | Intrinsic { operation; type_arguments } when Intrinsic.has_contract operation ->
+      let path = Intrinsic.make_contract_path operation in
+      if Option.is_none (Contracts.find_callee_clauses context path) then
+        Facts.raise_bug "`%s` has no contract in `standard.intrinsic_contracts`"
+          (Intrinsic.show_operation operation);
+      resolve_target context frame
+        (Function { path; instantiation = { type_arguments; capability_arguments = [] } })
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
 
 let resolve context frame written ~lends ~uses =

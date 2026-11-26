@@ -1,0 +1,116 @@
+use standard.intrinsic
+
+public fn storage_empty[Element]() -> intrinsic.Storage[Element]
+  ensures intrinsic.storage_length(result) == 0
+  cost time O(1)
+  cost allocations == 0
+  cost allocated_bytes == 0
+{
+  todo
+}
+
+public fn storage_shorten[Element: Plain](storage: mut intrinsic.Storage[Element], length: UInt64)
+  requires length <= intrinsic.storage_length(storage)
+  ensures intrinsic.storage_capacity(storage) == old(intrinsic.storage_capacity(storage))
+  ensures intrinsic.storage_length(storage) == length
+  ensures forall index in 0..length =>
+    identical(intrinsic.storage_model(storage)[index], old(intrinsic.storage_model(storage))[index])
+  cost time O(1)
+  cost allocations == 0
+  cost allocated_bytes == 0
+{
+  todo
+}
+
+public fn storage_push[Element](storage: mut intrinsic.Storage[Element], value: own Element)
+  requires intrinsic.storage_length(storage) < intrinsic.storage_capacity(storage)
+  ensures intrinsic.storage_capacity(storage) == old(intrinsic.storage_capacity(storage))
+  ensures identical(intrinsic.storage_model(storage), old(intrinsic.storage_model(storage)).append(value))
+  cost time O(1)
+  cost allocations == 0
+  cost allocated_bytes == 0
+{
+  todo
+}
+
+public fn storage_pop[Element](storage: mut intrinsic.Storage[Element]) -> Element
+  requires intrinsic.storage_length(storage) > 0
+  ensures intrinsic.storage_capacity(storage) == old(intrinsic.storage_capacity(storage))
+  ensures identical(old(intrinsic.storage_model(storage)), intrinsic.storage_model(storage).append(result))
+  cost time O(1)
+  cost allocations == 0
+  cost allocated_bytes == 0
+{
+  todo
+}
+
+public fn storage_insert[Element](storage: mut intrinsic.Storage[Element], index: UInt64, value: own Element)
+  requires index <= intrinsic.storage_length(storage)
+  requires intrinsic.storage_length(storage) < intrinsic.storage_capacity(storage)
+  ensures intrinsic.storage_capacity(storage) == old(intrinsic.storage_capacity(storage))
+  ensures intrinsic.storage_length(storage) == old(intrinsic.storage_length(storage)) + 1
+  ensures identical(intrinsic.storage_model(storage)[index], value)
+  ensures forall kept in 0..index =>
+    identical(intrinsic.storage_model(storage)[kept], old(intrinsic.storage_model(storage))[kept])
+  ensures forall moved in index..old(intrinsic.storage_length(storage)) =>
+    identical(intrinsic.storage_model(storage)[moved + 1], old(intrinsic.storage_model(storage))[moved])
+  ensures forall moved in index + 1..intrinsic.storage_length(storage) =>
+    identical(intrinsic.storage_model(storage)[moved], old(intrinsic.storage_model(storage))[moved - 1])
+  ensures forall measure: fn(Element) -> Integer =>
+    intrinsic.storage_model(storage).sum(measure)
+      == old(intrinsic.storage_model(storage)).sum(measure) + measure(value)
+  cost time O(intrinsic.storage_length(storage))
+  cost allocations == 0
+  cost allocated_bytes == 0
+{
+  todo
+}
+
+public fn storage_remove[Element](storage: mut intrinsic.Storage[Element], index: UInt64) -> Element
+  requires index < intrinsic.storage_length(storage)
+  ensures intrinsic.storage_capacity(storage) == old(intrinsic.storage_capacity(storage))
+  ensures intrinsic.storage_length(storage) == old(intrinsic.storage_length(storage)) - 1
+  ensures identical(result, old(intrinsic.storage_model(storage))[index])
+  ensures forall kept in 0..index =>
+    identical(intrinsic.storage_model(storage)[kept], old(intrinsic.storage_model(storage))[kept])
+  ensures forall moved in index..intrinsic.storage_length(storage) =>
+    identical(intrinsic.storage_model(storage)[moved], old(intrinsic.storage_model(storage))[moved + 1])
+  ensures forall measure: fn(Element) -> Integer =>
+    old(intrinsic.storage_model(storage)).sum(measure)
+      == intrinsic.storage_model(storage).sum(measure) + measure(result)
+  cost time O(intrinsic.storage_length(storage))
+  cost allocations == 0
+  cost allocated_bytes == 0
+{
+  todo
+}
+
+public fn storage_swap[Element](storage: mut intrinsic.Storage[Element], first: UInt64, second: UInt64)
+  requires first < intrinsic.storage_length(storage)
+  requires second < intrinsic.storage_length(storage)
+  ensures intrinsic.storage_capacity(storage) == old(intrinsic.storage_capacity(storage))
+  ensures intrinsic.storage_length(storage) == old(intrinsic.storage_length(storage))
+  ensures identical(intrinsic.storage_model(storage)[first], old(intrinsic.storage_model(storage))[second])
+  ensures identical(intrinsic.storage_model(storage)[second], old(intrinsic.storage_model(storage))[first])
+  ensures forall index in 0..intrinsic.storage_length(storage) =>
+    index == first || index == second
+    || identical(intrinsic.storage_model(storage)[index], old(intrinsic.storage_model(storage))[index])
+  ensures forall measure: fn(Element) -> Integer =>
+    intrinsic.storage_model(storage).sum(measure) == old(intrinsic.storage_model(storage)).sum(measure)
+  cost time O(1)
+  cost allocations == 0
+  cost allocated_bytes == 0
+{
+  todo
+}
+
+public fn find_byte(bytes: intrinsic.Storage[UInt8], byte: UInt8) -> UInt64
+  ensures result <= intrinsic.storage_length(bytes)
+  ensures result < intrinsic.storage_length(bytes) ==> identical(intrinsic.storage_model(bytes)[result], byte)
+  ensures forall index in 0..result => !identical(intrinsic.storage_model(bytes)[index], byte)
+  cost time O(result)
+  cost allocations == 0
+  cost allocated_bytes == 0
+{
+  todo
+}

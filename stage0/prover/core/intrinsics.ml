@@ -444,38 +444,12 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
   let all name low high body =
     Logic.forall ([ (name, Logic.Int) ], Logic.(in_interval (Symbol name) low high ==> body))
   in
-  let in_bounds index sequence = in_interval index (Logic.int 0) (length sequence) in
-  let each_sum = make_each_sum context element in
   let read_changed_storage () = storage (List.hd changed) in
-  let assume_swapped before after =
-    let first = read_operand 1 and second = read_operand 2 in
-    require ~requirement:Elements_at_both_indexes
-      Logic.(in_bounds first before &&& in_bounds second before);
-    let limit = make_index_name () in
-    Facts.assume context frame
-      (Logic.conjunction
-         [
-           Logic.equal (length after) (length before);
-           Logic.equal (at after first) (at before second);
-           Logic.equal (at after second) (at before first);
-         ]);
-    Facts.assume context frame
-      (all limit (Logic.int 0) (length before)
-         Logic.(
-           not_ (equal (Symbol limit) first)
-           &&& not_ (equal (Symbol limit) second)
-           ==> equal (at after (Symbol limit)) (at before (Symbol limit))));
-    Facts.assume context frame (each_sum (fun sum _ -> Logic.equal (sum after) (sum before)));
-    known
-  in
   match operation with
   | Storage_model -> storage (read_operand 0)
   | Array_model ->
       let array = read_passed 0 in
       Models.make_array_model context frame array.type_ array.term
-  | Storage_empty ->
-      Facts.assume context frame (Logic.equal (length (storage known)) (Logic.int 0));
-      known
   | Storage_with_capacity ->
       Facts.assume context frame
         Logic.(equal (length (storage known)) (int 0) &&& equal (capacity known) (read_operand 0));
@@ -508,104 +482,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
         (all limit (Logic.int 0) (length before)
            (Logic.equal (at after (Logic.Symbol limit)) (at before (Logic.Symbol limit))));
       known
-  | Storage_shorten ->
-      let shorter = read_operand 1 in
-      let before = storage (read_operand 0) and after = read_changed_storage () in
-      require ~requirement:Length_within_storage (Logic.less_equal shorter (length before));
-      assume_capacity_kept ();
-      let limit = make_index_name () in
-      Facts.assume context frame (Logic.equal (length after) shorter);
-      Facts.assume context frame
-        (all limit (Logic.int 0) shorter
-           (Logic.equal (at after (Logic.Symbol limit)) (at before (Logic.Symbol limit))));
-      known
-  | Storage_push ->
-      let buffer = read_operand 0 in
-      require (Logic.less (length (storage buffer)) (capacity buffer));
-      assume_capacity_kept ();
-      let longer = append_element context frame element (storage buffer) (read_operand 1) in
-      Facts.assume context frame (Logic.equal (read_changed_storage ()) longer);
-      known
-  | Storage_pop ->
-      let buffer = read_operand 0 in
-      require ~requirement:Element_to_pop (Logic.greater (length (storage buffer)) (Logic.int 0));
-      assume_capacity_kept ();
-      let longer = append_element context frame element (read_changed_storage ()) known in
-      Facts.assume context frame (Logic.equal (storage buffer) longer);
-      known
-  | Storage_insert ->
-      let buffer = read_operand 0 and index = read_operand 1 and value = read_operand 2 in
-      let before = storage buffer and after = read_changed_storage () in
-      require ~requirement:Index_within_length
-        Logic.(less_equal (int 0) index &&& less_equal index (length before));
-      require (Logic.less (length before) (capacity buffer));
-      assume_capacity_kept ();
-      let limit = make_index_name () in
-      Facts.assume context frame
-        (Logic.conjunction
-           [
-             Logic.equal (length after) (Logic.add (length before) (Logic.int 1));
-             Logic.equal (at after index) value;
-           ]);
-      Facts.assume context frame
-        (all limit (Logic.int 0) index
-           (Logic.equal (at after (Logic.Symbol limit)) (at before (Logic.Symbol limit))));
-      let limit = make_index_name () in
-      Facts.assume context frame
-        (all limit index (length before)
-           (Logic.equal
-              (at after (Logic.add (Logic.Symbol limit) (Logic.int 1)))
-              (at before (Logic.Symbol limit))));
-      let limit = make_index_name () in
-      Facts.assume context frame
-        (all limit
-           (Logic.add index (Logic.int 1))
-           (length after)
-           (Logic.equal (at after (Logic.Symbol limit))
-              (at before (Logic.subtract (Logic.Symbol limit) (Logic.int 1)))));
-      Facts.assume context frame
-        (each_sum (fun sum measure ->
-             Logic.equal (sum after) (Logic.add (sum before) (measure value))));
-      known
-  | Storage_remove ->
-      let index = read_operand 1 in
-      assume_capacity_kept ();
-      let before = storage (read_operand 0) and after = read_changed_storage () in
-      require_element context frame site element index before;
-      let limit = make_index_name () in
-      Facts.assume context frame
-        (Logic.conjunction
-           [
-             Logic.equal (length after) (Logic.subtract (length before) (Logic.int 1));
-             Logic.equal known (at before index);
-           ]);
-      Facts.assume context frame
-        (all limit (Logic.int 0) index
-           (Logic.equal (at after (Logic.Symbol limit)) (at before (Logic.Symbol limit))));
-      let limit = make_index_name () in
-      Facts.assume context frame
-        (all limit index (length after)
-           (Logic.equal (at after (Logic.Symbol limit))
-              (at before (Logic.add (Logic.Symbol limit) (Logic.int 1)))));
-      Facts.assume context frame
-        (each_sum (fun sum measure ->
-             Logic.equal (sum before) (Logic.add (sum after) (measure known))));
-      known
-  | Storage_swap ->
-      assume_capacity_kept ();
-      assume_swapped (storage (read_operand 0)) (read_changed_storage ())
   | Compare_bytes -> make_byte_order context (storage (read_operand 0)) (storage (read_operand 1))
-  | Find_byte ->
-      let bytes = storage (read_operand 0) and byte = read_operand 1 in
-      let limit = make_index_name () in
-      Facts.assume context frame
-        Logic.(
-          less_equal (int 0) known
-          &&& less_equal known (length bytes)
-          &&& (less known (length bytes) ==> equal (at bytes known) byte));
-      Facts.assume context frame
-        (all limit (Logic.int 0) known Logic.(not_ (equal (at bytes (Symbol limit)) byte)));
-      known
   | Storage_range ->
       let start = read_operand 1 and stop = read_operand 2 in
       let whole = storage (read_operand 0) and part = storage known in
@@ -641,6 +518,10 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
               &&& (greater length (int 0) ==> greater_equal known (int 1)));
           known
       | None -> known)
+  | Storage_empty | Storage_shorten | Storage_push | Storage_pop | Storage_insert | Storage_remove
+  | Storage_swap | Find_byte ->
+      Facts.raise_bug "`%s`, whose semantics is its contract, read as a term"
+        (Intrinsic.show_operation (Buffer operation))
   | Storage_from_array ->
       let array = read_passed 0 in
       let elements = make_buffer_model context Storage element known in

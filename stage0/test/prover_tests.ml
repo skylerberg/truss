@@ -4259,7 +4259,12 @@ let () =
       expect_proven_in_standard Fixtures.Prover.storage_read_at_a_checked_index);
   Harness.test "a storage is popped only when it holds an element" (fun () ->
       expect_not_proven_in_standard Fixtures.Prover.storage_popped_without_a_length
-        "prover.requires");
+        "prover.requires" ~says:"for this call to `storage_pop`"
+        ~fixed:
+          ( "fn last(storage: mut intrinsic.Storage[UInt8]) -> UInt8 {",
+            "fn last(storage: mut intrinsic.Storage[UInt8]) -> UInt8\n\
+            \  requires intrinsic.storage_length(storage) > 0\n\
+             {" ));
   Harness.test "a view is ranged only within its length" (fun () ->
       expect_not_proven_in_standard Fixtures.Prover.view_ranged_past_its_end "prover.requires")
 
