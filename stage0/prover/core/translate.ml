@@ -29,6 +29,16 @@ let make_outcome (query : Query.t) =
     evaluation = None;
   }
 
+let merge_outcomes (outcomes : Obligation.outcome list) : Obligation.outcome =
+  {
+    obligations =
+      List.concat_map (fun (outcome : Obligation.outcome) -> outcome.obligations) outcomes;
+    holes =
+      List.sort_uniq compare
+        (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
+    evaluation = None;
+  }
+
 let note_entry (frame : State.frame) term ~name =
   match term with
   | Logic.Symbol symbol -> { frame with entry = (symbol, name) :: frame.entry }
@@ -73,6 +83,13 @@ let make_empty_frame (environment : State.environment) (query : Query.t) source 
     spent = [];
     conditional_counters = [];
   }
+
+let start_proof ?blocked_holders ?proven_laws (lookups : Lookups.t) (source : State.source) ~current
+    =
+  make_empty_frame
+    (make_environment lookups ?blocked_holders ?proven_laws ~home:source.key ~current
+       ~terminates:false ~measures:[] ~inherits_precondition:false)
+    (Query.create ()) source
 
 let is_capability_implementation (lookups : Lookups.t) (path : Path.t) =
   match path with
@@ -501,17 +518,12 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
   (make_outcome query, Conditions.list_undecided query)
 
 let find_circular_proof (lookups : Lookups.t) (source : State.source) ~path =
-  let query = Query.create () in
-  let environment =
-    make_environment lookups ~home:source.key ~current:path ~terminates:false ~measures:[]
-      ~inherits_precondition:false
-  in
-  let start = make_empty_frame environment query source in
+  let start = start_proof lookups source ~current:path in
   match Cycles.list_circular_proofs start with
   | [] -> None
   | circular ->
       List.iter (Cycles.reject_circular_proof start) circular;
-      Some (make_outcome query)
+      Some (make_outcome start.query)
 
 let translate_function ?(substitution = Types.no_substitution) (lookups : Lookups.t)
     (source : State.source) ~path =
@@ -541,24 +553,11 @@ let translate_function ?(substitution = Types.no_substitution) (lookups : Lookup
            @ find_capability_condition (Built_in Panic)
            @ skipped))
   in
-  {
-    Obligation.obligations =
-      List.concat_map (fun (outcome : Obligation.outcome) -> outcome.obligations) outcomes;
-    holes =
-      List.sort_uniq compare
-        (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
-    evaluation = None;
-  }
+  merge_outcomes outcomes
 
 let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~proofs ~at
     =
-  let home = source.key in
-  let query = Query.create () in
-  let environment =
-    make_environment lookups ~home ~current:impl ~terminates:false ~measures:[]
-      ~inherits_precondition:false ~proven_laws:(trait, for_type)
-  in
-  let start = make_empty_frame environment query source in
+  let start = start_proof lookups source ~current:impl ~proven_laws:(trait, for_type) in
   let substitution = Contracts.make_trait_substitution lookups trait for_type in
   List.iter
     (fun (law_source, (law : Mir.law)) ->
@@ -625,8 +624,8 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
         let _, holds = Validity.read_specification inside law.states in
         Obligations.oblige start at (Law_may_fail { trait; law = law.name; for_type }) holds
       end)
-    (Laws.list_laws environment trait.trait);
-  make_outcome query
+    (Laws.list_laws start.environment trait.trait);
+  make_outcome start.query
 
 let prove_restated_method (start : State.frame) ~at ~impl_interface ~trait ~for_type
     (restated : Types.restated_method) (clauses : State.clauses) =
@@ -813,12 +812,7 @@ let prove_restated_method (start : State.frame) ~at ~impl_interface ~trait ~for_
 let translate_restated_clauses (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type
     ~at =
   run_blocking @@ fun ?blocked_holders () ->
-  let home = source.key in
-  let query = Query.create () in
-  let environment =
-    make_environment lookups ?blocked_holders ~home ~current:impl ~terminates:false ~measures:[]
-      ~inherits_precondition:false
-  in
+  let start = start_proof lookups source ~current:impl ?blocked_holders in
   let impl_interface = Interface.Definition.read_impl_interface lookups.interface impl in
   List.iter
     (fun (restated : Types.restated_method) ->
@@ -832,20 +826,13 @@ let translate_restated_clauses (lookups : Lookups.t) (source : State.source) ~im
       in
       match Contracts.find_declared_clauses lookups path with
       | Some clauses ->
-          prove_restated_method
-            (make_empty_frame environment query source)
-            ~at ~impl_interface ~trait ~for_type restated clauses
+          prove_restated_method start ~at ~impl_interface ~trait ~for_type restated clauses
       | None -> Facts.raise_bug "the restated method `%s` has no contract" (Path.show path))
     (Interface.Definition.read_trait_interface lookups.interface trait.trait).restated;
-  make_outcome query
+  make_outcome start.query
 
 let translate_type (lookups : Lookups.t) (source : State.source) ~path =
-  let home = source.key in
-  let query = Query.create () in
-  let environment =
-    make_environment lookups ~home ~current:path ~terminates:false ~measures:[]
-      ~inherits_precondition:false
-  in
+  let start = start_proof lookups source ~current:path in
   (match Mir.read_type_clauses lookups.mir path with
   | Some { form = { invariants; potential }; _ } -> (
       let ty =
@@ -854,7 +841,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
             Types.Named { path; arguments = Types.list_generic_arguments interface.type_generics }
         | _ -> Facts.raise_bug "%s is not a type" (Path.show path)
       in
-      let start = { (make_empty_frame environment query source) with self_type = Some ty } in
+      let start = { start with self_type = Some ty } in
       (match Mir.read_defaults lookups.mir path with
       | Some { form = Field_defaults defaults; _ } ->
           List.iter
@@ -885,26 +872,22 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
                 (Logic.less_equal (Logic.int 0) potential_term))
             potential)
   | None -> ());
-  make_outcome query
+  make_outcome start.query
 
 let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
-  let home = source.key in
-  let query = Query.create () in
-  let environment =
-    make_environment lookups ~home ~current:path ~terminates:false ~measures:[]
-      ~inherits_precondition:false
-  in
+  let start = start_proof lookups source ~current:path in
   match Mir.read_initializer lookups.mir path with
   | Some { form = code; _ } ->
-      let frame = make_empty_frame environment query source in
+      let frame = start in
       Cycles.reject_constant_cycle frame code;
       ignore
         (Lambdas.run_code frame code
-           ~type_:(Interface.Definition.read_constant_type environment.lookups.interface path));
+           ~type_:(Interface.Definition.read_constant_type start.environment.lookups.interface path));
       {
-        (make_outcome query) with
+        (make_outcome start.query) with
         evaluation =
-          (if Cycles.is_evaluated_constant environment path code then Some (Constant_value path)
+          (if Cycles.is_evaluated_constant start.environment path code then
+             Some (Constant_value path)
            else None);
       }
   | None -> Facts.raise_bug "the constant `%s` has no MIR" (Path.show path)
