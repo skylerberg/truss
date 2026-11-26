@@ -291,10 +291,14 @@ let find_measure_condition (clauses : Core.loop_clause Core.conditional list) =
       | Core.Invariant _ | Core.Cost _ -> None)
     clauses
 
+let has_integer_distance (type_ : Types.ty) =
+  type_ = Types.Integer || Types.is_integer_type type_ || Types.is_builtin Character type_
+
 let rec has_implicit_measure (condition : Core.expression) =
   match condition.kind with
   | Compare { comparison = Less | Less_equal | Greater | Greater_equal; left; right } ->
-      is_functional (fun visit -> walk_expression visit left)
+      has_integer_distance left.type_ && has_integer_distance right.type_
+      && is_functional (fun visit -> walk_expression visit left)
       && is_functional (fun visit -> walk_expression visit right)
   | Connective { connective = And; left; _ } -> has_implicit_measure left
   | _ -> false
