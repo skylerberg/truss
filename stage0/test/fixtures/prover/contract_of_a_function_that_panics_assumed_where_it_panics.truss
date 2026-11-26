@@ -1,0 +1,17 @@
+fn checked(number: UInt64) -> UInt64
+  uses Panic unless number > 0
+  ensures number == 0 ==> result == 1
+  ensures number == 0 ==> result == 2
+{
+  if number == 0 {
+    Panic.crash("zero")
+  } else {
+    number
+  }
+}
+
+fn before(number: UInt64) -> UInt64
+  requires number > 0 ==> checked(number) == checked(number)
+{
+  number - 1
+}

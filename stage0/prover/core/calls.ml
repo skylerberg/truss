@@ -285,10 +285,15 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
   in
   let assume_ensures (base : State.frame) (after : State.frame) ~changed ~applied ~result ~final
       is_kept =
+    let returned_without_its_axiom (clauses : State.clauses) =
+      clauses.panics_unless <> [] && Obligations.may_panic context
+    in
     let is_in_axiom (clauses : State.clauses) (clause : Mir.formula) =
       match applied with
       | Some (application : Contract_axioms.application) ->
-          application.is_limited || Contract_axioms.states context application clauses clause
+          application.is_limited
+          || Contract_axioms.states context application clauses clause
+             && not (returned_without_its_axiom clauses)
       | None -> false
     in
     let state term =
