@@ -58,3 +58,4 @@ val list_assumed_laws : lookups -> Path.t -> assumed_laws list
 val list_assumed_paths : lookups -> Path.t -> Path.t list
 val resolve_node : lookups -> Path.t -> Types.substitution -> Path.t
 val list_path_edges : lookups -> Path.t -> Path.t list
+val has_abort_site : lookups -> Path.t -> bool

@@ -27,6 +27,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       returns = [];
       enclosing_provides = [];
       instantiating = [];
+      is_specification = false;
       callees_whose_requires_are_read = [];
       query = Query.create ();
       axioms = Contract_axioms.make_state ();

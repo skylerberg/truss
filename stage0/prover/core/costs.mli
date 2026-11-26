@@ -19,6 +19,7 @@ val is_same_resource : Mir.cost -> locals:Logic.term Locals.t -> counter -> bool
 val list_stated_bounds :
   Types.cost list -> Language.Metric.t -> amortized:bool -> Types.cost_bound list
 
+val states_no_allocation : Types.cost list -> bool
 val find_stated_operand : Types.cost list -> Language.Metric.t -> Logic.term option
 val bound : Logic.term -> Logic.term
 val units : Logic.term -> Logic.term

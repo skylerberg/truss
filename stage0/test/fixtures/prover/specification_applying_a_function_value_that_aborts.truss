@@ -1,0 +1,22 @@
+fn never(count: UInt64) -> UInt64
+  ensures result == 5
+  ensures result == 6
+{
+  let long = "ab".repeated(9223372036854775807)
+  long.length() + count
+}
+
+fn apply(read: (fn(count: UInt64) -> UInt64 ensures result == 5 ensures result == 6), other: UInt64) -> UInt64
+  ensures result == other
+{
+  proof {
+    assert read(0) == 5 && other == 7
+  }
+  7
+}
+
+fn exploit(other: UInt64) -> UInt64
+  ensures result == other
+{
+  apply(never, other: other)
+}

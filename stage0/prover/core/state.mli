@@ -192,6 +192,7 @@ type context = {
   mutable returns : function_exit list;
   mutable enclosing_provides : Mir.provided list list;
   mutable instantiating : (Path.t * int) list;
+  mutable is_specification : bool;
   mutable callees_whose_requires_are_read : Path.t list;
   query : Query.t;
   axioms : axiom_state;

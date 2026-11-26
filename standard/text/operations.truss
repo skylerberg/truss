@@ -1070,7 +1070,7 @@ public fn String.split_whitespace(self) -> List[view String]
 }
 
 public fn String.split_once(self, separator: String) -> Option[core.Pair[view String, view String]]
-  ensures (result is Some(_)) == self.contains(separator)
+  ensures (result is Some(_)) == (self.find(separator) is Some(_))
   cost time O(self.length() + separator.length())
 {
   match self.find(separator) {

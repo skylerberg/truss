@@ -74,6 +74,19 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
     (definition : Callee.definition) (contract : State.contract) (values : State.passed list)
     ~recursive_callee =
   let path = definition.path and type_arguments = definition.type_arguments in
+  let may_abort =
+    (context : State.context).lookups.may_abort path
+    || Option.is_some definition.trait_method
+       && Path.equal path definition.declaration
+       && not
+            (Costs.states_no_allocation
+               (match Contracts.read_signature context definition.declaration with
+               | Some signature -> signature.costs
+               | None -> []))
+  in
+  let is_unspecified_application =
+    may_abort && ((frame : State.frame).is_ghost || context.is_specification)
+  in
   let substitution_of = definition.substitution_of in
   let keep_holding_clauses clauses =
     Conditions.keep_holding context ~substitution:(substitution_of clauses) clauses
@@ -232,7 +245,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
       | Some application -> application.term
       | None -> Encoding.arrive context after "result" result_type
     in
-    Validity.assume_valid context after result_type result;
+    if not is_unspecified_application then Validity.assume_valid context after result_type result;
     (applied, result)
   in
   let assume_changed_validity (after : State.frame) ~changed ~left_valid =
@@ -277,9 +290,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
     end
   in
   let returns_where_its_condition_holds =
-    not
-      (Conditions.may_panic_for_every_value context.lookups ~current:context.current
-         ~condition:context.condition callee.uses)
+    (not may_abort)
+    && not
+         (Conditions.may_panic_for_every_value context.lookups ~current:context.current
+            ~condition:context.condition callee.uses)
   in
   let state_axiom (after : State.frame) applied =
     if returns_where_its_condition_holds then
@@ -355,13 +369,17 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
   assume_changed_validity after ~changed ~left_valid:None;
   run_instantiating (fun () ->
       state_axiom after applied;
-      match contract.result_kind with
-      | `Lends ->
-          let assume = assume_ensures frame after ~changed ~applied ~result ~final:(Some result) in
-          assume Lending.holds_where_lent;
-          assume (fun clause -> not (Lending.holds_where_lent clause))
-      | `Returns -> assume_ensures frame after ~changed ~applied ~result ~final:None (fun _ -> true));
-  assume_hypotheses after applied;
+      if not is_unspecified_application then
+        match contract.result_kind with
+        | `Lends ->
+            let assume =
+              assume_ensures frame after ~changed ~applied ~result ~final:(Some result)
+            in
+            assume Lending.holds_where_lent;
+            assume (fun clause -> not (Lending.holds_where_lent clause))
+        | `Returns ->
+            assume_ensures frame after ~changed ~applied ~result ~final:None (fun _ -> true));
+  if not is_unspecified_application then assume_hypotheses after applied;
   match (contract.result_kind, callee.lends) with
   | `Lends, Some Language.Mode.Mut ->
       havoc.end_writes after;
@@ -519,14 +537,20 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
           end
           else Encoding.arrive context frame "result" result_type
         in
-        Validity.assume_valid context frame result_type result;
+        let is_unspecified_application =
+          (frame.is_ghost || context.is_specification)
+          && not (Costs.states_no_allocation function_type.costs)
+        in
+        if not is_unspecified_application then
+          Validity.assume_valid context frame result_type result;
         let frame =
           Amounts.spend_indirect_call context ~before ~after:frame ~location function_type called
             values ~changed:(List.rev havoc.written) ~result_type:declared_result_type ~result
         in
-        Callbacks.assume_returned context frame function_type called ~entries
-          ~exits:(List.map (find_written havoc) values)
-          ~result;
+        if not is_unspecified_application then
+          Callbacks.assume_returned context frame function_type called ~entries
+            ~exits:(List.map (find_written havoc) values)
+            ~result;
         List.iter
           (fun (passed : State.passed) ->
             Option.iter

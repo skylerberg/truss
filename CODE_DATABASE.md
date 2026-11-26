@@ -101,7 +101,8 @@ Each table's key is the definition's id. `state` is `value`, `failed`, or
 `blocked`. A fact that a pass reads by a path alone, with no module and
 ordinal, is keyed by the id of the path, which `definition.path` holds:
 `type_facts`, `constant_value`, `derived_interface`, `generated_mir`,
-`call_node`, `recursion_group`, and `proof_group`. Such a fact is in the
+`call_node`, `recursion_group`, `proof_group`, `aborts_outside_group`, and
+`may_abort`. Such a fact is in the
 database of the package that declares the definition. A method written on a
 type of another package is an error, and its path names the other package,
 so a read by path that finds no row there reads the project's database.
@@ -124,6 +125,8 @@ generated_mir   (definition, state, body, contract)
 call_node       (definition, state, kind, callees)
 recursion_group (definition, state, representative, members)
 proof_group     (definition, state, representative, members)
+aborts_outside_group (definition, state, value)
+may_abort            (definition, state, value)
 usage_check     (definition, state)
 ownership       (definition, state, must_be_disjoint)
 proof           (definition, state, value)
@@ -245,13 +248,14 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Generate MIR | Derived method | `Infer.derive_form` | Interfaces and contracts | `generated_mir` |
 | List calls | Definition, with the supplied methods | `Mir.Call_edges.list_path_edges`, `Mir.Call_edges.list_assumed_paths` | MIR and interfaces | `call_node`, `calls` and `assumes` edges |
 | Group recursion | The definitions whose `calls` or `assumes` edges changed, and their groups | Strongly connected components, once over the `calls` edges and once over both | The definitions that both reach and are reached by a changed one, and the edges among them | `recursion_group`, `proof_group` |
+| Find aborts | Path, a definition's callees before it | Whether the definition's MIR holds a call of `intrinsic.crash` or of an intrinsic that allocates, or one of its callees outside its recursion group may abort. Once the members of a group are computed, whether any of them does, written for each member. | The definition's MIR, its `call_node`, its `recursion_group`, and its callees' `may_abort` | `aborts_outside_group`, `may_abort` |
 | Check bodies | Definition | `Usage.check`, `Ownership.check` | The body's tables and `uses_run_forever`, the definition's `recursion_group`, its MIR, and its ownership modes | `usage_check`, `ownership` |
 | Check an impl, a type | Definition | `Package_checks.run` with `Sealed`, `Impl`, or `Type` | Interfaces | Diagnostics |
 | Check an instantiation | Generic function or method, with the other stale units of the drain | `Package_checks.find_growing_cycles`, then `Package_checks.run` with `Instantiation` | The `instantiates` edges of its body and of each body that those edges reach, each read once for the drain | Diagnostics |
 | Check a test | Test | `Package_checks.run` with `Test` | The tests of its package that have its name | Diagnostics |
 | Check unexported | Function, method, constant, or member constant, with the other stale units of the drain | `Package_checks.classify_uses`, then `Package_checks.run` with `Unexported` | The `references` edges into the definition, one user at a time, and the declaration of each user | Diagnostics |
 | Check a dependency | Dependency | `Package_checks.run` with `Dependency` | Whether a body of the package references the dependency | `dependency_use` |
-| Prove | Definition | `Prover.prove` | MIR, contracts, `ownership`, `recursion_group`, `proof_group` | `proof`, `hole`, `claims` edges to the items of its evaluations |
+| Prove | Definition | `Prover.prove` | MIR, contracts, `ownership`, `recursion_group`, `proof_group`, its callees' `may_abort` | `proof`, `hole`, `claims` edges to the items of its evaluations |
 | Decide | Definition | `Prover.pose`, the solver, `Prover.list_states` | The proof, the results of running its evaluations, and the outputs of the unit's own runs of Z3 | `verdict`, `solver_run` |
 | Lower | Item | `Lowering.lower`, `Lowering.check_calls` | MIR and interfaces; the callees of the item's definition and of each callee | `lowered`, `references` edges to the items its code names |
 | Key tests | Item, with the items of its reference cycle | `Lowering.derive_test_keys` | `lowered`, and the test keys of the items it references | `test_key` |

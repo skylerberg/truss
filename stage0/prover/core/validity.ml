@@ -80,8 +80,13 @@ let note_place (context : State.context) (frame : State.frame) ~node ~origin val
   end
 
 let run_as_specification (context : State.context) read =
-  Obligations.run_with_panics context ~panics:false (fun () ->
-      Counters.run_without_counters context read)
+  let was_specification = context.is_specification in
+  context.is_specification <- true;
+  Fun.protect
+    ~finally:(fun () -> context.is_specification <- was_specification)
+    (fun () ->
+      Obligations.run_with_panics context ~panics:false (fun () ->
+          Counters.run_without_counters context read))
 
 let read_specification (context : State.context) frame (formula : Mir.formula) =
   run_as_specification context (fun () -> context.read_formula frame formula ~arguments:[])

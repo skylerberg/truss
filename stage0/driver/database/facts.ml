@@ -219,6 +219,15 @@ let make_group ~table target : Path.t list Tracker.fact =
 let recursion_group = make_group ~table:"recursion_group" Recursion_group
 let proof_group = make_group ~table:"proof_group" Proof_group
 
+let make_abort_fact ~table target : bool Tracker.fact =
+  Tracker.make_fact ~stage:Find_aborts ~table ~id_column:"path" ~fixed:[]
+    ~groups:[ (target, [ "value" ]) ]
+    ~encode:(fun value -> [ Integer (Bool.to_int value) ])
+    ~decode:(fun cells -> decode_boolean cells.(0))
+
+let aborts_outside_group = make_abort_fact ~table:"aborts_outside_group" Aborts_outside_group
+let may_abort = make_abort_fact ~table:"may_abort" May_abort
+
 let proof : Prover.proof Tracker.fact =
   make_marshaled ~stage:Prove ~table:"proof" ~id_column:"definition" Proof
 

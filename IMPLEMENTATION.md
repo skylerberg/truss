@@ -187,6 +187,19 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `uses Panic unless C` says that `C` rules a panic out, not that a return
   implies `C`.
 
+  A definition that may abort returns for no argument that the prover
+  knows of, so it has no axiom, and a call of it in a specification or a
+  proof assumes neither its `ensures` nor that its result is valid. It may
+  abort where its code, or a callee's, holds a call of `intrinsic.crash` or
+  of an intrinsic that allocates. That is the fact `may_abort` of the call
+  graph, which the code database computes for a definition from its own
+  code and its callees' facts, and once for the members of a recursion
+  group. A method called through a trait bound and a function value have
+  no code to read, so each may abort unless the trait or the function's
+  type states `cost allocations == 0`, which every `impl` and every
+  function passed then proves. A scalar result keeps its range, since a
+  value in range exists for every argument.
+
   An `impl`'s method refines its trait's method: the trait's `requires`
   imply the method's own, and the trait's `ensures` are proven of the
   method's body under the trait's `requires`. A function value passed for a

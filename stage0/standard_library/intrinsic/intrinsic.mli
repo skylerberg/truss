@@ -95,5 +95,6 @@ val operations : operation list
 val show_operation : operation -> string
 val make_operation_path : operation -> Path.t
 val has_contract : operation -> bool
+val may_abort : operation -> bool
 val make_contract_path : operation -> Path.t
 val find_operation : Path.t -> operation option
