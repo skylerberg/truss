@@ -436,6 +436,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
               shape = Other;
               origin = None;
               passed_place = Some cursor_access;
+              is_step_self = false;
               type_ = cursor_type;
               declared_type = cursor_type;
               term = cursor;
@@ -466,7 +467,9 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
         advance =
           (fun (frame : State.frame) ->
             let now = cursor_access.read after in
-            { (cursor_access.write frame now) with spent = after.spent });
+            let advanced, end_write = cursor_access.write frame ~is_valid:true now in
+            end_write advanced;
+            { advanced with spent = after.spent });
       })
 
 let run_for_loop context frame (for_loop : for_loop) =

@@ -491,6 +491,12 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       Facts.assume context frame (Logic.equal (capacity (List.hd changed)) room);
       known
   | Storage_lengthen ->
+      if
+        Option.is_none (Types.find_integer_bits element)
+        && Option.is_none (Facts.find_float_format element)
+      then
+        Facts.raise_bug "`storage_lengthen` over `%s`, which has bit patterns that are no value"
+          (Types.show element);
       let buffer = read_operand 0 and by = read_operand 1 in
       let before = storage buffer and after = read_changed_storage () in
       require (Logic.less_equal (Logic.add (length before) by) (capacity buffer));
@@ -617,7 +623,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       let built =
         Logic.Apply (Facts.make_constructor_symbol result_type None, [ read_operand 0 ])
       in
-      Lambdas.check_valid context frame
+      Validity.check_valid context frame
         (Facts.locate context frame.source site.origin)
         result_type built ~deep:false ~moment:Built_here;
       built

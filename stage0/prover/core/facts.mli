@@ -83,10 +83,6 @@ val is_equality_identity : State.context -> ?seen:Types.ty list -> Types.ty -> b
 val make_in_range : Types.ty -> Logic.term -> Logic.term
 val run_once : State.context -> State.stated -> (unit -> unit) -> unit
 val arrive : State.context -> State.frame -> string -> Types.ty -> Logic.term
-
-val read_or_arrive :
-  State.context -> State.frame -> string -> Types.ty -> (State.frame -> Logic.term) -> Logic.term
-
 val bind : State.frame -> Locals.key -> Types.ty -> Logic.term -> State.frame
 
 val list_definition_bounds :

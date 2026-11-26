@@ -2296,6 +2296,22 @@ let () =
       expect_not_proven Fixtures.Prover.span_low_raised_through_a_lend "prover.invariant");
   Harness.test "an element mutated through a lend that keeps its invariant proves" (fun () ->
       expect_proven Fixtures.Prover.span_high_raised_through_a_lend);
+  Harness.test "an element meets its invariant when a step on it returns" (fun () ->
+      expect_not_proven Fixtures.Prover.step_on_a_list_element_breaking_its_invariant
+        "prover.invariant";
+      expect_not_proven Fixtures.Prover.step_on_the_element_of_a_loop_breaking_its_invariant
+        "prover.invariant");
+  Harness.test "a value that a step left breaking its invariant is checked when it is passed"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.value_passed_to_a_call_after_a_step_broke_its_invariant
+        "prover.invariant");
+  Harness.test "a step on an element that restores its invariant proves" (fun () ->
+      expect_proven Fixtures.Prover.step_on_a_list_element_restoring_its_invariant);
+  Harness.test "an element's invariant is proven from the ensures of a call that changes a part"
+    (fun () ->
+      expect_proven Fixtures.Prover.call_changing_a_part_of_a_list_element_within_its_invariant;
+      expect_not_proven Fixtures.Prover.call_changing_a_part_of_a_list_element_past_its_invariant
+        "prover.invariant");
   Harness.test "a lent part meets its invariant" (fun () ->
       let packages = Support.setup [ ("app.main", Fixtures.Prover.positive_lent_by_a_source) ] in
       let messages =
@@ -4235,6 +4251,20 @@ let () =
              (fun (obligation : Prover.Obligation.t) -> obligation.has_untriggered_written_fact)
              obligations)
       then Harness.fail "no obligation names the fact");
+  Harness.test "a call in an ensures poses no query for an invariant that the return proved"
+    (fun () ->
+      let obligations =
+        list_obligations
+          Fixtures.Prover.ensures_calling_a_predicate_on_a_mut_parameter_with_an_invariant
+      in
+      if
+        List.exists
+          (fun (obligation : Prover.Obligation.t) ->
+            match obligation.obligation with
+            | Invariant_may_fail { moment = When_passed _; _ } -> true
+            | _ -> false)
+          obligations
+      then Harness.fail "the argument's invariant is posed again");
   Harness.test "an untriggered fact of the standard library is not named" (fun () ->
       let obligations = list_obligations Fixtures.Prover.list_index_from_a_map in
       if

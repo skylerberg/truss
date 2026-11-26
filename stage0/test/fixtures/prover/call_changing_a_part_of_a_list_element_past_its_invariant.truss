@@ -1,0 +1,14 @@
+public type Span(low: UInt8, high: UInt8)
+  invariant low <= high
+
+fn raise(value: mut UInt8)
+  ensures value == 255
+{
+  value = 255
+}
+
+public fn raise_first(spans: mut List[Span])
+  requires spans.length() > 0
+{
+  raise(mut spans[0].low)
+}

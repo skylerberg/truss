@@ -152,6 +152,13 @@ develop as well as make it easier to bootstrap the compiler in parts.
   which `Mir.Call_edges` lists: a callee's contract, a type's invariant, and
   the laws of an `impl`. `Laws` assumes no law of an `impl` in the proof
   group of the definition being proven.
+- **`Validity` decides each check of an invariant.** Every moment that
+  obliges one calls `Validity.check_valid`, which first asks its record of
+  the values already shown valid, so a value is proven once. A write
+  through a passed place returns the end of the write, and the call ends it
+  after its postconditions: an element is checked there, and a step's
+  `self` is a value not known to be valid until then. Its state is one
+  record, `context.validity`.
 - **The solver keeps Z3 running.** `Solver` starts one `z3 -in` process for
   each domain that solves, gives each query to an idle process, and sends
   `(reset)` after the answer, so a query costs no launch. A process that was

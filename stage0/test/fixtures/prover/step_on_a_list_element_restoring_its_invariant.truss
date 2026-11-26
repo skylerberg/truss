@@ -1,0 +1,15 @@
+public type Span(low: UInt8, high: UInt8)
+  invariant low <= high
+
+fn Span.reset(mut self)
+  ensures self.low == 0 && self.high == 0
+{
+  self.low = 0
+  self.high = 0
+}
+
+public fn reset_first(spans: mut List[Span])
+  requires spans.length() > 0
+{
+  mut spans[0].reset()
+}

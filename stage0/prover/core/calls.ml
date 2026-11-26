@@ -87,21 +87,21 @@ let name_term context ty term =
         Facts.add_fact context (Logic.equal named term));
     named
 
-let calls_update_step (context : State.context) (invocation : Invocation.t) =
-  match invocation.callee with
-  | Function { path; _ } -> (
-      match Contracts.read_signature context path with
-      | Some signature -> signature.is_update_step
-      | None -> false)
-  | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
+type havoc = {
+  after : State.frame;
+  written : (int * Logic.term) list;
+  end_writes : State.frame -> unit;
+}
 
-let havoc_mut context (frame : State.frame) (values : State.passed list) ~is_update_step
-    ~list_modified =
+let find_written havoc (passed : State.passed) =
+  Option.value (List.assoc_opt passed.position havoc.written) ~default:passed.term
+
+let havoc_mut context (frame : State.frame) (values : State.passed list) ~list_modified =
   List.fold_left
-    (fun (frame : State.frame) (passed : State.passed) ->
+    (fun havoc (passed : State.passed) ->
+      let frame = havoc.after in
       match (passed.mode, passed.passed_place) with
       | Language.Mode.Mut, Some place ->
-          if is_update_step && passed.position = 0 then place.note_changed_in_place ();
           let arrive ty = Facts.arrive context frame "changed" ty in
           let changed =
             Option.bind (list_modified passed.position) (fun parts ->
@@ -115,9 +115,19 @@ let havoc_mut context (frame : State.frame) (values : State.passed list) ~is_upd
                             else arrive part_type)))
                   (Some passed.term) parts)
           in
-          place.write frame (match changed with Some term -> term | None -> arrive passed.type_)
-      | _ -> frame)
-    frame values
+          let term = match changed with Some term -> term | None -> arrive passed.type_ in
+          let after, end_write = place.write frame ~is_valid:(not passed.is_step_self) term in
+          {
+            after;
+            written = (passed.position, term) :: havoc.written;
+            end_writes =
+              (fun ended ->
+                havoc.end_writes ended;
+                end_write ended);
+          }
+      | _ -> havoc)
+    { after = frame; written = []; end_writes = ignore }
+    values
 
 let add_restated_clauses (context : State.context) ~self_type ~bind trait name receiver
     (contract : State.contract) =
@@ -295,25 +305,14 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
              snd (Validity.read_specification context (read_entry_frame clauses) requirement))
            (Facts.list_clauses clauses.requires))
   in
-  let after =
-    havoc_mut context frame values
-      ~is_update_step:(calls_update_step context invocation)
-      ~list_modified:(Contracts.list_modified_parts context path)
+  let havoc =
+    havoc_mut context frame values ~list_modified:(Contracts.list_modified_parts context path)
   in
+  let after = havoc.after and changed = List.rev havoc.written in
   let in_quantifier = is_logic_call && frame.binders <> [] in
   let state term =
     if in_quantifier then Facts.add_frame_fact context after term
     else Facts.assume context after term
-  in
-  let changed =
-    List.filter_map
-      (fun (passed : State.passed) ->
-        match (passed.mode, passed.passed_place) with
-        | Language.Mode.Mut, Some place ->
-            Some
-              (passed.position, Facts.read_or_arrive context after "changed" passed.type_ place.read)
-        | _ -> None)
-      values
   in
   let callee_bindings = list_bindings callee_clauses in
   let callee_arguments = List.filter_map snd callee_bindings in
@@ -373,11 +372,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let check_left () =
     match left_valid with
     | Some (_, leave) ->
-        Lambdas.check_valid context after location result_type (leave result) ~deep:true
+        Validity.check_valid context after location result_type (leave result) ~deep:true
           ~moment:When_lend_ends
     | None -> ()
   in
-  let is_update_step = calls_update_step context invocation in
   List.iter
     (fun (passed : State.passed) ->
       if passed.mode = Language.Mode.Mut then
@@ -385,8 +383,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         | Some term ->
             let valid =
               Validity.make_validity context after ~assuming:true
-                ~includes_invariants:(not (is_update_step && passed.position = 0))
-                passed.type_ term
+                ~includes_invariants:(not passed.is_step_self) passed.type_ term
             in
             Facts.assume context after
               (match left_valid with Some (left, _) -> Logic.( ==> ) left valid | None -> valid)
@@ -490,6 +487,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       ~is_recursive:(Option.is_some recursive_callee) ~bind_frame:(fun clauses ->
         { (read_entry_frame clauses) with result = Some result; condition = after.condition })
   in
+  havoc.end_writes after;
   (after, Option.value !definition ~default:result)
 
 type modelled =
@@ -525,19 +523,16 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     values;
   let declared_result_type = Facts.substitute_declared_type context frame site.type_ in
   let result_type = Types.erase_views declared_result_type in
-  let is_update_step = calls_update_step context invocation in
   (match invocation.callee with
   | Intrinsic _ -> ()
   | _ ->
       List.iter
         (fun (passed : State.passed) ->
-          Lambdas.check_valid context frame location passed.type_ passed.term ~deep:true
-            ~includes_invariants:(not (is_update_step && passed.position = 0))
+          Validity.check_valid context frame location passed.type_ passed.term ~deep:true
+            ~includes_invariants:(not passed.is_step_self)
             ~moment:(When_passed { at = location; callee = None }))
         values);
-  let havoc_whole_arguments frame =
-    havoc_mut context frame values ~is_update_step ~list_modified:(fun _ -> None)
-  in
+  let havoc_whole_arguments frame = havoc_mut context frame values ~list_modified:(fun _ -> None) in
   let list_arguments (type_arguments : Types.argument list) =
     List.map
       (fun argument ->
@@ -583,11 +578,11 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           (call_contract ~recursive_callee ~lent_final:leave_lent context frame site invocation path
              contract values ~substitution_of ~type_arguments)
     | None ->
-        let frame =
-          havoc_mut context frame values ~is_update_step
-            ~list_modified:(Contracts.list_modified_parts context path)
+        let havoc =
+          havoc_mut context frame values ~list_modified:(Contracts.list_modified_parts context path)
         in
-        let frame = Amounts.spend_call_without_a_contract context frame invocation values in
+        let frame = Amounts.spend_call_without_a_contract context havoc.after invocation values in
+        havoc.end_writes frame;
         Without_contract (Some (frame, Facts.arrive context frame "result" result_type))
   in
   let modelled =
@@ -673,7 +668,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     | Indirect () ->
         Laws.check_callback_requires context frame site through values;
         let before = frame in
-        let frame = havoc_whole_arguments frame in
+        let havoc = havoc_whole_arguments frame in
+        let frame = havoc.after in
         let result =
           match through with
           | Some (Types.Function function_type, callee_term, _)
@@ -689,20 +685,13 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         Validity.assume_valid context frame result_type result;
         let frame =
           Amounts.spend_indirect_call context ~before ~after:frame ~location through values
-            ~result_type:declared_result_type ~result
+            ~changed:(List.rev havoc.written) ~result_type:declared_result_type ~result
         in
         (match through with
         | Some (Types.Function function_type, callee_term, shape)
           when List.length function_type.inputs = List.length values -> (
             let entries = List.map (fun (passed : State.passed) -> passed.term) values in
-            let exits =
-              List.map
-                (fun (passed : State.passed) ->
-                  match (passed.mode, passed.passed_place) with
-                  | Language.Mode.Mut, Some place -> place.read frame
-                  | _ -> passed.term)
-                values
-            in
+            let exits = List.map (find_written havoc) values in
             Facts.assume context frame
               (Lambdas.make_callback_ensures context function_type callee_term ~entries ~exits
                  ~result);
@@ -713,32 +702,24 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         | _ -> ());
         List.iter
           (fun (passed : State.passed) ->
-            match (passed.mode, passed.passed_place) with
-            | Language.Mode.Mut, Some place -> (
-                try Validity.assume_valid context frame passed.type_ (place.read frame)
-                with Facts.Unsupported _ -> ())
-            | _ -> ())
+            Option.iter
+              (Validity.assume_valid context frame passed.type_)
+              (List.assoc_opt passed.position havoc.written))
           values;
+        havoc.end_writes frame;
         Without_contract (Some (frame, result))
     | Capability_method { capability; name } ->
         with_contract
           (Path.make_capability_method capability name)
           (Contracts.find_capability_contract context capability name)
     | Intrinsic { operation; type_arguments } ->
-        let frame =
+        let havoc =
           match operation with
-          | Lend _ -> frame
+          | Lend _ -> { after = frame; written = []; end_writes = ignore }
           | Scalar _ | Buffer _ | Runtime _ -> havoc_whole_arguments frame
         in
-        let changed =
-          List.map
-            (fun (passed : State.passed) ->
-              match (passed.mode, passed.passed_place) with
-              | Language.Mode.Mut, Some place ->
-                  Facts.read_or_arrive context frame "changed" passed.type_ place.read
-              | _ -> passed.term)
-            values
-        in
+        let frame = havoc.after in
+        let changed = List.map (find_written havoc) values in
         let types =
           List.filter_map
             (function Types.Type ty -> Some (Facts.substitute_type context frame ty) | _ -> None)
@@ -752,6 +733,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           Amounts.spend_intrinsic context frame invocation operation values ~changed
             ~result_type:declared_result_type ~result
         in
+        havoc.end_writes frame;
         Without_contract (Some (frame, result))
   in
   match modelled with

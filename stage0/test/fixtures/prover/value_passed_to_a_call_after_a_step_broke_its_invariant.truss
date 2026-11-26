@@ -1,0 +1,17 @@
+public type Span(low: UInt8, high: UInt8)
+  invariant low <= high
+
+fn Span.break_it(mut self) {
+  self.low = 100
+  self.high = 0
+}
+
+public fn Span.width(self) -> UInt8 {
+  self.high - self.low
+}
+
+public fn width_after_a_step() -> UInt8 {
+  var span = Span(low: 0, high: 1)
+  mut span.break_it()
+  span.width()
+}

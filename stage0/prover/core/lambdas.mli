@@ -17,17 +17,6 @@ val apply_callback_ensures : State.context -> Types.function_type -> Logic.term 
 val make_parameter_symbols :
   State.context -> State.frame -> Types.function_type -> ('a Logic.Symbol.t * Logic.sort) list
 
-val check_valid :
-  ?includes_invariants:bool ->
-  State.context ->
-  State.frame ->
-  Obligation.location ->
-  Types.ty ->
-  Logic.term ->
-  deep:bool ->
-  moment:Catalog.Prover.invariant_moment ->
-  unit
-
 val remove_temporaries : 'a Locals.t -> 'a Locals.t
 
 val run_lambda_body :
