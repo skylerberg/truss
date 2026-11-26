@@ -12,6 +12,12 @@ let find_signature : Logic.symbol -> (Logic.sort list * Logic.sort) option = fun
   | Sequence_range element ->
       let sequence = Encoding.sort_of (Encoding.make_sequence_type element) in
       Some ([ sequence; Int; Int ], sequence)
+  | Function { callee; type_arguments = [ Type element ] }
+    when Path.equal callee (Well_known.make_method_path Sequence_length) ->
+      Some ([ Encoding.sort_of (Encoding.make_sequence_type element) ], Int)
+  | Function { callee; type_arguments = [ Type element ] }
+    when Path.equal callee (Well_known.make_method_path Sequence_sum) ->
+      Some ([ Encoding.sort_of (Encoding.make_sequence_type element); Function_sort 1 ], Int)
   | Compare_bytes_order ->
       let bytes = Encoding.sort_of (Encoding.make_sequence_type (Types.make_builtin UInt8)) in
       Some ([ bytes; bytes ], Int)

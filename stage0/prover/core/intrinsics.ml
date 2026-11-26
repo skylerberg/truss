@@ -14,7 +14,7 @@ let make_sequence_range (environment : State.environment) query element sequence
       and high_term = Logic.Symbol high
       and position_term = Logic.Symbol position in
       let range = range_of whole_term low_term high_term in
-      let length = Models.make_sequence_length query element in
+      let length = Models.make_sequence_length element in
       let count = Logic.subtract high_term low_term in
       let is_within =
         Logic.(
@@ -74,7 +74,7 @@ let apply_range (context : State.context) (frame : State.frame) ~node (site : In
       | Some model -> model
       | None -> Facts.raise_unsupported location (Range_of base_type)
   in
-  let length = Models.make_sequence_length context.query element model in
+  let length = Models.make_sequence_length element model in
   let is_whole =
     match (low, high) with Logic.Integer start, None -> Z.equal start Z.zero | _ -> false
   in
@@ -117,7 +117,7 @@ let index_element (environment : State.environment) query element term index =
   | None -> Facts.raise_unsupported Whole_definition Sequence_elements
 
 let assume_unchanged_outside (frame : State.frame) element ~before ~after ~start ~stop =
-  let length sequence = Models.make_sequence_length frame.query element sequence in
+  let length sequence = Models.make_sequence_length element sequence in
   let at = index_element frame.environment frame.query element in
   let limit = Query.make_fresh_name frame.query "index" in
   let index = Logic.Symbol limit in
@@ -174,7 +174,7 @@ let call_libc (frame : State.frame) ~(site : Invocation.site) (function_ : Libc.
       condition
   in
   let make_element_type scalar = Types.make_builtin (Intrinsic.convert_libc_scalar scalar) in
-  let length element sequence = Models.make_sequence_length frame.query element sequence in
+  let length element sequence = Models.make_sequence_length element sequence in
   List.iteri
     (fun position (_, passes) ->
       match (passes, List.nth_opt operands position, List.nth_opt changed position) with
@@ -233,19 +233,11 @@ let measure_type element : Types.function_type =
     costs = [];
   }
 
-let make_sequence_sum query element term measure =
+let make_sequence_sum element term measure =
   let symbol =
     Logic.Symbol.Function
       { callee = Well_known.make_method_path Sequence_sum; type_arguments = [ Types.Type element ] }
   in
-  Query.declare query
-    (Logic.Function
-       ( symbol,
-         [
-           Encoding.sort_of (Encoding.make_sequence_type element);
-           Encoding.sort_of (Types.Function (measure_type element));
-         ],
-         Logic.Int ));
   Logic.Apply (symbol, [ term; measure ])
 
 let make_each_sum query element relation =
@@ -253,7 +245,7 @@ let make_each_sum query element relation =
   Logic.forall
     ( [ (measure, Encoding.sort_of (Types.Function (measure_type element))) ],
       relation
-        (fun sequence -> make_sequence_sum query element sequence (Logic.Symbol measure))
+        (fun sequence -> make_sequence_sum element sequence (Logic.Symbol measure))
         (fun value ->
           Callbacks.apply_function (measure_type element) (Logic.Symbol measure) [ value ]) )
 
@@ -261,8 +253,7 @@ let make_empty_sequence (frame : State.frame) element =
   let empty =
     Facts.declare_fresh frame "parts" (Encoding.sort_of (Encoding.make_sequence_type element))
   in
-  Facts.assume frame
-    (Logic.equal (Models.make_sequence_length frame.query element empty) (Logic.int 0));
+  Facts.assume frame (Logic.equal (Models.make_sequence_length element empty) (Logic.int 0));
   Facts.assume frame
     (make_each_sum frame.query element (fun sum _ -> Logic.equal (sum empty) (Logic.int 0)));
   empty
@@ -271,11 +262,11 @@ let append_element (frame : State.frame) element shorter appended =
   let longer =
     Facts.declare_fresh frame "parts" (Encoding.sort_of (Encoding.make_sequence_type element))
   in
-  let length = Models.make_sequence_length frame.query element shorter in
+  let length = Models.make_sequence_length element shorter in
   Facts.assume frame
     Logic.(
       greater_equal length (int 0)
-      &&& equal (Models.make_sequence_length frame.query element longer) (add length (int 1)));
+      &&& equal (Models.make_sequence_length element longer) (add length (int 1)));
   (match
      (Models.index_sequence frame.environment frame.query element longer length, frame.bound)
    with
@@ -299,9 +290,9 @@ let append_element (frame : State.frame) element shorter appended =
     (Logic.forall
        ( [ (measure, Encoding.sort_of (Types.Function (measure_type element))) ],
          Logic.equal
-           (make_sequence_sum frame.query element longer (Logic.Symbol measure))
+           (make_sequence_sum element longer (Logic.Symbol measure))
            (Logic.add
-              (make_sequence_sum frame.query element shorter (Logic.Symbol measure))
+              (make_sequence_sum element shorter (Logic.Symbol measure))
               (Callbacks.apply_function (measure_type element) (Logic.Symbol measure) [ appended ]))
        ));
   longer
@@ -321,8 +312,7 @@ let make_length_in_range value =
 
 let model_buffer (frame : State.frame) (builtin : Language.Builtin_type.t) element term =
   let sequence = make_buffer_model builtin element term in
-  Facts.assume frame
-    (make_length_in_range (Models.make_sequence_length frame.query element sequence));
+  Facts.assume frame (make_length_in_range (Models.make_sequence_length element sequence));
   sequence
 
 let model_storage (frame : State.frame) element term =
@@ -330,7 +320,7 @@ let model_storage (frame : State.frame) element term =
   let capacity = make_buffer_capacity element term in
   Facts.assume frame
     Logic.(
-      less_equal (Models.make_sequence_length frame.query element sequence) capacity
+      less_equal (Models.make_sequence_length element sequence) capacity
       &&& make_length_in_range capacity);
   sequence
 
@@ -353,7 +343,7 @@ let translate_buffer_operation (context : State.context) (frame : State.frame)
           position
   in
   let read_operand position = (read_passed position).term in
-  let length sequence = Models.make_sequence_length context.query element sequence in
+  let length sequence = Models.make_sequence_length element sequence in
   let capacity term = make_buffer_capacity element term in
   let storage = model_storage frame element in
   let require ?(requirement = Catalog.Prover.Room_written) condition =
@@ -420,8 +410,7 @@ let translate_buffer_operation (context : State.context) (frame : State.frame)
       match find_scalar_bytes element with
       | Some bytes ->
           let length =
-            Models.make_sequence_length context.query element
-              (make_buffer_model Storage element (read_operand 0))
+            Models.make_sequence_length element (make_buffer_model Storage element (read_operand 0))
           in
           Facts.assume frame
             Logic.(
@@ -444,7 +433,7 @@ let translate_lend (frame : State.frame) ~(site : Invocation.site) (lend : Intri
         require_precondition frame site Element_at_index
           Logic.(
             less_equal (int 0) index.term
-            &&& less index.term (Models.make_sequence_length frame.query element sequence))
+            &&& less index.term (Models.make_sequence_length element sequence))
       in
       index_element frame.environment frame.query element sequence index.term
   | _ ->
@@ -481,7 +470,7 @@ let translate_runtime (context : State.context) (frame : State.frame) ~(site : I
   | Environment_entry ->
       let byte = Types.make_builtin UInt8 in
       let model = make_buffer_model Storage byte (Lazy.force known) in
-      let length = Models.make_sequence_length context.query byte model in
+      let length = Models.make_sequence_length byte model in
       (match
          Models.index_sequence context.environment context.query byte model
            (Logic.Symbol (Query.make_variable "entry.index"))
@@ -536,7 +525,7 @@ let translate_intrinsic (context : State.context) (frame : State.frame) ~(site :
       translate_runtime context frame ~site runtime values ~changed result_type known
 
 let replace_element (frame : State.frame) element ~before ~after index part =
-  let length sequence = Models.make_sequence_length frame.query element sequence in
+  let length sequence = Models.make_sequence_length element sequence in
   let at = index_element frame.environment frame.query element in
   let limit = Query.make_fresh_name frame.query "index" in
   Facts.assume frame
@@ -598,9 +587,7 @@ let read_sequence_element (context : State.context) (frame : State.frame) (seque
   let element = find_sequence_element frame sequence in
   let model = find_sequence_model context frame sequence term in
   let is_in_bounds =
-    Logic.(
-      less_equal (int 0) index
-      &&& less index (Models.make_sequence_length context.query element model))
+    Logic.(less_equal (int 0) index &&& less index (Models.make_sequence_length element model))
   in
   oblige_in_bounds frame ~origin is_in_bounds;
   Validity.note_place context frame ~node ~origin (One index);
@@ -679,8 +666,8 @@ let replace_elements (context : State.context) (frame : State.frame) (sequence :
   let keep_length ~before ~after =
     Facts.assume frame
       (Logic.equal
-         (Models.make_sequence_length context.query element after)
-         (Models.make_sequence_length context.query element before))
+         (Models.make_sequence_length element after)
+         (Models.make_sequence_length element before))
   in
   if Types.is_builtin Storage sequence then begin
     let after = Encoding.arrive frame "changed" sequence in

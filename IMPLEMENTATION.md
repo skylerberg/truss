@@ -449,7 +449,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
   a declaration, a bound variable, a constructor or a field names. It
   rejects a written declaration of a derived symbol, so each symbol has one
   source of its signature. A symbol that names a definition or a fresh
-  value is declared by the module that makes it. The axioms of a derived
+  value is declared by the module that makes it, except the length and the
+  sum of a sequence, which the prover itself builds: `Signatures` gives
+  their signatures, and `Contract_axioms.declare_function` checks a call of
+  them against it. The axioms of a derived
   symbol that are a function of the symbol are in `Signatures.list_axioms`:
   `Logic.prune` adds them for each derived symbol that the query names, so
   an axiom is in a query exactly where its symbol is.

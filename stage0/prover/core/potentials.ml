@@ -61,8 +61,7 @@ let make_potential_measure (context : State.context) element =
   term
 
 let sum_element_potentials (context : State.context) element sequence =
-  Intrinsics.make_sequence_sum context.query element sequence
-    (make_potential_measure context element)
+  Intrinsics.make_sequence_sum element sequence (make_potential_measure context element)
 
 let choose_by_variant ty term shape compute_variant =
   match shape with
@@ -185,7 +184,7 @@ and compute_potential (context : State.context) (frame : State.frame) ?(seen = [
           | Some { kind; element; model_of } ->
               let sequence = model_of term in
               let slack = Intrinsics.make_buffer_slack ty term in
-              let length = Models.make_sequence_length context.query element sequence in
+              let length = Models.make_sequence_length element sequence in
               Facts.add_axiom frame
                 Logic.(less_equal (int 0) slack &&& less_equal slack (multiply (int 2) length));
               (match (ty, kind) with

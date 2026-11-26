@@ -41,7 +41,7 @@ val apply_range :
 val make_buffer_capacity : Types.ty -> Logic.term -> Logic.term
 val make_buffer_model : Language.Builtin_type.t -> Types.ty -> Logic.term -> Logic.term
 val measure_type : Types.ty -> Types.function_type
-val make_sequence_sum : Query.t -> Types.ty -> Logic.term -> Logic.term -> Logic.term
+val make_sequence_sum : Types.ty -> Logic.term -> Logic.term -> Logic.term
 val make_empty_sequence : State.frame -> Types.ty -> Logic.term
 val append_element : State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
 

@@ -11,7 +11,7 @@ val run_under_binder :
   (State.frame -> 'read) ->
   State.frame * 'read * (Logic.term -> Logic.term)
 
-val make_sequence_length : Query.t -> Types.ty -> Logic.term -> Logic.term
+val make_sequence_length : Types.ty -> Logic.term -> Logic.term
 
 val index_sequence :
   State.environment -> Query.t -> Types.ty -> Logic.term -> Logic.term -> Logic.term option
