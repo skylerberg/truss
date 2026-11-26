@@ -485,7 +485,8 @@ let translate_lambda context (frame : State.frame) ~(site : Invocation.site)
     (frame, term)
   else read_lambda context frame ~site written ~stated
 
-let make_passed_values context frame (callee : Callee.t) (arguments : State.call_argument list) =
+let make_passed_values context frame ~at (callee : Callee.t) (arguments : State.call_argument list)
+    =
   let values =
     List.filter_map
       (function
@@ -496,7 +497,9 @@ let make_passed_values context frame (callee : Callee.t) (arguments : State.call
   snd
     (List.fold_left_map
        (fun known -> function
-         | State.Value_argument passed -> (known, passed)
+         | State.Value_argument passed ->
+             Callbacks.check_passed context frame ~at callee passed ~arguments:known;
+             (known, passed)
          | Lambda_argument { position; mode; site; lambda = written } ->
              let _, term =
                translate_lambda context frame ~site written
@@ -506,7 +509,6 @@ let make_passed_values context frame (callee : Callee.t) (arguments : State.call
                {
                  State.position;
                  mode;
-                 shape = Lambda;
                  origin = Some site.origin;
                  passed_place = None;
                  is_step_self = false;

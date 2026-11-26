@@ -89,7 +89,6 @@ type function_use = Passed_for_parameter | Used_as_value of Types.ty
 type unpromised =
   | Nothing_promises
   | Type_may_not_promise of string
-  | Type_promises_nothing of string
   | Ensures_may_not_promise of Path.t
 
 type obligation =

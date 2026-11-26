@@ -55,6 +55,10 @@ let merge context ?value_type ~condition
     | [] -> Facts.raise_bug "a value that no path gives"
   in
   let define prefix sort (values : (Logic.term * State.frame * Logic.term) list) =
+    (match values with
+    | (_, _, term) :: rest when List.exists (fun (_, _, other) -> other <> term) rest ->
+        List.iter (fun (_, frame, merged) -> Callbacks.check_read context frame merged) values
+    | _ -> ());
     match values with
     | (_, _, term) :: rest
       when List.for_all (fun (_, _, other) -> other == term || other = term) rest ->

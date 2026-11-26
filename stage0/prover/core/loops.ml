@@ -408,7 +408,6 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
             {
               position = 0;
               mode = Language.Mode.Mut;
-              shape = Other;
               origin = None;
               passed_place = Some cursor_access;
               is_step_self = false;

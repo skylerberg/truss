@@ -1794,6 +1794,18 @@ let () =
            ( "  requires x > 0\n  ensures result == Eager().tag(x)",
              "  requires x > 0 ==> Eager().tag(x) == Eager().tag(x)\n  ensures result > 0" ))
         [ "prover.ensures" ]);
+  let held = Fixtures.Prover.named_function_held_in_a_local_then_passed in
+  Harness.test "a function value keeps its contract where a local holds it" (fun () ->
+      expect_proven held;
+      expect_codes
+        (Support.apply_edit held ("  ensures result == 1\n{\n  1", "  ensures result <= 1\n{\n  1"))
+        [ "prover.ensures" ]);
+  Harness.test "a callback chosen by a condition is known as neither choice" (fun () ->
+      expect_codes Fixtures.Prover.callback_chosen_by_a_condition [ "prover.ensures" ]);
+  Harness.test "a callback with a requires that a condition chooses accepts every argument"
+    (fun () ->
+      expect_codes Fixtures.Prover.callback_with_a_requires_chosen_by_a_condition
+        [ "prover.requires" ]);
   let nested = Fixtures.Prover.generic_impl_contract_read_at_a_nested_type in
   Harness.test "a generic impl's ensures are read inside their own at a smaller type" (fun () ->
       expect_proven nested;
@@ -2491,9 +2503,12 @@ let () =
 
 let () =
   Harness.test "a function with a requires bound to a local must accept every argument" (fun () ->
-      expect_not_proven Fixtures.Prover.below_three_bound_to_a_local "prover.requires");
+      expect_codes Fixtures.Prover.below_three_bound_to_a_local
+        [ "prover.requires"; "prover.requires" ]);
   Harness.test "a function with a requires passed through a local must accept every argument"
-    (fun () -> expect_not_proven Fixtures.Prover.below_one_passed_through_a_local "prover.requires");
+    (fun () ->
+      expect_codes Fixtures.Prover.below_one_passed_through_a_local
+        [ "prover.requires"; "prover.requires" ]);
   Harness.test "a callback's requires names a mut parameter as the caller passed it" (fun () ->
       expect_not_proven Fixtures.Prover.callback_requires_naming_a_mut_limit "prover.requires");
   Harness.test "a forwarded callback must be promised its requires" (fun () ->
@@ -2511,7 +2526,8 @@ let () =
   Harness.test "a lambda returns a valid value" (fun () ->
       expect_not_proven Fixtures.Prover.apply_of_a_positive_lambda "prover.invariant");
   Harness.test "a callback with a requires bound to a local must accept every argument" (fun () ->
-      expect_not_proven Fixtures.Prover.callback_with_a_requires_bound_to_a_local "prover.requires")
+      expect_codes Fixtures.Prover.callback_with_a_requires_bound_to_a_local
+        [ "prover.requires"; "prover.requires" ])
 
 let () =
   Harness.test "a callee relies on its callback type's ensures, which a lambda proves" (fun () ->

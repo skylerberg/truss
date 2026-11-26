@@ -542,8 +542,6 @@ let describe_obligation = function
           | Nothing_promises -> "and nothing promises it of the function passed here."
           | Type_may_not_promise name ->
               Printf.sprintf "and the type of `%s` may not promise it." name
-          | Type_promises_nothing name ->
-              Printf.sprintf "and the type of `%s` promises nothing of its results." name
           | Ensures_may_not_promise path ->
               Printf.sprintf "and the `ensures` of `%s` may not promise it." (Path.show path));
       ]

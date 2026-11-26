@@ -1,0 +1,15 @@
+fn apply(measure: (fn(index: UInt64) -> UInt64 ensures result == 1)) -> UInt64
+  ensures result == 1
+{
+  measure(0)
+}
+
+fn pick(
+  flag: Bool,
+  visit: (fn(index: UInt64) -> UInt64 ensures result == 1),
+  other: fn(UInt64) -> UInt64,
+) -> UInt64
+  ensures result == 1
+{
+  apply(if flag { visit } else { other })
+}

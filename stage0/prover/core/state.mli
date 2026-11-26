@@ -61,7 +61,6 @@ type passed_place = {
 type passed = {
   position : int;
   mode : Language.Mode.t;
-  shape : Invocation.shape;
   origin : Core.origin option;
   passed_place : passed_place option;
   is_step_self : bool;
@@ -155,8 +154,18 @@ type validity_state = {
   valid_values : (Types.ty * Logic.term) list Tables.Term_table.t;
 }
 
+type known_function =
+  | Named of {
+      path : Path.t;
+      contract : contract;
+      substitution_of : clauses -> Types.substitution;
+      type_arguments : Types.argument list;
+      group_member : Path.t option;
+    }
+  | Own of { name : string; callback : Mir.callback }
+
 type callback_state = {
-  mutable own : (Core.local * string * Mir.callback) list;
+  mutable known : (Logic.term * (Types.function_type * known_function)) list;
   mutable is_reading : bool;
 }
 

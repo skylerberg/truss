@@ -20,4 +20,9 @@ val translate_lambda :
   State.frame * Logic.term
 
 val make_passed_values :
-  State.context -> State.frame -> Callee.t -> State.call_argument list -> State.passed list
+  State.context ->
+  State.frame ->
+  at:Core.origin ->
+  Callee.t ->
+  State.call_argument list ->
+  State.passed list
