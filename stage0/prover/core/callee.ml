@@ -23,8 +23,8 @@ type target =
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
 
 type t = {
-  written : unit Core.target;
   target : target;
+  group_member : Path.t option;
   lends : Language.Mode.t option;
   uses : Types.capability_set;
 }
@@ -81,7 +81,7 @@ let add_restated_clauses (context : State.context) (method_ : trait_method) inst
            ~self_type:method_.self_type method_.trait.trait method_.name method_.receiver);
   }
 
-let resolve_target (context : State.context) (frame : State.frame) (written : unit Core.target) =
+let resolve_target (context : State.context) (frame : State.frame) (written : _ Core.target) =
   let substitute_instantiation (instantiation : Types.instantiation) : Types.instantiation =
     {
       type_arguments = substitute_arguments context frame instantiation.type_arguments;
@@ -168,11 +168,16 @@ let resolve_target (context : State.context) (frame : State.frame) (written : un
           trait_method = None;
           capability_method = Some (capability, name);
         }
-  | Indirect () -> Function_value
+  | Indirect _ -> Function_value
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
 
 let resolve context frame written ~lends ~uses =
-  { written; target = resolve_target context frame written; lends; uses }
+  {
+    target = resolve_target context frame written;
+    group_member = Cycles.find_group_member context frame written;
+    lends;
+    uses;
+  }
 
 let is_update_step context (callee : t) =
   match callee.target with

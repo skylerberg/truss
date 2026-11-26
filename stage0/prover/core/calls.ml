@@ -280,8 +280,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
     Option.iter
       (fun application ->
         Contract_axioms.state context after application contract ~substitution_of ~result_type
-          ~group_member:(Cycles.find_group_member context frame callee.written)
-          ~is_on_bound_values)
+          ~group_member:callee.group_member ~is_on_bound_values)
       applied
   in
   let assume_ensures (base : State.frame) (after : State.frame) ~changed ~applied ~result ~final
@@ -432,7 +431,9 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
             ~moment:(When_passed { at = location; callee = None }))
         values);
   let havoc_whole_arguments frame = havoc_mut context frame values ~list_modified:(fun _ -> None) in
-  let recursive_callee = Termination.find_recursive_callee context frame location callee.written in
+  let recursive_callee =
+    Termination.find_recursive_callee context frame location callee.group_member
+  in
   let call_definition (definition : Callee.definition) =
     match definition.contract with
     | Some contract ->

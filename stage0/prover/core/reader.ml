@@ -17,18 +17,8 @@ type run = {
   mutable cancelled : (Mir.task * branch_exit list ref) list;
 }
 
-let resolve_target context frame (target : _ Core.target) ~lends ~uses =
-  Callee.resolve context frame ~lends ~uses
-    (match target with
-    | Function { path; instantiation } -> Function { path; instantiation }
-    | Trait_method { trait; name; receiver; self_type; instantiation; evidence } ->
-        Trait_method { trait; name; receiver; self_type; instantiation; evidence }
-    | Capability_method { capability; name } -> Capability_method { capability; name }
-    | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
-    | Indirect _ -> Indirect ())
-
 let resolve_callee context frame (callee : Mir.callee) ~lends =
-  resolve_target context frame callee.target ~lends ~uses:callee.uses
+  Callee.resolve context frame callee.target ~lends ~uses:callee.uses
 
 let find_declared_fields context ty variant =
   match Encoding.find_visible_type context ty with
@@ -751,7 +741,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Specification (Method_cost { metric; method_ }) ->
       ( frame,
         Amounts.compute_method_cost context frame metric
-          (resolve_target context frame method_ ~lends:None ~uses:Types.no_capabilities) )
+          (Callee.resolve context frame method_ ~lends:None ~uses:Types.no_capabilities) )
   | Specification (Map entries) ->
       Values.apply_map_literal context frame ~ty ~location
         (List.map

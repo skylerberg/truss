@@ -399,7 +399,9 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       before)
     ~receive:(fun head before ->
       let cursor = cursor_access.read head in
-      let recursive_callee = Termination.find_recursive_callee context head location next.written in
+      let recursive_callee =
+        Termination.find_recursive_callee context head location next.group_member
+      in
       let ({ frame = after; result = pulled; _ } : Calls.applied) =
         Calls.call_contract ~recursive_callee context head pulling next definition contract
           [

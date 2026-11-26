@@ -122,14 +122,14 @@ let find_induction_premise context (clauses : State.clauses) ~is_self_call ~call
   | Smaller_measures smaller | Smaller_part { smaller; _ } -> Some smaller
   | Unmeasured | Uncompared -> None
 
-let find_recursive_callee (context : State.context) (frame : State.frame) location callee =
+let find_recursive_callee (context : State.context) (frame : State.frame) location group_member =
   let reject target impl =
     Obligations.oblige context frame location
       (Recursion_through_impl { call = { at = location; callee = Some target }; impl })
       (Logic.Boolean false);
     None
   in
-  match Cycles.find_group_member context frame callee with
+  match group_member with
   | Some target when frame.makes_obligations -> (
       match context.lookups.mir.find_form_origin target with
       | Some (Derived _, _) when context.termination.terminates -> reject target Derives

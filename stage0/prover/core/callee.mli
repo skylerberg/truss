@@ -23,8 +23,8 @@ type target =
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
 
 type t = {
-  written : unit Core.target;
   target : target;
+  group_member : Path.t option;
   lends : Language.Mode.t option;
   uses : Types.capability_set;
 }
@@ -32,7 +32,7 @@ type t = {
 val resolve :
   State.context ->
   State.frame ->
-  unit Core.target ->
+  'operand Core.target ->
   lends:Language.Mode.t option ->
   uses:Types.capability_set ->
   t
