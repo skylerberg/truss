@@ -41,6 +41,8 @@ val read_ensures :
   result:Logic.term ->
   (Catalog.Prover.quoted * Logic.term) list
 
+val specify_known : State.known_function -> State.frame -> Specification.t
+
 val read_named_function :
   State.frame -> Invocation.site -> Path.t -> Types.instantiation -> is_argument:bool -> Logic.term
 

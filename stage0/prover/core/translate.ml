@@ -715,6 +715,21 @@ let prove_restated_method (start : State.frame) ~at ~impl_interface ~trait ~for_
               (reading entry).locals clauses.costs ~inherited:true ~counts_provider_potential:false
           in
           let entry = Cost_promises.enter_definition entry promised ~body:None in
+          let entry =
+            Specification.assume_requires entry
+              (Callbacks.specify_known
+                 (Named
+                    {
+                      path = definition.path;
+                      contract;
+                      substitution_of = definition.substitution_of;
+                      type_arguments = definition.type_arguments;
+                      group_member = callee.group_member;
+                      may_abort = Callee.may_abort start.environment definition;
+                    })
+                 entry)
+              (List.map snd (list_arguments entry))
+          in
           let result_type =
             Types.substitute_erased subtrait_substitution
               (Types.extract_result_type signature.output)
