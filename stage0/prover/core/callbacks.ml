@@ -246,17 +246,31 @@ let list_requires (frame : State.frame) (known : State.known_function) arguments
   | Own { callback; _ } -> read_requires (Some (frame.source, frame, callback)) arguments
 
 let list_ensures (frame : State.frame) (known : State.known_function) ~entries ~exits ~result =
-  List.map snd
-    (match known with
-    | Named { substitution_of; contract; _ } ->
-        let clauses = contract.callee_clauses in
-        let substitution = substitution_of clauses in
-        read_holding frame.environment frame.query clauses ~substitution
-          (Contracts.make_exit_frame frame clauses ~entries:(number entries) ~exits:(number exits)
-             ~result:(Some result) ~substitution)
-          clauses.ensures
-    | Own { callback; _ } ->
-        read_ensures (Some (frame.source, frame, callback)) ~entries ~exits ~result)
+  match known with
+  | Named { substitution_of; contract; _ } ->
+      let clauses = contract.callee_clauses in
+      let substitution = substitution_of clauses in
+      read_holding frame.environment frame.query clauses ~substitution
+        (Contracts.make_exit_frame frame clauses ~entries:(number entries) ~exits:(number exits)
+           ~result:(Some result) ~substitution)
+        clauses.ensures
+  | Own { callback; _ } ->
+      read_ensures (Some (frame.source, frame, callback)) ~entries ~exits ~result
+
+let specify_parameter (stated : parameter_contract) : Specification.t =
+  {
+    list_requires = read_requires stated;
+    list_ensures = read_ensures stated;
+    has_ensures =
+      (match stated with Some (_, _, { ensures = _ :: _; _ }) -> true | Some _ | None -> false);
+  }
+
+let specify_known (known : State.known_function) (frame : State.frame) : Specification.t =
+  {
+    list_requires = list_requires frame known;
+    list_ensures = list_ensures frame known;
+    has_ensures = true;
+  }
 
 let has_requires : State.known_function -> bool = function
   | Named { contract; _ } -> (Contracts.select_precondition_clauses contract).requires <> []
@@ -264,21 +278,21 @@ let has_requires : State.known_function -> bool = function
 
 type use = Called | Not_called of Catalog.Prover.function_use
 
+let describe_requirement location (known : State.known_function) ~use clause :
+    Catalog.Prover.obligation =
+  match (use, known) with
+  | Called, Named { path; _ } ->
+      Precondition_may_fail { clause; call = { at = location; callee = Some path } }
+  | Called, Own { name; _ } ->
+      Callback_precondition { clause; call = { at = location; callee = None }; name }
+  | Not_called use, Named { path; _ } ->
+      Function_requirement { function_ = Named_function path; use; clause }
+  | Not_called use, Own { name; _ } ->
+      Function_requirement { function_ = Callback_parameter name; use; clause }
+
 let check_requires (frame : State.frame) location (known : State.known_function) ~use arguments =
-  let describe clause : Catalog.Prover.obligation =
-    match (use, known) with
-    | Called, Named { path; _ } ->
-        Precondition_may_fail { clause; call = { at = location; callee = Some path } }
-    | Called, Own { name; _ } ->
-        Callback_precondition { clause; call = { at = location; callee = None }; name }
-    | Not_called use, Named { path; _ } ->
-        Function_requirement { function_ = Named_function path; use; clause }
-    | Not_called use, Own { name; _ } ->
-        Function_requirement { function_ = Callback_parameter name; use; clause }
-  in
-  List.iter
-    (fun (clause, term) -> Obligations.oblige frame location (describe clause) term)
-    (list_requires frame known arguments)
+  Specification.oblige_requires frame location (specify_known known frame) arguments
+    ~describe:(describe_requirement location known ~use)
 
 let check_escaping (frame : State.frame) location known (function_type : Types.function_type) =
   if has_requires known then
@@ -299,37 +313,28 @@ let check_passed (frame : State.frame) ~at (callee : Callee.t) (passed : State.p
   let location = Facts.locate frame (Option.value passed.origin ~default:at) in
   match (Callee.find_parameter_type frame.environment callee passed.position, passed.type_) with
   | Some (Types.Function expected), _ ->
-      let stated = Callee.find_callback frame callee passed.position ~known:arguments in
-      let promises =
-        match stated with Some (_, _, { ensures = _ :: _; _ }) -> true | Some _ | None -> false
+      let stated =
+        specify_parameter (Callee.find_callback frame callee passed.position ~known:arguments)
       in
-      if promises || Option.fold ~none:false ~some:has_requires known then begin
+      if stated.has_ensures || Option.fold ~none:false ~some:has_requires known then begin
         let _, supposed = Facts.suppose frame "called" in
-        let entries = declare_arguments supposed expected.inputs in
-        let at_call =
-          Facts.restrict supposed (Logic.conjunction (List.map snd (read_requires stated entries)))
+        let unpromised : Catalog.Prover.unpromised =
+          match known with
+          | Some (Named { path; _ }) -> Ensures_may_not_promise path
+          | Some (Own { name; _ }) -> Type_may_not_promise name
+          | None -> Nothing_promises
         in
-        Option.iter
-          (fun known ->
-            check_requires at_call location known ~use:(Not_called Passed_for_parameter) entries)
-          known;
-        if promises then begin
-          let exits, result = declare_results supposed expected entries in
-          Option.iter
-            (fun known ->
-              List.iter (Facts.assume at_call) (list_ensures at_call known ~entries ~exits ~result))
-            known;
-          let unpromised : Catalog.Prover.unpromised =
-            match known with
-            | Some (Named { path; _ }) -> Ensures_may_not_promise path
-            | Some (Own { name; _ }) -> Type_may_not_promise name
-            | None -> Nothing_promises
-          in
-          List.iter
-            (fun (promise, term) ->
-              Obligations.oblige at_call location (Callback_promise { promise; unpromised }) term)
-            (read_ensures stated ~entries ~exits ~result)
-        end
+        let entries = declare_arguments supposed expected.inputs in
+        Specification.refine supposed location
+          ~by:
+            (Option.map
+               (fun known ->
+                 ( specify_known known,
+                   describe_requirement location known ~use:(Not_called Passed_for_parameter) ))
+               known)
+          stated entries
+          ~havoc:(fun () -> declare_results supposed expected entries)
+          ~describe_ensures:(fun promise -> Callback_promise { promise; unpromised })
       end
   | _, Types.Function passed_type ->
       Option.iter (fun known -> check_escaping frame location known passed_type) known
@@ -349,7 +354,8 @@ let assume_returned (frame : State.frame) (function_type : Types.function_type) 
     ~exits ~result =
   Facts.assume frame (make_callback_ensures function_type called ~entries ~exits ~result);
   Option.iter
-    (fun known -> List.iter (Facts.assume frame) (list_ensures frame known ~entries ~exits ~result))
+    (fun known ->
+      Specification.assume_ensures frame (specify_known known frame) ~entries ~exits ~result)
     (find_known frame called)
 
 let find_logic_link (function_type : Types.function_type) term =
@@ -386,7 +392,7 @@ let state_relation (frame : State.frame) (function_type : Types.function_type) t
                    (Validity.make_validity frame ~assuming:true input entry))
                function_type.inputs entries
             @ List.map snd (list_requires frame known entries)),
-          list_ensures frame known ~entries ~exits ~result ))
+          List.map snd (list_ensures frame known ~entries ~exits ~result) ))
   in
   if
     ensures <> []

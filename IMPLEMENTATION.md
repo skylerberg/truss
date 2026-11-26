@@ -215,6 +215,25 @@ develop as well as make it easier to bootstrap the compiler in parts.
   type" from holding of arguments that the clause's own definition never
   showed well defined. A callee whose `ensures` names `read(0)` under a
   premise that its `requires` rules out is such a clause.
+- **A contract is a specification statement, and every reader stands in
+  one of three relations to it.** In the refinement calculus a contract
+  with precondition `pre` and postcondition `post`, over the values `w`
+  that a call may change, is the statement `assert pre; havoc w; assume
+  post`.
+
+  | Relation | In kernel commands |
+  |---|---|
+  | A body implements a contract | `assume pre`; the body; `assert post` at each exit |
+  | A call executes a contract | `assert pre; havoc w; assume post` |
+  | Contract 1 refines contract 2: the statement of 1 implements 2 | `assume pre2; assert pre1; havoc w; assume post1; assert post2` |
+
+  `Specification.t` is a contract read at given entry and exit values. It
+  has the four readings that the relations are made of, `assume_requires`,
+  `oblige_requires`, `assume_ensures` and `oblige_ensures`, and `refine`,
+  which is the third row. `Callbacks` reads a function value's contract
+  through it: a value passed for a parameter refines the parameter's
+  contract, a call of a value obliges its `requires`, and a call that
+  returned assumes its `ensures`.
 - **A contract is resolved once, and its three readers differ only in what
   they prove and what they assume.** The rules are those of modular
   verification with pre- and postconditions. A definition is proven against
