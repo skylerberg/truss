@@ -1,7 +1,6 @@
 let version = "5.3.3"
 let steps = 1_000_000
 let refutation_steps = steps / 10
-let cardinality_bounds = [ 2; 3; 4 ]
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Solver" format
 
 type t = { answer_query : string -> string; stop : unit -> unit; queries_run : int Atomic.t }
@@ -230,16 +229,6 @@ let solve solver ~find_output request =
     | Unknown _ as undecided when request.is_refutation -> undecided
     | Unknown _ when is_proven_from_ground_facts () -> Proven
     | Unknown Out_of_steps when is_proven_one_conjunct_at_a_time () -> Proven
-    | Unknown _ as undecided when Logic.has_uninterpreted_sort request.query ->
-        let rec search_from = function
-          | [] -> undecided
-          | cardinality_bound :: larger_bounds -> (
-              match check (Logic.show_query ~cardinality_bound request.query) with
-              | Proven -> search_from larger_bounds
-              | Falsifiable -> Falsifiable
-              | Unknown _ -> undecided)
-        in
-        search_from cardinality_bounds
     | answer -> answer
   in
   { answer; runs = List.rev !runs }

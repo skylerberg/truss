@@ -49,13 +49,6 @@ let () =
             "fn f(count: UInt8) -> UInt8\n  requires count <= UInt8.maximum - 1\n{" )
         ~alternatives:
           [ ("fn f(count: UInt8) -> UInt8 {", "fn f(count: UInt8) -> UInt8\n  uses Panic\n{") ]);
-  Harness.test "a failure the solver leaves undecided is found in a model of few elements"
-    (fun () ->
-      let actual = read_message Fixtures.Prover.addition_under_an_exists_in_a_forall in
-      if
-        (not (String.includes ~affix:"may overflow" actual))
-        || String.includes ~affix:"decided whether this holds" actual
-      then Harness.fail "message %S" actual);
   Harness.test "an obligation that the solver runs out of steps on says so" (fun () ->
       let actual = read_message Fixtures.Prover.sum_of_two_cubes in
       if not (String.includes ~affix:"reached its step limit" actual) then
