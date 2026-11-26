@@ -8,6 +8,7 @@ type answer = Proven | Falsifiable | Unknown of unknown
 type request
 
 val make_request : Logic.query -> request
+val make_refutation_request : Logic.query -> request
 val show_input : request -> string
 
 type run = { input : string; output : string }

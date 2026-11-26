@@ -209,6 +209,16 @@ develop as well as make it easier to bootstrap the compiler in parts.
   of the lend, which takes the part as the caller left it, checks its
   invariant, and assumes the other clauses. `visited` and `final(result)`
   are separate MIR nodes, and each reads its own field of the frame.
+- **An obligation carries its refutation.** `Obligation.refutation` is the
+  negated goal under the obligation's path condition, and no refutation
+  for a goal of `false`, which only an unreachable path proves. `Prover`
+  asks it of every obligation that the solver did not prove, whether Z3
+  answered `sat` or `unknown`: a false goal needs a model of the facts,
+  and Z3 builds none once a fact is quantified, as a callee's contract
+  axiom is. A proven refutation is the verdict `Refuted`. The request is
+  one run of Z3 with a tenth of the step limit: a refutation that fails
+  makes Z3 search for a model until its steps run out, so its limit is a
+  cost of every obligation that stays undecided.
 - **The solver keeps Z3 running.** `Solver` starts one `z3 -in` process for
   each domain that solves, gives each query to an idle process, and sends
   `(reset)` after the answer, so a query costs no launch. A process that was
