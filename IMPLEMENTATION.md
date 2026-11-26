@@ -381,7 +381,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | None | | Builds a term or reads a type, such as `Encoding.sort_of` |
   | `State.environment` | The definition being proven and the database it is proven against: the lookups, the node, the condition and its bounds, the obligation policy. It does not change during a proof | Reads the program away from a point of it, such as `Callee.may_abort` or `Cycles.is_in_proof_cycle` |
   | `State.frame` | The logical context at a point of the program: the environment, the bindings, the path condition, the symbols of the definition's parameters at entry, and the query that its facts and obligations are added to | Reads the program at a point, adds a fact there or makes an obligation there, such as `Encoding.substitute_type`, `Facts.assume` or `Obligations.oblige` |
-  | `Query.t` | The query under construction | Declares a symbol or states a fact where no frame is at hand, such as `Models.make_sequence_length` |
+  | `Query.t` | The query under construction | Declares a symbol or states a fact where no frame is at hand, such as `Contract_axioms.declare_function` |
   | `State.context` | The state of each owner and the outcome of the proof | Reads a specification, runs a body, or uses an owner's state |
 
   `Facts.assume` guards a fact with the path condition of its frame. The
@@ -452,10 +452,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
   value is declared by the module that makes it, except the length and the
   sum of a sequence, which the prover itself builds: `Signatures` gives
   their signatures, and `Contract_axioms.declare_function` checks a call of
-  them against it. The axioms of a derived
-  symbol that are a function of the symbol are in `Signatures.list_axioms`:
-  `Logic.prune` adds them for each derived symbol that the query names, so
-  an axiom is in a query exactly where its symbol is.
+  them against it. The axioms of a derived symbol that are a function of
+  the symbol are in `Signatures.list_axioms`: `Logic.prune` adds them for
+  each derived symbol that the query names, so an axiom is in a query
+  exactly where its symbol is.
 - **`Validity` decides each check of an invariant.** Every moment that
   obliges one calls `Validity.check_valid`, which first asks its record of
   the values already shown valid, so a value is proven once. A write
