@@ -71,36 +71,75 @@ let is_self_of_enclosing_trait (type_ : Types.ty) =
   | Parameter self | Projection { base = Parameter self; _ } -> Types.is_self_parameter self
   | _ -> false
 
-let list_bounds_that_an_impl_assumes interface impl substitution =
-  let impl_interface = Interface.Definition.read_impl_interface interface impl in
-  Interface.Impls.list_required_bounds impl_interface.impl_generics substitution
-  @ Interface.Impls.list_associated_type_bounds interface impl_interface substitution
-
-let has_entered entered (trait : Types.trait_reference) type_ =
-  List.exists
-    (fun (entered_trait, entered_type) ->
-      Path.equal entered_trait trait.trait && Types.equal entered_type type_)
-    entered
-
-let rec list_code_of_impl_for ?(entered = []) interface
-    ((type_ : Types.ty), (bound : Types.trait_reference)) =
-  List.concat_map
-    (fun (required : Types.trait_reference) ->
-      if is_self_of_enclosing_trait type_ then list_trait_methods interface required.trait
-      else if has_entered entered required type_ then []
-      else
-        match
-          Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type:type_
-            ~trait:required Bound
-        with
-        | (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }) as
-          evidence ->
-            list_methods_of_evidence interface ~trait:required.trait evidence
+let list_instance_field_types (interface : Interface.Lookups.t) (ty : Types.ty) =
+  match Types.strip_view ty with
+  | Named { path; arguments } -> (
+      match Interface.Definition.find_interface interface path with
+      | Some (Interface.Environment.Type_interface type_interface) ->
+          List.map
+            (fun (field : Types.field) -> field.field_type)
+            (Option.value ~default:[] (Types.instantiate_fields type_interface arguments)
             @ List.concat_map
-                (list_code_of_impl_for ~entered:((required.trait, type_) :: entered) interface)
-                (list_bounds_that_an_impl_assumes interface impl substitution)
-        | Bound -> [])
-    (Interface.Properties.list_bound_closure interface ~self:type_ bound)
+                (fun (variant : Types.variant) -> Option.value ~default:[] variant.fields)
+                (Option.value ~default:[] (Types.instantiate_variants type_interface arguments)))
+      | Some _ | None -> [])
+  | _ -> []
+
+type satisfied_bound = {
+  satisfied : Types.trait_reference;
+  of_type : Types.ty;
+  evidence : Types.evidence;
+  is_assumed_by_an_impl : bool;
+}
+
+let list_bounds_that_evidence_assumes interface ~of_type ~(satisfied : Types.trait_reference)
+    ~derived_through_fields : Types.evidence -> (Types.ty * Types.trait_reference) list = function
+  | Bound -> []
+  | (Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ })
+    when derived_through_fields ->
+      List.map
+        (fun field_type -> (field_type, satisfied))
+        (list_instance_field_types interface of_type)
+  | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
+      let impl_interface = Interface.Definition.read_impl_interface interface impl in
+      Interface.Impls.list_required_bounds impl_interface.impl_generics substitution
+      @ Interface.Impls.list_associated_type_bounds interface impl_interface substitution
+
+let rec list_satisfied_bounds ?(entered = []) ?(is_assumed_by_an_impl = false) interface
+    ~derived_through_fields ((of_type : Types.ty), (bound : Types.trait_reference)) =
+  List.concat_map
+    (fun (satisfied : Types.trait_reference) ->
+      let has_entered =
+        List.exists
+          (fun (entered_trait, entered_type) ->
+            Path.equal entered_trait satisfied.trait && Types.equal entered_type of_type)
+          entered
+      in
+      if has_entered then []
+      else
+        let evidence =
+          Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type:of_type
+            ~trait:satisfied Bound
+        in
+        { satisfied; of_type; evidence; is_assumed_by_an_impl }
+        :: List.concat_map
+             (list_satisfied_bounds
+                ~entered:((satisfied.trait, of_type) :: entered)
+                ~is_assumed_by_an_impl:true interface ~derived_through_fields)
+             (list_bounds_that_evidence_assumes interface ~of_type ~satisfied
+                ~derived_through_fields evidence))
+    (Interface.Properties.list_bound_closure interface ~self:of_type bound)
+
+let list_code_of_impl_for interface bound =
+  List.concat_map
+    (fun { satisfied; of_type; evidence; _ } ->
+      match evidence with
+      | Bound ->
+          if is_self_of_enclosing_trait of_type then list_trait_methods interface satisfied.trait
+          else []
+      | Impl _ | Derived_for_view _ ->
+          list_methods_of_evidence interface ~trait:satisfied.trait evidence)
+    (list_satisfied_bounds interface ~derived_through_fields:false bound)
 
 let list_code_supplied_to_self (interface : Interface.Lookups.t) ~trait substitution =
   match Types.find_argument (Types.make_self_parameter trait) substitution with
@@ -293,57 +332,24 @@ type assumed_laws = {
 let states_laws (interface : Interface.Lookups.t) trait =
   match interface.find_trait_header trait with Some header -> header.laws <> [] | None -> false
 
-let list_instance_field_types (interface : Interface.Lookups.t) (ty : Types.ty) =
-  match Types.strip_view ty with
-  | Named { path; arguments } -> (
-      match Interface.Definition.find_interface interface path with
-      | Some (Interface.Environment.Type_interface type_interface) ->
-          List.map
-            (fun (field : Types.field) -> field.field_type)
-            (Option.value ~default:[] (Types.instantiate_fields type_interface arguments)
-            @ List.concat_map
-                (fun (variant : Types.variant) -> Option.value ~default:[] variant.fields)
-                (Option.value ~default:[] (Types.instantiate_variants type_interface arguments)))
-      | Some _ | None -> [])
-  | _ -> []
-
-let rec list_laws_of_bound ?(entered = []) (interface : Interface.Lookups.t) ~self_type
-    ~is_assumed_by_the_callee trait =
-  List.concat_map
-    (fun (required : Types.trait_reference) ->
-      let is_entered = has_entered entered required self_type in
-      let entered = (required.trait, self_type) :: entered in
-      if is_entered then []
-      else
-        match
-          Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type
-            ~trait:required Bound
-        with
-        | Bound -> []
-        | Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ } ->
-            List.concat_map
-              (fun field_type ->
-                list_laws_of_bound ~entered interface ~self_type:field_type
-                  ~is_assumed_by_the_callee:true required)
-              (list_instance_field_types interface self_type)
-        | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
-            (if states_laws interface required.trait then
-               [
-                 {
-                   impl;
-                   trait = required;
-                   type_ = self_type;
-                   origin = None;
-                   is_assumed_by_the_callee;
-                 };
-               ]
-             else [])
-            @ List.concat_map
-                (fun (assumed_of, assumed) ->
-                  list_laws_of_bound ~entered interface ~self_type:assumed_of
-                    ~is_assumed_by_the_callee:true assumed)
-                (list_bounds_that_an_impl_assumes interface impl substitution))
-    (Interface.Properties.list_bound_closure interface ~self:self_type trait)
+let list_laws_of_bound (interface : Interface.Lookups.t) ~self_type ~is_assumed_by_the_callee trait
+    =
+  List.filter_map
+    (fun { satisfied; of_type; evidence; is_assumed_by_an_impl } ->
+      match evidence with
+      | Bound | Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ } -> None
+      | Impl { impl; _ } | Derived_for_view { viewed = impl; _ } ->
+          if states_laws interface satisfied.trait then
+            Some
+              {
+                impl;
+                trait = satisfied;
+                type_ = of_type;
+                origin = None;
+                is_assumed_by_the_callee = is_assumed_by_the_callee || is_assumed_by_an_impl;
+              }
+          else None)
+    (list_satisfied_bounds interface ~derived_through_fields:true (self_type, trait))
 
 let list_laws_of_generics (interface : Interface.Lookups.t) instance path
     (instantiation : Types.instantiation) =
