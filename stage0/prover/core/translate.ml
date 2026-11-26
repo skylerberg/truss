@@ -100,8 +100,8 @@ let read_requires (context : State.context) frame (requirement : Mir.formula) =
       Obligations.with_condition context requirement.holds_when (fun () ->
           Validity.read_specification context frame requirement))
 
-let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_condition
-    (lookups : Lookups.t) (source : State.source) ~path =
+let translate_run ~proof ~substitution ~condition ~assumes_panic_condition (lookups : Lookups.t)
+    (source : State.source) ~path =
   let contract =
     match Mir.read_contract lookups.mir path with
     | Some { form; _ } -> form
@@ -144,22 +144,6 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
     else None
   in
   let can_declare_panic = not (Types.may_use (Built_in Panic) uses) in
-  let pair_up terms =
-    match (inherited, parameters, terms) with
-    | Some ((clauses : State.clauses), _), { local = Self; _ } :: _, _ :: rest
-      when not
-             (List.exists
-                (fun (parameter : Mir.parameter) -> parameter.local = Self)
-                clauses.parameters) ->
-        rest
-    | _ -> terms
-  in
-  let has_trait_frame =
-    match inherited with
-    | Some ((clauses : State.clauses), _) ->
-        List.length clauses.parameters = List.length (pair_up parameters)
-    | None -> false
-  in
   let home = source.key in
   let measures =
     List.filter
@@ -173,61 +157,41 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
         (Mir.Call_edges.resolve_node
            { interface = lookups.interface; mir = lookups.mir }
            path substitution)
-      ~terminates ~measures ~inherits_precondition:has_trait_frame
+      ~terminates ~measures
+      ~inherits_precondition:
+        (Option.is_some (Interface.Impls.find_implemented_method lookups.interface path))
   in
   List.iter
     (fun (measure : Mir.formula) ->
       ignore (Conditions.decide context ~substitution:Types.no_substitution measure.holds_when))
     contract.decreases;
-  let keep_clauses ~substitution (clauses : State.clauses) =
-    let decide holds_when =
-      Conditions.find_obligation_condition (Conditions.decide context ~substitution holds_when)
-    in
-    {
-      clauses with
-      requires =
-        List.filter_map
-          (fun (requirement : Mir.requirement) ->
-            Option.map
-              (fun holds_when ->
-                { requirement with clause = { requirement.clause with holds_when } })
-              (decide requirement.clause.holds_when))
-          clauses.requires;
-      ensures =
-        List.filter_map
-          (fun (clause : Mir.formula) ->
-            Option.map (fun holds_when -> { clause with holds_when }) (decide clause.holds_when))
-          clauses.ensures;
-      costs =
-        List.filter_map
-          (fun (cost : Mir.cost) ->
-            Option.map (fun holds_when -> { cost with holds_when }) (decide cost.holds_when))
-          clauses.costs;
-    }
-  in
-  let contract =
-    let kept =
-      keep_clauses ~substitution:Types.no_substitution
-        {
-          callee = source;
-          parameters = contract.parameters;
-          panics_unless = contract.panics_unless;
-          requires = contract.requires;
-          ensures = contract.ensures;
-          decreases = [];
-          costs = contract.costs;
-          callbacks = contract.callbacks;
-          inherited = false;
-          bindings = Types.no_substitution;
-        }
-    in
-    { contract with requires = kept.requires; ensures = kept.ensures; costs = kept.costs }
-  in
+  let keep_clauses = Conditions.keep_holding context in
   let inherited =
     Option.map
-      (fun ((clauses : State.clauses), substitution) ->
-        (keep_clauses ~substitution clauses, substitution))
-      inherited
+      (fun (clauses, substitution) -> (keep_clauses ~substitution clauses, substitution))
+      (Contracts.find_inherited_clauses context path)
+  in
+  let own, promises =
+    match Contracts.find_function_contract context path with
+    | Some resolved ->
+        let own =
+          keep_clauses ~substitution:Types.no_substitution
+            { resolved.callee_clauses with callee = source }
+        in
+        ( own,
+          Contracts.list_promises
+            { resolved with callee_clauses = own; trait_clauses = Option.map fst inherited } )
+    | None -> Facts.raise_bug "`%s` has no contract" (Resolve.Names.show_key source.key)
+  in
+  let pair_up terms =
+    match (inherited, parameters, terms) with
+    | Some ((clauses : State.clauses), _), { local = Self; _ } :: _, _ :: rest
+      when not
+             (List.exists
+                (fun (parameter : Mir.parameter) -> parameter.local = Self)
+                clauses.parameters) ->
+        rest
+    | _ -> terms
   in
   Callbacks.declare_own context
     (List.filter_map
@@ -237,8 +201,6 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
              (parameter.local, Facts.read_parameter_name parameter, callback))
            (List.nth_opt parameters position))
        contract.callbacks);
-  let declared_requires = Facts.list_clauses contract.requires
-  and declared_ensures = contract.ensures in
   let output = match signature with Some { output = Returns ty; _ } -> Some ty | _ -> None in
   let start =
     List.fold_left
@@ -287,32 +249,30 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   in
   let list_paired_values (at : State.frame) = pair_up (list_values at) in
   let entry_terms = list_paired_values start in
-  let find_trait_frame (at : State.frame) ~result =
+  let read_in ?result (at : State.frame) (clauses : State.clauses) =
     match inherited with
-    | Some ((clauses : State.clauses), substitution) when has_trait_frame ->
+    | Some (_, substitution) when clauses.inherited ->
         let number terms = List.mapi (fun position term -> (position, term)) terms in
         let inside =
           {
             (Contracts.make_exit_frame at clauses ~entries:(number entry_terms)
                ~exits:(number (list_paired_values at))
-               ~result ~substitution)
+               ~result:(Option.value result ~default:at.result)
+               ~substitution)
             with
             old_self = start.self;
           }
         in
-        Some
-          ( clauses,
-            match at.final_result with
-            | Some final -> Lending.bind_final inside final
-            | None -> inside )
-    | _ -> None
+        Option.fold ~none:inside ~some:(Lending.bind_final inside) at.final_result
+    | Some _ | None -> at
   in
   let trait_requires =
-    match find_trait_frame start ~result:None with
-    | Some (clauses, inside) ->
+    match inherited with
+    | Some (clauses, _) ->
         Logic.conjunction
           (List.map
-             (fun requirement -> snd (Validity.read_specification context inside requirement))
+             (fun requirement ->
+               snd (Validity.read_specification context (read_in start clauses) requirement))
              (Facts.list_clauses clauses.requires))
     | None -> Logic.Boolean true
   in
@@ -323,16 +283,14 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   in
   let counts_provider_potential = is_capability_implementation lookups path in
   let promised =
-    Cost_promises.list_promises context source start.locals contract.costs ~inherited:false
-      ~counts_provider_potential
-    @
-    match find_trait_frame start ~result:None with
-    | Some (clauses, inside) ->
-        Cost_promises.list_promises context clauses.callee inside.locals clauses.costs
-          ~inherited:true ~counts_provider_potential
-    | None -> []
+    List.concat_map
+      (fun ({ made_by; _ } : Contracts.promise) ->
+        Cost_promises.list_promises context made_by.callee (read_in start made_by).locals
+          made_by.costs ~inherited:made_by.inherited ~counts_provider_potential)
+      promises
   in
   let start = Cost_promises.enter_definition context start promised ~body:(Some mir.body) in
+  let declared_requires = Facts.list_clauses own.requires in
   if context.inherits_precondition then
     if declared_requires = [] then Facts.assume context start trait_requires
     else
@@ -350,14 +308,15 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
              frame)
            (Facts.restrict start trait_requires)
            declared_requires);
-  (if context.inherits_precondition && contract.panics_unless <> [] then
-     match find_trait_frame start ~result:None with
-     | Some (clauses, inside) when clauses.panics_unless <> [] ->
+  (if own.panics_unless <> [] then
+     match inherited with
+     | Some (clauses, _) when clauses.panics_unless <> [] ->
          let trait_condition =
            Logic.conjunction
              (List.map
                 (fun (requirement : Mir.requirement) ->
-                  snd (Validity.read_specification context inside requirement.clause))
+                  snd
+                    (Validity.read_specification context (read_in start clauses) requirement.clause))
                 clauses.panics_unless)
          in
          ignore
@@ -370,7 +329,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                   term;
                 frame)
               (Facts.restrict (Facts.restrict start trait_requires) trait_condition)
-              contract.panics_unless)
+              own.panics_unless)
      | Some _ | None -> ());
   let start =
     List.fold_left
@@ -387,7 +346,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
           let frame, term = Validity.read_specification context frame requirement.clause in
           Facts.assume context frame term;
           frame)
-        start contract.panics_unless
+        start own.panics_unless
     else start
   in
   Cost_promises.check_promise_amounts context start promised ~output;
@@ -409,48 +368,38 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
         parameter.mode = Language.Mode.Mut && parameter.local = Self)
       parameters
   in
-  let check_declared_ensures (frame : State.frame) location ~is_checked ~moment =
+  let check_promises (frame : State.frame) location ~is_checked ~moment =
     List.iter
-      (fun (ensured : Mir.formula) ->
-        if is_checked ensured then
-          let _, term =
-            Obligations.with_condition context ensured.holds_when (fun () ->
-                Validity.read_specification context frame ensured)
-          in
-          Obligations.oblige ~holds_when:ensured.holds_when ~cited:(source.key, ensured.origin)
-            context frame location
-            (Postcondition { clause = Facts.quote source ensured.origin; promiser = None; moment })
-            term)
-      declared_ensures
-  in
-  let check_inherited_ensures (frame : State.frame) location ~is_checked ~moment =
-    match find_trait_frame frame ~result:frame.result with
-    | Some (clauses, inside) ->
-        let under_trait = Facts.restrict frame trait_requires in
+      (fun ({ made_by; proven_under } : Contracts.promise) ->
+        let inside = read_in frame made_by
+        and under = if proven_under.inherited then Facts.restrict frame trait_requires else frame in
         List.iter
-          (fun (clause : Mir.formula) ->
-            if is_checked clause then
-              let _, term = Validity.read_specification context inside clause in
-              Obligations.oblige ~holds_when:clause.holds_when
-                ~cited:(clauses.callee.key, clause.origin)
-                context under_trait location
+          (fun (ensured : Mir.formula) ->
+            if is_checked ensured then
+              let _, term =
+                Obligations.with_condition context ensured.holds_when (fun () ->
+                    Validity.read_specification context inside ensured)
+              in
+              Obligations.oblige ~holds_when:ensured.holds_when
+                ~cited:(made_by.callee.key, ensured.origin)
+                context under location
                 (Postcondition
                    {
-                     clause = Facts.quote clauses.callee clause.origin;
-                     promiser = Some (Contracts.find_promiser lookups clauses.callee);
+                     clause = Facts.quote made_by.callee ensured.origin;
+                     promiser =
+                       (if made_by.inherited then
+                          Some (Contracts.find_promiser lookups made_by.callee)
+                        else None);
                      moment;
                    })
                 term)
-          clauses.ensures
-    | None -> ()
+          made_by.ensures)
+      promises
   in
   List.iter
     (fun ({ lent_frame; lent_origin } : State.lent_part) ->
       let location = Facts.locate context lent_frame.source lent_origin in
-      check_declared_ensures lent_frame location ~is_checked:Lending.holds_where_lent
-        ~moment:Where_lent;
-      check_inherited_ensures lent_frame location ~is_checked:Lending.holds_where_lent
-        ~moment:Where_lent)
+      check_promises lent_frame location ~is_checked:Lending.holds_where_lent ~moment:Where_lent)
     (Lending.list_lent_parts context);
   let holds_at_exit clause = not (lends && Lending.holds_where_lent clause) in
   let exit_moment : Catalog.Prover.postcondition_moment =
@@ -481,24 +430,21 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
           Validity.check_valid context frame exit_location self_type self ~deep:true
             ~includes_invariants:(not is_update_step) ~moment:Self_at_return
       | _ -> ());
-      check_declared_ensures frame exit_location ~is_checked:holds_at_exit ~moment:exit_moment;
+      check_promises frame exit_location ~is_checked:holds_at_exit ~moment:exit_moment;
       let under_trait = Facts.restrict frame trait_requires in
       List.iter
         (fun (promise : Cost_promises.promise) ->
           let cited = (promise.written_in.key, promise.clause.origin) in
           if promise.inherited then
-            match find_trait_frame frame ~result:returned with
-            | Some (_, inside) ->
-                Cost_promises.check_promise ~cited context under_trait promise
-                  ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
-                  ~location:exit_location
-            | None -> ()
+            let inside = read_in ~result:returned frame (fst (Option.get inherited)) in
+            Cost_promises.check_promise ~cited context under_trait promise
+              ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
+              ~location:exit_location
           else
             Cost_promises.check_promise ~cited context frame promise
               ~at:{ frame with locals = frame.old_locals; self = frame.old_self; result = returned }
               ~location:exit_location)
-        promised;
-      check_inherited_ensures frame exit_location ~is_checked:holds_at_exit ~moment:exit_moment)
+        promised)
     returns;
   (make_outcome context, context.skipped_conditions)
 
@@ -526,14 +472,13 @@ let find_circular_laws (lookups : Lookups.t) (source : State.source) ~path =
       List.iter (Cycles.reject_circular_proof context start) circular;
       Some (make_outcome context)
 
-let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_substitution)
+let translate_function ?(proof = false) ?(substitution = Types.no_substitution)
     (lookups : Lookups.t) (source : State.source) ~path =
   match find_circular_contract lookups source ~path with
   | Some outcome -> outcome
   | None ->
       let run ?(assumes_panic_condition = false) condition =
-        translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_condition lookups
-          source ~path
+        translate_run ~proof ~substitution ~condition ~assumes_panic_condition lookups source ~path
       in
       let base, skipped = run [] in
       let has_panic_condition =
@@ -658,11 +603,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
       (Types.list_bounds impl_interface.Types.impl_generics)
   in
   let declared =
-    match
-      List.find_opt
-        (fun (bound : Types.trait_reference) -> Path.equal bound.trait restated.declared_by)
-        (Interface.Properties.list_bound_closure lookups.interface ~self:for_type trait)
-    with
+    match Contracts.find_restated_trait lookups ~self_type:for_type trait restated with
     | Some declared -> declared
     | None ->
         Facts.raise_bug "`%s` restates a method of `%s`, which it does not require"

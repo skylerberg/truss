@@ -1785,6 +1785,26 @@ let () =
       expect_not_proven
         (Support.apply_edit kept ("-> UInt8\n{", "-> UInt8\n  requires n % 2 == 0\n{"))
         "prover.requires");
+  let inherited = Fixtures.Prover.impl_ensures_proven_under_the_trait_requires in
+  Harness.test "an impl's ensures hold where the trait's requires do, which its proof assumed"
+    (fun () ->
+      expect_proven inherited;
+      expect_codes
+        (Support.apply_edit inherited
+           ( "  requires x > 0\n  ensures result == Eager().tag(x)",
+             "  requires x > 0 ==> Eager().tag(x) == Eager().tag(x)\n  ensures result > 0" ))
+        [ "prover.ensures" ]);
+  let nested = Fixtures.Prover.generic_impl_contract_read_at_a_nested_type in
+  Harness.test "a generic impl's ensures are read inside their own at a smaller type" (fun () ->
+      expect_proven nested;
+      expect_not_proven
+        (Support.apply_edit nested ("ensures result == 3", "ensures result == 4"))
+        "prover.ensures");
+  Harness.test "a restated clause holds of the trait arguments that its trait requires" (fun () ->
+      expect_codes Fixtures.Prover.restated_clause_of_another_trait_argument [ "prover.ensures" ]);
+  Harness.test "a call in a quantifier over no value gives no fact outside the quantifier"
+    (fun () ->
+      expect_codes Fixtures.Prover.recursive_call_in_a_quantifier_over_no_value [ "prover.ensures" ]);
   Harness.test "the contract of a function that can panic is assumed only where it returns"
     (fun () ->
       expect_codes Fixtures.Prover.contract_of_a_function_that_panics_assumed_where_it_panics

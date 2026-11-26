@@ -578,7 +578,7 @@ let find_method_cost_bound context frame (metric : Language.Metric.t) (method_ :
                          (Impl { impl; substitution }))
                       (fun contract ->
                         List.find_map
-                          (fun (clauses : State.clauses) ->
+                          (fun ({ made_by = clauses; _ } : Contracts.promise) ->
                             find_static_bound context frame metric clauses ~has_own_generics
                               ~substitution:
                                 (if clauses.inherited then
@@ -586,7 +586,7 @@ let find_method_cost_bound context frame (metric : Language.Metric.t) (method_ :
                                      self_type
                                  else substitution)
                               ~self_type)
-                          (Contracts.list_declared_clauses contract))
+                          (Contracts.list_promises contract))
                 in
                 match (stated_bound, impl) with
                 | Some bound, _ -> Some bound
@@ -719,7 +719,11 @@ let spend_contract_call (context : State.context) ~(before : State.frame) ~(afte
           | None -> Costs.zero)
       | `Returns -> Potentials.compute_potential context after result_type result)
   in
-  let declared_clauses = Contracts.list_declared_clauses contract in
+  let declared_clauses =
+    List.map
+      (fun (promise : Contracts.promise) -> promise.made_by)
+      (Contracts.list_promises contract)
+  in
   let method_cost =
     lazy
       (if has_method_cost context definition then

@@ -146,6 +146,39 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `Amounts` | The amount that a call or an operation spends |
   | `Loop_costs` | The cost rules of a loop |
 
+- **A contract is resolved once, and its three readers differ only in what
+  they prove and what they assume.** The rules are those of modular
+  verification with pre- and postconditions. A definition is proven against
+  its contract once, and every use relies on that proof alone, so a use may
+  assume a clause only under the premises that the proof assumed.
+  `Contracts.list_promises` is the one statement of those premises: it lists
+  each clause set's `ensures` with the clause set whose `requires` they were
+  proven under.
+
+  | Reader | Proves | Assumes |
+  |---|---|---|
+  | The definition's check, `Translate` | Each `ensures` at every return, under its premise | The `requires` |
+  | A call, `Calls` | The `requires`, and the Panic condition where the caller may not panic | Each `ensures` under its premise, in the frame of the call |
+  | The axiom of a logic function, `Contract_axioms` | Nothing | Each `ensures`, for every argument in the function's domain |
+
+  A logic function is total in the logic and unspecified outside its domain.
+  Its domain is a condition under which the definition returns: valid
+  arguments, the premise of the clause, the Panic condition, and, for a
+  callee in the recursion group of the definition being proven, arguments
+  below the entry measure, which is the induction hypothesis. A call that
+  returned gives its `ensures` without the Panic condition, since
+  `uses Panic unless C` says that `C` rules a panic out, not that a return
+  implies `C`.
+
+  An `impl`'s method refines its trait's method: the trait's `requires`
+  imply the method's own, and the trait's `ensures` are proven of the
+  method's body under the trait's `requires`. A function value passed for a
+  parameter refines the parameter's type the same way.
+
+  A fact is assumed in the frame in which its obligations were made. A call
+  inside a quantifier's body proves its `requires` for each bound value, so
+  its `ensures` hold for each bound value and for nothing outside the
+  quantifier, whose range may be empty.
 - **One module states the contract of a logic function as an axiom.**
   `Contract_axioms` builds the axiom for a call and for a function used as a
   value, with every premise its proof had: arguments in range that meet

@@ -2,7 +2,6 @@ val find_circular_laws : Lookups.t -> State.source -> path:Path.t -> Obligation.
 
 val translate_function :
   ?proof:bool ->
-  ?inherited:State.clauses * Types.substitution ->
   ?substitution:Types.substitution ->
   Lookups.t ->
   State.source ->
