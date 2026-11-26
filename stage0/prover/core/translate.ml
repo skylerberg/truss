@@ -238,12 +238,19 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
            (List.nth_opt parameters position))
        contract.callbacks);
   Termination.enter_definition context start;
-  (match Interface.Impls.find_implemented_method lookups.interface path with
-  | Some { declaration; _ }
-    when condition = [] && lookups.may_abort path
-         && Option.fold ~none:false
-              ~some:(fun (declared : Types.signature) -> Types.states_no_allocation declared.costs)
-              (Interface.Impls.read_signature lookups.interface declaration) ->
+  let trait_declaration =
+    match (Interface.Impls.find_implemented_method lookups.interface path, path) with
+    | Some { declaration; _ }, _ -> Some declaration
+    | None, Method { owner; name; receiver }
+      when Option.is_some
+             (Interface.Definition.find_trait_method lookups.interface owner ~name ~receiver) ->
+        Some path
+    | None, _ -> None
+  in
+  (match Option.bind trait_declaration (Interface.Impls.read_signature lookups.interface) with
+  | Some declared
+    when condition = [] && lookups.may_abort context.node
+         && Types.states_no_allocation declared.costs ->
       Obligations.oblige context start Whole_definition
         (May_not_return_under_no_allocation This_method) (Logic.Boolean false)
   | Some _ | None -> ());

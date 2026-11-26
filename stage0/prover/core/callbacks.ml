@@ -218,10 +218,17 @@ let find_named context frame path instantiation : State.known_function option =
       ~lends:None ~uses:Types.no_capabilities
   in
   match callee.target with
-  | Definition { contract = Some contract; substitution_of; type_arguments; _ } ->
+  | Definition ({ contract = Some contract; substitution_of; type_arguments; _ } as definition) ->
       Some
         (Named
-           { path; contract; substitution_of; type_arguments; group_member = callee.group_member })
+           {
+             path;
+             contract;
+             substitution_of;
+             type_arguments;
+             group_member = callee.group_member;
+             may_abort = Callee.may_abort context definition;
+           })
   | Definition { contract = None; _ } | Function_value | Intrinsic _ -> None
 
 let number terms = List.mapi (fun position term -> (position, term)) terms
@@ -427,15 +434,11 @@ let read_named_function (context : State.context) (frame : State.frame) (site : 
   let location = Facts.locate context frame.source site.origin in
   let type_ = Encoding.substitute_type context frame site.type_ in
   match (find_named context frame path instantiation, type_) with
-  | ( Some (Named { contract; substitution_of; type_arguments; group_member; _ } as known),
+  | ( Some (Named { contract; substitution_of; type_arguments; group_member; may_abort; _ } as known),
       Types.Function function_type ) ->
       if frame.makes_obligations && not is_argument then
         check_escaping context frame location known function_type;
-      if
-        frame.makes_obligations
-        && Types.states_no_allocation function_type.costs
-        && context.lookups.may_abort path
-      then
+      if frame.makes_obligations && Types.states_no_allocation function_type.costs && may_abort then
         Obligations.oblige context frame location
           (May_not_return_under_no_allocation (Named_function path)) (Logic.Boolean false);
       let symbol = Logic.Symbol.Function_value { callee = path; type_arguments } in
@@ -443,12 +446,14 @@ let read_named_function (context : State.context) (frame : State.frame) (site : 
       let term = Logic.Symbol symbol in
       note_known context term function_type known;
       Facts.run_once context (Value_of symbol) (fun () ->
-          if is_in_the_logic function_type && contract.is_logic_function then
-            state_definition context frame function_type term ~path ~contract ~substitution_of
-              ~type_arguments ~group_member;
-          Option.iter
-            (Facts.add_frame_fact context frame)
-            (find_logic_link context function_type term);
+          if not may_abort then begin
+            if is_in_the_logic function_type && contract.is_logic_function then
+              state_definition context frame function_type term ~path ~contract ~substitution_of
+                ~type_arguments ~group_member;
+            Option.iter
+              (Facts.add_frame_fact context frame)
+              (find_logic_link context function_type term)
+          end;
           state_relation context frame function_type term known);
       term
   | _ -> Facts.raise_unsupported location Unreadable_function_value

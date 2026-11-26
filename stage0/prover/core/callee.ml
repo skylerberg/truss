@@ -190,6 +190,16 @@ let resolve context frame written ~lends ~uses =
     uses;
   }
 
+let may_abort (context : State.context) (definition : definition) =
+  context.lookups.may_abort definition.path
+  || Option.is_some definition.trait_method
+     && Path.equal definition.path definition.declaration
+     && not
+          (Types.states_no_allocation
+             (match Contracts.read_signature context definition.declaration with
+             | Some signature -> signature.costs
+             | None -> []))
+
 let is_update_step context (callee : t) =
   match callee.target with
   | Definition { path; trait_method = None; capability_method = None; _ } -> (

@@ -165,6 +165,7 @@ type known_function =
       substitution_of : clauses -> Types.substitution;
       type_arguments : Types.argument list;
       group_member : Path.t option;
+      may_abort : bool;
     }
   | Own of { name : string; callback : Mir.callback }
 

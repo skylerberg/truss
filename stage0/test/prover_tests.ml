@@ -1869,7 +1869,7 @@ let () =
         [ "prover.assertion" ]);
   Harness.test "a specification learns nothing from a function value that may abort" (fun () ->
       expect_codes Fixtures.Prover.specification_applying_a_function_value_that_aborts
-        [ "prover.assertion" ]);
+        [ "prover.assertion"; "prover.assertion" ]);
   Harness.test "a call that returned from a function that may abort keeps its contract" (fun () ->
       expect_proven Fixtures.Prover.call_that_returned_from_a_function_that_may_abort);
   Harness.test "a specification learns nothing from a generic function whose bound's method aborts"
@@ -4301,8 +4301,8 @@ let () =
       expect_a_message_saying ~says:"This method may not return" diagnostics;
       expect_a_message_saying ~says:"`narrowed` may not return" diagnostics;
       expect_a_message_saying ~says:"This lambda may not return" diagnostics;
-      if List.length diagnostics <> 3 then
-        Harness.fail "%d diagnostics, not 3" (List.length diagnostics))
+      if List.length diagnostics <> 4 then
+        Harness.fail "%d diagnostics, not 4" (List.length diagnostics))
 
 let () =
   Harness.test "two calls of a function that uses `System` are not known to return one value"

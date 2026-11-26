@@ -235,9 +235,13 @@ develop as well as make it easier to bootstrap the compiler in parts.
 
   So `cost allocations == 0` stands for "returns" on a trait's method and on
   a function's type. Three obligations make that hold of code
-  that could reach `intrinsic.crash`, which allocates nothing. An `impl`
-  method whose trait states the clause for it, and a function that states
-  it and is named as a value, are rejected where their `may_abort` holds. A
+  that could reach `intrinsic.crash`, which allocates nothing. A method
+  whose trait states the clause for it, and a function that states
+  it and is named as a value, are rejected where their `may_abort` holds.
+  The method is one that an `impl` writes, or the body that the trait gives:
+  that body is judged by the fact of the node it is proven as, which is the
+  trait's method, or the method that an `impl` inherits where the body is
+  proven for that `impl`. A
   lambda whose type states it is rejected where its body, or a lambda made
   in its body, holds an abort site or calls a function that may abort. So
   every function value of such a type was made from code that returns.
@@ -298,10 +302,17 @@ develop as well as make it easier to bootstrap the compiler in parts.
 
   | Use | Function | Rule |
   |---|---|---|
-  | Named as a value | `read_named_function` | States its definition and its relation once per query |
+  | Named as a value | `read_named_function` | States its relation once per query, and its definition where the function does not abort |
   | Passed for a parameter | `check_passed` | The parameter's `requires` imply its `requires`, and its `ensures` imply the parameter's |
   | Called | `check_called`, `assume_returned` | The call proves its `requires` and assumes its `ensures` |
   | Read where no function type states a `requires` | `check_read`, `check_passed` | Its `requires` hold for every argument |
+
+  The definition of a named function is its contract as an axiom, and the
+  relation holds only of a call that returned. So a function that may abort
+  has a relation and no definition: its application is a term that nothing
+  specifies, as its call in a specification is. `Callee.may_abort` decides
+  that for a call and for a function named as a value, and
+  `State.known_function` carries the answer with the contract.
 
   `Lambdas.make_passed_values` checks each argument of a call against its
   parameter's contract: it runs a lambda's body against the contract, which
