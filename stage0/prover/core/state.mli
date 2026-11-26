@@ -54,6 +54,7 @@ type environment = {
   inherits_precondition : bool;
   ranking : bool;
   terminates : bool;
+  proven_laws : (Types.trait_reference * Types.ty) option;
   policy : obligation_policy;
   visible_types : (Types.type_interface * Types.substitution) option Tables.Type_table.t;
   callees : known_callee Tables.Path_table.t;
@@ -202,13 +203,11 @@ type context = {
   callbacks : callback_state;
   mutable indexes : (Core.id * noted_place) list;
   lending : lending_state;
-  mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   cost : cost_state;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;
   lambda_definitions : Logic.term Tables.Symbol_table.t;
   models : (Logic.term -> Logic.term) option Tables.Model_table.t;
-  mutable equalities : Logic.term list;
   mutable holes : (Resolve.Names.key * Obligation.location) list;
   mutable unfinished : Logic.term list;
   mutable skipped_conditions : Types.condition list;

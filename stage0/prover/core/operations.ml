@@ -97,9 +97,8 @@ let make_derived_equal (context : State.context) (frame : State.frame) (ty : Typ
    with
   | Some (interface, _), Some shape
     when List.exists Encoding.is_standard_equal interface.derives
-         && (not (List.mem equal context.equalities))
          && not (Logic.mentions frame.bound equal) ->
-      context.equalities <- equal :: context.equalities;
+      Query.run_once context.query (Derived_equality equal) @@ fun () ->
       let fields_equal (variant, fields) =
         Logic.conjunction
           (List.map

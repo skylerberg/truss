@@ -12,6 +12,8 @@ type stated =
   | Range_elements of Types.ty
   | Non_negative_rank of Types.ty
   | Method_cost_bound of Logic.symbol
+  | Laws_of of Types.trait_reference * Types.ty
+  | Derived_equality of Logic.term
 
 module Symbol_table : Hashtbl.S with type key = Logic.symbol
 module Term_table : Hashtbl.S with type key = Logic.term
