@@ -364,18 +364,24 @@ let list_laws_of_generics (interface : Interface.Lookups.t) instance path
         signature.generics
   | None -> []
 
-let list_laws_assumed_at (interface : Interface.Lookups.t) instance (callee : _ Core.target) =
-  match callee with
-  | Trait_method { trait; self_type; name; receiver; instantiation; _ } ->
-      list_laws_of_bound interface
-        ~self_type:(substitute_type interface instance self_type)
-        ~is_assumed_by_the_callee:false
-        (substitute_trait interface instance trait)
-      @ list_laws_of_generics interface instance
-          (Path.Method { owner = trait.trait; name; receiver })
-          instantiation
-  | Function { path; instantiation } -> list_laws_of_generics interface instance path instantiation
-  | Capability_method _ | Intrinsic _ | Indirect _ -> []
+let list_laws_assumed_at (interface : Interface.Lookups.t) instance (statement : Tree.statement) =
+  (match Walk.find_callee statement with
+    | Some { target = Trait_method { trait; self_type; name; receiver; instantiation; _ }; _ } ->
+        list_laws_of_bound interface
+          ~self_type:(substitute_type interface instance self_type)
+          ~is_assumed_by_the_callee:false
+          (substitute_trait interface instance trait)
+        @ list_laws_of_generics interface instance
+            (Path.Method { owner = trait.trait; name; receiver })
+            instantiation
+    | Some { target = Function { path; instantiation }; _ } ->
+        list_laws_of_generics interface instance path instantiation
+    | Some { target = Capability_method _ | Intrinsic _ | Indirect _; _ } | None -> [])
+  @
+  match statement.kind with
+  | Basic (Assign { value = Function_value { path; instantiation; _ }; _ }) ->
+      list_laws_of_generics interface instance path instantiation
+  | _ -> []
 
 let collect (lookups : lookups) instance visit_roots =
   let dependencies = ref [] in
@@ -411,16 +417,11 @@ let collect (lookups : lookups) instance visit_roots =
         | Supplies { supplier; code } ->
             List.iter (add ~through statement.origin (Supplied supplier)) code)
       (list_statement_edges lookups.interface instance statement);
-    Option.iter
-      (fun (callee : Tree.callee) ->
-        List.iter
-          (fun (assumed : assumed_laws) ->
-            let origin =
-              match through with Some (origin, _) -> origin | None -> statement.origin
-            in
-            laws := { assumed with origin = Some origin } :: !laws)
-          (list_laws_assumed_at lookups.interface instance callee.target))
-      (Walk.find_callee statement);
+    List.iter
+      (fun (assumed : assumed_laws) ->
+        let origin = match through with Some (origin, _) -> origin | None -> statement.origin in
+        laws := { assumed with origin = Some origin } :: !laws)
+      (list_laws_assumed_at lookups.interface instance statement);
     match statement.kind with
     | Basic (Call { call; _ } | Lend { call; _ }) -> add_invariant_check ~through ~instance call
     | Basic (Assign { value = Parameter_default { definition; position; substitution }; _ }) ->
