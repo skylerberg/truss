@@ -743,9 +743,9 @@ and make_expected_signature lookups ?written (implemented : implemented_method) 
   match written with
   | Some written ->
       {
-        expected with
-        receiver =
-          (if implementation.trait.is_capability then written.receiver else expected.receiver);
+        (if implementation.trait.is_capability then Types.add_receiver expected written.receiver
+         else expected)
+        with
         parameters =
           List.map
             (fun (parameter : Types.parameter_info) -> { parameter with has_default = false })
