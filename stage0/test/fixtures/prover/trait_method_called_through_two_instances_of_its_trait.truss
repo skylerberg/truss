@@ -1,0 +1,10 @@
+trait Convert[Target] {
+  fn convert(self) -> Target
+}
+
+fn claim[T: Convert[Int64] + Convert[UInt8]](value: T) -> UInt8
+  requires Convert[Int64].convert(value) == 5
+  ensures result == 5
+{
+  Convert[UInt8].convert(value)
+}

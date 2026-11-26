@@ -17,16 +17,8 @@ type run = {
   mutable cancelled : (Mir.task * branch_exit list ref) list;
 }
 
-let make_unit_callee : _ Core.target -> Invocation.callee = function
-  | Function { path; instantiation } -> Function { path; instantiation }
-  | Trait_method { trait; name; receiver; self_type; instantiation; evidence } ->
-      Trait_method { trait; name; receiver; self_type; instantiation; evidence }
-  | Capability_method { capability; name } -> Capability_method { capability; name }
-  | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
-  | Indirect _ -> Indirect ()
-
-let make_invocation (callee : Mir.callee) ~lends : Invocation.t =
-  { callee = make_unit_callee callee.target; lends; uses = callee.uses }
+let resolve_callee context frame (callee : Mir.callee) ~lends =
+  Callee.resolve context frame callee.target ~lends ~uses:callee.uses
 
 let find_declared_fields context ty variant =
   match Encoding.find_visible_type context ty with
@@ -448,9 +440,8 @@ let find_argument_place context run (mode : Language.Mode.t) (value : Mir.operan
   | Mut, Borrow { place; _ } -> Some (make_passed_place context run place)
   | Mut, (Use _ | Take _ | Immediate _) | (Read | Own), _ -> None
 
-let evaluate_call_values context frame run (invocation : Invocation.t)
-    (arguments : Mir.argument list) =
-  Lambdas.make_passed_values context frame invocation
+let evaluate_call_values context frame run (callee : Callee.t) (arguments : Mir.argument list) =
+  Lambdas.make_passed_values context frame callee
     (List.mapi
        (fun position ({ mode; value; function_ } : Mir.argument) ->
          match function_ with
@@ -470,7 +461,7 @@ let evaluate_call_values context frame run (invocation : Invocation.t)
                  shape = classify_shape run ?function_ value;
                  origin = find_operand_origin value;
                  passed_place = find_argument_place context run mode value;
-                 is_step_self = position = 0 && Contracts.is_update_step context invocation;
+                 is_step_self = position = 0 && Callee.is_update_step context callee;
                  type_ = compute_operand_type context frame value;
                  declared_type =
                    Encoding.substitute_declared_type context frame (Mir.extract_operand_type value);
@@ -481,8 +472,7 @@ let evaluate_call_values context frame run (invocation : Invocation.t)
        arguments)
 
 let read_call context frame run (call : Mir.call) ~result_type =
-  let invocation = make_invocation call.callee ~lends:None in
-  match (invocation.callee, call.arguments) with
+  match (call.callee.target, call.arguments) with
   | ( Trait_method { trait; name; receiver; _ },
       [
         { value = tested; _ };
@@ -512,16 +502,17 @@ let read_call context frame run (call : Mir.call) ~result_type =
                 classify_shape run callee )
         | _ -> None
       in
-      let values = evaluate_call_values context frame run invocation call.arguments in
+      let callee = resolve_callee context frame call.callee ~lends:None in
+      let values = evaluate_call_values context frame run callee call.arguments in
       Calls.apply_call context frame
         { origin = call.origin; type_ = result_type }
-        invocation ~through values
+        callee ~through values
 
 let read_lend context (frame : State.frame) run part (call : Mir.call) =
   let mode = match run.infos.(part).kind with Lent mode -> mode | _ -> Language.Mode.Read in
-  let invocation = make_invocation call.callee ~lends:(Some mode) in
+  let callee = resolve_callee context frame call.callee ~lends:(Some mode) in
   let site : Invocation.site = { origin = call.origin; type_ = run.infos.(part).type_ } in
-  let values = evaluate_call_values context frame run invocation call.arguments in
+  let values = evaluate_call_values context frame run callee call.arguments in
   Option.map
     (fun ({ frame = after; result; end_lend } : Calls.applied) ->
       let lent = write_place context after run { root = Local part; projections = [] } result in
@@ -536,7 +527,7 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
           }
       | None, Language.Mode.Mut -> Facts.raise_bug "a `mut` lend that no call ends"
       | None, (Read | Own) -> lent)
-    (Calls.apply_lend context frame site invocation ~through:None values)
+    (Calls.apply_lend context frame site callee ~through:None values)
 
 let compute_target_type context frame run (target : Mir.place) =
   match target with
@@ -748,7 +739,9 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
         ~unconverted:(List.map (Encoding.substitute_type context frame) unconverted)
         ~types:(List.map (compute_operand_type context frame) arguments)
   | Specification (Method_cost { metric; method_ }) ->
-      (frame, Amounts.compute_method_cost context frame metric (make_unit_callee method_))
+      ( frame,
+        Amounts.compute_method_cost context frame metric
+          (Callee.resolve context frame method_ ~lends:None ~uses:Types.no_capabilities) )
   | Specification (Map entries) ->
       Values.apply_map_literal context frame ~ty ~location
         (List.map
@@ -1237,7 +1230,7 @@ and read_statement context frame run (statement : Mir.statement) =
               {
                 cursor = make_passed_place context run cursor;
                 cursor_type = compute_place_type context frame run cursor;
-                next = make_invocation next ~lends:None;
+                next = resolve_callee context frame next ~lends:None;
                 next_origin;
               }
       in

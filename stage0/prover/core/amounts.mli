@@ -7,7 +7,7 @@ val compute_construction_amount :
   State.context -> State.frame -> Types.ty -> string option -> Costs.counter -> Logic.term
 
 val compute_method_cost :
-  State.context -> State.frame -> Language.Metric.t -> Invocation.callee -> Logic.term
+  State.context -> State.frame -> Language.Metric.t -> Callee.t -> Logic.term
 
 val spend_copy :
   ?literal:Language.Literal.t ->
@@ -24,8 +24,8 @@ val spend_contract_call :
   before:State.frame ->
   after:State.frame ->
   Invocation.site ->
-  Invocation.t ->
-  Path.t ->
+  Callee.t ->
+  Callee.definition ->
   State.contract ->
   State.passed list ->
   changed:(int * Logic.term) list ->
@@ -37,12 +37,12 @@ val spend_contract_call :
   State.frame
 
 val spend_call_without_a_contract :
-  State.context -> State.frame -> Invocation.t -> State.passed list -> State.frame
+  State.context -> State.frame -> Callee.t -> State.passed list -> State.frame
 
 val spend_derived_equality :
   State.context ->
   State.frame ->
-  Invocation.t ->
+  Callee.t ->
   State.passed list ->
   result_type:Types.ty ->
   result:Logic.term ->
@@ -63,7 +63,7 @@ val spend_indirect_call :
 val spend_intrinsic :
   State.context ->
   State.frame ->
-  Invocation.t ->
+  Callee.t ->
   Intrinsic.operation ->
   State.passed list ->
   changed:Logic.term list ->

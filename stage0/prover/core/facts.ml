@@ -27,7 +27,9 @@ let run_in_source (context : State.context) (source : State.source) read =
     raise (Unsupported { unsupported with foreign_definition = Some source.definition })
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format
-let list_method_type_arguments ~self_type arguments = Types.Type self_type :: arguments
+
+let list_method_type_arguments (trait : Types.trait_reference) ~self_type arguments =
+  trait.trait_arguments @ (Types.Type self_type :: arguments)
 
 let read_parameter_name (parameter : Mir.parameter) =
   match Mir.find_local_name parameter.local with

@@ -1,0 +1,12 @@
+capability Chooser {
+  fn choose(count: UInt64, pick: (fn(n: UInt64) -> UInt64 requires n > 0 ensures result < n)) -> UInt64
+    requires count > 0
+    ensures result < count
+}
+
+fn index() -> UInt64
+  uses Chooser
+  ensures result < 5
+{
+  Chooser.choose(5, fn(n) { 100 / n % n })
+}

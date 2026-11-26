@@ -1,0 +1,5 @@
+type Box[T] = Box(value: T)
+
+fn spin[T](box: Box[T], again: Bool) -> UInt64 {
+  if again { spin[UInt8](Box.Box(value: 1), again: false) } else { 0 }
+}

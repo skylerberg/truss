@@ -60,7 +60,15 @@ let compare_with_entry (context : State.context) (clauses : State.clauses) ~is_s
     ~callee_entry ~argument_at =
   match (context.termination.measures, clauses.decreases) with
   | [], [] when context.termination.terminates && is_self_call -> (
-      match list_structural_parameters context (read_entry context).entry_frame clauses with
+      let entry = (read_entry context).entry_frame in
+      let is_passed_at_its_type ((parameter : Mir.parameter), ty, _, _) =
+        Types.equal
+          (Encoding.substitute_type context entry ty)
+          (Encoding.substitute_type context callee_entry parameter.type_)
+      in
+      match
+        List.filter is_passed_at_its_type (list_structural_parameters context entry clauses)
+      with
       | [] -> Unmeasured
       | parts ->
           let before = List.map (fun (_, ty, value, _) -> Models.rank context ty value) parts in
@@ -114,14 +122,14 @@ let find_induction_premise context (clauses : State.clauses) ~is_self_call ~call
   | Smaller_measures smaller | Smaller_part { smaller; _ } -> Some smaller
   | Unmeasured | Uncompared -> None
 
-let find_recursive_callee (context : State.context) (frame : State.frame) location callee =
+let find_recursive_callee (context : State.context) (frame : State.frame) location group_member =
   let reject target impl =
     Obligations.oblige context frame location
       (Recursion_through_impl { call = { at = location; callee = Some target }; impl })
       (Logic.Boolean false);
     None
   in
-  match Cycles.find_group_member context frame callee with
+  match group_member with
   | Some target when frame.makes_obligations -> (
       match context.lookups.mir.find_form_origin target with
       | Some (Derived _, _) when context.termination.terminates -> reject target Derives

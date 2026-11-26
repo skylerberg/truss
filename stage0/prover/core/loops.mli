@@ -14,7 +14,7 @@ type iterable =
   | Over_cursor of {
       cursor : State.passed_place;
       cursor_type : Types.ty;
-      next : Invocation.t;
+      next : Callee.t;
       next_origin : Core.origin;
     }
 

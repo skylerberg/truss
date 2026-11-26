@@ -20,7 +20,7 @@ val find_induction_premise :
   Logic.term option
 
 val find_recursive_callee :
-  State.context -> State.frame -> Obligation.location -> 'operand Core.target -> Path.t option
+  State.context -> State.frame -> Obligation.location -> Path.t option -> Path.t option
 
 val reject_uncompared_recursion :
   State.context -> State.frame -> Obligation.location -> Path.t option -> unit

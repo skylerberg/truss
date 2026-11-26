@@ -210,20 +210,23 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           check_literal_operands state ~left:left_type ~right:right_type;
           if arithmetic = Add && (is_string state left left_type || is_string state right right_type)
           then begin
-            let find_piece (side : Syntax.expression) : Catalog.Inference.joined_piece option =
+            let list_pieces (side : Syntax.expression) : Catalog.Inference.joined_piece list option
+                =
               match side.kind with
+              | String { tag = None; form = Ordinary; first = { value = ""; _ }; rest = []; _ } ->
+                  Some []
               | String { tag = None; form = Ordinary; first; rest = []; _ } ->
-                  Some (Fragment (Written first.id))
+                  Some [ Fragment (Written first.id) ]
               | String _ -> None
-              | _ -> Some (Interpolated (Written side.id))
+              | _ -> Some [ Interpolated (Written side.id) ]
             in
             State.make_error_type state
               (String_addition
                  {
                    at = Written value.id;
                    join =
-                     (match (find_piece left, find_piece right) with
-                     | Some left, Some right -> Some (left, right)
+                     (match (list_pieces left, list_pieces right) with
+                     | Some left, Some right -> Some (left @ right)
                      | _ -> None);
                  })
           end

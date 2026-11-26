@@ -147,11 +147,11 @@ let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) ~im
         in
         Facts.add_fact context fact)
 
+let model_trait : Types.trait_reference =
+  { trait = Well_known.make_path Model; trait_arguments = []; associated = [] }
+
 let find_model_impl (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   let interface = context.lookups.interface and list_bounds = Interface.Impls.list_no_bounds in
-  let model_trait : Types.trait_reference =
-    { trait = Well_known.make_path Model; trait_arguments = []; associated = [] }
-  in
   let value =
     Types.erase_views
       (Interface.Impls.normalize interface ~list_bounds
@@ -167,7 +167,7 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
         Logic.Symbol.Function
           {
             callee = Well_known.make_impl_method_path Model_model ~impl;
-            type_arguments = Facts.list_method_type_arguments ~self_type:ty [];
+            type_arguments = Facts.list_method_type_arguments model_trait ~self_type:ty [];
           }
       in
       Facts.declare context
