@@ -185,9 +185,11 @@ develop as well as make it easier to bootstrap the compiler in parts.
   defined. `Facts.suppose` makes the frame for each: it restricts the frame
   by a new Boolean, so every fact and obligation of the supposed execution
   has that Boolean as a premise, and the query stays satisfiable where the
-  execution is impossible. A function that never returns has an `ensures`
-  that no value meets, and assuming it of a supposed result in the caller's
-  own frame gave the caller a false fact about its other values.
+  execution is impossible. Two false proofs came from a supposed value in a
+  frame that runs: the `ensures` of a function that never returns, which no
+  result meets, denied the `requires` it was assumed under; and the
+  invariant of a supposed result of type `Room[capacity]` gave the body a
+  fact about `capacity`.
 - **A contract is resolved once, and its three readers differ only in what
   they prove and what they assume.** The rules are those of modular
   verification with pre- and postconditions. A definition is proven against
