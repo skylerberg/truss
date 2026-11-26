@@ -58,6 +58,7 @@ type circular_proof =
   | Circular_contract of { cyclic : Path.t; dependency : dependency }
   | Circular_inherited_contract of { cyclic : Path.t; dependency : dependency }
   | Circular_instance of { type_ : Types.ty; dependency : Path.t; cyclic : Path.t }
+  | Circular_laws of { trait : Types.trait_reference; type_ : Types.ty }
 
 type unbounded =
   | Unstated_costs of {

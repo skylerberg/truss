@@ -545,6 +545,18 @@ let find_circular_contract (lookups : Lookups.t) (source : State.source) ~path =
       List.iter (Cycles.reject_circular_proof context start) circular;
       Some (make_outcome context)
 
+let find_circular_laws (lookups : Lookups.t) (source : State.source) ~path =
+  let context =
+    make_context lookups ~home:source.key ~current:path ~terminates:false ~measures:[]
+      ~inherits_precondition:false
+  in
+  let start = make_empty_frame source in
+  match Cycles.list_circular_laws context start with
+  | [] -> None
+  | circular ->
+      List.iter (Cycles.reject_circular_proof context start) circular;
+      Some (make_outcome context)
+
 let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_substitution)
     (lookups : Lookups.t) (source : State.source) ~path =
   match find_circular_contract lookups source ~path with
@@ -601,7 +613,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
     (fun (law_source, (law : Mir.law)) ->
       let types = Laws.list_law_parameter_types ~substitution law in
       if not (List.exists (fun ty -> Types.is_error ty) types) then begin
-        context.laws_assumed <- (trait, for_type) :: context.laws_assumed;
+        Laws.enter_proof context trait for_type;
         let terms =
           List.map
             (fun ty ->

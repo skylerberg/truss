@@ -323,6 +323,12 @@ let () =
     (fun () ->
       expect_circular Fixtures.Prover.invariant_calling_a_method_of_an_element_of_its_type
         "prover.circular_proof" ~says:"This calls `Chain.head`" ~at:("rest[0].head()", 1));
+  Harness.test "a law proof that assumes laws proven from its own law is an error" (fun () ->
+      expect_circular Fixtures.Prover.law_proof_calling_a_method_of_a_trait_that_requires_its_own
+        "prover.circular_proof" ~says:"This assumes the laws of `Ordered` for `Level`"
+        ~at:("value.compare(value)", 1));
+  Harness.test "a theorem that a law proof calls is proven without the laws of that impl" (fun () ->
+      expect_not_proven Fixtures.Prover.law_proven_by_a_theorem_that_needs_the_law "prover.ensures");
   Harness.test "an invariant may call a function of a field's type" (fun () ->
       expect_proven Fixtures.Prover.invariant_calling_a_function_of_a_field);
   Harness.test "a requires that calls its own function is an error, and its caller is read"

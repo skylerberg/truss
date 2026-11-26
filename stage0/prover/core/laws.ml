@@ -95,14 +95,20 @@ let make_law_fact (context : State.context) (frame : State.frame) source ~substi
     with Facts.Unsupported _ -> None
   end
 
+let enter_proof (context : State.context) (trait : Types.trait_reference) (ty : Types.ty) =
+  context.laws_assumed <- (trait, ty) :: context.laws_assumed
+
 let assume_laws (context : State.context) frame (trait : Types.trait_reference) (ty : Types.ty) =
-  let key = (trait, ty) in
-  if not (List.mem key context.laws_assumed) then begin
-    context.laws_assumed <- key :: context.laws_assumed;
-    List.iter
-      (fun (required : Types.trait_reference) ->
+  List.iter
+    (fun (required : Types.trait_reference) ->
+      let key = (required, ty) in
+      let impl = Option.map fst (Facts.find_impl context required ty) in
+      let is_proven_with_this_proof =
+        match impl with Some impl -> Cycles.is_in_proof_cycle context impl | None -> false
+      in
+      if not (is_proven_with_this_proof || List.mem key context.laws_assumed) then begin
+        context.laws_assumed <- key :: context.laws_assumed;
         let substitution = Contracts.make_trait_substitution context.lookups required ty in
-        let impl = Option.map fst (Facts.find_impl context required ty) in
         List.iter
           (fun (source, (law : Mir.law)) ->
             match make_law_fact context frame source ~substitution law with
@@ -114,9 +120,9 @@ let assume_laws (context : State.context) frame (trait : Types.trait_reference) 
                   impl;
                 Facts.add_frame_fact context frame fact_
             | None -> ())
-          (list_laws context required.trait))
-      (Interface.Properties.list_bound_closure context.lookups.interface ~self:ty trait)
-  end
+          (list_laws context required.trait)
+      end)
+    (Interface.Properties.list_bound_closure context.lookups.interface ~self:ty trait)
 
 let read_named_requires context (frame : State.frame) (clauses : State.clauses) ~entries =
   let inside =

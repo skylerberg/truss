@@ -265,8 +265,39 @@ type dependency = {
   omitted : omitted option;
 }
 
-let collect_dependencies (lookups : lookups) instance visit_roots =
+type assumed_laws = {
+  impl : Path.t;
+  trait : Types.trait_reference;
+  type_ : Types.ty;
+  origin : Core.origin option;
+}
+
+let states_laws (interface : Interface.Lookups.t) trait =
+  match interface.find_trait_header trait with Some header -> header.laws <> [] | None -> false
+
+let list_laws_assumed_at (interface : Interface.Lookups.t) instance (callee : _ Core.target) =
+  match callee with
+  | Trait_method { trait; self_type; _ } ->
+      let self_type = substitute_type interface instance self_type in
+      let trait = substitute_trait interface instance trait in
+      List.filter_map
+        (fun (required : Types.trait_reference) ->
+          if states_laws interface required.trait then
+            match
+              Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type
+                ~trait:required Bound
+            with
+            | Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ } | Bound ->
+                None
+            | Impl { impl; _ } | Derived_for_view { viewed = impl; _ } ->
+                Some (impl, required, self_type)
+          else None)
+        (Interface.Properties.list_bound_closure interface ~self:self_type trait)
+  | Function _ | Capability_method _ | Intrinsic _ | Indirect _ -> []
+
+let collect (lookups : lookups) instance visit_roots =
   let dependencies = ref [] in
+  let laws = ref [] in
   let entered = Entered_table.create 4 in
   let enters code =
     if Entered_table.mem entered code then false
@@ -298,6 +329,16 @@ let collect_dependencies (lookups : lookups) instance visit_roots =
         | Supplies { supplier; code } ->
             List.iter (add ~through statement.origin (Supplied supplier)) code)
       (list_statement_edges lookups.interface instance statement);
+    Option.iter
+      (fun (callee : Tree.callee) ->
+        List.iter
+          (fun (impl, trait, type_) ->
+            let origin =
+              match through with Some (origin, _) -> origin | None -> statement.origin
+            in
+            laws := { impl; trait; type_; origin = Some origin } :: !laws)
+          (list_laws_assumed_at lookups.interface instance callee.target))
+      (Walk.find_callee statement);
     match statement.kind with
     | Basic (Call { call; _ } | Lend { call; _ }) -> add_invariant_check ~through ~instance call
     | Basic (Assign { value = Parameter_default { definition; position; substitution }; _ }) ->
@@ -375,7 +416,9 @@ let collect_dependencies (lookups : lookups) instance visit_roots =
   visit_roots
     ~code:(visit_code ~through:None ~instance)
     ~formula:(visit_formula ~through:None ~instance);
-  List.rev !dependencies
+  (List.rev !dependencies, List.rev !laws)
+
+let collect_dependencies lookups instance visit_roots = fst (collect lookups instance visit_roots)
 
 let list_dependencies lookups instance (code : Tree.t) =
   collect_dependencies lookups instance (fun ~code:visit ~formula:_ -> visit code)
@@ -569,6 +612,118 @@ let has_fields (interface : Interface.Lookups.t) path =
   | Some { shape = Record _ | Sum _; _ } -> true
   | Some _ | None -> false
 
+let list_law_proofs (lookups : lookups) package (trait : Types.trait_reference)
+    (for_type : Types.ty) =
+  let is_same_argument (left : Types.argument) (right : Types.argument) =
+    match (left, right) with Type left, Type right -> Types.equal left right | _ -> left = right
+  in
+  let named_laws =
+    match (Interface.Impls.find_head for_type, lookups.interface.find_trait_header trait.trait) with
+    | Some type_head, Some header ->
+        List.concat_map
+          (fun law ->
+            lookups.interface.names.list_law_proofs package { trait = trait.trait; law; type_head })
+          header.laws
+    | _ -> []
+  in
+  List.filter_map
+    (fun (key : Resolve.Names.key) ->
+      match Interface.Definition.find_interface lookups.interface key.path with
+      | Some (Interface.Environment.Law_proof_interface proven) -> (
+          let variables =
+            List.map (fun (generic : Types.generic) -> generic.generic) proven.generics
+          in
+          match
+            Interface.Impls.match_type ~variables Types.no_substitution proven.for_type for_type
+          with
+          | Some renaming
+            when List.equal is_same_argument
+                   (List.map
+                      (Types.substitute_argument_erased renaming)
+                      proven.trait.trait_arguments)
+                   trait.trait_arguments ->
+              Some (proven.law, key, renaming)
+          | _ -> None)
+      | _ -> Compiler_bug.raise_bug ~stage:"MIR" "%s is not a law proof" (Path.show key.path))
+    named_laws
+
+let find_implementing (interface : Interface.Lookups.t) (trait : Types.trait_reference) self_type =
+  match
+    Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type ~trait Bound
+  with
+  | Impl { impl; _ } | Derived_for_view { viewed = impl; _ } -> Some impl
+  | Bound -> None
+
+let find_proven_impl (lookups : lookups) path =
+  match Interface.Definition.find_interface lookups.interface path with
+  | Some (Interface.Environment.Law_proof_interface proven) ->
+      find_implementing lookups.interface proven.trait proven.for_type
+  | Some _ | None ->
+      Option.map
+        (fun (_ : Types.impl_interface) -> path)
+        (Interface.Definition.find_impl_interface lookups.interface path)
+
+let list_trait_laws (lookups : lookups) trait =
+  match lookups.interface.names.find_key trait with
+  | Some key -> (lookups.mir.read_contract_part key).laws
+  | None -> []
+
+let list_assumed_laws (lookups : lookups) path =
+  let instance = find_instance lookups path in
+  let list_laws substitution formulas =
+    snd (collect lookups substitution (fun ~code:_ ~formula -> List.iter formula formulas))
+  in
+  let list_laws_of_another_source substitution formulas =
+    List.map
+      (fun (laws : assumed_laws) -> { laws with origin = None })
+      (list_laws substitution formulas)
+  in
+  let of_code =
+    snd
+      (collect lookups instance (fun ~code ~formula:_ -> Option.iter code (find_code lookups path)))
+  in
+  let of_contract =
+    list_laws instance
+      (Option.fold ~none:[] ~some:list_contract_formulas (find_contract lookups path))
+  in
+  let of_inherited_contract =
+    match Interface.Impls.find_implemented_method lookups.interface path with
+    | Some implemented ->
+        list_laws_of_another_source implemented.implementation.substitution
+          (Option.fold ~none:[] ~some:list_contract_formulas
+             (find_contract lookups implemented.declaration))
+    | None -> []
+  in
+  let of_type_clauses =
+    list_laws Types.no_substitution
+      (list_invariant_clauses lookups path @ list_potential_clauses lookups path)
+  in
+  let of_proven_laws =
+    match Interface.Definition.find_impl_interface lookups.interface path with
+    | Some impl ->
+        list_laws_of_another_source
+          (Types.make_trait_substitution
+             (Interface.Definition.read_trait_interface lookups.interface impl.implements.trait)
+               .trait_generics
+             ~self:impl.for_type impl.implements)
+          (List.concat_map
+             (fun (law : Tree.law) -> law.requires @ [ law.states ])
+             (list_trait_laws lookups impl.implements.trait))
+    | None -> []
+  in
+  let proven = find_proven_impl lookups path in
+  List.filter
+    (fun (laws : assumed_laws) -> not (Option.equal Path.equal proven (Some laws.impl)))
+    (of_code @ of_contract @ of_inherited_contract @ of_type_clauses @ of_proven_laws)
+
+let list_own_law_proofs (lookups : lookups) path =
+  match Interface.Definition.find_impl_interface lookups.interface path with
+  | Some impl ->
+      List.map
+        (fun (_, (key : Resolve.Names.key), _) -> key.path)
+        (list_law_proofs lookups (Path.locate_package path) impl.implements impl.for_type)
+  | None -> []
+
 let list_assumed_paths (lookups : lookups) path =
   let package = Path.locate_package path in
   let is_type_of_package (used : type_use) =
@@ -587,4 +742,6 @@ let list_assumed_paths (lookups : lookups) path =
     @ List.filter_map is_type_of_package (list_type_uses lookups path)
     @ List.concat_map
         (fun (instance : instance_use) -> instance.dependencies)
-        (list_instance_uses lookups path))
+        (list_instance_uses lookups path)
+    @ List.map (fun (laws : assumed_laws) -> laws.impl) (list_assumed_laws lookups path)
+    @ list_own_law_proofs lookups path)

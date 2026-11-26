@@ -141,9 +141,17 @@ develop as well as make it easier to bootstrap the compiler in parts.
   of the definition being proven, arguments below the entry measure. Its
   state is one record, `context.axioms`, and CI rejects a use of it outside
   `Contract_axioms`.
-- **`Termination` compares a recursive call with the entry of the definition
-  being proven.** A call obliges the comparison, and the axiom of a callee in
-  the recursion group takes it as a premise, so the two never differ.
+- **`Termination` holds the rules that show a body to end.** It compares a
+  recursive call with the entry of the definition being proven: the call
+  obliges the comparison, and the axiom of a callee in the recursion group
+  takes it as a premise, so the two never differ. It also holds the measure
+  of a loop. Its state is one record, `context.termination`.
+- **`Cycles` reads the recursion group and the proof group, and rejects a
+  proof that assumes a fact whose own proof assumes it back.** Every fact
+  that a proof takes from another definition is an edge of the proof graph,
+  which `Mir.Call_edges` lists: a callee's contract, a type's invariant, and
+  the laws of an `impl`. `Laws` assumes no law of an `impl` in the proof
+  group of the definition being proven.
 - **The solver keeps Z3 running.** `Solver` starts one `z3 -in` process for
   each domain that solves, gives each query to an idle process, and sends
   `(reset)` after the answer, so a query costs no launch. A process that was

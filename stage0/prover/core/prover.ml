@@ -147,15 +147,25 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
               })
     | Constant | Member_constant ->
         Obligations (Translate.translate_constant lookups source ~path:key.path)
-    | Impl ->
-        let outcomes = translate_impl lookups key source in
-        Obligations
-          {
-            obligations =
-              List.concat_map (fun (outcome : Obligation.outcome) -> outcome.obligations) outcomes;
-            holes = List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes;
-            evaluation = None;
-          }
+    | Impl -> (
+        match Translate.find_circular_laws lookups source ~path:key.path with
+        | Some outcome -> Obligations outcome
+        | None ->
+            let outcomes = translate_impl lookups key source in
+            Obligations
+              {
+                obligations =
+                  List.concat_map
+                    (fun (outcome : Obligation.outcome) -> outcome.obligations)
+                    outcomes;
+                holes =
+                  List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes;
+                evaluation = None;
+              })
+    | Law_proof -> (
+        match Translate.find_circular_laws lookups source ~path:key.path with
+        | Some outcome -> Obligations outcome
+        | None -> Not_proven_here)
     | Type -> (
         let has_defaults () =
           match Mir.read_defaults lookups.mir key.path with
@@ -173,7 +183,7 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
         | Some { form = { potential; _ }; _ } when Option.is_some potential || has_defaults () ->
             Obligations (Translate.translate_type lookups source ~path:key.path)
         | Some _ | None -> Not_proven_here)
-    | Trait | Capability | Law_proof -> Not_proven_here
+    | Trait | Capability -> Not_proven_here
   with Facts.Unsupported { location; construct; foreign_definition } ->
     Unsupported { location; construct; foreign = foreign_definition }
 

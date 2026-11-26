@@ -1,0 +1,28 @@
+type Level(value: Int64)
+
+impl Equal for Level {
+  fn equal(self, other: Level) -> Bool
+    ensures result == (self.value == other.value)
+  {
+    self.value == other.value
+  }
+}
+
+impl Ordered for Level {
+  fn compare(self, other: Level) -> Ordering
+    ensures (result == Ordering.Less) == (self.value < other.value)
+    ensures (result == Ordering.Greater) == (self.value > other.value)
+  {
+    if self.value < other.value {
+      Ordering.Less
+    } else if self.value > other.value {
+      Ordering.Greater
+    } else {
+      Ordering.Equal
+    }
+  }
+}
+
+proof Equal.reflexive for Level {
+  let _ = value.compare(value)
+}

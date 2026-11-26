@@ -113,6 +113,35 @@ let list_circular_instance_uses (context : State.context) (frame : State.frame) 
       | Some _ | None -> None)
     (Mir.Call_edges.list_instance_uses lookups context.node)
 
+let list_impls_of_required_traits (context : State.context) =
+  match Interface.Definition.find_impl_interface context.lookups.interface context.node with
+  | Some impl ->
+      List.filter_map
+        (fun required -> Option.map fst (Facts.find_impl context required impl.for_type))
+        (Interface.Properties.list_bound_closure context.lookups.interface ~self:impl.for_type
+           impl.implements)
+  | None -> []
+
+let list_circular_laws (context : State.context) (frame : State.frame) =
+  let lookups : Mir.Call_edges.lookups =
+    { interface = context.lookups.interface; mir = context.lookups.mir }
+  in
+  let required = list_impls_of_required_traits context in
+  List.filter_map
+    (fun (laws : Mir.Call_edges.assumed_laws) ->
+      if is_in_proof_cycle context laws.impl && not (List.exists (Path.equal laws.impl) required)
+      then
+        Some
+          {
+            location =
+              (match laws.origin with
+              | Some origin -> Facts.locate context frame.source origin
+              | None -> Whole_definition);
+            proof = Circular_laws { trait = laws.trait; type_ = laws.type_ };
+          }
+      else None)
+    (Mir.Call_edges.list_assumed_laws lookups context.node)
+
 let list_circular_clauses (context : State.context) frame ~type_ =
   let lookups : Mir.Call_edges.lookups =
     { interface = context.lookups.interface; mir = context.lookups.mir }

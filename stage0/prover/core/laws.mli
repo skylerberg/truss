@@ -17,6 +17,7 @@ val bind_law_parameters :
   Logic.term list ->
   State.frame
 
+val enter_proof : State.context -> Types.trait_reference -> Types.ty -> unit
 val assume_laws : State.context -> State.frame -> Types.trait_reference -> Types.ty -> unit
 
 val check_named_callback :
