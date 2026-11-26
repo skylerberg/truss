@@ -1,0 +1,13 @@
+fn f(count: mut UInt64, steps: UInt64)
+  requires count <= 1000 && steps <= 1000
+{
+  count += 1
+  var index: UInt64 = 0
+  while index < steps
+    invariant index <= steps
+    invariant count == old(count) + index
+  {
+    count += 1
+    index += 1
+  }
+}

@@ -49,8 +49,8 @@ module Symbol = struct
     | Handle_descriptor
     | Compare_bytes_order
     | Cost_most
-    | Cost_log
-    | Cost_power
+    | Integer_log
+    | Integer_power
     | Reached of int
 end
 
@@ -287,8 +287,8 @@ let rec show_symbol : symbol -> string = function
   | Handle_descriptor -> "handle.descriptor"
   | Compare_bytes_order -> "compare_bytes.order"
   | Cost_most -> "cost.most"
-  | Cost_log -> "cost.log"
-  | Cost_power -> "cost.power"
+  | Integer_log -> "integer.log"
+  | Integer_power -> "integer.power"
   | Reached index -> Printf.sprintf "reached.%d" index
 
 and show_term term =
@@ -369,9 +369,27 @@ let ite condition then_ else_ =
   | _ -> if then_ = else_ then then_ else Operation (Ite, [ condition; then_; else_ ])
 
 let negate value = Operation (Negate, [ value ])
-let add left right = Operation (Add, [ left; right ])
-let subtract left right = Operation (Subtract, [ left; right ])
-let multiply left right = Operation (Multiply, [ left; right ])
+
+let add left right =
+  match (left, right) with
+  | Integer x, Integer y -> Integer (Z.add x y)
+  | (Integer x, other | other, Integer x) when Z.equal x Z.zero -> other
+  | _ -> Operation (Add, [ left; right ])
+
+let subtract left right =
+  match (left, right) with
+  | Integer x, Integer y -> Integer (Z.sub x y)
+  | other, Integer x when Z.equal x Z.zero -> other
+  | _ when left = right -> Integer Z.zero
+  | _ -> Operation (Subtract, [ left; right ])
+
+let multiply left right =
+  match (left, right) with
+  | Integer x, Integer y -> Integer (Z.mul x y)
+  | (Integer x, other | other, Integer x) when Z.equal x Z.one -> other
+  | (Integer x, _ | _, Integer x) when Z.equal x Z.zero -> Integer Z.zero
+  | _ -> Operation (Multiply, [ left; right ])
+
 let less left right = Operation (Less, [ left; right ])
 let less_equal left right = Operation (Less_equal, [ left; right ])
 let greater left right = Operation (Greater, [ left; right ])
@@ -399,26 +417,6 @@ let integer_of_bits ~is_signed ~width bits =
       unsigned
   else unsigned
 
-let plus left right =
-  match (left, right) with
-  | Integer x, Integer y -> Integer (Z.add x y)
-  | (Integer x, other | other, Integer x) when Z.equal x Z.zero -> other
-  | _ -> add left right
-
-let minus left right =
-  match (left, right) with
-  | Integer x, Integer y -> Integer (Z.sub x y)
-  | other, Integer x when Z.equal x Z.zero -> other
-  | _ when left = right -> Integer Z.zero
-  | _ -> subtract left right
-
-let times left right =
-  match (left, right) with
-  | Integer x, Integer y -> Integer (Z.mul x y)
-  | (Integer x, other | other, Integer x) when Z.equal x Z.one -> other
-  | (Integer x, _ | _, Integer x) when Z.equal x Z.zero -> Integer Z.zero
-  | _ -> multiply left right
-
 let larger left right =
   match (left, right) with
   | Integer x, Integer y -> Integer (Z.max x y)
@@ -428,7 +426,7 @@ let larger left right =
 let at_least_zero term = larger term (Integer Z.zero)
 
 let combine_linear (sums, constant) =
-  let scale (atom, coefficient) = times (Integer coefficient) atom in
+  let scale (atom, coefficient) = multiply (Integer coefficient) atom in
   let positive = List.filter (fun (_, coefficient) -> Z.sign coefficient > 0) sums in
   let negative =
     List.filter_map
@@ -437,13 +435,13 @@ let combine_linear (sums, constant) =
       sums
   in
   let total =
-    List.fold_left (fun total entry -> plus total (scale entry)) (Integer Z.zero) positive
+    List.fold_left (fun total entry -> add total (scale entry)) (Integer Z.zero) positive
   in
   let total =
-    if Z.sign constant >= 0 then plus total (Integer constant)
-    else minus total (Integer (Z.neg constant))
+    if Z.sign constant >= 0 then add total (Integer constant)
+    else subtract total (Integer (Z.neg constant))
   in
-  List.fold_left (fun total entry -> minus total (scale entry)) total negative
+  List.fold_left (fun total entry -> subtract total (scale entry)) total negative
 
 let rec linearize term =
   let rec add_scaled coefficient term (sums, constant) =
@@ -498,14 +496,16 @@ let rec linearize term =
         | common ->
             let shared =
               List.fold_left
-                (fun total (atom, coefficient) -> plus total (times (Integer coefficient) atom))
+                (fun total (atom, coefficient) -> add total (multiply (Integer coefficient) atom))
                 (Integer Z.zero) common
             in
             add shared
               (Apply
                  ( Symbol.Cost_most,
-                   [ normalize_linear (minus left shared); normalize_linear (minus right shared) ]
-                 )))
+                   [
+                     normalize_linear (subtract left shared);
+                     normalize_linear (subtract right shared);
+                   ] )))
     | Apply (name, arguments) -> Apply (name, List.map normalize_linear arguments)
     | Is (constructor, argument) -> Is (constructor, normalize_linear argument)
     | Operation (operator, arguments) -> Operation (operator, List.map normalize_linear arguments)
@@ -516,46 +516,42 @@ let rec linearize term =
 
 and normalize_linear term = combine_linear (linearize term)
 
-let find_constant_difference left right =
-  let rec collect coefficient term ((constant, atoms) as sums) =
-    match term with
-    | Integer value -> (Z.add constant (Z.mul coefficient value), atoms)
-    | Operation (Add, parts) ->
-        List.fold_left (fun sums part -> collect coefficient part sums) sums parts
-    | Operation (Subtract, [ minuend; subtrahend ]) ->
-        collect (Z.neg coefficient) subtrahend (collect coefficient minuend sums)
-    | Operation (Negate, [ inner ]) -> collect (Z.neg coefficient) inner sums
-    | Operation (Multiply, [ Integer factor; inner ])
-    | Operation (Multiply, [ inner; Integer factor ]) ->
-        collect (Z.mul coefficient factor) inner sums
-    | atom ->
-        let existing = Option.value (List.assoc_opt atom atoms) ~default:Z.zero in
-        (constant, (atom, Z.add existing coefficient) :: List.remove_assoc atom atoms)
-  in
-  let constant, atoms = collect Z.minus_one right (collect Z.one left (Z.zero, [])) in
-  if List.for_all (fun (_, coefficient) -> Z.equal coefficient Z.zero) atoms then Some constant
-  else None
+let rec decreases_lexicographically before after =
+  match (before, after) with
+  | [ right ], [ left ] -> less_equal (Integer Z.zero) right &&& less left right
+  | right :: before, left :: after ->
+      less_equal (Integer Z.zero) right
+      &&& (less left right ||| (equal left right &&& decreases_lexicographically before after))
+  | _ -> Boolean true
 
-let has_difference_sign left right ~fails =
-  match find_constant_difference left right with
-  | Some difference -> fails (Z.sign difference)
-  | None -> false
+let find_constant_difference left right =
+  match linearize (subtract left right) with [], difference -> Some difference | _ :: _, _ -> None
+
+let decide_comparison_of_constant_difference = function
+  | Operation (operator, [ left; right ]) -> (
+      let holds_at_sign =
+        match operator with
+        | Less -> Some (fun sign -> sign < 0)
+        | Less_equal -> Some (fun sign -> sign <= 0)
+        | Greater -> Some (fun sign -> sign > 0)
+        | Greater_equal -> Some (fun sign -> sign >= 0)
+        | Equal -> Some (fun sign -> sign = 0)
+        | _ -> None
+      in
+      match (holds_at_sign, find_constant_difference left right) with
+      | Some holds_at_sign, Some difference -> Some (holds_at_sign (Z.sign difference))
+      | _ -> None)
+  | _ -> None
 
 let rec is_refuted = function
   | Boolean value -> not value
-  | Operation (Less, [ left; right ]) ->
-      has_difference_sign left right ~fails:(fun sign -> sign >= 0)
-  | Operation (Less_equal, [ left; right ]) ->
-      has_difference_sign left right ~fails:(fun sign -> sign > 0)
-  | Operation (Greater, [ left; right ]) ->
-      has_difference_sign left right ~fails:(fun sign -> sign <= 0)
-  | Operation (Greater_equal, [ left; right ]) ->
-      has_difference_sign left right ~fails:(fun sign -> sign < 0)
-  | Operation (Equal, [ left; right ]) ->
-      has_difference_sign left right ~fails:(fun sign -> sign <> 0)
   | Operation (And, parts) -> List.exists is_refuted parts
   | Operation (Or, parts) -> List.for_all is_refuted parts
-  | _ -> false
+  | term -> decide_comparison_of_constant_difference term = Some false
+
+let is_valid = function
+  | Boolean value -> value
+  | term -> decide_comparison_of_constant_difference term = Some true
 
 let rec mentions symbols = function
   | Symbol name -> List.mem name symbols

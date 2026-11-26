@@ -1,0 +1,6 @@
+fn f(m: UInt64, n: UInt64) -> UInt64
+  decreases m, n
+{
+  if m == 0 || n >= 100 { return n }
+  f(m, n + 1)
+}

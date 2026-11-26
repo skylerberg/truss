@@ -1,0 +1,8 @@
+fn f(count: UInt64) -> UInt64 {
+  var index: UInt64 = 0
+  while index < count {
+    if index == 7 { continue }
+    index += 1
+  }
+  index
+}

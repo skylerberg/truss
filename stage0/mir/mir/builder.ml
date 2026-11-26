@@ -199,6 +199,12 @@ let lower_condition_block builder build : Tree.block option =
 let is_written : Core.origin -> bool = function Written _ -> true | Desugared _ -> false
 let emit_path_note builder note origin = Emitter.emit builder (Basic (Path_note note)) origin
 
+let rec find_tested_local (expression : Core.expression) ~holds =
+  match expression.kind with
+  | Use (Local { local = Declared _ as local; _ }) -> Some (local, holds)
+  | Not inner -> find_tested_local inner ~holds:(not holds)
+  | _ -> None
+
 let rec lower_expression builder (node : Core.expression) : Tree.operand option =
   let origin = node.origin in
   let hold value = Emitter.hold builder node.type_ origin value in
@@ -289,7 +295,12 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
           Emitter.build_block builder (fun () ->
               if is_written node.origin then
                 emit_path_note builder
-                  (Condition_holds { condition = tested.origin; holds })
+                  (Condition_holds
+                     {
+                       condition = tested.origin;
+                       holds;
+                       tested_local = find_tested_local tested ~holds;
+                     })
                   tested.origin;
               run (fun () ->
                   match (Option.map (lower_block builder) body, result) with

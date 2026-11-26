@@ -599,7 +599,7 @@ let describe_path_note = function
       Description.Text "the arm `"
       :: join ", " (List.map (fun pattern -> [ Build.quote pattern ]) patterns)
       @ [ Text "` is taken" ]
-  | Condition_holds { condition; holds } ->
+  | Condition_holds { condition; holds; _ } ->
       [ Text "`"; Build.quote condition; Text (Printf.sprintf "` is %b" holds) ]
   | Else_runs pattern ->
       [ Text "`"; Build.quote pattern; Text "` does not match, so the `else` runs" ]
@@ -728,6 +728,14 @@ let show_comparison : Language.Comparison.t -> string = function
   | Greater -> ">"
   | Greater_equal -> ">="
 
+let negate : Language.Comparison.t -> Language.Comparison.t = function
+  | Equal -> Not_equal
+  | Not_equal -> Equal
+  | Less -> Greater_equal
+  | Less_equal -> Greater
+  | Greater -> Less_equal
+  | Greater_equal -> Less
+
 let rec show_value level (code : Code.t) =
   let parenthesize inner text = if inner < level then "(" ^ text ^ ")" else text in
   match code with
@@ -754,7 +762,9 @@ and show_goal ~is_nested (code : Code.t) =
   | Compared { left; comparison; right } ->
       Printf.sprintf "%s %s %s" (show_value 0 left) (show_comparison comparison)
         (show_value 0 right)
-  | Not inner -> "!(" ^ show_code inner ^ ")"
+  | Not (Compared compared) ->
+      show_goal ~is_nested (Compared { compared with comparison = negate compared.comparison })
+  | Not inner -> "!" ^ show_value 4 inner
   | All parts -> join " && " parts
   | Any parts -> join " || " parts
   | Implies { premise; conclusion } ->
@@ -782,8 +792,13 @@ let describe_required = function
           type_names = List.map (fun (name, type_) -> (name, Types.show type_)) type_names;
         }
 
+let add_clause (place : Prover.clause_place) line : _ Description.edit =
+  match place with
+  | Before_clause clause -> Build.insert_before clause (line @ [ Description.Text "\n  " ])
+  | Before_body body -> Add_line_before (Nodes.Node body, line)
+
 let describe_fix = function
-  | Prover.Add_requires { body; required; premise; condition } ->
+  | Prover.Add_requires { place; required; premise; condition } ->
       let required = List.map describe_required required in
       let required =
         match condition with
@@ -798,19 +813,12 @@ let describe_fix = function
       in
       {
         Description.title = (Description.Text "Add `requires " :: required) @ [ Text "`" ];
-        edits = [ Add_line_before (Nodes.Node body, Text "requires " :: required) ];
+        edits = [ add_clause place (Text "requires " :: required) ];
       }
   | Add_panic place ->
-      {
-        title = say "Add `uses Panic`";
-        edits =
-          [
-            (match place with
-            | After_uses uses -> Build.insert_after uses [ Text ", Panic" ]
-            | Before_clause first -> Build.insert_before first [ Text "uses Panic\n  " ]
-            | Before_body body -> Add_line_before (Nodes.Node body, [ Text "uses Panic" ]));
-          ];
-      }
+      { title = say "Add `uses Panic`"; edits = [ add_clause place [ Text "uses Panic" ] ] }
+  | Add_panic_to_uses uses ->
+      { title = say "Add `uses Panic`"; edits = [ Build.insert_after uses [ Text ", Panic" ] ] }
 
 let show_construct = function
   | Prover.Potential_of_elements -> "the potential of a collection's elements"

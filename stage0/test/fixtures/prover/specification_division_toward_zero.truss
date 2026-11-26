@@ -1,0 +1,16 @@
+fn quotient(value: Int64, divisor: Int64) -> Int64
+  requires divisor != 0
+  requires value != Int64.minimum
+  ensures result == value / divisor
+  ensures result * divisor + value % divisor == value
+{
+  value / divisor
+}
+
+theorem literal_quotients()
+  ensures -7 / 2 == -3
+  ensures -7 % 2 == -1
+  ensures 7 / -2 == -3
+  ensures 7 % -2 == 1
+{
+}

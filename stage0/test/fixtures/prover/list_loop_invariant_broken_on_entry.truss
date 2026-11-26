@@ -1,0 +1,9 @@
+fn f(items: List[Int64]) -> UInt64 {
+  var seen: UInt64 = 1
+  for _ in items
+    invariant seen == visited.length()
+  {
+    seen += 1
+  }
+  seen
+}

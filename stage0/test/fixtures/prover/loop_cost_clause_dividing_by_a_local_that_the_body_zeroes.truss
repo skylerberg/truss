@@ -1,0 +1,13 @@
+fn f(count: UInt64, divisor: UInt64) -> UInt64
+  requires divisor != 0
+{
+  var index: UInt64 = 0
+  var remaining: UInt64 = divisor
+  while index < count
+    cost time O(index + (100 / remaining) * 0)
+  {
+    index = index + 1
+    remaining = 0
+  }
+  index
+}
