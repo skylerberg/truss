@@ -146,26 +146,17 @@ let remove_temporaries locals =
 
 let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.frame)
     ~(lambdas : Mir.body array) (body : Mir.body) ~type_ =
-  let saved_returns = context.returns in
-  context.returns <- [];
-  Fun.protect
-    ~finally:(fun () -> context.returns <- saved_returns)
-    (fun () ->
-      let inside =
-        enter
-          (Obligations.set_panics
-             { frame with locals = remove_temporaries frame.locals }
-             ~panics:false)
-      in
-      Facts.run_in_source frame (fun () -> context.run_body inside ~lambdas body);
-      match
-        Joins.join context ~value_type:type_
-          (List.rev_map
-             (fun (exit_ : State.function_exit) -> (exit_.frame, exit_.returned))
-             context.returns)
-      with
-      | Some (returned, Some term) -> Some ({ frame with spent = returned.spent }, term)
-      | Some (_, None) | None -> None)
+  let inside =
+    enter
+      (Obligations.set_panics { frame with locals = remove_temporaries frame.locals } ~panics:false)
+  in
+  let returns = Facts.run_in_source frame (fun () -> context.run_body inside ~lambdas body) in
+  match
+    Joins.join context ~value_type:type_
+      (List.rev_map (fun (exit_ : State.function_exit) -> (exit_.frame, exit_.returned)) returns)
+  with
+  | Some (returned, Some term) -> Some ({ frame with spent = returned.spent }, term)
+  | Some (_, None) | None -> None
 
 let run_code (context : State.context) (frame : State.frame) (code : Mir.t) ~type_ =
   match run_lambda_body context frame ~lambdas:code.lambdas code.body ~type_ with
@@ -371,18 +362,17 @@ let read_lambda ?(capture_free = false) (context : State.context) (frame : State
   let body = Query.mark context.query in
   let premises = Query.list_facts_since context.query start in
   let ended = ref [] in
-  let saved_returns = context.returns in
-  context.returns <- [];
   let inferred_bounds =
-    Termination.run_in_lambda context function_type @@ fun () ->
     Fun.protect
-      ~finally:(fun () ->
-        context.returns <- saved_returns;
-        Counters.leave_lambda context counters)
+      ~finally:(fun () -> Counters.leave_lambda context counters)
       (fun () ->
         let inside =
           Obligations.set_panics
-            { inside with locals = remove_temporaries inside.locals }
+            {
+              inside with
+              locals = remove_temporaries inside.locals;
+              terminates = Types.terminates function_type.uses;
+            }
             ~panics:
               (Conditions.may_panic context.environment.lookups ~current:context.environment.current
                  ~condition:context.environment.condition function_type.uses)
@@ -397,12 +387,10 @@ let read_lambda ?(capture_free = false) (context : State.context) (frame : State
                 argument)
             inside written.code.parameters arguments
         in
-        context.run_body inside ~lambdas:written.lambdas written.code;
-        let exits = List.map (fun (exit_ : State.function_exit) -> exit_.frame) context.returns in
+        let returns = context.run_body inside ~lambdas:written.lambdas written.code in
+        let exits = List.map (fun (exit_ : State.function_exit) -> exit_.frame) returns in
         ended :=
-          List.map
-            (fun (exit_ : State.function_exit) -> (exit_.frame, exit_.returned))
-            context.returns;
+          List.map (fun (exit_ : State.function_exit) -> (exit_.frame, exit_.returned)) returns;
         List.iter
           (fun ((exit_ : State.frame), returned) ->
             Option.iter

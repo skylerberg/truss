@@ -1,11 +1,4 @@
-let make_state ~terminates ~measures : State.termination_state =
-  { terminates; measures; definition_entry = None }
-
-let run_in_lambda (context : State.context) (function_type : Types.function_type) run =
-  let enclosing = context.termination.terminates in
-  context.termination.terminates <- Types.terminates function_type.uses;
-  Fun.protect ~finally:(fun () -> context.termination.terminates <- enclosing) run
-
+let make_state ~measures : State.termination_state = { measures; definition_entry = None }
 let is_datatype ty = match ty with Types.Named _ -> Types.find_builtin ty = None | _ -> false
 
 let enter_definition (context : State.context) (start : State.frame) =
@@ -57,9 +50,9 @@ let rec pair_measures before after =
   | _ -> ([], [])
 
 let compare_with_entry (context : State.context) (clauses : State.clauses) ~is_self_call
-    ~callee_entry ~argument_at =
+    ~(callee_entry : State.frame) ~argument_at =
   match (context.termination.measures, clauses.decreases) with
-  | [], [] when context.termination.terminates && is_self_call -> (
+  | [], [] when callee_entry.terminates && is_self_call -> (
       let entry = (read_entry context).entry_frame in
       let is_passed_at_its_type ((parameter : Mir.parameter), ty, _, _) =
         Types.equal
@@ -86,7 +79,7 @@ let compare_with_entry (context : State.context) (clauses : State.clauses) ~is_s
                 List.map (fun (parameter, _, _, _) -> Facts.read_parameter_name parameter) parts;
               smaller = Logic.decreases_lexicographically before after;
             })
-  | ([], _ | _, []) when context.termination.terminates -> Unmeasured
+  | ([], _ | _, []) when callee_entry.terminates -> Unmeasured
   | _ :: _, (_ :: _ as callee_measures) ->
       let after =
         List.map
@@ -137,14 +130,13 @@ let find_recursive_callee (context : State.context) (frame : State.frame) locati
   match group_member with
   | Some target when frame.makes_obligations -> (
       match context.environment.lookups.mir.find_form_origin target with
-      | Some (Derived _, _) when context.termination.terminates -> reject target Derives
-      | Some (Inherited _, _) when context.termination.terminates -> reject target Inherits
+      | Some (Derived _, _) when frame.terminates -> reject target Derives
+      | Some (Inherited _, _) when frame.terminates -> reject target Inherits
       | Some ((Written _ | Derived _ | Inherited _), _) | None -> Some target)
   | Some _ | None -> None
 
-let reject_uncompared_recursion (context : State.context) (frame : State.frame) location
-    recursive_callee =
-  if context.termination.terminates then
+let reject_uncompared_recursion (frame : State.frame) location recursive_callee =
+  if frame.terminates then
     Option.iter
       (fun callee ->
         Obligations.oblige frame location
@@ -175,7 +167,7 @@ let reject_recursion_through_supplied_code (context : State.context) (frame : St
             (fun (node : Path.t) -> match node with Method { owner; _ } -> Some owner | _ -> None)
             recursive))
   in
-  if context.termination.terminates && frame.makes_obligations then
+  if frame.terminates && frame.makes_obligations then
     List.iter
       (fun (edge : Mir.Call_edges.edge) ->
         match edge with Calls _ -> () | Supplies { supplier; code } -> reject_supply supplier code)
@@ -193,9 +185,9 @@ let read_measures (context : State.context) (at : State.frame) measures =
       snd (Validity.read_specification context { at with makes_obligations = false } measure))
     measures
 
-let make_comparison_measure (context : State.context) measure_operands =
+let make_comparison_measure (context : State.context) (head : State.frame) measure_operands =
   match measure_operands with
-  | Some (comparison, read_operands) when context.termination.terminates ->
+  | Some (comparison, read_operands) when head.terminates ->
       Some
         (fun (at : State.frame) ->
           let left, right =
@@ -221,8 +213,8 @@ let read_loop_measure ?implicit (context : State.context) (clauses : Mir.loop_cl
   in
   Option.map (fun read -> { read; at_head = read head }) read
 
-let require_measure (context : State.context) ~loop ~is_measured =
-  if context.termination.terminates && not is_measured then
+let require_measure (frame : State.frame) ~loop ~is_measured =
+  if frame.terminates && not is_measured then
     Facts.raise_bug "%s has no measure in a body that terminates" loop
 
 let check_loop_measure (frame : State.frame) location measure =

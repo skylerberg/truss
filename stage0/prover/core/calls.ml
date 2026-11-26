@@ -589,10 +589,10 @@ let apply_lend (context : State.context) (frame : State.frame) (site : Invocatio
   match modelled with
   | By_contract applied -> Some applied
   | Without_contract returned ->
-      Termination.reject_uncompared_recursion context frame location recursive_callee;
+      Termination.reject_uncompared_recursion frame location recursive_callee;
       Option.map (fun (frame, result) -> { frame; result; end_lend = None }) returned
   | Lent_without_contract applied ->
-      Termination.reject_uncompared_recursion context frame location recursive_callee;
+      Termination.reject_uncompared_recursion frame location recursive_callee;
       Some applied
 
 let apply_call (context : State.context) (frame : State.frame) site callee ~through values =

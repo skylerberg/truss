@@ -14,6 +14,7 @@ type run = {
   lambdas : Mir.body array;
   mutable loops : loop_exits list;
   mutable cancelled : (Mir.task * branch_exit list ref) list;
+  mutable returns : State.function_exit list;
 }
 
 let resolve_callee (frame : State.frame) (callee : Mir.callee) ~lends =
@@ -843,8 +844,8 @@ and read_choice (context : State.context) (frame : State.frame) run (choice : Mi
               Some (Facts.restrict frame (Logic.not_ reads_right), Logic.Boolean (connective <> And))
           ))
 
-and read_providing (context : State.context) run ~refresh read =
-  let returns = context.returns in
+and read_providing run ~refresh read =
+  let returns = run.returns in
   let loops = List.map (fun (exits : loop_exits) -> (exits, exits.breaks, exits.ends)) run.loops in
   let cancelled = List.map (fun (_, frames) -> (frames, !frames)) run.cancelled in
   let read = read () in
@@ -853,10 +854,10 @@ and read_providing (context : State.context) run ~refresh read =
     | exit :: rest -> refresh_exit exit :: refresh_since ~before refresh_exit rest
     | [] -> Facts.raise_bug "the exits before a `provide` block are gone after it"
   in
-  context.returns <-
+  run.returns <-
     refresh_since ~before:returns
       (fun (exit_ : State.function_exit) -> { exit_ with frame = refresh exit_.frame })
-      context.returns;
+      run.returns;
   List.iter
     (fun ((exits : loop_exits), breaks, ends) ->
       exits.breaks <- refresh_since ~before:breaks refresh exits.breaks;
@@ -918,7 +919,7 @@ and read_statement (context : State.context) (frame : State.frame) run (statemen
         }
       in
       let read =
-        read_providing context run ~refresh (fun () ->
+        read_providing run ~refresh (fun () ->
             read_block context { frame with provided = provided :: frame.provided } run body)
       in
       write_assignment context run target
@@ -939,13 +940,13 @@ and read_statement (context : State.context) (frame : State.frame) run (statemen
   | Jump jump ->
       (match jump with
       | Return returned ->
-          context.returns <-
+          run.returns <-
             {
               frame;
               returned = Option.map (read_operand context frame run) returned;
               return_origin = statement.origin;
             }
-            :: context.returns
+            :: run.returns
       | Break -> (
           match run.loops with
           | exits :: _ -> exits.breaks <- frame :: exits.breaks
@@ -1453,7 +1454,14 @@ and write_assignment (context : State.context) run (target : Mir.place) read =
   Some (write_place context frame run target term)
 
 let make_run ~locals ~lambdas =
-  { infos = locals; changed_in_place = Hashtbl.create 4; lambdas; loops = []; cancelled = [] }
+  {
+    infos = locals;
+    changed_in_place = Hashtbl.create 4;
+    lambdas;
+    loops = [];
+    cancelled = [];
+    returns = [];
+  }
 
 let read_formula (context : State.context) (frame : State.frame) (formula : Mir.formula) ~arguments
     =
@@ -1506,5 +1514,5 @@ let read_body (context : State.context) (start : State.frame) ~(lambdas : Mir.bo
       start (list_returned_locals body.code)
   in
   match read_statements context start run body.code.statements with
-  | None -> ()
+  | None -> run.returns
   | Some _ -> Facts.raise_bug "a body whose end control reaches"
