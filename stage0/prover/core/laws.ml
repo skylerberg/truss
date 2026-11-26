@@ -75,9 +75,6 @@ let make_law_fact (context : State.context) (frame : State.frame) source ~substi
     with Facts.Unsupported _ -> None
   end
 
-let enter_proof (context : State.context) (trait : Types.trait_reference) (ty : Types.ty) =
-  context.laws_assumed <- (trait, ty) :: context.laws_assumed
-
 let assume_laws (context : State.context) (frame : State.frame) (trait : Types.trait_reference)
     (ty : Types.ty) =
   List.iter
@@ -89,8 +86,8 @@ let assume_laws (context : State.context) (frame : State.frame) (trait : Types.t
         | Some impl -> Cycles.is_in_proof_cycle context.environment impl
         | None -> false
       in
-      if not (is_proven_with_this_proof || List.mem key context.laws_assumed) then begin
-        context.laws_assumed <- key :: context.laws_assumed;
+      if not (is_proven_with_this_proof || context.environment.proven_laws = Some key) then
+        Query.run_once context.query (Laws_of (required, ty)) @@ fun () ->
         let substitution =
           Contracts.make_trait_substitution context.environment.lookups required ty
         in
@@ -106,6 +103,5 @@ let assume_laws (context : State.context) (frame : State.frame) (trait : Types.t
                   impl;
                 Facts.add_frame_fact frame fact_
             | None -> ())
-          (list_laws context.environment required.trait)
-      end)
+          (list_laws context.environment required.trait))
     (Interface.Properties.list_bound_closure context.environment.lookups.interface ~self:ty trait)

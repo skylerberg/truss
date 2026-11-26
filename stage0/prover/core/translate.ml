@@ -1,6 +1,6 @@
 let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_failures = true)
-    ?panic_condition ?blocked_holders (lookups : Lookups.t) ~home ~current ~terminates ~measures
-    ~inherits_precondition =
+    ?panic_condition ?blocked_holders ?proven_laws (lookups : Lookups.t) ~home ~current ~terminates
+    ~measures ~inherits_precondition =
   let node = Option.value node ~default:current in
   let rec context =
     {
@@ -16,6 +16,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
           inherits_precondition;
           ranking = terminates && measures = [] && lookups.list_recursion_group node <> [];
           terminates;
+          proven_laws;
           policy = Obligations.make_policy ~keeps_termination ~keeps_failures ~panic_condition;
           visible_types = Tables.Type_table.create 16;
           callees = Tables.Path_table.create 16;
@@ -24,7 +25,6 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       run_body = (fun frame ~lambdas body -> Reader.read_body context frame ~lambdas body);
       read_formula =
         (fun frame formula ~arguments -> Reader.read_formula context frame formula ~arguments);
-      laws_assumed = [];
       local_names = Tables.Local_table.create 16;
       local_origins = Tables.Local_table.create 16;
       query = Query.create ();
@@ -38,7 +38,6 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       powers = [];
       lambda_definitions = Tables.Symbol_table.create 8;
       models = Tables.Model_table.create 16;
-      equalities = [];
       holes = [];
       unfinished = [];
       indexes = [];
@@ -553,7 +552,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
   let home = source.key in
   let context =
     make_context lookups ~home ~current:impl ~terminates:false ~measures:[]
-      ~inherits_precondition:false
+      ~inherits_precondition:false ~proven_laws:(trait, for_type)
   in
   let start = make_empty_frame context.environment context.query source in
   let substitution = Contracts.make_trait_substitution lookups trait for_type in
@@ -561,7 +560,6 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
     (fun (law_source, (law : Mir.law)) ->
       let types = Laws.list_law_parameter_types ~substitution law in
       if not (List.exists (fun ty -> Types.is_error ty) types) then begin
-        Laws.enter_proof context trait for_type;
         let terms =
           List.map
             (fun ty ->
