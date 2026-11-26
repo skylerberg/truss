@@ -184,6 +184,7 @@ public fn Path.join(self, part: String) -> Path
 
 public fn Path.join_path(self, other: Path) -> Path
   ensures identical(result, join_paths(self.text, second: other.text))
+  ensures result.text.length() <= self.text.length() + other.text.length() + 1
   cost time O(self.text.length() + other.text.length())
 {
   join_paths(self.text, second: other.text)

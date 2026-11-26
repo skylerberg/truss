@@ -1389,8 +1389,9 @@ public fn Regex.is_full_match(self, text: String) -> Bool
 public fn Regex.find(self, text: String) -> Option[Match]
   ensures match result {
     Some(matched) => matched.end <= text.length()
-    None => !self.is_match(text)
+    None => true
   }
+  ensures identical(result, self.find_from(text, offset: 0))
 {
   self.find_from(text, offset: 0)
 }
