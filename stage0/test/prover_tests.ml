@@ -1866,6 +1866,17 @@ let () =
         [ "prover.assertion" ]);
   Harness.test "a call that returned from a function that may abort keeps its contract" (fun () ->
       expect_proven Fixtures.Prover.call_that_returned_from_a_function_that_may_abort);
+  Harness.test "a specification learns nothing from a generic function whose bound's method aborts"
+    (fun () ->
+      expect_codes Fixtures.Prover.specification_naming_a_generic_function_whose_bound_aborts
+        (List.init 5 (fun _ -> "prover.assertion")));
+  Harness.test "a specification learns nothing from a function given a function that may abort"
+    (fun () ->
+      expect_codes Fixtures.Prover.specification_naming_a_function_given_a_function_that_aborts
+        [ "prover.assertion"; "prover.assertion" ]);
+  Harness.test "a generic function keeps its contract where the methods of its bound return"
+    (fun () ->
+      expect_proven Fixtures.Prover.specification_naming_a_generic_function_whose_bound_returns);
   Harness.test "a function that may abort, named only in a proof, leaves a contract an axiom"
     (fun () -> expect_proven Fixtures.Prover.aborting_function_named_only_in_proofs);
   Harness.test "a specification-only function learns nothing from a function that may abort"

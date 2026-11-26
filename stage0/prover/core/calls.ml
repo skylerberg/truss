@@ -83,6 +83,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
                (match Contracts.read_signature context definition.declaration with
                | Some signature -> signature.costs
                | None -> []))
+    || Supplied.may_abort context callee definition contract values
   in
   let is_unspecified_application =
     may_abort && ((frame : State.frame).is_ghost || context.is_specification)

@@ -115,14 +115,14 @@ let list_group (database : Tracker.t) recorder (group : Path.t list Tracker.fact
 
 let list_recursion_group database recorder = list_group database recorder Facts.recursion_group
 
-let may_abort (database : Tracker.t) recorder path =
+let find_abort (database : Tracker.t) recorder path : Facts.abort =
   match
     Tracker.find database recorder Facts.may_abort.whole (Path.locate_package path)
       ~id:(Ids.of_path path)
   with
-  | Some (Value aborts) -> aborts
-  | Some (Failed | Blocked) -> true
-  | None -> false
+  | Some (Value abort) -> abort
+  | Some (Failed | Blocked) -> { aborts = true; bound_methods_run = [] }
+  | None -> { aborts = false; bound_methods_run = [] }
 
 let make_usage database recorder : Usage.Lookups.t =
   {
@@ -190,7 +190,8 @@ let make_proof (database : Tracker.t) (recorder : Tracker.recorder) : Prover.Loo
     list_must_be_disjoint = read_of_key database recorder Facts.ownership.whole;
     list_recursion_group = list_recursion_group database recorder;
     list_proof_group = list_group database recorder Facts.proof_group;
-    may_abort = may_abort database recorder;
+    may_abort = (fun path -> (find_abort database recorder path).aborts);
+    list_bound_methods_run = (fun path -> (find_abort database recorder path).bound_methods_run);
   }
 
 let make_package_checks (database : Tracker.t) (recorder : Tracker.recorder) :
