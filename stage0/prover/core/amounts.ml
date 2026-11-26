@@ -366,7 +366,7 @@ let make_callback_cost (context : State.context) frame (metric : Language.Metric
       (match List.assoc_opt (term, metric) context.cost.lambda_costs with
       | Some (bound, showing) ->
           context.cost.lambda_costs <- List.remove_assoc (term, metric) context.cost.lambda_costs;
-          context.obligations <- List.rev_append showing context.obligations;
+          List.iter (Query.add_obligation context.query) showing;
           state_value bound
       | None -> ());
       cost

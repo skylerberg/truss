@@ -79,8 +79,7 @@ let apply (context : State.context) (frame : State.frame) ~path ~type_arguments 
   { symbol; sorts; term; is_limited }
 
 let make_fresh_parameters (context : State.context) label sorts =
-  context.fresh <- context.fresh + 1;
-  let axiom = context.fresh in
+  let axiom = Query.take_fresh_number context.query in
   List.mapi
     (fun index sort -> (Logic.Symbol.Variable { label; numbers = [ axiom; index ] }, sort))
     sorts
@@ -92,27 +91,24 @@ let find_readable_clause context mark clause inside =
   | exception Facts.Unsupported _ -> None
 
 let axiomatize (context : State.context) symbol parameters make =
-  let mark = context.fresh in
-  let facts = ref [] in
+  let mark = Query.count_fresh context.query in
   let axiom = { State.parameters = List.map fst parameters; hypotheses = []; at_calls = [] } in
-  let scopes = context.scopes and open_axioms = context.axioms.open_axioms in
+  let open_axioms = context.axioms.open_axioms in
   context.axioms.axiomatizing <- symbol :: context.axioms.axiomatizing;
-  context.scopes <- List.map (fun (name, _) -> (name, facts)) parameters @ scopes;
   context.axioms.open_axioms <- axiom :: open_axioms;
   Fun.protect
     ~finally:(fun () ->
       context.axioms.axiomatizing <- List.tl context.axioms.axiomatizing;
-      context.scopes <- scopes;
       context.axioms.open_axioms <- open_axioms)
     (fun () ->
-      let stated = make () in
+      let stated, newest_facts = Query.run_in_scope context.query (List.map fst parameters) make in
       let drop_fresh_terms terms =
         List.filter
           (fun term -> not (Facts.mentions_fresh_after context mark term))
           (List.rev terms)
       in
       axiom.hypotheses <- drop_fresh_terms axiom.hypotheses;
-      (stated, Logic.conjunction (drop_fresh_terms !facts), axiom))
+      (stated, Logic.conjunction (drop_fresh_terms newest_facts), axiom))
 
 let find_smaller_than_entry (context : State.context) (callee_clauses : State.clauses) ~group_member
     ~callee_entry ~inputs =
@@ -143,7 +139,7 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
       let bind (clauses : State.clauses) =
         Validity.bind_arguments outside clauses ~arguments ~substitution:(substitution_of clauses)
       in
-      let mark = context.fresh in
+      let mark = Query.count_fresh context.query in
       let stated, facts, axiom =
         axiomatize context symbol parameters (fun () ->
             let valid =
@@ -199,9 +195,7 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
       | Some (premise, readable_clauses) -> (
           let has_quantifier_through_definitions body =
             Logic.has_quantifier body
-            || Logic.mentions
-                 (List.of_seq (Tables.Symbol_table.to_seq_keys context.definitions))
-                 body
+            || Logic.mentions (Query.list_defined_symbols context.query) body
           in
           let definition =
             match (is_triggered, facts, readable_clauses) with

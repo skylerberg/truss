@@ -247,7 +247,7 @@ let check_lambda_exits context counters (exits : State.frame list) location ~typ
         counters.promised)
     exits;
   let facts =
-    Fact_list.list_newest_since context.facts ~count:facts_mark
+    Query.list_facts_since context.query ~count:facts_mark
     @ List.map (fun (exit_ : State.frame) -> exit_.condition) exits
   in
   List.filter_map

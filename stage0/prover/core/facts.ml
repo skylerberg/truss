@@ -1,5 +1,3 @@
-let make_variable ?(numbers = []) label = Logic.Symbol.Variable { label; numbers }
-
 type unsupported = {
   location : Obligation.location;
   construct : Catalog.Prover.construct;
@@ -39,27 +37,19 @@ let read_parameter_name (parameter : Mir.parameter) =
 let list_clauses (requires : Mir.requirement list) =
   List.map (fun (requirement : Mir.requirement) -> requirement.clause) requires
 
-let declare (context : State.context) (declaration : Logic.declaration) =
-  let declare_symbol name arguments =
-    if not (Tables.Symbol_table.mem context.declared name) then begin
-      Tables.Symbol_table.replace context.declared name arguments;
-      context.declarations <- declaration :: context.declarations
-    end
-  in
-  match declaration with
-  | Constant (name, _) -> declare_symbol name []
-  | Function (name, arguments, _) -> declare_symbol name arguments
-  | Definition { symbol; _ } ->
-      if not (Tables.Symbol_table.mem context.definitions symbol) then begin
-        Tables.Symbol_table.replace context.definitions symbol ();
-        context.declarations <- declaration :: context.declarations
-      end
-  | Datatype _ -> invalid_arg "Translate.declare: a datatype is declared by its sort"
+let make_variable ?numbers label = Query.make_variable ?numbers label
+let declare (context : State.context) declaration = Query.declare context.query declaration
 
 let find_argument_sorts (context : State.context) symbol =
-  Tables.Symbol_table.find_opt context.declared symbol
+  Query.find_argument_sorts context.query symbol
 
-let add_fact (context : State.context) fact = context.facts <- Fact_list.add fact context.facts
+let add_fact (context : State.context) fact = Query.add_fact context.query fact
+let make_fresh_name (context : State.context) label = Query.make_fresh_name context.query label
+
+let mentions_fresh_after (context : State.context) mark term =
+  Query.mentions_fresh_after context.query mark term
+
+let run_once (context : State.context) stated make = Query.run_once context.query stated make
 
 let declare_value_symbol context (frame : State.frame) name sort =
   match List.rev frame.binders with
@@ -71,30 +61,8 @@ let declare_value_symbol context (frame : State.frame) name sort =
         (Logic.Function (name, List.map (fun (_, sort, _) -> sort) outermost_first, sort));
       Logic.Apply (name, List.map (fun (bound, _, _) -> Logic.Symbol bound) outermost_first)
 
-let make_fresh_name (context : State.context) label =
-  context.fresh <- context.fresh + 1;
-  make_variable label ~numbers:[ context.fresh ]
-
-let declare_fresh context frame label sort =
-  let name = make_fresh_name context label in
-  Tables.Symbol_table.replace context.fresh_order name context.fresh;
-  declare_value_symbol context frame name sort
-
-let mentions_fresh_after (context : State.context) mark term =
-  let is_fresh_after name =
-    match Tables.Symbol_table.find_opt context.fresh_order name with
-    | Some order -> order > mark
-    | None -> false
-  in
-  let rec walk = function
-    | Logic.Symbol name -> is_fresh_after name
-    | Logic.Integer _ | Logic.Boolean _ | Logic.Bits _ -> false
-    | Logic.Apply (name, arguments) -> is_fresh_after name || List.exists walk arguments
-    | Logic.Operation (_, arguments) -> List.exists walk arguments
-    | Logic.Is (_, argument) -> walk argument
-    | Logic.Forall (_, _, body) | Logic.Exists (_, body) -> walk body
-  in
-  walk term
+let declare_fresh (context : State.context) frame label sort =
+  declare_value_symbol context frame (Query.make_ordered_fresh_name context.query label) sort
 
 let close_over_binders (frame : State.frame) term =
   let names = List.map (fun (name, _, _) -> name) frame.binders in
@@ -109,60 +77,9 @@ let close_over_binders (frame : State.frame) term =
              (Logic.conjunction (List.map (fun (_, _, premise) -> premise) outermost_first))
              term ))
 
-let add_scoped_fact (context : State.context) (frame : State.frame) term =
-  let named = List.filter (fun name -> Logic.mentions [ name ] term) frame.bound in
-  if List.for_all (fun name -> List.mem_assoc name context.scopes) named then
-    match List.find_opt (fun (name, _) -> List.mem name named) context.scopes with
-    | Some (_, facts) -> facts := term :: !facts
-    | None -> ()
-
-let list_scope_facts (context : State.context) names =
-  List.concat_map
-    (fun (name, facts) -> if List.mem name names then List.rev !facts else [])
-    context.scopes
-
-let add_quantifier_facts ~binders (context : State.context) term =
-  let is_stated bound fact =
-    List.for_all
-      (fun name -> List.mem name bound || not (Logic.mentions [ name ] fact))
-      context.quantifier_symbols
-  in
-  let rec walk positive bound term =
-    let collect_facts symbols =
-      let bound = List.map fst symbols @ bound in
-      ( bound,
-        List.filter (is_stated bound)
-          (Option.value ~default:[] (Tables.Term_table.find_opt context.quantifier_facts term)) )
-    in
-    match term with
-    | Logic.Forall (symbols, trigger, body) when positive ->
-        let bound, facts = collect_facts symbols in
-        let body = walk positive bound body in
-        Logic.Forall
-          ( symbols,
-            trigger,
-            match facts with [] -> body | facts -> Logic.( ==> ) (Logic.conjunction facts) body )
-    | Logic.Exists (symbols, body) when not positive ->
-        let bound, facts = collect_facts symbols in
-        let body = walk positive bound body in
-        Logic.Exists
-          ( symbols,
-            match facts with [] -> body | facts -> Logic.( &&& ) (Logic.conjunction facts) body )
-    | Logic.Operation (((And | Or) as operator), parts) ->
-        Logic.Operation (operator, List.map (walk positive bound) parts)
-    | Logic.Operation (Implies, [ premise; conclusion ]) ->
-        Logic.Operation
-          (Implies, [ walk (not positive) bound premise; walk positive bound conclusion ])
-    | Logic.Operation (Ite, [ condition; then_; else_ ]) ->
-        Logic.Operation (Ite, [ condition; walk positive bound then_; walk positive bound else_ ])
-    | Logic.Operation (Not, [ inner ]) -> Logic.Operation (Not, [ walk (not positive) bound inner ])
-    | term -> term
-  in
-  walk true binders term
-
 let add_frame_fact context (frame : State.frame) term =
   if not (Logic.mentions frame.bound term) then add_fact context term
-  else add_scoped_fact context frame term
+  else Query.add_scoped_fact context.query ~bound:frame.bound term
 
 let assume context (frame : State.frame) term =
   match term with
@@ -171,7 +88,7 @@ let assume context (frame : State.frame) term =
       let guarded = Logic.( ==> ) frame.condition term in
       if not (Logic.mentions frame.bound term || Logic.mentions frame.bound frame.condition) then
         add_fact context guarded
-      else add_scoped_fact context frame guarded
+      else Query.add_scoped_fact context.query ~bound:frame.bound guarded
 
 let locate (context : State.context) (source : State.source) origin =
   if is_home context source then Obligation.Node origin else Whole_definition
@@ -311,14 +228,18 @@ let add_requires (context : State.context) (frame : State.frame) required : Cata
       ]
   | Some _ | None -> []
 
-let rec make_closed_obligation context (frame : State.frame) location obligation goal =
+let make_obligation (context : State.context) (frame : State.frame) location obligation goal =
+  Query.make_obligation context.query ~condition:frame.condition location obligation goal
+
+let make_closed_obligation (context : State.context) (frame : State.frame) location obligation goal
+    =
   if not frame.makes_obligations then None
   else if not (Logic.mentions frame.bound goal || Logic.mentions frame.bound frame.condition) then
     Some (make_obligation context frame location obligation goal)
   else
     let names = List.map (fun (name, _, _) -> name) frame.binders in
     let goal =
-      match list_scope_facts context names with
+      match Query.list_scope_facts context.query names with
       | [] -> goal
       | facts -> Logic.( ==> ) (Logic.conjunction facts) goal
     in
@@ -329,29 +250,6 @@ let rec make_closed_obligation context (frame : State.frame) location obligation
              { frame with condition = Logic.Boolean true }
              location obligation closed)
     | None -> None
-
-and make_obligation (context : State.context) (frame : State.frame) location obligation goal :
-    Obligation.t =
-  let query =
-    Logic.prune
-      {
-        declarations = List.rev context.declarations;
-        facts = Fact_list.list_oldest_first context.facts;
-        goal = Logic.( ==> ) frame.condition goal;
-      }
-  in
-  {
-    obligation;
-    instance = [];
-    location;
-    cited = None;
-    fixes = [];
-    query;
-    has_untriggered_written_fact =
-      Logic.has_untriggered_fact query
-        ~is_counted:(Tables.Term_table.mem context.written_quantifiers);
-    is_rejection = goal = Logic.Boolean false;
-  }
 
 let remove_panic_condition (uses : Types.capability_set) =
   Types.replace_capabilities
@@ -381,15 +279,15 @@ let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?(is_proven_by_evaluat
       | _ ->
           (not is_proven_by_evaluation) && frame.makes_obligations
           && (not (Logic.mentions frame.bound goal || Logic.mentions frame.bound frame.condition))
-          && Fact_list.holds context.facts ~under:frame.condition goal
+          && Query.holds context.query ~under:frame.condition goal
     in
     if is_held then assume context frame goal
     else
       match
         make_closed_obligation context frame location obligation
-          (add_quantifier_facts
+          (Query.add_quantifier_facts context.query
              ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
-             context goal)
+             goal)
       with
       | Some obligation ->
           let is_home_body = is_home context frame.source && frame.makes_obligations in
@@ -407,7 +305,7 @@ let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?(is_proven_by_evaluat
               fixes @ make_panic_fix context
             else fixes
           in
-          context.obligations <- { obligation with cited; fixes } :: context.obligations;
+          Query.add_obligation context.query { obligation with cited; fixes };
           assume context frame goal
       | None -> ()
 
@@ -494,32 +392,23 @@ let rec declare_sort (context : State.context) (ty : Types.ty) : Logic.sort =
     match (ty, find_float_format ty) with
     | _, Some (exponent, significand) -> Float (exponent, significand)
     | _ when Types.equal ty Types.unit ->
-        if not (Tables.Type_table.mem context.datatypes ty) then begin
-          Tables.Type_table.replace context.datatypes ty ();
-          context.declarations <-
-            Logic.Datatype (ty, [ (Logic.Symbol.Unit, []) ]) :: context.declarations
-        end;
+        if not (Query.has_datatype context.query ty) then
+          Query.declare_datatype context.query ty (fun () -> [ (Logic.Symbol.Unit, []) ]);
         Type_sort ty
     | Function function_type, _ -> Function_sort (List.length function_type.inputs)
     | _ -> begin
-        (if not (Tables.Type_table.mem context.datatypes ty) then
+        (if not (Query.has_datatype context.query ty) then
            match find_constructors context ty with
            | Some shape ->
-               Tables.Type_table.replace context.datatypes ty ();
-               let declaration =
-                 Logic.Datatype
-                   ( ty,
-                     List.map
-                       (fun (variant, fields) ->
-                         ( make_constructor_symbol ty variant,
-                           List.map
-                             (fun (field, field_type) ->
-                               ( make_selector_symbol ty variant field,
-                                 declare_sort context field_type ))
-                             fields ))
-                       shape )
-               in
-               context.declarations <- declaration :: context.declarations
+               Query.declare_datatype context.query ty (fun () ->
+                   List.map
+                     (fun (variant, fields) ->
+                       ( make_constructor_symbol ty variant,
+                         List.map
+                           (fun (field, field_type) ->
+                             (make_selector_symbol ty variant field, declare_sort context field_type))
+                           fields ))
+                     shape)
            | None -> ());
         Type_sort ty
       end
@@ -547,12 +436,6 @@ let make_in_range ty term =
         Logic.(in_bounds &&& not_ (less_equal (int 0xD800) term &&& less_equal term (int 0xDFFF)))
       else in_bounds
   | None -> Logic.Boolean true
-
-let run_once (context : State.context) stated make =
-  if not (Tables.Stated_table.mem context.stated stated) then begin
-    Tables.Stated_table.replace context.stated stated ();
-    make ()
-  end
 
 let arrive context frame prefix ty =
   let value = declare_fresh context frame prefix (declare_sort context ty) in

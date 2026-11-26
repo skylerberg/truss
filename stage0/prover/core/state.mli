@@ -163,16 +163,8 @@ type context = {
   current : Path.t;
   node : Path.t;
   mutable callbacks : (Core.local * string * Mir.callback) list;
-  mutable declarations : Logic.declaration list;
-  declared : Logic.sort list Tables.Symbol_table.t;
-  definitions : unit Tables.Symbol_table.t;
-  datatypes : unit Tables.Type_table.t;
   visible_types : (Types.type_interface * Types.substitution) option Tables.Type_table.t;
   callees : known_callee Tables.Path_table.t;
-  stated : unit Tables.Stated_table.t;
-  mutable facts : Fact_list.t;
-  mutable obligations : Obligation.t list;
-  mutable fresh : int;
   mutable parameter_names : (Logic.symbol * string) list;
   local_names : string Tables.Local_table.t;
   local_origins : Core.origin Tables.Local_table.t;
@@ -180,6 +172,7 @@ type context = {
   mutable enclosing_provides : Mir.provided list list;
   mutable instantiating : Path.t list;
   mutable callees_whose_requires_are_read : Path.t list;
+  query : Query.t;
   axioms : axiom_state;
   termination : termination_state;
   validity : validity_state;
@@ -189,7 +182,6 @@ type context = {
   home : Resolve.Names.key;
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   cost : cost_state;
-  fresh_order : int Tables.Symbol_table.t;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;
   lambda_definitions : Logic.term Tables.Symbol_table.t;
@@ -201,10 +193,6 @@ type context = {
   mutable unfinished : Logic.term list;
   mutable reading_callback : bool;
   ranking : bool;
-  mutable scopes : (Logic.symbol * Logic.term list ref) list;
-  quantifier_facts : Logic.term list Tables.Term_table.t;
-  written_quantifiers : unit Tables.Term_table.t;
-  mutable quantifier_symbols : Logic.symbol list;
   condition : Types.condition;
   bounds : Interface.Impls.bounds;
   keeps_termination : bool;

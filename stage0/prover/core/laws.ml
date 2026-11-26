@@ -64,10 +64,10 @@ let make_law_fact (context : State.context) (frame : State.frame) source ~substi
   let types = list_law_parameter_types ~substitution law in
   if List.exists (fun ty -> Types.is_error ty) types then None
   else begin
-    context.fresh <- context.fresh + 1;
+    let number = Query.take_fresh_number context.query in
     let symbols =
       List.mapi
-        (fun index _ -> Logic.Symbol.Variable { label = "law"; numbers = [ context.fresh; index ] })
+        (fun index _ -> Logic.Symbol.Variable { label = "law"; numbers = [ number; index ] })
         types
     in
     let inside =
@@ -197,27 +197,24 @@ let add_named_relation context frame (expected : Types.function_type) callee_ter
          ( parameters,
            Logic.equal holds
              (Logic.equal result (Lambdas.apply_function context expected callee_term entries)) ));
-  let mark = context.State.fresh in
-  let facts_before = context.facts in
-  let premise =
-    Logic.conjunction
-      (List.map2
-         (fun (_, input) entry ->
-           Logic.( &&& ) (Facts.make_in_range input entry)
-             (Validity.make_validity context frame ~assuming:true input entry))
-         expected.inputs entries
-      @ read_named_requires context frame clauses ~entries)
-  in
-  let read = read_named_ensures context frame clauses expected ~entries ~exits ~result in
+  let mark = Query.count_fresh context.State.query in
   let bound = List.map fst parameters in
   let is_inside_the_relation fact =
     Logic.mentions bound fact || Facts.mentions_fresh_after context mark fact
   in
-  context.facts <-
-    List.fold_left
-      (fun facts fact -> if is_inside_the_relation fact then facts else Fact_list.add fact facts)
-      facts_before
-      (List.rev (Fact_list.list_newest_since context.facts ~count:(Fact_list.count facts_before)));
+  let premise, read =
+    Query.run_dropping_facts context.query ~drop:is_inside_the_relation (fun () ->
+        let premise =
+          Logic.conjunction
+            (List.map2
+               (fun (_, input) entry ->
+                 Logic.( &&& ) (Facts.make_in_range input entry)
+                   (Validity.make_validity context frame ~assuming:true input entry))
+               expected.inputs entries
+            @ read_named_requires context frame clauses ~entries)
+        in
+        (premise, read_named_ensures context frame clauses expected ~entries ~exits ~result))
+  in
   match read with
   | [] -> ()
   | ensures when List.exists (Facts.mentions_fresh_after context mark) (premise :: ensures) -> ()
