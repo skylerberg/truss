@@ -958,29 +958,94 @@ and read_statement (frame : State.frame) run (statement : Mir.statement) =
       | Todo -> record_todo frame statement.origin);
       None
   | Fork { fork; concurrent; branches } ->
-      let ended, exits =
-        List.fold_left
-          (fun (frame, exits) (index, (branch : Mir.block)) ->
-            match frame with
-            | None -> (None, exits)
-            | Some frame ->
-                let cancelled = ref [] in
-                run.cancelled <- (Mir.Branch { fork; index }, cancelled) :: run.cancelled;
-                let ended = read_statements frame run branch.statements in
-                run.cancelled <- List.tl run.cancelled;
-                (ended, exits @ List.map (fun exit -> (index, exit)) (List.rev !cancelled)))
-          (Some frame, [])
-          (List.mapi (fun index branch -> (index, branch)) branches)
+      let run_branch (start : State.frame) index (branch : Mir.block) =
+        let cancelled = ref [] in
+        run.cancelled <- (Mir.Branch { fork; index }, cancelled) :: run.cancelled;
+        let ended = read_statements start run branch.statements in
+        run.cancelled <- List.tl run.cancelled;
+        (ended, List.rev !cancelled)
       in
-      let forget_other_branches (index, exit) =
-        forget_changes exit.exited
-          (List.filter
-             (fun (part : State.changed_part) -> not (List.mem part.root exit.exit_locals))
-             (compute_changes frame.environment run exit.exited
-                (List.filteri (fun other _ -> other <> index) branches)))
+      let alone =
+        List.mapi
+          (fun index branch -> run_branch (snd (Facts.suppose frame "branch")) index branch)
+          branches
+      in
+      let ended =
+        if List.exists (fun (ended, _) -> Option.is_none ended) alone then None
+        else
+          Option.map
+            (fun (ended : State.frame) ->
+              { ended with makes_obligations = frame.makes_obligations })
+            (List.fold_left
+               (fun after_earlier (index, branch) ->
+                 Option.bind after_earlier (fun after_earlier ->
+                     fst (run_branch after_earlier index branch)))
+               (Some (snd (Facts.suppose { frame with makes_obligations = false } "ended")))
+               (List.mapi (fun index branch -> (index, branch)) branches))
+      in
+      let leave_other_branches index exit =
+        let others =
+          List.filteri
+            (fun other _ -> other <> index)
+            (List.map2
+               (fun branch (ended, exits) ->
+                 ( List.filter
+                     (fun (part : State.changed_part) -> not (List.mem part.root exit.exit_locals))
+                     (compute_changes frame.environment run exit.exited [ branch ]),
+                   Option.to_list ended @ List.map (fun exit -> exit.exited) exits ))
+               branches alone)
+        in
+        let is_changed_by_one_branch (part : State.changed_part) =
+          List.length
+            (List.filter
+               (fun (parts, _) ->
+                 List.exists (fun (other : State.changed_part) -> other.root = part.root) parts)
+               others)
+          = 1
+        in
+        List.fold_left
+          (fun (left : State.frame) (parts, outcomes) ->
+            let amounts =
+              List.map
+                (fun (counter, _) -> (counter, Facts.declare_fresh left "spent" Logic.Int))
+                left.spent
+            in
+            let describe (at : State.frame) =
+              Logic.conjunction
+                (List.filter_map
+                   (fun part ->
+                     match
+                       (Encoding.find_changed_part left part, Encoding.find_changed_part at part)
+                     with
+                     | Some (_, value), Some (_, value_at) -> Some (Logic.equal value value_at)
+                     | _ -> None)
+                   (List.filter is_changed_by_one_branch parts)
+                @ List.map
+                    (fun (counter, amount) ->
+                      Logic.equal amount
+                        (Costs.since
+                           ~start:(Counters.lookup_spent frame counter)
+                           (Counters.lookup_spent at counter)))
+                    amounts)
+            in
+            Facts.assume left
+              (Logic.disjunction
+                 (describe frame
+                 :: List.map
+                      (fun (at : State.frame) -> Logic.( &&& ) at.condition (describe at))
+                      outcomes));
+            Counters.spend left (fun counter ->
+                Option.value (List.assoc_opt counter amounts) ~default:Costs.zero))
+          (forget_changes exit.exited (List.concat_map fst others))
+          others
       in
       let joined =
-        Joins.join_frames (Option.to_list ended @ List.map forget_other_branches exits)
+        Joins.join_frames
+          (Option.to_list ended
+          @ List.concat
+              (List.mapi
+                 (fun index (_, exits) -> List.map (leave_other_branches index) exits)
+                 alone))
       in
       if concurrent then Option.map Amounts.spend_wait_for_tasks joined else joined
   | Resume { winner; exits } ->

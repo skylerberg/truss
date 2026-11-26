@@ -377,6 +377,17 @@ develop as well as make it easier to bootstrap the compiler in parts.
   parameter's contract: it runs a lambda's body against the contract, which
   it reads through `Callbacks.read_requires` and `Callbacks.read_ensures`,
   and gives every other value to `check_passed`.
+- **A branch of a `concurrent` or `parallel` block is read alone.** The
+  branches run at the same time, so a fact that one learns is not a fact of
+  another: a `return` in one branch can run before the guard of another.
+  `Reader` reads each branch from the entry of the block under a
+  supposition of its own, and the branch's obligations and early exits come
+  from that read. It then reads the branches in sequence, without
+  obligations, for the frame at the end of the block, where every branch
+  has run. At an early exit of one branch, every other branch has not
+  started or has ended in one of its outcomes, so the exit frame takes the
+  values of the places that the branch mutates, and the cost that it spent,
+  from a disjunction over those outcomes.
 - **One function builds the frame that reads a callee's clause.**
   `Contracts.make_entry_frame` binds a clause's parameters to the arguments,
   and `Contracts.make_exit_frame` to the values at return, with the entry

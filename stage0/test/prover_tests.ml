@@ -3158,6 +3158,11 @@ let () =
         "prover.requires")
 
 let () =
+  Harness.test
+    "a concurrent branch knows no fact of another branch until the block ends, and is checked \
+     where an earlier branch always returns" (fun () ->
+      expect_codes Fixtures.Prover.concurrent_branches_keep_their_own_facts
+        [ "prover.ensures"; "prover.ensures" ]);
   Harness.test "a value returned from a concurrent block is the winning branch's" (fun () ->
       expect_proven Fixtures.Prover.value_returned_from_a_concurrent_branch);
   Harness.test "a concurrent for may return early, with a value known by its type" (fun () ->
