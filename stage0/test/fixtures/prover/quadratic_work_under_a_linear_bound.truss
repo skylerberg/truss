@@ -1,0 +1,11 @@
+fn f(count: UInt64) -> UInt64
+  cost time O(count)
+{
+  var total: UInt64 = 0
+  for _ in 0..count {
+    for _ in 0..count {
+      total = total.saturating_add(1)
+    }
+  }
+  total
+}

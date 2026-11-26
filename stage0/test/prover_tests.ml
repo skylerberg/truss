@@ -53,6 +53,12 @@ let () =
       let actual = read_message Fixtures.Prover.sum_of_two_cubes in
       if not (String.includes ~affix:"reached its step limit" actual) then
         Harness.fail "message %S" actual);
+  Harness.test
+    "a cost bound that the solver cannot decide may be too small, and its message says so"
+    (fun () ->
+      let actual = read_message Fixtures.Prover.quadratic_work_under_a_linear_bound in
+      if not (String.includes ~affix:"A bound that is too small ends this way too" actual) then
+        Harness.fail "message %S" actual);
   Harness.test "code generic over an integer trait is proven for each type that implements it"
     (fun () ->
       expect_proven Fixtures.Prover.twice_of_a_signed_integer;
