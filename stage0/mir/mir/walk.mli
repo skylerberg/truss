@@ -1,5 +1,6 @@
 val list_nested_blocks : Tree.statement -> Tree.block list
 val iter_code : (Tree.statement -> unit) -> Tree.t -> unit
+val iter_run_code : (Tree.statement -> unit) -> Tree.t -> unit
 val iter_formula : (Tree.statement -> unit) -> Tree.formula -> unit
 val iter_places : (Core.origin -> Tree.place -> unit) -> Tree.t -> unit
 val iter_formula_places : (Core.origin -> Tree.place -> unit) -> Tree.formula -> unit

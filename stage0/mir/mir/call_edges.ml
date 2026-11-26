@@ -522,19 +522,35 @@ let find_code (lookups : lookups) path =
   | Some { form = Body code | Initializer code; _ } -> Some code.tree
   | Some { form = No_code; _ } | None -> None
 
-let has_abort_site (lookups : lookups) path =
-  match find_code lookups path with
+let is_specification_only (lookups : lookups) path =
+  match Interface.Impls.read_signature lookups.interface path with
+  | Some signature -> signature.specification_only
   | None -> false
-  | Some code ->
-      let has_site = ref false in
-      Walk.iter_code
-        (fun statement ->
-          match Walk.find_callee statement with
-          | Some { target = Intrinsic { operation; _ }; _ } when Intrinsic.may_abort operation ->
-              has_site := true
-          | Some _ | None -> ())
-        code;
-      !has_site
+
+let list_run_statements (lookups : lookups) path =
+  let statements = ref [] in
+  Option.iter
+    (Walk.iter_run_code (fun statement -> statements := statement :: !statements))
+    (find_code lookups path);
+  !statements
+
+let has_abort_site (lookups : lookups) path =
+  List.exists
+    (fun statement ->
+      match Walk.find_callee statement with
+      | Some { target = Intrinsic { operation; _ }; _ } -> Intrinsic.may_abort operation
+      | Some _ | None -> false)
+    (list_run_statements lookups path)
+
+let list_callees_that_run (lookups : lookups) path =
+  let instance = find_instance lookups path in
+  List.sort_uniq Path.compare
+    (List.concat_map
+       (fun statement ->
+         List.concat_map
+           (function Calls callee -> [ callee ] | Supplies { code; _ } -> code)
+           (list_statement_edges lookups.interface instance statement))
+       (list_run_statements lookups path))
 
 let list_path_edges (lookups : lookups) path =
   List.sort_uniq Path.compare

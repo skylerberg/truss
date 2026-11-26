@@ -106,7 +106,7 @@ let rec run_blocking ?blocked_holders translate =
   with Counters.Blocks_credited_potential blocked_holders ->
     run_blocking ~blocked_holders translate
 
-let translate_run ~proof ~substitution ~condition ~assumes_panic_condition (lookups : Lookups.t)
+let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : Lookups.t)
     (source : State.source) ~path =
   run_blocking @@ fun ?blocked_holders () ->
   let contract =
@@ -120,10 +120,10 @@ let translate_run ~proof ~substitution ~condition ~assumes_panic_condition (look
       (Types.map_signature (Types.substitute_erased substitution))
       (Interface.Impls.read_signature lookups.interface path)
   in
-  let is_update_step =
+  let is_update_step, is_specification_only =
     match signature with
-    | Some (signature : Types.signature) -> signature.is_update_step
-    | None -> false
+    | Some (signature : Types.signature) -> (signature.is_update_step, signature.specification_only)
+    | None -> (false, false)
   in
   let uses =
     match signature with
@@ -131,7 +131,7 @@ let translate_run ~proof ~substitution ~condition ~assumes_panic_condition (look
     | None -> Types.make_capability_set [ Built_in Run_forever ]
   in
   let implies = Conditions.implies lookups ~current:path in
-  let terminates = proof || Types.terminates_when ~implies condition uses in
+  let terminates = is_specification_only || Types.terminates_when ~implies condition uses in
   let keeps_termination =
     condition = [] || Types.find_unless (Built_in Run_forever) uses = Some condition
   in
@@ -225,7 +225,7 @@ let translate_run ~proof ~substitution ~condition ~assumes_panic_condition (look
             | _ -> ());
             Validity.assume_valid context frame ty term;
             Facts.bind frame (Core_local local) ty term)
-      { (make_empty_frame source) with substitution; is_ghost = proof }
+      { (make_empty_frame source) with substitution; is_ghost = is_specification_only }
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
@@ -479,13 +479,13 @@ let find_circular_laws (lookups : Lookups.t) (source : State.source) ~path =
       List.iter (Cycles.reject_circular_proof context start) circular;
       Some (make_outcome context)
 
-let translate_function ?(proof = false) ?(substitution = Types.no_substitution)
-    (lookups : Lookups.t) (source : State.source) ~path =
+let translate_function ?(substitution = Types.no_substitution) (lookups : Lookups.t)
+    (source : State.source) ~path =
   match find_circular_contract lookups source ~path with
   | Some outcome -> outcome
   | None ->
       let run ?(assumes_panic_condition = false) condition =
-        translate_run ~proof ~substitution ~condition ~assumes_panic_condition lookups source ~path
+        translate_run ~substitution ~condition ~assumes_panic_condition lookups source ~path
       in
       let base, skipped = run [] in
       let has_panic_condition =
@@ -880,5 +880,3 @@ let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
            else None);
       }
   | None -> Facts.raise_bug "the constant `%s` has no MIR" (Path.show path)
-
-let translate_theorem lookups source ~path = translate_function ~proof:true lookups source ~path

@@ -880,19 +880,23 @@ let find_call_edges (database : Tracker.t) (recorder : Tracker.recorder) path =
 let run_find_aborts database (row : Store.definition) =
   let path = (Declarations.decode_key row.key).path in
   run_fact database Find_aborts Facts.aborts_outside_group row ~id:row.path (fun recorder ->
-      let members =
-        Option.value ~default:[]
-          (Tracker.find_value database recorder Facts.recursion_group.whole
-             (Path.locate_package path) ~id:row.path)
+      let lookups = Lookups.make_call_edges database recorder in
+      let has_aborting_callee () =
+        let members =
+          Option.value ~default:[]
+            (Tracker.find_value database recorder Facts.recursion_group.whole
+               (Path.locate_package path) ~id:row.path)
+        in
+        List.exists
+          (fun callee ->
+            (not (List.exists (Path.equal callee) members))
+            && (not (Path.equal callee path))
+            && Lookups.may_abort database recorder callee)
+          (Mir.Call_edges.list_callees_that_run lookups path)
       in
       ( Value
-          (Mir.Call_edges.has_abort_site (Lookups.make_call_edges database recorder) path
-          || List.exists
-               (fun callee ->
-                 (not (List.exists (Path.equal callee) members))
-                 && (not (Path.equal callee path))
-                 && Lookups.may_abort database recorder callee)
-               (Option.value ~default:[] (find_call_edges database recorder path))),
+          ((not (Mir.Call_edges.is_specification_only lookups path))
+          && (Mir.Call_edges.has_abort_site lookups path || has_aborting_callee ())),
         [] ))
 
 let write_lowered (database : Tracker.t) ~id outcome =

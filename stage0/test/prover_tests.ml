@@ -1866,6 +1866,12 @@ let () =
         [ "prover.assertion" ]);
   Harness.test "a call that returned from a function that may abort keeps its contract" (fun () ->
       expect_proven Fixtures.Prover.call_that_returned_from_a_function_that_may_abort);
+  Harness.test "a function that may abort, named only in a proof, leaves a contract an axiom"
+    (fun () -> expect_proven Fixtures.Prover.aborting_function_named_only_in_proofs);
+  Harness.test "a specification-only function learns nothing from a function that may abort"
+    (fun () ->
+      expect_codes Fixtures.Prover.specification_function_calling_a_function_that_aborts
+        [ "prover.ensures" ]);
   Harness.test "the contract of a function that can panic is assumed only where it returns"
     (fun () ->
       expect_codes Fixtures.Prover.contract_of_a_function_that_panics_assumed_where_it_panics
