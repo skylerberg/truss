@@ -1467,6 +1467,7 @@ public fn Date.week_of_year(self) -> UInt8
 
 public fn Date.plus_days(self, days: Int32) -> Option[Date]
   cost time O(1)
+  cost allocations == 0
 {
   Some(Date(days_since_epoch: self.days_since_epoch.checked_add(days)?))
 }

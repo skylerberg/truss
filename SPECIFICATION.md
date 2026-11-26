@@ -3315,18 +3315,17 @@ an invariant, a law, or a proof.
   specification neither its `ensures` nor the invariant of its result. A
   scalar result is still within the range of its type. The same call in
   code keeps its contract once it has returned.
-- A generic function runs the methods of the `impl` that satisfies each of
-  its bounds, and a function that is passed a function may run it. A
-  specification learns the contract of such a call only where that code
-  returns. A method of the `impl` counts where the function runs it and a
-  call through the bound gives a fact about its result: its trait states an
-  `ensures` for it, or it lends, or its result type has no value that is
-  valid without a condition. A method that its trait gives a body does not count while that
-  body returns. Where the bound is one of the enclosing function's own, no
-  `impl` is known, and each such method of the trait has to state
-  `cost allocations == 0`. A function passed by name counts where it may
-  run out of memory, and a function parameter passed on counts where its
-  type states an `ensures`.
+- A generic function that calls a method through one of its bounds runs
+  the code of an `impl` that its caller chooses, and a function that calls
+  a function value runs code that its caller passes. Either may allocate,
+  so the function is one that may run out of memory, unless the trait
+  states `cost allocations == 0` for the method and the function value's
+  type states the same. A call of a function value needs no clause where it
+  gives the function no fact that the value could fail to meet: the
+  function states no `ensures` for a function parameter, and the value's
+  result type has a value that is valid without a condition.
+  `Equal`, `Ordered`, `Hash` and `Countable` state the clause for their
+  methods, so an `impl` of one of them allocates nothing in those methods.
 - A proof block, a loop's clauses, a theorem, and a function whose
   signature has a specification-only type never run. Each is a
   specification throughout: a call in one allocates nothing, so it does

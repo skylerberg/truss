@@ -574,6 +574,7 @@ public trait Cursor {
 
 public trait FiniteCursor: Cursor {
   fn remaining(self) -> UInt64
+    cost allocations == 0
 
   fn next(mut self) -> Option[Self.Element]
     uses Self.Uses

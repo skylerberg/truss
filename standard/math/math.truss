@@ -1687,6 +1687,7 @@ fn key_order(first: DecimalKey, second: DecimalKey) -> Ordering
     } else {
       first.digits.compare(second.digits)
     })
+  cost allocations == 0
 {
   if first.sign != second.sign {
     first.sign.compare(second.sign)
