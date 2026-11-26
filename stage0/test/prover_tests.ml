@@ -3458,6 +3458,8 @@ let () =
 let () =
   Harness.test "a lambda in a quantifier that captures a bound value is known for each one"
     (fun () -> expect_proven Fixtures.Prover.quantified_lambda_capturing_a_bound_value);
+  Harness.test "a lambda in a nested quantifier is a function of the bound values that it names"
+    (fun () -> expect_proven Fixtures.Prover.lambdas_with_one_definition_under_nested_quantifiers);
   Harness.test "a lambda in a quantifier that captures no bound value is known for every argument"
     (fun () -> expect_proven Fixtures.Prover.quantified_lambda_capturing_no_bound_value)
 

@@ -1,0 +1,12 @@
+fn apply(change: (fn(Integer) -> Integer cost allocations == 0), value: Integer) -> Integer
+  ensures result == change(value)
+{
+  change(value)
+}
+
+theorem each_captured()
+  ensures forall i in 0..3 =>
+    apply(fn(x) { x + i }, value: 1) == 1 + i
+    && forall j in 0..3 => apply(fn(x) { x + i }, value: 1) == 1 + i && j >= 0
+{
+}
