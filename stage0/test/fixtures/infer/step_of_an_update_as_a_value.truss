@@ -1,0 +1,15 @@
+type Span(low: UInt8, high: UInt8)
+  invariant low <= high
+
+fn Span.narrow(mut self) {
+  self.low = self.high
+}
+
+fn apply(span: mut Span, change: fn(mut Span)) {
+  change(mut span)
+}
+
+fn f() {
+  var span = Span(low: 1, high: 2)
+  apply(mut span, Span.narrow)
+}

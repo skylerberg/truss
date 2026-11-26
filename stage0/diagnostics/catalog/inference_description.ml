@@ -937,6 +937,16 @@ let describe : Inference.t -> Nodes.description = function
             "` lends a part, and a function value cannot lend. Call it where the part is used, or \
              write a lambda that returns a copy of the part.";
         ]
+  | Step_as_value { at = origin } ->
+      make Not_a_value (Build.at origin)
+        [
+          Text "`";
+          Build.quote origin;
+          Text
+            "` is a step of an update: it may return with `self` not meeting its invariant, and a \
+             call through a function value assumes that the invariant holds. Write a lambda that \
+             calls it.";
+        ]
   | View_passed_mut { at = origin } ->
       make Wrong_mode (Build.at origin)
         (say

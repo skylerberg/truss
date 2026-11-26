@@ -183,6 +183,8 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
 
 and check_function_value state (value : Syntax.expression) (instance : Instantiation.instance) =
   match Types.make_function_type instance.signature with
+  | Some _ when instance.signature.is_update_step ->
+      State.make_error_type state (Step_as_value { at = Written value.id })
   | Some function_type -> instance.flatten (Types.Function function_type)
   | None -> State.make_error_type state (Lending_function_value { at = Written value.id })
 
