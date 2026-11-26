@@ -25,6 +25,23 @@ fn strip_leading_zeros(digits: String) -> String {
 }
 
 fn convert_to_decimal(group: String, radix: UInt32) -> String {
+  let base = UInt64.from_integer(radix)
+  var value: UInt64 = 0
+  for byte in group.bytes() {
+    if is_hexadecimal_digit(byte) {
+      let Some(shifted) = value.checked_multiply(base) else {
+        return convert_large_to_decimal(group, radix)
+      }
+      let Some(next) = shifted.checked_add(UInt64.from_integer(hexadecimal_value(byte))) else {
+        return convert_large_to_decimal(group, radix)
+      }
+      value = next
+    }
+  }
+  "${value}"
+}
+
+fn convert_large_to_decimal(group: String, radix: UInt32) -> String {
   let base = math.BigInteger.from(UInt64.from_integer(radix))
   var value = math.BigInteger.zero()
   for byte in group.bytes() {
