@@ -87,7 +87,14 @@ let find_goal_code (frame : State.frame) term =
     | Some left, Some right -> Some (Catalog.Code.Compared { left; comparison; right })
     | _ -> None
   in
-  if List.exists (fun symbol -> List.mem_assoc symbol frame.entry) (Logic.list_free_constants term)
+  let rec find_conclusion : Logic.term -> Logic.term = function
+    | Operation (Implies, [ _; conclusion ]) -> find_conclusion conclusion
+    | conclusion -> conclusion
+  in
+  if
+    List.exists
+      (fun symbol -> List.mem_assoc symbol frame.entry)
+      (Logic.list_free_constants (find_conclusion term))
   then find_goal term
   else None
 

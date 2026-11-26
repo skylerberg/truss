@@ -2574,7 +2574,9 @@ let () =
   Harness.test "a loop keeps the validity of each value it mutates" (fun () ->
       expect_proven Fixtures.Prover.positive_reassigned_in_a_loop);
   Harness.test "an iteration must keep the validity of each value the loop mutates" (fun () ->
-      expect_not_proven Fixtures.Prover.positive_zeroed_in_a_loop "prover.invariant")
+      expect_not_proven Fixtures.Prover.positive_zeroed_in_a_loop "prover.invariant");
+  Harness.test "no fix requires the premise of a goal to be false" (fun () ->
+      expect_not_proven Fixtures.Prover.parameter_zeroed_in_a_loop "prover.invariant")
 
 let () =
   Harness.test "a mut range's bounds are evaluated once" (fun () ->
