@@ -1416,6 +1416,13 @@ fn List[Element].push(mut self, item: own Element)
 - A caller with an amortized bound also counts the potential that its own
   code makes. A value it builds counts its type's potential. A write counts
   the change in the potential of the values that contain the written place.
+- A decrease in the potential of the values of a type lowers an amortized
+  bound's count only in a function that calls no callee whose amortized
+  bound covers a change in the potential of that type. In a function that
+  calls one, an increase of that type's potential by the function's own
+  code or by a callee with a plain bound still counts, and a decrease does
+  not: the callee's bound paid for the potential it saved in the callee's
+  units, each of which stands for fewer steps than one of the caller's.
 - A caller with a plain bound counts a callee's plain bound. Where the
   callee states only an amortized bound, the caller counts that bound, and
   the potential that its calls spend where they spend more than they save.

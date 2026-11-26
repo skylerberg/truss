@@ -1,6 +1,6 @@
 let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_failures = true)
-    ?(panics = false) ?(can_declare_panic = false) ?panic_condition (lookups : Lookups.t) ~home
-    ~current ~terminates ~measures ~inherits_precondition =
+    ?(panics = false) ?(can_declare_panic = false) ?panic_condition ?blocked_holders
+    (lookups : Lookups.t) ~home ~current ~terminates ~measures ~inherits_precondition =
   let node = Option.value node ~default:current in
   let rec context =
     {
@@ -34,7 +34,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       validity = Validity.make_state ();
       callbacks = Callbacks.make_state ();
       lending = Lending.make_state ();
-      cost = Counters.make_state ();
+      cost = Counters.make_state ?blocked_holders ();
       logs = [];
       powers = [];
       lambda_definitions = Tables.Symbol_table.create 8;
@@ -100,8 +100,14 @@ let read_requires (context : State.context) frame (requirement : Mir.formula) =
       Obligations.with_condition context requirement.holds_when (fun () ->
           Validity.read_specification context frame requirement))
 
+let rec run_blocking ?blocked_holders translate =
+  try translate ?blocked_holders ()
+  with Counters.Blocks_credited_potential blocked_holders ->
+    run_blocking ~blocked_holders translate
+
 let translate_run ~proof ~substitution ~condition ~assumes_panic_condition (lookups : Lookups.t)
     (source : State.source) ~path =
+  run_blocking @@ fun ?blocked_holders () ->
   let contract =
     match Mir.read_contract lookups.mir path with
     | Some { form; _ } -> form
@@ -152,7 +158,7 @@ let translate_run ~proof ~substitution ~condition ~assumes_panic_condition (look
   in
   let context =
     make_context lookups ~condition ~keeps_termination ~keeps_failures ~panics ~can_declare_panic
-      ?panic_condition ~home ~current:path
+      ?panic_condition ?blocked_holders ~home ~current:path
       ~node:
         (Mir.Call_edges.resolve_node
            { interface = lookups.interface; mir = lookups.mir }
@@ -780,9 +786,10 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
 
 let translate_restated_clauses (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type
     ~at =
+  run_blocking @@ fun ?blocked_holders () ->
   let home = source.key in
   let context =
-    make_context lookups ~home ~current:impl ~terminates:false ~measures:[]
+    make_context lookups ?blocked_holders ~home ~current:impl ~terminates:false ~measures:[]
       ~inherits_precondition:false
   in
   let impl_interface = Interface.Definition.read_impl_interface lookups.interface impl in

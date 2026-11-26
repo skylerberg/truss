@@ -1,14 +1,19 @@
-val make_state : unit -> State.cost_state
+exception Blocks_credited_potential of string list
+
+val make_state : ?blocked_holders:string list -> unit -> State.cost_state
 val lookup_spent : State.frame -> Costs.counter -> Logic.term
 val read_condition : State.context -> Costs.counter -> Types.condition
 val spend : State.context -> State.frame -> (Costs.counter -> Logic.term) -> State.frame
 val declare_unknown_amount : State.context -> State.frame -> Costs.counter -> Logic.term
 val make_potential_credit : State.context -> Logic.term -> Logic.term
+val count_declared_potential : State.context -> of_:Types.ty -> Logic.term -> Logic.term
+val count_whole_potential : State.context -> Logic.term -> Logic.term
 
 val spend_operation :
   State.context ->
   State.frame ->
   potential_change:(unit -> Logic.term) option ->
+  held:(unit -> Types.ty list) ->
   ?note:(Costs.counter -> Logic.term -> unit) ->
   (Costs.counter -> Costs.charge) ->
   State.frame
