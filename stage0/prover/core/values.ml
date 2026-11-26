@@ -20,7 +20,7 @@ let assume_extensional (frame : State.frame) (ty : Types.ty) left right =
       with
       | Some at_a, Some at_b ->
           let length = Models.make_sequence_length frame.query element in
-          Facts.add_frame_fact frame
+          Facts.add_axiom frame
             Logic.(
               equal (length left) (length right)
               &&& forall
@@ -59,7 +59,7 @@ let assume_extensional (frame : State.frame) (ty : Types.ty) left right =
               | _ -> Logic.equal (has left) (has right)
             else Logic.equal (has left) (has right)
           in
-          Facts.add_frame_fact frame
+          Facts.add_axiom frame
             Logic.(
               forall ([ (each, key_sort) ], Encoding.make_in_range key (Symbol each) ==> same)
               ==> equal left right)
@@ -435,7 +435,7 @@ let make_log_order left right =
     ==> less_equal (log left) (log right)
     &&& (less_equal right left ==> less_equal (log right) (log left)))
 
-let declare_log (context : State.context) (frame : State.frame) log_argument =
+let make_log (context : State.context) (frame : State.frame) log_argument =
   let rec add log_argument ~halving =
     match List.assoc_opt log_argument context.logs with
     | Some true -> ()
@@ -443,17 +443,17 @@ let declare_log (context : State.context) (frame : State.frame) log_argument =
     | seen ->
         if seen = None then
           List.iter
-            (fun (other, _) -> Facts.add_frame_fact frame (make_log_order log_argument other))
+            (fun (other, _) -> Facts.add_axiom frame (make_log_order log_argument other))
             context.logs;
         context.logs <- (log_argument, halving) :: List.remove_assoc log_argument context.logs;
         let facts, half = make_log_facts log_argument ~halving in
-        List.iter (Facts.add_frame_fact frame) facts;
+        List.iter (Facts.add_axiom frame) facts;
         Option.iter (fun half -> add half ~halving:false) half
   in
   if not (Logic.mentions frame.bound log_argument) then add log_argument ~halving:true;
   (match log_argument with
   | Logic.Integer limit ->
-      Facts.add_frame_fact frame
+      Facts.add_axiom frame
         (Logic.equal
            (Logic.Apply (Logic.Symbol.Integer_log, [ log_argument ]))
            (Logic.int (if Z.sign limit <= 0 then 0 else Z.numbits limit)))
@@ -464,14 +464,14 @@ let apply_specification_function (context : State.context) (frame : State.frame)
     (measure : Core.specification_function) values ~unconverted ~types =
   match (measure, values, unconverted, types) with
   | Log, [ log_argument ], [ unconverted ], _ ->
-      let log = declare_log context frame log_argument in
+      let log = make_log context frame log_argument in
       (match Encoding.find_bounds unconverted with
       | Some (_, high) when not (Logic.mentions frame.bound log_argument) ->
-          Facts.add_frame_fact frame
+          Facts.add_axiom frame
             Logic.(less_equal log_argument (Integer high) ==> less_equal log (int (Z.numbits high)))
       | _ -> ());
       (frame, log)
-  | Power, [ base; exponent ], _, _ -> (frame, Operations.declare_power context frame base exponent)
+  | Power, [ base; exponent ], _, _ -> (frame, Operations.make_power context frame base exponent)
   | Callback_cost metric, [ function_term ], _, [ function_type ] ->
       (frame, Amounts.make_callback_cost context frame metric function_type function_term)
   | Callback_ensures, _, _, Types.Function function_type :: _ ->

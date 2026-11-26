@@ -385,7 +385,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `State.context` | The state of each owner and the outcome of the proof | Reads a specification, runs a body, or uses an owner's state |
 
   `Facts.assume` guards a fact with the path condition of its frame.
-  `Facts.add_frame_fact` and `Query.add_fact` add a fact with no guard, so
+  `Facts.add_axiom` and `Query.add_fact` add a fact with no guard, so
   each use of them states the definition of a new symbol or an axiom.
 - **Each rule of the prover has one owner module, and each record of its
   state one owner.** `Reader`, `Calls`, `Loops` and `Lambdas` execute the

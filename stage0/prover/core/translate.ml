@@ -239,7 +239,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
   let start =
-    Callbacks.declare_own start
+    Callbacks.bind_own start
       (List.filter_map
          (fun (position, callback) ->
            Option.map

@@ -133,7 +133,7 @@ let make_derived_equal (context : State.context) (frame : State.frame) (ty : Typ
                    Logic.(is_variant left &&& is_variant right &&& fields_equal one))
                  variants)
       in
-      Facts.add_frame_fact frame (Logic.equal equal defined)
+      Facts.add_axiom frame (Logic.equal equal defined)
   | _ -> ());
   equal
 
@@ -242,17 +242,16 @@ let make_power_order base left right =
         ==> less_equal (power left) (power right)
         &&& (less_equal right left ==> less_equal (power right) (power left))))
 
-let declare_power (context : State.context) (frame : State.frame) base exponent =
+let make_power (context : State.context) (frame : State.frame) base exponent =
   let add exponent =
     if not (List.mem (base, exponent) context.powers) then begin
       List.iter
         (fun (other_base, other) ->
-          if other_base = base then
-            Facts.add_frame_fact frame (make_power_order base exponent other))
+          if other_base = base then Facts.add_axiom frame (make_power_order base exponent other))
         context.powers;
       context.powers <- (base, exponent) :: context.powers;
       let facts, step = make_power_facts base exponent in
-      List.iter (Facts.add_frame_fact frame) facts;
+      List.iter (Facts.add_axiom frame) facts;
       Some step
     end
     else None
@@ -260,13 +259,13 @@ let declare_power (context : State.context) (frame : State.frame) base exponent 
   (if not (Logic.mentions frame.bound base || Logic.mentions frame.bound exponent) then
      match add exponent with
      | Some (step, previous) ->
-         Facts.add_frame_fact frame step;
+         Facts.add_axiom frame step;
          ignore (add previous)
      | None -> ());
   (match (base, exponent) with
   | Logic.Integer base_value, Logic.Integer exponent_value
     when Z.sign exponent_value >= 0 && Z.leq exponent_value (Z.of_int 256) ->
-      Facts.add_frame_fact frame
+      Facts.add_axiom frame
         (Logic.equal
            (Logic.Apply (Logic.Symbol.Integer_power, [ base; exponent ]))
            (Logic.Integer (Z.pow base_value (Z.to_int exponent_value))))
@@ -344,7 +343,7 @@ let translate_primitive_operation (context : State.context) (frame : State.frame
       (match (Encoding.find_bounds ty, find_width ty) with
       | Some (low, high), Some bits
         when Z.equal low Z.zero && not (Logic.mentions frame.bound right) ->
-          let scale = declare_power context frame (Logic.int 2) right in
+          let scale = make_power context frame (Logic.int 2) right in
           Facts.assume frame
             Logic.(
               less_equal (int 0) right
@@ -439,7 +438,7 @@ let translate_primitive_operation (context : State.context) (frame : State.frame
              let leading = count Leading_zeros value
              and trailing = count Trailing_zeros value
              and ones = count Count_ones value in
-             let power exponent = declare_power context frame (Logic.int 2) exponent in
+             let power exponent = make_power context frame (Logic.int 2) exponent in
              let width = Logic.int bits in
              let nonzero = Logic.not_ (Logic.equal value (Logic.int 0)) in
              let below_highest = Logic.subtract width leading in

@@ -101,7 +101,7 @@ let assume_laws (context : State.context) (frame : State.frame) (trait : Types.t
                       (Contracts.list_law_holes context.environment.lookups impl required ty
                          law.name))
                   impl;
-                Facts.add_frame_fact frame fact_
+                Facts.add_axiom frame fact_
             | None -> ())
           (list_laws context.environment required.trait))
     (Interface.Properties.list_bound_closure context.environment.lookups.interface ~self:ty trait)
