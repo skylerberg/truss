@@ -92,6 +92,22 @@ let () =
         \  }\n\
          }\n"
         "ownership.undeclared_change" ~says:"`log.total` changes here");
+  Harness.test
+    "an impl of a capability's method without a modifies clause changes only the capability's parts"
+    (fun () ->
+      expect_one_diagnostic
+        "public type Journal(entries: List[UInt64], total: UInt64)\n\
+         public type Quiet()\n\
+         public capability Recorder {\n\
+        \  fn record(log: mut Journal)\n\
+        \    modifies log.entries\n\
+         }\n\
+         impl Recorder for Quiet {\n\
+        \  fn record(self, log: mut Journal) {\n\
+        \    log.total = 1\n\
+        \  }\n\
+         }\n"
+        "ownership.undeclared_change" ~says:"`log.total` changes here");
   Harness.test "an impl's method keeps its trait's parts of a type opaque to its package" (fun () ->
       expect_one_diagnostic
         ~setup:(Support.setup ~dependencies:[ ("app", "lib") ])

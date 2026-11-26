@@ -780,6 +780,17 @@ let read_parameter_at (signature : signature) position =
             position
             (List.length signature.parameters))
 
+let add_receiver (signature : signature) receiver =
+  match (signature.receiver, receiver) with
+  | None, Some _ ->
+      {
+        signature with
+        receiver;
+        modifies =
+          List.map (fun part -> { part with position = part.position + 1 }) signature.modifies;
+      }
+  | _ -> { signature with receiver }
+
 let list_modified_parts (signature : signature) position =
   match List.filter (fun modified -> modified.position = position) signature.modifies with
   | [] -> None

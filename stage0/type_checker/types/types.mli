@@ -226,6 +226,7 @@ type signature = {
 val is_field_path_prefix : string list -> string list -> bool
 val find_parameter_position : signature -> string -> int option
 val read_parameter_at : signature -> int -> parameter_info
+val add_receiver : signature -> (Language.Mode.t * ty) option -> signature
 val list_modified_parts : signature -> int -> modified list option
 val is_part_within : container:modified -> modified -> bool
 val show_modified_part : root:string -> modified -> string
