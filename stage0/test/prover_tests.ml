@@ -1233,6 +1233,12 @@ let () =
   Harness.test
     "a proof reads a receiver whose part is lent `mut` as the method left it where it lent"
     (fun () -> expect_proven Fixtures.Prover.deque_read_while_its_element_is_lent);
+  let lent_while_counting = Fixtures.Prover.part_lent_while_another_argument_changes in
+  Harness.test "the end of a lend changes the lender and no other `mut` argument" (fun () ->
+      expect_proven lent_while_counting;
+      expect_not_proven
+        (Support.apply_edit lent_while_counting ("ensures result == 6", "ensures result == 1"))
+        "prover.ensures");
   Harness.test
     "a restated clause of a lending method is proven where it lends and when its lend ends"
     (fun () ->
