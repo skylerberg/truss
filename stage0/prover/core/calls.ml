@@ -361,10 +361,16 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
   match (contract.result_kind, callee.lends) with
   | `Lends, Some Language.Mode.Mut ->
       havoc.end_writes after;
+      let is_lender (position, _) = position = 0 in
+      let where_lent = List.filter (fun changed -> not (is_lender changed)) changed in
       let end_lend (ended : State.frame) final =
-        let havoc = havoc_mut context ended values ~list_modified in
-        let after = havoc.after and changed = List.rev havoc.written in
-        assume_changed_validity after ~changed
+        let havoc =
+          havoc_mut context ended
+            (List.filter (fun (passed : State.passed) -> passed.position = 0) values)
+            ~list_modified
+        in
+        let after = havoc.after and changed = List.rev havoc.written @ where_lent in
+        assume_changed_validity after ~changed:(List.rev havoc.written)
           ~left_valid:
             (Some
                (Validity.make_validity context after ~assuming:false ~deep:true result_type final));
