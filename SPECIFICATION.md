@@ -549,8 +549,12 @@ public type Interval =
   holder ends: a `var` at the end of its scope, and a `mut` parameter or
   `mut self` when the function returns. A `with` is checked after all of
   its updates. An element of a `List` or an `Array` meets it
-  when a write to a part of the element ends, as in `spans[0].low = 1` or
-  `bump(mut spans[0].low)`, since the next read of the element assumes it.
+  when a write to the element or to a part of it ends, as in
+  `spans[0].low = 1` or `bump(mut spans[0].low)`, since the next read of
+  the element assumes it. A write that a call makes ends when the call
+  returns, so the call's `ensures` are known: the element meets its
+  invariant after `bump` where `bump` ensures enough, and after a step on
+  the element, `mut spans[0].widen()`, where the step restores it.
 - An invariant clause that calls a definition private to its type's
   module is known only in that module. Another module assumes the clause of
   every value of the type and proves it only of a value it was given or a
