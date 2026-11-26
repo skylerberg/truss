@@ -291,9 +291,11 @@ let find_lambda_definition (context : State.context) (frame : State.frame)
             Logic.Symbol.Lambda { sorts = List.map snd bound; definition = named_by_position }
           in
           let sort = Encoding.sort_of (Types.Function function_type) in
+          let names_in_its_definition (name, _, _) = Logic.mentions [ name ] defined in
           let term =
-            if Logic.mentions frame.bound defined then Facts.declare_value_symbol frame symbol sort
-            else Facts.declare_value_symbol { frame with binders = [] } symbol sort
+            Facts.declare_value_symbol
+              { frame with binders = List.filter names_in_its_definition frame.binders }
+              symbol sort
           in
           let application = Callbacks.apply_function function_type term entries in
           Tables.Symbol_table.replace context.lambda_definitions symbol defined;
