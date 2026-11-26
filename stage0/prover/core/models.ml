@@ -242,14 +242,11 @@ let quantify_over (context : State.context) (frame : State.frame)
         inner each
   | Range_of_integers { low; high; inclusive; type_ } ->
       let inner = bind inner each type_ in
-      let premise =
-        Logic.(less_equal low each &&& (if inclusive then less_equal else less) each high)
-      in
-      let count =
-        if inclusive then Logic.add (Logic.subtract high low) (Logic.int 1)
-        else Logic.subtract high low
-      in
-      make ~count symbol Int premise inner each
+      make
+        ~count:(Encoding.count_values type_ ~low ~high ~inclusive)
+        symbol Int
+        (Encoding.make_in_values type_ each ~low ~high ~inclusive)
+        inner each
 
 let rec make_value_term context (frame : State.frame) (value : Types.value) =
   match value with

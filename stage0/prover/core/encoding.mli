@@ -13,6 +13,12 @@ val find_constructors :
 val declare_sort : State.context -> Types.ty -> Logic.sort
 val is_equality_identity : State.context -> ?seen:Types.ty list -> Types.ty -> bool
 val make_in_range : Types.ty -> Logic.term -> Logic.term
+
+val make_in_values :
+  Types.ty -> Logic.term -> low:Logic.term -> high:Logic.term -> inclusive:bool -> Logic.term
+
+val count_values : Types.ty -> low:Logic.term -> high:Logic.term -> inclusive:bool -> Logic.term
+val offset_value : Types.ty -> low:Logic.term -> Logic.term -> Logic.term
 val arrive : State.context -> State.frame -> string -> Types.ty -> Logic.term
 
 val list_definition_bounds :

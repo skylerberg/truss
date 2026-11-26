@@ -20,24 +20,6 @@ type context = {
 let report context diagnostic =
   context.diagnostics <- Catalog.Patterns diagnostic :: context.diagnostics
 
-let compute_integer_range type_ =
-  let compute_bounds signed width =
-    if signed then
-      Some (Z.neg (Z.shift_left Z.one (width - 1)), Z.pred (Z.shift_left Z.one (width - 1)))
-    else Some (Z.zero, Z.pred (Z.shift_left Z.one width))
-  in
-  match Types.find_builtin type_ with
-  | Some Int8 -> compute_bounds true 8
-  | Some Int16 -> compute_bounds true 16
-  | Some Int32 -> compute_bounds true 32
-  | Some Int64 -> compute_bounds true 64
-  | Some UInt8 -> compute_bounds false 8
-  | Some UInt16 -> compute_bounds false 16
-  | Some UInt32 -> compute_bounds false 32
-  | Some UInt64 -> compute_bounds false 64
-  | Some Character -> Some (Z.zero, Z.of_int 0x10FFFF)
-  | _ -> None
-
 let read_fields context path arguments =
   Option.bind (Interface.Definition.find_type_interface context.lookups.interface path)
     (fun interface -> Types.instantiate_fields interface arguments)
@@ -184,11 +166,12 @@ let split_intervals (low, high) (column : space list) =
     | Alternatives alternatives -> List.concat_map collect_intervals alternatives
     | _ -> []
   in
+  let clamp bound = Z.max low (Z.min (Z.succ high) bound) in
   let bounds =
     List.sort_uniq Z.compare
       (low :: Z.succ high
       :: List.concat_map
-           (fun (start, stop) -> [ Z.max low start; Z.min (Z.succ high) (Z.succ stop) ])
+           (fun (start, stop) -> [ clamp start; clamp (Z.succ stop) ])
            (List.concat_map collect_intervals column))
   in
   let rec pair_bounds = function
@@ -232,10 +215,13 @@ let rec build_default_matrix (rows : row list) =
       | _ -> [])
     rows
 
+let split_value_ranges type_ (column : space list) =
+  List.concat_map (fun range -> split_intervals range column) (Types.list_value_ranges type_)
+
 let compute_signature context type_ (column : space list) =
-  match compute_integer_range type_ with
-  | Some range -> Some (List.map (fun interval -> (interval, [])) (split_intervals range column))
-  | None -> list_constructors context type_
+  match split_value_ranges type_ column with
+  | [] -> list_constructors context type_
+  | intervals -> Some (List.map (fun interval -> (interval, [])) intervals)
 
 let rec find_witness context (types : Types.ty list) (rows : row list) : space list option =
   match types with
@@ -278,14 +264,17 @@ let rec is_useful context (types : Types.ty list) (rows : row list) (row : row) 
             (fun alternative -> is_useful context types rows (alternative :: rest))
             alternatives
       | Constructed (constructor, arguments) -> (
-          match (constructor, compute_integer_range type_) with
-          | Interval _, Some range ->
+          match
+            ( constructor,
+              split_value_ranges type_
+                (first :: List.filter_map (function first :: _ -> Some first | [] -> None) rows) )
+          with
+          | Interval _, (_ :: _ as parts) ->
               List.exists
                 (fun part ->
                   covers constructor part
                   && is_useful context rest_types (specialize ~width:0 part rows) rest)
-                (split_intervals range
-                   (first :: List.filter_map (function first :: _ -> Some first | [] -> None) rows))
+                parts
           | _ ->
               let field_types = read_field_types context type_ constructor in
               is_useful context (field_types @ rest_types)
@@ -315,7 +304,8 @@ let rec build_witness context type_ (pattern : space) : Catalog.Patterns.witness
   | Wild | Alternatives [] -> Any
   | Alternatives (first :: _) -> build_witness context type_ first
   | Constructed (Boolean value, _) -> Boolean value
-  | Constructed (Interval (low, high), _) when compute_integer_range type_ = Some (low, high) -> Any
+  | Constructed (Interval (low, high), _) when Types.list_value_ranges type_ = [ (low, high) ] ->
+      Any
   | Constructed (Interval (low, high), _) -> Integers { low; high }
   | Constructed ((Text _ | Opaque_constant _ | Opaque_range _), _) ->
       raise_bug "a witness holds a constructor that no type's signature lists"

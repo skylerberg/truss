@@ -8,7 +8,12 @@ let lower_range_loop state ~(schedule : Lowering.schedule) ~(low : Mir.operand)
     | Character -> Constant (Character value)
     | _ -> Definitions.raise_bug "a range of %s" (Ground.to_string element)
   in
-  let characters = scalar = Character in
+  let gap =
+    match (scalar, Types.list_value_ranges (Types.make_builtin Character)) with
+    | Character, [ (_, before); (after, _) ] ->
+        Some (Z.to_int (Z.succ before), Z.to_int (Z.pred after))
+    | _ -> None
+  in
   let compare op left right : Emit_c.Ir_builder.condition = Test (op, left, right) in
   match schedule with
   | Chunked ->
@@ -44,19 +49,21 @@ let lower_range_loop state ~(schedule : Lowering.schedule) ~(low : Mir.operand)
           (Assign
              ( Lowered.make_local_place last,
                Binary (Subtract, Copy (Lowered.make_local_place last), one) ));
-      if characters then
-        Emit_c.Ir_builder.emit_when state.builder
-          (Conjunction
-             ( compare Less (Copy first_value) (make_constant 0xD800),
-               compare Greater (Copy last_value) (make_constant 0xDFFF) ))
-          (fun () ->
-            Emit_c.Ir_builder.emit state.builder
-              (Assign
-                 ( Lowered.make_local_place last,
-                   Binary
-                     ( Subtract,
-                       Copy (Lowered.make_local_place last),
-                       Lowering.make_int_constant UInt64 (Z.of_int 0x800) ) )));
+      Option.iter
+        (fun (gap_low, gap_high) ->
+          Emit_c.Ir_builder.emit_when state.builder
+            (Conjunction
+               ( compare Less (Copy first_value) (make_constant gap_low),
+                 compare Greater (Copy last_value) (make_constant gap_high) ))
+            (fun () ->
+              Emit_c.Ir_builder.emit state.builder
+                (Assign
+                   ( Lowered.make_local_place last,
+                     Binary
+                       ( Subtract,
+                         Copy (Lowered.make_local_place last),
+                         Lowering.make_int_constant UInt64 (Z.of_int (gap_high - gap_low + 1)) ) ))))
+        gap;
       let body, environment =
         Lowering.outline state ~parts:[ first; last ] (fun () ->
             let index = Emit_c.Ir_builder.allocate_local state.builder wide in
@@ -74,14 +81,18 @@ let lower_range_loop state ~(schedule : Lowering.schedule) ~(low : Mir.operand)
                   (Assign (offset, Convert (Copy (Lowered.make_local_place index), scalar)));
                 Emit_c.Ir_builder.emit state.builder
                   (Assign (bound, Binary (Add, Copy first_value, Copy offset)));
-                if characters then
-                  Emit_c.Ir_builder.emit_when state.builder
-                    (Conjunction
-                       ( compare Less (Copy first_value) (make_constant 0xD800),
-                         compare Greater_equal (Copy bound) (make_constant 0xD800) ))
-                    (fun () ->
-                      Emit_c.Ir_builder.emit state.builder
-                        (Assign (bound, Binary (Add, Copy bound, make_constant 0x800))));
+                Option.iter
+                  (fun (gap_low, gap_high) ->
+                    Emit_c.Ir_builder.emit_when state.builder
+                      (Conjunction
+                         ( compare Less (Copy first_value) (make_constant gap_low),
+                           compare Greater_equal (Copy bound) (make_constant gap_low) ))
+                      (fun () ->
+                        Emit_c.Ir_builder.emit state.builder
+                          (Assign
+                             ( bound,
+                               Binary (Add, Copy bound, make_constant (gap_high - gap_low + 1)) ))))
+                  gap;
                 Lowering.run_in_loop state ~continue_:step ~break_:done_ ~depth (fun () ->
                     each bound));
             Emit_c.Ir_builder.finish state.builder (Goto step);
@@ -155,11 +166,14 @@ let lower_range_loop state ~(schedule : Lowering.schedule) ~(low : Mir.operand)
       end;
       Emit_c.Ir_builder.emit state.builder
         (Assign (index, Binary (Add, Copy index, make_constant 1)));
-      if characters then
-        Emit_c.Ir_builder.emit_when state.builder
-          (Test (Equal, Copy index, make_constant 0xD800))
-          (fun () ->
-            Emit_c.Ir_builder.emit state.builder (Assign (index, Use (make_constant 0xE000))));
+      Option.iter
+        (fun (gap_low, gap_high) ->
+          Emit_c.Ir_builder.emit_when state.builder
+            (Test (Equal, Copy index, make_constant gap_low))
+            (fun () ->
+              Emit_c.Ir_builder.emit state.builder
+                (Assign (index, Use (make_constant (gap_high + 1))))))
+        gap;
       Emit_c.Ir_builder.finish state.builder (Goto test);
       Emit_c.Ir_builder.start state.builder after
 

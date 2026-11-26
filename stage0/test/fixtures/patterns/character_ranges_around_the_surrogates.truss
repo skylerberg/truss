@@ -1,0 +1,6 @@
+fn plane(character: Character) -> Int64 {
+  match character {
+    Character"\u{0}"..=Character"\u{D7FF}" => 0
+    Character"\u{E000}"..=Character"\u{10FFFF}" => 1
+  }
+}

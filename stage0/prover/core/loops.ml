@@ -456,6 +456,7 @@ let run_for_loop context frame (for_loop : for_loop) =
           (Option.value for_loop.lent_element ~default:for_loop.element_type)
       in
       let over_positions = Option.is_some for_loop.lent_element in
+      let ranged = if over_positions then Types.Integer else element in
       let find_element_at (at : State.frame) position =
         Option.map
           (fun element_of -> element_of (for_loop.bind_element at position))
@@ -473,11 +474,7 @@ let run_for_loop context frame (for_loop : for_loop) =
         enter_loop context frame ~entry clauses ~changed:(for_loop.compute_changed_in frame)
       in
       let costs = start.costs and head = for_loop.bind_parts start.havocked in
-      let count =
-        Logic.normalize_linear
-          (if inclusive then Logic.add (Logic.subtract high low) (Logic.int 1)
-           else Logic.subtract high low)
-      in
+      let count = Logic.normalize_linear (Encoding.count_values ranged ~low ~high ~inclusive) in
       let iterations = Facts.declare_fresh context head "iterations" Logic.Int in
       Facts.assume context head
         Logic.(less_equal (int 0) iterations &&& less_equal iterations (at_least_zero count));
@@ -496,14 +493,15 @@ let run_for_loop context frame (for_loop : for_loop) =
                   Logic.(
                     less_equal (int 0) (Symbol position)
                     &&& less (Symbol position) iterations
-                    ==> equal visited_index (add low (Symbol position))) ))
+                    ==> equal visited_index (Encoding.offset_value ranged ~low (Symbol position)))
+                ))
        | None -> ());
       Option.iter
         (fun _ ->
           declare_elements_so_far context head ~element ~collection:for_loop.collection
             ~count:iterations before find_element_at)
         for_loop.element_call;
-      let index = Logic.add low iterations in
+      let index = Encoding.offset_value ranged ~low iterations in
       let head =
         Loop_costs.enter_head context
           (bind_at_index { head with visited = Some before } index)
@@ -528,7 +526,9 @@ let run_for_loop context frame (for_loop : for_loop) =
       let inside = Loop_costs.spend_step context inside in
       let ends, breaks = for_loop.run_body inside index in
       let with_through (exit_frame : State.frame) =
-        bind_at_index { exit_frame with visited = Some through } (Logic.add index (Logic.int 1))
+        bind_at_index
+          { exit_frame with visited = Some through }
+          (Encoding.offset_value ranged ~low (Logic.add iterations (Logic.int 1)))
       in
       end_iterations context frame for_loop.for_at clauses
         (Termination.read_loop_measure context clauses ~head)

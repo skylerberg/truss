@@ -301,6 +301,11 @@ let find_integer_range type_ =
       else (Z.zero, Z.pred (Z.shift_left Z.one bits)))
     (find_integer_bits type_)
 
+let list_value_ranges type_ =
+  if is_builtin Character type_ then
+    [ (Z.zero, Z.of_int 0xD7FF); (Z.of_int 0xE000, Z.of_int 0x10FFFF) ]
+  else Option.to_list (find_integer_range type_)
+
 let list_fitting_integer_types number =
   List.filter
     (fun builtin ->
