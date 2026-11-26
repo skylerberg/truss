@@ -116,6 +116,8 @@ type cost_state = {
   mutable recursive_costs_assumed : int;
   mutable lambdas_assuming_recursive_costs : Logic.term list;
   mutable lambda_costs : ((Logic.term * Language.Metric.t) * (Logic.term * Obligation.t list)) list;
+  mutable lambda_bounds :
+    (Logic.term * ((Language.Metric.t * Logic.term) list * Core.local list)) list;
   mutable lambda_captures : (Logic.term * Core.local list) list;
   mutable call_targets : (Logic.term * Core.local) list;
   mutable call_amounts : call_amount list;

@@ -47,8 +47,16 @@ val check_lambda_exits :
   mark:Query.mark ->
   (Language.Metric.t * (Logic.term * Obligation.t list)) list
 
+val has_another_cost :
+  State.context ->
+  Logic.term ->
+  captures:Core.local list ->
+  bounds:(Language.Metric.t * (Logic.term * Obligation.t list)) list ->
+  bool
+
 val note_lambda :
   State.context ->
+  State.frame ->
   lambda_counters ->
   Logic.term ->
   captures:Core.local list ->

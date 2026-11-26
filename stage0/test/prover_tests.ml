@@ -1821,6 +1821,13 @@ let () =
       expect_codes Fixtures.Prover.recursive_call_in_a_quantifier_over_no_value [ "prover.ensures" ]);
   Harness.test "two calls of a function that may panic give one result for one argument" (fun () ->
       expect_proven Fixtures.Prover.function_that_may_panic_called_twice);
+  let costed = Fixtures.Prover.two_lambdas_with_one_value_and_two_costs in
+  Harness.test "two lambdas with one value and two costs are costed apart" (fun () ->
+      expect_proven costed;
+      expect_codes
+        (Support.apply_edit costed
+           ("    let _ = item\n  })\n}", "    let _ = [item, item]\n  })\n}"))
+        [ "prover.cost" ]);
   Harness.test "the contract of a function that can panic is assumed only where it returns"
     (fun () ->
       expect_codes Fixtures.Prover.contract_of_a_function_that_panics_assumed_where_it_panics

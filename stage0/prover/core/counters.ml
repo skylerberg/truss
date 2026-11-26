@@ -6,6 +6,7 @@ let make_state () : State.cost_state =
     recursive_costs_assumed = 0;
     lambdas_assuming_recursive_costs = [];
     lambda_costs = [];
+    lambda_bounds = [];
     lambda_captures = [];
     call_targets = [];
     call_amounts = [];
@@ -270,7 +271,17 @@ let check_lambda_exits context counters (exits : State.frame list) location ~typ
         (Costs.find_cost_bound ~varies:(Facts.mentions_fresh_since context mark) ~facts most))
     counters.operand_counters
 
-let note_lambda (context : State.context) counters term ~captures ~bounds =
+let list_bound_terms bounds = List.map (fun (metric, (bound, _)) -> (metric, bound)) bounds
+
+let has_another_cost (context : State.context) term ~captures ~bounds =
+  match List.assoc_opt term context.cost.lambda_bounds with
+  | Some noted -> noted <> (list_bound_terms bounds, captures)
+  | None -> false
+
+let note_lambda (context : State.context) (frame : State.frame) counters term ~captures ~bounds =
+  if frame.makes_obligations && not (List.mem_assoc term context.cost.lambda_bounds) then
+    context.cost.lambda_bounds <-
+      (term, (list_bound_terms bounds, captures)) :: context.cost.lambda_bounds;
   context.cost.lambda_captures <- (term, captures) :: context.cost.lambda_captures;
   if context.cost.recursive_costs_assumed > counters.recursive_costs_mark then
     context.cost.lambdas_assuming_recursive_costs <-

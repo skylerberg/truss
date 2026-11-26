@@ -434,8 +434,13 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   let shown = Query.list_facts_since context.query body in
   let term =
     match find_lambda_definition context frame function_type written with
-    | Some term -> term
-    | None ->
+    | Some term
+      when not
+             (frame.makes_obligations
+             && Counters.has_another_cost context term ~captures:(list_captured_locals written)
+                  ~bounds:inferred_bounds) ->
+        term
+    | Some _ | None ->
         let term = Encoding.arrive context frame "lambda" ty in
         if Callbacks.is_in_the_logic function_type then
           add_lambda_facts context frame ~capture_free function_type term ~called ~arguments ~start
@@ -448,7 +453,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   if not (Callbacks.is_in_the_logic function_type) then
     add_lambda_relation context frame ~capture_free function_type term ~called ~arguments ~start
       ~end_ ~premises ~shown ~ended:!ended ~read_exits;
-  Counters.note_lambda context counters term ~captures:(list_captured_locals written)
+  Counters.note_lambda context frame counters term ~captures:(list_captured_locals written)
     ~bounds:inferred_bounds;
   (frame, term)
 
