@@ -15,14 +15,8 @@ let run_under_binder :
   let body_frame =
     Facts.restrict { frame with binders = (bound_symbol, sort, premise) :: frame.binders } premise
   in
-  Query.add_quantifier_symbol context.query bound_symbol;
-  let body, newest_facts =
-    Query.run_in_scope context.query [ bound_symbol ] (fun () -> read body_frame)
-  in
-  let with_facts term =
-    if newest_facts <> [] then
-      Query.attach_quantifier_facts context.query term (List.rev newest_facts);
-    term
+  let body, with_facts =
+    Query.run_under_binder context.query bound_symbol (fun () -> read body_frame)
   in
   (body_frame, body, with_facts)
 
@@ -207,7 +201,7 @@ let find_model context (ty : Types.ty) term ~element =
 let quantify_over (context : State.context) (frame : State.frame)
     (quantifier : Language.Quantifier.t) (range : quantified_range) ~bind ~read =
   let make ?count bound_symbol sort premise body_frame bound_value =
-    let mark = Query.count_fresh context.query in
+    let mark = Query.mark context.query in
     let body_frame, (after, body_value), with_facts =
       run_under_binder context body_frame bound_symbol sort premise (fun body_frame ->
           read body_frame bound_value)
@@ -216,7 +210,7 @@ let quantify_over (context : State.context) (frame : State.frame)
     let frame =
       match count with
       | Some count when frame.makes_obligations ->
-          Counters.spend_quantifier context frame ~count ~fresh_mark:mark ~bound:bound_symbol
+          Counters.spend_quantifier context frame ~count ~mark ~bound:bound_symbol
             ~before:body_frame ~after
       | _ -> frame
     in

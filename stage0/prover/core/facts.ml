@@ -48,8 +48,8 @@ let find_argument_sorts (context : State.context) symbol =
 let add_fact (context : State.context) fact = Query.add_fact context.query fact
 let make_fresh_name (context : State.context) label = Query.make_fresh_name context.query label
 
-let mentions_fresh_after (context : State.context) mark term =
-  Query.mentions_fresh_after context.query mark term
+let mentions_fresh_since (context : State.context) mark term =
+  Query.mentions_fresh_since context.query mark term
 
 let run_once (context : State.context) stated make = Query.run_once context.query stated make
 

@@ -376,10 +376,10 @@ let state_relation context (frame : State.frame) (function_type : Types.function
   in
   let parameters = inputs @ List.map snd changed @ returned in
   let holds = make_callback_ensures context function_type term ~entries ~exits ~result in
-  let mark = Query.count_fresh context.State.query in
+  let mark = Query.mark context.State.query in
   let bound = List.map fst parameters in
   let is_inside_the_relation fact =
-    Logic.mentions bound fact || Facts.mentions_fresh_after context mark fact
+    Logic.mentions bound fact || Facts.mentions_fresh_since context mark fact
   in
   let premise, ensures =
     Query.run_dropping_facts context.query ~drop:is_inside_the_relation (fun () ->
@@ -395,7 +395,7 @@ let state_relation context (frame : State.frame) (function_type : Types.function
   in
   if
     ensures <> []
-    && not (List.exists (Facts.mentions_fresh_after context mark) (premise :: ensures))
+    && not (List.exists (Facts.mentions_fresh_since context mark) (premise :: ensures))
   then
     Facts.add_frame_fact context frame
       (Logic.forall ~trigger:[ holds ]

@@ -58,16 +58,22 @@ let declare_datatype query ty list_constructors =
   query.declarations <- Logic.Datatype (ty, constructors) :: query.declarations
 
 let find_argument_sorts query symbol = Tables.Symbol_table.find_opt query.declared symbol
-let is_declared query symbol = Tables.Symbol_table.mem query.declared symbol
 let list_defined_symbols query = List.of_seq (Tables.Symbol_table.to_seq_keys query.definitions)
-let count_declarations query = List.length query.declarations
-
-let list_declarations_since query ~count =
-  List.take (List.length query.declarations - count) query.declarations
-
 let add_fact query fact = query.facts <- Fact_list.add fact query.facts
-let count_facts query = Fact_list.count query.facts
-let list_facts_since query ~count = Fact_list.list_newest_since query.facts ~count
+
+type mark = { declaration_count : int; fact_count : int; fresh_count : int }
+
+let mark query =
+  {
+    declaration_count = List.length query.declarations;
+    fact_count = Fact_list.count query.facts;
+    fresh_count = query.fresh;
+  }
+
+let list_declarations_since query mark =
+  List.take (List.length query.declarations - mark.declaration_count) query.declarations
+
+let list_facts_since query mark = Fact_list.list_newest_since query.facts ~count:mark.fact_count
 let holds query ~under goal = Fact_list.holds query.facts ~under goal
 
 let run_dropping_facts query ~drop run =
@@ -115,11 +121,14 @@ let list_scope_facts query names =
     (fun (name, facts) -> if List.mem name names then List.rev !facts else [])
     query.scopes
 
-let add_quantifier_symbol query symbol =
-  query.quantifier_symbols <- symbol :: query.quantifier_symbols
-
-let attach_quantifier_facts query term facts =
-  Tables.Term_table.replace query.quantifier_facts term facts
+let run_under_binder query symbol run =
+  query.quantifier_symbols <- symbol :: query.quantifier_symbols;
+  let result, facts = run_in_scope query [ symbol ] run in
+  let attach_facts term =
+    if facts <> [] then Tables.Term_table.replace query.quantifier_facts term (List.rev facts);
+    term
+  in
+  (result, attach_facts)
 
 let note_written_quantifier query term = Tables.Term_table.replace query.written_quantifiers term ()
 
@@ -166,7 +175,6 @@ let take_fresh_number query =
   query.fresh <- query.fresh + 1;
   query.fresh
 
-let count_fresh query = query.fresh
 let make_fresh_name query label = make_variable label ~numbers:[ take_fresh_number query ]
 
 let make_ordered_fresh_name query label =
@@ -174,12 +182,13 @@ let make_ordered_fresh_name query label =
   Tables.Symbol_table.replace query.fresh_order name query.fresh;
   name
 
-let find_fresh_order query name = Tables.Symbol_table.find_opt query.fresh_order name
+let is_made_between query since until name =
+  Option.map
+    (fun order -> order > since.fresh_count && order <= until.fresh_count)
+    (Tables.Symbol_table.find_opt query.fresh_order name)
 
-let mentions_fresh_after query mark term =
-  let is_fresh_after name =
-    match find_fresh_order query name with Some order -> order > mark | None -> false
-  in
+let mentions_fresh_since query since term =
+  let is_fresh_after name = is_made_between query since (mark query) name = Some true in
   let rec walk = function
     | Logic.Symbol name -> is_fresh_after name
     | Logic.Integer _ | Logic.Boolean _ | Logic.Bits _ -> false

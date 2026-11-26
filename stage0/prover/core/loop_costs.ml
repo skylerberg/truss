@@ -18,8 +18,7 @@ type loop_cost = {
 
 type t = {
   costs : loop_cost list;
-  fresh_mark : int;
-  facts_mark : int;
+  mark : Query.mark;
   recursive_costs_mark : int;
   changed : State.changed_part list;
 }
@@ -178,8 +177,7 @@ let enter (context : State.context) (frame : State.frame) ~entry clauses ~holds 
   check_entry context entry costs;
   {
     costs;
-    fresh_mark = Query.count_fresh context.query;
-    facts_mark = Query.count_facts context.query;
+    mark = Query.mark context.query;
     recursive_costs_mark = context.cost.recursive_costs_assumed;
     changed;
   }
@@ -325,8 +323,8 @@ let assumes_recursive_costs (context : State.context) loop =
 let check_iterations context loop_at (head : State.frame) loop ~iterations ~iteration_bounds
     ~(inside : State.frame) ~ends ~breaks =
   let location = Facts.locate context head.source loop_at in
-  let facts = Query.list_facts_since context.query ~count:loop.facts_mark @ [ inside.condition ] in
-  let frames = ends @ breaks and varies = Facts.mentions_fresh_after context loop.fresh_mark in
+  let facts = Query.list_facts_since context.query loop.mark @ [ inside.condition ] in
+  let frames = ends @ breaks and varies = Facts.mentions_fresh_since context loop.mark in
   let constant_count =
     if assumes_recursive_costs context loop then None
     else
@@ -490,12 +488,10 @@ let leave context ~(clause_at : State.frame) (exit_ : State.frame) loop ~iterati
 
 let leave_counted (context : State.context) ~clause_at exit_ loop ~iterations ~most ~count ~since =
   let facts =
-    Query.list_facts_since context.query ~count:since
-    @ Query.list_facts_since context.query ~count:loop.facts_mark
+    Query.list_facts_since context.query since @ Query.list_facts_since context.query loop.mark
   in
   leave context ~clause_at exit_ loop ~iterations
     ~most:
       (most
-      @ Costs.list_upper_bounds
-          ~varies:(Facts.mentions_fresh_after context loop.fresh_mark)
-          ~facts count)
+      @ Costs.list_upper_bounds ~varies:(Facts.mentions_fresh_since context loop.mark) ~facts count
+      )

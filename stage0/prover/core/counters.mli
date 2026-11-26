@@ -16,7 +16,7 @@ val spend_quantifier :
   State.context ->
   State.frame ->
   count:Logic.term ->
-  fresh_mark:int ->
+  mark:Query.mark ->
   bound:Logic.symbol ->
   before:State.frame ->
   after:State.frame ->
@@ -44,8 +44,7 @@ val check_lambda_exits :
   State.frame list ->
   Obligation.location ->
   type_:Types.ty ->
-  fresh_mark:int ->
-  facts_mark:int ->
+  mark:Query.mark ->
   (Language.Metric.t * (Logic.term * Obligation.t list)) list
 
 val note_lambda :
