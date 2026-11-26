@@ -1019,6 +1019,34 @@ let () =
       expect_may_abort source ~of_:"grow" ~expected:true;
       expect_may_abort source ~of_:"outer" ~expected:true;
       expect_may_abort source ~of_:"add" ~expected:false);
+  Harness.test "a caller whose call edges failed may abort, whatever the order of the units"
+    (fun () ->
+      let source =
+        "fn one() -> Int64 {\n\
+        \  1\n\
+         }\n\n\
+         fn take(n: Int64 = one()) -> Int64 {\n\
+        \  n\n\
+         }\n\n\
+         fn first() -> Int64 {\n\
+        \  take()\n\
+         }\n\n\
+         fn second() -> Int64 {\n\
+        \  take()\n\
+         }\n\n\
+         fn third() -> Int64 {\n\
+        \  take()\n\
+         }\n\n\
+         fn fourth() -> Int64 {\n\
+        \  take()\n\
+         }\n"
+      in
+      let lookups = Database.For_testing.make_proof_lookups (build [ ("app.main", source) ]) in
+      List.iter
+        (fun caller ->
+          if not (lookups.may_abort (make_main_path caller)) then
+            Harness.fail "%s is known not to abort" caller)
+        [ "first"; "second"; "third"; "fourth" ]);
   Harness.test "a definition does not abort through code that never runs" (fun () ->
       let source =
         "fn doubled(text: String) -> String {\n\
