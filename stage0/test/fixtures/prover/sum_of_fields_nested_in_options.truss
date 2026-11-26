@@ -1,0 +1,15 @@
+type Leaf(value: UInt64, flag: Bool)
+
+type Branch(leaf: Option[Leaf], weight: UInt64)
+
+type Tree(branch: Option[Branch], count: UInt64)
+
+fn f(tree: Tree) -> UInt64 {
+  match tree.branch {
+    Some(branch) => match branch.leaf {
+      Some(leaf) => leaf.value + tree.count
+      None => 0
+    }
+    None => 0
+  }
+}

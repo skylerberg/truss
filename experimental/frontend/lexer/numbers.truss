@@ -5,88 +5,74 @@ type NumberValue = IntegerValue(digits: String) | FloatValue(value: token.Decima
   derives Equal
 
 type NumberProblem(code: String, message: String, start: UInt64, stop: UInt64)
+  invariant start <= stop
 
 type Replacement(title: String, text: String)
 
 type CheckedNumber(value: NumberValue, problem: Option[NumberProblem], fixes: List[Replacement])
 
-fn fits_in_word(digits: String, radix: UInt32) -> Bool {
-  if radix == 16 {
-    digits.length() <= 15
-  } else if radix == 8 {
-    digits.length() <= 21
-  } else {
-    digits.length() <= 63
-  }
-}
-
-fn parse_digits(digits: String, radix: UInt32) -> String
-  requires radix >= 2 && radix <= 36
-  uses Panic
-{
-  if radix == 10 {
-    var start: UInt64 = 0
-    while start + 1 < digits.length() && digits.byte(start) == 48 {
-      start += 1
-    }
-    if digits.is_empty() {
-      return "0"
-    }
-    return digits.substring(start, to: digits.length()).copy()
-  }
+fn strip_leading_zeros(digits: String) -> String {
   if digits.is_empty() {
     return "0"
   }
-  if fits_in_word(digits, radix) {
-    var value: UInt64 = 0
-    for byte in digits.bytes() {
-      value = value * UInt64.from_integer(radix) + UInt64.from_integer(hexadecimal_value(byte))
-    }
-    return "${value}"
+  var start: UInt64 = 0
+  while start + 1 < digits.length() && digits.byte(start) == 48
+    invariant start < digits.length() && digits.is_boundary(start)
+  {
+    start += 1
   }
-  "${math.BigInteger.parse_radix(digits, radix).expect("the digits were checked")}"
+  digits.substring(start, to: digits.length()).copy()
 }
 
-fn parse_exponent(digits: String) -> math.BigInteger
-  uses Panic
-{
-  if digits.length() <= 18 {
-    var value: UInt64 = 0
-    for byte in digits.bytes() {
-      value = value * 10 + UInt64.from_integer(byte - 48)
+fn convert_to_decimal(group: String, radix: UInt32) -> String {
+  let base = math.BigInteger.from(UInt64.from_integer(radix))
+  var value = math.BigInteger.zero()
+  for byte in group.bytes() {
+    if is_hexadecimal_digit(byte) {
+      value = value * base + math.BigInteger.from(UInt64.from_integer(hexadecimal_value(byte)))
     }
-    return math.BigInteger.from(value)
   }
-  math.BigInteger.parse_radix(digits, radix: 10).expect("the exponent digits were checked")
+  "${value}"
 }
 
-fn is_name_byte_or_continue(text: String, position: UInt64) -> UInt64
-  uses Panic
-  ensures position < text.length() && is_ascii_name_byte(text.byte(position)) ==> result == 1
+fn parse_exponent(group: String) -> math.BigInteger {
+  let radix: UInt64 = 10
+  let base = math.BigInteger.from(radix)
+  var value = math.BigInteger.zero()
+  for byte in group.bytes() {
+    if is_digit(byte) {
+      value = value * base + math.BigInteger.from(UInt64.from_integer(byte - 48))
+    }
+  }
+  value
+}
+
+fn measure_name_character(text: String, position: UInt64) -> UInt64
+  requires position < text.length() && text.is_boundary(position)
+  ensures is_ascii_name_byte(text.byte(position)) ==> result == 1
+  ensures 0 < result ==> position + result <= text.length() && text.is_boundary(position + result)
 {
   let byte = text.byte(position)
   if is_ascii_name_byte(byte) {
     return 1
   }
-  if byte >= 128 {
-    let decoded = decode_text(text, index: position)
-    if decoded.is_valid && is_xid_continue(decoded.code) {
-      return decoded.length
-    }
+  if is_ascii(byte) {
+    return 0
   }
-  0
+  let character = text.character_at(position)
+  if is_xid_continue(character.code()) { character.utf8_length() } else { 0 }
 }
 
 fn compute_name_end(text: String, position: UInt64) -> UInt64
-  uses Panic
-  ensures position <= result
+  requires text.is_boundary(position)
+  ensures position <= result && text.is_boundary(result)
   ensures position < text.length() && is_ascii_name_byte(text.byte(position)) ==> position < result
 {
   var at = position
   while at < text.length()
-    invariant position <= at
+    invariant position <= at && text.is_boundary(at)
   {
-    let width = is_name_byte_or_continue(text, position: at)
+    let width = measure_name_character(text, position: at)
     if width == 0 {
       break
     }
@@ -96,7 +82,8 @@ fn compute_name_end(text: String, position: UInt64) -> UInt64
 }
 
 fn is_radix_prefix(text: String, start: UInt64) -> Bool
-  uses Panic
+  requires start <= text.length()
+  ensures result ==> start + 1 < text.length() && text.byte(start) == 48 && is_ascii(text.byte(start + 1))
 {
   start + 1 < text.length() && text.byte(start) == 48 && {
     let marker = text.byte(start + 1)
@@ -113,10 +100,9 @@ fn is_digits_only(text: String) -> Bool {
   true
 }
 
-fn numbers_scan_end(text: String, start: UInt64) -> UInt64
-  uses Panic
-  ensures start <= result
-  ensures start < text.length() && is_digit(text.byte(start)) ==> start < result
+fn scan_plain_number_end(text: String, start: UInt64) -> UInt64
+  requires start < text.length() && is_digit(text.byte(start))
+  ensures start < result && text.is_boundary(result)
 {
   let length = text.length()
   let first_stop = compute_name_end(text, position: start)
@@ -138,7 +124,7 @@ fn numbers_scan_end(text: String, start: UInt64) -> UInt64
 type Cleaned(text: String, first_bad: Option[UInt64])
 
 fn clean_underscores(group: String) -> Cleaned
-  uses Panic
+  ensures !(result.first_bad is Some(index) && group.length() <= index)
 {
   var parts: List[view String] = []
   for part in group.split("_") {
@@ -159,59 +145,61 @@ fn clean_underscores(group: String) -> Cleaned
   Cleaned(text: own cleaned, first_bad: None)
 }
 
-fn remove_underscores(group: String) -> String
-  uses Panic
-{
+fn remove_underscores(group: String) -> String {
   group.replace("_", replacement: "")
 }
 
-type Issue(problem: NumberProblem, is_fixable: Bool)
+type Issues(limit: UInt64, leftmost: Option[NumberProblem], leftmost_unfixable: Option[NumberProblem])
+  invariant !(leftmost is Some(problem) && limit < problem.stop)
+  invariant !(leftmost_unfixable is Some(problem) && limit < problem.stop)
 
-fn make_issue(code: String, message: String, start: UInt64, stop: UInt64, is_fixable: Bool = true) -> Issue {
-  Issue(problem: NumberProblem(code: code.copy(), message: message.copy(), start, stop), is_fixable)
+fn make_issues(limit: UInt64) -> Issues
+  ensures result.limit == limit
+{
+  Issues(limit, leftmost: None, leftmost_unfixable: None)
 }
 
-fn make_underscore_issue(offset: UInt64) -> Issue
-  uses Panic
+fn is_left_of(problem: NumberProblem, leftmost: Option[NumberProblem]) -> Bool {
+  match leftmost {
+    Some(current) => problem.start < current.start
+    None => true
+  }
+}
+
+fn add_issue(issues: mut Issues, code: String, message: String, start: UInt64, stop: UInt64, is_fixable: Bool = true)
+  requires start <= stop && stop <= issues.limit
+  ensures issues.limit == old(issues.limit)
 {
-  make_issue("lexer.number_underscore", message: "`_` can only go between digits.", start: offset, stop: offset + 1)
+  let problem = NumberProblem(code: code.copy(), message: message.copy(), start, stop)
+  if !is_fixable && is_left_of(problem, leftmost: issues.leftmost_unfixable) {
+    issues.leftmost_unfixable = Some(problem.copy())
+  }
+  if is_left_of(problem, leftmost: issues.leftmost) {
+    issues.leftmost = Some(own problem)
+  }
+}
+
+fn add_underscore_issue(issues: mut Issues, offset: UInt64)
+  requires offset < issues.limit
+  ensures issues.limit == old(issues.limit)
+{
+  add_issue(mut issues, "lexer.number_underscore", message: "`_` can only go between digits.", start: offset, stop: offset + 1)
 }
 
 fn measure_character(text: String, offset: UInt64) -> UInt64
-  uses Panic
+  requires offset < text.length() && text.is_boundary(offset)
+  ensures offset + result <= text.length() && text.is_boundary(offset + result)
 {
-  let decoded = decode_text(text, index: offset)
-  if decoded.is_valid { decoded.length } else { 1 }
+  text.character_at(offset).utf8_length()
 }
 
-fn take_leftmost(issues: own List[Issue], only_unfixable: Bool) -> Option[NumberProblem] {
-  var best: Option[NumberProblem] = None
-  for issue in own issues {
-    if only_unfixable && issue.is_fixable {
-      continue
-    }
-    let is_better = match best {
-      Some(current) => issue.problem.start < current.start
-      None => true
-    }
-    if is_better {
-      best = Some(own issue.problem)
-    }
+fn choose_problem(value: own NumberValue, issues: own Issues, fixed: String) -> CheckedNumber
+  ensures !(result.problem is Some(problem) && issues.limit < problem.stop)
+{
+  if issues.leftmost_unfixable is Some(problem) {
+    return CheckedNumber(own value, problem: Some(problem.copy()), fixes: [])
   }
-  best
-}
-
-fn choose_problem(value: own NumberValue, issues: own List[Issue], fixed: String) -> CheckedNumber {
-  var has_unfixable = false
-  for issue in issues {
-    if !issue.is_fixable {
-      has_unfixable = true
-    }
-  }
-  if has_unfixable {
-    return CheckedNumber(own value, problem: take_leftmost(own issues, only_unfixable: true), fixes: [])
-  }
-  match take_leftmost(own issues, only_unfixable: false) {
+  match own issues.leftmost {
     None => CheckedNumber(own value, problem: None, fixes: [])
     Some(problem) => CheckedNumber(
       own value,
@@ -221,7 +209,9 @@ fn choose_problem(value: own NumberValue, issues: own List[Issue], fixed: String
   }
 }
 
-fn is_base_digit(byte: UInt8, base: UInt32) -> Bool {
+fn is_base_digit(byte: UInt8, base: UInt32) -> Bool
+  ensures result ==> is_hexadecimal_digit(byte)
+{
   if base == 16 {
     is_hexadecimal_digit(byte)
   } else if base == 2 {
@@ -232,91 +222,93 @@ fn is_base_digit(byte: UInt8, base: UInt32) -> Bool {
 }
 
 fn check_radix(text: String) -> CheckedNumber
-  uses Panic
+  requires is_radix_prefix(text, start: 0)
+  ensures !(result.problem is Some(problem) && text.length() < problem.stop)
 {
   let length = text.length()
   let marker = text.byte(1)
   let base: UInt32 = if marker == 120 { 16 } else if marker == 98 { 2 } else { 8 }
   let base_name = if base == 16 { "hexadecimal" } else if base == 2 { "binary" } else { "octal" }
   var stop: UInt64 = 2
-  while stop < length && (is_base_digit(text.byte(stop), base) || text.byte(stop) == 95) {
+  while stop < length && (is_base_digit(text.byte(stop), base) || text.byte(stop) == 95)
+    invariant 2 <= stop && text.is_boundary(stop)
+  {
     stop += 1
   }
+  let prefix = text.substring(0, to: 2)
   let group = text.substring(2, to: stop)
   let cleaned = clean_underscores(group)
   let digits = remove_underscores(group)
-  var issues: List[Issue] = []
+  var issues = make_issues(limit: length)
   if digits.is_empty() && stop == length {
-    mut issues.push(
-      make_issue(
-        "lexer.number_missing_digits",
-        message: "`${text.substring(0, to: 2)}` must be followed by ${base_name} digits.",
-        start: 0,
-        stop: stop,
-        is_fixable: false,
-      ),
+    add_issue(
+      mut issues,
+      "lexer.number_missing_digits",
+      message: "`${prefix}` must be followed by ${base_name} digits.",
+      start: 0,
+      stop: stop,
+      is_fixable: false,
     )
   }
   if cleaned.first_bad is Some(offset) && !digits.is_empty() {
-    mut issues.push(make_underscore_issue(2 + offset))
+    add_underscore_issue(mut issues, offset: 2 + offset)
   }
   if stop < length {
     let width = measure_character(text, offset: stop)
-    mut issues.push(
-      make_issue(
-        "lexer.number_invalid_digit",
-        message: "`${text.substring(stop, to: stop + width)}` is not a ${base_name} digit.",
-        start: stop,
-        stop: stop + width,
-        is_fixable: false,
-      ),
+    add_issue(
+      mut issues,
+      "lexer.number_invalid_digit",
+      message: "`${text.substring(stop, to: stop + width)}` is not a ${base_name} digit.",
+      start: stop,
+      stop: stop + width,
+      is_fixable: false,
     )
   }
-  let value = NumberValue.IntegerValue(parse_digits(digits, radix: base))
-  choose_problem(own value, own issues, fixed: "${text.substring(0, to: 2)}${cleaned.text}")
+  let value = NumberValue.IntegerValue(convert_to_decimal(group, radix: base))
+  choose_problem(own value, own issues, fixed: "${prefix}${cleaned.text}")
 }
 
-type Group(offset: UInt64, text: view String)
-
-fn Group.stop(self) -> UInt64
-  uses Panic
-{
-  self.offset + self.text.length()
-}
+type Group(offset: UInt64, stop: UInt64, text: view String)
+  invariant offset <= stop && text.length() == stop - offset
 
 fn group_from(text: String, offset: UInt64) -> Group
-  uses Panic
+  requires text.is_boundary(offset)
+  ensures result.offset == offset && text.is_boundary(result.stop)
 {
   var stop = offset
-  while stop < text.length() && (is_digit(text.byte(stop)) || text.byte(stop) == 95) {
+  while stop < text.length() && (is_digit(text.byte(stop)) || text.byte(stop) == 95)
+    invariant offset <= stop && text.is_boundary(stop)
+  {
     stop += 1
   }
-  Group(offset, text: text.substring(offset, to: stop))
+  Group(offset, stop, text: text.substring(offset, to: stop))
 }
 
 type Exponent(marker: UInt64, sign: view String, digits: Group)
+  invariant marker < digits.offset
 
-fn list_underscore_issues(group: Group, issues: mut List[Issue])
-  uses Panic
+fn add_underscore_issues(group: Group, issues: mut Issues)
+  requires group.stop <= issues.limit
+  ensures issues.limit == old(issues.limit)
 {
   if clean_underscores(group.text).first_bad is Some(bad) {
-    mut issues.push(make_underscore_issue(group.offset + bad))
+    add_underscore_issue(mut issues, offset: group.offset + bad)
   }
 }
 
 fn check_decimal(text: String) -> CheckedNumber
-  uses Panic
+  ensures !(result.problem is Some(problem) && text.length() < problem.stop)
 {
   let length = text.length()
   let whole = group_from(text, offset: 0)
-  let fraction = if whole.stop() < length && text.byte(whole.stop()) == 46 {
-    Some(group_from(text, offset: whole.stop() + 1))
+  let fraction = if whole.stop < length && text.byte(whole.stop) == 46 {
+    Some(group_from(text, offset: whole.stop + 1))
   } else {
     None
   }
   let position = match fraction {
-    Some(group) => group.stop()
-    None => whole.stop()
+    Some(group) => group.stop
+    None => whole.stop
   }
   let exponent = if position < length && text.byte(position) == 101 {
     let digits_offset = if position + 1 < length && (text.byte(position + 1) == 43 || text.byte(position + 1) == 45) {
@@ -334,41 +326,56 @@ fn check_decimal(text: String) -> CheckedNumber
     None
   }
   let rest = match exponent {
-    Some(written) => written.digits.stop()
+    Some(written) => written.digits.stop
     None => position
   }
-  var issues: List[Issue] = []
-  list_underscore_issues(whole, mut issues)
+  let issues = list_decimal_issues(text, whole, fraction, exponent, rest)
+  let fixed = write_decimal(whole, fraction, exponent)
+  choose_problem(value: compute_decimal_value(whole, fraction, exponent), issues: own issues, fixed: fixed)
+}
+
+fn list_decimal_issues(text: String, whole: Group, fraction: Option[Group], exponent: Option[Exponent], rest: UInt64) -> Issues
+  requires whole.stop <= text.length()
+  requires !(fraction is Some(group) && text.length() < group.stop)
+  requires !(exponent is Some(written) && text.length() < written.digits.stop)
+  requires text.is_boundary(rest)
+  ensures result.limit == text.length()
+{
+  let length = text.length()
+  var issues = make_issues(limit: length)
+  add_underscore_issues(whole, mut issues)
   if fraction is Some(group) {
-    list_underscore_issues(group, mut issues)
+    add_underscore_issues(group, mut issues)
   }
   if exponent is Some(written) {
     if remove_underscores(written.digits.text).is_empty() {
-      mut issues.push(
-        make_issue(
-          "lexer.number_missing_digits",
-          message: "The exponent needs digits after `e`.",
-          start: written.marker,
-          stop: written.digits.offset,
-          is_fixable: false,
-        ),
+      add_issue(
+        mut issues,
+        "lexer.number_missing_digits",
+        message: "The exponent needs digits after `e`.",
+        start: written.marker,
+        stop: written.digits.offset,
+        is_fixable: false,
       )
     } else {
-      list_underscore_issues(written.digits, mut issues)
+      add_underscore_issues(written.digits, mut issues)
     }
   }
   if rest < length {
     let width = measure_character(text, offset: rest)
-    mut issues.push(
-      make_issue(
-        "lexer.number_followed_by_name",
-        message: "A number cannot be followed directly by a name character such as `${text.substring(rest, to: rest + width)}`.",
-        start: rest,
-        stop: rest + width,
-        is_fixable: false,
-      ),
+    add_issue(
+      mut issues,
+      "lexer.number_followed_by_name",
+      message: "A number cannot be followed directly by a name character such as `${text.substring(rest, to: rest + width)}`.",
+      start: rest,
+      stop: rest + width,
+      is_fixable: false,
     )
   }
+  issues
+}
+
+fn write_decimal(whole: Group, fraction: Option[Group], exponent: Option[Exponent]) -> String {
   var fixed = clean_underscores(whole.text).text
   if fraction is Some(group) {
     mut fixed.push(".")
@@ -379,36 +386,33 @@ fn check_decimal(text: String) -> CheckedNumber
     mut fixed.push(written.sign)
     mut fixed.push(clean_underscores(written.digits.text).text)
   }
-  let whole_digits = remove_underscores(whole.text)
-  let value = if fraction.is_none() && exponent.is_none() {
-    NumberValue.IntegerValue(parse_digits(whole_digits, radix: 10))
-  } else {
-    let fraction_digits = match fraction {
-      Some(group) => remove_underscores(group.text)
-      None => ""
-    }
-    let exponent_value = match exponent {
-      Some(written) => {
-        let exponent_digits = remove_underscores(written.digits.text)
-        if exponent_digits.is_empty() {
-          math.BigInteger.zero()
-        } else {
-          let magnitude = parse_exponent(exponent_digits)
-          if written.sign == "-" { -magnitude } else { magnitude }
-        }
-      }
-      None => math.BigInteger.zero()
-    }
-    let significand = parse_digits("${whole_digits}${fraction_digits}", radix: 10)
-    NumberValue.FloatValue(
-      token.normalize_decimal(significand, exponent: exponent_value - math.BigInteger.from(fraction_digits.length())),
-    )
-  }
-  choose_problem(own value, own issues, fixed)
+  fixed
 }
 
-fn numbers_check(text: String) -> CheckedNumber
-  uses Panic
+fn compute_decimal_value(whole: Group, fraction: Option[Group], exponent: Option[Exponent]) -> NumberValue {
+  let whole_digits = remove_underscores(whole.text)
+  if fraction.is_none() && exponent.is_none() {
+    return NumberValue.IntegerValue(strip_leading_zeros(whole_digits))
+  }
+  let fraction_digits = match fraction {
+    Some(group) => remove_underscores(group.text)
+    None => ""
+  }
+  let exponent_value = match exponent {
+    Some(written) => {
+      let magnitude = parse_exponent(written.digits.text)
+      if written.sign == "-" { -magnitude } else { magnitude }
+    }
+    None => math.BigInteger.zero()
+  }
+  let significand = strip_leading_zeros("${whole_digits}${fraction_digits}")
+  NumberValue.FloatValue(
+    token.normalize_decimal(significand, exponent: exponent_value - math.BigInteger.from(fraction_digits.length())),
+  )
+}
+
+fn check_plain_number(text: String) -> CheckedNumber
+  ensures !(result.problem is Some(problem) && text.length() < problem.stop)
 {
   if is_radix_prefix(text, start: 0) { check_radix(text) } else { check_decimal(text) }
 }
@@ -459,7 +463,7 @@ fn is_float_suffix(suffix: String) -> Bool {
 }
 
 fn is_radix(text: String) -> Bool
-  uses Panic
+  ensures result ==> 2 <= text.length() && text.byte(0) == 48 && is_ascii(text.byte(1))
 {
   text.length() >= 2 && text.byte(0) == 48 && {
     let marker = text.byte(1)
@@ -467,50 +471,53 @@ fn is_radix(text: String) -> Bool
   }
 }
 
-fn is_hexadecimal(text: String) -> Bool
-  uses Panic
-{
+fn is_hexadecimal(text: String) -> Bool {
   is_radix(text) && (text.byte(1) == 120 || text.byte(1) == 88)
 }
 
 fn skip_hexadecimal_digits(text: String, position: UInt64) -> UInt64
-  uses Panic
+  ensures position <= result
 {
   var at = position
-  while at < text.length() && is_hexadecimal_digit(text.byte(at)) {
+  while at < text.length() && is_hexadecimal_digit(text.byte(at))
+    invariant position <= at
+  {
     at += 1
   }
   at
 }
 
 fn skip_decimal_digits(text: String, position: UInt64, with_underscores: Bool) -> UInt64
-  uses Panic
+  requires text.is_boundary(position)
+  ensures position <= result && text.is_boundary(result)
 {
   var at = position
-  while at < text.length() && (is_digit(text.byte(at)) || (with_underscores && text.byte(at) == 95)) {
+  while at < text.length() && (is_digit(text.byte(at)) || (with_underscores && text.byte(at) == 95))
+    invariant position <= at && text.is_boundary(at)
+  {
     at += 1
   }
   at
 }
 
 fn sign_follows(text: String, stop: UInt64, marker: UInt8) -> Bool
-  uses Panic
+  requires 0 < stop && stop <= text.length()
+  ensures result ==> stop + 1 < text.length() && is_ascii(text.byte(stop))
 {
   text.byte(stop - 1) == marker && stop + 1 < text.length() && (text.byte(stop) == 43 || text.byte(stop) == 45)
     && is_digit(text.byte(stop + 1))
 }
 
-fn number_scan_end(text: String, start: UInt64) -> UInt64
-  uses Panic
-  ensures start <= result
-  ensures start < text.length() && is_digit(text.byte(start)) ==> start < result
+fn scan_number_end(text: String, start: UInt64) -> UInt64
+  requires start < text.length() && is_digit(text.byte(start))
+  ensures start < result && text.is_boundary(result)
 {
   let length = text.length()
-  var stop = numbers_scan_end(text, start)
+  var stop = scan_plain_number_end(text, start)
   let literal = text.substring(start, to: stop)
   if is_digits_only(literal) {
     while stop + 1 < length && text.byte(stop) == 39 && is_digit(text.byte(stop + 1))
-      invariant start <= stop
+      invariant start < stop && text.is_boundary(stop)
     {
       stop = compute_name_end(text, position: stop + 1)
     }
@@ -534,12 +541,14 @@ fn number_scan_end(text: String, start: UInt64) -> UInt64
 }
 
 fn compute_number_end(text: String) -> UInt64
-  uses Panic
+  ensures text.is_boundary(result)
 {
   let length = text.length()
   if is_radix(text) {
     var at: UInt64 = 2
-    while at < length && (is_hexadecimal_digit(text.byte(at)) || text.byte(at) == 95) {
+    while at < length && (is_hexadecimal_digit(text.byte(at)) || text.byte(at) == 95)
+      invariant 2 <= at && text.is_boundary(at)
+    {
       at += 1
     }
     return at
@@ -565,11 +574,13 @@ fn compute_number_end(text: String) -> UInt64
 
 type OctalChoice = NotOctal | ValidOctal(octal: String) | InvalidOctal
 
-type Derivation =
-  | Translated(problem: NumberProblem, translation: String)
-  | HexadecimalFloat(problem: NumberProblem)
-  | Suffixed(problem: NumberProblem, is_float: Bool)
-  | LeadingZero(problem: NumberProblem, decimal: String, octal: OctalChoice)
+type DerivationKind =
+  | Translated(translation: String)
+  | HexadecimalFloat
+  | Suffixed(is_float: Bool)
+  | LeadingZero(decimal: String, octal: OctalChoice)
+
+type Derivation(problem: NumberProblem, kind: DerivationKind)
 
 type AppliedFixes(
   are_separators_fixed: Bool,
@@ -626,17 +637,25 @@ fn AppliedFixes.include(self, fix: NumberFix) -> AppliedFixes
   }
 }
 
-fn derive(derivation: own Derivation, text: own String, applied: AppliedFixes, fix: NumberFix) -> Examination
+type Derived(derivation: Derivation, text: String, applied: AppliedFixes)
+
+fn derive(
+  code: String,
+  message: String,
+  start: UInt64,
+  stop: UInt64,
+  kind: own DerivationKind,
+  text: own String,
+  applied: AppliedFixes,
+  fix: NumberFix,
+) -> Option[Derived]
+  requires start <= stop
   requires !applied.has(fix)
-  ensures !(result is Derived(applied: next, ..) && applied.count_unapplied() <= next.count_unapplied())
+  ensures !(result is Some(derived) && applied.count_unapplied() <= derived.applied.count_unapplied())
+  ensures !(result is Some(derived) && derived.derivation.problem.stop != stop)
 {
-  Examination.Derived(own derivation, own text, applied: applied.include(fix))
-}
-
-type Examination = Final(checked: CheckedNumber) | Derived(derivation: Derivation, text: String, applied: AppliedFixes)
-
-fn make_problem(code: String, message: String, start: UInt64, stop: UInt64) -> NumberProblem {
-  NumberProblem(code: code.copy(), message: message.copy(), start, stop)
+  let problem = NumberProblem(code: code.copy(), message: message.copy(), start, stop)
+  Some(Derived(derivation: Derivation(own problem, own kind), own text, applied: applied.include(fix)))
 }
 
 fn translate(
@@ -647,25 +666,27 @@ fn translate(
   translation: own String,
   applied: AppliedFixes,
   fix: NumberFix,
-) -> Examination
+) -> Option[Derived]
+  requires start <= stop
   requires !applied.has(fix)
-  ensures !(result is Derived(applied: next, ..) && applied.count_unapplied() <= next.count_unapplied())
+  ensures !(result is Some(derived) && applied.count_unapplied() <= derived.applied.count_unapplied())
+  ensures !(result is Some(derived) && derived.derivation.problem.stop != stop)
 {
   let text = translation.copy()
-  derive(Derivation.Translated(problem: make_problem(code, message, start, stop), own translation), own text, applied: applied, fix: fix)
+  derive(code, message, start, stop, kind: DerivationKind.Translated(own translation), text: own text, applied: applied, fix: fix)
 }
 
-fn combine(derivation: own Derivation, derived: own CheckedNumber) -> CheckedNumber
-  uses Panic
-{
+type Combined(value: NumberValue, fixes: List[Replacement])
+
+fn combine(kind: own DerivationKind, derived: own CheckedNumber) -> Combined {
   let is_valid = derived.problem.is_none()
-  match own derivation {
-    Translated(problem, translation) => {
+  match own kind {
+    Translated(translation) => {
       let fixes = if is_valid { [Replacement(title: "Write `${translation}`", text: own translation)] } else { [] }
-      CheckedNumber(value: own derived.value, problem: Some(own problem), own fixes)
+      Combined(value: own derived.value, own fixes)
     }
-    HexadecimalFloat(problem) => CheckedNumber(value: own derived.value, problem: Some(own problem), fixes: [])
-    Suffixed(problem, is_float) => {
+    HexadecimalFloat => Combined(value: own derived.value, fixes: [])
+    Suffixed(is_float) => {
       let value = match own derived.value {
         IntegerValue(digits) => if is_float {
           NumberValue.FloatValue(token.normalize_decimal(digits, exponent: math.BigInteger.zero()))
@@ -674,9 +695,9 @@ fn combine(derivation: own Derivation, derived: own CheckedNumber) -> CheckedNum
         }
         FloatValue(decimal) => NumberValue.FloatValue(own decimal)
       }
-      CheckedNumber(own value, problem: Some(own problem), fixes: [])
+      Combined(own value, fixes: [])
     }
-    LeadingZero(problem, decimal, octal) => {
+    LeadingZero(decimal, octal) => {
       var alternatives: List[Replacement] = []
       match own octal {
         NotOctal => if is_valid {
@@ -688,20 +709,18 @@ fn combine(derivation: own Derivation, derived: own CheckedNumber) -> CheckedNum
         }
         InvalidOctal => {}
       }
-      CheckedNumber(value: own derived.value, problem: Some(own problem), fixes: own alternatives)
+      Combined(value: own derived.value, fixes: own alternatives)
     }
   }
 }
 
-fn replace_quotes(text: String) -> String
-  uses Panic
-{
+fn replace_quotes(text: String) -> String {
   text.replace("'", replacement: "_")
 }
 
-fn examine(text: String, applied: AppliedFixes) -> Examination
-  uses Panic
-  ensures !(result is Derived(applied: next, ..) && applied.count_unapplied() <= next.count_unapplied())
+fn examine(text: String, applied: AppliedFixes) -> Option[Derived]
+  ensures !(result is Some(derived) && applied.count_unapplied() <= derived.applied.count_unapplied())
+  ensures !(result is Some(derived) && text.length() < derived.derivation.problem.stop)
 {
   let length = text.length()
   let stop = compute_number_end(text)
@@ -721,13 +740,16 @@ fn examine(text: String, applied: AppliedFixes) -> Examination
   if !applied.has(NumberFix.HexadecimalFloat) && is_hexadecimal(text) && stop < length
     && (text.byte(stop) == 46 || text.byte(stop) == 112 || text.byte(stop) == 80)
   {
-    let problem = make_problem(
+    return derive(
       "lexer.number_hexadecimal_float",
       message: "Truss has no hexadecimal floats. Write the value as a decimal float.",
       start: 0,
       stop: length,
+      kind: DerivationKind.HexadecimalFloat,
+      text: text.substring(0, to: stop).copy(),
+      applied: applied,
+      fix: NumberFix.HexadecimalFloat,
     )
-    return derive(Derivation.HexadecimalFloat(own problem), text: text.substring(0, to: stop).copy(), applied: applied, fix: NumberFix.HexadecimalFloat)
   }
   if !applied.has(NumberFix.UppercasePrefix) && is_radix(text) && (text.byte(1) == 88 || text.byte(1) == 66 || text.byte(1) == 79) {
     let prefix = "0${text.substring(1, to: 2).to_ascii_lowercase()}"
@@ -748,14 +770,12 @@ fn examine(text: String, applied: AppliedFixes) -> Examination
       Some(name) => name
       None => if number.contains(".") || number.contains("e") { "Float64" } else { "Int64" }
     }
-    let problem = make_problem(
+    return derive(
       "lexer.number_suffix",
       message: "Number literals have no type suffixes such as `${suffix}`. A literal takes its type from its context, as in `let value: ${type_name} = ${number}`.",
       start: stop,
       stop: length,
-    )
-    return derive(
-      Derivation.Suffixed(own problem, is_float: is_float_suffix(lowered_suffix)),
+      kind: DerivationKind.Suffixed(is_float: is_float_suffix(lowered_suffix)),
       text: number.copy(),
       applied: applied,
       fix: NumberFix.TypeSuffix,
@@ -772,13 +792,23 @@ fn examine(text: String, applied: AppliedFixes) -> Examination
       fix: NumberFix.UppercaseExponent,
     )
   }
+  examine_leading_zero(text, applied)
+}
+
+fn examine_leading_zero(text: String, applied: AppliedFixes) -> Option[Derived]
+  ensures !(result is Some(derived) && applied.count_unapplied() <= derived.applied.count_unapplied())
+  ensures !(result is Some(derived) && text.length() < derived.derivation.problem.stop)
+{
+  let length = text.length()
   let whole = skip_decimal_digits(text, position: 0, with_underscores: true)
   let digits = remove_underscores(text.substring(0, to: whole))
   if applied.has(NumberFix.LeadingZero) || is_radix(text) || digits.length() < 2 || digits.byte(0) != 48 {
-    return Examination.Final(numbers_check(text))
+    return None
   }
   var stripped: UInt64 = 0
-  while stripped < length && (text.byte(stripped) == 48 || text.byte(stripped) == 95) {
+  while stripped < length && (text.byte(stripped) == 48 || text.byte(stripped) == 95)
+    invariant text.is_boundary(stripped)
+  {
     stripped += 1
   }
   let without_zeros: view String = if stripped >= whole { "0" } else { text.substring(stripped, to: whole) }
@@ -794,30 +824,41 @@ fn examine(text: String, applied: AppliedFixes) -> Examination
     OctalChoice.NotOctal
   } else {
     let written = "0o${without_zeros}"
-    if numbers_check(written).problem.is_none() { OctalChoice.ValidOctal(own written) } else { OctalChoice.InvalidOctal }
+    if check_plain_number(written).problem.is_none() { OctalChoice.ValidOctal(own written) } else { OctalChoice.InvalidOctal }
   }
   let message = if octal_possible {
     "Decimal numbers do not start with `0`. In C and Go, `${text.substring(0, to: whole)}` would be octal: write `0o${without_zeros}` for octal, or `${without_zeros}` for decimal."
   } else {
     "Decimal numbers do not start with `0`."
   }
-  let problem = NumberProblem(code: "lexer.number_leading_zero", own message, start: 0, stop: whole)
   let derived = decimal.copy()
-  derive(Derivation.LeadingZero(own problem, own decimal, own octal), text: own derived, applied: applied, fix: NumberFix.LeadingZero)
+  derive(
+    "lexer.number_leading_zero",
+    message: message,
+    start: 0,
+    stop: whole,
+    kind: DerivationKind.LeadingZero(own decimal, own octal),
+    text: own derived,
+    applied: applied,
+    fix: NumberFix.LeadingZero,
+  )
 }
 
 fn check_number(text: String) -> CheckedNumber
-  uses Panic
+  ensures !(result.problem is Some(problem) && text.length() < problem.stop)
 {
   check_with_fixes(text, applied: AppliedFixes(are_separators_fixed: false, is_float_truncated: false, is_prefix_lowered: false, is_suffix_removed: false, is_exponent_lowered: false, are_zeros_removed: false))
 }
 
 fn check_with_fixes(text: String, applied: AppliedFixes) -> CheckedNumber
-  uses Panic
   decreases applied.count_unapplied()
+  ensures !(result.problem is Some(problem) && text.length() < problem.stop)
 {
   match examine(text, applied) {
-    Final(checked) => own checked
-    Derived(derivation, text: derived, applied: next) => combine(own derivation, derived: check_with_fixes(derived, applied: next))
+    None => check_plain_number(text)
+    Some(derived) => {
+      let combined = combine(own derived.derivation.kind, derived: check_with_fixes(derived.text, applied: derived.applied))
+      CheckedNumber(value: own combined.value, problem: Some(own derived.derivation.problem), fixes: own combined.fixes)
+    }
   }
 }

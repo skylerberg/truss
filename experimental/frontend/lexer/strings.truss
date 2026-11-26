@@ -59,18 +59,18 @@ fn make_literal(scanner: mut Scanner, tag: own Option[token.Tag], form: token.Fo
   store_literal(mut scanner, literal: token.StringLiteral(own tag, form, first: own finished.first, rest: own finished.rest))
 }
 
-fn opens_raw_string(scanner: Scanner, index: UInt64) -> Bool
-  uses Panic
-{
+fn opens_raw_string(scanner: Scanner, index: UInt64) -> Bool {
   let dollars = scanner.run_length(index, byte: 36)
   scanner.run_length(index + dollars, byte: 34) >= 3
 }
 
 fn ends_in_closer(scanner: Scanner, text_start: UInt64, stop: UInt64) -> Bool
-  uses Panic
+  requires stop <= scanner.length
 {
   var position = stop
-  while position > text_start && is_space(scanner.lookup(position - 1)) {
+  while position > text_start && is_space(scanner.lookup(position - 1))
+    invariant position <= stop
+  {
     position -= 1
   }
   if position <= text_start {
@@ -103,7 +103,7 @@ fn read_interpolation_item(scanner: mut Scanner, state: mut InterpolationState, 
   ensures !(item is Lexed(_)) ==> result is Finish(..)
 {
   match item {
-    LineEnd | End => {
+    LineEnd(_) | End => {
       report(
         mut scanner,
         code: "lexer.line_break_in_interpolation",
@@ -152,6 +152,10 @@ fn begin_interpolation(scanner: mut Scanner, request: InterpolationRequest) -> C
   ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
+  let stop = start + request.delimiter_length
+  if !scanner.is_at(stop - 1, byte: 123) {
+    Panic.crash("an interpolation request ends before its `{`")
+  }
   var state = InterpolationState(
     start,
     nesting: request.nesting,
@@ -166,14 +170,14 @@ fn begin_interpolation(scanner: mut Scanner, request: InterpolationRequest) -> C
     report(
       mut scanner,
       code: "lexer.interpolation_too_deep",
-      span: source.make_span(start, stop: start + request.delimiter_length),
+      span: source.make_span(start, stop: stop),
       message: "Interpolations can nest at most ${maximum_nesting} deep.",
     )
-    scanner.position = scanner.compute_end_of_line(start + request.delimiter_length)
+    scanner.position = scanner.compute_end_of_line(stop)
     state.is_finished = true
     state.ending = Ending.Unterminated
   } else {
-    scanner.position = start + request.delimiter_length
+    scanner.position = stop
     scanner.previous = None
   }
   make_code_frame(mode: LayoutMode.InterpolationMode(state))
@@ -229,6 +233,10 @@ type StringScan =
   | OrdinaryScan(closing: UInt8, literal_start: UInt64)
   | OneLineRawScan(literal_start: UInt64, quotes: UInt64, dollars: UInt64)
   | indirect MultiLineRawScan(text: MultiLineRawText)
+  invariant match self {
+    OrdinaryScan(closing, ..) => is_ascii(closing)
+    _ => true
+  }
 
 type StringOrigin =
   | PlainString(start: UInt64)
@@ -319,6 +327,7 @@ fn open_ordinary(scanner: mut Scanner, tag: own Option[token.Tag], nesting: UInt
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
     scanner.semicolons, scanner.tables
+  requires scanner.is_at(scanner.position, byte: closing) && is_ascii(closing)
   ensures old(scanner.position) < scanner.position
 {
   let open_quote = scanner.position
@@ -444,6 +453,9 @@ fn finish_scanned(scanner: mut Scanner, origin: StringOrigin, inline: Bool, scan
     QuotedString(start, delimiter) => report_quoted_string(mut scanner, start, delimiter, scanned)
   }
   let PlainString(start) | PrefixedString(start, ..) | QuotedString(start, ..) = origin
+  if start >= scanner.position {
+    Panic.crash("a string ends before it starts")
+  }
   lexed(mut scanner, inline, start, kind: scanned.kind, ending: scanned.ending)
 }
 
@@ -453,6 +465,7 @@ type EscapeResult = ContinueString | EndOfLine
 fn continue_ordinary(scanner: mut Scanner, builder: mut Builder, closing: UInt8, literal_start: UInt64, nesting: UInt64) -> StringProgress
   uses Panic
   modifies scanner.diagnostics, scanner.position
+  requires is_ascii(closing)
   ensures result is Interpolates(_) ==> scanner.position < scanner.length
   ensures old(scanner.position) <= scanner.position
 {
@@ -507,6 +520,7 @@ fn continue_ordinary(scanner: mut Scanner, builder: mut Builder, closing: UInt8,
 fn scan_escape(scanner: mut Scanner, buffer: mut String) -> EscapeResult
   uses Panic
   modifies scanner.diagnostics, scanner.position
+  requires scanner.is_at(scanner.position, byte: 92)
   ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
@@ -557,10 +571,12 @@ fn scan_escape(scanner: mut Scanner, buffer: mut String) -> EscapeResult
     }
     let digits_start = start + 3
     var stop = digits_start
+    var value: UInt32 = 0
     while scanner.is_hexadecimal_digit_at(stop)
-      invariant digits_start <= stop
+      invariant digits_start <= stop && scanner.is_boundary(stop)
       decreases scanner.count_remaining(stop)
     {
+      value = (value << 4) | UInt32.from_integer(hexadecimal_value(scanner.lookup(stop)))
       stop += 1
     }
     let count = stop - digits_start
@@ -573,10 +589,6 @@ fn scan_escape(scanner: mut Scanner, buffer: mut String) -> EscapeResult
       return EscapeResult.ContinueString
     }
     let digits = scanner.text(digits_start, stop)
-    var value: UInt32 = 0
-    for byte in digits.bytes() {
-      value = value * 16 + UInt32.from_integer(hexadecimal_value(byte))
-    }
     match Character.try_from_code(value) {
       Ok(character) => {
         mut buffer.push_character(character)
@@ -596,38 +608,20 @@ fn scan_escape(scanner: mut Scanner, buffer: mut String) -> EscapeResult
   if scan_foreign_escape(mut scanner, mut buffer) {
     return EscapeResult.ContinueString
   }
-  let decoded = scanner.decode(start + 1)
-  let length = if decoded.is_valid { decoded.length } else { 1 }
-  let written = if !decoded.is_valid {
-    "`\\` followed by ${scanner.show_character(start + 1)}"
-  } else {
-    "`${scanner.text(start, stop: start + 1 + length)}`"
-  }
+  let stop = start + 1 + scanner.character_at(start + 1).utf8_length()
   report_escape_problem(
     mut scanner,
     start,
-    stop: start + 1 + length,
-    message: "${written} is not an escape. The escapes are `\\n`, `\\t`, `\\r`, `\\0`, `\\\\`, `\\\"`, `\\\${`, and `\\u{...}`. For text with backslashes, such as a regular expression or a Windows path, a raw string has no escapes: `\"\"\"\\d+\"\"\"`.",
+    stop,
+    message: "`${scanner.text(start, stop)}` is not an escape. The escapes are `\\n`, `\\t`, `\\r`, `\\0`, `\\\\`, `\\\"`, `\\\${`, and `\\u{...}`. For text with backslashes, such as a regular expression or a Windows path, a raw string has no escapes: `\"\"\"\\d+\"\"\"`.",
   )
   EscapeResult.ContinueString
-}
-
-fn hexadecimal_value(byte: UInt8) -> UInt8
-  uses Panic
-{
-  if is_digit(byte) {
-    byte - 48
-  } else if byte >= 97 {
-    byte - 87
-  } else {
-    byte - 55
-  }
 }
 
 fn report_escape_problem(scanner: mut Scanner, start: UInt64, stop: UInt64, message: String)
   uses Panic
   modifies scanner.diagnostics, scanner.position
-  requires scanner.position <= stop
+  requires scanner.position <= stop && scanner.is_boundary(stop)
   ensures scanner.position == stop
 {
   report(mut scanner, code: "lexer.invalid_escape", span: source.make_span(start, stop), message: message)
@@ -635,7 +629,6 @@ fn report_escape_problem(scanner: mut Scanner, start: UInt64, stop: UInt64, mess
 }
 
 fn scan_raw_dollars(scanner: mut Scanner, builder: mut Builder, dollars: UInt64, nesting: UInt64) -> Option[InterpolationRequest]
-  uses Panic
   modifies scanner.position
   requires scanner.is_at(scanner.position, byte: 36)
   ensures result is Some(_) ==> scanner.position < scanner.length
@@ -791,6 +784,7 @@ fn continue_multi_line_raw(scanner: mut Scanner, builder: mut Builder, text: mut
   ensures old(scanner.position) <= scanner.position
 {
   while true
+    invariant old(scanner.position) <= scanner.position
     decreases scanner.count_remaining(scanner.position)
   {
     if text.is_at_line_start {
@@ -895,10 +889,15 @@ fn compute_common_indentation(lines: List[Finished]) -> String
 fn guess_raw_string_end(scanner: Scanner, literal_start: UInt64, line_end: UInt64) -> Option[UInt64]
   uses Panic
 {
+  if !scanner.is_end_of_line(line_end) {
+    Panic.crash("a raw string's opening line ends before its line break")
+  }
   let opener_line = scanner.source.compute_line_start(literal_start)
   let opener_indentation = scanner.skip_spaces(opener_line) - opener_line
   var position = line_end
-  while position < scanner.length {
+  while position < scanner.length
+    invariant scanner.is_end_of_line(position)
+  {
     let line_start = position + scanner.measure_line_break(position)
     if line_start >= scanner.length {
       return None
@@ -995,6 +994,9 @@ fn build_multi_line(
         at += 1
       }
       let line_whitespace = find_leading_whitespace(line).unwrap_or("")
+      if !scanner.is_boundary(line.first.span.start) {
+        Panic.crash("a raw string's line starts inside a character")
+      }
       let whitespace_stop = scanner.skip_spaces(line.first.span.start)
       let source_whitespace = scanner.text(line.first.span.start, stop: whitespace_stop)
       var source_difference: UInt64 = 0
