@@ -3,8 +3,6 @@ val make_state : unit -> State.callback_state
 val declare_own :
   State.context -> State.frame -> (Core.local * string * Mir.callback) list -> State.frame
 
-val run_reading_callback : State.context -> (unit -> 'a) -> 'a
-
 val apply_function :
   State.context -> Types.function_type -> Logic.term -> Logic.term list -> Logic.term
 

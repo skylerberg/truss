@@ -1,4 +1,4 @@
-let make_state () : State.callback_state = { named = []; is_reading = false }
+let make_state () : State.callback_state = { named = [] }
 
 let note_named (context : State.context) term function_type known =
   if not (List.mem_assoc term context.callbacks.named) then
@@ -171,12 +171,6 @@ let declare_results context frame (function_type : Types.function_type) entries 
   Validity.assume_valid context frame output result;
   (exits, result)
 
-let run_reading_callback : 'a. _ -> (unit -> 'a) -> 'a =
- fun (context : State.context) read ->
-  let saved = context.callbacks.is_reading in
-  context.callbacks.is_reading <- true;
-  Fun.protect ~finally:(fun () -> context.callbacks.is_reading <- saved) read
-
 type parameter_contract = (State.source * State.frame * Mir.callback) option
 
 let bind_inputs (frame : State.frame) inputs terms =
@@ -300,7 +294,7 @@ let check_escaping context frame location known (function_type : Types.function_
       (declare_arguments context supposed function_type.inputs)
 
 let check_read (context : State.context) (frame : State.frame) term =
-  if frame.makes_obligations && not context.callbacks.is_reading then
+  if frame.makes_obligations && not frame.is_reading_callback then
     match find_typed context frame term with
     | Some (function_type, (Own { callback = { requires = first :: _; _ }; _ } as known)) ->
         check_escaping context frame

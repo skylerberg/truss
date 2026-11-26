@@ -77,6 +77,9 @@ let make_empty_frame source =
     panics = false;
     can_declare_panic = false;
     instantiating = [];
+    obligation_condition = [];
+    is_reading_callback = false;
+    validating = [];
     visited = None;
     final_result = None;
     spent = [];
@@ -94,10 +97,9 @@ let is_capability_implementation (lookups : Lookups.t) (path : Path.t) =
 
 let read_requires (context : State.context) (frame : State.frame) (requirement : Mir.formula) =
   let after, term =
-    Obligations.with_condition context requirement.holds_when (fun () ->
-        Validity.read_specification context
-          { frame with requires_being_read = Some requirement.origin }
-          requirement)
+    Validity.read_specification ~holds_when:requirement.holds_when context
+      { frame with requires_being_read = Some requirement.origin }
+      requirement
   in
   ({ after with requires_being_read = frame.requires_being_read }, term)
 
@@ -329,8 +331,8 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
         (List.fold_left
            (fun frame (requirement : Mir.formula) ->
              let frame, term =
-               Obligations.with_condition context requirement.holds_when (fun () ->
-                   Validity.read_specification context frame requirement)
+               Validity.read_specification ~holds_when:requirement.holds_when context frame
+                 requirement
              in
              Obligations.oblige ~holds_when:requirement.holds_when context frame
                (Facts.locate context frame.source requirement.origin)
@@ -408,8 +410,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
           (fun (ensured : Mir.formula) ->
             if is_checked ensured then
               let _, term =
-                Obligations.with_condition context ensured.holds_when (fun () ->
-                    Validity.read_specification context inside ensured)
+                Validity.read_specification ~holds_when:ensured.holds_when context inside ensured
               in
               Obligations.oblige ~holds_when:ensured.holds_when
                 ~cited:(made_by.callee.key, ensured.origin)
