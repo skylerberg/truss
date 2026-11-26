@@ -134,6 +134,16 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `Amounts` | The amount that a call or an operation spends |
   | `Loop_costs` | The cost rules of a loop |
 
+- **One module states the contract of a logic function as an axiom.**
+  `Contract_axioms` builds the axiom for a call and for a function used as a
+  value, with every premise its proof had: arguments in range that meet
+  their invariants, the `requires`, and, for a callee in the recursion group
+  of the definition being proven, arguments below the entry measure. Its
+  state is one record, `context.axioms`, and CI rejects a use of it outside
+  `Contract_axioms`.
+- **`Termination` compares a recursive call with the entry of the definition
+  being proven.** A call obliges the comparison, and the axiom of a callee in
+  the recursion group takes it as a premise, so the two never differ.
 - **The solver keeps Z3 running.** `Solver` starts one `z3 -in` process for
   each domain that solves, gives each query to an idle process, and sends
   `(reset)` after the answer, so a query costs no launch. A process that was

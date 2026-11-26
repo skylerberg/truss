@@ -1,0 +1,6 @@
+fn f(n: UInt8) -> Bool
+  requires f(n)
+  decreases n
+{
+  if n == 0 { true } else { f(n - 1) }
+}

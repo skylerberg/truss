@@ -118,6 +118,19 @@ let assume_laws (context : State.context) frame (trait : Types.trait_reference) 
       (Interface.Properties.list_bound_closure context.lookups.interface ~self:ty trait)
   end
 
+let read_named_requires context (frame : State.frame) (clauses : State.clauses) ~entries =
+  let inside =
+    Validity.bind_arguments frame clauses
+      ~arguments:(List.mapi (fun index entry -> (index, entry)) entries)
+      ~substitution:Types.no_substitution
+  in
+  List.filter_map
+    (fun (requirement : Mir.formula) ->
+      if Conditions.holds_here context requirement.holds_when then
+        Some (snd (Validity.read_specification context inside requirement))
+      else None)
+    (Facts.list_clauses clauses.requires)
+
 let read_named_ensures context (frame : State.frame) (clauses : State.clauses)
     (expected : Types.function_type) ~entries ~exits ~result =
   let inside =
@@ -180,6 +193,15 @@ let add_named_relation context frame (expected : Types.function_type) callee_ter
              (Logic.equal result (Lambdas.apply_function context expected callee_term entries)) ));
   let mark = context.State.fresh in
   let facts_before = context.facts in
+  let premise =
+    Logic.conjunction
+      (List.map2
+         (fun (_, input) entry ->
+           Logic.( &&& ) (Facts.make_in_range input entry)
+             (Validity.make_validity context frame ~assuming:true input entry))
+         expected.inputs entries
+      @ read_named_requires context frame clauses ~entries)
+  in
   let read = read_named_ensures context frame clauses expected ~entries ~exits ~result in
   let bound = List.map fst parameters in
   let is_inside_the_relation fact =
@@ -192,11 +214,11 @@ let add_named_relation context frame (expected : Types.function_type) callee_ter
       (List.rev (Fact_list.list_newest_since context.facts ~count:(Fact_list.count facts_before)));
   match read with
   | [] -> ()
-  | ensures when List.exists (Facts.mentions_fresh_after context mark) ensures -> ()
+  | ensures when List.exists (Facts.mentions_fresh_after context mark) (premise :: ensures) -> ()
   | ensures ->
       Facts.add_frame_fact context frame
         (Logic.forall ~trigger:[ holds ]
-           (parameters, Logic.( ==> ) holds (Logic.conjunction ensures)))
+           (parameters, Logic.( ==> ) holds (Logic.( ==> ) premise (Logic.conjunction ensures))))
 
 let check_named_callback context (frame : State.frame) (invocation : Invocation.t)
     (passed : State.passed) ~origin path (contract : State.contract) (values : State.passed list) =

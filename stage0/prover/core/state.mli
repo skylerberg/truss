@@ -131,6 +131,21 @@ type lending = {
   return_postconditions : Mir.formula list;
 }
 
+type open_axiom = {
+  parameters : Logic.symbol list;
+  mutable hypotheses : Logic.term list;
+  mutable at_calls : (frame -> (Logic.term -> Logic.term) -> unit) list;
+}
+
+type axiom_state = {
+  mutable axiomatizing : Logic.symbol list;
+  axiom_clauses : unit Tables.Axiom_clause_table.t;
+  mutable open_axioms : open_axiom list;
+  axioms_of : open_axiom Tables.Symbol_table.t;
+}
+
+type definition_entry = { entry_frame : frame; entry_measures : Logic.term list }
+
 type context = {
   lookups : Lookups.t;
   current : Path.t;
@@ -138,6 +153,7 @@ type context = {
   mutable terminates : bool;
   mutable callbacks : (Core.local * string * Mir.callback) list;
   measures : Mir.formula list;
+  mutable definition_entry : definition_entry option;
   mutable declarations : Logic.declaration list;
   declared : Logic.sort list Tables.Symbol_table.t;
   definitions : unit Tables.Symbol_table.t;
@@ -156,10 +172,7 @@ type context = {
   mutable enclosing_provides : Mir.provided list list;
   mutable instantiating : Path.t list;
   mutable callees_whose_requires_are_read : Path.t list;
-  mutable axiomatizing : Logic.symbol list;
-  axiom_clauses : unit Tables.Axiom_clause_table.t;
-  mutable open_axioms : open_axiom list;
-  axioms_of : open_axiom Tables.Symbol_table.t;
+  axioms : axiom_state;
   disjoint : (Core.id list * Core.id list) list;
   mutable indexes : (Core.id * noted_place) list;
   mutable lending : lending option;
@@ -195,10 +208,4 @@ type context = {
   mutable skipped_conditions : Types.condition list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;
   read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;
-}
-
-and open_axiom = {
-  parameters : Logic.symbol list;
-  mutable hypotheses : Logic.term list;
-  mutable at_calls : (frame -> (Logic.term -> Logic.term) -> unit) list;
 }

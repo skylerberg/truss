@@ -87,8 +87,6 @@ let name_term context ty term =
         Facts.add_fact context (Logic.equal named term));
     named
 
-let is_datatype ty = match ty with Types.Named _ -> Types.find_builtin ty = None | _ -> false
-
 let calls_update_step (context : State.context) (invocation : Invocation.t) =
   match invocation.callee with
   | Function { path; _ } -> (
@@ -120,40 +118,6 @@ let havoc_mut context (frame : State.frame) (values : State.passed list) ~is_upd
           place.write frame (match changed with Some term -> term | None -> arrive passed.type_)
       | _ -> frame)
     frame values
-
-let list_structural_parameters context (frame : State.frame) (clauses : State.clauses) =
-  List.concat
-    (List.mapi
-       (fun index (parameter : Mir.parameter) ->
-         match parameter.local with
-         | Self -> (
-             match (frame.old_self, frame.self_type) with
-             | Some entry, Some ty when is_datatype ty -> [ (parameter, ty, entry, index) ]
-             | _ -> [])
-         | local -> (
-             match
-               ( Locals.find_opt (Core_local local) frame.old_locals,
-                 Facts.find_local_type context frame (Core_local local) )
-             with
-             | Some entry, Some ty when is_datatype ty -> [ (parameter, ty, entry, index) ]
-             | _ -> []))
-       clauses.parameters)
-
-let rec has_application_of symbol (term : Logic.term) =
-  match term with
-  | Apply (applied, _) when applied = symbol -> true
-  | Forall (_, _, body) | Exists (_, body) -> has_application_of symbol body
-  | _ -> List.exists (has_application_of symbol) (Logic.list_arguments term)
-
-let find_definition ~symbol result (term : Logic.term) =
-  match term with
-  | Operation (Equal, [ left; right ]) when left = result && not (has_application_of symbol right)
-    ->
-      Some right
-  | Operation (Equal, [ left; right ]) when right = result && not (has_application_of symbol left)
-    ->
-      Some left
-  | _ -> None
 
 let add_restated_clauses (context : State.context) ~self_type ~bind trait name receiver
     (contract : State.contract) =
@@ -216,7 +180,6 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         values
     else values
   in
-  let caller = frame.source in
   let location = Facts.locate context frame.source site.origin in
   let find_argument_at index =
     List.find_map
@@ -262,65 +225,13 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     }
   in
   let callee_clauses = contract.callee_clauses in
-  let is_self_call = Option.equal Path.equal recursive_callee (Some context.node) in
-  if Option.is_some recursive_callee then
-    begin match (context.measures, callee_clauses.decreases) with
-    | [], []
-      when context.terminates && is_self_call
-           && list_structural_parameters context frame callee_clauses <> [] ->
-        let pairs = list_structural_parameters context frame callee_clauses in
-        let before = List.map (fun (_, ty, entry, _) -> Models.rank context ty entry) pairs in
-        let after =
-          List.map
-            (fun (_, ty, _, index) ->
-              Models.rank context ty (lookup_argument_at_index values index))
-            pairs
-        in
-        let compared =
-          List.map (fun (parameter, _, _, _) -> Facts.read_parameter_name parameter) pairs
-        in
-        Facts.oblige context frame location
-          (Recursion_not_on_part { call = { at = location; callee = Some path }; compared })
-          (Logic.decreases_lexicographically before after)
-    | ([], _ | _, []) when context.terminates ->
-        Facts.oblige context frame location
-          (Recursion_may_not_end { call = { at = location; callee = Some path }; is_self_call })
-          (Logic.Boolean false)
-    | (_ :: _ as measures), (_ :: _ as callee_measures) ->
-        let current_frame =
-          { frame with makes_obligations = false; locals = frame.old_locals; self = frame.old_self }
-        in
-        let callee_entry = read_entry_frame callee_clauses in
-        let rec split_prefix before after =
-          match (before, after) with
-          | right_term :: before, left_term :: after ->
-              let rest_before, rest_after = split_prefix before after in
-              (right_term :: rest_before, left_term :: rest_after)
-          | _ -> ([], [])
-        in
-        let before =
-          List.map
-            (fun measure -> snd (Validity.read_specification context current_frame measure))
-            measures
-        in
-        let after =
-          List.map
-            (fun measure -> snd (Validity.read_specification context callee_entry measure))
-            callee_measures
-        in
-        let before, after = split_prefix before after in
-        Facts.oblige context frame location
-          (Measure_may_not_decrease
-             {
-               call = { at = location; callee = None };
-               measures =
-                 List.map
-                   (fun (measure : Mir.formula) -> Facts.quote caller measure.origin)
-                   measures;
-             })
-          (Logic.decreases_lexicographically before after)
-    | [], _ | _, [] -> ()
-    end;
+  Option.iter
+    (fun recursive ->
+      Termination.check_recursive_call context frame location ~path callee_clauses
+        ~is_self_call:(Path.equal recursive context.node)
+        ~callee_entry:(read_entry_frame callee_clauses)
+        ~argument_at:(lookup_argument_at_index values))
+    recursive_callee;
   let precondition_clauses = Contracts.select_precondition_clauses contract in
   let read_required () =
     let entry = read_entry_frame precondition_clauses in
@@ -409,12 +320,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let is_on_bound_values = List.exists (Logic.mentions after.bound) callee_arguments in
   let declared_result_type = Facts.substitute_declared_type context frame site.type_ in
   let result_type = Types.erase_views declared_result_type in
-  let applied_as = ref None in
   let definition = ref None in
-  let is_limited_call = ref false in
-  let result =
+  let applied =
     if is_logic_call && List.length callee_arguments = List.length callee_bindings then begin
-      let function_symbol = Logic.Symbol.Function { callee = path; type_arguments } in
       let sorts =
         List.mapi
           (fun index ((parameter : Mir.parameter), _) ->
@@ -428,8 +336,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                         (Types.substitute (substitution_of callee_clauses) parameter.type_))))
           callee_bindings
       in
-      let result_sort = Facts.declare_sort context result_type in
-      Facts.declare context (Logic.Function (function_symbol, sorts, result_sort));
+      let function_symbol =
+        Contract_axioms.declare_function context ~path ~type_arguments ~sorts ~result_type
+      in
       (match (path, callee_bindings) with
       | Method { owner = Impl { trait; _ } as impl; name; receiver }, [ (self, _) ]
         when self.local = Self
@@ -440,47 +349,16 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                   (Types.substitute (substitution_of callee_clauses) self.type_)))
             ~model:result_type ~impl function_symbol
       | _ -> ());
-      let symbol =
-        if List.mem function_symbol context.axiomatizing then begin
-          is_limited_call := true;
-          let limited = Logic.Symbol.Limited { callee = path; type_arguments } in
-          Facts.declare context (Logic.Function (limited, sorts, result_sort));
-          Facts.run_once context (Limited_link function_symbol) (fun () ->
-              let parameters =
-                List.mapi
-                  (fun index sort ->
-                    (Logic.Symbol.Variable { label = "linked"; numbers = [ index ] }, sort))
-                  sorts
-              in
-              let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
-              let applied = Logic.Apply (function_symbol, inputs) in
-              Facts.add_fact context
-                (Logic.forall ~trigger:[ applied ]
-                   (parameters, Logic.equal applied (Logic.Apply (limited, inputs)))));
-          limited
-        end
-        else function_symbol
-      in
-      applied_as := Some (symbol, sorts);
-      let term = Logic.Apply (symbol, callee_arguments) in
-      Facts.assume context after (Facts.make_in_range result_type term);
-      if Facts.find_bounds result_type <> None && is_on_bound_values then
-        Facts.run_once context (In_range symbol) (fun () ->
-            let parameters =
-              List.mapi
-                (fun index sort ->
-                  (Logic.Symbol.Variable { label = "ranged"; numbers = [ index ] }, sort))
-                sorts
-            in
-            Facts.add_fact context
-              (Logic.forall
-                 ( parameters,
-                   Facts.make_in_range result_type
-                     (Logic.Apply (symbol, List.map (fun (name, _) -> Logic.Symbol name) parameters))
-                 )));
-      term
+      Some
+        (Contract_axioms.apply context after ~path ~type_arguments ~sorts ~result_type
+           ~arguments:callee_arguments ~is_on_bound_values)
     end
-    else Facts.arrive context after "result" result_type
+    else None
+  in
+  let result =
+    match applied with
+    | Some application -> application.term
+    | None -> Facts.arrive context after "result" result_type
   in
   Validity.assume_valid context after result_type result;
   let left_valid =
@@ -516,195 +394,16 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     values;
   if not (List.exists (Path.equal path) context.instantiating) then begin
     context.instantiating <- path :: context.instantiating;
-    let axiom_symbol =
-      match !applied_as with
-      | Some (symbol, sorts)
-        when contract.result_kind = `Returns && (not !is_limited_call)
-             && not (Types.equal result_type Types.unit) ->
-          Some (symbol, sorts)
-      | _ -> None
-    in
-    let make_parameters label sorts =
-      context.fresh <- context.fresh + 1;
-      let axiom = context.fresh in
-      List.mapi
-        (fun index sort -> (Logic.Symbol.Variable { label; numbers = [ axiom; index ] }, sort))
-        sorts
-    in
-    let find_readable_clause mark clause inside =
-      match snd (Validity.read_specification context inside clause) with
-      | term when not (Facts.mentions_fresh_after context mark term) -> Some term
-      | _ -> None
-      | exception Facts.Unsupported _ -> None
-    in
-    let make_parameters_valid outside inputs =
-      Logic.conjunction
-        (List.map2
-           (fun ((parameter : Mir.parameter), _) input ->
-             let ty = Types.substitute_erased (substitution_of callee_clauses) parameter.type_ in
-             Logic.( &&& ) (Facts.make_in_range ty input)
-               (Validity.make_validity context outside ~assuming:true ty input))
-           callee_bindings inputs)
-    in
-    let axiomatize symbol parameters make =
-      let mark = context.fresh in
-      let facts = ref [] in
-      let axiom = { State.parameters = List.map fst parameters; hypotheses = []; at_calls = [] } in
-      let scopes = context.scopes and open_axioms = context.open_axioms in
-      context.axiomatizing <- symbol :: context.axiomatizing;
-      context.scopes <- List.map (fun (name, _) -> (name, facts)) parameters @ scopes;
-      context.open_axioms <- axiom :: open_axioms;
-      Fun.protect
-        ~finally:(fun () ->
-          context.axiomatizing <- List.tl context.axiomatizing;
-          context.scopes <- scopes;
-          context.open_axioms <- open_axioms)
-        (fun () ->
-          let stated = make () in
-          let drop_fresh_terms terms =
-            List.filter
-              (fun term -> not (Facts.mentions_fresh_after context mark term))
-              (List.rev terms)
-          in
-          axiom.hypotheses <- drop_fresh_terms axiom.hypotheses;
-          (stated, Logic.conjunction (drop_fresh_terms !facts), axiom))
-    in
-    let record_axiom symbol axiom = Tables.Symbol_table.add context.axioms_of symbol axiom in
-    let add_contract_axiom ~is_triggered symbol sorts =
-      Facts.run_once context (Contract_of symbol) (fun () ->
-          let parameters = make_parameters "ensured" sorts in
-          let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
-          let arguments = List.mapi (fun index input -> (index, input)) inputs in
-          let applied = Logic.Apply (symbol, inputs) in
-          let outside =
-            {
-              after with
-              bound = List.map fst parameters;
-              binders = [];
-              condition = Logic.Boolean true;
-              makes_obligations = false;
-            }
-          in
-          let mark = context.fresh in
-          let stated, facts, axiom =
-            axiomatize symbol parameters (fun () ->
-                let valid = make_parameters_valid outside inputs in
-                let readable_clauses =
-                  List.filter_map
-                    (fun (clauses : State.clauses) ->
-                      let inside =
-                        {
-                          (Validity.bind_arguments outside clauses ~arguments
-                             ~substitution:(substitution_of clauses))
-                          with
-                          result = Some applied;
-                          makes_obligations = false;
-                        }
-                      in
-                      let required =
-                        List.map
-                          (fun requirement -> find_readable_clause mark requirement inside)
-                          (Facts.list_clauses clauses.requires)
-                      in
-                      if List.mem None required then None
-                      else
-                        match
-                          List.filter_map
-                            (fun (clause : Mir.formula) ->
-                              Option.map
-                                (fun term -> (clause, term))
-                                (find_readable_clause mark clause inside))
-                            clauses.ensures
-                        with
-                        | [] -> None
-                        | ensures -> Some (clauses, List.filter_map Fun.id required, ensures))
-                    (Contracts.list_declared_clauses contract)
-                in
-                if readable_clauses = [] || Facts.mentions_fresh_after context mark valid then None
-                else Some (valid, readable_clauses))
-          in
-          match stated with
-          | None -> ()
-          | Some (valid, readable_clauses) -> (
-              let has_quantifier_through_definitions body =
-                Logic.has_quantifier body
-                || Logic.mentions
-                     (List.of_seq (Tables.Symbol_table.to_seq_keys context.definitions))
-                     body
-              in
-              let definition =
-                match (is_triggered, facts, readable_clauses) with
-                | ( true,
-                    Logic.Boolean true,
-                    [ (_, required, [ (_, Logic.Operation (Equal, [ left; right ])) ]) ] ) -> (
-                    let defined_by body =
-                      if
-                        Logic.mentions [ symbol ] body
-                        || Facts.find_bounds result_type <> None
-                        || not (has_quantifier_through_definitions body)
-                      then None
-                      else Some (required, body)
-                    in
-                    match (left, right) with
-                    | _ when left = applied -> defined_by right
-                    | _ when right = applied -> defined_by left
-                    | _ -> None)
-                | _ -> None
-              in
-              if is_triggered then
-                List.iter
-                  (fun ((clauses : State.clauses), _, ensures) ->
-                    List.iter
-                      (fun ((clause : Mir.formula), _) ->
-                        Tables.Axiom_clause_table.replace context.axiom_clauses
-                          (symbol, clauses.callee.key, clauses.callee.definition, clause.origin)
-                          ())
-                      ensures)
-                  readable_clauses;
-              record_axiom symbol axiom;
-              match definition with
-              | Some (required, body) ->
-                  let unspecified = Logic.Symbol.Unspecified symbol
-                  and result_sort = Facts.declare_sort context result_type in
-                  Facts.declare context (Logic.Function (unspecified, sorts, result_sort));
-                  Facts.declare context
-                    (Logic.Definition
-                       {
-                         symbol;
-                         parameters;
-                         result = result_sort;
-                         body =
-                           Logic.ite
-                             (Logic.conjunction ((valid :: axiom.hypotheses) @ required))
-                             body
-                             (Logic.Apply (unspecified, inputs));
-                       })
-              | None ->
-                  Facts.add_fact context
-                    (Logic.forall
-                       ~trigger:(if is_triggered then [ applied ] else [])
-                       ( parameters,
-                         Logic.( ==> )
-                           (Logic.conjunction (valid :: axiom.hypotheses))
-                           (Logic.conjunction
-                              (facts
-                              :: List.map
-                                   (fun (_, required, ensures) ->
-                                     Logic.( ==> ) (Logic.conjunction required)
-                                       (Logic.conjunction (List.map snd ensures)))
-                                   readable_clauses)) ))))
-    in
-    (match (!is_limited_call, axiom_symbol, !applied_as) with
-    | true, _, _ -> ()
-    | false, Some (symbol, sorts), _ -> add_contract_axiom ~is_triggered:true symbol sorts
-    | false, None, Some (symbol, sorts) when is_on_bound_values ->
-        add_contract_axiom ~is_triggered:false symbol sorts
-    | false, None, _ -> ());
+    Option.iter
+      (fun application ->
+        Contract_axioms.state context after application contract ~substitution_of ~result_type
+          ~group_member:(Facts.find_group_member context frame invocation.callee)
+          ~is_on_bound_values)
+      applied;
     let is_in_axiom (clauses : State.clauses) (clause : Mir.formula) =
-      match axiom_symbol with
-      | Some (symbol, _) ->
-          Tables.Axiom_clause_table.mem context.axiom_clauses
-            (symbol, clauses.callee.key, clauses.callee.definition, clause.origin)
+      match applied with
+      | Some application ->
+          application.is_limited || Contract_axioms.states context application clauses clause
       | None -> false
     in
     let assume_ensures is_kept =
@@ -752,7 +451,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           in
           List.iter
             (fun (clause : Mir.formula) ->
-              if is_kept clause && not (!is_limited_call || is_in_axiom clauses clause) then
+              if is_kept clause && not (is_in_axiom clauses clause) then
                 let frame_for_clause =
                   if contract.result_kind = `Lends && Contracts.mentions_result clause then
                     {
@@ -765,8 +464,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                 in
                 match Validity.read_specification context frame_for_clause clause with
                 | _, term ->
-                    (match (!applied_as, !definition) with
-                    | Some (symbol, _), None -> definition := find_definition ~symbol result term
+                    (match (applied, !definition) with
+                    | Some application, None ->
+                        definition := Contract_axioms.find_definition application term
                     | _ -> ());
                     state (Logic.( ==> ) (compute_required clauses) term)
                 | exception Facts.Unsupported _ -> ())
@@ -780,17 +480,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     context.instantiating <- List.tl context.instantiating
   end
   else check_left ();
-  (match !applied_as with
-  | Some (symbol, _) when not !is_limited_call ->
-      List.iter
-        (fun (axiom : State.open_axiom) ->
-          let substitute = Logic.substitute (List.combine axiom.parameters callee_arguments) in
-          List.iter
-            (fun hypothesis -> Operations.assume_typed context after (substitute hypothesis))
-            axiom.hypotheses;
-          List.iter (fun apply_hook -> apply_hook after substitute) axiom.at_calls)
-        (Tables.Symbol_table.find_all context.axioms_of symbol)
-  | _ -> ());
+  Option.iter
+    (fun application ->
+      Contract_axioms.assume_hypotheses context after application ~arguments:callee_arguments)
+    applied;
   let after =
     Amounts.spend_contract_call context ~before:frame ~after site invocation path contract values
       ~changed ~result ~result_type:declared_result_type ~lent_final

@@ -281,7 +281,7 @@ let assume_field_range_of_every_result context ty variant field field_type term 
 
 let project_field context (frame : State.frame) ty variant field field_type term =
   let part = Validity.select_field context ty variant field term in
-  Operations.assume_typed context frame (Facts.make_in_range field_type part);
+  Contract_axioms.assume_typed context frame (Facts.make_in_range field_type part);
   if Logic.mentions (List.map (fun (name, _, _) -> name) frame.binders) term then
     assume_field_range_of_every_result context ty variant field field_type term;
   if context.ranking then begin
@@ -289,54 +289,6 @@ let project_field context (frame : State.frame) ty variant field field_type term
       (Logic.less (Models.rank context field_type part) (Models.rank context ty term))
   end;
   part
-
-let assume_contract_for_every_argument context (frame : State.frame) (contract : State.contract)
-    parameters value =
-  let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
-  let over =
-    {
-      frame with
-      State.bound = List.map fst parameters @ frame.bound;
-      binders =
-        List.rev_map (fun (name, sort) -> (name, sort, Logic.Boolean true)) parameters
-        @ frame.binders;
-      makes_obligations = false;
-    }
-  in
-  let read (clauses : State.clauses) =
-    {
-      (Validity.bind_arguments over clauses
-         ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
-         ~substitution:Types.no_substitution)
-      with
-      result = Some value;
-    }
-  in
-  try
-    let precondition_clauses = Contracts.select_precondition_clauses contract in
-    let conjoin_requires (clauses : State.clauses) =
-      Logic.conjunction
-        (List.map
-           (fun requirement -> snd (Validity.read_specification context (read clauses) requirement))
-           (Facts.list_clauses clauses.requires))
-    in
-    let required = conjoin_requires precondition_clauses in
-    List.iter
-      (fun (clauses : State.clauses) ->
-        let required =
-          if clauses == precondition_clauses then required else conjoin_requires clauses
-        in
-        List.iter
-          (fun clause ->
-            match snd (Validity.read_specification context (read clauses) clause) with
-            | ensured -> (
-                match Facts.close_over_binders over (Logic.( ==> ) required ensured) with
-                | Some closed -> Facts.add_fact context closed
-                | None -> ())
-            | exception Facts.Unsupported _ -> ())
-          clauses.ensures)
-      (Contracts.list_declared_clauses contract)
-  with Facts.Unsupported _ -> ()
 
 let translate_named_function (context : State.context) (frame : State.frame)
     (site : Invocation.site) path type_arguments (contract : State.contract) ~is_argument =
@@ -373,15 +325,23 @@ let translate_named_function (context : State.context) (frame : State.frame)
     when Lambdas.is_in_the_logic function_type && contract.is_logic_function ->
       let parameters = Lambdas.make_parameter_symbols context frame function_type in
       let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
-      let function_symbol = Logic.Symbol.Function { callee = path; type_arguments } in
-      Facts.declare context
-        (Logic.Function
-           ( function_symbol,
-             List.map snd parameters,
-             Facts.declare_sort context function_type.output ));
+      let sorts = List.map snd parameters in
+      let function_symbol =
+        Contract_axioms.declare_function context ~path ~type_arguments ~sorts
+          ~result_type:function_type.output
+      in
       let value = Logic.Apply (function_symbol, inputs) in
       if type_arguments = [] then
-        assume_contract_for_every_argument context frame contract parameters value;
+        Contract_axioms.state context frame
+          { symbol = function_symbol; sorts; term = value; is_limited = false }
+          contract
+          ~substitution_of:(fun _ -> Types.no_substitution)
+          ~result_type:function_type.output
+          ~group_member:
+            (Facts.find_group_member context frame
+               (Core.Function
+                  { path; instantiation = { type_arguments; capability_arguments = [] } }))
+          ~is_on_bound_values:true;
       Facts.add_frame_fact context frame
         (Logic.forall
            (parameters, Logic.equal (Lambdas.apply_function context function_type term inputs) value))

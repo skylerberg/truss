@@ -10,7 +10,6 @@ val list_impl_packages : State.context -> Types.ty -> Path.package list
 val make_equality :
   State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
 
-val assume_typed : State.context -> State.frame -> Logic.term -> unit
 val declare_power : State.context -> State.frame -> Logic.term -> Logic.term -> Logic.term
 
 val translate_primitive_operation :

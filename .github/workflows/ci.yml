@@ -28,8 +28,8 @@ jobs:
       - name: Check that only the renderer builds a rendered diagnostic
         run: .github/scripts/for_rendering.sh
 
-      - name: Check that only the cost modules use the state of cost checking
-        run: .github/scripts/for_cost_state.sh
+      - name: Check that only its owner modules use each record of the prover's state
+        run: .github/scripts/for_prover_state.sh
 
       - id: opam
         uses: ./.github/actions/opam

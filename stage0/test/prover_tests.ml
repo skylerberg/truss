@@ -355,6 +355,27 @@ let () =
   Harness.test "a recursive function's ensures may call the function" (fun () ->
       expect_proven Fixtures.Prover.recursive_function_whose_ensures_calls_itself);
   Harness.test
+    "a recursive function's contract is assumed in its own proof only below the entry measure"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.recursive_function_whose_ensures_contradicts_itself
+        "prover.termination";
+      expect_codes Fixtures.Prover.mutually_recursive_functions_whose_ensures_contradict_each_other
+        [ "prover.termination"; "prover.termination" ]);
+  Harness.test "a recursive call in a requires is compared with the entry measure" (fun () ->
+      expect_not_proven Fixtures.Prover.recursive_function_whose_requires_calls_itself
+        "prover.termination");
+  Harness.test
+    "the contract of a function bound as a value is assumed only for arguments that meet their \
+     invariants" (fun () ->
+      expect_not_proven Fixtures.Prover.function_value_whose_ensures_needs_its_parameters_invariant
+        "prover.ensures");
+  Harness.test
+    "the ensures of a function passed as an argument is assumed only for arguments that meet their \
+     invariants" (fun () ->
+      expect_not_proven
+        Fixtures.Prover.function_argument_whose_ensures_needs_its_parameters_invariant
+        "prover.ensures");
+  Harness.test
     "a generic type's invariant that calls an impl is an error where the impl uses the type"
     (fun () ->
       expect_circular_at_each

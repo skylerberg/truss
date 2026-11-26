@@ -325,30 +325,6 @@ let make_float_fits source target value =
       Facts.raise_bug "a float check from `%s` to `%s` needs a float source and a bounded target"
         (Types.show source) (Types.show target)
 
-let find_innermost_axiom (context : State.context) (frame : State.frame) term =
-  match context.open_axioms with
-  | axiom :: _
-    when let named = List.filter (fun name -> Logic.mentions [ name ] term) frame.bound in
-         named <> [] && List.for_all (fun name -> List.mem name axiom.parameters) named ->
-      Some axiom
-  | _ -> None
-
-let assume_typed context (frame : State.frame) term =
-  let guarded = Logic.( ==> ) frame.condition term in
-  match find_innermost_axiom context frame guarded with
-  | Some axiom -> axiom.hypotheses <- guarded :: axiom.hypotheses
-  | None -> Facts.assume context frame term
-
-let rec map_each_value context (frame : State.frame) value make =
-  if not (Logic.mentions frame.bound value) then make frame value
-  else
-    match find_innermost_axiom context frame value with
-    | Some axiom ->
-        axiom.at_calls <-
-          (fun frame substitute -> map_each_value context frame (substitute value) make)
-          :: axiom.at_calls
-    | None -> ()
-
 let make_power_facts base exponent =
   let power exponent = Logic.Apply (Logic.Symbol.Integer_power, [ base; exponent ]) in
   let previous = Logic.subtract exponent (Logic.int 1) in
@@ -570,7 +546,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
           let term = count operation value in
           Facts.assume context frame Logic.(less_equal (int 0) term &&& less_equal term (int bits));
           (if Z.equal low Z.zero then
-             map_each_value context frame value @@ fun frame value ->
+             Contract_axioms.map_each_value context frame value @@ fun frame value ->
              let leading = count Leading_zeros value
              and trailing = count Trailing_zeros value
              and ones = count Count_ones value in

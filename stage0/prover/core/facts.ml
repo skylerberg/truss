@@ -455,6 +455,13 @@ let reject_recursion_through_supplied_code (context : State.context) (frame : St
         match edge with Calls _ -> () | Supplies { supplier; code } -> reject_supply supplier code)
       (Mir.Call_edges.list_statement_edges context.lookups.interface frame.substitution statement)
 
+let find_group_member (context : State.context) (frame : State.frame) callee =
+  match
+    (Mir.Call_edges.resolve_callee context.lookups.interface frame.substitution callee).target
+  with
+  | Some target when is_in_recursion_group context target -> Some target
+  | Some _ | None -> None
+
 let find_recursive_callee (context : State.context) (frame : State.frame) location callee =
   let reject target impl =
     oblige context frame location
@@ -462,10 +469,8 @@ let find_recursive_callee (context : State.context) (frame : State.frame) locati
       (Logic.Boolean false);
     None
   in
-  match
-    (Mir.Call_edges.resolve_callee context.lookups.interface frame.substitution callee).target
-  with
-  | Some target when frame.makes_obligations && is_in_recursion_group context target -> (
+  match find_group_member context frame callee with
+  | Some target when frame.makes_obligations -> (
       match context.lookups.mir.find_form_origin target with
       | Some (Derived _, _) when context.terminates -> reject target Derives
       | Some (Inherited _, _) when context.terminates -> reject target Inherits
