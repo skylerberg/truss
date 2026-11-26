@@ -165,6 +165,5 @@ val has_untriggered_fact : ?is_counted:(term -> bool) -> query -> bool
 val hash_term : term -> int
 val prune : query -> query
 val list_conjunct_queries : query -> query list
-val show_query : ?cardinality_bound:int -> query -> string
-val has_uninterpreted_sort : query -> bool
+val show_query : query -> string
 val show_symbol : symbol -> string

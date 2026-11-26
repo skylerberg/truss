@@ -1052,16 +1052,7 @@ let number_symbols query =
     sort_order = Dynarray.create ();
   }
 
-type rendering = { text : string; numbering : numbering }
-
-let render_cardinality_bound sort_name element_count =
-  let elements = List.init element_count (Printf.sprintf "%s_e%d" sort_name) in
-  String.concat ""
-    (List.map (fun element -> Printf.sprintf "(declare-fun %s () %s)\n" element sort_name) elements)
-  ^ Printf.sprintf "(assert (forall ((b0 %s)) (or%s)))\n" sort_name
-      (String.concat "" (List.map (Printf.sprintf " (= b0 %s)") elements))
-
-let render_with ~cardinality_bound query =
+let show_query query =
   let numbering = number_symbols query in
   let render_assertion term =
     let buffer = Buffer.create 128 in
@@ -1104,14 +1095,6 @@ let render_with ~cardinality_bound query =
       sort_order
   in
   let sorts = List.map (Printf.sprintf "(declare-sort %s 0)\n") uninterpreted_sorts in
-  let cardinality_bounds =
-    match cardinality_bound with
-    | None -> []
-    | Some element_count ->
-        List.map
-          (fun sort_name -> render_cardinality_bound sort_name element_count)
-          uninterpreted_sorts
-  in
   let datatypes = List.filter (Sort_table.mem numbering.datatypes) sort_order in
   let datatype_block =
     match datatypes with
@@ -1145,15 +1128,4 @@ let render_with ~cardinality_bound query =
             (String.concat " " (List.map render_body datatypes));
         ]
   in
-  {
-    text =
-      String.concat "" (sorts @ datatype_block @ cardinality_bounds @ declarations @ assertions)
-      ^ "(check-sat)\n";
-    numbering;
-  }
-
-let show_query ?cardinality_bound query = (render_with ~cardinality_bound query).text
-
-let has_uninterpreted_sort query =
-  let { numbering; _ } = render_with ~cardinality_bound:None query in
-  Dynarray.exists (fun sort -> not (Sort_table.mem numbering.datatypes sort)) numbering.sort_order
+  String.concat "" (sorts @ datatype_block @ declarations @ assertions) ^ "(check-sat)\n"
