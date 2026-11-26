@@ -95,6 +95,25 @@ let declare_unknown_amount context frame (counter : Costs.counter) =
   Facts.assume context frame (Logic.less_equal (Costs.least_amount counter.resource) amount);
   amount
 
+let make_potential_credit (context : State.context) change =
+  if Option.is_none (Facts.find_argument_sorts context Costs.credit_symbol) then begin
+    let is_credited = Logic.Symbol.Variable { label = "cost.is_credited"; numbers = [] }
+    and saved = Logic.Symbol.Variable { label = "cost.saved"; numbers = [] } in
+    Facts.declare context (Logic.Constant (is_credited, Logic.Bool));
+    Facts.declare context (Logic.Function (Costs.credit_symbol, [ Logic.Int ], Logic.Int));
+    let applied = Logic.Apply (Costs.credit_symbol, [ Logic.Symbol saved ]) in
+    Facts.add_fact context
+      (Logic.forall ~trigger:[ applied ]
+         ( [ (saved, Logic.Int) ],
+           Logic.equal applied
+             (Logic.ite (Logic.Symbol is_credited) (Logic.Symbol saved) Costs.zero) ))
+  end;
+  let sums, constant = Logic.linearize change in
+  let credit part = Logic.Apply (Costs.credit_symbol, [ part ]) in
+  Logic.add
+    (Logic.combine_linear (List.map (fun (part, factor) -> (credit part, factor)) sums, Z.zero))
+    (if Z.equal constant Z.zero then Costs.zero else credit (Logic.Integer constant))
+
 let spend_operation context frame ~potential_change ?(note = fun _ _ -> ())
     (charge_of : Costs.counter -> Costs.charge) =
   let change = Option.map Lazy.from_fun potential_change in
@@ -113,10 +132,13 @@ let spend_operation context frame ~potential_change ?(note = fun _ _ -> ())
             | Some change -> Logic.add amount change
             | None -> declare_unknown_amount context frame counter)
         | Potential_change, false -> (
-            match find_change () with Some change -> Logic.subtract amount change | None -> amount)
+            match find_change () with
+            | Some change -> Logic.subtract amount (make_potential_credit context change)
+            | None -> declare_unknown_amount context frame counter)
         | Potential_growth, false -> (
             match find_change () with
-            | Some change -> Logic.subtract amount (Logic.at_least_zero change)
+            | Some change ->
+                Logic.subtract amount (make_potential_credit context (Logic.at_least_zero change))
             | None -> amount)
       in
       note counter amount;

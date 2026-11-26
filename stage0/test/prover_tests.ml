@@ -1839,6 +1839,11 @@ let () =
         (Support.apply_edit costed
            ("    let _ = item\n  })\n}", "    let _ = [item, item]\n  })\n}"))
         [ "prover.cost" ]);
+  Harness.test "potential that a callee saved pays for no step of a plain bound" (fun () ->
+      expect_codes Fixtures.Prover.false_plain_bounds_paid_for_by_saved_potential
+        (List.init 9 (fun _ -> "prover.cost")));
+  Harness.test "potential that a callee saved offsets potential that a later call spends" (fun () ->
+      expect_proven Fixtures.Prover.true_bounds_that_pay_for_saved_potential);
   Harness.test "the contract of a function that can panic is assumed only where it returns"
     (fun () ->
       expect_codes Fixtures.Prover.contract_of_a_function_that_panics_assumed_where_it_panics

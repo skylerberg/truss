@@ -81,6 +81,10 @@ let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause lis
   List.map
     (fun (counter : Costs.counter) ->
       let gains, measure_gained = Lazy.force held_gains in
+      let measure_gained =
+        if counter.amortized then measure_gained
+        else fun gain at -> Counters.make_potential_credit context (measure_gained gain at)
+      in
       let gains =
         if counter.amortized then
           List.filter_map

@@ -146,6 +146,23 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `Amounts` | The amount that a call or an operation spends |
   | `Loop_costs` | The cost rules of a loop |
 
+- **A worst-case bound is proven at both ends of the exchange rate between
+  a callee's bound and its potential.** A callee's `O(f)` is checked against
+  `2^17 * f + 2^16` of the callee's units and charged to its caller as
+  `f + 1`, so one unit of a callee's bound stands for up to 2^17 of the
+  callee's steps, and one unit of potential for one. The work of a callee
+  with an amortized bound is therefore its bound less its potential change
+  divided by 2^17. An account is affine in that rate, so it is within a
+  bound at that rate where it is within the bound at rate 0 and at rate 1.
+  `Counters.make_potential_credit` builds `credit(change)`, which is
+  `change` or zero by one Boolean that no fact constrains, so each cost
+  obligation is proven for both rates. `Loop_costs` credits the potential
+  that a loop gained by the same term in a plain account.
+
+  | Rate | Account of a callee with an amortized bound | Rejects |
+  |---|---|---|
+  | 1 | Its bound less its potential change | A bound that ignores potential that the callee spent |
+  | 0 | Its bound | A bound whose steps are paid for by potential that the callee saved |
 - **A contract is resolved once, and its three readers differ only in what
   they prove and what they assume.** The rules are those of modular
   verification with pre- and postconditions. A definition is proven against

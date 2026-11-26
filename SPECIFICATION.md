@@ -1417,10 +1417,13 @@ fn List[Element].push(mut self, item: own Element)
   code makes. A value it builds counts its type's potential. A write counts
   the change in the potential of the values that contain the written place.
 - A caller with a plain bound counts a callee's plain bound. Where the
-  callee states only an amortized bound, the caller counts that bound less
-  the change in potential. A function that pushes only onto a list it
-  creates empty therefore has a plain bound, since the list starts with no
-  potential to spend.
+  callee states only an amortized bound, the caller counts that bound, and
+  the potential that its calls spend where they spend more than they save.
+  Potential that a call saves offsets potential that a later call spends,
+  and pays for no step of the caller: one unit of a callee's bound stands
+  for many of the callee's steps, and one unit of potential for one. A
+  function that pushes only onto a list it creates empty therefore has a
+  plain bound, since the list starts with no potential to spend.
 - **A capability method's `O(...)` bound counts the change in the potential
   of its provider,** whether or not it is `amortized`. An `impl` of the
   capability is checked so, and a caller counts the bound as stated. A plain

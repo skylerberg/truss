@@ -1,0 +1,161 @@
+type Purse(coins: UInt64)
+  invariant coins <= 4611686018427387904
+  cost potential coins
+
+fn deposit(purse: mut Purse)
+  requires purse.coins <= 4611686018427386904
+  ensures purse.coins == old(purse.coins) + 1000
+  cost amortized time O(1)
+{
+  purse.coins = purse.coins + 1000
+}
+
+fn work(size: UInt64)
+  cost time O(size)
+{
+  for _ in 0..size {
+  }
+}
+
+fn dropped_after_a_loop(count: UInt64) -> UInt64
+  requires count <= 4503599627370496
+  cost time O(1)
+{
+  var purse = Purse(coins: 0)
+  for index in 0..count
+    invariant purse.coins == index * 1000
+  {
+    deposit(mut purse)
+  }
+  0
+}
+
+fn dropped_after_a_while_loop(count: UInt64) -> UInt64
+  requires count <= 4503599627370496
+  cost time O(1)
+{
+  var purse = Purse(coins: 0)
+  var index: UInt64 = 0
+  while index < count
+    invariant index <= count
+    invariant purse.coins == index * 1000
+    decreases count - index
+  {
+    deposit(mut purse)
+    index += 1
+  }
+  0
+}
+
+fn dropped_by_reassignment(count: UInt64) -> UInt64
+  requires count <= 4503599627370496
+  cost time O(1)
+{
+  var purse = Purse(coins: 0)
+  for index in 0..count
+    invariant purse.coins == index * 1000
+  {
+    deposit(mut purse)
+  }
+  purse = Purse(coins: 0)
+  purse.coins
+}
+
+fn run(body: (fn() -> UInt64 cost time O(1))) -> UInt64
+  cost time O(1)
+{
+  body()
+}
+
+fn dropped_in_a_lambda(count: UInt64) -> UInt64
+  requires count <= 4503599627370496
+  cost time O(1)
+{
+  run(fn() {
+    var purse = Purse(coins: 0)
+    for index in 0..count
+      invariant purse.coins == index * 1000
+    {
+      deposit(mut purse)
+    }
+    0
+  })
+}
+
+fn kept_in_a_mut_parameter(purse: mut Purse, count: UInt64)
+  requires purse.coins == 0
+  requires count <= 4503599627370496
+  cost time O(1)
+{
+  for index in 0..count
+    invariant purse.coins == index * 1000
+  {
+    deposit(mut purse)
+  }
+}
+
+fn coins_of(purse: own Purse) -> UInt64
+  cost time O(1)
+{
+  purse.coins
+}
+
+fn passed_own_to_a_plain_callee(count: UInt64) -> UInt64
+  requires count <= 4503599627370496
+  cost time O(1)
+{
+  var purse = Purse(coins: 0)
+  for index in 0..count
+    invariant purse.coins == index * 1000
+  {
+    deposit(mut purse)
+  }
+  coins_of(own purse)
+}
+
+fn returned(count: UInt64) -> Purse
+  requires count <= 4503599627370496
+  cost time O(1)
+{
+  var purse = Purse(coins: 0)
+  for index in 0..count
+    invariant purse.coins == index * 1000
+  {
+    deposit(mut purse)
+  }
+  purse
+}
+
+type Wallet(purse: Purse, label: UInt64)
+
+fn saved_in_a_field(count: UInt64) -> UInt64
+  requires count <= 4503599627370496
+  cost time O(1)
+{
+  var wallet = Wallet(purse: Purse(coins: 0), label: 7)
+  for index in 0..count
+    invariant wallet.purse.coins == index * 1000
+  {
+    deposit(mut wallet.purse)
+  }
+  wallet.label
+}
+
+fn raise(purse: mut Purse, count: UInt64)
+  requires purse.coins <= 1000000000
+  requires count <= 1000000
+  ensures purse.coins == old(purse.coins) + 1000 * count
+  cost amortized time O(count)
+{
+  purse.coins = purse.coins + 1000 * count
+}
+
+fn raised(count: UInt64) -> UInt64
+  requires count <= 1000000
+  cost time O(1)
+{
+  var purse = Purse(coins: 0)
+  raise(mut purse, count)
+  work(count)
+  0
+}

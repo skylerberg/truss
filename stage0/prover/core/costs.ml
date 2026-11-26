@@ -97,6 +97,8 @@ let rec since ~start total =
       Logic.ite condition (since ~start left) (since ~start right)
   | _ -> Logic.normalize_linear (Logic.subtract total start)
 
+let credit_symbol = Logic.Symbol.Variable { label = "cost.credit"; numbers = [] }
+
 type polarity = Grows | Shrinks | Both
 
 let flip = function Grows -> Shrinks | Shrinks -> Grows | Both -> Both
@@ -149,6 +151,8 @@ let list_varying_parts varies term =
       | Logic.Apply
           ( (Logic.Symbol.Cost_most | Logic.Symbol.Integer_log | Logic.Symbol.Integer_power),
             arguments ) ->
+          List.iter (walk polarity) arguments
+      | Logic.Apply (symbol, arguments) when symbol = credit_symbol ->
           List.iter (walk polarity) arguments
       | _ -> add term polarity
   in
@@ -259,7 +263,8 @@ let list_upper_bounds ~varies ~facts term =
     (fun (smaller, larger) -> if smaller = term && not (varies larger) then Some larger else None)
     (List.concat_map list_comparisons facts)
 
-let is_potential = function
+let rec is_potential = function
+  | Logic.Apply (symbol, [ credited ]) when symbol = credit_symbol -> is_potential credited
   | Logic.Apply ((Logic.Symbol.Potential _ | Logic.Symbol.Slack _), _) -> true
   | Logic.Apply (_, arguments) ->
       List.exists
