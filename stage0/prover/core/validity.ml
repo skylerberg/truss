@@ -67,7 +67,7 @@ let note_place (context : State.context) (frame : State.frame) ~node ~origin val
                         Logic.less_equal other_stop other_start;
                       ]
               in
-              Obligations.oblige context frame (Facts.locate frame origin)
+              Obligations.oblige frame (Facts.locate frame origin)
                 (May_alias { first = quote first; second = quote second })
                 apart
           | _ -> ())
@@ -96,7 +96,8 @@ let read_specification ?holds_when (context : State.context) (frame : State.fram
     },
     term )
 
-let check_defined (context : State.context) frame ~holds_when (formula : Mir.formula) =
+let check_defined (context : State.context) (frame : State.frame) ~holds_when
+    (formula : Mir.formula) =
   ignore (read_specification ~holds_when context frame formula)
 
 let make_type_frame (frame : State.frame) source (ty : Types.ty) ~self =
@@ -239,7 +240,8 @@ let rec make_validity (context : State.context) (frame : State.frame) ~assuming 
     in
     Logic.( &&& ) invariants_hold fields
 
-let assume_valid ?(includes_invariants = true) (context : State.context) frame ty term =
+let assume_valid ?(includes_invariants = true) (context : State.context) (frame : State.frame) ty
+    term =
   Facts.assume frame (make_validity context frame ~assuming:true ~includes_invariants ty term);
   if includes_invariants then note_valid context frame ty term
 
@@ -249,6 +251,6 @@ let check_valid ?(includes_invariants = true) (context : State.context) (frame :
     match make_validity context frame ~assuming:false ~deep ~includes_invariants ty term with
     | Logic.Boolean true -> ()
     | valid ->
-        Obligations.oblige context frame location (Invariant_may_fail { type_ = ty; moment }) valid;
+        Obligations.oblige frame location (Invariant_may_fail { type_ = ty; moment }) valid;
         if deep && includes_invariants && frame.makes_obligations then
           note_valid context frame ty term

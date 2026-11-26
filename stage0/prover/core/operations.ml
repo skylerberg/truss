@@ -51,11 +51,11 @@ let check_widened location ~is_written actual expected =
       Facts.raise_unsupported location Function_value_costs
   | _ -> ()
 
-let convert_from_integer (context : State.context) frame (site : Invocation.site) term =
+let convert_from_integer frame (site : Invocation.site) term =
   let ty = Encoding.substitute_type frame site.type_ in
   Obligations.oblige
-    ~fixes:(Fixes.make_range_fix context frame ty term)
-    context frame (Facts.locate frame site.origin)
+    ~fixes:(Fixes.make_range_fix frame ty term)
+    frame (Facts.locate frame site.origin)
     (Out_of_range { at = Facts.quote frame.source site.origin; type_ = ty })
     (Encoding.make_in_range ty term);
   term
@@ -138,7 +138,7 @@ let make_derived_equal (context : State.context) (frame : State.frame) (ty : Typ
   | _ -> ());
   equal
 
-let make_equality (context : State.context) frame (ty : Types.ty) left right =
+let make_equality (context : State.context) (frame : State.frame) (ty : Types.ty) left right =
   if Encoding.is_equality_identity context.environment ty then Logic.equal left right
   else if Encoding.find_float_format ty <> None then make_float_equal left right
   else
@@ -162,7 +162,7 @@ let declare_opaque_operation (frame : State.frame) ty operation arguments =
   Facts.assume frame (Encoding.make_in_range ty term);
   term
 
-let translate_arithmetic (context : State.context) (frame : State.frame) (site : Invocation.site) ty
+let translate_arithmetic (frame : State.frame) (site : Invocation.site) ty
     (operation : Intrinsic.scalar) left right =
   let source = frame.source in
   let location = Facts.locate frame site.origin in
@@ -178,27 +178,27 @@ let translate_arithmetic (context : State.context) (frame : State.frame) (site :
   if is_division then
     Obligations.oblige
       ~fixes:
-        (match Fixes.find_parameter_code context frame right with
+        (match Fixes.find_parameter_code frame right with
         | Some divisor ->
-            Fixes.add_requires context frame
+            Fixes.add_requires frame
               [ Clause (Fixes.make_comparison divisor Not_equal (Integer Z.zero)) ]
         | None -> [])
-      context frame location
+      frame location
       (Divisor_may_be_zero { at = Facts.quote source site.origin })
       (Logic.not_ (Logic.equal right (Logic.int 0)));
   (match Encoding.find_bounds ty with
   | Some (low, _) when is_division ->
       if Z.sign low < 0 then
         Obligations.oblige
-          ~fixes:(Fixes.make_division_overflow_fix context frame ty left right)
-          context frame location
+          ~fixes:(Fixes.make_division_overflow_fix frame ty left right)
+          frame location
           (Division_overflow { at = Facts.quote source site.origin; type_ = ty })
           (Logic.not_ Logic.(equal left (Integer low) &&& equal right (int (-1))))
   | Some (low, high) ->
       let unsigned = Z.sign low = 0 && not (Types.is_builtin Character ty) in
       Obligations.oblige
-        ~fixes:(Fixes.make_overflow_fix context frame ty operation left right exact)
-        context frame location
+        ~fixes:(Fixes.make_overflow_fix frame ty operation left right exact)
+        frame location
         (Overflow { at = Facts.quote source site.origin; type_ = ty })
         (match operation with
         | (Add | Multiply) when unsigned -> Logic.less_equal exact (Integer high)
@@ -243,7 +243,7 @@ let make_power_order base left right =
         ==> less_equal (power left) (power right)
         &&& (less_equal right left ==> less_equal (power right) (power left))))
 
-let declare_power (context : State.context) frame base exponent =
+let declare_power (context : State.context) (frame : State.frame) base exponent =
   let add exponent =
     if not (List.mem (base, exponent) context.powers) then begin
       List.iter
@@ -308,15 +308,15 @@ let translate_primitive_operation (context : State.context) (frame : State.frame
       Logic.Operation (Fp_div Nearest_ties_to_even, [ left; right ])
   | Negate, _ :: _, [ value ] when is_float -> Logic.Operation (Fp_neg, [ value ])
   | (Add | Subtract | Multiply | Divide | Remainder), ty :: _, [ left; right ] when not is_float ->
-      let result = translate_arithmetic context frame site ty operation left right in
+      let result = translate_arithmetic frame site ty operation left right in
       if Encoding.find_bounds ty <> None then Facts.assume frame (Encoding.make_in_range ty result);
       result
   | Negate, ty :: _, [ inner ] when not is_float ->
       let negated = Logic.negate inner in
       if Encoding.find_bounds ty <> None then
         Obligations.oblige
-          ~fixes:(Fixes.make_negation_fix context frame ty inner)
-          context frame location
+          ~fixes:(Fixes.make_negation_fix frame ty inner)
+          frame location
           (Overflow { at = Facts.quote source site.origin; type_ = ty })
           (Encoding.make_in_range ty negated)
       else if ty <> Types.Integer then Facts.raise_unsupported location (Negation_of ty);
@@ -330,14 +330,14 @@ let translate_primitive_operation (context : State.context) (frame : State.frame
             | Some amount ->
                 ( Facts.locate frame amount,
                   (Facts.quote source amount, true),
-                  match Fixes.find_parameter_code context frame right with
+                  match Fixes.find_parameter_code frame right with
                   | Some amount ->
-                      Fixes.add_requires context frame
+                      Fixes.add_requires frame
                         [ Clause (Fixes.make_comparison amount Less (Integer (Z.of_int bits))) ]
                   | None -> [] )
             | None -> (location, (Facts.quote source site.origin, false), [])
           in
-          Obligations.oblige ~fixes context frame at_amount
+          Obligations.oblige ~fixes frame at_amount
             (Shift_amount { amount; is_operand; bits })
             Logic.(less right (int bits))
       | None -> Facts.raise_unsupported location (Shift_of ty));
@@ -535,7 +535,7 @@ let translate_primitive_operation (context : State.context) (frame : State.frame
         when Encoding.find_float_format source <> None && Encoding.find_bounds target <> None -> (
           match operands with
           | [ value ] -> (
-              Obligations.oblige context frame (Facts.locate frame site.origin)
+              Obligations.oblige frame (Facts.locate frame site.origin)
                 (Float_conversion { at = Facts.quote frame.source site.origin; target })
                 (make_float_fits source target value);
               match (find_width target, Encoding.find_bounds target) with
@@ -565,7 +565,7 @@ let translate_primitive_operation (context : State.context) (frame : State.frame
       | Convert, [ _; target ] when Types.is_builtin Character target -> (
           match operands with
           | [ value ] ->
-              Obligations.oblige context frame (Facts.locate frame site.origin)
+              Obligations.oblige frame (Facts.locate frame site.origin)
                 (Not_a_scalar_value { at = Facts.quote frame.source site.origin })
                 (Encoding.make_in_range target value);
               value

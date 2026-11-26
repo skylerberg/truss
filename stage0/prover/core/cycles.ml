@@ -61,23 +61,17 @@ let make_catalog_dependency (dependency : Mir.Call_edges.dependency) : Catalog.P
         dependency.omitted;
   }
 
-let reject_constant_cycle (context : State.context) (frame : State.frame) (code : Mir.t) =
-  if context.environment.lookups.list_recursion_group context.environment.node <> [] then
+let reject_constant_cycle (frame : State.frame) (code : Mir.t) =
+  if frame.environment.lookups.list_recursion_group frame.environment.node <> [] then
     List.iter
       (fun (dependency : Mir.Call_edges.dependency) ->
-        if is_in_recursion_group context.environment dependency.path then
-          Obligations.oblige context frame (Node dependency.origin)
+        if is_in_recursion_group frame.environment dependency.path then
+          Obligations.oblige frame (Node dependency.origin)
             (Constant_cycle
-               {
-                 cyclic = context.environment.node;
-                 dependency = make_catalog_dependency dependency;
-               })
+               { cyclic = frame.environment.node; dependency = make_catalog_dependency dependency })
             (Logic.Boolean false))
       (Mir.Call_edges.list_dependencies
-         {
-           interface = context.environment.lookups.interface;
-           mir = context.environment.lookups.mir;
-         }
+         { interface = frame.environment.lookups.interface; mir = frame.environment.lookups.mir }
          Types.no_substitution code)
 
 type circular_proof = { location : Obligation.location; proof : Catalog.Prover.circular_proof }
@@ -207,6 +201,5 @@ let list_circular_contracts (frame : State.frame) =
         let group = frame.environment.lookups.list_proof_group frame.environment.node in
         if List.exists (has_circular_clause lookups group) group then [] else circular
 
-let reject_circular_proof (context : State.context) frame (circular : circular_proof) =
-  Obligations.oblige context frame circular.location (Circular_proof circular.proof)
-    (Logic.Boolean false)
+let reject_circular_proof frame (circular : circular_proof) =
+  Obligations.oblige frame circular.location (Circular_proof circular.proof) (Logic.Boolean false)

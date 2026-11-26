@@ -378,9 +378,9 @@ develop as well as make it easier to bootstrap the compiler in parts.
   |---|---|---|
   | None | | Builds a term or reads a type, such as `Encoding.sort_of` |
   | `State.environment` | The definition being proven and the database it is proven against: the lookups, the node, the condition and its bounds, the obligation policy. It does not change during a proof | Reads the program away from a point of it, such as `Callee.may_abort` or `Cycles.is_in_proof_cycle` |
-  | `State.frame` | The logical context at a point of the program: the environment, the bindings, the path condition, and the query that its facts are added to | Reads the program at a point or adds a fact there, such as `Encoding.substitute_type` or `Facts.assume` |
+  | `State.frame` | The logical context at a point of the program: the environment, the bindings, the path condition, the symbols of the definition's parameters at entry, and the query that its facts and obligations are added to | Reads the program at a point, adds a fact there or makes an obligation there, such as `Encoding.substitute_type`, `Facts.assume` or `Obligations.oblige` |
   | `Query.t` | The query under construction | Declares a symbol or states a fact where no frame is at hand, such as `Models.make_sequence_length` |
-  | `State.context` | The state of each owner and the outcome of the proof | Makes an obligation, reads a specification, or uses an owner's state |
+  | `State.context` | The state of each owner and the outcome of the proof | Reads a specification, runs a body, or uses an owner's state |
 
   `Facts.assume` guards a fact with the path condition of its frame.
   `Facts.add_frame_fact` and `Query.add_fact` add a fact with no guard, so

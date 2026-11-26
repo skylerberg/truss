@@ -237,7 +237,7 @@ let rec make_value_term (frame : State.frame) (value : Types.value) =
       | _ -> substitute_value_term frame.query value)
   | Known _ | Value_variable _ | Value_error _ -> substitute_value_term frame.query value
 
-let make_array_model (context : State.context) frame (ty : Types.ty) term =
+let make_array_model (context : State.context) (frame : State.frame) (ty : Types.ty) term =
   match ty with
   | Types.Named { arguments = [ Types.Type element; Types.Value count ]; _ } -> (
       match find_model context ty term ~element with

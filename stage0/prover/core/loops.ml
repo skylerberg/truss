@@ -102,7 +102,7 @@ let list_validity_obligations (context : State.context) (entry : State.frame)
       | None -> None)
     (List.sort_uniq compare (List.map (fun (part : State.changed_part) -> part.root) changed))
 
-let assume_preserved_validity (context : State.context) head preserved =
+let assume_preserved_validity (context : State.context) (head : State.frame) preserved =
   List.iter
     (fun (_, ty, valid_on_entry, read) ->
       match read head with
@@ -118,14 +118,14 @@ let check_preserved_validity (context : State.context) end_ location preserved =
     (fun (described, ty, valid_on_entry, read) ->
       match read end_ with
       | Some term ->
-          Obligations.oblige context end_ location
+          Obligations.oblige end_ location
             (Preserved_invariant { type_ = ty; value = described })
             (Logic.( ==> ) valid_on_entry
                (Validity.make_validity context end_ ~assuming:false ~deep:true ty term))
       | None -> ())
     preserved
 
-let check_loop_clauses (context : State.context) frame clauses ~moment =
+let check_loop_clauses (context : State.context) (frame : State.frame) clauses ~moment =
   List.iter
     (fun (clause : Mir.loop_clause) ->
       match clause with
@@ -133,7 +133,7 @@ let check_loop_clauses (context : State.context) frame clauses ~moment =
           let _, term =
             Validity.read_specification ~holds_when:invariant.holds_when context frame invariant
           in
-          Obligations.oblige ~holds_when:invariant.holds_when context frame
+          Obligations.oblige ~holds_when:invariant.holds_when frame
             (Facts.locate frame invariant.origin)
             (Loop_invariant { clause = Facts.quote frame.source invariant.origin; moment })
             term
@@ -145,7 +145,7 @@ let check_loop_clauses (context : State.context) frame clauses ~moment =
       | Cost _ -> ())
     clauses
 
-let assume_invariants (context : State.context) frame clauses =
+let assume_invariants (context : State.context) (frame : State.frame) clauses =
   List.iter
     (fun (invariant : Mir.formula) ->
       let _, term =
@@ -154,7 +154,7 @@ let assume_invariants (context : State.context) frame clauses =
       Facts.assume frame term)
     (Validity.list_invariants clauses)
 
-let enter_loop ?holds (context : State.context) frame ~entry clauses ~changed =
+let enter_loop ?holds (context : State.context) (frame : State.frame) ~entry clauses ~changed =
   let holds = Option.value holds ~default:changed in
   let costs = Loop_costs.enter context frame ~entry clauses ~holds ~changed in
   let preserved = list_validity_obligations context frame changed in
@@ -165,7 +165,7 @@ let enter_loop ?holds (context : State.context) frame ~entry clauses ~changed =
 let end_scope ~(outer : State.frame) (frame : State.frame) =
   { frame with locals = Locals.filter (fun id _ -> Locals.mem id outer.locals) frame.locals }
 
-let leave_loop (context : State.context) frame frames =
+let leave_loop (context : State.context) (frame : State.frame) frames =
   Option.map (end_scope ~outer:frame) (Joins.join_frames context frames)
 
 let end_iterations (context : State.context) (frame : State.frame) loop_at clauses measure
@@ -179,7 +179,7 @@ let end_iterations (context : State.context) (frame : State.frame) loop_at claus
       let through = with_through end_ in
       check_loop_clauses context through clauses ~moment:After_iteration;
       check_preserved_validity context end_ location start.preserved;
-      Termination.check_loop_measure context through location measure)
+      Termination.check_loop_measure through location measure)
     ends
 
 let declare_elements_so_far (context : State.context) (head : State.frame) ~element ~collection
@@ -302,19 +302,19 @@ let assume_visited_is_a_prefix (head : State.frame) ~element ~visited ~entry_mod
       Values.assume_extensional head (Encoding.make_sequence_type element) visited entry_model
   | _ -> ()
 
-let oblige_next_gives_the_model (context : State.context) (after : State.frame) location ~element
-    ~has_another ~pulled ~model ~model_after =
-  let length = Models.make_sequence_length context.query element in
-  let position = Query.make_fresh_name context.query "position" in
+let oblige_next_gives_the_model (after : State.frame) location ~element ~has_another ~pulled ~model
+    ~model_after =
+  let length = Models.make_sequence_length after.query element in
+  let position = Query.make_fresh_name after.query "position" in
   let index = Logic.Symbol position in
   match
-    ( Models.index_sequence context.environment context.query element model (Logic.int 0),
-      Models.index_sequence context.environment context.query element model_after index,
-      Models.index_sequence context.environment context.query element model
+    ( Models.index_sequence after.environment after.query element model (Logic.int 0),
+      Models.index_sequence after.environment after.query element model_after index,
+      Models.index_sequence after.environment after.query element model
         (Logic.add index (Logic.int 1)) )
   with
   | Some first, Some value_after, Some value_ahead ->
-      Obligations.oblige context after location Visited_out_of_order
+      Obligations.oblige after location Visited_out_of_order
         Logic.(
           has_another
           ==> (greater (length model) (int 0)
@@ -432,7 +432,7 @@ let prove_cursor_loop ~(for_loop : for_loop) (context : State.context) (frame : 
       in
       (match (find_model head, find_model after) with
       | Some model, Some model_after ->
-          oblige_next_gives_the_model context after location ~element:element_type ~has_another
+          oblige_next_gives_the_model after location ~element:element_type ~has_another
             ~pulled:element ~model ~model_after
       | _ -> ());
       let inside = Facts.restrict after has_another in
@@ -449,7 +449,7 @@ let prove_cursor_loop ~(for_loop : for_loop) (context : State.context) (frame : 
             { advanced with spent = after.spent });
       })
 
-let run_for_loop (context : State.context) frame (for_loop : for_loop) =
+let run_for_loop (context : State.context) (frame : State.frame) (for_loop : for_loop) =
   let clauses = for_loop.for_clauses in
   match for_loop.iterable with
   | Over_range { low; high; inclusive } ->
@@ -540,9 +540,7 @@ let run_for_loop (context : State.context) frame (for_loop : for_loop) =
       List.iter
         (fun (end_ : State.frame) ->
           Option.iter
-            (Obligations.oblige context end_
-               (Facts.locate frame for_loop.for_at)
-               Element_count_changes)
+            (Obligations.oblige end_ (Facts.locate frame for_loop.for_at) Element_count_changes)
             (find_kept_count end_))
         ends;
       let most = [ Logic.at_least_zero count ] in

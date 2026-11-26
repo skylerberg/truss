@@ -33,16 +33,16 @@ let is_panic_obligation : Diagnostic.Code.prover -> bool = function
   | _ -> false
 
 let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?(is_proven_by_evaluation = false)
-    ?holds_when (context : State.context) (frame : State.frame) location obligation goal =
+    ?holds_when (frame : State.frame) location obligation goal =
   let code = Catalog.Prover_description.find_code obligation in
   let holds_when = Option.value holds_when ~default:frame.obligation_condition in
   if
     (is_panic_obligation code && frame.panics)
-    || (Option.is_some context.environment.policy.panic_condition && not (is_panic_obligation code))
+    || (Option.is_some frame.environment.policy.panic_condition && not (is_panic_obligation code))
     || not
-         (holds_when = context.environment.condition
-         || (code = Diagnostic.Code.Termination && context.environment.policy.keeps_termination)
-         || (is_panic_obligation code && context.environment.policy.keeps_failures))
+         (holds_when = frame.environment.condition
+         || (code = Diagnostic.Code.Termination && frame.environment.policy.keeps_termination)
+         || (is_panic_obligation code && frame.environment.policy.keeps_failures))
   then Facts.assume frame goal
   else
     let is_held =
@@ -51,13 +51,13 @@ let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?(is_proven_by_evaluat
       | _ ->
           (not is_proven_by_evaluation) && frame.makes_obligations
           && (not (Logic.mentions frame.bound goal || Logic.mentions frame.bound frame.condition))
-          && Query.holds context.query ~under:frame.condition goal
+          && Query.holds frame.query ~under:frame.condition goal
     in
     if is_held then Facts.assume frame goal
     else
       match
         make_closed_obligation frame location obligation
-          (Query.add_quantifier_facts context.query
+          (Query.add_quantifier_facts frame.query
              ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
              goal)
       with
@@ -66,17 +66,17 @@ let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?(is_proven_by_evaluat
           let fixes =
             match fixes with
             | [] when is_home_body && can_be_required -> (
-                match Fixes.find_goal_code context goal with
+                match Fixes.find_goal_code frame goal with
                 | Some _ when Logic.is_refuted goal -> []
-                | Some required -> Fixes.add_requires context frame [ Clause required ]
+                | Some required -> Fixes.add_requires frame [ Clause required ]
                 | None -> [])
             | fixes -> fixes
           in
           let fixes =
             if is_panic_obligation code && frame.can_declare_panic && is_home_body then
-              fixes @ Fixes.make_panic_fix context.environment
+              fixes @ Fixes.make_panic_fix frame.environment
             else fixes
           in
-          Query.add_obligation context.query { obligation with cited; fixes };
+          Query.add_obligation frame.query { obligation with cited; fixes };
           Facts.assume frame goal
       | None -> ()

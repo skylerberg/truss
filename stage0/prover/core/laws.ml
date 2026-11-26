@@ -78,7 +78,8 @@ let make_law_fact (context : State.context) (frame : State.frame) source ~substi
 let enter_proof (context : State.context) (trait : Types.trait_reference) (ty : Types.ty) =
   context.laws_assumed <- (trait, ty) :: context.laws_assumed
 
-let assume_laws (context : State.context) frame (trait : Types.trait_reference) (ty : Types.ty) =
+let assume_laws (context : State.context) (frame : State.frame) (trait : Types.trait_reference)
+    (ty : Types.ty) =
   List.iter
     (fun (required : Types.trait_reference) ->
       let key = (required, ty) in

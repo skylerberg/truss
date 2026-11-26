@@ -66,7 +66,7 @@ let assume_extensional (frame : State.frame) (ty : Types.ty) left right =
       | _ -> ())
   | _ -> ()
 
-let make_sequence (context : State.context) frame (ty : Types.ty) ~element values =
+let make_sequence (context : State.context) (frame : State.frame) (ty : Types.ty) ~element values =
   let literal = Encoding.arrive frame "literal" ty in
   let sequence =
     match ty with
@@ -102,7 +102,7 @@ let assume_only_members (frame : State.frame) label sort contains members =
          Logic.( ==> ) (contains (Logic.Symbol each))
            (Logic.disjunction (List.map (Logic.equal (Logic.Symbol each)) members)) ))
 
-let make_set (context : State.context) frame (ty : Types.ty) ~element values =
+let make_set (context : State.context) (frame : State.frame) (ty : Types.ty) ~element values =
   let arguments = [ Types.Type element ] in
   let literal = Encoding.arrive frame "literal" ty in
   let model =
@@ -128,7 +128,8 @@ let make_set (context : State.context) frame (ty : Types.ty) ~element values =
       literal)
     model
 
-let apply_list_literal (context : State.context) frame (site : Invocation.site) values =
+let apply_list_literal (context : State.context) (frame : State.frame) (site : Invocation.site)
+    values =
   let ty = Encoding.substitute_type frame site.type_ in
   let location = Facts.locate frame site.origin in
   let element =
@@ -146,7 +147,8 @@ let apply_list_literal (context : State.context) frame (site : Invocation.site) 
   in
   (frame, literal)
 
-let apply_map_literal (context : State.context) frame ~(ty : Types.ty) ~location terms =
+let apply_map_literal (context : State.context) (frame : State.frame) ~(ty : Types.ty) ~location
+    terms =
   let key_type, value_type =
     match ty with
     | Types.Named { arguments = [ Types.Type key; Types.Type value_type ]; _ } -> (key, value_type)
@@ -157,7 +159,7 @@ let apply_map_literal (context : State.context) frame ~(ty : Types.ty) ~location
       List.iteri
         (fun other (other_key, other_term, _) ->
           if other > index then
-            Obligations.oblige context frame
+            Obligations.oblige frame
               (match other_key with Some origin -> Facts.locate frame origin | None -> location)
               (Duplicate_key { key = Option.map (Facts.quote frame.source) other_key })
               (Logic.not_ (Operations.make_equality context frame key_type key_term other_term)))
@@ -195,7 +197,7 @@ let apply_map_literal (context : State.context) frame ~(ty : Types.ty) ~location
 
 let literal_bytes_limit = 256
 
-let rec make_literal_value (context : State.context) frame (ty : Types.ty)
+let rec make_literal_value (context : State.context) (frame : State.frame) (ty : Types.ty)
     (value : Language.Literal.t) =
   let symbol = Logic.Symbol.Literal { type_ = ty; value } in
   let literal = Logic.Symbol symbol in
@@ -298,7 +300,7 @@ let project_field (context : State.context) (frame : State.frame) ty variant fie
   end;
   part
 
-let evaluate_constant (context : State.context) frame path =
+let evaluate_constant (context : State.context) (frame : State.frame) path =
   match
     ( Contracts.find_source context.environment.lookups path,
       Mir.read_initializer context.environment.lookups.mir path )
@@ -335,7 +337,7 @@ let evaluate_constant (context : State.context) frame path =
       Logic.Symbol symbol
   | _ -> Facts.raise_bug "the constant %s has no initializer" (Path.show path)
 
-let evaluate_field_default (context : State.context) frame ty variant field =
+let evaluate_field_default (context : State.context) (frame : State.frame) ty variant field =
   match (ty, Validity.find_type_source context ty) with
   | Types.Named { path; _ }, Some source -> (
       match Mir.read_defaults context.environment.lookups.mir path with
@@ -358,11 +360,11 @@ let evaluate_field_default (context : State.context) frame ty variant field =
           Facts.raise_bug "a type with no MIR of its defaults")
   | _ -> Facts.raise_bug "a default of %s, which has no source" (Types.show ty)
 
-let check_built (context : State.context) frame (site : Invocation.site) ty term =
+let check_built (context : State.context) (frame : State.frame) (site : Invocation.site) ty term =
   Validity.check_valid context frame (Facts.locate frame site.origin) ty term ~deep:false
     ~moment:Built_here
 
-let apply_construct (context : State.context) frame (site : Invocation.site) variant
+let apply_construct (context : State.context) (frame : State.frame) (site : Invocation.site) variant
     (fields : (string * Logic.term option) list) =
   let ty = Encoding.substitute_type frame site.type_ in
   if Types.equal ty Types.unit then (frame, Logic.Apply (Logic.Symbol.Unit, []))
@@ -433,7 +435,7 @@ let make_log_order left right =
     ==> less_equal (log left) (log right)
     &&& (less_equal right left ==> less_equal (log right) (log left)))
 
-let declare_log (context : State.context) frame log_argument =
+let declare_log (context : State.context) (frame : State.frame) log_argument =
   let rec add log_argument ~halving =
     match List.assoc_opt log_argument context.logs with
     | Some true -> ()
@@ -458,7 +460,7 @@ let declare_log (context : State.context) frame log_argument =
   | _ -> ());
   Logic.Apply (Logic.Symbol.Integer_log, [ log_argument ])
 
-let apply_specification_function (context : State.context) frame ~location
+let apply_specification_function (context : State.context) (frame : State.frame) ~location
     (measure : Core.specification_function) values ~unconverted ~types =
   match (measure, values, unconverted, types) with
   | Log, [ log_argument ], [ unconverted ], _ ->

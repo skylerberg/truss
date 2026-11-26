@@ -24,7 +24,6 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       read_formula =
         (fun frame formula ~arguments -> Reader.read_formula context frame formula ~arguments);
       laws_assumed = [];
-      parameter_names = [];
       local_names = Tables.Local_table.create 16;
       local_origins = Tables.Local_table.create 16;
       returns = [];
@@ -40,7 +39,6 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       lambda_definitions = Tables.Symbol_table.create 8;
       models = Tables.Model_table.create 16;
       equalities = [];
-      entry = [];
       holes = [];
       unfinished = [];
       indexes = [];
@@ -55,11 +53,17 @@ let make_outcome (context : State.context) =
     evaluation = None;
   }
 
+let note_entry (frame : State.frame) term ~name =
+  match term with
+  | Logic.Symbol symbol -> { frame with entry = (symbol, name) :: frame.entry }
+  | _ -> frame
+
 let make_empty_frame (environment : State.environment) (query : Query.t) source =
   {
     State.environment;
     query;
     source;
+    entry = [];
     locals = Locals.empty;
     types = Locals.empty;
     old_locals = Locals.empty;
@@ -215,23 +219,15 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
         | Self ->
             let self_type = Encoding.substitute_type frame parameter.type_ in
             let self = Encoding.arrive frame "self" self_type in
-            (match self with
-            | Logic.Symbol symbol -> context.entry <- symbol :: context.entry
-            | _ -> ());
             Validity.assume_valid context frame ~includes_invariants:(not is_update_step) self_type
               self;
-            { frame with self = Some self; self_type = Some self_type }
+            { (note_entry frame self ~name:None) with self = Some self; self_type = Some self_type }
         | local ->
             let ty = Encoding.substitute_type frame parameter.type_ in
             let name = Facts.read_parameter_name parameter in
             let term = Encoding.arrive frame ("parameter." ^ name) ty in
-            (match term with
-            | Logic.Symbol symbol ->
-                context.parameter_names <- (symbol, name) :: context.parameter_names;
-                context.entry <- symbol :: context.entry
-            | _ -> ());
             Validity.assume_valid context frame ty term;
-            Facts.bind frame (Core_local local) ty term)
+            Facts.bind (note_entry frame term ~name:(Some name)) (Core_local local) ty term)
       {
         (make_empty_frame context.environment context.query source) with
         substitution;
@@ -267,8 +263,8 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
     when condition = []
          && lookups.may_abort context.environment.node
          && Types.states_no_allocation declared.costs ->
-      Obligations.oblige context start Whole_definition
-        (May_not_return_under_no_allocation This_method) (Logic.Boolean false)
+      Obligations.oblige start Whole_definition (May_not_return_under_no_allocation This_method)
+        (Logic.Boolean false)
   | Some _ | None -> ());
   let output = Option.map (Encoding.substitute_type start) output in
   let lends =
@@ -340,7 +336,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
                Validity.read_specification ~holds_when:requirement.holds_when context frame
                  requirement
              in
-             Obligations.oblige ~holds_when:requirement.holds_when context frame
+             Obligations.oblige ~holds_when:requirement.holds_when frame
                (Facts.locate frame requirement.origin)
                (Impl_precondition { clause = Facts.quote source requirement.origin })
                term;
@@ -362,7 +358,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
            (List.fold_left
               (fun frame (requirement : Mir.requirement) ->
                 let frame, term = Validity.read_specification context frame requirement.clause in
-                Obligations.oblige context frame
+                Obligations.oblige frame
                   (Facts.locate frame requirement.clause.origin)
                   (Impl_panic_condition { clause = Facts.quote source requirement.clause.origin })
                   term;
@@ -420,7 +416,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
               in
               Obligations.oblige ~holds_when:ensured.holds_when
                 ~cited:(made_by.callee.key, ensured.origin)
-                context under location
+                under location
                 (Postcondition
                    {
                      clause = Facts.quote made_by.callee ensured.origin;
@@ -495,7 +491,7 @@ let find_circular_contract (lookups : Lookups.t) (source : State.source) ~path =
   match Cycles.list_circular_contracts start with
   | [] -> None
   | circular ->
-      List.iter (Cycles.reject_circular_proof context start) circular;
+      List.iter (Cycles.reject_circular_proof start) circular;
       Some (make_outcome context)
 
 let find_circular_laws (lookups : Lookups.t) (source : State.source) ~path =
@@ -507,7 +503,7 @@ let find_circular_laws (lookups : Lookups.t) (source : State.source) ~path =
   match Cycles.list_circular_laws start with
   | [] -> None
   | circular ->
-      List.iter (Cycles.reject_circular_proof context start) circular;
+      List.iter (Cycles.reject_circular_proof start) circular;
       Some (make_outcome context)
 
 let translate_function ?(substitution = Types.no_substitution) (lookups : Lookups.t)
@@ -626,7 +622,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
                proofs)
         in
         let _, holds = Validity.read_specification context inside law.states in
-        Obligations.oblige context start at (Law_may_fail { trait; law = law.name; for_type }) holds
+        Obligations.oblige start at (Law_may_fail { trait; law = law.name; for_type }) holds
       end)
     (Laws.list_laws context.environment trait.trait);
   make_outcome context
@@ -769,7 +765,7 @@ let prove_restated_method (context : State.context) (start : State.frame) ~at ~i
               (fun (clause : Mir.formula) ->
                 if is_checked clause then
                   let _, term = Validity.read_specification context ensuring clause in
-                  Obligations.oblige context after location
+                  Obligations.oblige after location
                     (Restated_contract
                        {
                          for_type;
@@ -868,7 +864,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
             defaults
       | Some { form = Parameter_defaults _; _ } | None -> ());
       match Cycles.list_circular_clauses start ~type_:ty with
-      | _ :: _ as circular -> List.iter (Cycles.reject_circular_proof context start) circular
+      | _ :: _ as circular -> List.iter (Cycles.reject_circular_proof start) circular
       | [] ->
           let value_ = Encoding.arrive start "value" ty in
           Facts.assume start
@@ -883,7 +879,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
           Option.iter
             (fun (written : Mir.formula) ->
               let _, potential_term = Validity.read_specification context at_value written in
-              Obligations.oblige context at_value
+              Obligations.oblige at_value
                 (Facts.locate at_value written.origin)
                 (Negative_potential { type_ = ty })
                 (Logic.less_equal (Logic.int 0) potential_term))
@@ -900,7 +896,7 @@ let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
   match Mir.read_initializer lookups.mir path with
   | Some { form = code; _ } ->
       let frame = make_empty_frame context.environment context.query source in
-      Cycles.reject_constant_cycle context frame code;
+      Cycles.reject_constant_cycle frame code;
       ignore
         (Lambdas.run_code context frame code
            ~type_:
