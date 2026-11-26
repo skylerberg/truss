@@ -1,4 +1,4 @@
-fn apply(change: fn(Bool) -> Bool, value: Bool) -> Bool
+fn apply(change: (fn(Bool) -> Bool cost allocations == 0), value: Bool) -> Bool
   ensures result == change(value)
 {
   change(value)

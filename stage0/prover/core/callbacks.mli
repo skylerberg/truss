@@ -64,7 +64,6 @@ val read_named_function :
   is_argument:bool ->
   Logic.term
 
-val find_known : State.context -> Logic.term -> State.known_function option
 val check_read : State.context -> State.frame -> Logic.term -> unit
 
 val check_passed :

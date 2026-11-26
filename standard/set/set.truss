@@ -35,8 +35,7 @@ fn Set[Element: Hash + Ordered].position_of(self, element: Element) -> UInt64
   ensures forall i in 0..self.map.keys.length() => i == result || !(self.map.keys.model()[i] == element)
   ensures (result < self.map.keys.length()) == contains_equal(self.model(), value: element)
   cost time O(time(Element.hash) + time(Element.equal) + (1 + log(self.length())) * (1 + time(Element.compare)))
-  cost allocations <= allocations(Element.hash) + 16 * allocations(Element.equal)
-    + (2 * log(self.length()) + 2) * allocations(Element.compare)
+  cost allocations == 0
 {
   let position = self.map.index_of(element)
   proof {
@@ -48,8 +47,7 @@ fn Set[Element: Hash + Ordered].position_of(self, element: Element) -> UInt64
 public fn Set[Element: Hash + Ordered].contains(self, element: Element) -> Bool
   ensures result == contains_equal(self.model(), value: element)
   cost time O(time(Element.hash) + time(Element.equal) + (1 + log(self.length())) * (1 + time(Element.compare)))
-  cost allocations <= allocations(Element.hash) + 16 * allocations(Element.equal)
-    + (2 * log(self.length()) + 2) * allocations(Element.compare)
+  cost allocations == 0
 {
   self.position_of(element) < self.map.keys.length()
 }
@@ -234,8 +232,7 @@ fn Set[Element: Hash + Ordered].missing_from(self, other: Set[Element]) -> UInt6
   ensures result < self.map.keys.length() ==> !other.contains(self.map.keys.model()[result])
   cost time O(1 + self.length() * (1 + time(Element.hash) + time(Element.equal)
     + (1 + log(other.length())) * (1 + time(Element.compare))))
-  cost allocations <= self.length() * (allocations(Element.hash) + 16 * allocations(Element.equal)
-    + (2 * log(other.length()) + 2) * allocations(Element.compare))
+  cost allocations == 0
 {
   var index: UInt64 = 0
   while index < self.map.keys.length()
@@ -244,8 +241,7 @@ fn Set[Element: Hash + Ordered].missing_from(self, other: Set[Element]) -> UInt6
     decreases self.map.keys.length() - index
     cost time O(index * (1 + time(Element.hash) + time(Element.equal)
       + (1 + log(other.length())) * (1 + time(Element.compare))))
-    cost allocations <= index * (allocations(Element.hash) + 16 * allocations(Element.equal)
-      + (2 * log(other.length()) + 2) * allocations(Element.compare))
+    cost allocations == 0
   {
     if !other.contains(self.map.keys[index]) {
       return index
@@ -273,8 +269,7 @@ public fn Set[Element: Hash + Ordered].is_subset_of(self, other: Set[Element]) -
     self.model().contains(value) ==> contains_equal(other.model(), value: value))
   cost time O(1 + self.length() * (1 + time(Element.hash) + time(Element.equal)
     + (1 + log(other.length())) * (1 + time(Element.compare))))
-  cost allocations <= self.length() * (allocations(Element.hash) + 16 * allocations(Element.equal)
-    + (2 * log(other.length()) + 2) * allocations(Element.compare))
+  cost allocations == 0
 {
   let missing = self.missing_from(other)
   proof {
@@ -290,8 +285,7 @@ public fn Set[Element: Hash + Ordered].is_superset_of(self, other: Set[Element])
     other.model().contains(value) ==> contains_equal(self.model(), value: value))
   cost time O(1 + other.length() * (1 + time(Element.hash) + time(Element.equal)
     + (1 + log(self.length())) * (1 + time(Element.compare))))
-  cost allocations <= other.length() * (allocations(Element.hash) + 16 * allocations(Element.equal)
-    + (2 * log(self.length()) + 2) * allocations(Element.compare))
+  cost allocations == 0
 {
   other.is_subset_of(self)
 }
@@ -301,8 +295,7 @@ public fn Set[Element: Hash + Ordered].is_disjoint_from(self, other: Set[Element
     self.model().contains(value) ==> !contains_equal(other.model(), value: value))
   cost time O(1 + self.length() * (1 + time(Element.hash) + time(Element.equal)
     + (1 + log(other.length())) * (1 + time(Element.compare))))
-  cost allocations <= self.length() * (allocations(Element.hash) + 16 * allocations(Element.equal)
-    + (2 * log(other.length()) + 2) * allocations(Element.compare))
+  cost allocations == 0
 {
   var index: UInt64 = 0
   while index < self.map.keys.length()
@@ -311,8 +304,7 @@ public fn Set[Element: Hash + Ordered].is_disjoint_from(self, other: Set[Element
     decreases self.map.keys.length() - index
     cost time O(index * (1 + time(Element.hash) + time(Element.equal)
       + (1 + log(other.length())) * (1 + time(Element.compare))))
-    cost allocations <= index * (allocations(Element.hash) + 16 * allocations(Element.equal)
-      + (2 * log(other.length()) + 2) * allocations(Element.compare))
+    cost allocations == 0
   {
     if other.contains(self.map.keys[index]) {
       proof {
@@ -425,8 +417,7 @@ impl Equal for Set[Element: Hash + Ordered] {
       && forall element: Element => self.contains(element) == other.contains(element))
     cost time O(1 + self.length() * (1 + time(Element.hash) + time(Element.equal)
       + (1 + log(self.length())) * (1 + time(Element.compare))))
-    cost allocations <= 2 * self.length() * (allocations(Element.hash) + 16 * allocations(Element.equal)
-      + (2 * log(self.length()) + 2) * allocations(Element.compare))
+    cost allocations == 0
   {
     if self.map.keys.length() != other.map.keys.length() {
       return false

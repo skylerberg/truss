@@ -2,6 +2,7 @@ use standard.core
 
 public fn Range[Value: Ordered].is_empty(self) -> Bool
   ensures result == (if self.inclusive { self.start > self.stop } else { self.start >= self.stop })
+  cost allocations == 0
 {
   if self.inclusive { self.start > self.stop } else { self.start >= self.stop }
 }
@@ -122,6 +123,7 @@ impl Iterable for Stepped[Value: core.Countable] {
 
 public fn Range[Value: core.Countable].length(self) -> Option[UInt64]
   cost time O(1)
+  cost allocations == 0
 {
   match self.start.steps_to(self.stop) {
     Some(count) => if self.inclusive { count.checked_add(1) } else { Some(count) }

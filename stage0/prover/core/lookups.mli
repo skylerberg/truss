@@ -4,6 +4,5 @@ type t = {
   list_must_be_disjoint : Resolve.Names.key -> (Core.id list * Core.id list) list;
   list_recursion_group : Path.t -> Path.t list;
   may_abort : Path.t -> bool;
-  list_bound_methods_run : Path.t -> Path.t list;
   list_proof_group : Path.t -> Path.t list;
 }

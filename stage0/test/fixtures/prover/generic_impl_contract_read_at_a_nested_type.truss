@@ -1,6 +1,7 @@
 trait Size {
   fn size(self) -> Int64
     ensures result >= 0 && result <= 10
+    cost allocations == 0
 }
 
 type Leaf(x: Int64)

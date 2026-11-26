@@ -1049,20 +1049,39 @@ let () =
       expect_may_abort "fn no_elements() -> List[UInt64] {\n  []\n}\n" ~of_:"no_elements"
         ~expected:false;
       expect_may_abort source ~of_:"named_in_a_theorem" ~expected:false;
-      let held =
-        "type Holder(read: fn() -> List[UInt64])\n\n\
-         fn read_from_a_field(holder: Holder) -> UInt64 {\n\
-        \  let read = holder.read\n\
-        \  read().length()\n\
-         }\n\n\
-         fn read_from_a_parameter(read: fn() -> List[UInt64]) -> UInt64 {\n\
-        \  read().length()\n\
-         }\n"
-      in
-      expect_may_abort held ~of_:"read_from_a_field" ~expected:true;
-      expect_may_abort held ~of_:"read_from_a_parameter" ~expected:false;
       expect_may_abort source ~of_:"named_in_a_proof" ~expected:false;
       expect_may_abort source ~of_:"named_in_an_invariant" ~expected:false);
+  Harness.test
+    "a call through a bound or of a function value is an abort site unless it states no allocation"
+    (fun () ->
+      let source =
+        "trait Measured {\n\
+        \  fn size(self) -> UInt64\n\n\
+        \  fn width(self) -> UInt64\n\
+        \    cost allocations == 0\n\
+         }\n\n\
+         fn size_of[Item: Measured](item: Item) -> UInt64 {\n\
+        \  item.size()\n\
+         }\n\n\
+         fn width_of[Item: Measured](item: Item) -> UInt64 {\n\
+        \  item.width()\n\
+         }\n\n\
+         fn length_read(read: fn() -> List[UInt64]) -> UInt64 {\n\
+        \  read().length()\n\
+         }\n\n\
+         fn length_read_without_allocating(read: (fn() -> List[UInt64] cost allocations == 0)) -> \
+         UInt64 {\n\
+        \  read().length()\n\
+         }\n\n\
+         fn count_read(read: fn() -> UInt64) -> UInt64 {\n\
+        \  read()\n\
+         }\n"
+      in
+      expect_may_abort source ~of_:"size_of" ~expected:true;
+      expect_may_abort source ~of_:"width_of" ~expected:false;
+      expect_may_abort source ~of_:"length_read" ~expected:true;
+      expect_may_abort source ~of_:"length_read_without_allocating" ~expected:false;
+      expect_may_abort source ~of_:"count_read" ~expected:true);
   Harness.test "a recursion group may abort where one member allocates" (fun () ->
       let source =
         "fn first(count: UInt64, items: mut List[Int64]) {\n\

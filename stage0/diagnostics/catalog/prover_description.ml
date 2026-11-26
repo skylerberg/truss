@@ -649,8 +649,8 @@ let describe_withheld = function
               (fun callee -> [ Description.Text ("`" ^ Build.show_callee callee ^ "`") ])
               callees)
       @ say
-          ", since the call may not return: the function, or code supplied to it, may run out of \
-           memory."
+          ", since the call may not return: the function may run out of memory, or it calls a \
+           method of a bound or a function value that does not state `cost allocations == 0`."
 
 let advise_other_ways : Diagnostic.Code.prover -> _ = function
   | Overflow | Division | Shift ->

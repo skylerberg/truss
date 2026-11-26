@@ -41,3 +41,15 @@ fn given_a_lambda() -> UInt64 {
     width
   })
 }
+
+trait Shown {
+  fn shown(self) -> UInt64
+    cost allocations == 0
+  {
+    intrinsic.crash("never shown")
+  }
+}
+
+type Flat(width: UInt64)
+
+impl Shown for Flat {}

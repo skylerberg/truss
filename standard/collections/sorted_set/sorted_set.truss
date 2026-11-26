@@ -39,7 +39,7 @@ fn collections.SortedSet[Element: Ordered].search(self, element: Element) -> Res
       && (forall i in index..self.elements.length() => element < self.elements.model()[i])
   }
   cost time O(log(self.elements.length()) * time(Element.compare))
-  cost allocations <= log(self.elements.length()) * allocations(Element.compare)
+  cost allocations == 0
 {
   var low: UInt64 = 0
   var high = self.elements.length()
@@ -50,7 +50,7 @@ fn collections.SortedSet[Element: Ordered].search(self, element: Element) -> Res
     invariant forall i in high..self.elements.length() => element < self.elements.model()[i]
     decreases high - low
     cost time O((log(self.elements.length()) - log(high - low)) * time(Element.compare))
-    cost allocations <= (log(self.elements.length()) - log(high - low)) * allocations(Element.compare)
+    cost allocations == 0
   {
     let middle = low + (high - low) / 2
     match self.elements[middle].compare(element) {
@@ -339,7 +339,7 @@ public fn collections.SortedSet[Element: Ordered].is_empty(self) -> Bool
 public fn collections.SortedSet[Element: Ordered].contains(self, element: Element) -> Bool
   ensures result == (self.search(element) is Ok(_))
   cost time O(log(self.length()) * time(Element.compare))
-  cost allocations <= log(self.length()) * allocations(Element.compare)
+  cost allocations == 0
 {
   self.search(element) is Ok(_)
 }
@@ -690,7 +690,7 @@ impl Equal for collections.SortedSet[Element: Ordered] {
   fn equal(self, other: collections.SortedSet[Element]) -> Bool
     ensures result == (self.elements == other.elements)
     cost time O(self.length() * time(Element.equal))
-    cost allocations <= self.length() * allocations(Element.equal)
+    cost allocations == 0
   {
     self.elements == other.elements
   }
@@ -700,7 +700,7 @@ impl Hash for collections.SortedSet[Element: Ordered + Hash] {
   fn hash(self, hasher: Hasher) -> Hasher
     ensures identical(result, self.elements.hash(hasher))
     cost time O(self.length() * time(Element.hash))
-    cost allocations <= self.length() * allocations(Element.hash)
+    cost allocations == 0
   {
     self.elements.hash(hasher)
   }

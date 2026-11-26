@@ -74,10 +74,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
     (definition : Callee.definition) (contract : State.contract) (values : State.passed list)
     ~recursive_callee =
   let path = definition.path and type_arguments = definition.type_arguments in
-  let may_abort =
-    Callee.may_abort context definition
-    || Supplied.may_abort context callee definition contract values
-  in
+  let may_abort = Callee.may_abort context definition in
   let is_unspecified_application =
     may_abort && ((frame : State.frame).is_ghost || (context : State.context).is_specification)
   in
