@@ -1,3 +1,6 @@
+let make_state () : State.validity_state =
+  { validating = []; type_clauses = Tables.Path_table.create 16 }
+
 let find_selected_place (context : State.context) selection =
   let shift offset : State.place_value -> State.place_value = function
     | One index -> One (Logic.add offset index)
@@ -153,7 +156,7 @@ let make_type_frame context frame source (ty : Types.ty) ~self =
 let find_type_declaration (context : State.context) (ty : Types.ty) =
   match ty with
   | Types.Named { path; _ } -> (
-      match Tables.Path_table.find_opt context.type_clauses path with
+      match Tables.Path_table.find_opt context.validity.type_clauses path with
       | Some declaration -> declaration
       | None ->
           let declaration =
@@ -168,7 +171,7 @@ let find_type_declaration (context : State.context) (ty : Types.ty) =
                 (Contracts.find_source context.lookups path)
             else None
           in
-          Tables.Path_table.replace context.type_clauses path declaration;
+          Tables.Path_table.replace context.validity.type_clauses path declaration;
           declaration)
   | _ -> None
 
@@ -220,12 +223,12 @@ let apply_opaque_validity context ty term =
 
 let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
     ?(includes_invariants = true) ?(seen = []) ty term =
-  if List.exists (Types.equal ty) seen || List.exists (Types.equal ty) context.validating then
-    Logic.Boolean true
+  if List.exists (Types.equal ty) seen || List.exists (Types.equal ty) context.validity.validating
+  then Logic.Boolean true
   else
-    let validating = context.validating in
-    context.validating <- ty :: validating;
-    Fun.protect ~finally:(fun () -> context.validating <- validating) @@ fun () ->
+    let validating = context.validity.validating in
+    context.validity.validating <- ty :: validating;
+    Fun.protect ~finally:(fun () -> context.validity.validating <- validating) @@ fun () ->
     let invariants_hold =
       match find_invariants context ty with
       | _ when not includes_invariants -> Logic.Boolean true
@@ -305,6 +308,11 @@ let rec find_parts_in_range context ?(seen = []) ty term =
 let assume_valid ?includes_invariants context frame ty term =
   Facts.assume context frame
     (make_validity context frame ~assuming:true ?includes_invariants ty term)
+
+let check_valid ?includes_invariants context frame location ty term ~deep ~moment =
+  match make_validity context frame ~assuming:false ~deep ?includes_invariants ty term with
+  | Logic.Boolean true -> ()
+  | valid -> Facts.oblige context frame location (Invariant_may_fail { type_ = ty; moment }) valid
 
 let declare_callback_arguments context frame inputs =
   List.map

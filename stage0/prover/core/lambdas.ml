@@ -448,11 +448,6 @@ let find_lambda_definition context frame (function_type : Types.function_type)
       | _ -> None)
   | _ -> None
 
-let check_valid ?includes_invariants context frame location ty term ~deep ~moment =
-  match Validity.make_validity context frame ~assuming:false ~deep ?includes_invariants ty term with
-  | Logic.Boolean true -> ()
-  | valid -> Facts.oblige context frame location (Invariant_may_fail { type_ = ty; moment }) valid
-
 let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : Invocation.site)
     (written : State.lambda_code) ~list_facts ~list_promises =
   let location = Facts.locate context frame.source site.origin in
@@ -536,7 +531,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
           (fun ((exit_ : State.frame), returned) ->
             Option.iter
               (fun term ->
-                check_valid context exit_ location
+                Validity.check_valid context exit_ location
                   (Facts.substitute_type context frame function_type.output)
                   term ~deep:true ~moment:Lambda_result)
               returned;
@@ -546,7 +541,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                 | Language.Mode.Mut, Source { local; _ } -> (
                     match Locals.find_opt (Core_local local) exit_.locals with
                     | Some term ->
-                        check_valid context exit_ location
+                        Validity.check_valid context exit_ location
                           (Facts.substitute_type context frame input)
                           term ~deep:true ~moment:Lambda_mut_parameter
                     | None -> ())

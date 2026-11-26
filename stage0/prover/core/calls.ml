@@ -373,7 +373,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let check_left () =
     match left_valid with
     | Some (_, leave) ->
-        Lambdas.check_valid context after location result_type (leave result) ~deep:true
+        Validity.check_valid context after location result_type (leave result) ~deep:true
           ~moment:When_lend_ends
     | None -> ()
   in
@@ -531,7 +531,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
   | _ ->
       List.iter
         (fun (passed : State.passed) ->
-          Lambdas.check_valid context frame location passed.type_ passed.term ~deep:true
+          Validity.check_valid context frame location passed.type_ passed.term ~deep:true
             ~includes_invariants:(not (is_update_step && passed.position = 0))
             ~moment:(When_passed { at = location; callee = None }))
         values);

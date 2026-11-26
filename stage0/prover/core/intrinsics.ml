@@ -617,7 +617,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       let built =
         Logic.Apply (Facts.make_constructor_symbol result_type None, [ read_operand 0 ])
       in
-      Lambdas.check_valid context frame
+      Validity.check_valid context frame
         (Facts.locate context frame.source site.origin)
         result_type built ~deep:false ~moment:Built_here;
       built

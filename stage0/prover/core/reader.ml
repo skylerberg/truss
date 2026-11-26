@@ -228,7 +228,7 @@ let write_resolved context frame run (place : Mir.place) new_value =
             (match rest with
             | [] -> ()
             | _ :: _ ->
-                Lambdas.check_valid context frame
+                Validity.check_valid context frame
                   (Facts.locate context frame.source origin)
                   part_type element ~deep:true ~moment:Element_changed);
             let after =
@@ -633,7 +633,7 @@ let lend_part context (frame : State.frame) origin (mode : Language.Mode.t) ~han
             (Lent_part_ensures { clause = Facts.quote frame.source clause.origin })
             term)
         part_postconditions;
-      Lambdas.check_valid context frame location part_type handed ~deep:true ~moment:Part_lent;
+      Validity.check_valid context frame location part_type handed ~deep:true ~moment:Part_lent;
       let frame, part_after =
         if mode = Language.Mode.Mut && lends then
           let part_after = Facts.arrive context frame "lent" part_type in
@@ -994,16 +994,10 @@ and read_statement context frame run (statement : Mir.statement) =
       let read =
         read_providing context run provided ~refresh (fun () -> read_block context frame run body)
       in
-      write_assignment context run target ~copied:(Option.to_list body.value)
+      write_assignment context run target
         (Option.map (fun (after, term) -> (refresh after, term)) read)
   | Choose { target; choice } ->
-      let copied =
-        match choice with
-        | Conditional { then_; else_; _ } -> List.filter_map Fun.id [ then_.value; else_.value ]
-        | Cases cases -> List.filter_map (fun (case : Mir.case) -> case.value.value) cases
-        | Connective _ -> []
-      in
-      write_assignment context run target ~copied (read_choice context frame run choice)
+      write_assignment context run target (read_choice context frame run choice)
   | Yield { mode; part } ->
       let origin = statement.origin in
       let frame, handed = read_yielded_value context frame run ~origin part in
@@ -1357,16 +1351,15 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
         read_rvalue context frame run value
           ~site:{ origin = statement.origin; type_ = compute_target_type context frame run target }
       in
-      let copied = match value with Operand copied -> [ copied ] | _ -> [] in
       match target with
       | { root = Local held; projections = [] } -> (
           match find_held_callback context run held value with
           | Some core ->
               Hashtbl.replace run.held_callbacks held core;
-              write_assignment context run target ~copied
+              write_assignment context run target
                 (Some (Validity.run_reading_callback context read))
-          | None -> write_assignment context run target ~copied (Some (read ())))
-      | _ -> write_assignment context run target ~copied (Some (read ())))
+          | None -> write_assignment context run target (Some (read ())))
+      | _ -> write_assignment context run target (Some (read ())))
   | Call { destination; call } -> read_call_statement context frame run ~destination call
   | Live _ | Loan_start _ | Loan_end _ | Echo _ -> Some frame
   | Dead locals ->
@@ -1379,7 +1372,7 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
             | ( { kind = (Source { is_var = true; _ } | Temporary) as kind; type_; origin; _ },
                 Some term )
               when Hashtbl.mem run.changed_in_place local ->
-                Lambdas.check_valid context frame
+                Validity.check_valid context frame
                   (Facts.locate context frame.source origin)
                   (Facts.substitute_type context frame type_)
                   term ~deep:true
@@ -1514,12 +1507,7 @@ and read_call_statement context frame run ~destination (call : Mir.call) =
       | None -> Some after)
   | None -> None
 
-and write_assignment context run (target : Mir.place) ~(copied : Mir.operand list) read =
-  let copied =
-    match List.sort_uniq compare (List.map find_whole_local copied) with
-    | [ Some source ] -> Some source
-    | _ -> None
-  in
+and write_assignment context run (target : Mir.place) read =
   let* frame, term = read in
   (match target.root with
   | Local local -> (
@@ -1532,7 +1520,6 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
             run.infos.(local).origin
       | Source _ | Temporary | Lent _ -> ())
   | Constant _ | Literal _ -> ());
-  ignore copied;
   Some (write_place context frame run target term)
 
 let make_run ~locals ~lambdas =

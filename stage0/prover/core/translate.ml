@@ -27,7 +27,6 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       definitions = Tables.Symbol_table.create 8;
       datatypes = Tables.Type_table.create 16;
       visible_types = Tables.Type_table.create 16;
-      type_clauses = Tables.Path_table.create 16;
       callees = Tables.Path_table.create 16;
       stated = Tables.Stated_table.create 64;
       facts = Fact_list.empty;
@@ -46,6 +45,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       callees_whose_requires_are_read = [];
       axioms = Contract_axioms.make_state ();
       termination = Termination.make_state ~terminates ~measures;
+      validity = Validity.make_state ();
       lending = None;
       callbacks = [];
       cost = Counters.make_state ();
@@ -60,7 +60,6 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       holes = [];
       unfinished = [];
       reading_callback = false;
-      validating = [];
       ranking = terminates && measures = [] && lookups.list_recursion_group node <> [];
       disjoint = lookups.list_must_be_disjoint home;
       indexes = [];
@@ -453,7 +452,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
       let exit_location = Facts.locate context frame.source return_origin in
       (match (returned, output) with
       | Some term, Some output ->
-          Lambdas.check_valid context frame exit_location output term ~deep:true
+          Validity.check_valid context frame exit_location output term ~deep:true
             ~moment:Returned_value
       | _ -> ());
       List.iter
@@ -463,13 +462,13 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
               Facts.find_local_type context frame (Core_local parameter.local) )
           with
           | Some term, Some ty ->
-              Lambdas.check_valid context frame exit_location ty term ~deep:true
+              Validity.check_valid context frame exit_location ty term ~deep:true
                 ~moment:(Mut_parameter_at_return (Facts.read_parameter_name parameter))
           | _ -> ())
         mut_parameters;
       (match (mut_self, frame.self, frame.self_type) with
       | true, Some self, Some self_type ->
-          Lambdas.check_valid context frame exit_location self_type self ~deep:true
+          Validity.check_valid context frame exit_location self_type self ~deep:true
             ~includes_invariants:(not is_update_step) ~moment:Self_at_return
       | _ -> ());
       (match (context.lending, frame.yielded_so_far) with

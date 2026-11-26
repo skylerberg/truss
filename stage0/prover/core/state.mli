@@ -152,6 +152,11 @@ type termination_state = {
   mutable definition_entry : definition_entry option;
 }
 
+type validity_state = {
+  mutable validating : Types.ty list;
+  type_clauses : (source * Mir.type_clauses option Lazy.t) option Tables.Path_table.t;
+}
+
 type context = {
   lookups : Lookups.t;
   current : Path.t;
@@ -162,7 +167,6 @@ type context = {
   definitions : unit Tables.Symbol_table.t;
   datatypes : unit Tables.Type_table.t;
   visible_types : (Types.type_interface * Types.substitution) option Tables.Type_table.t;
-  type_clauses : (source * Mir.type_clauses option Lazy.t) option Tables.Path_table.t;
   callees : known_callee Tables.Path_table.t;
   stated : unit Tables.Stated_table.t;
   mutable facts : Fact_list.t;
@@ -177,6 +181,7 @@ type context = {
   mutable callees_whose_requires_are_read : Path.t list;
   axioms : axiom_state;
   termination : termination_state;
+  validity : validity_state;
   disjoint : (Core.id list * Core.id list) list;
   mutable indexes : (Core.id * noted_place) list;
   mutable lending : lending option;
@@ -199,7 +204,6 @@ type context = {
   quantifier_facts : Logic.term list Tables.Term_table.t;
   written_quantifiers : unit Tables.Term_table.t;
   mutable quantifier_symbols : Logic.symbol list;
-  mutable validating : Types.ty list;
   condition : Types.condition;
   bounds : Interface.Impls.bounds;
   keeps_termination : bool;

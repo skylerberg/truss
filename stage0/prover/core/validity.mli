@@ -1,3 +1,5 @@
+val make_state : unit -> State.validity_state
+
 val note_place :
   State.context -> State.frame -> node:Core.id -> origin:Core.origin -> State.place_value -> unit
 
@@ -49,6 +51,17 @@ val find_parts_in_range :
 
 val assume_valid :
   ?includes_invariants:bool -> State.context -> State.frame -> Types.ty -> Logic.term -> unit
+
+val check_valid :
+  ?includes_invariants:bool ->
+  State.context ->
+  State.frame ->
+  Obligation.location ->
+  Types.ty ->
+  Logic.term ->
+  deep:bool ->
+  moment:Catalog.Prover.invariant_moment ->
+  unit
 
 val declare_callback_arguments :
   State.context -> State.frame -> ('a * Types.ty) list -> Logic.term list

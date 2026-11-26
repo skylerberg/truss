@@ -415,7 +415,7 @@ let evaluate_field_default context frame ty variant field =
   | _ -> Facts.raise_bug "a default of %s, which has no source" (Types.show ty)
 
 let check_built context frame (site : Invocation.site) ty term =
-  Lambdas.check_valid context frame
+  Validity.check_valid context frame
     (Facts.locate context frame.source site.origin)
     ty term ~deep:false ~moment:Built_here
 
