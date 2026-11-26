@@ -34,32 +34,6 @@ let make_declaration (trait : Types.trait_reference) (declared : Types.trait_met
   Path.Method
     { owner = trait.trait; name = declared.method_name; receiver = declared.method_receiver }
 
-let judge_method (context : State.context) ~is_restated (trait : Types.trait_reference)
-    (declared : Types.trait_method) =
-  let declaration = make_declaration trait declared in
-  match Contracts.read_signature context declaration with
-  | None -> { teaches = true; states_no_allocation = false }
-  | Some signature ->
-      let states_ensures =
-        match Contracts.find_callee_clauses context declaration with
-        | Some clauses -> clauses.ensures <> []
-        | None -> false
-      in
-      let has_default_that_returns =
-        declared.provided && not (context.lookups.may_abort declaration)
-      in
-      {
-        teaches =
-          is_restated declared
-          || (not has_default_that_returns)
-             && (states_ensures
-                ||
-                match signature.output with
-                | Lends _ -> true
-                | Returns output -> not (has_valid_value context output));
-        states_no_allocation = Costs.states_no_allocation signature.costs;
-      }
-
 let deepest_supplied_bound = 8
 
 let rec bound_may_abort (context : State.context) ?(depth = 0) ?(entered = []) ~bound_methods_run
@@ -76,11 +50,44 @@ let rec bound_may_abort (context : State.context) ?(depth = 0) ?(entered = []) ~
           (Interface.Definition.read_trait_interface interface required.trait).restated)
       closure
   in
+  let may_abort_below ~entered ~bound_methods_run =
+    bound_may_abort context ~depth:(depth + 1) ~entered ~bound_methods_run
+  in
+  let judge required (method_ : Types.trait_method) =
+    let declaration = make_declaration required method_ in
+    match Contracts.read_signature context declaration with
+    | None -> { teaches = true; states_no_allocation = false }
+    | Some signature ->
+        let states_ensures =
+          match Contracts.find_callee_clauses context declaration with
+          | Some clauses -> clauses.ensures <> []
+          | None -> false
+        in
+        let has_default_that_returns () =
+          method_.provided
+          && (not (context.lookups.may_abort declaration))
+          && (not (List.exists (Path.equal declaration) entered))
+          && not
+               (may_abort_below ~entered:(declaration :: entered)
+                  ~bound_methods_run:(context.lookups.list_bound_methods_run declaration)
+                  (type_, required))
+        in
+        {
+          teaches =
+            is_restated method_
+            || (states_ensures
+               ||
+               match signature.output with
+               | Lends _ -> true
+               | Returns output -> not (has_valid_value context output))
+               && not (has_default_that_returns ());
+          states_no_allocation = Costs.states_no_allocation signature.costs;
+        }
+  in
   depth > deepest_supplied_bound
   || List.exists
        (fun (required : Types.trait_reference) ->
          let declared = Interface.Definition.read_trait_interface interface required.trait in
-         let judge = judge_method context ~is_restated required in
          let run =
            List.filter
              (fun method_ ->
@@ -98,7 +105,7 @@ let rec bound_may_abort (context : State.context) ?(depth = 0) ?(entered = []) ~
              in
              List.exists
                (fun bound ->
-                 bound_may_abort context ~depth:(depth + 1) ~entered ~bound_methods_run
+                 may_abort_below ~entered ~bound_methods_run
                    (chosen, Types.substitute_trait_erased substitution bound))
                associated.associated_bounds)
            declared.associated_types
@@ -118,11 +125,11 @@ let rec bound_may_abort (context : State.context) ?(depth = 0) ?(entered = []) ~
                         supplied method_)
                      ~default:(make_declaration required method_)
                  in
-                 ((judge method_).teaches && context.lookups.may_abort code)
+                 ((judge required method_).teaches && context.lookups.may_abort code)
                  || (not (List.exists (Path.equal code) entered))
                     &&
                     let below =
-                      bound_may_abort context ~depth:(depth + 1) ~entered:(code :: entered)
+                      may_abort_below ~entered:(code :: entered)
                         ~bound_methods_run:(context.lookups.list_bound_methods_run code)
                     in
                     below (type_, required)
@@ -135,7 +142,7 @@ let rec bound_may_abort (context : State.context) ?(depth = 0) ?(entered = []) ~
          | Some (Evidence Bound | Accepted _) | None ->
              List.exists
                (fun method_ ->
-                 let judged = judge method_ in
+                 let judged = judge required method_ in
                  judged.teaches && not judged.states_no_allocation)
                run)
        closure

@@ -73,3 +73,53 @@ fn at_an_associated_type(bag: Bag) -> UInt64 {
   }
   bag.big.size
 }
+
+trait Shown {
+  fn count(self) -> UInt64
+
+  fn text(self) -> String
+    ensures result.length() == self.count()
+
+  fn shown(self) -> String
+    ensures result.length() == self.count()
+  {
+    self.text()
+  }
+}
+
+type Tall(size: UInt64)
+
+impl Shown for Tall {
+  fn count(self) -> UInt64
+    ensures result == self.size
+  {
+    self.size
+  }
+
+  fn text(self) -> String
+    ensures result.length() == self.count()
+  {
+    "a".repeated(self.size)
+  }
+}
+
+fn shown_length[Item: Shown](item: Item) -> UInt64
+  ensures result <= 9223372036854775807
+  ensures result == item.count()
+{
+  item.shown().length()
+}
+
+fn at_an_impl_whose_default_runs_it(tall: Tall) -> UInt64 {
+  proof {
+    assert shown_length(tall) == tall.size
+  }
+  tall.size
+}
+
+fn at_a_bound_whose_default_runs_it[Item: Shown](item: Item) -> UInt64 {
+  proof {
+    assert shown_length(item) == item.count()
+  }
+  item.count()
+}

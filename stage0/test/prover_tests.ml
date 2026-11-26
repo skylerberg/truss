@@ -1869,7 +1869,7 @@ let () =
   Harness.test "a specification learns nothing from a generic function whose bound's method aborts"
     (fun () ->
       expect_codes Fixtures.Prover.specification_naming_a_generic_function_whose_bound_aborts
-        [ "prover.assertion"; "prover.assertion"; "prover.assertion" ]);
+        (List.init 5 (fun _ -> "prover.assertion")));
   Harness.test "a specification learns nothing from a function given a function that may abort"
     (fun () ->
       expect_codes Fixtures.Prover.specification_naming_a_function_given_a_function_that_aborts
