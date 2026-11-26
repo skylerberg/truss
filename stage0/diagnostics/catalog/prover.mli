@@ -126,6 +126,7 @@ type obligation =
   | Float_conversion of { at : quoted; target : Types.ty }
   | Not_a_scalar_value of { at : quoted }
   | Unreachable_reached
+  | May_not_return_under_no_allocation of { function_ : Path.t option }
   | Cost_promise of promise
   | Impl_precondition of { clause : quoted }
   | Impl_panic_condition of { clause : quoted }

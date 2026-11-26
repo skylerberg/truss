@@ -243,6 +243,17 @@ develop as well as make it easier to bootstrap the compiler in parts.
   A storage of capacity zero allocates nothing, so the call that builds one,
   which an empty list literal makes, is no abort site.
 
+  Where no code is known, `cost allocations == 0` stands for "returns": at a
+  bound of the enclosing definition and at a function value that is no
+  lambda and no named function. Two obligations make that hold of code
+  that could reach `intrinsic.crash`, which allocates nothing: an `impl`
+  method whose trait states the clause for it, and a function that states
+  it and is named as a value, are rejected where their `may_abort` holds.
+  The call of a function value that is no parameter of its definition has no
+  call site that judges the value, so it is an abort site of the definition
+  where the function's result type has no value that is valid without a
+  condition, since the call assumes that the result is valid.
+
   `Query.note_withheld` records each call whose contract a specification
   did not learn, by the symbol of its function. An obligation keeps the
   callees among them that its pruned query declares, and a failed one names

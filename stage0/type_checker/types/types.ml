@@ -112,6 +112,17 @@ let make_capability_set capabilities : capability_set =
 
 let no_capabilities : capability_set = []
 
+let states_no_allocation costs =
+  List.exists
+    (fun (cost : cost) ->
+      cost.resource = Metric Allocations
+      && (not cost.amortized)
+      &&
+      match cost.bound with
+      | No_more_than limit | Exactly_cost limit -> Z.equal limit Z.zero
+      | Order_of -> false)
+    costs
+
 let union_capabilities (left : capability_set) (right : capability_set) =
   make_capability_set (left @ right)
 

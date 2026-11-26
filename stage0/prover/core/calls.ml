@@ -79,7 +79,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
     || Option.is_some definition.trait_method
        && Path.equal path definition.declaration
        && not
-            (Costs.states_no_allocation
+            (Types.states_no_allocation
                (match Contracts.read_signature context definition.declaration with
                | Some signature -> signature.costs
                | None -> []))
@@ -544,7 +544,7 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
         in
         let is_unspecified_application =
           (frame.is_ghost || context.is_specification)
-          && not (Costs.states_no_allocation function_type.costs)
+          && not (Types.states_no_allocation function_type.costs)
         in
         if not is_unspecified_application then
           Validity.assume_valid context frame result_type result;

@@ -1,0 +1,34 @@
+use standard.intrinsic
+
+trait Make {
+  fn make(self) -> UInt64
+    cost allocations == 0
+}
+
+type Narrow(width: UInt64)
+
+impl Make for Narrow {
+  fn make(self) -> UInt64 {
+    if self.width > 3 {
+      intrinsic.crash("too wide")
+    }
+    self.width
+  }
+}
+
+fn narrowed(width: UInt64) -> UInt64
+  cost allocations == 0
+{
+  if width > 3 {
+    intrinsic.crash("too wide")
+  }
+  width
+}
+
+fn applied(make: (fn(UInt64) -> UInt64 cost allocations == 0)) -> UInt64 {
+  make(1)
+}
+
+fn named_as_a_value() -> UInt64 {
+  applied(narrowed)
+}

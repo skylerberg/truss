@@ -63,12 +63,6 @@ let list_stated_bounds (costs : Types.cost list) (metric : Language.Metric.t) ~a
       else None)
     costs
 
-let states_no_allocation costs =
-  List.exists
-    (function
-      | Types.No_more_than limit | Exactly_cost limit -> Z.equal limit Z.zero | Order_of -> false)
-    (list_stated_bounds costs Allocations ~amortized:false)
-
 let find_stated_operand costs metric =
   let counting = (make_operand_counter metric).counting in
   List.find_map

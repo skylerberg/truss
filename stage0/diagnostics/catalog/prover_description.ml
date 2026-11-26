@@ -452,6 +452,14 @@ let describe_obligation = function
   | Not_a_scalar_value { at } ->
       tick at @ [ Text " may not be a Unicode scalar value, which a `Character` must be." ]
   | Unreachable_reached -> say "This `unreachable` may be reached."
+  | May_not_return_under_no_allocation { function_ } ->
+      say
+        ((match function_ with
+           | Some function_ -> Printf.sprintf "`%s`" (Build.show_callee function_)
+           | None -> "This method")
+        ^ " may not return: its code, or a function it calls, may run out of memory. `cost \
+           allocations == 0` is stated for it, and a call through a bound, or of a function value, \
+           takes that clause to mean that the function returns.")
   | Cost_promise promise -> describe_promise promise
   | Impl_precondition { clause } ->
       tick clause
@@ -561,8 +569,8 @@ let find_code : Prover.obligation -> Diagnostic.Code.prover = function
       Requires
   | Precondition_may_panic _ | Panics_where_ruled_out _ -> Panic
   | Upper_bound_in_exact_cost _ | Lambda_cost _ | Lambda_call_above_bound _ | Loop_cost_clause _
-  | Iteration_above_inferred_bound | Unbounded_iteration_cost _ | Cost_promise _
-  | Negative_potential _ ->
+  | May_not_return_under_no_allocation _ | Iteration_above_inferred_bound
+  | Unbounded_iteration_cost _ | Cost_promise _ | Negative_potential _ ->
       Cost
   | Out_of_bounds _ -> Out_of_bounds
   | Invariant_may_fail _ | Preserved_invariant _ | Derived_default_invariant | Loop_invariant _

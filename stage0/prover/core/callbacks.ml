@@ -431,6 +431,14 @@ let read_named_function (context : State.context) (frame : State.frame) (site : 
       Types.Function function_type ) ->
       if frame.makes_obligations && not is_argument then
         check_escaping context frame location known function_type;
+      if
+        frame.makes_obligations
+        && Types.states_no_allocation function_type.costs
+        && context.lookups.may_abort path
+      then
+        Obligations.oblige context frame location
+          (May_not_return_under_no_allocation { function_ = Some path })
+          (Logic.Boolean false);
       let symbol = Logic.Symbol.Function_value { callee = path; type_arguments } in
       Facts.declare context (Logic.Constant (symbol, Encoding.declare_sort context type_));
       let term = Logic.Symbol symbol in

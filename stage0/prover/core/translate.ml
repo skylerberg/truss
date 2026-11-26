@@ -238,6 +238,16 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
            (List.nth_opt parameters position))
        contract.callbacks);
   Termination.enter_definition context start;
+  (match Interface.Impls.find_implemented_method lookups.interface path with
+  | Some { declaration; _ }
+    when condition = [] && lookups.may_abort path
+         && Option.fold ~none:false
+              ~some:(fun (declared : Types.signature) -> Types.states_no_allocation declared.costs)
+              (Interface.Impls.read_signature lookups.interface declaration) ->
+      Obligations.oblige context start Whole_definition
+        (May_not_return_under_no_allocation { function_ = None })
+        (Logic.Boolean false)
+  | Some _ | None -> ());
   let output = Option.map (Encoding.substitute_type context start) output in
   let lends =
     match signature with

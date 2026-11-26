@@ -537,7 +537,50 @@ let list_run_statements (lookups : lookups) path =
     (find_code lookups path);
   !statements
 
-let is_abort_site (statement : Tree.statement) =
+let list_invariant_clauses (lookups : lookups) type_ =
+  match Parts.read_type_clauses lookups.mir type_ with
+  | Some { form = clauses; _ } ->
+      List.map (fun (requirement : Tree.requirement) -> requirement.clause) clauses.invariants
+  | None -> []
+
+let rec has_valid_value (lookups : lookups) ?(entered = []) (ty : Types.ty) =
+  match (Types.find_builtin ty, ty) with
+  | ( Some
+        ( Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | Float32 | Float64 | Bool
+        | Character | Unit | Integer ),
+      _ )
+  | None, Integer ->
+      true
+  | Some (Never | Array | Storage | View | Handle | Shared), _ -> false
+  | None, Named { path; arguments } when not (List.exists (Path.equal path) entered) -> (
+      let have_values fields =
+        List.for_all
+          (fun (field : Types.field) ->
+            has_valid_value lookups ~entered:(path :: entered) field.field_type)
+          fields
+      in
+      list_invariant_clauses lookups path = []
+      &&
+      match Interface.Definition.find_interface lookups.interface path with
+      | Some (Type_interface ({ shape = Record _; _ } as declared)) ->
+          Option.fold ~none:false ~some:have_values (Types.instantiate_fields declared arguments)
+      | Some (Type_interface ({ shape = Sum _; _ } as declared)) ->
+          List.exists
+            (fun (variant : Types.variant) -> have_values (Option.value ~default:[] variant.fields))
+            (Option.value ~default:[] (Types.instantiate_variants declared arguments))
+      | Some _ | None -> false)
+  | None, (Named _ | Parameter _ | Projection _ | Function _ | Never | Variable _ | Hole | Error _)
+    ->
+      false
+
+let is_abort_site (lookups : lookups) instance ~parameters (statement : Tree.statement) =
+  let is_parameter : Tree.operand -> bool = function
+    | Use { place = { root = Local local; projections = [] }; _ }
+    | Borrow { place = { root = Local local; projections = [] }; _ }
+    | Take { place = { root = Local local; projections = [] }; _ } ->
+        List.mem local parameters
+    | Use _ | Borrow _ | Take _ | Immediate _ -> false
+  in
   match statement.kind with
   | Basic
       (Call
@@ -554,12 +597,24 @@ let is_abort_site (statement : Tree.statement) =
   | _ -> (
       match Walk.find_callee statement with
       | Some { target = Intrinsic { operation; _ }; _ } -> Intrinsic.may_abort operation
+      | Some { target = Indirect called; _ } when not (is_parameter called) -> (
+          match substitute_type lookups.interface instance (Walk.extract_operand_type called) with
+          | Function function_type ->
+              (not (Types.states_no_allocation function_type.costs))
+              && not (has_valid_value lookups function_type.output)
+          | _ -> false)
       | Some _ | None -> false)
 
 let has_abort_site (lookups : lookups) path =
   match Intrinsic.find_contract_operation path with
   | Some operation -> Intrinsic.may_abort operation
-  | None -> List.exists is_abort_site (list_run_statements lookups path)
+  | None ->
+      let parameters =
+        match find_code lookups path with Some code -> code.body.parameters | None -> []
+      in
+      List.exists
+        (is_abort_site lookups (find_instance lookups path) ~parameters)
+        (list_run_statements lookups path)
 
 let list_bound_methods_run (lookups : lookups) path =
   let instance = find_instance lookups path in
@@ -623,12 +678,6 @@ let list_inherited_contract_dependencies (lookups : lookups) path =
         (list_formula_dependencies lookups implemented.implementation.substitution)
         (Option.fold ~none:[] ~some:list_contract_formulas
            (find_contract lookups implemented.declaration))
-  | None -> []
-
-let list_invariant_clauses (lookups : lookups) type_ =
-  match Parts.read_type_clauses lookups.mir type_ with
-  | Some { form = clauses; _ } ->
-      List.map (fun (requirement : Tree.requirement) -> requirement.clause) clauses.invariants
   | None -> []
 
 let list_potential_clauses (lookups : lookups) type_ =
