@@ -817,6 +817,8 @@ theorem regrown_after_occupied_move(
   assert folded(after_places[slots[moved].occupant - 1] - 1, capacity: slots.length()) == moved
   assert after[after_places[slots[moved].occupant - 1] - 1].occupant == slots[moved].occupant
   assert moves_slot(slots, grown: after, places: after_places, moved: moved + 1, slot: moved)
+  assert forall slot in 0..slots.length() =>
+    moves_slot(slots, grown: after, places: after_places, moved: moved + 1, slot: slot)
 }
 
 theorem regrown_after_flag(
