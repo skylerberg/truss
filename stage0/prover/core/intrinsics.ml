@@ -276,7 +276,8 @@ let make_each_sum context element relation =
       relation
         (fun sequence -> make_sequence_sum context element sequence (Logic.Symbol measure))
         (fun value ->
-          Lambdas.apply_function context (measure_type element) (Logic.Symbol measure) [ value ]) )
+          Callbacks.apply_function context (measure_type element) (Logic.Symbol measure) [ value ])
+    )
 
 let make_empty_parts context frame element =
   let parts =
@@ -323,8 +324,8 @@ let append_part context frame element parts part =
            (make_sequence_sum context element longer (Logic.Symbol measure))
            (Logic.add
               (make_sequence_sum context element parts (Logic.Symbol measure))
-              (Lambdas.apply_function context (measure_type element) (Logic.Symbol measure) [ part ]))
-       ));
+              (Callbacks.apply_function context (measure_type element) (Logic.Symbol measure)
+                 [ part ])) ));
   longer
 
 let make_byte_order context left right =

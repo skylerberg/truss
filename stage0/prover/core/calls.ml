@@ -512,13 +512,14 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
       | Named_function { origin; path; _ } -> (
           match Contracts.find_function_contract context path with
           | Some contract ->
-              Laws.check_named_callback context frame invocation passed ~origin path contract values
+              Callbacks.check_named_callback context frame invocation passed ~origin path contract
+                values
           | None -> ())
       | Forwarded local ->
-          Validity.check_forwarded_callback context frame site invocation passed local values
+          Callbacks.check_forwarded_callback context frame site invocation passed local values
       | Other ->
-          Validity.check_callback_promises context frame ~location invocation passed
-            ~unpromised:Nothing_promises ~assume:Validity.assume_nothing values
+          Callbacks.check_callback_promises context frame ~location invocation passed
+            ~unpromised:Nothing_promises ~assume:Callbacks.assume_nothing values
       | Lambda -> ())
     values;
   let declared_result_type = Facts.substitute_declared_type context frame site.type_ in
@@ -666,16 +667,16 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                     receiver)
                  (Contracts.find_method_contract context trait name receiver evidence)))
     | Indirect () ->
-        Laws.check_callback_requires context frame site through values;
+        Callbacks.check_callback_requires context frame site through values;
         let before = frame in
         let havoc = havoc_whole_arguments frame in
         let frame = havoc.after in
         let result =
           match through with
           | Some (Types.Function function_type, callee_term, _)
-            when Lambdas.is_in_the_logic function_type ->
+            when Callbacks.is_in_the_logic function_type ->
               let term =
-                Lambdas.apply_function context function_type callee_term
+                Callbacks.apply_function context function_type callee_term
                   (List.map (fun (passed : State.passed) -> passed.term) values)
               in
               Facts.assume context frame (Facts.make_in_range result_type term);
@@ -693,11 +694,11 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             let entries = List.map (fun (passed : State.passed) -> passed.term) values in
             let exits = List.map (find_written havoc) values in
             Facts.assume context frame
-              (Lambdas.make_callback_ensures context function_type callee_term ~entries ~exits
+              (Callbacks.make_callback_ensures context function_type callee_term ~entries ~exits
                  ~result);
             match shape with
             | Invocation.Forwarded local ->
-                Validity.assume_own_callback_ensures context frame local ~entries ~exits ~result
+                Callbacks.assume_own_callback_ensures context frame local ~entries ~exits ~result
             | Named_function _ | Lambda | Other -> ())
         | _ -> ());
         List.iter

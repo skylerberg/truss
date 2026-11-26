@@ -1,60 +1,3 @@
-let apply_function context (function_type : Types.function_type) callee arguments =
-  let inputs = List.map (fun (_, input) -> Facts.declare_sort context input) function_type.inputs in
-  let output = Facts.declare_sort context function_type.output in
-  let value_sort = Facts.declare_sort context (Types.Function function_type) in
-  let symbol = Logic.Symbol.Apply ((value_sort :: inputs) @ [ output ]) in
-  Facts.declare context (Logic.Function (symbol, value_sort :: inputs, output));
-  Logic.Apply (symbol, callee :: arguments)
-
-let returns_value (function_type : Types.function_type) =
-  not (Types.equal function_type.output Types.unit)
-
-let make_callback_ensures context (function_type : Types.function_type) callee ~entries ~exits
-    ~result =
-  let sorts =
-    Facts.declare_sort context (Types.Function function_type)
-    :: List.concat_map
-         (fun ((mode : Language.Mode.t), input) ->
-           let sort = Facts.declare_sort context input in
-           match mode with Mut -> [ sort; sort ] | Read | Own -> [ sort ])
-         function_type.inputs
-    @
-    if returns_value function_type then [ Facts.declare_sort context function_type.output ] else []
-  in
-  let arguments =
-    List.concat
-      (List.map2
-         (fun ((mode : Language.Mode.t), _) (entry, exit_) ->
-           match mode with Mut -> [ entry; exit_ ] | Read | Own -> [ entry ])
-         function_type.inputs (List.combine entries exits))
-    @ if returns_value function_type then [ result ] else []
-  in
-  let symbol = Logic.Symbol.Callback_ensures sorts in
-  Facts.declare context (Logic.Function (symbol, sorts, Logic.Bool));
-  Logic.Apply (symbol, callee :: arguments)
-
-let apply_callback_ensures context (function_type : Types.function_type) values =
-  let rec split inputs arguments ~entries ~exits =
-    match (inputs, arguments) with
-    | [], rest -> (List.rev entries, List.rev exits, rest)
-    | (Language.Mode.Mut, _) :: inputs, entry :: exit_ :: rest ->
-        split inputs rest ~entries:(entry :: entries) ~exits:(exit_ :: exits)
-    | ((Language.Mode.Read | Own), _) :: inputs, value :: rest ->
-        split inputs rest ~entries:(value :: entries) ~exits:(value :: exits)
-    | _ :: _, _ ->
-        Facts.raise_bug "`.ensures` with fewer arguments than its function type has inputs"
-  in
-  match values with
-  | callee :: arguments -> (
-      let entries, exits, rest = split function_type.inputs arguments ~entries:[] ~exits:[] in
-      match rest with
-      | [ result ] -> make_callback_ensures context function_type callee ~entries ~exits ~result
-      | [] when not (returns_value function_type) ->
-          make_callback_ensures context function_type callee ~entries ~exits
-            ~result:(Logic.Apply (Logic.Symbol.Unit, []))
-      | _ -> Facts.raise_bug "`.ensures` with arguments that do not match its function type")
-  | [] -> Facts.raise_bug "`.ensures` without the function it describes"
-
 let make_lifting (context : State.context) (frame : State.frame) ~called ~arguments ~start_fresh
     ~end_fresh ~start_declarations parameters =
   let declared_here = Query.list_declarations_since context.query ~count:start_declarations in
@@ -140,7 +83,7 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
   in
   let premise = lift (Logic.conjunction premises) in
   let applied_here =
-    apply_function context function_type term
+    Callbacks.apply_function context function_type term
       (List.map (fun (name, _) -> Logic.Symbol name) parameters)
   in
   let statements =
@@ -176,7 +119,7 @@ let add_lambda_relation (context : State.context) (frame : State.frame) ~capture
       (List.mapi (fun index input -> (index, input)) function_type.inputs)
   in
   let returned =
-    if returns_value function_type then
+    if Callbacks.returns_value function_type then
       [
         ( Facts.make_variable "lambda.result" ~numbers:[ start_fresh ],
           Facts.declare_sort context function_type.output );
@@ -202,7 +145,7 @@ let add_lambda_relation (context : State.context) (frame : State.frame) ~capture
     | [ (name, _) ] -> Logic.Symbol name
     | _ -> Logic.Apply (Logic.Symbol.Unit, [])
   in
-  let holds = make_callback_ensures context function_type term ~entries ~exits ~result in
+  let holds = Callbacks.make_callback_ensures context function_type term ~entries ~exits ~result in
   let premise = lift (Logic.conjunction premises) in
   let exited =
     List.map
@@ -239,7 +182,7 @@ let add_lambda_relation (context : State.context) (frame : State.frame) ~capture
 
 let add_logic_relation (context : State.context) (frame : State.frame) ~capture_free
     (function_type : Types.function_type) term =
-  if returns_value function_type then begin
+  if Callbacks.returns_value function_type then begin
     let inputs =
       List.mapi
         (fun index (_, input) ->
@@ -250,7 +193,7 @@ let add_logic_relation (context : State.context) (frame : State.frame) ~capture_
     let returned = Facts.make_variable "relation.result" ~numbers:[] in
     let entries = List.map (fun (name, _) -> Logic.Symbol name) inputs in
     let holds =
-      make_callback_ensures context function_type term ~entries ~exits:entries
+      Callbacks.make_callback_ensures context function_type term ~entries ~exits:entries
         ~result:(Logic.Symbol returned)
     in
     add_quantified_fact context frame ~capture_free
@@ -258,12 +201,8 @@ let add_logic_relation (context : State.context) (frame : State.frame) ~capture_
          ( inputs @ [ (returned, Facts.declare_sort context function_type.output) ],
            Logic.equal holds
              (Logic.equal (Logic.Symbol returned)
-                (apply_function context function_type term entries)) ))
+                (Callbacks.apply_function context function_type term entries)) ))
   end
-
-let is_in_the_logic (function_type : Types.function_type) =
-  function_type.uses = Types.no_capabilities
-  && List.for_all (fun (mode, _) -> mode <> Language.Mode.Mut) function_type.inputs
 
 let make_parameter_symbols context (frame : State.frame) (function_type : Types.function_type) =
   let depth = List.length frame.bound in
@@ -357,7 +296,7 @@ let canonicalize_binders term =
 let find_lambda_definition context frame (function_type : Types.function_type)
     (written : State.lambda_code) =
   match written.code.is_functional with
-  | true when is_in_the_logic function_type -> (
+  | true when Callbacks.is_in_the_logic function_type -> (
       let bound = make_parameter_symbols context frame function_type in
       let defined =
         let mark = Query.count_fresh context.query in
@@ -416,7 +355,7 @@ let find_lambda_definition context frame (function_type : Types.function_type)
             else Facts.declare_value_symbol context { frame with binders = [] } symbol sort
           in
           let application =
-            apply_function context function_type term
+            Callbacks.apply_function context function_type term
               (List.map (fun (name, _) -> Logic.Symbol name) bound)
           in
           Tables.Symbol_table.replace context.lambda_definitions symbol defined;
@@ -558,7 +497,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
             let result =
               match returned with
               | Some result -> Some result
-              | None when not (returns_value function_type) ->
+              | None when not (Callbacks.returns_value function_type) ->
                   Some (Logic.Apply (Logic.Symbol.Unit, []))
               | None -> None
             in
@@ -582,12 +521,12 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
     | Some term -> term
     | None ->
         let term = Facts.arrive context frame "lambda" ty in
-        if is_in_the_logic function_type then
+        if Callbacks.is_in_the_logic function_type then
           add_lambda_facts context frame ~capture_free function_type term ~called ~arguments
             ~start_fresh ~end_fresh ~start_declarations ~premises ~shown ~ended:!ended;
         term
   in
-  if is_in_the_logic function_type then
+  if Callbacks.is_in_the_logic function_type then
     add_logic_relation context frame ~capture_free function_type term
   else
     add_lambda_relation context frame ~capture_free function_type term ~called ~arguments
@@ -633,9 +572,9 @@ let make_passed_values context frame (invocation : Invocation.t)
       | Lambda_argument { position; mode; site; lambda = written } ->
           let _, term =
             translate_lambda context frame ~site written
-              ~list_facts:(Validity.list_callback_facts context frame invocation position known)
+              ~list_facts:(Callbacks.list_callback_facts context frame invocation position known)
               ~list_promises:
-                (Validity.list_callback_promises context frame invocation position known)
+                (Callbacks.list_callback_promises context frame invocation position known)
           in
           {
             position;

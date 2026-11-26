@@ -275,3 +275,31 @@ let find_promiser (lookups : Lookups.t) (source : State.source) : Catalog.Prover
     when Resolve.Names.find_kind lookups.interface.names owner = Some Resolve.Names.Capability ->
       Capability_promiser
   | _ -> Trait_promiser
+
+let bind_arguments frame (clauses : State.clauses) ~arguments ~substitution =
+  let locals, types, self =
+    List.fold_left
+      (fun (locals, types, self) (position, (parameter : Mir.parameter)) ->
+        match (parameter.local, List.assoc_opt position arguments) with
+        | Self, Some term -> (locals, types, Some (term, parameter.type_))
+        | local, Some term ->
+            ( Locals.add (Core_local local) term locals,
+              Locals.add (Core_local local) parameter.type_ types,
+              self )
+        | _, None -> (locals, types, self))
+      (Locals.empty, Locals.empty, None)
+      (List.mapi (fun position parameter -> (position, parameter)) clauses.parameters)
+  in
+  {
+    frame with
+    State.source = clauses.callee;
+    locals;
+    types;
+    old_locals = locals;
+    self = Option.map fst self;
+    old_self = Option.map fst self;
+    self_type = Option.map (fun (_, ty) -> Types.substitute_erased substitution ty) self;
+    result = None;
+    makes_obligations = false;
+    substitution;
+  }

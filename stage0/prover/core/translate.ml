@@ -35,8 +35,8 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       axioms = Contract_axioms.make_state ();
       termination = Termination.make_state ~terminates ~measures;
       validity = Validity.make_state ();
+      callbacks = Callbacks.make_state ();
       lending = None;
-      callbacks = [];
       cost = Counters.make_state ();
       logs = [];
       powers = [];
@@ -47,7 +47,6 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       inherits_precondition;
       holes = [];
       unfinished = [];
-      reading_callback = false;
       ranking = terminates && measures = [] && lookups.list_recursion_group node <> [];
       disjoint = lookups.list_must_be_disjoint home;
       indexes = [];
@@ -233,14 +232,14 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
         (keep_clauses ~substitution clauses, substitution))
       inherited
   in
-  context.callbacks <-
-    List.filter_map
-      (fun (position, callback) ->
-        Option.map
-          (fun (parameter : Mir.parameter) ->
-            (parameter.local, Facts.read_parameter_name parameter, callback))
-          (List.nth_opt parameters position))
-      contract.callbacks;
+  Callbacks.declare_own context
+    (List.filter_map
+       (fun (position, callback) ->
+         Option.map
+           (fun (parameter : Mir.parameter) ->
+             (parameter.local, Facts.read_parameter_name parameter, callback))
+           (List.nth_opt parameters position))
+       contract.callbacks);
   let declared_requires = Facts.list_clauses contract.requires
   and declared_ensures = contract.ensures in
   let output = match signature with Some { output = Returns ty; _ } -> Some ty | _ -> None in
@@ -754,7 +753,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
               clauses.parameters
           in
           let reading (frame : State.frame) =
-            Validity.bind_arguments frame clauses ~arguments:(list_arguments frame)
+            Contracts.bind_arguments frame clauses ~arguments:(list_arguments frame)
               ~substitution:subtrait_substitution
           in
           let promised =

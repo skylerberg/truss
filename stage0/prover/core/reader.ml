@@ -125,12 +125,12 @@ let read_root context frame run (root : Mir.root) =
               Facts.raise_bug "`%s` reads `self` outside a method"
                 (Resolve.Names.show_key frame.source.key))
       | key -> (
-          (if frame.makes_obligations && not context.reading_callback then
+          (if frame.makes_obligations && not (Callbacks.is_reading context) then
              match key with
-             | Core_local core -> Validity.check_escaping_callback context frame core
+             | Core_local core -> Callbacks.check_escaping_callback context frame core
              | Mir_local _ -> (
                  match Hashtbl.find_opt run.held_callbacks local with
-                 | Some core -> Validity.check_escaping_callback context frame core
+                 | Some core -> Callbacks.check_escaping_callback context frame core
                  | None -> ()));
           match Locals.find_opt key frame.locals with
           | Some term -> term
@@ -421,7 +421,7 @@ let find_held_callback context run held (value : Mir.rvalue) =
     | Use { place = { root = Local local; projections = [] }; _ }
     | Borrow { place = { root = Local local; projections = [] }; _ } -> (
         match run.infos.(local).kind with
-        | Source { local = core; _ } when Option.is_some (Validity.find_own_callback context core)
+        | Source { local = core; _ } when Option.is_some (Callbacks.find_own_callback context core)
           ->
             Some core
         | Source _ | Temporary | Lent _ -> Hashtbl.find_opt run.held_callbacks local)
@@ -473,7 +473,7 @@ let evaluate_call_values context frame run (invocation : Invocation.t)
                  declared_type =
                    Facts.substitute_declared_type context frame (Mir.extract_operand_type value);
                  term =
-                   Validity.run_reading_callback context (fun () ->
+                   Callbacks.run_reading_callback context (fun () ->
                        read_operand context frame run value);
                })
        arguments)
@@ -505,7 +505,7 @@ let read_call context frame run (call : Mir.call) ~result_type =
         | Indirect callee ->
             Some
               ( compute_operand_type context frame callee,
-                Validity.run_reading_callback context (fun () ->
+                Callbacks.run_reading_callback context (fun () ->
                     read_operand context frame run callee),
                 classify_shape run callee )
         | _ -> None
@@ -784,7 +784,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       (frame, Logic.equal first_value second_value)
   | Specification (Applied { function_; arguments; unconverted }) ->
       let values =
-        Validity.run_reading_callback context (fun () -> List.map translate_operand arguments)
+        Callbacks.run_reading_callback context (fun () -> List.map translate_operand arguments)
       in
       Values.apply_specification_function context frame ~location function_ values
         ~unconverted:(List.map (Facts.substitute_type context frame) unconverted)
@@ -1375,7 +1375,7 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
           | Some core ->
               Hashtbl.replace run.held_callbacks held core;
               write_assignment context run target
-                (Some (Validity.run_reading_callback context read))
+                (Some (Callbacks.run_reading_callback context read))
           | None -> write_assignment context run target (Some (read ())))
       | _ -> write_assignment context run target (Some (read ())))
   | Call { destination; call } -> read_call_statement context frame run ~destination call
