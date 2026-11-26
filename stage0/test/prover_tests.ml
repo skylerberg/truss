@@ -1806,6 +1806,8 @@ let () =
     (fun () ->
       expect_codes Fixtures.Prover.callback_with_a_requires_chosen_by_a_condition
         [ "prover.requires" ]);
+  Harness.test "a quantifier over a type ranges over values whose fields are in range" (fun () ->
+      expect_codes Fixtures.Prover.quantifier_over_a_type_with_a_ranged_field [ "prover.ensures" ]);
   let nested = Fixtures.Prover.generic_impl_contract_read_at_a_nested_type in
   Harness.test "a generic impl's ensures are read inside their own at a smaller type" (fun () ->
       expect_proven nested;

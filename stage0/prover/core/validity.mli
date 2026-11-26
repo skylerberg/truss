@@ -23,6 +23,7 @@ val make_validity :
   assuming:bool ->
   ?deep:bool ->
   ?includes_invariants:bool ->
+  ?includes_ranges:bool ->
   ?seen:Types.ty list ->
   Types.ty ->
   Logic.term ->

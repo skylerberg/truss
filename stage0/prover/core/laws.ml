@@ -58,17 +58,20 @@ let make_law_fact (context : State.context) (frame : State.frame) source ~substi
              (fun clause -> snd (Validity.read_specification context inside clause))
              law.requires)
       in
-      let range =
+      let valid =
         Logic.conjunction
           (List.map2
-             (fun symbol ty -> Encoding.make_in_range ty (Logic.Symbol symbol))
+             (fun symbol ty ->
+               Logic.( &&& )
+                 (Encoding.make_in_range ty (Logic.Symbol symbol))
+                 (Validity.make_validity context inside ~assuming:true ty (Logic.Symbol symbol)))
              symbols types)
       in
       let _, holds = Validity.read_specification context inside law.states in
       Some
         (Logic.forall
            ( List.map2 (fun symbol ty -> (symbol, Encoding.declare_sort context ty)) symbols types,
-             Logic.( ==> ) (Logic.( &&& ) range premise) holds ))
+             Logic.( ==> ) (Logic.( &&& ) valid premise) holds ))
     with Facts.Unsupported _ -> None
   end
 
