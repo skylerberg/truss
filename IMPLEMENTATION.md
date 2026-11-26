@@ -413,12 +413,31 @@ develop as well as make it easier to bootstrap the compiler in parts.
   query, and every other frame is a copy of a frame, so the frames of a
   proof share one of each.
 
-  `Facts.assume` guards a fact with the path condition of its frame. The
-  other three add a fact with no guard. `Facts.define` states that a term
-  equals a value, and a second definition of the term with another value is
-  a compiler bug: two values for one term make the query inconsistent, and
-  every obligation that reaches the term would prove. `Facts.add_axiom` and
-  `Query.add_fact` state an axiom, which has to hold on every path.
+- **A formula enters a query in one of three ways.** A fact that is true
+  on one path and stated for every path makes the query prove false
+  claims on the other paths, so the function that takes a plain fact is the
+  one that guards it.
+
+  | Function | States | Under |
+  |---|---|---|
+  | `Facts.assume` | What reading a path showed: a branch taken, a call that returned, an obligation just made | The path condition of its frame |
+  | `Facts.define` | That a term equals a value | Nothing. A term has one definition: a second with another value is a compiler bug |
+  | `Facts.add_theorem` | A formula that holds on every path, with the reason in `~because` | Nothing |
+
+  | `Query.reason` | The formula holds because |
+  |---|---|
+  | `Defines term` | It is the one definition of a symbol at every argument |
+  | `Specifies term` | It constrains a term or a symbol that has no definition: the range of a new symbol, a bound on a cost |
+  | `Lemma` | It is a theorem of arithmetic, of the values of a type, or of a model function |
+  | `Proven_by path` | The proof of that definition establishes it for every argument: a contract, a law, the sign of a type's potential |
+  | `Hypothesis` | The definition being proven assumes it and each of its uses discharges it: a law of one of its bounds |
+  | `Generalizes_an_execution` | It is the facts of a supposed run, each under the premises of that run |
+
+  A definition is all that is true of its term. `Query.add_theorem` does
+  not add a `Specifies` fact of a term that has a definition, and a
+  definition of a term after a fact about it was stated is a compiler bug:
+  the two could contradict each other, and every obligation that reaches
+  the term would then prove.
 - **Each rule of the prover has one owner module, and each record of its
   state one owner.** `Reader`, `Calls`, `Loops` and `Lambdas` execute the
   MIR and call an owner at each statement, so a new rule edits its owner.

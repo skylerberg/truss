@@ -61,11 +61,11 @@ let make_lifting (frame : State.frame) ~called ~arguments ~start ~end_ parameter
   in
   lift
 
-let add_quantified_fact (frame : State.frame) ~capture_free stated =
-  if frame.bound = [] || capture_free then Query.add_fact frame.query stated
+let add_quantified_theorem (frame : State.frame) ~capture_free ~because stated =
+  if frame.bound = [] || capture_free then Query.add_theorem frame.query ~because stated
   else
     match Facts.close_over_binders frame stated with
-    | Some closed -> Query.add_fact frame.query closed
+    | Some closed -> Query.add_theorem frame.query ~because closed
     | None -> ()
 
 let add_lambda_facts (frame : State.frame) ~capture_free (function_type : Types.function_type) term
@@ -92,7 +92,7 @@ let add_lambda_facts (frame : State.frame) ~capture_free (function_type : Types.
   in
   List.iter
     (fun statement ->
-      add_quantified_fact frame ~capture_free
+      add_quantified_theorem frame ~capture_free ~because:Generalizes_an_execution
         (Logic.forall (parameters, Logic.( ==> ) premise statement)))
     statements
 
@@ -134,7 +134,7 @@ let add_lambda_relation (frame : State.frame) ~capture_free (function_type : Typ
   in
   List.iter
     (fun statement ->
-      add_quantified_fact frame ~capture_free
+      add_quantified_theorem frame ~capture_free ~because:Generalizes_an_execution
         (Logic.forall ~trigger:[ holds ]
            (parameters, Logic.( ==> ) holds (Logic.( ==> ) premise statement))))
     statements
@@ -282,16 +282,18 @@ let find_lambda_definition (frame : State.frame) (function_type : Types.function
       | Some defined ->
           let defined = canonicalize_binders defined in
           let named_by_position =
-            List.fold_left
-              (fun term (index, (name, _)) ->
-                Logic.replace ~from:(Logic.Symbol name)
-                  ~into:(Logic.Symbol (Query.make_variable "parameter" ~numbers:[ index ]))
-                  term)
-              defined
-              (List.mapi (fun index parameter -> (index, parameter)) bound)
+            List.mapi
+              (fun index (_, sort) -> (Query.make_variable "parameter" ~numbers:[ index ], sort))
+              bound
+          in
+          let defined_by_position =
+            List.fold_left2
+              (fun term (name, _) (by_position, _) ->
+                Logic.replace ~from:(Logic.Symbol name) ~into:(Logic.Symbol by_position) term)
+              defined bound named_by_position
           in
           let symbol =
-            Logic.Symbol.Lambda { sorts = List.map snd bound; definition = named_by_position }
+            Logic.Symbol.Lambda { sorts = List.map snd bound; definition = defined_by_position }
           in
           let sort = Encoding.sort_of (Types.Function function_type) in
           let names_in_its_definition (name, _, _) = Logic.mentions [ name ] defined in
@@ -302,7 +304,13 @@ let find_lambda_definition (frame : State.frame) (function_type : Types.function
           in
           let application = Callbacks.apply_function function_type term entries in
           Tables.Symbol_table.replace (Query.read_state frame.query definitions) symbol defined;
-          Facts.add_axiom frame (Logic.forall (bound, Logic.equal application defined));
+          Facts.add_theorem frame ~because:(Defines term)
+            (Logic.forall
+               ( named_by_position,
+                 Logic.equal
+                   (Callbacks.apply_function function_type term
+                      (List.map (fun (name, _) -> Logic.Symbol name) named_by_position))
+                   defined_by_position ));
           (match written.code.value_type with
           | Some value_type -> (
               match
@@ -463,7 +471,7 @@ let read_lambda ?(capture_free = false) (frame : State.frame) ~(site : Invocatio
   in
   if states_application then
     Option.iter
-      (add_quantified_fact frame ~capture_free)
+      (add_quantified_theorem frame ~capture_free ~because:Lemma)
       (Callbacks.find_logic_link function_type term)
   else
     add_lambda_relation frame ~capture_free function_type term ~called ~arguments ~start ~end_

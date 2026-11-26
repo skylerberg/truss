@@ -64,23 +64,23 @@ let close_over_binders (frame : State.frame) term =
              (Logic.conjunction (List.map (fun (_, _, premise) -> premise) outermost_first))
              term ))
 
-let add_axiom (frame : State.frame) term =
-  if not (Logic.mentions frame.bound term) then Query.add_fact frame.query term
-  else Query.add_scoped_fact frame.query ~bound:frame.bound term
+let add_theorem (frame : State.frame) ~because theorem =
+  if not (Logic.mentions frame.bound theorem) then Query.add_theorem frame.query ~because theorem
+  else Query.add_scoped_fact frame.query ~bound:frame.bound theorem
 
 let define (frame : State.frame) defined value =
   let definition = Logic.equal defined value in
-  if Logic.mentions frame.bound definition then add_axiom frame definition
+  if Logic.mentions frame.bound definition then
+    Query.add_scoped_fact frame.query ~bound:frame.bound definition
   else Query.define frame.query defined value
 
 let assume (frame : State.frame) term =
   match term with
   | Logic.Boolean true -> ()
   | _ ->
-      let guarded = Logic.( ==> ) frame.condition term in
       if not (Logic.mentions frame.bound term || Logic.mentions frame.bound frame.condition) then
-        Query.add_fact frame.query guarded
-      else Query.add_scoped_fact frame.query ~bound:frame.bound guarded
+        Query.assume frame.query ~under:frame.condition term
+      else Query.add_scoped_fact frame.query ~bound:frame.bound (Logic.( ==> ) frame.condition term)
 
 let locate_source environment source origin =
   if is_home_source environment source then Obligation.Node origin else Whole_definition

@@ -249,11 +249,12 @@ let make_power (frame : State.frame) base exponent =
     if not (List.mem (base, exponent) state.powers) then begin
       List.iter
         (fun (other_base, other) ->
-          if other_base = base then Facts.add_axiom frame (make_power_order base exponent other))
+          if other_base = base then
+            Facts.add_theorem frame ~because:Lemma (make_power_order base exponent other))
         state.powers;
       state.powers <- (base, exponent) :: state.powers;
       let facts, step = make_power_facts base exponent in
-      List.iter (Facts.add_axiom frame) facts;
+      List.iter (Facts.add_theorem frame ~because:Lemma) facts;
       Some step
     end
     else None
@@ -261,7 +262,7 @@ let make_power (frame : State.frame) base exponent =
   (if not (Logic.mentions frame.bound base || Logic.mentions frame.bound exponent) then
      match add exponent with
      | Some (step, previous) ->
-         Facts.add_axiom frame step;
+         Facts.add_theorem frame ~because:Lemma step;
          ignore (add previous)
      | None -> ());
   (match (base, exponent) with

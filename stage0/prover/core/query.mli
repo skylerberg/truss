@@ -6,7 +6,17 @@ val make_variable : ?numbers:int list -> string -> 'a Logic.Symbol.t
 val declare : t -> Logic.declaration -> unit
 val find_argument_sorts : t -> Logic.symbol -> Logic.sort list option
 val list_defined_symbols : t -> Logic.symbol list
-val add_fact : t -> Logic.term -> unit
+val assume : t -> under:Logic.term -> Logic.term -> unit
+
+type reason =
+  | Defines of Logic.term
+  | Specifies of Logic.term
+  | Lemma
+  | Proven_by of Path.t
+  | Hypothesis
+  | Generalizes_an_execution
+
+val add_theorem : t -> because:reason -> Logic.term -> unit
 val define : t -> Logic.term -> Logic.term -> unit
 
 type mark

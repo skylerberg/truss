@@ -29,7 +29,7 @@ let assume_extensional (frame : State.frame) (ty : Types.ty) left right =
       with
       | Some at_a, Some at_b ->
           let length = Models.make_sequence_length element in
-          Facts.add_axiom frame
+          Facts.add_theorem frame ~because:Lemma
             Logic.(
               equal (length left) (length right)
               &&& forall
@@ -68,7 +68,7 @@ let assume_extensional (frame : State.frame) (ty : Types.ty) left right =
               | _ -> Logic.equal (has left) (has right)
             else Logic.equal (has left) (has right)
           in
-          Facts.add_axiom frame
+          Facts.add_theorem frame ~because:Lemma
             Logic.(
               forall ([ (each, key_sort) ], Encoding.make_in_range key (Symbol each) ==> same)
               ==> equal left right)
@@ -222,14 +222,15 @@ let rec make_literal_value (frame : State.frame) (ty : Types.ty) (value : Langua
         | Elements _, _ -> Facts.raise_bug "a literal of elements has the type `%s`" (Types.show ty)
       in
       let assume_holds model =
-        Query.add_fact frame.query
+        Query.add_theorem frame.query ~because:(Specifies literal)
           (Logic.equal (Models.make_sequence_length element model) (Logic.int count));
         List.iteri
           (fun index at_index ->
             match
               Models.index_sequence frame.environment frame.query element model (Logic.int index)
             with
-            | Some at -> Query.add_fact frame.query (Logic.equal at at_index)
+            | Some at ->
+                Query.add_theorem frame.query ~because:(Specifies literal) (Logic.equal at at_index)
             | None -> ())
           elements
       in
@@ -243,7 +244,7 @@ let rec make_literal_value (frame : State.frame) (ty : Types.ty) (value : Langua
               if Well_known.find_builtin_type path = Some Storage && Types.equal stored element then
                 assume_holds (Intrinsics.make_buffer_model Storage element part)
           | _ ->
-              Query.add_fact frame.query
+              Query.add_theorem frame.query ~because:(Specifies literal)
                 (Logic.equal part (make_literal_value frame field_type value)))
       | _ -> ());
   literal
@@ -284,7 +285,8 @@ let assume_field_range_of_every_result (environment : State.environment) query t
                       Is (Encoding.make_constructor_symbol ty (Some name), abstracted) ==> range)
                 | None -> range
               in
-              Query.add_fact query (Logic.forall ~trigger:[ selection ] (parameters, range))))
+              Query.add_theorem query ~because:Lemma
+                (Logic.forall ~trigger:[ selection ] (parameters, range))))
   | None -> ()
 
 let project_field (frame : State.frame) ty variant field field_type term =
@@ -331,7 +333,7 @@ let evaluate_constant (frame : State.frame) path =
           in
           Query.declare frame.query (Logic.Constant (symbol, Encoding.sort_of ty));
           let _, defined_value = Lambdas.run_code (Counters.stop_counting empty) code ~type_:ty in
-          Query.add_fact frame.query (Logic.equal (Logic.Symbol symbol) defined_value));
+          Query.define frame.query (Logic.Symbol symbol) defined_value);
       Logic.Symbol symbol
   | _ -> Facts.raise_bug "the constant %s has no initializer" (Path.show path)
 
@@ -437,11 +439,12 @@ let make_log (frame : State.frame) log_argument =
     | seen ->
         if seen = None then
           List.iter
-            (fun (other, _) -> Facts.add_axiom frame (make_log_order log_argument other))
+            (fun (other, _) ->
+              Facts.add_theorem frame ~because:Lemma (make_log_order log_argument other))
             state.logs;
         state.logs <- (log_argument, halving) :: List.remove_assoc log_argument state.logs;
         let facts, half = make_log_facts log_argument ~halving in
-        List.iter (Facts.add_axiom frame) facts;
+        List.iter (Facts.add_theorem frame ~because:Lemma) facts;
         Option.iter (fun half -> add half ~halving:false) half
   in
   if not (Logic.mentions frame.bound log_argument) then add log_argument ~halving:true;
@@ -460,7 +463,7 @@ let apply_specification_function (frame : State.frame) ~location
       let log = make_log frame log_argument in
       (match Encoding.find_bounds unconverted with
       | Some (_, high) when not (Logic.mentions frame.bound log_argument) ->
-          Facts.add_axiom frame
+          Facts.add_theorem frame ~because:Lemma
             Logic.(less_equal log_argument (Integer high) ==> less_equal log (int (Z.numbits high)))
       | _ -> ());
       (frame, log)

@@ -96,7 +96,9 @@ let assume_laws (frame : State.frame) (trait : Types.trait_reference) (ty : Type
                     List.iter (Query.add_hole frame.query)
                       (Contracts.list_law_holes frame.environment.lookups impl required ty law.name))
                   impl;
-                Facts.add_axiom frame fact_
+                Facts.add_theorem frame
+                  ~because:(match impl with Some impl -> Proven_by impl | None -> Hypothesis)
+                  fact_
             | None -> ())
           (list_laws frame.environment required.trait))
     (Interface.Properties.list_bound_closure frame.environment.lookups.interface ~self:ty trait)

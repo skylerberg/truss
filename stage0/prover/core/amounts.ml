@@ -317,20 +317,24 @@ let make_callback_cost (frame : State.frame) (metric : Language.Metric.t) (ty : 
       let symbol = Logic.Symbol.Callback_cost { metric; sort } in
       let cost = Logic.Apply (symbol, [ term ]) in
       let least = Costs.least_amount (Metric metric) in
-      Facts.add_axiom frame (Logic.less_equal least cost);
-      let state_value value = Facts.define frame cost (Logic.larger least value) in
-      (match term with
-      | Logic.Symbol (Function_value { callee; _ }) ->
-          Option.iter state_value
-            (Option.bind (Contracts.read_signature frame.environment callee)
-               (fun (signature : Types.signature) ->
-                 Costs.find_stated_operand signature.costs metric))
-      | _ -> ());
-      (match Counters.take_lambda_cost frame.query term metric with
-      | Some (bound, showing) ->
-          List.iter (Query.add_obligation frame.query) showing;
-          state_value bound
-      | None -> ());
+      let stated_by_its_signature =
+        match term with
+        | Logic.Symbol (Function_value { callee; _ }) ->
+            Option.bind (Contracts.read_signature frame.environment callee)
+              (fun (signature : Types.signature) ->
+                Costs.find_stated_operand signature.costs metric)
+        | _ -> None
+      in
+      let shown_of_its_body =
+        Option.map
+          (fun (bound, showing) ->
+            List.iter (Query.add_obligation frame.query) showing;
+            bound)
+          (Counters.take_lambda_cost frame.query term metric)
+      in
+      (match Option.to_list stated_by_its_signature @ Option.to_list shown_of_its_body with
+      | [] -> Facts.add_theorem frame ~because:(Specifies cost) (Logic.less_equal least cost)
+      | values -> List.iter (fun value -> Facts.define frame cost (Logic.larger least value)) values);
       cost
 
 let compute_function_value_amount (frame : State.frame) ~location
@@ -580,10 +584,11 @@ let make_method_cost (frame : State.frame) (metric : Language.Metric.t) (method_
   let symbol = Logic.Symbol.Method_cost { metric; method_; trait_arguments; self_type } in
   Query.run_once frame.query (Method_cost_bound symbol) (fun () ->
       let least = Costs.least_amount (Metric metric) in
-      Query.add_fact frame.query (Logic.less_equal least (Logic.Symbol symbol));
+      Query.add_theorem frame.query ~because:(Specifies (Logic.Symbol symbol))
+        (Logic.less_equal least (Logic.Symbol symbol));
       Option.iter
         (fun bound ->
-          Query.add_fact frame.query
+          Query.add_theorem frame.query ~because:Generalizes_an_execution
             (Logic.less_equal (Logic.Symbol symbol) (Logic.larger bound least)))
         (find_method_cost_bound frame metric method_ ~trait_arguments self_type));
   Logic.Symbol symbol

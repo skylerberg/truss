@@ -22,7 +22,7 @@ let make_sequence_range (environment : State.environment) query element sequence
           &&& less_equal low_term high_term
           &&& less_equal high_term (length whole_term))
       in
-      Query.add_fact query
+      Query.add_theorem query ~because:Lemma
         (Logic.forall ~trigger:[ range ] (bound, Logic.(is_within ==> equal (length range) count)));
       (match
          ( Models.index_sequence environment query element range position_term,
@@ -30,7 +30,7 @@ let make_sequence_range (environment : State.environment) query element sequence
              (Logic.add low_term position_term) )
        with
       | Some inside, Some outside ->
-          Query.add_fact query
+          Query.add_theorem query ~because:Lemma
             (Logic.forall ~trigger:[ inside ]
                ( bound @ [ (position, Logic.Int) ],
                  Logic.(
@@ -44,7 +44,7 @@ let make_sequence_range (environment : State.environment) query element sequence
             (Logic.subtract position_term low_term) )
       with
       | Some outside, Some inside ->
-          Query.add_fact query
+          Query.add_theorem query ~because:Lemma
             (Logic.forall ~trigger:[ range; outside ]
                ( bound @ [ (position, Logic.Int) ],
                  Logic.(

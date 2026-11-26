@@ -129,7 +129,7 @@ let make_potential_credit (query : Query.t) change =
     Query.declare query (Logic.Constant (is_credited, Logic.Bool));
     Query.declare query (Logic.Function (Costs.credit_symbol, [ Logic.Int ], Logic.Int));
     let applied = Logic.Apply (Costs.credit_symbol, [ Logic.Symbol saved ]) in
-    Query.add_fact query
+    Query.add_theorem query ~because:(Defines (Logic.Symbol Costs.credit_symbol))
       (Logic.forall ~trigger:[ applied ]
          ( [ (saved, Logic.Int) ],
            Logic.equal applied
