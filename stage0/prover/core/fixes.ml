@@ -112,7 +112,7 @@ let add_requires (context : State.context) (frame : State.frame) required : Cata
   match find_signature context with
   | Some (signature, body) when not context.inherits_precondition ->
       let place : Catalog.Prover.clause_place =
-        match context.requires_clause_being_read with
+        match frame.requires_being_read with
         | Some origin -> Before_clause (Written (read_requires_clause signature origin).id)
         | None -> Before_body (Written body.id)
       in

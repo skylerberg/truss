@@ -1,29 +1,10 @@
-let make_policy ~keeps_termination ~keeps_failures ~panics ~can_declare_panic ~panic_condition :
-    State.obligation_policy =
-  {
-    panics;
-    can_declare_panic;
-    panic_condition;
-    keeps_termination;
-    keeps_failures;
-    obligation_condition = [];
-  }
+let make_policy ~keeps_termination ~keeps_failures ~panic_condition : State.obligation_policy =
+  { panic_condition; keeps_termination; keeps_failures; obligation_condition = [] }
 
-let may_panic (context : State.context) = context.policy.panics
+let find_ruled_out_panic (context : State.context) (frame : State.frame) =
+  if frame.panics then None else context.policy.panic_condition
 
-let find_ruled_out_panic (context : State.context) =
-  if context.policy.panics then None else context.policy.panic_condition
-
-let run_with_panics (context : State.context) ~panics run =
-  let enclosing_panics = context.policy.panics
-  and enclosing_can_declare_panic = context.policy.can_declare_panic in
-  context.policy.panics <- panics;
-  context.policy.can_declare_panic <- false;
-  Fun.protect
-    ~finally:(fun () ->
-      context.policy.panics <- enclosing_panics;
-      context.policy.can_declare_panic <- enclosing_can_declare_panic)
-    run
+let set_panics (frame : State.frame) ~panics = { frame with panics; can_declare_panic = false }
 
 let with_condition (context : State.context) condition run =
   let enclosing = context.policy.obligation_condition in
@@ -62,7 +43,7 @@ let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?(is_proven_by_evaluat
   let code = Catalog.Prover_description.find_code obligation in
   let holds_when = Option.value holds_when ~default:context.policy.obligation_condition in
   if
-    (is_panic_obligation code && context.policy.panics)
+    (is_panic_obligation code && frame.panics)
     || (Option.is_some context.policy.panic_condition && not (is_panic_obligation code))
     || not
          (holds_when = context.condition
@@ -98,7 +79,7 @@ let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?(is_proven_by_evaluat
             | fixes -> fixes
           in
           let fixes =
-            if is_panic_obligation code && context.policy.can_declare_panic && is_home_body then
+            if is_panic_obligation code && frame.can_declare_panic && is_home_body then
               fixes @ Fixes.make_panic_fix context
             else fixes
           in

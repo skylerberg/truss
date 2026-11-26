@@ -1,15 +1,12 @@
 let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_failures = true)
-    ?(panics = false) ?(can_declare_panic = false) ?panic_condition ?blocked_holders
-    (lookups : Lookups.t) ~home ~current ~terminates ~measures ~inherits_precondition =
+    ?panic_condition ?blocked_holders (lookups : Lookups.t) ~home ~current ~terminates ~measures
+    ~inherits_precondition =
   let node = Option.value node ~default:current in
   let rec context =
     {
       State.condition;
       bounds = Encoding.list_definition_bounds lookups ~current ~condition;
-      policy =
-        Obligations.make_policy ~keeps_termination ~keeps_failures ~panics ~can_declare_panic
-          ~panic_condition;
-      requires_clause_being_read = None;
+      policy = Obligations.make_policy ~keeps_termination ~keeps_failures ~panic_condition;
       skipped_conditions = [];
       run_body = (fun frame ~lambdas body -> Reader.read_body context frame ~lambdas body);
       read_formula =
@@ -25,10 +22,6 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       local_names = Tables.Local_table.create 16;
       local_origins = Tables.Local_table.create 16;
       returns = [];
-      enclosing_provides = [];
-      instantiating = [];
-      is_specification = false;
-      callees_whose_requires_are_read = [];
       query = Query.create ();
       axioms = Contract_axioms.make_state ();
       termination = Termination.make_state ~terminates ~measures;
@@ -78,6 +71,12 @@ let make_empty_frame source =
     aliases = Locals.empty;
     lends = Locals.empty;
     callbacks = [];
+    requires_being_read = None;
+    callees_whose_requires_are_read = [];
+    provided = [];
+    panics = false;
+    can_declare_panic = false;
+    instantiating = [];
     visited = None;
     final_result = None;
     spent = [];
@@ -93,14 +92,14 @@ let is_capability_implementation (lookups : Lookups.t) (path : Path.t) =
       | None -> false)
   | _ -> false
 
-let read_requires (context : State.context) frame (requirement : Mir.formula) =
-  let outer = context.requires_clause_being_read in
-  context.requires_clause_being_read <- Some requirement.origin;
-  Fun.protect
-    ~finally:(fun () -> context.requires_clause_being_read <- outer)
-    (fun () ->
-      Obligations.with_condition context requirement.holds_when (fun () ->
-          Validity.read_specification context frame requirement))
+let read_requires (context : State.context) (frame : State.frame) (requirement : Mir.formula) =
+  let after, term =
+    Obligations.with_condition context requirement.holds_when (fun () ->
+        Validity.read_specification context
+          { frame with requires_being_read = Some requirement.origin }
+          requirement)
+  in
+  ({ after with requires_being_read = frame.requires_being_read }, term)
 
 let rec run_blocking ?blocked_holders translate =
   try translate ?blocked_holders ()
@@ -159,8 +158,8 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
       contract.decreases
   in
   let context =
-    make_context lookups ~condition ~keeps_termination ~keeps_failures ~panics ~can_declare_panic
-      ?panic_condition ?blocked_holders ~home ~current:path
+    make_context lookups ~condition ~keeps_termination ~keeps_failures ?panic_condition
+      ?blocked_holders ~home ~current:path
       ~node:
         (Mir.Call_edges.resolve_node
            { interface = lookups.interface; mir = lookups.mir }
@@ -226,7 +225,13 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
             | _ -> ());
             Validity.assume_valid context frame ty term;
             Facts.bind frame (Core_local local) ty term)
-      { (make_empty_frame source) with substitution; is_ghost = is_specification_only }
+      {
+        (make_empty_frame source) with
+        substitution;
+        is_ghost = is_specification_only;
+        panics;
+        can_declare_panic;
+      }
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in

@@ -58,6 +58,12 @@ type frame = {
   aliases : (Logic.term * Mir.place) list Locals.t;
   lends : (Logic.term * (frame -> Logic.term -> frame)) list Locals.t;
   callbacks : (Logic.term * (Types.function_type * known_function)) list;
+  requires_being_read : Core.origin option;
+  callees_whose_requires_are_read : Path.t list;
+  provided : Mir.provided list list;
+  panics : bool;
+  can_declare_panic : bool;
+  instantiating : (Path.t * int) list;
 }
 
 type changed_part = { root : Locals.local; declared_root_type : Types.ty; fields : string list }
@@ -176,8 +182,6 @@ type callback_state = {
 }
 
 type obligation_policy = {
-  mutable panics : bool;
-  mutable can_declare_panic : bool;
   panic_condition : Catalog.Prover.quoted list option;
   keeps_termination : bool;
   keeps_failures : bool;
@@ -194,10 +198,6 @@ type context = {
   local_names : string Tables.Local_table.t;
   local_origins : Core.origin Tables.Local_table.t;
   mutable returns : function_exit list;
-  mutable enclosing_provides : Mir.provided list list;
-  mutable instantiating : (Path.t * int) list;
-  mutable is_specification : bool;
-  mutable callees_whose_requires_are_read : Path.t list;
   query : Query.t;
   axioms : axiom_state;
   termination : termination_state;
@@ -222,7 +222,6 @@ type context = {
   ranking : bool;
   condition : Types.condition;
   bounds : Interface.Impls.bounds;
-  mutable requires_clause_being_read : Core.origin option;
   mutable skipped_conditions : Types.condition list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;
   read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;

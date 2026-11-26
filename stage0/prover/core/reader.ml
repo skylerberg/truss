@@ -845,13 +845,11 @@ and read_choice context frame run (choice : Mir.choice) =
               Some (Facts.restrict frame (Logic.not_ reads_right), Logic.Boolean (connective <> And))
           ))
 
-and read_providing (context : State.context) run provided ~refresh read =
+and read_providing (context : State.context) run ~refresh read =
   let returns = context.returns in
   let loops = List.map (fun (exits : loop_exits) -> (exits, exits.breaks, exits.ends)) run.loops in
   let cancelled = List.map (fun (_, frames) -> (frames, !frames)) run.cancelled in
-  let enclosing = context.enclosing_provides in
-  context.enclosing_provides <- provided :: enclosing;
-  let read = Fun.protect ~finally:(fun () -> context.enclosing_provides <- enclosing) read in
+  let read = read () in
   let rec refresh_since ~before refresh_exit = function
     | exits when exits == before -> exits
     | exit :: rest -> refresh_exit exit :: refresh_since ~before refresh_exit rest
@@ -905,20 +903,25 @@ and read_statement context frame run (statement : Mir.statement) =
                        run implementation.value)))
              Costs.zero provided)
       in
-      let refresh frame =
-        Potentials.spend_provided context
-          (List.fold_left
-             (fun frame place ->
-               let root = { (expand_place frame run place) with Mir.projections = [] } in
-               refresh_place context frame
-                 (compute_place_type context frame run root)
-                 (make_passed_place context run root))
-             frame
-             (Mir.list_mut_provided_places provided))
-          provider_potential
+      let refresh (inside : State.frame) =
+        {
+          (Potentials.spend_provided context
+             (List.fold_left
+                (fun frame place ->
+                  let root = { (expand_place frame run place) with Mir.projections = [] } in
+                  refresh_place context frame
+                    (compute_place_type context frame run root)
+                    (make_passed_place context run root))
+                inside
+                (Mir.list_mut_provided_places provided))
+             provider_potential)
+          with
+          provided = frame.provided;
+        }
       in
       let read =
-        read_providing context run provided ~refresh (fun () -> read_block context frame run body)
+        read_providing context run ~refresh (fun () ->
+            read_block context { frame with provided = provided :: frame.provided } run body)
       in
       write_assignment context run target
         (Option.map (fun (after, term) -> (refresh after, term)) read)
@@ -1389,8 +1392,8 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
       in
       Facts.declare context (Logic.Constant (symbol, Logic.Bool));
       let _, holds =
-        Validity.run_as_specification context (fun () ->
-            Lambdas.run_code context frame code ~type_:Types.bool)
+        Validity.run_as_specification context { frame with is_ghost = true } (fun specification ->
+            Lambdas.run_code context specification code ~type_:Types.bool)
       in
       Facts.assume context frame (Logic.equal (Logic.Symbol symbol) holds);
       let location = Facts.locate context frame.source statement.origin in

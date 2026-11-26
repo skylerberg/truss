@@ -71,7 +71,8 @@ let list_providers (enclosing : Mir.provided list list) =
   in
   list enclosing
 
-let find_capability_reach (context : State.context) ~(uses : Types.capability_set) capability =
+let find_capability_reach (context : State.context) (frame : State.frame)
+    ~(uses : Types.capability_set) capability =
   let rec reach enclosing uses =
     let providers = list_providers enclosing in
     let find_provider used =
@@ -112,10 +113,10 @@ let find_capability_reach (context : State.context) ~(uses : Types.capability_se
       Not_reached
       (List.map Types.find_base (Types.list_capabilities uses))
   in
-  reach context.enclosing_provides uses
+  reach frame.provided uses
 
 let compute_capability_amount context frame ~uses capability counter ~direct =
-  match find_capability_reach context ~uses capability with
+  match find_capability_reach context frame ~uses capability with
   | Not_reached -> Costs.zero
   | Reached_through_providers -> Counters.declare_unknown_amount context frame counter
   | Reached_directly -> direct ()
@@ -421,7 +422,6 @@ let make_static_frame (frame : State.frame) source ~substitution ~self_type =
     spent = [];
     aliases = Locals.empty;
     lends = Locals.empty;
-    callbacks = [];
   }
 
 let is_static ~has_own_generics (amount : Mir.formula) =
