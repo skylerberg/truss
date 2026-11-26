@@ -3247,7 +3247,10 @@ can be proven that way.
 
   `fn clamp(n: UInt64) -> UInt64 requires clamp(n) >= 0` is an error at the
   call in its `requires`. A recursive function's `ensures` may call the
-  function, since its body's calls already form that cycle.
+  function, since its body's calls already form that cycle. That call is a
+  recursive call, so its measure is below the function's own on entry:
+  `ensures result == f(n) + 1` in a function `f(n)` that `decreases n` is an
+  error at the call.
 
 - A fact that relates two functions is not a clause of one where the
   contract of the other calls back. `Set.count` cannot ensure that every

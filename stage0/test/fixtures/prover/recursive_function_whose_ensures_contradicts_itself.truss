@@ -1,0 +1,7 @@
+fn f(n: UInt8) -> UInt64
+  ensures result == f(n) + 1
+  ensures result < 3
+  decreases n
+{
+  if n == 0 { 100 } else { f(n - 1) }
+}

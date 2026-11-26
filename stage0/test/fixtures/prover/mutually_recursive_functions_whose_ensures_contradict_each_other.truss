@@ -1,0 +1,14 @@
+fn f(n: UInt8) -> UInt64
+  ensures result == g(n) + 1
+  ensures result < 3
+  decreases n
+{
+  if n == 0 { 100 } else { g(n - 1) + 1 }
+}
+
+fn g(n: UInt8) -> UInt64
+  ensures result == f(n)
+  decreases n
+{
+  if n == 0 { 1 } else { f(n - 1) }
+}

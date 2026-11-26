@@ -47,6 +47,8 @@ val oblige :
 val reject_recursion_through_supplied_code :
   State.context -> State.frame -> Obligation.location -> Mir.statement -> unit
 
+val find_group_member : State.context -> State.frame -> 'operand Core.target -> Path.t option
+
 val find_recursive_callee :
   State.context -> State.frame -> Obligation.location -> 'operand Core.target -> Path.t option
 

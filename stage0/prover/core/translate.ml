@@ -24,6 +24,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       node;
       terminates;
       measures;
+      definition_entry = None;
       declarations = [];
       declared = Tables.Symbol_table.create 64;
       definitions = Tables.Symbol_table.create 8;
@@ -46,10 +47,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       enclosing_provides = [];
       instantiating = [];
       callees_whose_requires_are_read = [];
-      axiomatizing = [];
-      open_axioms = [];
-      axioms_of = Tables.Symbol_table.create 16;
-      axiom_clauses = Tables.Axiom_clause_table.create 16;
+      axioms = Contract_axioms.make_state ();
       lending = None;
       callbacks = [];
       cost = Counters.make_state ();
@@ -289,6 +287,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
+  Termination.enter_definition context start;
   let output = Option.map (Facts.substitute_type context start) output in
   let start =
     match signature with

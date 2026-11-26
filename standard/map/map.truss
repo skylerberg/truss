@@ -229,12 +229,15 @@ theorem model_after_push[Key: Hash + Ordered, Value](
   assert identical(after.keys.model()[before.keys.length()], key)
   assert identical(after.values.model()[before.keys.length()], value)
   assert forall other: Key => identical(other, key) ==> other == key
+  assert forall other: Key => identical(key, other) ==> other == key
   assert forall other: Key =>
     (exists i in 0..after.keys.length() => identical(after.keys.model()[i], other))
       == ((exists i in 0..before.keys.length() => identical(before.keys.model()[i], other)) || identical(key, other))
   assert after.model().contains_key(key) && identical(after.model().get(key), value)
   assert forall other: Key =>
     after.model().contains_key(other) && other == key ==> identical(other, key)
+  assert forall other: Key =>
+    after.model().contains_key(other) == (before.model().contains_key(other) || identical(key, other))
 }
 
 internal fn Map[Key: Hash + Ordered, Value].push_entry(mut self, key: own Key, value: own Value)
@@ -1180,8 +1183,10 @@ theorem equality_is_transitive[Key: Hash + Ordered, Value: Equal](
   requires second == third
   ensures first == third
 {
-  assert first.entries_included_in(second) && second.entries_included_in(first)
-  assert second.entries_included_in(third) && third.entries_included_in(second)
+  assert first.entries_included_in(second)
+  assert second.entries_included_in(first)
+  assert second.entries_included_in(third)
+  assert third.entries_included_in(second)
   entries_inclusion_is_transitive(first, second: second, third: third)
   entries_inclusion_is_transitive(first: third, second: second, third: first)
   assert first.keys.length() == third.keys.length()
