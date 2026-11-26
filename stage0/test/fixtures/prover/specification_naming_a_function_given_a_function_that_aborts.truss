@@ -1,0 +1,31 @@
+fn never(count: UInt64) -> UInt64
+  ensures result == 5
+  ensures result == 6
+{
+  let long = "ab".repeated(9223372036854775807)
+  long.length() + count
+}
+
+fn applied(read: (fn(count: UInt64) -> UInt64 ensures result == 5 ensures result == 6)) -> UInt64
+  ensures result == 5
+  ensures result == 6
+{
+  read(0)
+}
+
+fn given_a_function(other: UInt64) -> UInt64 {
+  proof {
+    assert applied(never) == 5 && other == 7
+  }
+  other
+}
+
+fn given_its_parameter(
+  read: (fn(count: UInt64) -> UInt64 ensures result == 5 ensures result == 6),
+  other: UInt64,
+) -> UInt64 {
+  proof {
+    assert applied(read) == 5 && other == 7
+  }
+  other
+}

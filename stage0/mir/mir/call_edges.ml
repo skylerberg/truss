@@ -46,22 +46,25 @@ let make_impl_method trait_interface impl_interface impl (declared : Types.trait
           ~default:declared.method_receiver;
     }
 
+let find_method_of_evidence (interface : Interface.Lookups.t) ~trait (evidence : Types.evidence)
+    (declared : Types.trait_method) =
+  Option.map
+    (function
+      | Interface.Impls.Declaration_for_view ->
+          Path.Method
+            { owner = trait; name = declared.method_name; receiver = declared.method_receiver }
+      | Method_of_impl { impl; _ } ->
+          make_impl_method
+            (Interface.Definition.read_trait_interface interface trait)
+            (Interface.Definition.read_impl_interface interface impl)
+            impl declared)
+    (Interface.Impls.locate_method interface evidence ~name:declared.method_name
+       ~receiver:declared.method_receiver)
+
 let list_methods_of_evidence (interface : Interface.Lookups.t) ~trait (evidence : Types.evidence) =
-  let trait_interface = Interface.Definition.read_trait_interface interface trait in
   List.filter_map
-    (fun (declared : Types.trait_method) ->
-      Option.map
-        (function
-          | Interface.Impls.Declaration_for_view ->
-              Path.Method
-                { owner = trait; name = declared.method_name; receiver = declared.method_receiver }
-          | Method_of_impl { impl; _ } ->
-              make_impl_method trait_interface
-                (Interface.Definition.read_impl_interface interface impl)
-                impl declared)
-        (Interface.Impls.locate_method interface evidence ~name:declared.method_name
-           ~receiver:declared.method_receiver))
-    trait_interface.methods
+    (find_method_of_evidence interface ~trait evidence)
+    (Interface.Definition.read_trait_interface interface trait).methods
 
 let is_self_of_enclosing_trait (type_ : Types.ty) =
   match type_ with

@@ -3,6 +3,9 @@ type resolution = { target : Path.t option; supplied : Path.t list Lazy.t }
 
 val resolve_callee : Interface.Lookups.t -> Types.substitution -> 'operand Core.target -> resolution
 
+val find_method_of_evidence :
+  Interface.Lookups.t -> trait:Path.t -> Types.evidence -> Types.trait_method -> Path.t option
+
 type supplier = Call | Named_function of Path.t | Provide
 type edge = Calls of Path.t | Supplies of { supplier : supplier; code : Path.t list }
 

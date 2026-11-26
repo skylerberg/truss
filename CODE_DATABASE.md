@@ -255,7 +255,7 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Check a test | Test | `Package_checks.run` with `Test` | The tests of its package that have its name | Diagnostics |
 | Check unexported | Function, method, constant, or member constant, with the other stale units of the drain | `Package_checks.classify_uses`, then `Package_checks.run` with `Unexported` | The `references` edges into the definition, one user at a time, and the declaration of each user | Diagnostics |
 | Check a dependency | Dependency | `Package_checks.run` with `Dependency` | Whether a body of the package references the dependency | `dependency_use` |
-| Prove | Definition | `Prover.prove` | MIR, contracts, `ownership`, `recursion_group`, `proof_group`, its callees' `may_abort` | `proof`, `hole`, `claims` edges to the items of its evaluations |
+| Prove | Definition | `Prover.prove` | MIR, contracts, `ownership`, `recursion_group`, `proof_group`, the `may_abort` of its callees and of the `impl` methods and functions supplied to them | `proof`, `hole`, `claims` edges to the items of its evaluations |
 | Decide | Definition | `Prover.pose`, the solver, `Prover.list_states` | The proof, the results of running its evaluations, and the outputs of the unit's own runs of Z3 | `verdict`, `solver_run` |
 | Lower | Item | `Lowering.lower`, `Lowering.check_calls` | MIR and interfaces; the callees of the item's definition and of each callee | `lowered`, `references` edges to the items its code names |
 | Key tests | Item, with the items of its reference cycle | `Lowering.derive_test_keys` | `lowered`, and the test keys of the items it references | `test_key` |

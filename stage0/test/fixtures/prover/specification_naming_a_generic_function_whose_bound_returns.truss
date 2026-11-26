@@ -1,0 +1,48 @@
+trait Measured {
+  fn size(self) -> UInt64
+    ensures result >= 1
+    cost allocations == 0
+}
+
+type Leaf(width: UInt64)
+
+impl Measured for Leaf {
+  fn size(self) -> UInt64
+    ensures result == 1
+  {
+    1
+  }
+}
+
+fn measured[Item: Measured](item: Item) -> UInt64
+  ensures result >= 1
+{
+  item.size()
+}
+
+fn at_an_impl(leaf: Leaf) -> UInt64 {
+  proof {
+    assert measured(leaf) >= 1
+  }
+  leaf.width
+}
+
+fn at_a_bound[Item: Measured](item: Item) -> UInt64 {
+  proof {
+    assert measured(item) >= 1
+  }
+  item.size()
+}
+
+fn apply(change: fn(UInt64) -> UInt64, value: UInt64) -> UInt64
+  ensures result == change(value)
+{
+  change(value)
+}
+
+fn given_its_parameter(change: fn(UInt64) -> UInt64, value: UInt64) -> UInt64 {
+  proof {
+    assert apply(change, value: value) == change(value)
+  }
+  value
+}
