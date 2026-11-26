@@ -338,7 +338,7 @@ let translate_named_function (context : State.context) (frame : State.frame)
           ~substitution_of:(fun _ -> Types.no_substitution)
           ~result_type:function_type.output
           ~group_member:
-            (Facts.find_group_member context frame
+            (Cycles.find_group_member context frame
                (Core.Function
                   { path; instantiation = { type_arguments; capability_arguments = [] } }))
           ~is_on_bound_values:true;
@@ -364,7 +364,7 @@ let evaluate_constant (context : State.context) frame path =
   with
   | Some (constant_source, _, _), Some { form = code; _ } ->
       let symbol : Logic.symbol =
-        if Facts.is_evaluated_constant context path code then Evaluated (Constant_value path)
+        if Cycles.is_evaluated_constant context path code then Evaluated (Constant_value path)
         else Constant path
       in
       let empty =

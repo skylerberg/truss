@@ -146,14 +146,17 @@ type axiom_state = {
 
 type definition_entry = { entry_frame : frame; entry_measures : Logic.term list }
 
+type termination_state = {
+  mutable terminates : bool;
+  measures : Mir.formula list;
+  mutable definition_entry : definition_entry option;
+}
+
 type context = {
   lookups : Lookups.t;
   current : Path.t;
   node : Path.t;
-  mutable terminates : bool;
   mutable callbacks : (Core.local * string * Mir.callback) list;
-  measures : Mir.formula list;
-  mutable definition_entry : definition_entry option;
   mutable declarations : Logic.declaration list;
   declared : Logic.sort list Tables.Symbol_table.t;
   definitions : unit Tables.Symbol_table.t;
@@ -173,6 +176,7 @@ type context = {
   mutable instantiating : Path.t list;
   mutable callees_whose_requires_are_read : Path.t list;
   axioms : axiom_state;
+  termination : termination_state;
   disjoint : (Core.id list * Core.id list) list;
   mutable indexes : (Core.id * noted_place) list;
   mutable lending : lending option;

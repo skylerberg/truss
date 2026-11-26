@@ -499,20 +499,18 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   in
   let ended = ref [] in
   let saved_returns = context.returns
-  and saved_terminates = context.terminates
   and saved_panics = context.panics
   and saved_can_declare_panic = context.can_declare_panic in
   context.returns <- [];
-  context.terminates <- Types.terminates function_type.uses;
   context.can_declare_panic <- false;
   context.panics <-
     Conditions.may_panic context.lookups ~current:context.current ~condition:context.condition
       function_type.uses;
   let inferred_bounds =
+    Termination.run_in_lambda context function_type @@ fun () ->
     Fun.protect
       ~finally:(fun () ->
         context.returns <- saved_returns;
-        context.terminates <- saved_terminates;
         context.panics <- saved_panics;
         context.can_declare_panic <- saved_can_declare_panic;
         Counters.leave_lambda context counters)

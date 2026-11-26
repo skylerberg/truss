@@ -948,7 +948,7 @@ and read_providing (context : State.context) run provided ~refresh read =
 
 and read_statement context frame run (statement : Mir.statement) =
   let location = Facts.locate context frame.source statement.origin in
-  Facts.reject_recursion_through_supplied_code context frame location statement;
+  Termination.reject_recursion_through_supplied_code context frame location statement;
   match statement.kind with
   | Basic basic -> read_basic context frame run statement basic
   | Assert_by_bit_vector { names; code; _ } ->

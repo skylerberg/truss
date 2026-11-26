@@ -22,9 +22,6 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       lookups;
       current;
       node;
-      terminates;
-      measures;
-      definition_entry = None;
       declarations = [];
       declared = Tables.Symbol_table.create 64;
       definitions = Tables.Symbol_table.create 8;
@@ -48,6 +45,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       instantiating = [];
       callees_whose_requires_are_read = [];
       axioms = Contract_axioms.make_state ();
+      termination = Termination.make_state ~terminates ~measures;
       lending = None;
       callbacks = [];
       cost = Counters.make_state ();
@@ -541,10 +539,10 @@ let find_circular_contract (lookups : Lookups.t) (source : State.source) ~path =
       ~inherits_precondition:false
   in
   let start = make_empty_frame source in
-  match Facts.list_circular_contracts context start with
+  match Cycles.list_circular_contracts context start with
   | [] -> None
   | circular ->
-      List.iter (Facts.reject_circular_proof context start) circular;
+      List.iter (Cycles.reject_circular_proof context start) circular;
       Some (make_outcome context)
 
 let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_substitution)
@@ -906,8 +904,8 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
                    ~type_:(Facts.substitute_type context start default.type_)))
             defaults
       | Some { form = Parameter_defaults _; _ } | None -> ());
-      match Facts.list_circular_clauses context start ~type_:ty with
-      | _ :: _ as circular -> List.iter (Facts.reject_circular_proof context start) circular
+      match Cycles.list_circular_clauses context start ~type_:ty with
+      | _ :: _ as circular -> List.iter (Cycles.reject_circular_proof context start) circular
       | [] ->
           let value_ = Facts.arrive context start "value" ty in
           Facts.assume context start
@@ -939,14 +937,14 @@ let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
   match Mir.read_initializer lookups.mir path with
   | Some { form = code; _ } ->
       let frame = make_empty_frame source in
-      Facts.reject_constant_cycle context frame code;
+      Cycles.reject_constant_cycle context frame code;
       ignore
         (Lambdas.run_code context frame code
            ~type_:(Interface.Definition.read_constant_type context.lookups.interface path));
       {
         (make_outcome context) with
         evaluation =
-          (if Facts.is_evaluated_constant context path code then Some (Constant_value path)
+          (if Cycles.is_evaluated_constant context path code then Some (Constant_value path)
            else None);
       }
   | None -> Facts.raise_bug "the constant `%s` has no MIR" (Path.show path)
