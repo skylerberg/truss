@@ -4,10 +4,9 @@ val check_widened : Obligation.location -> is_written:bool -> Types.ty -> Types.
 val convert_from_integer : State.frame -> Invocation.site -> Logic.term -> Logic.term
 val list_impl_packages : State.environment -> Types.ty -> Path.package list
 val make_equality : State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
-val make_power : State.context -> State.frame -> Logic.term -> Logic.term -> Logic.term
+val make_power : State.frame -> Logic.term -> Logic.term -> Logic.term
 
 val translate_primitive_operation :
-  State.context ->
   State.frame ->
   site:Invocation.site ->
   Intrinsic.scalar ->

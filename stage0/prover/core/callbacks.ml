@@ -1,16 +1,18 @@
-let make_state () : State.callback_state = { named = [] }
+type state = { mutable named : (Logic.term * (Types.function_type * State.known_function)) list }
 
-let note_named (context : State.context) term function_type known =
-  if not (List.mem_assoc term context.callbacks.named) then
-    context.callbacks.named <- (term, (function_type, known)) :: context.callbacks.named
+let state = Private_state.make_key (fun () -> { named = [] })
 
-let find_typed (context : State.context) (frame : State.frame) term =
+let note_named (query : Query.t) term function_type known =
+  let state = Query.read_state query state in
+  if not (List.mem_assoc term state.named) then
+    state.named <- (term, (function_type, known)) :: state.named
+
+let find_typed (frame : State.frame) term =
   match List.assoc_opt term frame.callbacks with
   | Some _ as own -> own
-  | None -> List.assoc_opt term context.callbacks.named
+  | None -> List.assoc_opt term (Query.read_state frame.query state).named
 
-let find_known (context : State.context) (frame : State.frame) term =
-  Option.map snd (find_typed context frame term)
+let find_known (frame : State.frame) term = Option.map snd (find_typed frame term)
 
 let bind_own (frame : State.frame) own =
   List.fold_left
@@ -135,17 +137,16 @@ let is_in_the_logic (function_type : Types.function_type) =
   function_type.uses = Types.no_capabilities
   && List.for_all (fun (mode, _) -> mode <> Language.Mode.Mut) function_type.inputs
 
-let declare_arguments (context : State.context) (frame : State.frame) inputs =
+let declare_arguments (frame : State.frame) inputs =
   List.map
     (fun (_, input) ->
       let input = Encoding.substitute_type frame input in
       let term = Encoding.arrive frame "argument" input in
-      Validity.assume_valid context frame input term;
+      Validity.assume_valid frame input term;
       term)
     inputs
 
-let declare_results (context : State.context) (frame : State.frame)
-    (function_type : Types.function_type) entries =
+let declare_results (frame : State.frame) (function_type : Types.function_type) entries =
   let exits =
     List.map2
       (fun ((mode : Language.Mode.t), input) entry ->
@@ -153,14 +154,14 @@ let declare_results (context : State.context) (frame : State.frame)
         | Mut ->
             let input = Encoding.substitute_type frame input in
             let exit_ = Encoding.arrive frame "changed" input in
-            Validity.assume_valid context frame input exit_;
+            Validity.assume_valid frame input exit_;
             exit_
         | Read | Own -> entry)
       function_type.inputs entries
   in
   let output = Encoding.substitute_type frame function_type.output in
   let result = Encoding.arrive frame "result" output in
-  Validity.assume_valid context frame output result;
+  Validity.assume_valid frame output result;
   (exits, result)
 
 type parameter_contract = (State.source * State.frame * Mir.callback) option
@@ -170,16 +171,16 @@ let bind_inputs (frame : State.frame) inputs terms =
     (fun locals input term -> Locals.add (Core_local input) term locals)
     frame.old_locals inputs terms
 
-let read_clauses (context : State.context) (source : State.source) inside clauses =
+let read_clauses (source : State.source) inside clauses =
   List.map
     (fun (clause : Mir.formula) ->
-      (Facts.quote source clause.origin, snd (Validity.read_specification context inside clause)))
+      (Facts.quote source clause.origin, snd (Validity.read_specification inside clause)))
     clauses
 
-let read_requires (context : State.context) (stated : parameter_contract) arguments =
+let read_requires (stated : parameter_contract) arguments =
   match stated with
   | Some (source, inside, { inputs; requires; _ }) ->
-      read_clauses context source
+      read_clauses source
         {
           inside with
           locals = bind_inputs inside inputs arguments;
@@ -189,10 +190,10 @@ let read_requires (context : State.context) (stated : parameter_contract) argume
         requires
   | None -> []
 
-let read_ensures (context : State.context) (stated : parameter_contract) ~entries ~exits ~result =
+let read_ensures (stated : parameter_contract) ~entries ~exits ~result =
   match stated with
   | Some (source, inside, { inputs; ensures; _ }) ->
-      read_clauses context source
+      read_clauses source
         {
           inside with
           locals = bind_inputs inside inputs exits;
@@ -226,36 +227,36 @@ let find_named (frame : State.frame) path instantiation : State.known_function o
 
 let number terms = List.mapi (fun position term -> (position, term)) terms
 
-let read_holding (context : State.context) (clauses : State.clauses) ~substitution inside formulas =
-  read_clauses context clauses.callee inside
+let read_holding (environment : State.environment) (query : Query.t) (clauses : State.clauses)
+    ~substitution inside formulas =
+  read_clauses clauses.callee inside
     (List.filter
-       (fun (clause : Mir.formula) -> Conditions.holds_here context ~substitution clause.holds_when)
+       (fun (clause : Mir.formula) ->
+         Conditions.holds_here environment query ~substitution clause.holds_when)
        formulas)
 
-let list_requires (context : State.context) (frame : State.frame) (known : State.known_function)
-    arguments =
+let list_requires (frame : State.frame) (known : State.known_function) arguments =
   match known with
   | Named { substitution_of; contract; _ } ->
       let clauses = Contracts.select_precondition_clauses contract in
       let substitution = substitution_of clauses in
-      read_holding context clauses ~substitution
+      read_holding frame.environment frame.query clauses ~substitution
         (Contracts.make_entry_frame frame clauses ~arguments:(number arguments) ~substitution)
         (Facts.list_clauses clauses.requires)
-  | Own { callback; _ } -> read_requires context (Some (frame.source, frame, callback)) arguments
+  | Own { callback; _ } -> read_requires (Some (frame.source, frame, callback)) arguments
 
-let list_ensures (context : State.context) (frame : State.frame) (known : State.known_function)
-    ~entries ~exits ~result =
+let list_ensures (frame : State.frame) (known : State.known_function) ~entries ~exits ~result =
   List.map snd
     (match known with
     | Named { substitution_of; contract; _ } ->
         let clauses = contract.callee_clauses in
         let substitution = substitution_of clauses in
-        read_holding context clauses ~substitution
+        read_holding frame.environment frame.query clauses ~substitution
           (Contracts.make_exit_frame frame clauses ~entries:(number entries) ~exits:(number exits)
              ~result:(Some result) ~substitution)
           clauses.ensures
     | Own { callback; _ } ->
-        read_ensures context (Some (frame.source, frame, callback)) ~entries ~exits ~result)
+        read_ensures (Some (frame.source, frame, callback)) ~entries ~exits ~result)
 
 let has_requires : State.known_function -> bool = function
   | Named { contract; _ } -> (Contracts.select_precondition_clauses contract).requires <> []
@@ -263,8 +264,7 @@ let has_requires : State.known_function -> bool = function
 
 type use = Called | Not_called of Catalog.Prover.function_use
 
-let check_requires (context : State.context) (frame : State.frame) location
-    (known : State.known_function) ~use arguments =
+let check_requires (frame : State.frame) location (known : State.known_function) ~use arguments =
   let describe clause : Catalog.Prover.obligation =
     match (use, known) with
     | Called, Named { path; _ } ->
@@ -278,28 +278,26 @@ let check_requires (context : State.context) (frame : State.frame) location
   in
   List.iter
     (fun (clause, term) -> Obligations.oblige frame location (describe clause) term)
-    (list_requires context frame known arguments)
+    (list_requires frame known arguments)
 
-let check_escaping (context : State.context) (frame : State.frame) location known
-    (function_type : Types.function_type) =
+let check_escaping (frame : State.frame) location known (function_type : Types.function_type) =
   if has_requires known then
     let _, supposed = Facts.suppose frame "called" in
-    check_requires context supposed location known
+    check_requires supposed location known
       ~use:(Not_called (Used_as_value (Types.Function function_type)))
-      (declare_arguments context supposed function_type.inputs)
+      (declare_arguments supposed function_type.inputs)
 
-let check_read (context : State.context) (frame : State.frame) term =
+let check_read (frame : State.frame) term =
   if frame.makes_obligations && not frame.is_reading_callback then
-    match find_typed context frame term with
+    match find_typed frame term with
     | Some (function_type, (Own { callback = { requires = first :: _; _ }; _ } as known)) ->
-        check_escaping context frame (Facts.locate frame first.origin) known function_type
+        check_escaping frame (Facts.locate frame first.origin) known function_type
     | Some (_, (Own _ | Named _)) | None -> ()
 
-let check_passed (context : State.context) (frame : State.frame) ~at (callee : Callee.t)
-    (passed : State.passed) ~arguments =
-  let known = find_known context frame passed.term in
+let check_passed (frame : State.frame) ~at (callee : Callee.t) (passed : State.passed) ~arguments =
+  let known = find_known frame passed.term in
   let location = Facts.locate frame (Option.value passed.origin ~default:at) in
-  match (Callee.find_parameter_type context.environment callee passed.position, passed.type_) with
+  match (Callee.find_parameter_type frame.environment callee passed.position, passed.type_) with
   | Some (Types.Function expected), _ ->
       let stated = Callee.find_callback frame callee passed.position ~known:arguments in
       let promises =
@@ -307,22 +305,19 @@ let check_passed (context : State.context) (frame : State.frame) ~at (callee : C
       in
       if promises || Option.fold ~none:false ~some:has_requires known then begin
         let _, supposed = Facts.suppose frame "called" in
-        let entries = declare_arguments context supposed expected.inputs in
+        let entries = declare_arguments supposed expected.inputs in
         let at_call =
-          Facts.restrict supposed
-            (Logic.conjunction (List.map snd (read_requires context stated entries)))
+          Facts.restrict supposed (Logic.conjunction (List.map snd (read_requires stated entries)))
         in
         Option.iter
           (fun known ->
-            check_requires context at_call location known ~use:(Not_called Passed_for_parameter)
-              entries)
+            check_requires at_call location known ~use:(Not_called Passed_for_parameter) entries)
           known;
         if promises then begin
-          let exits, result = declare_results context supposed expected entries in
+          let exits, result = declare_results supposed expected entries in
           Option.iter
             (fun known ->
-              List.iter (Facts.assume at_call)
-                (list_ensures context at_call known ~entries ~exits ~result))
+              List.iter (Facts.assume at_call) (list_ensures at_call known ~entries ~exits ~result))
             known;
           let unpromised : Catalog.Prover.unpromised =
             match known with
@@ -333,32 +328,29 @@ let check_passed (context : State.context) (frame : State.frame) ~at (callee : C
           List.iter
             (fun (promise, term) ->
               Obligations.oblige at_call location (Callback_promise { promise; unpromised }) term)
-            (read_ensures context stated ~entries ~exits ~result)
+            (read_ensures stated ~entries ~exits ~result)
         end
       end
   | _, Types.Function passed_type ->
-      Option.iter (fun known -> check_escaping context frame location known passed_type) known
+      Option.iter (fun known -> check_escaping frame location known passed_type) known
   | _, _ -> ()
 
-let check_called (context : State.context) (frame : State.frame) (site : Invocation.site) called
-    arguments =
+let check_called (frame : State.frame) (site : Invocation.site) called arguments =
   Option.iter
-    (fun known ->
-      check_requires context frame (Facts.locate frame site.origin) known ~use:Called arguments)
-    (find_known context frame called)
+    (fun known -> check_requires frame (Facts.locate frame site.origin) known ~use:Called arguments)
+    (find_known frame called)
 
-let list_called_requires (context : State.context) (frame : State.frame) called arguments =
-  match find_known context frame called with
-  | Some known -> List.map snd (list_requires context frame known arguments)
+let list_called_requires (frame : State.frame) called arguments =
+  match find_known frame called with
+  | Some known -> List.map snd (list_requires frame known arguments)
   | None -> []
 
-let assume_returned (context : State.context) (frame : State.frame)
-    (function_type : Types.function_type) called ~entries ~exits ~result =
+let assume_returned (frame : State.frame) (function_type : Types.function_type) called ~entries
+    ~exits ~result =
   Facts.assume frame (make_callback_ensures function_type called ~entries ~exits ~result);
   Option.iter
-    (fun known ->
-      List.iter (Facts.assume frame) (list_ensures context frame known ~entries ~exits ~result))
-    (find_known context frame called)
+    (fun known -> List.iter (Facts.assume frame) (list_ensures frame known ~entries ~exits ~result))
+    (find_known frame called)
 
 let find_logic_link (function_type : Types.function_type) term =
   if is_in_the_logic function_type && returns_value function_type then
@@ -372,81 +364,79 @@ let find_logic_link (function_type : Types.function_type) term =
            Logic.equal holds (Logic.equal result (apply_function function_type term entries)) ))
   else None
 
-let state_relation (context : State.context) (frame : State.frame)
-    (function_type : Types.function_type) term known =
+let state_relation (frame : State.frame) (function_type : Types.function_type) term known =
   let { inputs; changed; returned; entries; exits; result } =
     make_relation_variables function_type ~label:"named" ~numbers:[]
   in
   let parameters = inputs @ List.map snd changed @ returned in
   let holds = make_callback_ensures function_type term ~entries ~exits ~result in
-  let mark = Query.mark context.query in
+  let mark = Query.mark frame.query in
   let bound = List.map fst parameters in
   let is_inside_the_relation fact =
-    Logic.mentions bound fact || Query.mentions_fresh_since context.query mark fact
+    Logic.mentions bound fact || Query.mentions_fresh_since frame.query mark fact
   in
   let premise, ensures =
-    Query.run_dropping_facts context.query ~drop:is_inside_the_relation (fun () ->
+    Query.run_dropping_facts frame.query ~drop:is_inside_the_relation (fun () ->
         ( Logic.conjunction
             (List.map2
                (fun (_, input) entry ->
                  Logic.( &&& )
                    (Encoding.make_in_range input entry)
-                   (Validity.make_validity context frame ~assuming:true input entry))
+                   (Validity.make_validity frame ~assuming:true input entry))
                function_type.inputs entries
-            @ List.map snd (list_requires context frame known entries)),
-          list_ensures context frame known ~entries ~exits ~result ))
+            @ List.map snd (list_requires frame known entries)),
+          list_ensures frame known ~entries ~exits ~result ))
   in
   if
     ensures <> []
-    && not (List.exists (Query.mentions_fresh_since context.query mark) (premise :: ensures))
+    && not (List.exists (Query.mentions_fresh_since frame.query mark) (premise :: ensures))
   then
     Facts.add_axiom frame
       (Logic.forall ~trigger:[ holds ]
          (parameters, Logic.( ==> ) holds (Logic.( ==> ) premise (Logic.conjunction ensures))))
 
-let state_definition (context : State.context) (frame : State.frame)
-    (function_type : Types.function_type) term ~path ~contract ~substitution_of ~type_arguments
-    ~group_member =
+let state_definition (frame : State.frame) (function_type : Types.function_type) term ~path
+    ~contract ~substitution_of ~type_arguments ~group_member =
   let parameters =
     make_input_variables function_type ~label:"parameter" ~numbers:[ List.length frame.bound ]
   in
   let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
   let sorts = List.map snd parameters in
   let symbol =
-    Contract_axioms.declare_function context.query ~path ~type_arguments ~sorts
+    Contract_axioms.declare_function frame.query ~path ~type_arguments ~sorts
       ~result_type:function_type.output
   in
   let value = Logic.Apply (symbol, inputs) in
-  Contract_axioms.state context frame
+  Contract_axioms.state frame
     { symbol; sorts; term = value; is_limited = false }
     contract ~substitution_of ~result_type:function_type.output ~group_member
     ~is_on_bound_values:true;
   Facts.add_axiom frame
     (Logic.forall (parameters, Logic.equal (apply_function function_type term inputs) value))
 
-let read_named_function (context : State.context) (frame : State.frame) (site : Invocation.site)
-    path instantiation ~is_argument =
+let read_named_function (frame : State.frame) (site : Invocation.site) path instantiation
+    ~is_argument =
   let location = Facts.locate frame site.origin in
   let type_ = Encoding.substitute_type frame site.type_ in
   match (find_named frame path instantiation, type_) with
   | ( Some (Named { contract; substitution_of; type_arguments; group_member; may_abort; _ } as known),
       Types.Function function_type ) ->
       if frame.makes_obligations && not is_argument then
-        check_escaping context frame location known function_type;
+        check_escaping frame location known function_type;
       if frame.makes_obligations && Types.states_no_allocation function_type.costs && may_abort then
         Obligations.oblige frame location (May_not_return_under_no_allocation (Named_function path))
           (Logic.Boolean false);
       let symbol = Logic.Symbol.Function_value { callee = path; type_arguments } in
-      Query.declare context.query (Logic.Constant (symbol, Encoding.sort_of type_));
+      Query.declare frame.query (Logic.Constant (symbol, Encoding.sort_of type_));
       let term = Logic.Symbol symbol in
-      note_named context term function_type known;
-      Query.run_once context.query (Value_of symbol) (fun () ->
+      note_named frame.query term function_type known;
+      Query.run_once frame.query (Value_of symbol) (fun () ->
           if not may_abort then begin
             if is_in_the_logic function_type && contract.is_logic_function then
-              state_definition context frame function_type term ~path ~contract ~substitution_of
+              state_definition frame function_type term ~path ~contract ~substitution_of
                 ~type_arguments ~group_member;
             Option.iter (Facts.add_axiom frame) (find_logic_link function_type term)
           end;
-          state_relation context frame function_type term known);
+          state_relation frame function_type term known);
       term
   | _ -> Facts.raise_unsupported location Unreadable_function_value

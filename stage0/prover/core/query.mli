@@ -1,6 +1,7 @@
 type t
 
 val create : unit -> t
+val read_state : t -> 'state Private_state.key -> 'state
 val make_variable : ?numbers:int list -> string -> 'a Logic.Symbol.t
 val declare : t -> Logic.declaration -> unit
 val find_argument_sorts : t -> Logic.symbol -> Logic.sort list option
@@ -43,3 +44,5 @@ val make_obligation :
 val add_obligation : t -> Obligation.t -> unit
 val note_withheld : t -> Logic.symbol -> Path.t -> unit
 val list_obligations : t -> Obligation.t list
+val add_hole : t -> Resolve.Names.key * Obligation.location -> unit
+val list_holes : t -> (Resolve.Names.key * Obligation.location) list

@@ -13,6 +13,8 @@ type t = {
   withheld : Path.t Tables.Symbol_table.t;
   mutable fresh : int;
   fresh_order : int Tables.Symbol_table.t;
+  mutable holes : (Resolve.Names.key * Obligation.location) list;
+  private_state : Private_state.t;
 }
 
 let create () =
@@ -31,8 +33,11 @@ let create () =
     withheld = Tables.Symbol_table.create 4;
     fresh = 0;
     fresh_order = Tables.Symbol_table.create 64;
+    holes = [];
+    private_state = Private_state.create ();
   }
 
+let read_state query key = Private_state.read query.private_state key
 let make_variable ?(numbers = []) label = Logic.Symbol.Variable { label; numbers }
 
 let declare query (declaration : Logic.declaration) =
@@ -244,3 +249,5 @@ let make_obligation query ~find_signature ~list_axioms ~list_constructors ~condi
 let add_obligation query obligation = query.obligations <- obligation :: query.obligations
 let note_withheld query symbol callee = Tables.Symbol_table.replace query.withheld symbol callee
 let list_obligations query = List.rev query.obligations
+let add_hole query hole = if not (List.mem hole query.holes) then query.holes <- hole :: query.holes
+let list_holes query = List.rev query.holes

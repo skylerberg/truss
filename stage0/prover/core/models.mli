@@ -3,7 +3,6 @@ type quantified_range =
   | Range_of_integers of { low : Logic.term; high : Logic.term; inclusive : bool; type_ : Types.ty }
 
 val run_under_binder :
-  State.context ->
   State.frame ->
   Logic.symbol ->
   Logic.sort ->
@@ -31,12 +30,12 @@ val rank_model :
   State.environment -> Query.t -> Types.ty -> model:Types.ty -> impl:Path.t -> Logic.symbol -> unit
 
 val find_model_function :
-  State.context -> Types.ty -> model:Types.ty -> (Logic.term -> Logic.term) option
+  State.environment -> Query.t -> Types.ty -> model:Types.ty -> (Logic.term -> Logic.term) option
 
-val find_model : State.context -> Types.ty -> Logic.term -> element:Types.ty -> Logic.term option
+val find_model :
+  State.environment -> Query.t -> Types.ty -> Logic.term -> element:Types.ty -> Logic.term option
 
 val quantify_over :
-  State.context ->
   State.frame ->
   Language.Quantifier.t ->
   quantified_range ->
@@ -45,4 +44,4 @@ val quantify_over :
   State.frame * Logic.term
 
 val make_value_term : State.frame -> Types.value -> Logic.term
-val make_array_model : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term
+val make_array_model : State.frame -> Types.ty -> Logic.term -> Logic.term

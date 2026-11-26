@@ -1,4 +1,3 @@
-val make_state : unit -> State.callback_state
 val bind_own : State.frame -> (Core.local * string * Mir.callback) list -> State.frame
 val apply_function : Types.function_type -> Logic.term -> Logic.term list -> Logic.term
 val returns_value : Types.function_type -> bool
@@ -33,13 +32,9 @@ val find_logic_link : Types.function_type -> Logic.term -> Logic.term option
 type parameter_contract = (State.source * State.frame * Mir.callback) option
 
 val read_requires :
-  State.context ->
-  parameter_contract ->
-  Logic.term list ->
-  (Catalog.Prover.quoted * Logic.term) list
+  parameter_contract -> Logic.term list -> (Catalog.Prover.quoted * Logic.term) list
 
 val read_ensures :
-  State.context ->
   parameter_contract ->
   entries:Logic.term list ->
   exits:Logic.term list ->
@@ -47,18 +42,11 @@ val read_ensures :
   (Catalog.Prover.quoted * Logic.term) list
 
 val read_named_function :
-  State.context ->
-  State.frame ->
-  Invocation.site ->
-  Path.t ->
-  Types.instantiation ->
-  is_argument:bool ->
-  Logic.term
+  State.frame -> Invocation.site -> Path.t -> Types.instantiation -> is_argument:bool -> Logic.term
 
-val check_read : State.context -> State.frame -> Logic.term -> unit
+val check_read : State.frame -> Logic.term -> unit
 
 val check_passed :
-  State.context ->
   State.frame ->
   at:Core.origin ->
   Callee.t ->
@@ -66,14 +54,10 @@ val check_passed :
   arguments:(int * Logic.term) list ->
   unit
 
-val check_called :
-  State.context -> State.frame -> Invocation.site -> Logic.term -> Logic.term list -> unit
-
-val list_called_requires :
-  State.context -> State.frame -> Logic.term -> Logic.term list -> Logic.term list
+val check_called : State.frame -> Invocation.site -> Logic.term -> Logic.term list -> unit
+val list_called_requires : State.frame -> Logic.term -> Logic.term list -> Logic.term list
 
 val assume_returned :
-  State.context ->
   State.frame ->
   Types.function_type ->
   Logic.term ->

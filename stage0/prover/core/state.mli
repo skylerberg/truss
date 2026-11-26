@@ -21,11 +21,6 @@ type contract = {
   result_kind : [ `Returns | `Lends ];
 }
 
-type known_callee = {
-  known_signature : Types.signature option Lazy.t;
-  known_clauses : (Interface.form_origin * clauses option) option Lazy.t;
-}
-
 type known_function =
   | Named of {
       path : Path.t;
@@ -54,13 +49,16 @@ type environment = {
   inherits_precondition : bool;
   ranking : bool;
   terminates : bool;
+  measures : Mir.formula list;
+  blocked_holders : string list;
   proven_laws : (Types.trait_reference * Types.ty) option;
   policy : obligation_policy;
-  visible_types : (Types.type_interface * Types.substitution) option Tables.Type_table.t;
-  callees : known_callee Tables.Path_table.t;
+  memos : Private_state.t;
+  read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;
+  run_body : frame -> lambdas:Mir.body array -> Mir.body -> body_exits;
 }
 
-type frame = {
+and frame = {
   environment : environment;
   query : Query.t;
   source : source;
@@ -94,12 +92,21 @@ type frame = {
   is_reading_callback : bool;
   validating : Types.ty list;
   terminates : bool;
+  lent_part_type : Types.ty option;
+  definition_entry : definition_entry option;
 }
 
-type changed_part = { root : Locals.local; declared_root_type : Types.ty; fields : string list }
-type place_value = One of Logic.term | Run of Logic.term * Logic.term
-type noted_place = { origin : Core.origin; value : place_value }
-type function_exit = { frame : frame; returned : Logic.term option; return_origin : Core.origin }
+and definition_entry = { entry_frame : frame; entry_measures : Logic.term list }
+and function_exit = { frame : frame; returned : Logic.term option; return_origin : Core.origin }
+and lent_part = { lent_frame : frame; lent_origin : Core.origin }
+and body_exits = { returns : function_exit list; lends : lent_part list }
+
+type changed_part = {
+  root : Locals.local;
+  root_description : Catalog.Prover.value;
+  declared_root_type : Types.ty;
+  fields : string list;
+}
 
 type passed_place = {
   read : frame -> Logic.term;
@@ -127,90 +134,3 @@ type call_argument =
       site : Invocation.site;
       lambda : lambda_code;
     }
-
-type call_amount = {
-  call : Catalog.Prover.quoted;
-  callee : Path.t;
-  states_cost : bool;
-  counts_potential : bool;
-  counter : Costs.counter;
-  amount : Logic.term;
-}
-
-type buffer = {
-  kind : Language.Builtin_type.t;
-  element : Types.ty;
-  model_of : Logic.term -> Logic.term;
-}
-
-type cost_state = {
-  mutable counters : Costs.counter list;
-  mutable conditional_counters : Costs.counter list;
-  mutable bounded_counters : Costs.counter list;
-  mutable recursive_costs_assumed : int;
-  mutable lambdas_assuming_recursive_costs : Logic.term list;
-  mutable lambda_costs : ((Logic.term * Language.Metric.t) * (Logic.term * Obligation.t list)) list;
-  mutable lambda_bounds :
-    (Logic.term * ((Language.Metric.t * Logic.term) list * Core.local list)) list;
-  mutable lambda_captures : (Logic.term * Core.local list) list;
-  mutable call_targets : (Logic.term * Core.local) list;
-  mutable call_amounts : call_amount list;
-  mutable potentials : Logic.term list;
-  mutable credited_holders : string list;
-  mutable blocked_holders : string list;
-  holds_potential : bool Tables.Type_table.t;
-  buffers : buffer option Tables.Type_table.t;
-}
-
-type lent_part = { lent_frame : frame; lent_origin : Core.origin }
-type lending_state = { mutable part_type : Types.ty option; mutable lent_parts : lent_part list }
-
-type open_axiom = {
-  parameters : Logic.symbol list;
-  mutable hypotheses : Logic.term list;
-  mutable at_calls : (frame -> (Logic.term -> Logic.term) -> unit) list;
-}
-
-type axiom_state = {
-  mutable axiomatizing : Logic.symbol list;
-  axiom_clauses : unit Tables.Axiom_clause_table.t;
-  mutable open_axioms : open_axiom list;
-  axioms_of : open_axiom Tables.Symbol_table.t;
-}
-
-type definition_entry = { entry_frame : frame; entry_measures : Logic.term list }
-
-type termination_state = {
-  measures : Mir.formula list;
-  mutable definition_entry : definition_entry option;
-}
-
-type validity_state = {
-  type_clauses : (source * Mir.type_clauses option Lazy.t) option Tables.Path_table.t;
-  valid_values : (Types.ty * Logic.term) list Tables.Term_table.t;
-}
-
-type callback_state = { mutable named : (Logic.term * (Types.function_type * known_function)) list }
-
-type context = {
-  environment : environment;
-  local_names : string Tables.Local_table.t;
-  local_origins : Core.origin Tables.Local_table.t;
-  query : Query.t;
-  axioms : axiom_state;
-  termination : termination_state;
-  validity : validity_state;
-  callbacks : callback_state;
-  mutable indexes : (Core.id * noted_place) list;
-  lending : lending_state;
-  cost : cost_state;
-  mutable logs : (Logic.term * bool) list;
-  mutable powers : (Logic.term * Logic.term) list;
-  lambda_definitions : Logic.term Tables.Symbol_table.t;
-  models : (Logic.term -> Logic.term) option Tables.Model_table.t;
-  mutable holes : (Resolve.Names.key * Obligation.location) list;
-  mutable unfinished : Logic.term list;
-  mutable skipped_conditions : Types.condition list;
-  run_body : frame -> lambdas:Mir.body array -> Mir.body -> function_exit list;
-  read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;
-}

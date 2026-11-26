@@ -5,7 +5,6 @@ type applied = {
 }
 
 val call_contract :
-  State.context ->
   State.frame ->
   Invocation.site ->
   Callee.t ->
@@ -16,7 +15,6 @@ val call_contract :
   applied
 
 val apply_call :
-  State.context ->
   State.frame ->
   Invocation.site ->
   Callee.t ->
@@ -25,7 +23,6 @@ val apply_call :
   (State.frame * Logic.term) option
 
 val apply_lend :
-  State.context ->
   State.frame ->
   Invocation.site ->
   Callee.t ->

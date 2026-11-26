@@ -9,4 +9,4 @@ val bind_law_parameters :
   Logic.term list ->
   State.frame
 
-val assume_laws : State.context -> State.frame -> Types.trait_reference -> Types.ty -> unit
+val assume_laws : State.frame -> Types.trait_reference -> Types.ty -> unit

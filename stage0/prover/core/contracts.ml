@@ -88,12 +88,21 @@ let list_law_holes (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_re
           (list_law_proofs lookups (Path.locate_package impl) trait for_type)
   | None -> []
 
-let find_callee (environment : State.environment) path : State.known_callee =
-  match Tables.Path_table.find_opt environment.callees path with
+type known_callee = {
+  known_signature : Types.signature option Lazy.t;
+  known_clauses : (Interface.form_origin * State.clauses option) option Lazy.t;
+}
+
+let callees : known_callee Tables.Path_table.t Private_state.key =
+  Private_state.make_key (fun () -> Tables.Path_table.create 16)
+
+let find_callee (environment : State.environment) path =
+  let callees = Private_state.read environment.memos callees in
+  match Tables.Path_table.find_opt callees path with
   | Some callee -> callee
   | None ->
       let lookups = environment.lookups in
-      let callee : State.known_callee =
+      let callee =
         {
           known_signature = lazy (Interface.Impls.read_signature lookups.interface path);
           known_clauses =
@@ -103,7 +112,7 @@ let find_callee (environment : State.environment) path : State.known_callee =
                  (find_source lookups path));
         }
       in
-      Tables.Path_table.replace environment.callees path callee;
+      Tables.Path_table.replace callees path callee;
       callee
 
 let read_signature (environment : State.environment) path =

@@ -40,8 +40,7 @@ let name_path_condition (frame : State.frame) condition =
       Facts.define frame path condition;
       path
 
-let merge (context : State.context) ?value_type ~condition
-    (paths : (Logic.term * State.frame * Logic.term option) list) =
+let merge ?value_type ~condition (paths : (Logic.term * State.frame * Logic.term option) list) =
   let first =
     match paths with (_, first, _) :: _ -> first | [] -> Facts.raise_bug "no paths meet"
   in
@@ -57,7 +56,7 @@ let merge (context : State.context) ?value_type ~condition
   let define prefix sort (values : (Logic.term * State.frame * Logic.term) list) =
     (match values with
     | (_, _, term) :: rest when List.exists (fun (_, _, other) -> other <> term) rest ->
-        List.iter (fun (_, frame, merged) -> Callbacks.check_read context frame merged) values
+        List.iter (fun (_, frame, merged) -> Callbacks.check_read frame merged) values
     | _ -> ());
     match values with
     | (_, _, term) :: rest
@@ -175,7 +174,7 @@ let merge (context : State.context) ?value_type ~condition
       | None -> Some (choose values)
   in
   let merge_part pick =
-    match (Lending.find_part_sort context, find_held pick) with
+    match (Option.map Encoding.sort_of first.lent_part_type, find_held pick) with
     | Some sort, Some values -> Some (define "part" sort values)
     | _ -> pick first
   in
@@ -190,7 +189,7 @@ let merge (context : State.context) ?value_type ~condition
     },
     value )
 
-let join (context : State.context) ?value_type frames =
+let join ?value_type frames =
   match frames with
   | [] -> None
   | [ (frame, value) ] -> Some (frame, value)
@@ -200,8 +199,7 @@ let join (context : State.context) ?value_type frames =
           (Logic.disjunction (List.map (fun ((frame : State.frame), _) -> frame.condition) frames))
       in
       Some
-        (merge context ?value_type ~condition
+        (merge ?value_type ~condition
            (List.map (fun ((frame : State.frame), value) -> (frame.condition, frame, value)) frames))
 
-let join_frames (context : State.context) frames =
-  Option.map fst (join context (List.map (fun frame -> (frame, None)) frames))
+let join_frames frames = Option.map fst (join (List.map (fun frame -> (frame, None)) frames))

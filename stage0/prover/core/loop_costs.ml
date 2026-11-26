@@ -37,14 +37,13 @@ let read_declared_part_type (environment : State.environment) (part : State.chan
             (Types.show declared))
     part.declared_root_type part.fields
 
-let measure_held_gains (context : State.context) (entry : State.frame)
-    (changed : State.changed_part list) =
+let measure_held_gains (entry : State.frame) (changed : State.changed_part list) =
   let held =
     List.filter_map
       (fun part ->
         Option.map
           (fun _ ->
-            ( read_declared_part_type context.environment part,
+            ( read_declared_part_type entry.environment part,
               fun (at : State.frame) -> Option.map snd (Encoding.find_changed_part at part) ))
           (Encoding.find_changed_part entry part))
       changed
@@ -55,12 +54,15 @@ let measure_held_gains (context : State.context) (entry : State.frame)
         match read at with Some term -> Logic.add total (measure at ty term) | None -> total)
       Costs.zero held
   in
-  let measure_whole = sum_held (fun at ty term -> Potentials.compute_potential context at ty term)
+  let measure_whole = sum_held (fun at ty term -> Potentials.compute_potential at ty term)
   and measure_elements =
-    sum_held (fun _ ty term -> Potentials.compute_elements_potential context ty term)
+    sum_held (fun _ ty term ->
+        Potentials.compute_elements_potential entry.environment entry.query ty term)
   in
   lazy
-    (let holds_potential = List.exists (fun (ty, _) -> Potentials.has_potential context ty) held in
+    (let holds_potential =
+       List.exists (fun (ty, _) -> Potentials.has_potential entry.environment entry.query ty) held
+     in
      let whole_on_entry = measure_whole entry in
      let elements_on_entry = measure_elements entry in
      let rec measure_gained gain (at : State.frame) =
@@ -77,14 +79,13 @@ let measure_held_gains (context : State.context) (entry : State.frame)
        @ (No_gain :: (if elements_on_entry = Costs.zero then [] else [ Potential_without_elements ])),
        measure_gained ))
 
-let list_loop_costs (context : State.context) (frame : State.frame) (clauses : Mir.loop_clause list)
-    ~held_gains =
+let list_loop_costs (frame : State.frame) (clauses : Mir.loop_clause list) ~held_gains =
   List.map
     (fun (counter : Costs.counter) ->
       let gains, measure_gained = Lazy.force held_gains in
       let measure_gained =
         if counter.amortized then measure_gained
-        else fun gain at -> Counters.make_potential_credit context.query (measure_gained gain at)
+        else fun gain at -> Counters.make_potential_credit frame.query (measure_gained gain at)
       in
       let gains =
         if counter.amortized then
@@ -134,21 +135,22 @@ let list_loop_costs (context : State.context) (frame : State.frame) (clauses : M
         match written with
         | Some written ->
             Conditions.find_obligation_condition
-              (Conditions.decide context ~substitution:Types.no_substitution written.holds_when)
+              (Conditions.decide frame.environment frame.query ~substitution:Types.no_substitution
+                 written.holds_when)
             <> Some []
         | None -> false
       in
       let holds_when =
-        if is_conditional_clause then context.environment.condition
-        else Counters.read_condition context counter
+        if is_conditional_clause then frame.environment.condition
+        else Counters.read_condition frame.environment frame.query counter
       in
       { counter; entry; rule; measure_gained; holds_when })
-    context.cost.counters
+    (Counters.list_counters frame.query)
 
-let read_amount ?holds_when (context : State.context) (at : State.frame) (cost : Mir.cost) =
+let read_amount ?holds_when (at : State.frame) (cost : Mir.cost) =
   match cost.bound with
   | Order_of amount | At_most amount | Exactly amount ->
-      snd (Validity.read_specification ?holds_when context at amount)
+      snd (Validity.read_specification ?holds_when at amount)
 
 let make_clause_bound (counter : Costs.counter) ~since ~amount =
   match counter.counting with
@@ -156,9 +158,8 @@ let make_clause_bound (counter : Costs.counter) ~since ~amount =
   | Exactly -> Logic.equal since amount
   | At_most -> Logic.less_equal since amount
 
-let oblige_clause (context : State.context) (frame : State.frame) cost (written : Mir.cost) ~moment
-    ~since =
-  let amount = read_amount ~holds_when:cost.holds_when context frame written in
+let oblige_clause (frame : State.frame) cost (written : Mir.cost) ~moment ~since =
+  let amount = read_amount ~holds_when:cost.holds_when frame written in
   Obligations.oblige ~holds_when:cost.holds_when frame
     (Facts.locate frame written.origin)
     (Loop_cost_clause { clause = Facts.quote frame.source written.origin; moment })
@@ -167,24 +168,22 @@ let oblige_clause (context : State.context) (frame : State.frame) cost (written 
 let make_count_bound ~(counter : Costs.counter) ~at ~bound =
   if counter.counting = Exactly then Logic.equal at bound else Logic.less_equal at bound
 
-let check_entry (context : State.context) (frame : State.frame) costs =
+let check_entry (frame : State.frame) costs =
   List.iter
     (fun cost ->
       match cost.rule with
       | Clause_bound { written; _ } ->
-          oblige_clause context frame cost written ~moment:On_entry ~since:Costs.zero
+          oblige_clause frame cost written ~moment:On_entry ~since:Costs.zero
       | Per_iteration _ -> ())
     costs
 
-let enter (context : State.context) (frame : State.frame) ~entry clauses ~holds ~changed =
-  let costs =
-    list_loop_costs context frame clauses ~held_gains:(measure_held_gains context frame holds)
-  in
-  check_entry context entry costs;
+let enter (frame : State.frame) ~entry clauses ~holds ~changed =
+  let costs = list_loop_costs frame clauses ~held_gains:(measure_held_gains frame holds) in
+  check_entry entry costs;
   {
     costs;
-    mark = Query.mark context.query;
-    recursive_costs_mark = context.cost.recursive_costs_assumed;
+    mark = Query.mark frame.query;
+    recursive_costs_mark = Counters.count_recursive_costs_assumed frame.query;
     changed;
   }
 
@@ -201,7 +200,7 @@ let declare_iterations (head : State.frame) loop =
   end
   else None
 
-let enter_head (context : State.context) (head : State.frame) loop ~iterations =
+let enter_head (head : State.frame) loop ~iterations =
   let iterations = Option.value iterations ~default:Costs.zero in
   let head =
     {
@@ -220,7 +219,7 @@ let enter_head (context : State.context) (head : State.frame) loop ~iterations =
               (Logic.subtract at_head cost.entry)
               (Option.value gained_at_head ~default:Costs.zero)
           in
-          let amount = read_amount context { head with makes_obligations = false } written in
+          let amount = read_amount { head with makes_obligations = false } written in
           Facts.assume head (make_clause_bound cost.counter ~since ~amount)
       | Per_iteration { rules; _ } ->
           List.iter
@@ -238,8 +237,7 @@ let make_step_cost (counter : Costs.counter) =
   | Metric Time -> Logic.int 1
   | Metric (Allocations | Allocated_bytes) | Calls _ -> Costs.zero
 
-let spend_step (context : State.context) (frame : State.frame) =
-  Counters.spend context frame make_step_cost
+let spend_step (frame : State.frame) = Counters.spend frame make_step_cost
 
 let find_constant_count bounds =
   List.find_map
@@ -257,8 +255,8 @@ let is_written_in_home_package (environment : State.environment) callee =
       = 0
   | Some ((Derived _ | Inherited _), _) | None -> false
 
-let explain_uncounted_potential (environment : State.environment) (call : State.call_amount) metric
-    : Catalog.Prover.unbounded =
+let explain_uncounted_potential (environment : State.environment) (call : Amounts.call_amount)
+    metric : Catalog.Prover.unbounded =
   Uncounted_potential
     {
       metric;
@@ -267,11 +265,10 @@ let explain_uncounted_potential (environment : State.environment) (call : State.
       is_editable = is_written_in_home_package environment call.callee;
     }
 
-let describe_part (context : State.context) (frame : State.frame) (part : State.changed_part) :
-    Catalog.Prover.changed_part =
-  { root = Facts.describe_local context frame part.root; fields = part.fields }
+let describe_part (part : State.changed_part) : Catalog.Prover.changed_part =
+  { root = part.root_description; fields = part.fields }
 
-let explain_changing_cost (context : State.context) (head : State.frame) (call : State.call_amount)
+let explain_changing_cost (head : State.frame) (call : Amounts.call_amount)
     ~(changed : State.changed_part list) ~parts : Catalog.Prover.unbounded =
   let is_mentioned = function
     | Some (_, term) -> List.exists (fun part -> Costs.mentions_part ~part:term part) parts
@@ -284,25 +281,24 @@ let explain_changing_cost (context : State.context) (head : State.frame) (call :
       values =
         List.filter_map
           (fun part ->
-            if is_mentioned (Encoding.find_changed_part head part) then
-              Some (describe_part context head part)
+            if is_mentioned (Encoding.find_changed_part head part) then Some (describe_part part)
             else None)
           changed;
     }
 
-let explain_unbounded_iteration (context : State.context) (head : State.frame)
-    (counter : Costs.counter) ~changed ~parts : Catalog.Prover.unbounded =
-  let list_call_parts (call : State.call_amount) =
+let explain_unbounded_iteration (head : State.frame) (counter : Costs.counter) ~changed ~parts :
+    Catalog.Prover.unbounded =
+  let list_call_parts (call : Amounts.call_amount) =
     if call.counter = counter then
       List.filter (fun part -> Costs.mentions_part ~part call.amount) parts
     else []
   in
   let calls =
-    List.filter (fun call -> list_call_parts call <> []) (List.rev context.cost.call_amounts)
+    List.filter (fun call -> list_call_parts call <> []) (Amounts.list_call_amounts head.query)
   in
   let unstated =
     List.fold_left
-      (fun callees (call : State.call_amount) ->
+      (fun callees (call : Amounts.call_amount) ->
         if call.states_cost || List.exists (Path.equal call.callee) callees then callees
         else callees @ [ call.callee ])
       [] calls
@@ -313,27 +309,27 @@ let explain_unbounded_iteration (context : State.context) (head : State.frame)
         {
           metric;
           callees = unstated;
-          editable = List.filter (is_written_in_home_package context.environment) unstated;
+          editable = List.filter (is_written_in_home_package head.environment) unstated;
           counts_units = counter.counting = Units;
         }
   | Metric metric, [], call :: _
     when counter.amortized && (not call.counts_potential)
          && List.exists Costs.mentions_potential (list_call_parts call) ->
-      explain_uncounted_potential context.environment call metric
+      explain_uncounted_potential head.environment call metric
   | Metric _, [], call :: _ ->
-      explain_changing_cost context head call ~changed ~parts:(list_call_parts call)
+      explain_changing_cost head call ~changed ~parts:(list_call_parts call)
   | (Metric _ | Calls _), _, _ -> Unbounded_iteration
 
-let assumes_recursive_costs (context : State.context) loop =
-  context.cost.recursive_costs_assumed > loop.recursive_costs_mark
+let assumes_recursive_costs (query : Query.t) loop =
+  Counters.count_recursive_costs_assumed query > loop.recursive_costs_mark
 
-let check_iterations (context : State.context) loop_at (head : State.frame) loop ~iterations
-    ~iteration_bounds ~(inside : State.frame) ~ends ~breaks =
+let check_iterations loop_at (head : State.frame) loop ~iterations ~iteration_bounds
+    ~(inside : State.frame) ~ends ~breaks =
   let location = Facts.locate head loop_at in
-  let facts = Query.list_facts_since context.query loop.mark @ [ inside.condition ] in
-  let frames = ends @ breaks and varies = Query.mentions_fresh_since context.query loop.mark in
+  let facts = Query.list_facts_since head.query loop.mark @ [ inside.condition ] in
+  let frames = ends @ breaks and varies = Query.mentions_fresh_since head.query loop.mark in
   let constant_count =
-    if assumes_recursive_costs context loop then None
+    if assumes_recursive_costs head.query loop then None
     else
       Option.bind iterations (fun iterations ->
           Option.map (fun count -> (iterations, count)) (find_constant_count iteration_bounds))
@@ -371,7 +367,7 @@ let check_iterations (context : State.context) loop_at (head : State.frame) loop
             clause.gained_at_head;
           List.iter
             (fun (frame, moment) ->
-              oblige_clause context frame cost clause.written ~moment
+              oblige_clause frame cost clause.written ~moment
                 ~since:
                   (Logic.add
                      (Logic.subtract (Counters.lookup_spent frame cost.counter) cost.entry)
@@ -437,22 +433,20 @@ let check_iterations (context : State.context) loop_at (head : State.frame) loop
               in
               Obligations.oblige ~holds_when:cost.holds_when head location
                 (Unbounded_iteration_cost
-                   (explain_unbounded_iteration context head cost.counter ~changed:loop.changed
-                      ~parts))
+                   (explain_unbounded_iteration head cost.counter ~changed:loop.changed ~parts))
                 (Logic.Boolean false)))
     loop.costs
 
-let leave (context : State.context) ~(clause_at : State.frame) (exit_ : State.frame) loop
-    ~iterations ~most =
+let leave ~(clause_at : State.frame) (exit_ : State.frame) loop ~iterations ~most =
   let iterations = Option.value iterations ~default:Costs.zero in
-  let assumes_recursive_costs = assumes_recursive_costs context loop in
+  let assumes_recursive_costs = assumes_recursive_costs clause_at.query loop in
   let spent =
     List.map
       (fun cost ->
         let at = Counters.lookup_spent exit_ cost.counter in
         match cost.rule with
         | Clause_bound { written; gain; _ } ->
-            let amount = read_amount context { clause_at with makes_obligations = false } written in
+            let amount = read_amount { clause_at with makes_obligations = false } written in
             let counted =
               match cost.counter.counting with
               | Units when assumes_recursive_costs -> Costs.bound amount
@@ -492,13 +486,9 @@ let leave (context : State.context) ~(clause_at : State.frame) (exit_ : State.fr
   in
   { exit_ with spent }
 
-let leave_counted (context : State.context) ~clause_at exit_ loop ~iterations ~most ~count ~since =
-  let facts =
-    Query.list_facts_since context.query since @ Query.list_facts_since context.query loop.mark
-  in
-  leave context ~clause_at exit_ loop ~iterations
+let leave_counted (query : Query.t) ~clause_at exit_ loop ~iterations ~most ~count ~since =
+  let facts = Query.list_facts_since query since @ Query.list_facts_since query loop.mark in
+  leave ~clause_at exit_ loop ~iterations
     ~most:
       (most
-      @ Costs.list_upper_bounds
-          ~varies:(Query.mentions_fresh_since context.query loop.mark)
-          ~facts count)
+      @ Costs.list_upper_bounds ~varies:(Query.mentions_fresh_since query loop.mark) ~facts count)

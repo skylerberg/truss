@@ -4,19 +4,18 @@ type quantified_range =
 
 let run_under_binder :
     'read.
-    State.context ->
     State.frame ->
     Logic.symbol ->
     Logic.sort ->
     Logic.term ->
     (State.frame -> 'read) ->
     State.frame * 'read * (Logic.term -> Logic.term) =
- fun context frame bound_symbol sort premise read ->
+ fun frame bound_symbol sort premise read ->
   let body_frame =
     Facts.restrict { frame with binders = (bound_symbol, sort, premise) :: frame.binders } premise
   in
   let body, with_facts =
-    Query.run_under_binder context.query bound_symbol (fun () -> read body_frame)
+    Query.run_under_binder frame.query bound_symbol (fun () -> read body_frame)
   in
   (body_frame, body, with_facts)
 
@@ -160,34 +159,42 @@ let compute_model_function (environment : State.environment) query (ty : Types.t
       Some (fun term -> Logic.Apply (symbol, [ term ]))
   | None -> None
 
-let find_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
+module Model_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Types.ty * Types.ty
+end))
+
+let model_functions : (Logic.term -> Logic.term) option Model_table.t Private_state.key =
+  Private_state.make_key (fun () -> Model_table.create 16)
+
+let find_model_function (environment : State.environment) (query : Query.t) (ty : Types.ty)
+    ~(model : Types.ty) =
+  let model_functions = Query.read_state query model_functions in
   let key = (ty, model) in
-  match Tables.Model_table.find_opt context.models key with
+  match Model_table.find_opt model_functions key with
   | Some model_fn -> model_fn
   | None ->
-      let model_fn = compute_model_function context.environment context.query ty ~model in
-      Tables.Model_table.replace context.models key model_fn;
+      let model_fn = compute_model_function environment query ty ~model in
+      Model_table.replace model_functions key model_fn;
       model_fn
 
-let find_model (context : State.context) (ty : Types.ty) term ~element =
+let find_model (environment : State.environment) (query : Query.t) (ty : Types.ty) term ~element =
   Option.map
     (fun model_of -> model_of term)
-    (find_model_function context ty ~model:(Encoding.make_sequence_type element))
+    (find_model_function environment query ty ~model:(Encoding.make_sequence_type element))
 
-let quantify_over (context : State.context) (frame : State.frame)
-    (quantifier : Language.Quantifier.t) (range : quantified_range) ~bind ~read =
+let quantify_over (frame : State.frame) (quantifier : Language.Quantifier.t)
+    (range : quantified_range) ~bind ~read =
   let make ?count bound_symbol sort premise body_frame bound_value =
-    let mark = Query.mark context.query in
+    let mark = Query.mark frame.query in
     let body_frame, (after, body_value), with_facts =
-      run_under_binder context body_frame bound_symbol sort premise (fun body_frame ->
+      run_under_binder body_frame bound_symbol sort premise (fun body_frame ->
           read body_frame bound_value)
     in
     let bound = [ (bound_symbol, sort) ] in
     let frame =
       match count with
       | Some count when frame.makes_obligations ->
-          Counters.spend_quantifier context frame ~count ~mark ~bound:bound_symbol
-            ~before:body_frame ~after
+          Counters.spend_quantifier frame ~count ~mark ~bound:bound_symbol ~before:body_frame ~after
       | _ -> frame
     in
     let term =
@@ -195,17 +202,17 @@ let quantify_over (context : State.context) (frame : State.frame)
       | Forall -> Logic.forall (bound, Logic.( ==> ) premise body_value)
       | Exists -> Logic.Exists (bound, Logic.( &&& ) premise body_value)
     in
-    if Facts.is_in_home_package frame then Query.note_written_quantifier context.query term;
+    if Facts.is_in_home_package frame then Query.note_written_quantifier frame.query term;
     (frame, with_facts term)
   in
-  let symbol = Query.make_fresh_name context.query "bound" in
+  let symbol = Query.make_fresh_name frame.query "bound" in
   let inner = { frame with bound = symbol :: frame.bound } in
   let each = Logic.Symbol symbol in
   match range with
   | Range_of_type ty ->
       let inner = bind inner each ty in
       make symbol (Encoding.sort_of ty)
-        (Validity.make_validity context inner ~assuming:true ~includes_ranges:true ty each)
+        (Validity.make_validity inner ~assuming:true ~includes_ranges:true ty each)
         inner each
   | Range_of_integers { low; high; inclusive; type_ } ->
       let inner = bind inner each type_ in
@@ -224,10 +231,10 @@ let rec make_value_term (frame : State.frame) (value : Types.value) =
       | _ -> substitute_value_term value)
   | Known _ | Value_variable _ | Value_error _ -> substitute_value_term value
 
-let make_array_model (context : State.context) (frame : State.frame) (ty : Types.ty) term =
+let make_array_model (frame : State.frame) (ty : Types.ty) term =
   match ty with
   | Types.Named { arguments = [ Types.Type element; Types.Value count ]; _ } -> (
-      match find_model context ty term ~element with
+      match find_model frame.environment frame.query ty term ~element with
       | Some sequence ->
           Facts.assume frame
             (Logic.equal (make_sequence_length element sequence) (make_value_term frame count));

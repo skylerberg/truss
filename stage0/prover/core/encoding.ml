@@ -59,10 +59,15 @@ let sequence_path : Path.t = Well_known.make_path Sequence
 let make_sequence_type element =
   Types.Named { path = sequence_path; arguments = [ Types.Type element ] }
 
+let visible_types :
+    (Types.type_interface * Types.substitution) option Tables.Type_table.t Private_state.key =
+  Private_state.make_key (fun () -> Tables.Type_table.create 16)
+
 let find_visible_type (environment : State.environment) (ty : Types.ty) =
+  let visible_types = Private_state.read environment.memos visible_types in
   match ty with
   | Named { path; arguments } when Types.find_builtin ty = None -> (
-      match Tables.Type_table.find_opt environment.visible_types ty with
+      match Tables.Type_table.find_opt visible_types ty with
       | Some visible -> visible
       | None ->
           let visible =
@@ -73,7 +78,7 @@ let find_visible_type (environment : State.environment) (ty : Types.ty) =
                 Some (interface, Types.make_substitution interface.type_generics arguments)
             | _ -> None
           in
-          Tables.Type_table.replace environment.visible_types ty visible;
+          Tables.Type_table.replace visible_types ty visible;
           visible)
   | _ -> None
 

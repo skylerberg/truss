@@ -24,9 +24,7 @@ val assume : State.frame -> Logic.term -> unit
 val remove_panic : Types.capability_set -> Types.capability_set
 val locate : State.frame -> Core.origin -> Obligation.location
 val locate_source : State.environment -> State.source -> Core.origin -> Obligation.location
-val add_hole : State.context -> Resolve.Names.key * Obligation.location -> unit
 val quote : State.source -> Core.origin -> Catalog.Prover.quoted
-val describe_local : State.context -> State.frame -> Locals.local -> Catalog.Prover.value
 val is_home : State.frame -> bool
 val is_in_home_package : State.frame -> bool
 val bind : State.frame -> Locals.key -> Types.ty -> Logic.term -> State.frame

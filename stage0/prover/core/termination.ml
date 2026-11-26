@@ -1,20 +1,22 @@
-let make_state ~measures : State.termination_state = { measures; definition_entry = None }
 let is_datatype ty = match ty with Types.Named _ -> Types.find_builtin ty = None | _ -> false
 
-let enter_definition (context : State.context) (start : State.frame) =
+let enter_definition (start : State.frame) =
   let at_entry = { start with makes_obligations = false } in
-  context.termination.definition_entry <-
-    Some
-      {
-        entry_frame = start;
-        entry_measures =
-          List.map
-            (fun measure -> snd (Validity.read_specification context at_entry measure))
-            context.termination.measures;
-      }
+  {
+    start with
+    definition_entry =
+      Some
+        {
+          entry_frame = start;
+          entry_measures =
+            List.map
+              (fun measure -> snd (Validity.read_specification at_entry measure))
+              start.environment.measures;
+        };
+  }
 
-let read_entry (context : State.context) =
-  match context.termination.definition_entry with
+let read_entry (frame : State.frame) =
+  match frame.definition_entry with
   | Some entry -> entry
   | None -> Facts.raise_bug "a recursive call is compared before the definition is entered"
 
@@ -49,11 +51,11 @@ let rec pair_measures before after =
       (entry :: rest_before, called :: rest_after)
   | _ -> ([], [])
 
-let compare_with_entry (context : State.context) (clauses : State.clauses) ~is_self_call
+let compare_with_entry (frame : State.frame) (clauses : State.clauses) ~is_self_call
     ~(callee_entry : State.frame) ~argument_at =
-  match (context.termination.measures, clauses.decreases) with
+  match (frame.environment.measures, clauses.decreases) with
   | [], [] when callee_entry.terminates && is_self_call -> (
-      let entry = (read_entry context).entry_frame in
+      let entry = (read_entry frame).entry_frame in
       let is_passed_at_its_type ((parameter : Mir.parameter), ty, _, _) =
         Types.equal
           (Encoding.substitute_type entry ty)
@@ -64,13 +66,13 @@ let compare_with_entry (context : State.context) (clauses : State.clauses) ~is_s
       | parts ->
           let before =
             List.map
-              (fun (_, ty, value, _) -> Models.rank context.environment context.query ty value)
+              (fun (_, ty, value, _) -> Models.rank frame.environment frame.query ty value)
               parts
           in
           let after =
             List.map
               (fun (_, ty, _, index) ->
-                Models.rank context.environment context.query ty (argument_at index))
+                Models.rank frame.environment frame.query ty (argument_at index))
               parts
           in
           Smaller_part
@@ -83,16 +85,16 @@ let compare_with_entry (context : State.context) (clauses : State.clauses) ~is_s
   | _ :: _, (_ :: _ as callee_measures) ->
       let after =
         List.map
-          (fun measure -> snd (Validity.read_specification context callee_entry measure))
+          (fun measure -> snd (Validity.read_specification callee_entry measure))
           callee_measures
       in
-      let before, after = pair_measures (read_entry context).entry_measures after in
+      let before, after = pair_measures (read_entry frame).entry_measures after in
       Smaller_measures (Logic.decreases_lexicographically before after)
   | [], _ | _, [] -> Uncompared
 
-let check_recursive_call (context : State.context) (frame : State.frame) location ~path
-    (clauses : State.clauses) ~is_self_call ~callee_entry ~argument_at =
-  match compare_with_entry context clauses ~is_self_call ~callee_entry ~argument_at with
+let check_recursive_call (frame : State.frame) location ~path (clauses : State.clauses)
+    ~is_self_call ~callee_entry ~argument_at =
+  match compare_with_entry frame clauses ~is_self_call ~callee_entry ~argument_at with
   | Smaller_part { compared; smaller } ->
       Obligations.oblige frame location
         (Recursion_not_on_part { call = { at = location; callee = Some path }; compared })
@@ -109,14 +111,14 @@ let check_recursive_call (context : State.context) (frame : State.frame) locatio
              measures =
                List.map
                  (fun (measure : Mir.formula) -> Facts.quote frame.source measure.origin)
-                 context.termination.measures;
+                 frame.environment.measures;
            })
         smaller
   | Uncompared -> ()
 
-let find_induction_premise (context : State.context) (clauses : State.clauses) ~is_self_call
+let find_induction_premise (frame : State.frame) (clauses : State.clauses) ~is_self_call
     ~callee_entry ~argument_at =
-  match compare_with_entry context clauses ~is_self_call ~callee_entry ~argument_at with
+  match compare_with_entry frame clauses ~is_self_call ~callee_entry ~argument_at with
   | Smaller_measures smaller | Smaller_part { smaller; _ } -> Some smaller
   | Unmeasured | Uncompared -> None
 
@@ -179,19 +181,18 @@ type loop_measure = { read : State.frame -> Logic.term list; at_head : Logic.ter
 let find_written_measures (clauses : Mir.loop_clause list) =
   List.find_map (function Mir.Decreases measures -> Some measures | _ -> None) clauses
 
-let read_measures (context : State.context) (at : State.frame) measures =
+let read_measures (at : State.frame) measures =
   List.map
-    (fun measure ->
-      snd (Validity.read_specification context { at with makes_obligations = false } measure))
+    (fun measure -> snd (Validity.read_specification { at with makes_obligations = false } measure))
     measures
 
-let make_comparison_measure (context : State.context) (head : State.frame) measure_operands =
+let make_comparison_measure (head : State.frame) measure_operands =
   match measure_operands with
   | Some (comparison, read_operands) when head.terminates ->
       Some
         (fun (at : State.frame) ->
           let left, right =
-            Counters.run_without_counters context (fun () ->
+            Counters.run_without_counters at.query (fun () ->
                 read_operands { at with makes_obligations = false })
           in
           let distance from into = Logic.subtract into from in
@@ -204,11 +205,10 @@ let make_comparison_measure (context : State.context) (head : State.frame) measu
           | Equal | Not_equal -> Facts.raise_bug "an equality gives a loop its measure")
   | Some _ | None -> None
 
-let read_loop_measure ?implicit (context : State.context) (clauses : Mir.loop_clause list)
-    ~(head : State.frame) =
+let read_loop_measure ?implicit (clauses : Mir.loop_clause list) ~(head : State.frame) =
   let read =
     match find_written_measures clauses with
-    | Some written -> Some (fun at -> read_measures context at written)
+    | Some written -> Some (fun at -> read_measures at written)
     | None -> implicit
   in
   Option.map (fun read -> { read; at_head = read head }) read
