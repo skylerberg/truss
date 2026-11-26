@@ -222,30 +222,26 @@ develop as well as make it easier to bootstrap the compiler in parts.
   so its own contract is an axiom only at arguments where that contract
   holds of the supplied code as a function of the logic.
   `Supplied.may_abort` decides that at each call, and the call rule then
-  treats the callee as one that may abort. A supplied method counts where a
+  treats the callee as one that may abort. The abort fact of a definition
+  also lists the trait methods that it runs through a bound, in its own code
+  or a callee's, and only those are judged. A supplied method counts where a
   call of it through the bound assumes a fact that the method could fail to
-  meet: an `ensures`, a lent part, or a result of a type with no value that
-  is valid without a condition. A method with a body in its trait that
-  returns shows that its contract can be met, so it counts only for an
-  `ensures` that a subtrait restates. For an `impl`, the `may_abort` of each
-  such method decides. For a bound of the enclosing definition no `impl` is
-  known, so each such method has to state `cost allocations == 0`. A
-  function passed by name is decided by its `may_abort` and by the code
+  meet: an `ensures`, declared or restated by a trait of the bound, a lent
+  part, or a result of a type with no value that is valid without a
+  condition. A method with a body in its trait that returns shows that its
+  declared contract can be met, so it counts only for a restated `ensures`.
+  For an `impl`, the `may_abort` of each such method decides, and then the
+  methods that it runs in turn. For a bound of the enclosing definition no
+  `impl` is known, so each such method has to state `cost allocations == 0`.
+  A function passed by name is decided by its `may_abort` and by the code
   supplied to it in turn, a lambda is a term of the logic, and any other
   function value counts where the callee's parameter states an `ensures`
-  for it. The contract of a call through a bound is read from
-  `Callee.resolve`, as the call itself reads it. A specification-only
-  callee runs nothing.
+  for it. The rule reads the contract of a trait's declaration and no
+  `impl`'s, so a proof relies on no `impl` method through it. A
+  specification-only callee runs nothing.
 
-  An `impl`'s method refines its trait's method: the trait's `requires`
-  imply the method's own, and the trait's `ensures` are proven of the
-  method's body under the trait's `requires`. A function value passed for a
-  parameter refines the parameter's type the same way.
-
-  A fact is assumed in the frame in which its obligations were made. A call
-  inside a quantifier's body proves its `requires` for each bound value, so
-  its `ensures` hold for each bound value and for nothing outside the
-  quantifier, whose range may be empty.
+  A storage of capacity zero allocates nothing, so the call that builds one,
+  which an empty list literal makes, is no abort site.
 - **The semantics of a storage operation is a contract written in Truss.**
   `standard.intrinsic_contracts` declares a function with the name and the
   signature of the intrinsic and a `todo` body, as `standard.specification`

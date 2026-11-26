@@ -537,25 +537,55 @@ let list_run_statements (lookups : lookups) path =
     (find_code lookups path);
   !statements
 
+let is_abort_site (statement : Tree.statement) =
+  match statement.kind with
+  | Basic
+      (Call
+         {
+           call =
+             {
+               callee = { target = Intrinsic { operation = Buffer Storage_with_capacity; _ }; _ };
+               arguments = [ { value = Immediate { value = Integer capacity; _ }; _ } ];
+               _;
+             };
+           _;
+         }) ->
+      not (Z.equal capacity Z.zero)
+  | _ -> (
+      match Walk.find_callee statement with
+      | Some { target = Intrinsic { operation; _ }; _ } -> Intrinsic.may_abort operation
+      | Some _ | None -> false)
+
 let has_abort_site (lookups : lookups) path =
   match Intrinsic.find_contract_operation path with
   | Some operation -> Intrinsic.may_abort operation
-  | None ->
-      List.exists
-        (fun statement ->
-          match Walk.find_callee statement with
-          | Some { target = Intrinsic { operation; _ }; _ } -> Intrinsic.may_abort operation
-          | Some _ | None -> false)
-        (list_run_statements lookups path)
+  | None -> List.exists is_abort_site (list_run_statements lookups path)
+
+let list_bound_methods_run (lookups : lookups) path =
+  let instance = find_instance lookups path in
+  List.sort_uniq Path.compare
+    (List.filter_map
+       (fun statement ->
+         match Walk.find_callee statement with
+         | Some { target = Trait_method { trait; name; receiver; _ } as target; _ } -> (
+             let declaration = Path.Method { owner = trait.trait; name; receiver } in
+             match (resolve_callee lookups.interface instance target).target with
+             | Some resolved when not (Path.equal resolved declaration) -> None
+             | Some _ | None -> Some declaration)
+         | Some _ | None -> None)
+       (list_run_statements lookups path))
 
 let list_callees_that_run (lookups : lookups) path =
   let instance = find_instance lookups path in
   List.sort_uniq Path.compare
     (List.concat_map
        (fun statement ->
-         List.concat_map
-           (function Calls callee -> [ callee ] | Supplies { code; _ } -> code)
-           (list_statement_edges lookups.interface instance statement))
+         match Walk.find_callee statement with
+         | Some { target = Intrinsic _; _ } -> []
+         | Some _ | None ->
+             List.concat_map
+               (function Calls callee -> [ callee ] | Supplies { code; _ } -> code)
+               (list_statement_edges lookups.interface instance statement))
        (list_run_statements lookups path))
 
 let list_path_edges (lookups : lookups) path =

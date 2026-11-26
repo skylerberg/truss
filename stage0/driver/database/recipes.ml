@@ -881,22 +881,34 @@ let run_find_aborts database (row : Store.definition) =
   let path = (Declarations.decode_key row.key).path in
   run_fact database Find_aborts Facts.aborts_outside_group row ~id:row.path (fun recorder ->
       let lookups = Lookups.make_call_edges database recorder in
-      let has_aborting_callee () =
+      let list_callee_aborts () =
         let members =
           Option.value ~default:[]
             (Tracker.find_value database recorder Facts.recursion_group.whole
                (Path.locate_package path) ~id:row.path)
         in
-        List.exists
+        List.filter_map
           (fun callee ->
-            (not (List.exists (Path.equal callee) members))
-            && (not (Path.equal callee path))
-            && Lookups.may_abort database recorder callee)
+            if List.exists (Path.equal callee) members || Path.equal callee path then None
+            else Some (Lookups.find_abort database recorder callee))
           (Mir.Call_edges.list_callees_that_run lookups path)
       in
       ( Value
-          ((not (Mir.Call_edges.is_specification_only lookups path))
-          && (Mir.Call_edges.has_abort_site lookups path || has_aborting_callee ())),
+          (if Mir.Call_edges.is_specification_only lookups path then
+             { Facts.aborts = false; bound_methods_run = [] }
+           else
+             let callees = list_callee_aborts () in
+             {
+               aborts =
+                 Mir.Call_edges.has_abort_site lookups path
+                 || List.exists (fun (callee : Facts.abort) -> callee.aborts) callees;
+               bound_methods_run =
+                 List.sort_uniq Path.compare
+                   (Mir.Call_edges.list_bound_methods_run lookups path
+                   @ List.concat_map
+                       (fun (callee : Facts.abort) -> callee.bound_methods_run)
+                       callees);
+             }),
         [] ))
 
 let write_lowered (database : Tracker.t) ~id outcome =
@@ -1635,16 +1647,29 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
             members;
           run_units database ?on_bug stage (List.map Ids.of_path members) (fun database id ->
               recipe.run database (read_first_definition database recipe id));
-          let aborts_outside member =
-            match
-              Tracker.find database Tracker.untracked Facts.aborts_outside_group.whole
-                (Path.locate_package member) ~id:(Ids.of_path member)
-            with
-            | Some (Value aborts) -> aborts
-            | Some (Failed | Blocked) -> true
-            | None -> false
+          let outside : Facts.abort list =
+            List.map
+              (fun member : Facts.abort ->
+                match
+                  Tracker.find database Tracker.untracked Facts.aborts_outside_group.whole
+                    (Path.locate_package member) ~id:(Ids.of_path member)
+                with
+                | Some (Value abort) -> abort
+                | Some (Failed | Blocked) -> { aborts = true; bound_methods_run = [] }
+                | None -> { aborts = false; bound_methods_run = [] })
+              members
           in
-          let may_abort : bool Tracker.outcome = Value (List.exists aborts_outside members) in
+          let may_abort : Facts.abort Tracker.outcome =
+            Value
+              {
+                aborts = List.exists (fun (member : Facts.abort) -> member.aborts) outside;
+                bound_methods_run =
+                  List.sort_uniq Path.compare
+                    (List.concat_map
+                       (fun (member : Facts.abort) -> member.bound_methods_run)
+                       outside);
+              }
+          in
           List.iter
             (fun member ->
               ignore

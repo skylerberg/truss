@@ -125,8 +125,8 @@ generated_mir   (definition, state, body, contract)
 call_node       (definition, state, kind, callees)
 recursion_group (definition, state, representative, members)
 proof_group     (definition, state, representative, members)
-aborts_outside_group (definition, state, value)
-may_abort            (definition, state, value)
+aborts_outside_group (definition, state, value, bound_methods_run)
+may_abort            (definition, state, value, bound_methods_run)
 usage_check     (definition, state)
 ownership       (definition, state, must_be_disjoint)
 proof           (definition, state, value)
@@ -248,7 +248,7 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Generate MIR | Derived method | `Infer.derive_form` | Interfaces and contracts | `generated_mir` |
 | List calls | Definition, with the supplied methods | `Mir.Call_edges.list_path_edges`, `Mir.Call_edges.list_assumed_paths` | MIR and interfaces | `call_node`, `calls` and `assumes` edges |
 | Group recursion | The definitions whose `calls` or `assumes` edges changed, and their groups | Strongly connected components, once over the `calls` edges and once over both | The definitions that both reach and are reached by a changed one, and the edges among them | `recursion_group`, `proof_group` |
-| Find aborts | Path, a definition's callees before it | Whether the code of the definition that runs holds a call of `intrinsic.crash` or of an intrinsic that allocates, or calls a definition outside its recursion group that may abort. A specification-only definition does neither. Once the members of a group are computed, whether any of them does, written for each member. | The definition's MIR and signature, its `recursion_group`, and its callees' `may_abort` | `aborts_outside_group`, `may_abort` |
+| Find aborts | Path, a definition's callees before it | Whether the code of the definition that runs holds a call of `intrinsic.crash` or of an intrinsic that allocates, or calls a definition outside its recursion group that may abort, and the trait methods that it or such a callee calls through a bound. A storage of capacity zero is no allocation. A specification-only definition does neither. Once the members of a group are computed, whether any of them does, written for each member. | The definition's MIR and signature, its `recursion_group`, and its callees' `may_abort` | `aborts_outside_group`, `may_abort` |
 | Check bodies | Definition | `Usage.check`, `Ownership.check` | The body's tables and `uses_run_forever`, the definition's `recursion_group`, its MIR, and its ownership modes | `usage_check`, `ownership` |
 | Check an impl, a type | Definition | `Package_checks.run` with `Sealed`, `Impl`, or `Type` | Interfaces | Diagnostics |
 | Check an instantiation | Generic function or method, with the other stale units of the drain | `Package_checks.find_growing_cycles`, then `Package_checks.run` with `Instantiation` | The `instantiates` edges of its body and of each body that those edges reach, each read once for the drain | Diagnostics |

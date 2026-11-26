@@ -64,4 +64,5 @@ val list_path_edges : lookups -> Path.t -> Path.t list
 val is_specification_only : lookups -> Path.t -> bool
 val has_abort_site : lookups -> Path.t -> bool
 val list_callees_that_run : lookups -> Path.t -> Path.t list
+val list_bound_methods_run : lookups -> Path.t -> Path.t list
 val list_instance_field_types : Interface.Lookups.t -> Types.ty -> Types.ty list

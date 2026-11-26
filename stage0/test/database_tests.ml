@@ -1046,6 +1046,8 @@ let () =
          }\n"
       in
       expect_may_abort source ~of_:"doubled" ~expected:true;
+      expect_may_abort "fn no_elements() -> List[UInt64] {\n  []\n}\n" ~of_:"no_elements"
+        ~expected:false;
       expect_may_abort source ~of_:"named_in_a_theorem" ~expected:false;
       expect_may_abort source ~of_:"named_in_a_proof" ~expected:false;
       expect_may_abort source ~of_:"named_in_an_invariant" ~expected:false);

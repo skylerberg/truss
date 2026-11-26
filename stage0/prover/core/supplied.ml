@@ -28,67 +28,65 @@ let rec has_valid_value (context : State.context) ?(entered = []) (ty : Types.ty
     ->
       false
 
-let teaches_through_a_bound (context : State.context) frame ~self_type
-    (trait : Types.trait_reference) (declared : Types.trait_method) =
-  let name = declared.method_name and receiver = declared.method_receiver in
-  let declaration = Path.Method { owner = trait.trait; name; receiver } in
-  let has_ensures (clauses : State.clauses) = clauses.ensures <> [] in
+type supplied_method = { teaches : bool; states_no_allocation : bool }
+
+let make_declaration (trait : Types.trait_reference) (declared : Types.trait_method) =
+  Path.Method
+    { owner = trait.trait; name = declared.method_name; receiver = declared.method_receiver }
+
+let judge_method (context : State.context) ~is_restated (trait : Types.trait_reference)
+    (declared : Types.trait_method) =
+  let declaration = make_declaration trait declared in
   match Contracts.read_signature context declaration with
-  | None -> true
+  | None -> { teaches = true; states_no_allocation = false }
   | Some signature ->
-      (not (Costs.states_no_allocation signature.costs))
-      &&
-      let through_the_bound =
-        Callee.resolve context frame
-          (Trait_method
-             {
-               trait;
-               name;
-               receiver;
-               self_type;
-               instantiation =
-                 {
-                   type_arguments =
-                     List.map
-                       (fun (generic : Types.generic) ->
-                         Types.Type (Types.Parameter generic.generic))
-                       signature.generics;
-                   capability_arguments = [];
-                 };
-               evidence = Bound;
-             })
-          ~lends:None ~uses:signature.uses
+      let states_ensures =
+        match Contracts.find_callee_clauses context declaration with
+        | Some clauses -> clauses.ensures <> []
+        | None -> false
       in
       let has_default_that_returns =
         declared.provided && not (context.lookups.may_abort declaration)
       in
-      let restates_ensures, states_ensures =
-        match through_the_bound.target with
-        | Definition { contract = Some contract; _ } ->
-            ( List.exists has_ensures contract.restated_clauses,
-              has_ensures contract.callee_clauses
-              || Option.fold ~none:false ~some:has_ensures contract.trait_clauses )
-        | Definition { contract = None; _ } | Function_value | Intrinsic _ -> (false, false)
-      in
-      restates_ensures
-      || (not has_default_that_returns)
-         && (states_ensures
-            ||
-            match signature.output with
-            | Lends _ -> true
-            | Returns output -> not (has_valid_value context output))
+      {
+        teaches =
+          is_restated declared
+          || (not has_default_that_returns)
+             && (states_ensures
+                ||
+                match signature.output with
+                | Lends _ -> true
+                | Returns output -> not (has_valid_value context output));
+        states_no_allocation = Costs.states_no_allocation signature.costs;
+      }
 
 let deepest_supplied_bound = 8
 
-let rec bound_may_abort (context : State.context) frame ?(depth = 0)
+let rec bound_may_abort (context : State.context) ?(depth = 0) ?(entered = []) ~bound_methods_run
     ((type_ : Types.ty), (bound : Types.trait_reference)) =
   let interface = context.lookups.interface in
-  let may_abort_below = bound_may_abort context frame ~depth:(depth + 1) in
+  let closure = Interface.Properties.list_bound_closure interface ~self:type_ bound in
+  let is_restated (declared : Types.trait_method) =
+    List.exists
+      (fun (required : Types.trait_reference) ->
+        List.exists
+          (fun (restated : Types.restated_method) ->
+            restated.restated_name = declared.method_name
+            && restated.restated_receiver = declared.method_receiver)
+          (Interface.Definition.read_trait_interface interface required.trait).restated)
+      closure
+  in
   depth > deepest_supplied_bound
   || List.exists
        (fun (required : Types.trait_reference) ->
-         let teaches = teaches_through_a_bound context frame ~self_type:type_ required in
          let declared = Interface.Definition.read_trait_interface interface required.trait in
+         let judge = judge_method context ~is_restated required in
+         let run =
+           List.filter
+             (fun method_ ->
+               List.exists (Path.equal (make_declaration required method_)) bound_methods_run)
+             declared.methods
+         in
          let substitution =
            Types.make_trait_substitution declared.trait_generics ~self:type_ required
          in
@@ -100,7 +98,8 @@ let rec bound_may_abort (context : State.context) frame ?(depth = 0)
              in
              List.exists
                (fun bound ->
-                 may_abort_below (chosen, Types.substitute_trait_erased substitution bound))
+                 bound_may_abort context ~depth:(depth + 1) ~entered ~bound_methods_run
+                   (chosen, Types.substitute_trait_erased substitution bound))
                associated.associated_bounds)
            declared.associated_types
          ||
@@ -112,64 +111,77 @@ let rec bound_may_abort (context : State.context) frame ?(depth = 0)
                 (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution })) ->
              let supplied = Types.Impl { impl; substitution } in
              List.exists
-               (fun (method_ : Types.trait_method) ->
-                 teaches method_
-                 && context.lookups.may_abort
-                      (Option.value
-                         (Mir.Call_edges.find_method_of_evidence interface ~trait:required.trait
-                            supplied method_)
-                         ~default:
-                           (Path.Method
-                              {
-                                owner = required.trait;
-                                name = method_.method_name;
-                                receiver = method_.method_receiver;
-                              })))
-               declared.methods
-             || List.exists may_abort_below
-                  (Interface.Impls.list_required_bounds
-                     (Interface.Definition.read_impl_interface interface impl).impl_generics
-                     substitution)
+               (fun method_ ->
+                 let code =
+                   Option.value
+                     (Mir.Call_edges.find_method_of_evidence interface ~trait:required.trait
+                        supplied method_)
+                     ~default:(make_declaration required method_)
+                 in
+                 ((judge method_).teaches && context.lookups.may_abort code)
+                 || (not (List.exists (Path.equal code) entered))
+                    &&
+                    let below =
+                      bound_may_abort context ~depth:(depth + 1) ~entered:(code :: entered)
+                        ~bound_methods_run:(context.lookups.list_bound_methods_run code)
+                    in
+                    below (type_, required)
+                    || List.exists below
+                         (Interface.Impls.list_required_bounds
+                            (Interface.Definition.read_impl_interface interface impl).impl_generics
+                            substitution))
+               run
          | Some Built_in -> false
-         | Some (Evidence Bound | Accepted _) | None -> List.exists teaches declared.methods)
-       (Interface.Properties.list_bound_closure interface ~self:type_ bound)
+         | Some (Evidence Bound | Accepted _) | None ->
+             List.exists
+               (fun method_ ->
+                 let judged = judge method_ in
+                 judged.teaches && not judged.states_no_allocation)
+               run)
+       closure
 
-let generics_may_abort context frame path substitution =
-  match Contracts.read_signature context path with
-  | Some signature ->
-      List.exists (bound_may_abort context frame)
+let generics_may_abort (context : State.context) path substitution =
+  match (context.lookups.list_bound_methods_run path, Contracts.read_signature context path) with
+  | (_ :: _ as bound_methods_run), Some signature ->
+      List.exists
+        (bound_may_abort context ~bound_methods_run)
         (Interface.Impls.list_required_bounds signature.generics substitution)
-  | None -> false
+  | [], _ | _, None -> false
 
 let make_own_substitution substitution_of (contract : State.contract) =
   substitution_of
     { contract.callee_clauses with inherited = false; bindings = Types.no_substitution }
 
-let function_value_may_abort context frame (callee : Callee.t) (passed : State.passed) =
+let function_value_may_abort context (callee : Callee.t) (passed : State.passed) =
   match
     Option.value (Callee.find_parameter_type context callee passed.position) ~default:passed.type_
   with
-  | Function function_type when not (Costs.states_no_allocation function_type.costs) -> (
-      (not (has_valid_value context function_type.output))
-      ||
+  | Function function_type -> (
+      let states_an_ensures () =
+        match callee.target with
+        | Definition { declaration; _ } -> (
+            match Contracts.find_callee_clauses context declaration with
+            | Some clauses -> (
+                match List.assoc_opt passed.position clauses.callbacks with
+                | Some callback -> callback.ensures <> []
+                | None -> false)
+            | None -> false)
+        | Function_value | Intrinsic _ -> false
+      in
       match (passed.term, Callbacks.find_known context passed.term) with
-      | (Symbol (Lambda _) | Apply (Lambda _, _)), _ -> false
       | _, Some (Named { path; contract; substitution_of; _ }) ->
           context.lookups.may_abort path
-          || generics_may_abort context frame path (make_own_substitution substitution_of contract)
-      | _, (Some (Own _) | None) -> (
-          match callee.target with
-          | Definition { declaration; _ } -> (
-              match Contracts.find_callee_clauses context declaration with
-              | Some clauses -> (
-                  match List.assoc_opt passed.position clauses.callbacks with
-                  | Some callback -> callback.ensures <> []
-                  | None -> false)
-              | None -> false)
-          | Function_value | Intrinsic _ -> false))
+          || generics_may_abort context path (make_own_substitution substitution_of contract)
+      | term, known ->
+          (not (Costs.states_no_allocation function_type.costs))
+          && ((not (has_valid_value context function_type.output))
+             ||
+             match (term, known) with
+             | (Symbol (Lambda _) | Apply (Lambda _, _)), _ -> false
+             | _, (Some (Own _ | Named _) | None) -> states_an_ensures ()))
   | _ -> false
 
-let may_abort context frame (callee : Callee.t) (definition : Callee.definition)
+let may_abort context (callee : Callee.t) (definition : Callee.definition)
     (contract : State.contract) (values : State.passed list) =
   let runs =
     match Contracts.read_signature context definition.path with
@@ -177,6 +189,6 @@ let may_abort context frame (callee : Callee.t) (definition : Callee.definition)
     | None -> true
   in
   runs
-  && (generics_may_abort context frame definition.path
+  && (generics_may_abort context definition.path
         (make_own_substitution definition.substitution_of contract)
-     || List.exists (function_value_may_abort context frame callee) values)
+     || List.exists (function_value_may_abort context callee) values)
