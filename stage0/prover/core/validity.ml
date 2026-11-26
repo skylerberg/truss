@@ -1,9 +1,5 @@
 let make_state () : State.validity_state =
-  {
-    validating = [];
-    type_clauses = Tables.Path_table.create 16;
-    valid_values = Tables.Term_table.create 16;
-  }
+  { type_clauses = Tables.Path_table.create 16; valid_values = Tables.Term_table.create 16 }
 
 let list_valid_at (context : State.context) term =
   Option.value (Tables.Term_table.find_opt context.validity.valid_values term) ~default:[]
@@ -83,16 +79,26 @@ let run_as_specification (context : State.context) (frame : State.frame) read =
   Counters.run_without_counters context (fun () ->
       read (Obligations.set_panics frame ~panics:false))
 
-let read_specification (context : State.context) (frame : State.frame) (formula : Mir.formula) =
+let read_specification ?holds_when (context : State.context) (frame : State.frame)
+    (formula : Mir.formula) =
   let after, term =
-    run_as_specification context frame (fun specification ->
-        context.read_formula specification formula ~arguments:[])
+    run_as_specification context
+      {
+        frame with
+        obligation_condition = Option.value holds_when ~default:frame.obligation_condition;
+      }
+      (fun specification -> context.read_formula specification formula ~arguments:[])
   in
-  ({ after with panics = frame.panics; can_declare_panic = frame.can_declare_panic }, term)
+  ( {
+      after with
+      panics = frame.panics;
+      can_declare_panic = frame.can_declare_panic;
+      obligation_condition = frame.obligation_condition;
+    },
+    term )
 
 let check_defined context frame ~holds_when (formula : Mir.formula) =
-  Obligations.with_condition context holds_when (fun () ->
-      ignore (read_specification context frame formula))
+  ignore (read_specification ~holds_when context frame formula)
 
 let make_type_frame context frame source (ty : Types.ty) ~self =
   let substitution =
@@ -182,14 +188,12 @@ let apply_opaque_validity context ty term =
   Facts.declare context (Logic.Function (symbol, [ Encoding.declare_sort context ty ], Logic.Bool));
   Logic.Apply (symbol, [ term ])
 
-let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
+let rec make_validity (context : State.context) (frame : State.frame) ~assuming ?(deep = true)
     ?(includes_invariants = true) ?(includes_ranges = false) ?(seen = []) ty term =
-  if List.exists (Types.equal ty) seen || List.exists (Types.equal ty) context.validity.validating
-  then Logic.Boolean true
+  if List.exists (Types.equal ty) seen || List.exists (Types.equal ty) frame.validating then
+    Logic.Boolean true
   else
-    let validating = context.validity.validating in
-    context.validity.validating <- ty :: validating;
-    Fun.protect ~finally:(fun () -> context.validity.validating <- validating) @@ fun () ->
+    let frame = { frame with validating = ty :: frame.validating } in
     let invariants_hold =
       match find_invariants context ty with
       | _ when not includes_invariants -> Logic.Boolean true

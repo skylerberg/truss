@@ -6,7 +6,6 @@ val make_policy :
 
 val find_ruled_out_panic : State.context -> State.frame -> Catalog.Prover.quoted list option
 val set_panics : State.frame -> panics:bool -> State.frame
-val with_condition : State.context -> Types.condition -> (unit -> 'a) -> 'a
 
 val oblige :
   ?cited:Resolve.Names.key * Core.origin ->

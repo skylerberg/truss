@@ -1,15 +1,10 @@
 let make_policy ~keeps_termination ~keeps_failures ~panic_condition : State.obligation_policy =
-  { panic_condition; keeps_termination; keeps_failures; obligation_condition = [] }
+  { panic_condition; keeps_termination; keeps_failures }
 
 let find_ruled_out_panic (context : State.context) (frame : State.frame) =
   if frame.panics then None else context.policy.panic_condition
 
 let set_panics (frame : State.frame) ~panics = { frame with panics; can_declare_panic = false }
-
-let with_condition (context : State.context) condition run =
-  let enclosing = context.policy.obligation_condition in
-  context.policy.obligation_condition <- condition;
-  Fun.protect ~finally:(fun () -> context.policy.obligation_condition <- enclosing) run
 
 let make_obligation (context : State.context) (frame : State.frame) location obligation goal =
   Query.make_obligation context.query ~condition:frame.condition location obligation goal
@@ -41,7 +36,7 @@ let is_panic_obligation : Diagnostic.Code.prover -> bool = function
 let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?(is_proven_by_evaluation = false)
     ?holds_when (context : State.context) (frame : State.frame) location obligation goal =
   let code = Catalog.Prover_description.find_code obligation in
-  let holds_when = Option.value holds_when ~default:context.policy.obligation_condition in
+  let holds_when = Option.value holds_when ~default:frame.obligation_condition in
   if
     (is_panic_obligation code && frame.panics)
     || (Option.is_some context.policy.panic_condition && not (is_panic_obligation code))

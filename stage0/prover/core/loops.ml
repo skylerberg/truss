@@ -130,8 +130,7 @@ let check_loop_clauses context frame clauses ~moment =
       match clause with
       | Invariant invariant ->
           let _, term =
-            Obligations.with_condition context invariant.holds_when (fun () ->
-                Validity.read_specification context frame invariant)
+            Validity.read_specification ~holds_when:invariant.holds_when context frame invariant
           in
           Obligations.oblige ~holds_when:invariant.holds_when context frame
             (Facts.locate context frame.source invariant.origin)

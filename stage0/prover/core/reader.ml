@@ -426,9 +426,7 @@ let evaluate_call_values context frame run ~at (callee : Callee.t) (arguments : 
                  type_ = compute_operand_type context frame value;
                  declared_type =
                    Encoding.substitute_declared_type context frame (Mir.extract_operand_type value);
-                 term =
-                   Callbacks.run_reading_callback context (fun () ->
-                       read_operand context frame run value);
+                 term = read_operand context { frame with is_reading_callback = true } run value;
                })
        arguments)
 
@@ -458,8 +456,7 @@ let read_call context frame run (call : Mir.call) ~result_type =
         | Indirect callee ->
             Some
               ( compute_operand_type context frame callee,
-                Callbacks.run_reading_callback context (fun () ->
-                    read_operand context frame run callee) )
+                read_operand context { frame with is_reading_callback = true } run callee )
         | _ -> None
       in
       let callee = resolve_callee context frame call.callee ~lends:None in
@@ -690,7 +687,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       (frame, Logic.equal first_value second_value)
   | Specification (Applied { function_; arguments; unconverted }) ->
       let values =
-        Callbacks.run_reading_callback context (fun () -> List.map translate_operand arguments)
+        List.map (read_operand context { frame with is_reading_callback = true } run) arguments
       in
       Values.apply_specification_function context frame ~location function_ values
         ~unconverted:(List.map (Encoding.substitute_type context frame) unconverted)
@@ -1279,15 +1276,20 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
         (write_place context frame run target
            (Encoding.arrive context frame "lambda" (compute_place_type context frame run target)))
   | Assign { target; value } -> (
-      let read () =
-        read_rvalue context frame run value
-          ~site:{ origin = statement.origin; type_ = compute_target_type context frame run target }
+      let read (reading : State.frame) =
+        let after, term =
+          read_rvalue context reading run value
+            ~site:
+              { origin = statement.origin; type_ = compute_target_type context frame run target }
+        in
+        ({ after with is_reading_callback = frame.is_reading_callback }, term)
       in
       match (target, value) with
       | { root = Local held; projections = [] }, (Operand _ | Convert { conversion = Widen; _ })
         when match run.infos.(held).kind with Temporary | Lent _ -> true | Source _ -> false ->
-          write_assignment context run target (Some (Callbacks.run_reading_callback context read))
-      | _ -> write_assignment context run target (Some (read ())))
+          write_assignment context run target
+            (Some (read { frame with is_reading_callback = true }))
+      | _ -> write_assignment context run target (Some (read frame)))
   | Call { destination; call } -> read_call_statement context frame run ~destination call
   | Live _ | Loan_start _ | Loan_end _ | Echo _ -> Some frame
   | Dead locals ->

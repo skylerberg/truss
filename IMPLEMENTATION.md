@@ -403,10 +403,13 @@ develop as well as make it easier to bootstrap the compiler in parts.
   |---|---|
   | `is_ghost` | A specification, a proof block or an evaluated assertion is read |
   | `panics`, `can_declare_panic` | The code being read may panic, and may be given `uses Panic` as a fix |
+  | `obligation_condition` | A clause that holds under a condition is read, so that an obligation made while reading it is one of that condition |
   | `requires_being_read` | One `requires` clause of the definition is read, so that a fix is placed before it |
   | `callees_whose_requires_are_read` | The `requires` of a callee are read, so that a call to the same callee inside them reads none |
   | `instantiating` | The contract of a callee is read at an instantiation, so that a nested reading at a larger instantiation stops |
   | `provided` | The body of a `provide` block is read |
+  | `is_reading_callback` | An operand is read as a function to call or to pass, where a function parameter does not escape |
+  | `validating` | The invariant of a type is read, so that a value of the same type inside it is not unfolded again |
   | `callbacks` | The parameters of a definition or of a clause are bound |
 
 - **`Query` holds the query under construction.** Its declarations, facts,

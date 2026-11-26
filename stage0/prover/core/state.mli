@@ -64,6 +64,9 @@ type frame = {
   panics : bool;
   can_declare_panic : bool;
   instantiating : (Path.t * int) list;
+  obligation_condition : Types.condition;
+  is_reading_callback : bool;
+  validating : Types.ty list;
 }
 
 type changed_part = { root : Locals.local; declared_root_type : Types.ty; fields : string list }
@@ -171,21 +174,16 @@ type termination_state = {
 }
 
 type validity_state = {
-  mutable validating : Types.ty list;
   type_clauses : (source * Mir.type_clauses option Lazy.t) option Tables.Path_table.t;
   valid_values : (Types.ty * Logic.term) list Tables.Term_table.t;
 }
 
-type callback_state = {
-  mutable named : (Logic.term * (Types.function_type * known_function)) list;
-  mutable is_reading : bool;
-}
+type callback_state = { mutable named : (Logic.term * (Types.function_type * known_function)) list }
 
 type obligation_policy = {
   panic_condition : Catalog.Prover.quoted list option;
   keeps_termination : bool;
   keeps_failures : bool;
-  mutable obligation_condition : Types.condition;
 }
 
 type context = {
