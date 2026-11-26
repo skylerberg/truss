@@ -193,6 +193,19 @@ develop as well as make it easier to bootstrap the compiler in parts.
   fact about `capacity`; and a call in a lambda's body, explored where the
   lambda was made, gave the code around the lambda the callee's `ensures`
   about a captured value.
+- **The facts of a partial term are assumed under its precondition.** Three
+  terms denote a value only where a condition holds: an application of a
+  function value, under the `requires` of its contract; an element at an
+  index, under the bounds; and a call's result, under the callee's
+  `requires`. A frame that makes obligations proves the condition before it
+  reads the term, and an obligation that is made is assumed, so the term's
+  facts are stated in that frame as they are. A frame that makes none reads
+  a clause of another definition and proves nothing, so it takes the
+  condition as a premise: `Facts.restrict_unless_proven` gives the frame.
+  That premise is all that keeps the claim "this term is a value of its
+  type" from holding of arguments that the clause's own definition never
+  showed well defined. A callee whose `ensures` names `read(0)` under a
+  premise that its `requires` rules out is such a clause.
 - **A contract is resolved once, and its three readers differ only in what
   they prove and what they assume.** The rules are those of modular
   verification with pre- and postconditions. A definition is proven against
@@ -209,12 +222,6 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | The axiom of a logic function, `Contract_axioms` | Nothing | Each `ensures`, for every argument in the function's domain |
 
   A logic function is total in the logic and unspecified outside its domain.
-  Reading an `ensures` for the axiom also makes facts about the terms in
-  it. The proof of the definition showed an application of a function
-  parameter well defined under the `requires`, so the axiom states the
-  facts of that application, its range, its validity and its relation,
-  under the `requires` of the clause set being read.
-  `Contract_axioms.restrict_to_requires` gives the frame for them.
   Its domain is a condition under which the definition returns: valid
   arguments, the premise of the clause, the Panic condition, and, for a
   callee in the recursion group of the definition being proven, arguments
@@ -318,11 +325,17 @@ develop as well as make it easier to bootstrap the compiler in parts.
   the result of each of its calls, which `visit.ensures(...)` reads.
   `Callbacks` knows the contract of two function values: a named function,
   whose definition `Callee` resolves at the type arguments written, and a
-  callback parameter of the definition being proven. It keys each contract
-  by the value's term, so the contract follows the value into a local and
-  out of it, and nothing reads the form of the expression that an argument
-  was written as. Every other function value promises nothing. Each use of
-  a function value reads that contract in one function:
+  function-typed parameter. It keys each contract by the value's term, so
+  the contract follows the value into a local and out of it, and nothing
+  reads the form of the expression that an argument was written as. The
+  contract of a parameter belongs to the frame that binds the parameter,
+  `frame.callbacks`: the first frame of the definition being proven, and
+  the frame that `Contracts.make_entry_frame` builds to read a clause of
+  another definition, where the key is the argument. So a clause that
+  applies its function parameter finds that parameter's `requires` wherever
+  the clause is read: at a call, in a callee's axiom, in a relation. Every
+  other function value promises nothing. Each use of a function value reads
+  that contract in one function:
 
   | Use | Function | Rule |
   |---|---|---|

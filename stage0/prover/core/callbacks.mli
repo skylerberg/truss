@@ -1,5 +1,8 @@
 val make_state : unit -> State.callback_state
-val declare_own : State.context -> State.frame -> (Core.local * string * Mir.callback) list -> unit
+
+val declare_own :
+  State.context -> State.frame -> (Core.local * string * Mir.callback) list -> State.frame
+
 val run_reading_callback : State.context -> (unit -> 'a) -> 'a
 
 val apply_function :
@@ -77,6 +80,9 @@ val check_passed :
 
 val check_called :
   State.context -> State.frame -> Invocation.site -> Logic.term -> Logic.term list -> unit
+
+val list_called_requires :
+  State.context -> State.frame -> Logic.term -> Logic.term list -> Logic.term list
 
 val assume_returned :
   State.context ->

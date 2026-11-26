@@ -694,13 +694,16 @@ let oblige_in_bounds context (frame : State.frame) ~origin condition =
 let read_sequence_element context frame (sequence : Types.ty) term index ~node ~origin =
   let element = find_sequence_element context frame sequence in
   let model = find_sequence_model context frame sequence term in
-  oblige_in_bounds context frame ~origin
+  let is_in_bounds =
     Logic.(
-      less_equal (int 0) index &&& less index (Models.make_sequence_length context element model));
+      less_equal (int 0) index &&& less index (Models.make_sequence_length context element model))
+  in
+  oblige_in_bounds context frame ~origin is_in_bounds;
   Validity.note_place context frame ~node ~origin (One index);
   let read = index_element context element model index in
-  Facts.assume context frame (Encoding.make_in_range element read);
-  Validity.assume_valid context frame element read;
+  let defined = Facts.restrict_unless_proven frame is_in_bounds in
+  Facts.assume context defined (Encoding.make_in_range element read);
+  Validity.assume_valid context defined element read;
   read
 
 let write_sequence context frame (sequence : Types.ty) before ~write_model =

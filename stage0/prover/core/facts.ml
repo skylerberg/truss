@@ -129,6 +129,9 @@ let bind (frame : State.frame) local ty term =
 let restrict (frame : State.frame) condition =
   { frame with State.condition = Logic.( &&& ) frame.condition condition }
 
+let restrict_unless_proven (frame : State.frame) precondition =
+  if frame.makes_obligations then frame else restrict frame precondition
+
 let suppose context frame label =
   let hypothesis = declare_fresh context frame label Logic.Bool in
   (hypothesis, restrict frame hypothesis)

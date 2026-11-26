@@ -315,6 +315,21 @@ let make_entry_frame frame (clauses : State.clauses) ~arguments ~substitution =
       (Locals.empty, Locals.empty, None)
       (List.mapi (fun position parameter -> (position, parameter)) clauses.parameters)
   in
+  let callbacks =
+    List.filter_map
+      (fun (position, callback) ->
+        match (List.nth_opt clauses.parameters position, List.assoc_opt position arguments) with
+        | Some (parameter : Mir.parameter), Some term -> (
+            match Types.substitute_erased substitution parameter.type_ with
+            | Types.Function function_type ->
+                Some
+                  ( term,
+                    ( function_type,
+                      State.Own { name = Facts.read_parameter_name parameter; callback } ) )
+            | _ -> None)
+        | _ -> None)
+      clauses.callbacks
+  in
   {
     frame with
     State.source = clauses.callee;
@@ -329,6 +344,7 @@ let make_entry_frame frame (clauses : State.clauses) ~arguments ~substitution =
     final_result = None;
     makes_obligations = false;
     substitution;
+    callbacks;
   }
 
 let make_exit_frame frame (clauses : State.clauses) ~entries ~exits ~result ~substitution =

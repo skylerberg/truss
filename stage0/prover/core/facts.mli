@@ -37,4 +37,5 @@ val is_in_home_package : State.context -> State.source -> bool
 val run_once : State.context -> State.stated -> (unit -> unit) -> unit
 val bind : State.frame -> Locals.key -> Types.ty -> Logic.term -> State.frame
 val restrict : State.frame -> Logic.term -> State.frame
+val restrict_unless_proven : State.frame -> Logic.term -> State.frame
 val suppose : State.context -> State.frame -> string -> Logic.term * State.frame
