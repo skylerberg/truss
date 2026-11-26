@@ -392,10 +392,7 @@ let compute_construction_amount (frame : State.frame) (ty : Types.ty) variant
       Costs.zero
   | Metric Allocations -> Logic.int 1
   | Metric Allocated_bytes when counter.counting = Units -> Logic.int 1
-  | Metric Allocated_bytes ->
-      let symbol = Logic.Symbol.Block_bytes { type_ = ty; variant } in
-      Facts.add_axiom frame (Logic.less_equal (Logic.int 1) (Logic.Symbol symbol));
-      Logic.Symbol symbol
+  | Metric Allocated_bytes -> Logic.Symbol (Logic.Symbol.Block_bytes { type_ = ty; variant })
   | Metric Time | Calls _ -> Costs.zero
 
 let make_static_frame (frame : State.frame) source ~substitution ~self_type =

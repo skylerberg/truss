@@ -8,6 +8,7 @@ let set_panics (frame : State.frame) ~panics = { frame with panics; can_declare_
 
 let make_obligation (frame : State.frame) location obligation goal =
   Query.make_obligation frame.query ~find_signature:Signatures.find_signature
+    ~list_axioms:Signatures.list_axioms
     ~list_constructors:(Encoding.list_constructors frame.environment)
     ~condition:frame.condition location obligation goal
 
