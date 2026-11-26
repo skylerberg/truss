@@ -75,9 +75,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
     ~recursive_callee =
   let path = definition.path and type_arguments = definition.type_arguments in
   let may_abort = Callee.may_abort context definition in
-  let is_unspecified_application =
-    may_abort && ((frame : State.frame).is_ghost || (context : State.context).is_specification)
-  in
+  let is_unspecified_application = may_abort && (frame : State.frame).is_ghost in
   let substitution_of = definition.substitution_of in
   let keep_holding_clauses clauses =
     Conditions.keep_holding context ~substitution:(substitution_of clauses) clauses
@@ -127,7 +125,12 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
     recursive_callee;
   let precondition_clauses = Contracts.select_precondition_clauses contract in
   let read_required () =
-    let entry = read_entry_frame frame precondition_clauses in
+    let entry =
+      {
+        (read_entry_frame frame precondition_clauses) with
+        callees_whose_requires_are_read = path :: frame.callees_whose_requires_are_read;
+      }
+    in
     List.map
       (fun (requirement : Mir.requirement) ->
         let clause = requirement.clause in
@@ -148,16 +151,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
       precondition_clauses.requires
   in
   let required =
-    if List.exists (Path.equal path) context.callees_whose_requires_are_read then Logic.Boolean true
-    else begin
-      let outer = context.callees_whose_requires_are_read in
-      context.callees_whose_requires_are_read <- path :: outer;
-      Fun.protect
-        ~finally:(fun () -> context.callees_whose_requires_are_read <- outer)
-        (fun () -> Logic.conjunction (read_required ()))
-    end
+    if List.exists (Path.equal path) frame.callees_whose_requires_are_read then Logic.Boolean true
+    else Logic.conjunction (read_required ())
   in
-  if not (Obligations.may_panic context || Types.has_capability (Built_in Panic) callee.uses) then begin
+  if not (frame.panics || Types.has_capability (Built_in Panic) callee.uses) then begin
     let clauses = contract.callee_clauses in
     let entry = read_entry_frame frame clauses in
     List.iter
@@ -275,11 +272,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
       List.for_all
         (fun (outer, outer_size) ->
           (not (Path.equal path outer)) || instantiation_size < outer_size)
-        context.instantiating
-    then begin
-      context.instantiating <- (path, instantiation_size) :: context.instantiating;
-      Fun.protect ~finally:(fun () -> context.instantiating <- List.tl context.instantiating) run
-    end
+        frame.instantiating
+    then
+      run (fun (entered : State.frame) ->
+          { entered with instantiating = (path, instantiation_size) :: frame.instantiating })
   in
   let returns_where_its_condition_holds =
     (not may_abort)
@@ -297,9 +293,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
   in
   let assume_ensures (base : State.frame) (after : State.frame) ~changed ~applied ~result ~final
       is_kept =
-    let proves_the_axiom_domain =
-      callee_clauses.panics_unless = [] || not (Obligations.may_panic context)
-    in
+    let proves_the_axiom_domain = callee_clauses.panics_unless = [] || not frame.panics in
     let is_in_axiom (clauses : State.clauses) (clause : Mir.formula) =
       match applied with
       | Some (application : Contract_axioms.application) ->
@@ -363,18 +357,20 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
       Query.note_withheld context.query symbol path
   | _ -> ());
   assume_changed_validity after ~changed ~left_valid:None;
-  run_instantiating (fun () ->
-      state_axiom after applied;
+  run_instantiating (fun enter ->
+      state_axiom (enter after) applied;
       if not is_unspecified_application then
         match contract.result_kind with
         | `Lends ->
             let assume =
-              assume_ensures frame after ~changed ~applied ~result ~final:(Some result)
+              assume_ensures (enter frame) (enter after) ~changed ~applied ~result
+                ~final:(Some result)
             in
             assume Lending.holds_where_lent;
             assume (fun clause -> not (Lending.holds_where_lent clause))
         | `Returns ->
-            assume_ensures frame after ~changed ~applied ~result ~final:None (fun _ -> true));
+            assume_ensures (enter frame) (enter after) ~changed ~applied ~result ~final:None
+              (fun _ -> true));
   if not is_unspecified_application then assume_hypotheses after applied;
   match (contract.result_kind, callee.lends) with
   | `Lends, Some Language.Mode.Mut ->
@@ -394,9 +390,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
                (Validity.make_validity context after ~assuming:false ~deep:true result_type final));
         Validity.check_valid context after location result_type final ~deep:true
           ~moment:When_lend_ends;
-        run_instantiating (fun () ->
-            assume_ensures ended after ~changed ~applied ~result ~final:(Some final) (fun clause ->
-                not (Lending.holds_where_lent clause)));
+        run_instantiating (fun enter ->
+            assume_ensures (enter ended) (enter after) ~changed ~applied ~result ~final:(Some final)
+              (fun clause -> not (Lending.holds_where_lent clause)));
         let after = spend ~before:ended ~after ~changed ~result ~final:(Some final) in
         havoc.end_writes after;
         after
@@ -419,7 +415,7 @@ type modelled =
 let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : Callee.t) ~through
     (values : State.passed list) =
   let location = Facts.locate context frame.source site.origin in
-  (match Obligations.find_ruled_out_panic context with
+  (match Obligations.find_ruled_out_panic context frame with
   | Some condition
     when Conditions.may_panic_for_every_value context.lookups ~current:context.current
            ~condition:context.condition callee.uses ->
@@ -539,8 +535,7 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
           else Encoding.arrive context frame "result" result_type
         in
         let is_unspecified_application =
-          (frame.is_ghost || context.is_specification)
-          && not (Types.states_no_allocation function_type.costs)
+          frame.is_ghost && not (Types.states_no_allocation function_type.costs)
         in
         if not is_unspecified_application then
           Validity.assume_valid context

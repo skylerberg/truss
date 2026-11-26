@@ -3,7 +3,7 @@ val make_state : unit -> State.validity_state
 val note_place :
   State.context -> State.frame -> node:Core.id -> origin:Core.origin -> State.place_value -> unit
 
-val run_as_specification : State.context -> (unit -> 'a) -> 'a
+val run_as_specification : State.context -> State.frame -> (State.frame -> 'a) -> 'a
 val read_specification : State.context -> State.frame -> Mir.formula -> State.frame * Logic.term
 
 val check_defined :

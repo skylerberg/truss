@@ -1,14 +1,11 @@
 val make_policy :
   keeps_termination:bool ->
   keeps_failures:bool ->
-  panics:bool ->
-  can_declare_panic:bool ->
   panic_condition:Catalog.Prover.quoted list option ->
   State.obligation_policy
 
-val may_panic : State.context -> bool
-val find_ruled_out_panic : State.context -> Catalog.Prover.quoted list option
-val run_with_panics : State.context -> panics:bool -> (unit -> 'a) -> 'a
+val find_ruled_out_panic : State.context -> State.frame -> Catalog.Prover.quoted list option
+val set_panics : State.frame -> panics:bool -> State.frame
 val with_condition : State.context -> Types.condition -> (unit -> 'a) -> 'a
 
 val oblige :

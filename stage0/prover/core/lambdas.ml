@@ -148,11 +148,15 @@ let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.f
     ~(lambdas : Mir.body array) (body : Mir.body) ~type_ =
   let saved_returns = context.returns in
   context.returns <- [];
-  Obligations.run_with_panics context ~panics:false @@ fun () ->
   Fun.protect
     ~finally:(fun () -> context.returns <- saved_returns)
     (fun () ->
-      let inside = enter { frame with locals = remove_temporaries frame.locals } in
+      let inside =
+        enter
+          (Obligations.set_panics
+             { frame with locals = remove_temporaries frame.locals }
+             ~panics:false)
+      in
       Facts.run_in_source context frame.source (fun () -> context.run_body inside ~lambdas body);
       match
         Joins.join context ~value_type:type_
@@ -371,18 +375,19 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   let saved_returns = context.returns in
   context.returns <- [];
   let inferred_bounds =
-    Obligations.run_with_panics context
-      ~panics:
-        (Conditions.may_panic context.lookups ~current:context.current ~condition:context.condition
-           function_type.uses)
-    @@ fun () ->
     Termination.run_in_lambda context function_type @@ fun () ->
     Fun.protect
       ~finally:(fun () ->
         context.returns <- saved_returns;
         Counters.leave_lambda context counters)
       (fun () ->
-        let inside = { inside with locals = remove_temporaries inside.locals } in
+        let inside =
+          Obligations.set_panics
+            { inside with locals = remove_temporaries inside.locals }
+            ~panics:
+              (Conditions.may_panic context.lookups ~current:context.current
+                 ~condition:context.condition function_type.uses)
+        in
         let inside =
           List.fold_left2
             (fun inside parameter argument ->

@@ -79,17 +79,16 @@ let note_place (context : State.context) (frame : State.frame) ~node ~origin val
       context.disjoint
   end
 
-let run_as_specification (context : State.context) read =
-  let was_specification = context.is_specification in
-  context.is_specification <- true;
-  Fun.protect
-    ~finally:(fun () -> context.is_specification <- was_specification)
-    (fun () ->
-      Obligations.run_with_panics context ~panics:false (fun () ->
-          Counters.run_without_counters context read))
+let run_as_specification (context : State.context) (frame : State.frame) read =
+  Counters.run_without_counters context (fun () ->
+      read (Obligations.set_panics frame ~panics:false))
 
-let read_specification (context : State.context) frame (formula : Mir.formula) =
-  run_as_specification context (fun () -> context.read_formula frame formula ~arguments:[])
+let read_specification (context : State.context) (frame : State.frame) (formula : Mir.formula) =
+  let after, term =
+    run_as_specification context frame (fun specification ->
+        context.read_formula specification formula ~arguments:[])
+  in
+  ({ after with panics = frame.panics; can_declare_panic = frame.can_declare_panic }, term)
 
 let check_defined context frame ~holds_when (formula : Mir.formula) =
   Obligations.with_condition context holds_when (fun () ->

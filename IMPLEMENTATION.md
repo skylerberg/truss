@@ -394,6 +394,21 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `Lending` | The contract of a lending method: where each clause holds, and the part as the caller left it |
   | `Laws` | The laws of a trait |
 
+- **What holds for the length of a nested read is a field of the frame that
+  the read receives.** A reader that needs such a fact takes it from its
+  frame, and the frame that the caller keeps never had it, so nothing is
+  set and restored and a reader cannot see the setting of another read.
+
+  | Field of `State.frame` | Holds while |
+  |---|---|
+  | `is_ghost` | A specification, a proof block or an evaluated assertion is read |
+  | `panics`, `can_declare_panic` | The code being read may panic, and may be given `uses Panic` as a fix |
+  | `requires_being_read` | One `requires` clause of the definition is read, so that a fix is placed before it |
+  | `callees_whose_requires_are_read` | The `requires` of a callee are read, so that a call to the same callee inside them reads none |
+  | `instantiating` | The contract of a callee is read at an instantiation, so that a nested reading at a larger instantiation stops |
+  | `provided` | The body of a `provide` block is read |
+  | `callbacks` | The parameters of a definition or of a clause are bound |
+
 - **`Query` holds the query under construction.** Its declarations, facts,
   fresh names, scopes and posed obligations are fields of an abstract type,
   `context.query`, so no other module writes them: a module marks the facts
