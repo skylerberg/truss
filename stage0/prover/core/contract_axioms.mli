@@ -1,5 +1,6 @@
 val make_state : unit -> State.axiom_state
 val assume_typed : State.context -> State.frame -> Logic.term -> unit
+val restrict_to_requires : State.context -> State.frame -> State.frame
 
 val map_each_value :
   State.context -> State.frame -> Logic.term -> (State.frame -> Logic.term -> unit) -> unit

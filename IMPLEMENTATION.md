@@ -209,10 +209,12 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | The axiom of a logic function, `Contract_axioms` | Nothing | Each `ensures`, for every argument in the function's domain |
 
   A logic function is total in the logic and unspecified outside its domain.
-  Reading a clause for the axiom also makes facts about the terms in it,
-  such as the range of an application of a function parameter. The proof of
-  the definition showed those terms well defined under the `requires`, so
-  the axiom states those facts under the `requires` too.
+  Reading an `ensures` for the axiom also makes facts about the terms in
+  it. The proof of the definition showed an application of a function
+  parameter well defined under the `requires`, so the axiom states the
+  facts of that application, its range, its validity and its relation,
+  under the `requires` of the clause set being read.
+  `Contract_axioms.restrict_to_requires` gives the frame for them.
   Its domain is a condition under which the definition returns: valid
   arguments, the premise of the clause, the Panic condition, and, for a
   callee in the recursion group of the definition being proven, arguments

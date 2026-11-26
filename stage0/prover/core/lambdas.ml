@@ -259,20 +259,21 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
       in
       let entries = List.map (fun (name, _) -> Logic.Symbol name) bound in
       let mark = Query.mark context.query in
-      let domain =
+      let are_valid, required =
         Query.run_dropping_facts context.query
           ~drop:(fun fact ->
             Logic.mentions (List.map fst bound) fact || Facts.mentions_fresh_since context mark fact)
           (fun () ->
-            Logic.conjunction
-              (List.map2
-                 (fun (_, input) entry ->
-                   Validity.make_validity context frame ~assuming:true ~includes_ranges:true
-                     (Encoding.substitute_type context frame input)
-                     entry)
-                 function_type.inputs entries
-              @ List.map snd (Callbacks.read_requires context stated entries)))
+            ( Logic.conjunction
+                (List.map2
+                   (fun (_, input) entry ->
+                     Validity.make_validity context frame ~assuming:true ~includes_ranges:true
+                       (Encoding.substitute_type context frame input)
+                       entry)
+                   function_type.inputs entries),
+              Logic.conjunction (List.map snd (Callbacks.read_requires context stated entries)) ))
       in
+      let domain = Logic.( &&& ) are_valid required in
       match defined with
       | Some defined
         when Logic.mentions enclosing_parameters defined

@@ -527,7 +527,9 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
         let result =
           if Callbacks.is_in_the_logic function_type then begin
             let term = Callbacks.apply_function context function_type called entries in
-            Facts.assume context frame (Encoding.make_in_range result_type term);
+            Facts.assume context
+              (Contract_axioms.restrict_to_requires context frame)
+              (Encoding.make_in_range result_type term);
             term
           end
           else Encoding.arrive context frame "result" result_type
@@ -537,13 +539,17 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
           && not (Types.states_no_allocation function_type.costs)
         in
         if not is_unspecified_application then
-          Validity.assume_valid context frame result_type result;
+          Validity.assume_valid context
+            (Contract_axioms.restrict_to_requires context frame)
+            result_type result;
         let frame =
           Amounts.spend_indirect_call context ~before ~after:frame ~location function_type called
             values ~changed:(List.rev havoc.written) ~result_type:declared_result_type ~result
         in
         if not is_unspecified_application then
-          Callbacks.assume_returned context frame function_type called ~entries
+          Callbacks.assume_returned context
+            (Contract_axioms.restrict_to_requires context frame)
+            function_type called ~entries
             ~exits:(List.map (find_written havoc) values)
             ~result;
         List.iter
