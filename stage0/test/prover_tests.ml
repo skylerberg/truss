@@ -319,6 +319,10 @@ let () =
         ~at:("value.compare(value)", 1));
   Harness.test "a theorem that a law proof calls is proven without the laws of that impl" (fun () ->
       expect_not_proven Fixtures.Prover.law_proven_by_a_theorem_that_needs_the_law "prover.ensures");
+  Harness.test "a law is not proven through a derived impl that assumes its argument's laws"
+    (fun () ->
+      expect_codes Fixtures.Prover.law_proven_through_a_derived_impl_that_assumes_it
+        [ "prover.circular_proof" ]);
   Harness.test "a law is not proven through a generic impl that assumes its bound's laws" (fun () ->
       expect_codes Fixtures.Prover.law_proven_through_a_generic_impl_that_assumes_it
         [ "prover.circular_proof" ]);
