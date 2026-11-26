@@ -1,0 +1,20 @@
+type Bad(value: Int64)
+
+impl Equal for Bad {
+  fn equal(self, other: Bad) -> Bool
+    ensures !result
+  {
+    false
+  }
+}
+
+fn same[Item: Equal](first: Item, second: Item)
+  requires identical(first, second)
+  ensures first == second
+{
+  let _ = first == second
+}
+
+proof Equal.reflexive for Bad {
+  same(value, value)
+}

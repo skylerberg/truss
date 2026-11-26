@@ -129,7 +129,9 @@ let list_circular_laws (context : State.context) (frame : State.frame) =
   let required = list_impls_of_required_traits context in
   List.filter_map
     (fun (laws : Mir.Call_edges.assumed_laws) ->
-      if is_in_proof_cycle context laws.impl && not (List.exists (Path.equal laws.impl) required)
+      if
+        is_in_proof_cycle context laws.impl
+        && (laws.is_assumed_by_the_callee || not (List.exists (Path.equal laws.impl) required))
       then
         Some
           {

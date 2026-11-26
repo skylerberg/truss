@@ -51,6 +51,7 @@ type assumed_laws = {
   trait : Types.trait_reference;
   type_ : Types.ty;
   origin : Core.origin option;
+  is_assumed_by_the_callee : bool;
 }
 
 val list_assumed_laws : lookups -> Path.t -> assumed_laws list
