@@ -258,7 +258,12 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
                      Logic.( ==> )
                        (Logic.conjunction (premise :: axiom.hypotheses))
                        (Logic.conjunction
-                          (facts
+                          (Logic.( ==> )
+                             (Logic.conjunction
+                                (List.concat_map
+                                   (fun (_, required, _) -> required)
+                                   readable_clauses))
+                             facts
                           :: List.map
                                (fun (_, required, ensures) ->
                                  Logic.( ==> ) (Logic.conjunction required)
