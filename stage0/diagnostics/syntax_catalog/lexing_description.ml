@@ -361,6 +361,7 @@ let describe_action = function
   | Remove_semicolon -> "Remove the `;`"
   | Delete_characters { is_plural } ->
       if is_plural then "Delete the characters" else "Delete the character"
+  | Delete_comment -> "Delete the comment"
   | Replace_with_escapes code_points -> "Replace with `" ^ show_escapes code_points ^ "`"
   | Write_interpolation -> "Write `${...}`"
   | Write_ordinary_string -> "Write an ordinary string"

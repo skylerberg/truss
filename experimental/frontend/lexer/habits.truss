@@ -11,6 +11,12 @@ type OperatorScan = LexedOperator(kind: token.Kind) | Ellipsis
 
 type StringFormScan = FormScanned(scan: ItemScan) | Skipped
 
+fn make_comment_deletion(scanner: Scanner, start: UInt64, stop: UInt64, line_break: Bool) -> source.Fix
+  uses Panic
+{
+  source.make_fix("Delete the comment", edits: [scanner.remove_trivia(start, stop, line_break: line_break)])
+}
+
 fn lex_line_comment(scanner: mut Scanner)
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.line_is_blank
@@ -18,9 +24,10 @@ fn lex_line_comment(scanner: mut Scanner)
 {
   let start = scanner.position
   let stop = scanner.compute_end_of_line(start + 1)
+  let fix = make_comment_deletion(scanner, start, stop, line_break: false)
   scanner.position = stop
   scanner.line_is_blank = false
-  report(mut scanner, code: "lexer.comment", span: source.make_span(start, stop), message: comment_message)
+  report(mut scanner, code: "lexer.comment", span: source.make_span(start, stop), message: comment_message, fixes: [own fix])
 }
 
 fn lex_block_comment(scanner: mut Scanner)
@@ -68,7 +75,12 @@ fn lex_block_comment(scanner: mut Scanner)
   } else {
     "${comment_message} This comment is never closed, so it runs to the end of the file."
   }
-  report(mut scanner, code: "lexer.comment", span: source.make_span(start, stop: position), message: message)
+  let fixes: List[source.Fix] = if is_closed {
+    [make_comment_deletion(scanner, start, stop: position, line_break: first_line_break.is_some())]
+  } else {
+    []
+  }
+  report(mut scanner, code: "lexer.comment", span: source.make_span(start, stop: position), message: message, fixes: own fixes)
 }
 
 fn record_semicolon(scanner: mut Scanner)
