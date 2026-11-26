@@ -1047,6 +1047,22 @@ let () =
           if not (lookups.may_abort (make_main_path caller)) then
             Harness.fail "%s is known not to abort" caller)
         [ "first"; "second"; "third"; "fourth" ]);
+  Harness.test "a caller is run after a callee that an edit to its own callee made stale" (fun () ->
+      let write_callers addend =
+        String.concat ""
+          (List.map
+             (fun name -> Printf.sprintf "fn %s() -> Int64 {\n  middle() + %d\n}\n\n" name addend)
+             [ "first"; "second"; "third"; "fourth"; "fifth"; "sixth" ])
+      in
+      let write_package ~innermost_body addend =
+        Printf.sprintf
+          "fn innermost() -> Int64 {\n  %s\n}\n\nfn middle() -> Int64 {\n  innermost()\n}\n\n%s"
+          innermost_body (write_callers addend)
+      in
+      ignore
+        (list_propagated
+           ~before:[ ("app.main", write_package ~innermost_body:"missing" 1) ]
+           ~after:[ ("app.main", write_package ~innermost_body:"1" 2) ]));
   Harness.test "a definition does not abort through code that never runs" (fun () ->
       let source =
         "fn doubled(text: String) -> String {\n\

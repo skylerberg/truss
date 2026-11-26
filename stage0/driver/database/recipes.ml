@@ -1611,8 +1611,7 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
   | Decide -> Compiler_bug.raise_bug ~stage:"Database" "Decide is drained with a solver"
   | Find_aborts ->
       let recipe = find_recipe stage in
-      let waiting = Hashtbl.create 64 in
-      List.iter (fun id -> Hashtbl.replace waiting id ()) stale;
+      let visiting = Hashtbl.create 64 in
       let read_untracked (fact : Path.t list Tracker.fact) path =
         match
           Tracker.find database Tracker.untracked fact.whole (Path.locate_package path)
@@ -1622,7 +1621,7 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
         | Some (Failed | Blocked) | None -> []
       in
       let rec run_after_callees id =
-        if Hashtbl.mem waiting id then begin
+        if Store.is_stale database.store ~stage:rank ~id && not (Hashtbl.mem visiting id) then begin
           let path =
             (Declarations.decode_key (read_first_definition database recipe id).key).path
           in
@@ -1631,14 +1630,16 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
             | [] -> [ path ]
             | members -> members
           in
-          List.iter (fun member -> Hashtbl.remove waiting (Ids.of_path member)) members;
+          let member_ids = List.map Ids.of_path members in
+          List.iter (fun member -> Hashtbl.replace visiting member ()) member_ids;
           List.iter
             (fun member ->
               List.iter
                 (fun callee -> run_after_callees (Ids.of_path callee))
                 (read_untracked Facts.call_node member))
             members;
-          run_units database ?on_bug stage (List.map Ids.of_path members) (fun database id ->
+          List.iter (Hashtbl.remove visiting) member_ids;
+          run_units database ?on_bug stage member_ids (fun database id ->
               recipe.run database (read_first_definition database recipe id));
           let aborts_outside member =
             match
