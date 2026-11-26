@@ -57,11 +57,10 @@ let apply_callback_ensures context (function_type : Types.function_type) values 
 
 let make_lifting (context : State.context) (frame : State.frame) ~called ~arguments ~start_fresh
     ~end_fresh ~start_declarations parameters =
-  let declared_here =
-    List.take (List.length context.declarations - start_declarations) context.declarations
-  in
+  let declared_here = Query.list_declarations_since context.query ~count:start_declarations in
   let captures_fresh = function
-    | Logic.Symbol.Lambda _ as name when not (Tables.Symbol_table.mem context.fresh_order name) -> (
+    | Logic.Symbol.Lambda _ as name when Option.is_none (Query.find_fresh_order context.query name)
+      -> (
         match Tables.Symbol_table.find_opt context.lambda_definitions name with
         | Some defined -> Facts.mentions_fresh_after context start_fresh defined
         | None -> false)
@@ -83,7 +82,7 @@ let make_lifting (context : State.context) (frame : State.frame) ~called ~argume
     (function
       | Logic.Constant (name, sort) when not (Tables.Symbol_table.mem renamed name) ->
           let is_fresh_in_body =
-            match Tables.Symbol_table.find_opt context.fresh_order name with
+            match Query.find_fresh_order context.query name with
             | Some order -> order > start_fresh && order <= end_fresh
             | None -> captures_fresh name
           in
@@ -93,7 +92,7 @@ let make_lifting (context : State.context) (frame : State.frame) ~called ~argume
             Tables.Symbol_table.replace renamed name (Logic.Apply (lifted, variables))
           end
       | Logic.Function (name, inputs, sort) when frame.binders <> [] -> (
-          match Tables.Symbol_table.find_opt context.fresh_order name with
+          match Query.find_fresh_order context.query name with
           | Some order when order > start_fresh && order <= end_fresh ->
               let lifted = Logic.Symbol.Lifted name in
               Facts.declare context
@@ -361,7 +360,7 @@ let find_lambda_definition context frame (function_type : Types.function_type)
   | true when is_in_the_logic function_type -> (
       let bound = make_parameter_symbols context frame function_type in
       let defined =
-        let mark = context.fresh in
+        let mark = Query.count_fresh context.query in
         Counters.run_without_counters context (fun () ->
             try
               let enter inside =
@@ -461,9 +460,9 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
     Facts.raise_bug "a lambda whose parameters do not match %s" (Types.show ty);
   let called = Facts.declare_fresh context frame "called" Logic.Bool in
   let inside = { (Facts.restrict frame called) with result = None } in
-  let start_fresh = context.fresh
-  and start_facts = Fact_list.count context.facts
-  and start_declarations = List.length context.declarations in
+  let start_fresh = Query.count_fresh context.query
+  and start_facts = Query.count_facts context.query
+  and start_declarations = Query.count_declarations context.query in
   let arguments =
     List.map
       (fun (_, input) ->
@@ -486,11 +485,11 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
          (fun index pair -> (index, pair))
          (List.combine written.code.parameters function_type.inputs))
   in
-  let mark = context.fresh and facts_mark = Fact_list.count context.facts in
+  let mark = Query.count_fresh context.query and facts_mark = Query.count_facts context.query in
   let premises =
     List.drop
-      (Fact_list.count context.facts - facts_mark)
-      (Fact_list.list_newest_since context.facts ~count:start_facts)
+      (Query.count_facts context.query - facts_mark)
+      (Query.list_facts_since context.query ~count:start_facts)
   in
   let ended = ref [] in
   let saved_returns = context.returns
@@ -576,8 +575,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         Counters.check_lambda_exits context counters exits location ~type_:ty ~fresh_mark:mark
           ~facts_mark)
   in
-  let end_fresh = context.fresh in
-  let shown = Fact_list.list_newest_since context.facts ~count:facts_mark in
+  let end_fresh = Query.count_fresh context.query in
+  let shown = Query.list_facts_since context.query ~count:facts_mark in
   let term =
     match find_lambda_definition context frame function_type written with
     | Some term -> term

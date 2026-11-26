@@ -15,16 +15,13 @@ let run_under_binder :
   let body_frame =
     Facts.restrict { frame with binders = (bound_symbol, sort, premise) :: frame.binders } premise
   in
-  let facts = ref [] in
-  context.scopes <- (bound_symbol, facts) :: context.scopes;
-  context.quantifier_symbols <- bound_symbol :: context.quantifier_symbols;
-  let body =
-    Fun.protect
-      ~finally:(fun () -> context.scopes <- List.tl context.scopes)
-      (fun () -> read body_frame)
+  Query.add_quantifier_symbol context.query bound_symbol;
+  let body, newest_facts =
+    Query.run_in_scope context.query [ bound_symbol ] (fun () -> read body_frame)
   in
   let with_facts term =
-    if !facts <> [] then Tables.Term_table.replace context.quantifier_facts term (List.rev !facts);
+    if newest_facts <> [] then
+      Query.attach_quantifier_facts context.query term (List.rev newest_facts);
     term
   in
   (body_frame, body, with_facts)
@@ -208,7 +205,7 @@ let find_model context (ty : Types.ty) term ~element =
 let quantify_over (context : State.context) (frame : State.frame)
     (quantifier : Language.Quantifier.t) (range : quantified_range) ~bind ~read =
   let make ?count bound_symbol sort premise body_frame bound_value =
-    let mark = context.fresh in
+    let mark = Query.count_fresh context.query in
     let body_frame, (after, body_value), with_facts =
       run_under_binder context body_frame bound_symbol sort premise (fun body_frame ->
           read body_frame bound_value)
@@ -227,7 +224,7 @@ let quantify_over (context : State.context) (frame : State.frame)
       | Exists -> Logic.Exists (bound, Logic.( &&& ) premise body_value)
     in
     if Facts.is_in_home_package context frame.source then
-      Tables.Term_table.replace context.written_quantifiers term ();
+      Query.note_written_quantifier context.query term;
     (frame, with_facts term)
   in
   let symbol = Facts.make_fresh_name context "bound" in

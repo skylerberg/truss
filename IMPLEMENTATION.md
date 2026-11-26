@@ -152,6 +152,12 @@ develop as well as make it easier to bootstrap the compiler in parts.
   which `Mir.Call_edges` lists: a callee's contract, a type's invariant, and
   the laws of an `impl`. `Laws` assumes no law of an `impl` in the proof
   group of the definition being proven.
+- **`Query` holds the query under construction.** Its declarations, facts,
+  fresh names, scopes and posed obligations are fields of an abstract type,
+  `context.query`, so no other module writes them: a module marks the facts
+  with `Query.count_facts` and reads the ones added since, and a module that
+  reads code under a binder takes the facts of that scope from
+  `Query.run_in_scope`.
 - **`Validity` decides each check of an invariant.** Every moment that
   obliges one calls `Validity.check_valid`, which first asks its record of
   the values already shown valid, so a value is proven once. A write

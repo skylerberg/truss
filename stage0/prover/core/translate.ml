@@ -22,20 +22,8 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       lookups;
       current;
       node;
-      declarations = [];
-      declared = Tables.Symbol_table.create 64;
-      definitions = Tables.Symbol_table.create 8;
-      datatypes = Tables.Type_table.create 16;
       visible_types = Tables.Type_table.create 16;
       callees = Tables.Path_table.create 16;
-      stated = Tables.Stated_table.create 64;
-      facts = Fact_list.empty;
-      scopes = [];
-      quantifier_facts = Tables.Term_table.create 16;
-      written_quantifiers = Tables.Term_table.create 4;
-      quantifier_symbols = [];
-      obligations = [];
-      fresh = 0;
       parameter_names = [];
       local_names = Tables.Local_table.create 16;
       local_origins = Tables.Local_table.create 16;
@@ -43,13 +31,13 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       enclosing_provides = [];
       instantiating = [];
       callees_whose_requires_are_read = [];
+      query = Query.create ();
       axioms = Contract_axioms.make_state ();
       termination = Termination.make_state ~terminates ~measures;
       validity = Validity.make_state ();
       lending = None;
       callbacks = [];
       cost = Counters.make_state ();
-      fresh_order = Tables.Symbol_table.create 64;
       logs = [];
       powers = [];
       lambda_definitions = Tables.Symbol_table.create 8;
@@ -69,7 +57,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
 
 let make_outcome (context : State.context) =
   {
-    Obligation.obligations = List.rev context.obligations;
+    Obligation.obligations = Query.list_obligations context.query;
     holes = List.rev context.holes;
     evaluation = None;
   }

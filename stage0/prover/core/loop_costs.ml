@@ -178,8 +178,8 @@ let enter (context : State.context) (frame : State.frame) ~entry clauses ~holds 
   check_entry context entry costs;
   {
     costs;
-    fresh_mark = context.fresh;
-    facts_mark = Fact_list.count context.facts;
+    fresh_mark = Query.count_fresh context.query;
+    facts_mark = Query.count_facts context.query;
     recursive_costs_mark = context.cost.recursive_costs_assumed;
     changed;
   }
@@ -325,9 +325,7 @@ let assumes_recursive_costs (context : State.context) loop =
 let check_iterations context loop_at (head : State.frame) loop ~iterations ~iteration_bounds
     ~(inside : State.frame) ~ends ~breaks =
   let location = Facts.locate context head.source loop_at in
-  let facts =
-    Fact_list.list_newest_since context.facts ~count:loop.facts_mark @ [ inside.condition ]
-  in
+  let facts = Query.list_facts_since context.query ~count:loop.facts_mark @ [ inside.condition ] in
   let frames = ends @ breaks and varies = Facts.mentions_fresh_after context loop.fresh_mark in
   let constant_count =
     if assumes_recursive_costs context loop then None
@@ -492,8 +490,8 @@ let leave context ~(clause_at : State.frame) (exit_ : State.frame) loop ~iterati
 
 let leave_counted (context : State.context) ~clause_at exit_ loop ~iterations ~most ~count ~since =
   let facts =
-    Fact_list.list_newest_since context.facts ~count:since
-    @ Fact_list.list_newest_since context.facts ~count:loop.facts_mark
+    Query.list_facts_since context.query ~count:since
+    @ Query.list_facts_since context.query ~count:loop.facts_mark
   in
   leave context ~clause_at exit_ loop ~iterations
     ~most:

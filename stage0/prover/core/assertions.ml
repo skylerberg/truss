@@ -99,47 +99,41 @@ let add_bitwise_definitions (query : Logic.query) =
 
 let assert_bit_vector (context : State.context) frame ~named ~origin
     ~(read : State.frame -> Logic.term) =
-  let saved_facts = context.facts in
-  let saved_stated = Tables.Stated_table.copy context.stated in
-  context.facts <- Fact_list.empty;
-  let isolated =
-    {
-      frame with
-      State.condition = Logic.Boolean true;
-      bound = [];
-      binders = [];
-      makes_obligations = false;
-    }
-  in
-  let isolated =
-    List.fold_left
-      (fun (inside : State.frame) (local, ty) ->
-        let symbol =
-          Facts.declare_fresh context inside "asserted" (Facts.declare_sort context ty)
-        in
-        Facts.assume context inside (Facts.make_in_range ty symbol);
-        match local with
-        | Core.Self -> { inside with self = Some symbol }
-        | _ -> { inside with locals = Locals.add (Core_local local) symbol inside.locals })
-      isolated named
-  in
-  let term = read isolated in
-  let obligation =
-    Facts.make_obligation context
-      { isolated with makes_obligations = true }
-      (Facts.locate context frame.source origin)
-      (Bit_vector_assertion_may_fail { clause = Facts.quote frame.source origin })
-      term
-  in
-  let cited =
-    if not (Facts.is_home context frame.source) then Some (frame.source.key, origin) else None
-  in
-  context.obligations <-
-    { obligation with query = add_bitwise_definitions obligation.query; cited }
-    :: context.obligations;
-  context.facts <- saved_facts;
-  Tables.Stated_table.reset context.stated;
-  Tables.Stated_table.iter (Tables.Stated_table.replace context.stated) saved_stated
+  Query.run_without_facts context.query (fun () ->
+      let isolated =
+        {
+          frame with
+          State.condition = Logic.Boolean true;
+          bound = [];
+          binders = [];
+          makes_obligations = false;
+        }
+      in
+      let isolated =
+        List.fold_left
+          (fun (inside : State.frame) (local, ty) ->
+            let symbol =
+              Facts.declare_fresh context inside "asserted" (Facts.declare_sort context ty)
+            in
+            Facts.assume context inside (Facts.make_in_range ty symbol);
+            match local with
+            | Core.Self -> { inside with self = Some symbol }
+            | _ -> { inside with locals = Locals.add (Core_local local) symbol inside.locals })
+          isolated named
+      in
+      let term = read isolated in
+      let obligation =
+        Facts.make_obligation context
+          { isolated with makes_obligations = true }
+          (Facts.locate context frame.source origin)
+          (Bit_vector_assertion_may_fail { clause = Facts.quote frame.source origin })
+          term
+      in
+      let cited =
+        if not (Facts.is_home context frame.source) then Some (frame.source.key, origin) else None
+      in
+      Query.add_obligation context.query
+        { obligation with query = add_bitwise_definitions obligation.query; cited })
 
 let check_assertion context frame ~origin ~bit_vector term =
   (match bit_vector with
