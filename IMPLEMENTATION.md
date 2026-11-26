@@ -226,9 +226,14 @@ develop as well as make it easier to bootstrap the compiler in parts.
 
   | Reader | Proves | Assumes |
   |---|---|---|
-  | The definition's check, `Translate` | Each `ensures` at every return, under its premise | The `requires` |
-  | A call, `Calls` | The `requires`, and the Panic condition where the caller may not panic | Each `ensures` under its premise, in the frame of the call |
+  | The definition's check, `Translate` | Each `ensures` at every return, under its premise, in `check_return`, and the clauses on a lent part in `check_lent_part` | The `requires`, in `enter_function` |
+  | A call, `Calls` | The `requires`, and the Panic condition where the caller may not panic, in `oblige_preconditions` | Each `ensures` under its premise, in the frame of the call, in `call_contract` |
   | The axiom of a logic function, `Contract_axioms` | Nothing | Each `ensures`, for every argument in the function's domain |
+
+  `Translate.translate_run` is the proof of a function in four steps: it
+  enters the definition, reads the body, and checks each lent part and
+  each return. A proof that reads no body, of a law, a type, a constant or
+  a restated method, starts from `Translate.start_proof`.
 
   A logic function is total in the logic and unspecified outside its domain.
   Its domain is a condition under which the definition returns: valid
