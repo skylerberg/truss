@@ -1,0 +1,7 @@
+fn skipped(l: List[UInt8]) -> UInt8 {
+  var last: UInt8 = 0
+  for x in l.cursor().skip(1) {
+    last = x - 0
+  }
+  last
+}

@@ -1304,6 +1304,8 @@ let () =
     (fun () -> expect_proven Fixtures.Prover.inclusive_range_loop_counting);
   Harness.test "a range loop's index bounds its cost" (fun () ->
       expect_proven Fixtures.Prover.range_loop_with_an_index_cost_clause);
+  Harness.test "an element that a cursor gives has the range of its type" (fun () ->
+      expect_proven Fixtures.Prover.cursor_element_keeps_its_range);
   Harness.test "a loop over a type's own cursor calls its next" (fun () ->
       expect_proven Fixtures.Prover.countdown_loop);
   Harness.test "a loop over a cursor in a field calls its next and keeps the other fields"

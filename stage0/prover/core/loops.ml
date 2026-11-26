@@ -419,18 +419,17 @@ let prove_cursor_loop ~(for_loop : for_loop) (context : State.context) (frame : 
       let has_another =
         Logic.Is (Encoding.make_constructor_symbol option_type some_variant, pulled)
       in
+      let inside = Facts.restrict after has_another in
       let element =
-        Logic.Apply
-          ( Encoding.make_selector_symbol option_type some_variant
-              (Well_known.show_field Option_some_value),
-            [ pulled ] )
+        Values.project_field context inside option_type some_variant
+          (Well_known.show_field Option_some_value)
+          element_type pulled
       in
       (match (find_model head, find_model after) with
       | Some model, Some model_after ->
           oblige_next_gives_the_model after location ~element:element_type ~has_another
             ~pulled:element ~model ~model_after
       | _ -> ());
-      let inside = Facts.restrict after has_another in
       Validity.assume_valid context inside element_type element;
       {
         has_another;

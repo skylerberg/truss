@@ -235,7 +235,7 @@ let rec make_literal_value (context : State.context) (frame : State.frame) (ty :
       Option.iter assume_holds (Models.find_model context ty literal ~element);
       match Encoding.find_constructors context.environment ty with
       | Some [ (None, [ (field, field_type) ]) ] -> (
-          let part = Logic.Apply (Encoding.make_selector_symbol ty None field, [ literal ]) in
+          let part = Encoding.select_field context.environment ty None field literal in
           match field_type with
           | Types.Named { path; arguments = [ Types.Type stored ] }
             when Option.is_some (Well_known.find_builtin_type path) ->

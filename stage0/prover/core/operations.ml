@@ -103,9 +103,8 @@ let make_derived_equal (frame : State.frame) (ty : Types.ty) left right =
         Logic.conjunction
           (List.map
              (fun (field, field_type) ->
-               let selector = Encoding.make_selector_symbol ty variant field in
-               let left = Logic.Apply (selector, [ left ])
-               and right = Logic.Apply (selector, [ right ]) in
+               let select = Encoding.select_field frame.environment ty variant field in
+               let left = select left and right = select right in
                if Encoding.is_equality_identity frame.environment field_type then
                  Logic.equal left right
                else if Encoding.find_float_format field_type <> None then
