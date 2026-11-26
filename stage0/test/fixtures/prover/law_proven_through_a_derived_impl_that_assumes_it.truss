@@ -1,0 +1,17 @@
+type Leaf(x: Int64)
+
+type Box[Item](value: Item)
+  derives Equal
+
+impl Equal for Leaf {
+  fn equal(self, other: Leaf) -> Bool
+    ensures !result
+  {
+    false
+  }
+}
+
+proof Equal.reflexive for Leaf {
+  let boxed = Box(value: Leaf(x: value.x))
+  let _ = boxed == boxed
+}

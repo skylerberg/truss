@@ -276,31 +276,59 @@ type assumed_laws = {
 let states_laws (interface : Interface.Lookups.t) trait =
   match interface.find_trait_header trait with Some header -> header.laws <> [] | None -> false
 
-let rec list_laws_of_bound (interface : Interface.Lookups.t) ~self_type ~is_assumed_by_the_callee
-    trait =
+let list_field_types (interface : Interface.Lookups.t) (ty : Types.ty) =
+  match Types.strip_view ty with
+  | Named { path; arguments } -> (
+      match Interface.Definition.find_interface interface path with
+      | Some (Interface.Environment.Type_interface type_interface) ->
+          List.map
+            (fun (field : Types.field) -> field.field_type)
+            (Option.value ~default:[] (Types.instantiate_fields type_interface arguments)
+            @ List.concat_map
+                (fun (variant : Types.variant) -> Option.value ~default:[] variant.fields)
+                (Option.value ~default:[] (Types.instantiate_variants type_interface arguments)))
+      | Some _ | None -> [])
+  | _ -> []
+
+let rec list_laws_of_bound ?(entered = []) (interface : Interface.Lookups.t) ~self_type
+    ~is_assumed_by_the_callee trait =
   List.concat_map
     (fun (required : Types.trait_reference) ->
-      match
-        Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type ~trait:required
-          Bound
-      with
-      | Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ } | Bound -> []
-      | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
-          (if states_laws interface required.trait then
-             [
-               {
-                 impl;
-                 trait = required;
-                 type_ = self_type;
-                 origin = None;
-                 is_assumed_by_the_callee;
-               };
-             ]
-           else [])
-          @ list_laws_of_impl_generics interface impl substitution)
+      let is_entered =
+        List.exists
+          (fun (trait, ty) -> Path.equal trait required.trait && Types.equal ty self_type)
+          entered
+      in
+      let entered = (required.trait, self_type) :: entered in
+      if is_entered then []
+      else
+        match
+          Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type
+            ~trait:required Bound
+        with
+        | Bound -> []
+        | Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ } ->
+            List.concat_map
+              (fun field_type ->
+                list_laws_of_bound ~entered interface ~self_type:field_type
+                  ~is_assumed_by_the_callee:true required)
+              (list_field_types interface self_type)
+        | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
+            (if states_laws interface required.trait then
+               [
+                 {
+                   impl;
+                   trait = required;
+                   type_ = self_type;
+                   origin = None;
+                   is_assumed_by_the_callee;
+                 };
+               ]
+             else [])
+            @ list_laws_of_impl_generics ~entered interface impl substitution)
     (Interface.Properties.list_bound_closure interface ~self:self_type trait)
 
-and list_laws_of_impl_generics interface impl substitution =
+and list_laws_of_impl_generics ~entered interface impl substitution =
   let generics = (Interface.Definition.read_impl_interface interface impl).impl_generics in
   List.concat_map
     (fun (generic : Types.generic) ->
@@ -308,7 +336,8 @@ and list_laws_of_impl_generics interface impl substitution =
       | Some (Type argument) ->
           List.concat_map
             (fun bound ->
-              list_laws_of_bound interface ~self_type:argument ~is_assumed_by_the_callee:true
+              list_laws_of_bound ~entered interface ~self_type:argument
+                ~is_assumed_by_the_callee:true
                 (Types.substitute_trait substitution bound))
             (Types.list_bounds generics generic.generic)
       | Some (Value _) | None -> [])
