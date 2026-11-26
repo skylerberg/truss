@@ -464,7 +464,7 @@ let describe_obligation = function
   | Cost_promise { promise; unstated = [] } -> describe_promise promise
   | Cost_promise { promise; unstated } ->
       describe_promise promise
-      @ Description.Text " No cost is stated for "
+      @ Description.Text " The prover has no bound for the cost of "
         :: join_with_and
              (List.map
                 (fun (method_, self_type) ->
@@ -473,11 +473,7 @@ let describe_obligation = function
                       (Printf.sprintf "`%s` of `%s`" (show_callee method_) (Types.show self_type));
                   ])
                 unstated)
-      @ [
-          Description.Text
-            (Printf.sprintf ", so the prover has no bound for %s calls."
-               (match unstated with [ _ ] -> "its" | _ -> "their"));
-        ]
+      @ [ Description.Text ", which the cost here depends on." ]
   | Impl_precondition { clause } ->
       tick clause
       @ [

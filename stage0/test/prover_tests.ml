@@ -3449,12 +3449,14 @@ let () =
       expected
   in
   let impl_precondition = "may not follow from the trait's precondition" in
+  Harness.test "a map over a list proves a time bound in the list's length" (fun () ->
+      expect_proven Fixtures.Prover.map_over_a_list_under_a_time_bound);
   Harness.test "a cost bound that depends on a method with no stated cost names the method"
     (fun () ->
       expect_messages_saying Fixtures.Prover.map_over_a_type_whose_methods_state_no_cost
         [
-          "No cost is stated for `Iterable.count` of `Countdown` and `Iterable.element` of \
-           `Countdown`, so the prover has no bound for their calls.";
+          "The prover has no bound for the cost of `Iterable.count` of `Countdown` and \
+           `Iterable.element` of `Countdown`, which the cost here depends on.";
         ]);
   Harness.test "a parameter that a loop leaves invalid is named" (fun () ->
       expect_messages_saying Fixtures.Prover.parameter_zeroed_in_a_loop
