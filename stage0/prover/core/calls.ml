@@ -407,10 +407,6 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
         (Panics_where_ruled_out { call = { at = location; callee = None }; condition })
         (Logic.Boolean false)
   | Some _ | None -> ());
-  let arguments = List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values in
-  List.iter
-    (fun passed -> Callbacks.check_passed context frame site callee passed ~arguments)
-    values;
   let declared_result_type = Encoding.substitute_declared_type context frame site.type_ in
   let result_type = Types.erase_views declared_result_type in
   (match callee.target with
@@ -499,13 +495,13 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
         | _ -> call_definition definition)
     | Definition definition -> call_definition definition
     | Function_value ->
-        let function_type, called, shape =
+        let function_type, called =
           match through with
-          | Some (Types.Function function_type, called, shape) -> (function_type, called, shape)
+          | Some (Types.Function function_type, called) -> (function_type, called)
           | Some _ | None -> Facts.raise_bug "a call through a value that is not a function"
         in
         let entries = List.map (fun (passed : State.passed) -> passed.term) values in
-        Callbacks.check_called context frame site shape entries;
+        Callbacks.check_called context frame site called entries;
         let before = frame in
         let havoc = havoc_whole_arguments frame in
         let frame = havoc.after in
@@ -522,7 +518,7 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
           Amounts.spend_indirect_call context ~before ~after:frame ~location function_type called
             values ~changed:(List.rev havoc.written) ~result_type:declared_result_type ~result
         in
-        Callbacks.assume_returned context frame function_type called shape ~entries
+        Callbacks.assume_returned context frame function_type called ~entries
           ~exits:(List.map (find_written havoc) values)
           ~result;
         List.iter

@@ -42,11 +42,7 @@ and operand =
 type callee = { target : operand Core.target; uses : Types.capability_set }
 
 type function_argument =
-  | Function_reference of {
-      path : Path.t;
-      instantiation : Types.instantiation;
-      origin : Core.origin;
-    }
+  | Function_reference of { path : Path.t; origin : Core.origin }
   | Lambda_expression of { body : int; origin : Core.origin; type_ : Types.ty }
 
 type argument = { mode : Language.Mode.t; value : operand; function_ : function_argument option }

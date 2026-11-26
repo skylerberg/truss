@@ -203,20 +203,24 @@ develop as well as make it easier to bootstrap the compiler in parts.
   the result of each of its calls, which `visit.ensures(...)` reads.
   `Callbacks` knows the contract of two function values: a named function,
   whose definition `Callee` resolves at the type arguments written, and a
-  callback parameter of the definition being proven. Every other function
-  value promises nothing. Each use of a function value reads that contract
-  in one function:
+  callback parameter of the definition being proven. It keys each contract
+  by the value's term, so the contract follows the value into a local and
+  out of it, and nothing reads the form of the expression that an argument
+  was written as. Every other function value promises nothing. Each use of
+  a function value reads that contract in one function:
 
   | Use | Function | Rule |
   |---|---|---|
   | Named as a value | `read_named_function` | States its definition and its relation once per query |
   | Passed for a parameter | `check_passed` | The parameter's `requires` imply its `requires`, and its `ensures` imply the parameter's |
   | Called | `check_called`, `assume_returned` | The call proves its `requires` and assumes its `ensures` |
-  | Used where no function type states a `requires` | `check_escaping_callback`, `check_passed` | Its `requires` hold for every argument |
+  | Read where no function type states a `requires` | `check_read`, `check_passed` | Its `requires` hold for every argument |
 
-  `Lambdas` runs a lambda's body against the parameter's contract, which it
-  reads through `Callbacks.read_requires` and `Callbacks.read_ensures`. The
-  state of `Callbacks` is one record, `context.callbacks`.
+  `Lambdas.make_passed_values` checks each argument of a call against its
+  parameter's contract: it runs a lambda's body against the contract, which
+  it reads through `Callbacks.read_requires` and `Callbacks.read_ensures`,
+  and gives every other value to `check_passed`. The state of `Callbacks`
+  is one record, `context.callbacks`.
 - **One function builds the frame that reads a callee's clause.**
   `Contracts.make_entry_frame` binds a clause's parameters to the arguments,
   and `Contracts.make_exit_frame` to the values at return, with the entry

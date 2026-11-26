@@ -193,14 +193,6 @@ let translate_run ~proof ~substitution ~condition ~assumes_panic_condition (look
         rest
     | _ -> terms
   in
-  Callbacks.declare_own context
-    (List.filter_map
-       (fun (position, callback) ->
-         Option.map
-           (fun (parameter : Mir.parameter) ->
-             (parameter.local, Facts.read_parameter_name parameter, callback))
-           (List.nth_opt parameters position))
-       contract.callbacks);
   let output = match signature with Some { output = Returns ty; _ } -> Some ty | _ -> None in
   let start =
     List.fold_left
@@ -230,6 +222,14 @@ let translate_run ~proof ~substitution ~condition ~assumes_panic_condition (look
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
+  Callbacks.declare_own context start
+    (List.filter_map
+       (fun (position, callback) ->
+         Option.map
+           (fun (parameter : Mir.parameter) ->
+             (parameter.local, Facts.read_parameter_name parameter, callback))
+           (List.nth_opt parameters position))
+       contract.callbacks);
   Termination.enter_definition context start;
   let output = Option.map (Encoding.substitute_type context start) output in
   let lends =
@@ -696,7 +696,6 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
                    {
                      position;
                      mode = parameter.mode;
-                     shape = Other;
                      origin = None;
                      passed_place =
                        (match parameter.mode with

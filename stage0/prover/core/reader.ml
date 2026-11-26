@@ -11,7 +11,6 @@ type branch_exit = { exited : State.frame; exit_locals : Locals.local list }
 type run = {
   infos : Mir.local_info array;
   changed_in_place : (Mir.local, unit) Hashtbl.t;
-  held_callbacks : (Mir.local, Core.local) Hashtbl.t;
   lambdas : Mir.body array;
   mutable loops : loop_exits list;
   mutable cancelled : (Mir.task * branch_exit list ref) list;
@@ -117,13 +116,10 @@ let read_root context frame run (root : Mir.root) =
               Facts.raise_bug "`%s` reads `self` outside a method"
                 (Resolve.Names.show_key frame.source.key))
       | key -> (
-          Option.iter
-            (Callbacks.check_escaping_callback context frame)
-            (match key with
-            | Core_local core -> Some core
-            | Mir_local _ -> Hashtbl.find_opt run.held_callbacks local);
           match Locals.find_opt key frame.locals with
-          | Some term -> term
+          | Some term ->
+              Callbacks.check_read context frame term;
+              term
           | None ->
               Facts.raise_bug "`%s` reads %s before the prover binds it"
                 (Resolve.Names.show_key frame.source.key)
@@ -394,12 +390,6 @@ let find_operand_origin : Mir.operand -> Core.origin option = function
   | Use { origin; _ } | Borrow { origin; _ } | Take { origin; _ } -> Some origin
   | Immediate _ -> None
 
-let find_whole_local : Mir.operand -> Mir.local option = function
-  | Use { place = { root = Local local; projections = [] }; _ }
-  | Borrow { place = { root = Local local; projections = [] }; _ } ->
-      Some local
-  | Use _ | Borrow _ | Take _ | Immediate _ -> None
-
 let make_passed_place context run place =
   {
     State.read =
@@ -407,40 +397,13 @@ let make_passed_place context run place =
     write = (fun frame -> write_place_until_its_write_ends context frame run place);
   }
 
-let find_held_callback context run held (value : Mir.rvalue) =
-  let read_whole (operand : Mir.operand) =
-    match operand with
-    | Use { place = { root = Local local; projections = [] }; _ }
-    | Borrow { place = { root = Local local; projections = [] }; _ } -> (
-        match run.infos.(local).kind with
-        | Source { local = core; _ } when Option.is_some (Callbacks.find_own_callback context core)
-          ->
-            Some core
-        | Source _ | Temporary | Lent _ -> Hashtbl.find_opt run.held_callbacks local)
-    | Use _ | Borrow _ | Take _ | Immediate _ -> None
-  in
-  match (run.infos.(held).kind, value) with
-  | (Temporary | Lent _), (Operand operand | Convert { conversion = Widen; value = operand; _ }) ->
-      read_whole operand
-  | _ -> None
-
-let classify_shape run ?function_ (value : Mir.operand) : Invocation.shape =
-  match (function_, find_whole_local value) with
-  | Some (Mir.Function_reference { path; instantiation; origin }), _ ->
-      Named_function { origin; path; instantiation }
-  | (Some (Lambda_expression _) | None), Some local -> (
-      match (run.infos.(local).kind, Hashtbl.find_opt run.held_callbacks local) with
-      | Source { local = core; _ }, _ | (Temporary | Lent _), Some core -> Forwarded core
-      | (Temporary | Lent _), None -> Other)
-  | (Some (Lambda_expression _) | None), None -> Other
-
 let find_argument_place context run (mode : Language.Mode.t) (value : Mir.operand) =
   match (mode, value) with
   | Mut, Borrow { place; _ } -> Some (make_passed_place context run place)
   | Mut, (Use _ | Take _ | Immediate _) | (Read | Own), _ -> None
 
-let evaluate_call_values context frame run (callee : Callee.t) (arguments : Mir.argument list) =
-  Lambdas.make_passed_values context frame callee
+let evaluate_call_values context frame run ~at (callee : Callee.t) (arguments : Mir.argument list) =
+  Lambdas.make_passed_values context frame ~at callee
     (List.mapi
        (fun position ({ mode; value; function_ } : Mir.argument) ->
          match function_ with
@@ -457,7 +420,6 @@ let evaluate_call_values context frame run (callee : Callee.t) (arguments : Mir.
                {
                  position;
                  mode;
-                 shape = classify_shape run ?function_ value;
                  origin = find_operand_origin value;
                  passed_place = find_argument_place context run mode value;
                  is_step_self = position = 0 && Callee.is_update_step context callee;
@@ -497,12 +459,11 @@ let read_call context frame run (call : Mir.call) ~result_type =
             Some
               ( compute_operand_type context frame callee,
                 Callbacks.run_reading_callback context (fun () ->
-                    read_operand context frame run callee),
-                classify_shape run callee )
+                    read_operand context frame run callee) )
         | _ -> None
       in
       let callee = resolve_callee context frame call.callee ~lends:None in
-      let values = evaluate_call_values context frame run callee call.arguments in
+      let values = evaluate_call_values context frame run ~at:call.origin callee call.arguments in
       Calls.apply_call context frame
         { origin = call.origin; type_ = result_type }
         callee ~through values
@@ -511,7 +472,7 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
   let mode = match run.infos.(part).kind with Lent mode -> mode | _ -> Language.Mode.Read in
   let callee = resolve_callee context frame call.callee ~lends:(Some mode) in
   let site : Invocation.site = { origin = call.origin; type_ = run.infos.(part).type_ } in
-  let values = evaluate_call_values context frame run callee call.arguments in
+  let values = evaluate_call_values context frame run ~at:call.origin callee call.arguments in
   Option.map
     (fun ({ frame = after; result; end_lend } : Calls.applied) ->
       let lent = write_place context after run { root = Local part; projections = [] } result in
@@ -1319,14 +1280,10 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
         read_rvalue context frame run value
           ~site:{ origin = statement.origin; type_ = compute_target_type context frame run target }
       in
-      match target with
-      | { root = Local held; projections = [] } -> (
-          match find_held_callback context run held value with
-          | Some core ->
-              Hashtbl.replace run.held_callbacks held core;
-              write_assignment context run target
-                (Some (Callbacks.run_reading_callback context read))
-          | None -> write_assignment context run target (Some (read ())))
+      match (target, value) with
+      | { root = Local held; projections = [] }, (Operand _ | Convert { conversion = Widen; _ })
+        when match run.infos.(held).kind with Temporary | Lent _ -> true | Source _ -> false ->
+          write_assignment context run target (Some (Callbacks.run_reading_callback context read))
       | _ -> write_assignment context run target (Some (read ())))
   | Call { destination; call } -> read_call_statement context frame run ~destination call
   | Live _ | Loan_start _ | Loan_end _ | Echo _ -> Some frame
@@ -1490,14 +1447,7 @@ and write_assignment context run (target : Mir.place) read =
   Some (write_place context frame run target term)
 
 let make_run ~locals ~lambdas =
-  {
-    infos = locals;
-    changed_in_place = Hashtbl.create 4;
-    held_callbacks = Hashtbl.create 4;
-    lambdas;
-    loops = [];
-    cancelled = [];
-  }
+  { infos = locals; changed_in_place = Hashtbl.create 4; lambdas; loops = []; cancelled = [] }
 
 let read_formula context (frame : State.frame) (formula : Mir.formula) ~arguments =
   let run = make_run ~locals:formula.locals ~lambdas:formula.lambdas in

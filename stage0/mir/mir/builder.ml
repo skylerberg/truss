@@ -607,7 +607,7 @@ and lower_function_expression builder (node : Core.expression) ~is_argument :
   match node.kind with
   | Function_value { path; instantiation } ->
       let* value = hold (Function_value { path; instantiation; is_argument }) in
-      Some (value, Tree.Function_reference { path; instantiation; origin })
+      Some (value, Tree.Function_reference { path; origin })
   | Lambda { parameters; captures; body; _ } ->
       let index = lower_lambda builder ~origin parameters captures body in
       let* value =

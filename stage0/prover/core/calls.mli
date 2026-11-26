@@ -20,7 +20,7 @@ val apply_call :
   State.frame ->
   Invocation.site ->
   Callee.t ->
-  through:(Types.ty * Logic.term * Invocation.shape) option ->
+  through:(Types.ty * Logic.term) option ->
   State.passed list ->
   (State.frame * Logic.term) option
 
@@ -29,6 +29,6 @@ val apply_lend :
   State.frame ->
   Invocation.site ->
   Callee.t ->
-  through:(Types.ty * Logic.term * Invocation.shape) option ->
+  through:(Types.ty * Logic.term) option ->
   State.passed list ->
   applied option

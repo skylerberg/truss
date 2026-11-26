@@ -1,0 +1,18 @@
+fn one(n: UInt8) -> UInt64
+  ensures result == 1
+{
+  1
+}
+
+fn apply(measure: (fn(n: UInt8) -> UInt64 ensures result == 1)) -> UInt64
+  ensures result == 1
+{
+  measure(0)
+}
+
+fn run() -> UInt64
+  ensures result == 1
+{
+  let held = one
+  apply(held)
+}

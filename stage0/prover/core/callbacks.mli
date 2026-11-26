@@ -1,7 +1,6 @@
 val make_state : unit -> State.callback_state
-val declare_own : State.context -> (Core.local * string * Mir.callback) list -> unit
+val declare_own : State.context -> State.frame -> (Core.local * string * Mir.callback) list -> unit
 val run_reading_callback : State.context -> (unit -> 'a) -> 'a
-val find_own_callback : State.context -> Core.local -> (string * Mir.callback) option
 
 val apply_function :
   State.context -> Types.function_type -> Logic.term -> Logic.term list -> Logic.term
@@ -65,26 +64,25 @@ val read_named_function :
   is_argument:bool ->
   Logic.term
 
-val check_escaping_callback : State.context -> State.frame -> Core.local -> unit
+val check_read : State.context -> State.frame -> Logic.term -> unit
 
 val check_passed :
   State.context ->
   State.frame ->
-  Invocation.site ->
+  at:Core.origin ->
   Callee.t ->
   State.passed ->
   arguments:(int * Logic.term) list ->
   unit
 
 val check_called :
-  State.context -> State.frame -> Invocation.site -> Invocation.shape -> Logic.term list -> unit
+  State.context -> State.frame -> Invocation.site -> Logic.term -> Logic.term list -> unit
 
 val assume_returned :
   State.context ->
   State.frame ->
   Types.function_type ->
   Logic.term ->
-  Invocation.shape ->
   entries:Logic.term list ->
   exits:Logic.term list ->
   result:Logic.term ->
