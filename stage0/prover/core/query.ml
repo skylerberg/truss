@@ -3,6 +3,7 @@ type t = {
   declared : Logic.sort list Tables.Symbol_table.t;
   definitions : unit Tables.Symbol_table.t;
   stated : unit Tables.Stated_table.t;
+  defined_terms : Logic.term Tables.Term_table.t;
   mutable facts : Fact_list.t;
   mutable scopes : (Logic.symbol * Logic.term list ref) list;
   quantifier_facts : Logic.term list Tables.Term_table.t;
@@ -20,6 +21,7 @@ let create () =
     declared = Tables.Symbol_table.create 64;
     definitions = Tables.Symbol_table.create 8;
     stated = Tables.Stated_table.create 64;
+    defined_terms = Tables.Term_table.create 16;
     facts = Fact_list.empty;
     scopes = [];
     quantifier_facts = Tables.Term_table.create 16;
@@ -54,6 +56,15 @@ let find_argument_sorts query symbol = Tables.Symbol_table.find_opt query.declar
 let list_defined_symbols query = List.of_seq (Tables.Symbol_table.to_seq_keys query.definitions)
 let add_fact query fact = query.facts <- Fact_list.add fact query.facts
 
+let define query defined value =
+  (match Tables.Term_table.find_opt query.defined_terms defined with
+  | Some earlier ->
+      if earlier <> value then
+        Compiler_bug.raise_bug ~stage:"Prover" "`%s` is defined as `%s` and again as `%s`"
+          (Logic.show_term defined) (Logic.show_term earlier) (Logic.show_term value)
+  | None -> Tables.Term_table.replace query.defined_terms defined value);
+  add_fact query (Logic.equal defined value)
+
 type mark = { declaration_count : int; fact_count : int; fresh_count : int }
 
 let mark query =
@@ -86,13 +97,17 @@ let run_once query stated make =
   end
 
 let run_without_facts query run =
-  let facts = query.facts and stated = Tables.Stated_table.copy query.stated in
+  let facts = query.facts
+  and stated = Tables.Stated_table.copy query.stated
+  and defined_terms = Tables.Term_table.copy query.defined_terms in
   query.facts <- Fact_list.empty;
   Fun.protect
     ~finally:(fun () ->
       query.facts <- facts;
       Tables.Stated_table.reset query.stated;
-      Tables.Stated_table.iter (Tables.Stated_table.replace query.stated) stated)
+      Tables.Stated_table.iter (Tables.Stated_table.replace query.stated) stated;
+      Tables.Term_table.reset query.defined_terms;
+      Tables.Term_table.iter (Tables.Term_table.replace query.defined_terms) defined_terms)
     run
 
 let run_in_scope query symbols run =

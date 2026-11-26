@@ -68,6 +68,11 @@ let add_axiom (frame : State.frame) term =
   if not (Logic.mentions frame.bound term) then Query.add_fact frame.query term
   else Query.add_scoped_fact frame.query ~bound:frame.bound term
 
+let define (frame : State.frame) defined value =
+  let definition = Logic.equal defined value in
+  if Logic.mentions frame.bound definition then add_axiom frame definition
+  else Query.define frame.query defined value
+
 let assume (frame : State.frame) term =
   match term with
   | Logic.Boolean true -> ()
