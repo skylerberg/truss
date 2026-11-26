@@ -88,7 +88,11 @@ let translate_derived_default (lookups : Lookups.t) (key : Resolve.Names.key)
       ~impl:(Derived { type_ = key.path; trait = Well_known.make_path Default })
   in
   if derives_default && Option.is_some (Mir.read_code lookups.mir path) then
-    let outcome = Translate.translate_function lookups source ~path in
+    let outcome =
+      match Translate.find_circular_proof lookups source ~path with
+      | Some circular -> circular
+      | None -> Translate.translate_function lookups source ~path
+    in
     List.map
       (fun (obligation : Obligation.t) ->
         match Catalog.Prover_description.find_code obligation.obligation with
@@ -101,11 +105,15 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
   let declaration = lookups.interface.names.read_declaration key
   and source = Contracts.read_source_at_key lookups key in
   try
-    match declaration.kind with
-    | (Function | Method | Test) when Mir.find_code (lookups.mir.read_body_part key) = None ->
+    match
+      (declaration.kind, lazy (Translate.find_circular_proof lookups source ~path:key.path))
+    with
+    | (Function | Method | Test), _ when Mir.find_code (lookups.mir.read_body_part key) = None ->
         Not_proven_here
-    | Theorem -> Obligations (Translate.translate_function lookups source ~path:key.path)
-    | Function | Method | Test -> (
+    | (Trait | Capability), _ -> Not_proven_here
+    | _, (lazy (Some circular)) -> Obligations circular
+    | Theorem, _ -> Obligations (Translate.translate_function lookups source ~path:key.path)
+    | (Function | Method | Test), _ -> (
         let prove_with substitution =
           Translate.translate_function ~substitution lookups source ~path:key.path
         in
@@ -136,28 +144,19 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                     (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
                 evaluation = None;
               })
-    | Constant | Member_constant ->
+    | (Constant | Member_constant), _ ->
         Obligations (Translate.translate_constant lookups source ~path:key.path)
-    | Impl -> (
-        match Translate.find_circular_proof lookups source ~path:key.path with
-        | Some outcome -> Obligations outcome
-        | None ->
-            let outcomes = translate_impl lookups key source in
-            Obligations
-              {
-                obligations =
-                  List.concat_map
-                    (fun (outcome : Obligation.outcome) -> outcome.obligations)
-                    outcomes;
-                holes =
-                  List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes;
-                evaluation = None;
-              })
-    | Law_proof -> (
-        match Translate.find_circular_proof lookups source ~path:key.path with
-        | Some outcome -> Obligations outcome
-        | None -> Not_proven_here)
-    | Type -> (
+    | Impl, _ ->
+        let outcomes = translate_impl lookups key source in
+        Obligations
+          {
+            obligations =
+              List.concat_map (fun (outcome : Obligation.outcome) -> outcome.obligations) outcomes;
+            holes = List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes;
+            evaluation = None;
+          }
+    | Law_proof, _ -> Not_proven_here
+    | Type, _ -> (
         let has_defaults () =
           match Mir.read_defaults lookups.mir key.path with
           | Some { form = Field_defaults (_ :: _); _ } -> true
@@ -174,7 +173,6 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
         | Some { form = { potential; _ }; _ } when Option.is_some potential || has_defaults () ->
             Obligations (Translate.translate_type lookups source ~path:key.path)
         | Some _ | None -> Not_proven_here)
-    | Trait | Capability -> Not_proven_here
   with Facts.Unsupported { location; construct; foreign_definition } ->
     Unsupported { location; construct; foreign = foreign_definition }
 

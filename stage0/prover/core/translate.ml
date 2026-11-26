@@ -475,45 +475,40 @@ let find_circular_proof (lookups : Lookups.t) (source : State.source) ~path =
 
 let translate_function ?(substitution = Types.no_substitution) (lookups : Lookups.t)
     (source : State.source) ~path =
-  match find_circular_proof lookups source ~path with
-  | Some outcome -> outcome
-  | None ->
-      let run ?(assumes_panic_condition = false) condition =
-        translate_run ~substitution ~condition ~assumes_panic_condition lookups source ~path
-      in
-      let base, skipped = run [] in
-      let has_panic_condition =
-        match Interface.Impls.read_signature lookups.interface path with
-        | Some signature ->
-            Types.has_capability (Capability_unless_values (Built_in Panic)) signature.uses
-        | None -> false
-      in
-      let find_capability_condition capability =
-        match Interface.Impls.read_signature lookups.interface path with
-        | Some signature when not (Types.has_capability capability signature.uses) ->
-            Option.to_list
-              (Types.find_unless capability
-                 (Types.substitute_capabilities substitution signature.uses))
-        | Some _ | None -> []
-      in
-      let outcomes =
-        base
-        :: (if has_panic_condition then [ fst (run ~assumes_panic_condition:true []) ] else [])
-        @ List.map
-            (fun condition -> fst (run condition))
-            (List.sort_uniq compare
-               (find_capability_condition (Built_in Run_forever)
-               @ find_capability_condition (Built_in Panic)
-               @ skipped))
-      in
-      {
-        Obligation.obligations =
-          List.concat_map (fun (outcome : Obligation.outcome) -> outcome.obligations) outcomes;
-        holes =
-          List.sort_uniq compare
-            (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
-        evaluation = None;
-      }
+  let run ?(assumes_panic_condition = false) condition =
+    translate_run ~substitution ~condition ~assumes_panic_condition lookups source ~path
+  in
+  let base, skipped = run [] in
+  let has_panic_condition =
+    match Interface.Impls.read_signature lookups.interface path with
+    | Some signature ->
+        Types.has_capability (Capability_unless_values (Built_in Panic)) signature.uses
+    | None -> false
+  in
+  let find_capability_condition capability =
+    match Interface.Impls.read_signature lookups.interface path with
+    | Some signature when not (Types.has_capability capability signature.uses) ->
+        Option.to_list
+          (Types.find_unless capability (Types.substitute_capabilities substitution signature.uses))
+    | Some _ | None -> []
+  in
+  let outcomes =
+    (base :: (if has_panic_condition then [ fst (run ~assumes_panic_condition:true []) ] else []))
+    @ List.map
+        (fun condition -> fst (run condition))
+        (List.sort_uniq compare
+           (find_capability_condition (Built_in Run_forever)
+           @ find_capability_condition (Built_in Panic)
+           @ skipped))
+  in
+  {
+    Obligation.obligations =
+      List.concat_map (fun (outcome : Obligation.outcome) -> outcome.obligations) outcomes;
+    holes =
+      List.sort_uniq compare
+        (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
+    evaluation = None;
+  }
 
 let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~proofs ~at
     =
