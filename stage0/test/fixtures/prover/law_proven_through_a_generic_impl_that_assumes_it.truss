@@ -1,0 +1,35 @@
+trait Size {
+  fn size(self) -> Int64
+
+  law at_least_one(value: Self) {
+    value.size() >= 1
+  }
+}
+
+type Leaf(x: Int64)
+
+type Box[Item](value: Item)
+
+impl Size for Box[Item: Size] {
+  fn size(self) -> Int64
+    ensures result == self.value.size()
+  {
+    self.value.size()
+  }
+}
+
+proof Size.at_least_one for Box[Item: Size] {
+}
+
+impl Size for Leaf {
+  fn size(self) -> Int64
+    ensures result == 0
+  {
+    0
+  }
+}
+
+proof Size.at_least_one for Leaf {
+  let boxed = Box(value: Leaf(x: value.x))
+  let _ = boxed.size()
+}

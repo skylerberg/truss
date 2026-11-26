@@ -276,21 +276,43 @@ type assumed_laws = {
 let states_laws (interface : Interface.Lookups.t) trait =
   match interface.find_trait_header trait with Some header -> header.laws <> [] | None -> false
 
-let list_laws_of_bound (interface : Interface.Lookups.t) ~self_type ~is_assumed_by_the_callee trait
-    =
-  List.filter_map
+let rec list_laws_of_bound (interface : Interface.Lookups.t) ~self_type ~is_assumed_by_the_callee
+    trait =
+  List.concat_map
     (fun (required : Types.trait_reference) ->
-      if states_laws interface required.trait then
-        match
-          Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type
-            ~trait:required Bound
-        with
-        | Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ } | Bound -> None
-        | Impl { impl; _ } | Derived_for_view { viewed = impl; _ } ->
-            Some
-              { impl; trait = required; type_ = self_type; origin = None; is_assumed_by_the_callee }
-      else None)
+      match
+        Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type ~trait:required
+          Bound
+      with
+      | Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ } | Bound -> []
+      | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
+          (if states_laws interface required.trait then
+             [
+               {
+                 impl;
+                 trait = required;
+                 type_ = self_type;
+                 origin = None;
+                 is_assumed_by_the_callee;
+               };
+             ]
+           else [])
+          @ list_laws_of_impl_generics interface impl substitution)
     (Interface.Properties.list_bound_closure interface ~self:self_type trait)
+
+and list_laws_of_impl_generics interface impl substitution =
+  let generics = (Interface.Definition.read_impl_interface interface impl).impl_generics in
+  List.concat_map
+    (fun (generic : Types.generic) ->
+      match Types.find_argument generic.generic substitution with
+      | Some (Type argument) ->
+          List.concat_map
+            (fun bound ->
+              list_laws_of_bound interface ~self_type:argument ~is_assumed_by_the_callee:true
+                (Types.substitute_trait substitution bound))
+            (Types.list_bounds generics generic.generic)
+      | Some (Value _) | None -> [])
+    generics
 
 let list_laws_of_generics (interface : Interface.Lookups.t) instance path
     (instantiation : Types.instantiation) =
