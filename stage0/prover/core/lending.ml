@@ -8,7 +8,7 @@ let find_part_sort (context : State.context) = Option.map Encoding.sort_of conte
 
 let lend_part (context : State.context) (frame : State.frame) origin (mode : Language.Mode.t)
     ~handed ~lends_places ~write_back =
-  let location = Facts.locate context frame.source origin in
+  let location = Facts.locate frame origin in
   match context.lending.part_type with
   | None -> Facts.raise_unsupported location Lent_part_outside_lending_method
   | Some part_type ->
@@ -17,7 +17,7 @@ let lend_part (context : State.context) (frame : State.frame) origin (mode : Lan
         { lent_frame = lent; lent_origin = origin } :: context.lending.lent_parts;
       Validity.check_valid context lent location part_type handed ~deep:true ~moment:Part_lent;
       if mode = Language.Mode.Mut && lends_places then begin
-        let final = Encoding.arrive context lent "lent" part_type in
+        let final = Encoding.arrive lent "lent" part_type in
         Validity.assume_valid context lent part_type final;
         let written : State.frame = write_back lent final in
         { written with final_result = Some final }

@@ -4,7 +4,7 @@ val make_policy :
   panic_condition:Catalog.Prover.quoted list option ->
   State.obligation_policy
 
-val find_ruled_out_panic : State.context -> State.frame -> Catalog.Prover.quoted list option
+val find_ruled_out_panic : State.frame -> Catalog.Prover.quoted list option
 val set_panics : State.frame -> panics:bool -> State.frame
 
 val oblige :
@@ -21,7 +21,6 @@ val oblige :
   unit
 
 val make_closed_obligation :
-  State.context ->
   State.frame ->
   Obligation.location ->
   Catalog.Prover.obligation ->
@@ -29,9 +28,4 @@ val make_closed_obligation :
   Obligation.t option
 
 val make_obligation :
-  State.context ->
-  State.frame ->
-  Obligation.location ->
-  Catalog.Prover.obligation ->
-  Logic.term ->
-  Obligation.t
+  State.frame -> Obligation.location -> Catalog.Prover.obligation -> Logic.term -> Obligation.t

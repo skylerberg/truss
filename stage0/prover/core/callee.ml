@@ -29,17 +29,18 @@ type t = {
   uses : Types.capability_set;
 }
 
-let substitute_arguments context (frame : State.frame) arguments =
+let substitute_arguments (frame : State.frame) arguments =
   List.map
     (fun argument ->
       match Types.substitute_argument_erased frame.substitution argument with
-      | Types.Type ty -> Types.Type (Encoding.substitute_type context frame ty)
+      | Types.Type ty -> Types.Type (Encoding.substitute_type frame ty)
       | other -> other)
     arguments
 
-let bind_generics context path (instantiation : Types.instantiation) ~fixed =
+let bind_generics (environment : State.environment) path (instantiation : Types.instantiation)
+    ~fixed =
   let generics, capability_parameters =
-    match Contracts.read_signature context path with
+    match Contracts.read_signature environment path with
     | Some (signature : Types.signature) ->
         ( List.map (fun (generic : Types.generic) -> generic.generic) signature.generics,
           signature.capability_parameters )
@@ -59,7 +60,7 @@ let bind_generics context path (instantiation : Types.instantiation) ~fixed =
        instantiation.type_arguments)
     (Types.make_capability_substitution capability_parameters instantiation.capability_arguments)
 
-let add_restated_clauses (context : State.context) (method_ : trait_method) instantiation
+let add_restated_clauses (environment : State.environment) (method_ : trait_method) instantiation
     (contract : State.contract) =
   {
     contract with
@@ -69,25 +70,25 @@ let add_restated_clauses (context : State.context) (method_ : trait_method) inst
           {
             clauses with
             bindings =
-              bind_generics context
+              bind_generics environment
                 (Path.Method
                    { owner = subtrait.trait; name = method_.name; receiver = method_.receiver })
                 instantiation
                 ~fixed:
-                  (Contracts.make_trait_substitution context.lookups subtrait method_.self_type);
+                  (Contracts.make_trait_substitution environment.lookups subtrait method_.self_type);
           })
-        (Contracts.list_restated_clauses context
-           ~packages:(Operations.list_impl_packages context method_.self_type)
+        (Contracts.list_restated_clauses environment
+           ~packages:(Operations.list_impl_packages environment method_.self_type)
            ~self_type:method_.self_type method_.trait method_.name method_.receiver);
   }
 
 let bind_clauses substitution_of (clauses : State.clauses) =
   Types.combine_substitutions (substitution_of clauses) clauses.bindings
 
-let rec resolve_target (context : State.context) (frame : State.frame) (written : _ Core.target) =
+let rec resolve_target (frame : State.frame) (written : _ Core.target) =
   let substitute_instantiation (instantiation : Types.instantiation) : Types.instantiation =
     {
-      type_arguments = substitute_arguments context frame instantiation.type_arguments;
+      type_arguments = substitute_arguments frame instantiation.type_arguments;
       capability_arguments =
         List.map
           (fun (name, argument) ->
@@ -98,11 +99,13 @@ let rec resolve_target (context : State.context) (frame : State.frame) (written 
   match written with
   | Function { path; instantiation } ->
       let instantiation = substitute_instantiation instantiation in
-      let substitution = bind_generics context path instantiation ~fixed:Types.no_substitution in
+      let substitution =
+        bind_generics frame.environment path instantiation ~fixed:Types.no_substitution
+      in
       Definition
         {
           path;
-          contract = Contracts.find_function_contract context path;
+          contract = Contracts.find_function_contract frame.environment path;
           substitution_of = bind_clauses (fun _ -> substitution);
           type_arguments = instantiation.type_arguments;
           declaration = path;
@@ -113,32 +116,30 @@ let rec resolve_target (context : State.context) (frame : State.frame) (written 
   | Trait_method { trait; name; receiver; evidence; self_type; instantiation } ->
       let instantiation = substitute_instantiation instantiation in
       let evidence =
-        Interface.Impls.resolve_evidence context.lookups.interface frame.substitution ~self_type
-          ~trait evidence
+        Interface.Impls.resolve_evidence frame.environment.lookups.interface frame.substitution
+          ~self_type ~trait evidence
       in
       let method_ =
         {
-          trait =
-            {
-              trait with
-              trait_arguments = substitute_arguments context frame trait.trait_arguments;
-            };
+          trait = { trait with trait_arguments = substitute_arguments frame trait.trait_arguments };
           name;
           receiver;
-          self_type = Encoding.substitute_type context frame self_type;
+          self_type = Encoding.substitute_type frame self_type;
           evidence;
         }
       in
       let declaration = Path.Method { owner = trait.trait; name; receiver } in
       let declaration_substitution =
-        bind_generics context declaration instantiation
-          ~fixed:(Contracts.make_trait_substitution context.lookups method_.trait method_.self_type)
+        bind_generics frame.environment declaration instantiation
+          ~fixed:
+            (Contracts.make_trait_substitution frame.environment.lookups method_.trait
+               method_.self_type)
       in
       let path, substitution =
         match evidence with
         | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
             let path = Path.Method { owner = impl; name; receiver } in
-            (path, bind_generics context path instantiation ~fixed:substitution)
+            (path, bind_generics frame.environment path instantiation ~fixed:substitution)
         | Bound -> (declaration, declaration_substitution)
       in
       Definition
@@ -146,8 +147,8 @@ let rec resolve_target (context : State.context) (frame : State.frame) (written 
           path;
           contract =
             Option.map
-              (add_restated_clauses context method_ instantiation)
-              (Contracts.find_method_contract context method_.trait name receiver evidence);
+              (add_restated_clauses frame.environment method_ instantiation)
+              (Contracts.find_method_contract frame.environment method_.trait name receiver evidence);
           substitution_of =
             bind_clauses (fun clauses ->
                 if clauses.inherited then declaration_substitution else substitution);
@@ -164,7 +165,7 @@ let rec resolve_target (context : State.context) (frame : State.frame) (written 
       Definition
         {
           path;
-          contract = Contracts.find_capability_contract context capability name;
+          contract = Contracts.find_capability_contract frame.environment capability name;
           substitution_of = bind_clauses (fun _ -> Types.no_substitution);
           type_arguments = [];
           declaration = path;
@@ -175,43 +176,43 @@ let rec resolve_target (context : State.context) (frame : State.frame) (written 
   | Indirect _ -> Function_value
   | Intrinsic { operation; type_arguments } when Intrinsic.has_contract operation ->
       let path = Intrinsic.make_contract_path operation in
-      if Option.is_none (Contracts.find_callee_clauses context path) then
+      if Option.is_none (Contracts.find_callee_clauses frame.environment path) then
         Facts.raise_bug "`%s` has no contract in `standard.intrinsic_contracts`"
           (Intrinsic.show_operation operation);
-      resolve_target context frame
+      resolve_target frame
         (Function { path; instantiation = { type_arguments; capability_arguments = [] } })
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
 
-let resolve context frame written ~lends ~uses =
+let resolve (frame : State.frame) written ~lends ~uses =
   {
-    target = resolve_target context frame written;
-    group_member = Cycles.find_group_member context frame written;
+    target = resolve_target frame written;
+    group_member = Cycles.find_group_member frame written;
     lends;
     uses;
   }
 
-let may_abort (context : State.context) (definition : definition) =
-  context.lookups.may_abort definition.path
+let may_abort (environment : State.environment) (definition : definition) =
+  environment.lookups.may_abort definition.path
   || Option.is_some definition.trait_method
      && Path.equal definition.path definition.declaration
      && not
           (Types.states_no_allocation
-             (match Contracts.read_signature context definition.declaration with
+             (match Contracts.read_signature environment definition.declaration with
              | Some signature -> signature.costs
              | None -> []))
 
-let is_update_step context (callee : t) =
+let is_update_step (environment : State.environment) (callee : t) =
   match callee.target with
   | Definition { path; trait_method = None; capability_method = None; _ } -> (
-      match Contracts.read_signature context path with
+      match Contracts.read_signature environment path with
       | Some signature -> signature.is_update_step
       | None -> false)
   | Definition _ | Function_value | Intrinsic _ -> false
 
-let find_parameter_type context (callee : t) index =
+let find_parameter_type (environment : State.environment) (callee : t) index =
   match callee.target with
   | Definition { declaration; declaration_substitution; _ } ->
-      Option.bind (Contracts.read_signature context declaration)
+      Option.bind (Contracts.read_signature environment declaration)
         (fun (signature : Types.signature) ->
           let types =
             (match signature.receiver with Some (_, ty) -> [ ty ] | None -> [])
@@ -220,10 +221,10 @@ let find_parameter_type context (callee : t) index =
           Option.map (Types.substitute_erased declaration_substitution) (List.nth_opt types index))
   | Function_value | Intrinsic _ -> None
 
-let find_callback context (frame : State.frame) (callee : t) position ~known =
+let find_callback (frame : State.frame) (callee : t) position ~known =
   match callee.target with
   | Definition { declaration; declaration_substitution; _ } ->
-      Option.bind (Contracts.find_callee_clauses context declaration)
+      Option.bind (Contracts.find_callee_clauses frame.environment declaration)
         (fun (clauses : State.clauses) ->
           Option.map
             (fun callback ->

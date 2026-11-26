@@ -9,7 +9,7 @@ val enter :
   changed:State.changed_part list ->
   t
 
-val declare_iterations : State.context -> State.frame -> t -> Logic.term option
+val declare_iterations : State.frame -> t -> Logic.term option
 val enter_head : State.context -> State.frame -> t -> iterations:Logic.term option -> State.frame
 val spend_step : State.context -> State.frame -> State.frame
 

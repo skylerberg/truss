@@ -4,8 +4,8 @@ val make_state : ?blocked_holders:string list -> unit -> State.cost_state
 val lookup_spent : State.frame -> Costs.counter -> Logic.term
 val read_condition : State.context -> Costs.counter -> Types.condition
 val spend : State.context -> State.frame -> (Costs.counter -> Logic.term) -> State.frame
-val declare_unknown_amount : State.context -> State.frame -> Costs.counter -> Logic.term
-val make_potential_credit : State.context -> Logic.term -> Logic.term
+val declare_unknown_amount : State.frame -> Costs.counter -> Logic.term
+val make_potential_credit : Query.t -> Logic.term -> Logic.term
 val count_declared_potential : State.context -> of_:Types.ty -> Logic.term -> Logic.term
 val count_whole_potential : State.context -> Logic.term -> Logic.term
 

@@ -5,7 +5,7 @@ val check_widened : Obligation.location -> is_written:bool -> Types.ty -> Types.
 val convert_from_integer :
   State.context -> State.frame -> Invocation.site -> Logic.term -> Logic.term
 
-val list_impl_packages : State.context -> Types.ty -> Path.package list
+val list_impl_packages : State.environment -> Types.ty -> Path.package list
 
 val make_equality :
   State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term

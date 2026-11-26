@@ -5,7 +5,7 @@ let make_lifting (context : State.context) (frame : State.frame) ~called ~argume
   let captures_fresh = function
     | Logic.Symbol.Lambda _ as name when Option.is_none (find_made_in_body name) -> (
         match Tables.Symbol_table.find_opt context.lambda_definitions name with
-        | Some defined -> Facts.mentions_fresh_since context start defined
+        | Some defined -> Query.mentions_fresh_since context.query start defined
         | None -> false)
     | _ -> false
   in
@@ -31,14 +31,14 @@ let make_lifting (context : State.context) (frame : State.frame) ~called ~argume
           in
           if is_fresh_in_body then begin
             let lifted = Logic.Symbol.Lifted name in
-            Facts.declare context (Logic.Function (lifted, List.map snd parameters, sort));
+            Query.declare context.query (Logic.Function (lifted, List.map snd parameters, sort));
             Tables.Symbol_table.replace renamed name (Logic.Apply (lifted, variables))
           end
       | Logic.Function (name, inputs, sort) when frame.binders <> [] -> (
           match find_made_in_body name with
           | Some true ->
               let lifted = Logic.Symbol.Lifted name in
-              Facts.declare context
+              Query.declare context.query
                 (Logic.Function (lifted, inputs @ List.map snd parameters, sort));
               Tables.Symbol_table.replace functions name lifted
           | _ -> ())
@@ -59,11 +59,11 @@ let make_lifting (context : State.context) (frame : State.frame) ~called ~argume
   in
   lift
 
-let add_quantified_fact (context : State.context) (frame : State.frame) ~capture_free stated =
-  if frame.bound = [] || capture_free then Facts.add_fact context stated
+let add_quantified_fact (frame : State.frame) ~capture_free stated =
+  if frame.bound = [] || capture_free then Query.add_fact frame.query stated
   else
     match Facts.close_over_binders frame stated with
-    | Some closed -> Facts.add_fact context closed
+    | Some closed -> Query.add_fact frame.query closed
     | None -> ()
 
 let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_free
@@ -91,7 +91,7 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
   in
   List.iter
     (fun statement ->
-      add_quantified_fact context frame ~capture_free
+      add_quantified_fact frame ~capture_free
         (Logic.forall (parameters, Logic.( ==> ) premise statement)))
     statements
 
@@ -134,7 +134,7 @@ let add_lambda_relation (context : State.context) (frame : State.frame) ~capture
   in
   List.iter
     (fun statement ->
-      add_quantified_fact context frame ~capture_free
+      add_quantified_fact frame ~capture_free
         (Logic.forall ~trigger:[ holds ]
            (parameters, Logic.( ==> ) holds (Logic.( ==> ) premise statement))))
     statements
@@ -157,7 +157,7 @@ let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.f
              { frame with locals = remove_temporaries frame.locals }
              ~panics:false)
       in
-      Facts.run_in_source context frame.source (fun () -> context.run_body inside ~lambdas body);
+      Facts.run_in_source frame (fun () -> context.run_body inside ~lambdas body);
       match
         Joins.join context ~value_type:type_
           (List.rev_map
@@ -167,18 +167,18 @@ let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.f
       | Some (returned, Some term) -> Some ({ frame with spent = returned.spent }, term)
       | Some (_, None) | None -> None)
 
-let run_code context frame (code : Mir.t) ~type_ =
+let run_code (context : State.context) frame (code : Mir.t) ~type_ =
   match run_lambda_body context frame ~lambdas:code.lambdas code.body ~type_ with
   | Some returned -> returned
-  | None -> (frame, Encoding.arrive context frame "unfinished" type_)
+  | None -> (frame, Encoding.arrive frame "unfinished" type_)
 
-let compute_returned_type context frame (body : Mir.body) =
+let compute_returned_type (frame : State.frame) (body : Mir.body) =
   let rec find_returned_type (block : Mir.block) =
     List.find_map
       (fun (statement : Mir.statement) ->
         match statement.kind with
         | Jump (Return (Some value)) ->
-            Some (Encoding.substitute_type context frame (Mir.extract_operand_type value))
+            Some (Encoding.substitute_type frame (Mir.extract_operand_type value))
         | _ -> List.find_map find_returned_type (Mir.list_nested_blocks statement))
       block.statements
   in
@@ -218,15 +218,15 @@ let canonicalize_binders term =
   in
   walk [] term
 
-let find_lambda_definition context (frame : State.frame) (function_type : Types.function_type)
-    (written : State.lambda_code) ~stated =
+let find_lambda_definition (context : State.context) (frame : State.frame)
+    (function_type : Types.function_type) (written : State.lambda_code) ~stated =
   match written.code.is_functional with
   | true when Callbacks.is_in_the_logic function_type -> (
       let bound =
         Callbacks.make_input_variables function_type ~label:"parameter"
           ~numbers:[ List.length frame.bound ]
       in
-      let explored, supposed = Facts.suppose context frame "explored" in
+      let explored, supposed = Facts.suppose frame "explored" in
       let defined =
         let mark = Query.mark context.query in
         Counters.run_without_counters context (fun () ->
@@ -237,7 +237,7 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
                     let info = written.code.locals.(parameter) in
                     Facts.bind inside
                       (Locals.make_key written.code.locals parameter)
-                      (Encoding.substitute_type context inside info.type_)
+                      (Encoding.substitute_type inside info.type_)
                       (Logic.Symbol name))
                   inside written.code.parameters bound
               in
@@ -250,9 +250,10 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
                     result = None;
                   }
                   ~lambdas:written.lambdas written.code
-                  ~type_:(compute_returned_type context frame written.code)
+                  ~type_:(compute_returned_type frame written.code)
               with
-              | Some (_, defined) when not (Facts.mentions_fresh_since context mark defined) ->
+              | Some (_, defined) when not (Query.mentions_fresh_since context.query mark defined)
+                ->
                   Some (Logic.replace ~from:explored ~into:(Logic.Boolean true) defined)
               | Some _ | None -> None
             with Facts.Unsupported _ -> None)
@@ -266,13 +267,14 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
       let are_valid, required =
         Query.run_dropping_facts context.query
           ~drop:(fun fact ->
-            Logic.mentions (List.map fst bound) fact || Facts.mentions_fresh_since context mark fact)
+            Logic.mentions (List.map fst bound) fact
+            || Query.mentions_fresh_since context.query mark fact)
           (fun () ->
             ( Logic.conjunction
                 (List.map2
                    (fun (_, input) entry ->
                      Validity.make_validity context frame ~assuming:true ~includes_ranges:true
-                       (Encoding.substitute_type context frame input)
+                       (Encoding.substitute_type frame input)
                        entry)
                    function_type.inputs entries),
               Logic.conjunction (List.map snd (Callbacks.read_requires context stated entries)) ))
@@ -281,7 +283,7 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
       match defined with
       | Some defined
         when Logic.mentions enclosing_parameters defined
-             || Facts.mentions_fresh_since context mark domain ->
+             || Query.mentions_fresh_since context.query mark domain ->
           None
       | Some defined ->
           let defined = canonicalize_binders defined in
@@ -289,7 +291,7 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
             List.fold_left
               (fun term (index, (name, _)) ->
                 Logic.replace ~from:(Logic.Symbol name)
-                  ~into:(Logic.Symbol (Facts.make_variable "parameter" ~numbers:[ index ]))
+                  ~into:(Logic.Symbol (Query.make_variable "parameter" ~numbers:[ index ]))
                   term)
               defined
               (List.mapi (fun index parameter -> (index, parameter)) bound)
@@ -299,33 +301,29 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
           in
           let sort = Encoding.sort_of (Types.Function function_type) in
           let term =
-            if Logic.mentions frame.bound defined then
-              Facts.declare_value_symbol context frame symbol sort
-            else Facts.declare_value_symbol context { frame with binders = [] } symbol sort
+            if Logic.mentions frame.bound defined then Facts.declare_value_symbol frame symbol sort
+            else Facts.declare_value_symbol { frame with binders = [] } symbol sort
           in
           let application = Callbacks.apply_function function_type term entries in
           Tables.Symbol_table.replace context.lambda_definitions symbol defined;
-          Facts.add_frame_fact context frame (Logic.forall (bound, Logic.equal application defined));
+          Facts.add_frame_fact frame (Logic.forall (bound, Logic.equal application defined));
           (match written.code.value_type with
           | Some value_type -> (
               match
-                Encoding.make_in_range
-                  (Encoding.substitute_type context frame value_type)
-                  application
+                Encoding.make_in_range (Encoding.substitute_type frame value_type) application
               with
               | Logic.Boolean true -> ()
               | range ->
-                  Facts.add_frame_fact context frame
-                    (Logic.forall (bound, Logic.( ==> ) domain range)))
+                  Facts.add_frame_fact frame (Logic.forall (bound, Logic.( ==> ) domain range)))
           | None -> ());
           Some term
       | _ -> None)
   | _ -> None
 
-let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : Invocation.site)
-    (written : State.lambda_code) ~stated =
-  let location = Facts.locate context frame.source site.origin in
-  let ty = Encoding.substitute_type context frame site.type_ in
+let read_lambda ?(capture_free = false) (context : State.context) (frame : State.frame)
+    ~(site : Invocation.site) (written : State.lambda_code) ~stated =
+  let location = Facts.locate frame site.origin in
+  let ty = Encoding.substitute_type frame site.type_ in
   let function_type =
     match ty with
     | Types.Function function_type -> function_type
@@ -335,27 +333,28 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
     Facts.raise_bug "a lambda whose parameters do not match %s" (Types.show ty);
   let may_abort =
     Mir.Call_edges.body_may_abort
-      { interface = context.lookups.interface; mir = context.lookups.mir }
-      frame.substitution ~lambdas:written.lambdas written.code ~may_abort:context.lookups.may_abort
+      { interface = context.environment.lookups.interface; mir = context.environment.lookups.mir }
+      frame.substitution ~lambdas:written.lambdas written.code
+      ~may_abort:context.environment.lookups.may_abort
   in
   if frame.makes_obligations && Types.states_no_allocation function_type.costs && may_abort then
     Obligations.oblige context frame location (May_not_return_under_no_allocation This_lambda)
       (Logic.Boolean false);
   let states_application = Callbacks.is_in_the_logic function_type && not may_abort in
-  let called, supposed = Facts.suppose context frame "called" in
+  let called, supposed = Facts.suppose frame "called" in
   let inside = { supposed with result = None } in
   let start = Query.mark context.query in
   let arguments =
     List.map
       (fun (_, input) ->
-        let input = Encoding.substitute_type context frame input in
-        let argument = Encoding.arrive context inside "argument" input in
+        let input = Encoding.substitute_type frame input in
+        let argument = Encoding.arrive inside "argument" input in
         Validity.assume_valid context inside input argument;
         argument)
       function_type.inputs
   in
   List.iter
-    (fun (_, required) -> Facts.assume context inside required)
+    (fun (_, required) -> Facts.assume inside required)
     (Callbacks.read_requires context stated arguments);
   let counters, inside = Counters.enter_lambda context inside function_type written.code in
   let read_exits (exit_ : State.frame) =
@@ -385,8 +384,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
           Obligations.set_panics
             { inside with locals = remove_temporaries inside.locals }
             ~panics:
-              (Conditions.may_panic context.lookups ~current:context.current
-                 ~condition:context.condition function_type.uses)
+              (Conditions.may_panic context.environment.lookups ~current:context.environment.current
+                 ~condition:context.environment.condition function_type.uses)
         in
         let inside =
           List.fold_left2
@@ -394,7 +393,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
               let info = written.code.locals.(parameter) in
               Facts.bind inside
                 (Locals.make_key written.code.locals parameter)
-                (Encoding.substitute_type context inside info.type_)
+                (Encoding.substitute_type inside info.type_)
                 argument)
             inside written.code.parameters arguments
         in
@@ -409,7 +408,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
             Option.iter
               (fun term ->
                 Validity.check_valid context exit_ location
-                  (Encoding.substitute_type context frame function_type.output)
+                  (Encoding.substitute_type frame function_type.output)
                   term ~deep:true ~moment:Lambda_result)
               returned;
             List.iter2
@@ -419,7 +418,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                     match Locals.find_opt (Core_local local) exit_.locals with
                     | Some term ->
                         Validity.check_valid context exit_ location
-                          (Encoding.substitute_type context frame input)
+                          (Encoding.substitute_type frame input)
                           term ~deep:true ~moment:Lambda_mut_parameter
                     | None -> ())
                 | _ -> ())
@@ -464,7 +463,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                   ~bounds:inferred_bounds) ->
         term
     | Some _ | None ->
-        let term = Encoding.arrive context frame "lambda" ty in
+        let term = Encoding.arrive frame "lambda" ty in
         if states_application then
           add_lambda_facts context frame ~capture_free function_type term ~called ~arguments ~start
             ~end_ ~premises ~shown ~ended:!ended;
@@ -472,7 +471,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   in
   if states_application then
     Option.iter
-      (add_quantified_fact context frame ~capture_free)
+      (add_quantified_fact frame ~capture_free)
       (Callbacks.find_logic_link function_type term)
   else
     add_lambda_relation context frame ~capture_free function_type term ~called ~arguments ~start
@@ -481,7 +480,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
     ~bounds:inferred_bounds;
   (frame, term)
 
-let translate_lambda context (frame : State.frame) ~(site : Invocation.site)
+let translate_lambda (context : State.context) (frame : State.frame) ~(site : Invocation.site)
     (written : State.lambda_code) ~stated =
   let find_captured (local : Core.local) =
     match local with Self -> frame.self | local -> Locals.find_opt (Core_local local) frame.locals
@@ -503,8 +502,8 @@ let translate_lambda context (frame : State.frame) ~(site : Invocation.site)
     (frame, term)
   else read_lambda context frame ~site written ~stated
 
-let make_passed_values context frame ~at (callee : Callee.t) (arguments : State.call_argument list)
-    =
+let make_passed_values (context : State.context) frame ~at (callee : Callee.t)
+    (arguments : State.call_argument list) =
   let values =
     List.filter_map
       (function
@@ -521,7 +520,7 @@ let make_passed_values context frame ~at (callee : Callee.t) (arguments : State.
          | Lambda_argument { position; mode; site; lambda = written } ->
              let _, term =
                translate_lambda context frame ~site written
-                 ~stated:(Callee.find_callback context frame callee position ~known)
+                 ~stated:(Callee.find_callback frame callee position ~known)
              in
              ( (position, term) :: known,
                {
@@ -530,8 +529,8 @@ let make_passed_values context frame ~at (callee : Callee.t) (arguments : State.
                  origin = Some site.origin;
                  passed_place = None;
                  is_step_self = false;
-                 type_ = Encoding.substitute_type context frame site.type_;
-                 declared_type = Encoding.substitute_declared_type context frame site.type_;
+                 type_ = Encoding.substitute_type frame site.type_;
+                 declared_type = Encoding.substitute_declared_type frame site.type_;
                  term;
                } ))
        values arguments)

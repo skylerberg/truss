@@ -1,11 +1,11 @@
-let find_signature (context : State.context) =
-  match context.lookups.interface.names.read_definition context.home with
+let find_signature (environment : State.environment) =
+  match environment.lookups.interface.names.read_definition environment.home with
   | { kind = Function { signature; body; _ }; _ } -> Some (signature, body)
   | _ -> None
 
-let make_panic_fix (context : State.context) : Catalog.Prover.fix list =
-  match find_signature context with
-  | Some (signature, body) when not context.inherits_precondition ->
+let make_panic_fix (environment : State.environment) : Catalog.Prover.fix list =
+  match find_signature environment with
+  | Some (signature, body) when not environment.inherits_precondition ->
       [
         (match
            ( List.find_opt
@@ -52,7 +52,8 @@ let rec find_value_code context : Logic.term -> Catalog.Code.t option = function
   | Logic.Boolean value -> Some (Boolean value)
   | _ -> None
 
-and find_value_codes context parts = collect_codes (List.map (find_value_code context) parts)
+and find_value_codes (context : State.context) parts =
+  collect_codes (List.map (find_value_code context) parts)
 
 let find_comparison_operator : Logic.operator -> Language.Comparison.t option = function
   | Less -> Some Less
@@ -62,7 +63,7 @@ let find_comparison_operator : Logic.operator -> Language.Comparison.t option = 
   | Equal -> Some Equal
   | _ -> None
 
-let find_goal_code context term =
+let find_goal_code (context : State.context) term =
   let rec find_goal (term : Logic.term) : Catalog.Code.t option =
     match term with
     | Operation (And, parts) -> (
@@ -91,9 +92,8 @@ let find_goal_code context term =
     | Some left, Some right -> Some (Catalog.Code.Compared { left; comparison; right })
     | _ -> None
   in
-  if
-    List.exists (fun symbol -> List.mem symbol context.State.entry) (Logic.list_free_constants term)
-  then find_goal term
+  if List.exists (fun symbol -> List.mem symbol context.entry) (Logic.list_free_constants term) then
+    find_goal term
   else None
 
 let read_requires_clause (signature : Syntax.signature) (origin : Core.origin) =
@@ -109,8 +109,8 @@ let read_requires_clause (signature : Syntax.signature) (origin : Core.origin) =
 
 let add_requires (context : State.context) (frame : State.frame) required : Catalog.Prover.fix list
     =
-  match find_signature context with
-  | Some (signature, body) when not context.inherits_precondition ->
+  match find_signature context.environment with
+  | Some (signature, body) when not context.environment.inherits_precondition ->
       let place : Catalog.Prover.clause_place =
         match frame.requires_being_read with
         | Some origin -> Before_clause (Written (read_requires_clause signature origin).id)
@@ -125,14 +125,14 @@ let add_requires (context : State.context) (frame : State.frame) required : Cata
               (match frame.condition with
               | Logic.Boolean true -> None
               | condition -> find_goal_code context condition);
-            condition = context.condition;
+            condition = context.environment.condition;
           };
       ]
   | Some _ | None -> []
 
 let find_parameter_code (context : State.context) (frame : State.frame) term =
   if
-    Facts.is_home context frame.source
+    Facts.is_home frame
     && (not (Logic.has_quantifier term))
     &&
     match Logic.list_free_constants term with
@@ -145,7 +145,7 @@ let find_integer_limits ty = if Types.is_builtin Character ty then None else Enc
 let make_limit ty limit = Catalog.Code.Limit { type_ = ty; limit }
 let make_comparison left comparison right = Catalog.Code.Compared { left; comparison; right }
 
-let make_range_fix context frame ty term =
+let make_range_fix (context : State.context) frame ty term =
   match (find_integer_limits ty, find_parameter_code context frame term) with
   | Some (low, _), Some value ->
       let least = if Z.sign low = 0 then Catalog.Code.Integer Z.zero else make_limit ty Minimum in
@@ -160,7 +160,8 @@ let make_range_fix context frame ty term =
         ]
   | _ -> []
 
-let make_overflow_fix context frame ty (operation : Intrinsic.scalar) left right exact =
+let make_overflow_fix (context : State.context) frame ty (operation : Intrinsic.scalar) left right
+    exact =
   match find_integer_limits ty with
   | None -> []
   | Some (low, high) -> (
@@ -204,7 +205,7 @@ let make_overflow_fix context frame ty (operation : Intrinsic.scalar) left right
       | None, Subtract when is_unsigned -> []
       | None, _ -> make_range_fix context frame ty exact)
 
-let make_division_overflow_fix context frame ty left right =
+let make_division_overflow_fix (context : State.context) frame ty left right =
   match (find_integer_limits ty, find_parameter_code context frame left) with
   | Some _, Some dividend -> (
       let dividend_not_minimum = make_comparison dividend Not_equal (make_limit ty Minimum) in
@@ -226,7 +227,7 @@ let make_division_overflow_fix context frame ty left right =
           | None -> []))
   | _ -> []
 
-let make_negation_fix context frame ty inner =
+let make_negation_fix (context : State.context) frame ty inner =
   match (find_integer_limits ty, find_parameter_code context frame inner) with
   | Some _, Some value ->
       add_requires context frame
@@ -270,7 +271,7 @@ let list_required_fixes (context : State.context) (frame : State.frame) (clauses
       (List.mapi (fun index parameter -> (index, parameter)) clauses.parameters)
   in
   if
-    Facts.is_home context frame.source
+    Facts.is_home frame
     && List.for_all is_fixed (Logic.list_free_constants term)
     && List.exists (fun name -> List.mem name context.entry) (Logic.list_free_constants term)
     && not (Logic.is_refuted term)

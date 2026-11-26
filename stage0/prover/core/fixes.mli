@@ -2,7 +2,7 @@ val add_requires :
   State.context -> State.frame -> Catalog.Prover.required list -> Catalog.Prover.fix list
 
 val find_goal_code : State.context -> Logic.term -> Catalog.Code.t option
-val make_panic_fix : State.context -> Catalog.Prover.fix list
+val make_panic_fix : State.environment -> Catalog.Prover.fix list
 val find_parameter_code : State.context -> State.frame -> Logic.term -> Catalog.Code.t option
 val make_comparison : Catalog.Code.t -> Language.Comparison.t -> Catalog.Code.t -> Catalog.Code.t
 

@@ -1,8 +1,5 @@
 val make_state : unit -> State.callback_state
-
-val declare_own :
-  State.context -> State.frame -> (Core.local * string * Mir.callback) list -> State.frame
-
+val declare_own : State.frame -> (Core.local * string * Mir.callback) list -> State.frame
 val apply_function : Types.function_type -> Logic.term -> Logic.term list -> Logic.term
 val returns_value : Types.function_type -> bool
 val is_in_the_logic : Types.function_type -> bool

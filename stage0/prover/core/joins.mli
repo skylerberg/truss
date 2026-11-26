@@ -1,4 +1,4 @@
-val name_path_condition : State.context -> State.frame -> Logic.term -> Logic.term
+val name_path_condition : State.frame -> Logic.term -> Logic.term
 
 val merge :
   State.context ->

@@ -37,7 +37,7 @@ val find_buffer : State.context -> Types.ty -> State.buffer option
 val find_declared_element : Types.ty -> erased:Types.ty -> Types.ty
 
 val list_declared_fields :
-  State.context -> Types.ty -> ((string option * string) * Types.ty) list option
+  State.environment -> Types.ty -> ((string option * string) * Types.ty) list option
 
 val spend_declared_potential : State.context -> State.frame -> Types.ty -> Logic.term -> State.frame
 

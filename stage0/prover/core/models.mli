@@ -11,12 +11,15 @@ val run_under_binder :
   (State.frame -> 'read) ->
   State.frame * 'read * (Logic.term -> Logic.term)
 
-val make_sequence_length : State.context -> Types.ty -> Logic.term -> Logic.term
-val index_sequence : State.context -> Types.ty -> Logic.term -> Logic.term -> Logic.term option
-val rank : State.context -> Types.ty -> Logic.term -> Logic.term
+val make_sequence_length : Query.t -> Types.ty -> Logic.term -> Logic.term
+
+val index_sequence :
+  State.environment -> Query.t -> Types.ty -> Logic.term -> Logic.term -> Logic.term option
+
+val rank : State.environment -> Query.t -> Types.ty -> Logic.term -> Logic.term
 
 val make_finite_function :
-  State.context ->
+  Query.t ->
   Well_known.method_ ->
   arguments:Types.argument list ->
   Logic.sort ->
@@ -24,7 +27,8 @@ val make_finite_function :
   Logic.term ->
   Logic.term
 
-val rank_model : State.context -> Types.ty -> model:Types.ty -> impl:Path.t -> Logic.symbol -> unit
+val rank_model :
+  State.environment -> Query.t -> Types.ty -> model:Types.ty -> impl:Path.t -> Logic.symbol -> unit
 
 val find_model_function :
   State.context -> Types.ty -> model:Types.ty -> (Logic.term -> Logic.term) option
@@ -40,5 +44,5 @@ val quantify_over :
   read:(State.frame -> Logic.term -> State.frame * Logic.term) ->
   State.frame * Logic.term
 
-val make_value_term : State.context -> State.frame -> Types.value -> Logic.term
+val make_value_term : State.frame -> Types.value -> Logic.term
 val make_array_model : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term

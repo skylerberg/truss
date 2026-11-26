@@ -10,7 +10,10 @@ let list_promises (context : State.context) (source : State.source) locals (cost
   List.filter_map
     (fun (cost : Mir.cost) ->
       match Costs.find_resource cost ~locals with
-      | None -> Facts.raise_unsupported (Facts.locate context source cost.origin) Calls_target
+      | None ->
+          Facts.raise_unsupported
+            (Facts.locate_source context.environment source cost.origin)
+            Calls_target
       | Some resource ->
           let counting = Costs.classify_counting cost in
           let counter =
@@ -32,12 +35,12 @@ let list_promises (context : State.context) (source : State.source) locals (cost
           Some { counter; clause = cost; written_in = source; inherited })
     costs
 
-let enter_definition context frame promises ~body =
+let enter_definition (context : State.context) frame promises ~body =
   Counters.enter_body context frame
     (List.map (fun promise -> (promise.counter, promise.clause.holds_when)) promises)
     ~body
 
-let check_promise_amounts context (start : State.frame) promises ~output =
+let check_promise_amounts (context : State.context) (start : State.frame) promises ~output =
   List.iter
     (fun promise ->
       if not promise.inherited then
@@ -46,8 +49,8 @@ let check_promise_amounts context (start : State.frame) promises ~output =
             let at_return =
               match output with
               | Some output when Contracts.mentions_result amount ->
-                  let _, returned = Facts.suppose context start "returned" in
-                  let result = Encoding.arrive context returned "result" output in
+                  let _, returned = Facts.suppose start "returned" in
+                  let result = Encoding.arrive returned "result" output in
                   Validity.assume_valid context returned output result;
                   { returned with result = Some result }
               | Some _ | None -> start
@@ -82,7 +85,7 @@ let check_promise ?restated ?cited (context : State.context) (frame : State.fram
            Inherited_promise
              {
                counting;
-               promiser = Contracts.find_promiser context.lookups promise.written_in;
+               promiser = Contracts.find_promiser context.environment.lookups promise.written_in;
                clause;
              }
        | None -> Own_promise { counting; clause }))

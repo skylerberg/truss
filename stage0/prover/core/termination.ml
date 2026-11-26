@@ -25,7 +25,7 @@ let read_entry (context : State.context) =
   | Some entry -> entry
   | None -> Facts.raise_bug "a recursive call is compared before the definition is entered"
 
-let list_structural_parameters context (entry : State.frame) (clauses : State.clauses) =
+let list_structural_parameters (entry : State.frame) (clauses : State.clauses) =
   List.concat
     (List.mapi
        (fun index (parameter : Mir.parameter) ->
@@ -37,7 +37,7 @@ let list_structural_parameters context (entry : State.frame) (clauses : State.cl
          | local -> (
              match
                ( Locals.find_opt (Core_local local) entry.old_locals,
-                 Encoding.find_local_type context entry (Core_local local) )
+                 Encoding.find_local_type entry (Core_local local) )
              with
              | Some value, Some ty when is_datatype ty -> [ (parameter, ty, value, index) ]
              | _ -> []))
@@ -63,17 +63,22 @@ let compare_with_entry (context : State.context) (clauses : State.clauses) ~is_s
       let entry = (read_entry context).entry_frame in
       let is_passed_at_its_type ((parameter : Mir.parameter), ty, _, _) =
         Types.equal
-          (Encoding.substitute_type context entry ty)
-          (Encoding.substitute_type context callee_entry parameter.type_)
+          (Encoding.substitute_type entry ty)
+          (Encoding.substitute_type callee_entry parameter.type_)
       in
-      match
-        List.filter is_passed_at_its_type (list_structural_parameters context entry clauses)
-      with
+      match List.filter is_passed_at_its_type (list_structural_parameters entry clauses) with
       | [] -> Unmeasured
       | parts ->
-          let before = List.map (fun (_, ty, value, _) -> Models.rank context ty value) parts in
+          let before =
+            List.map
+              (fun (_, ty, value, _) -> Models.rank context.environment context.query ty value)
+              parts
+          in
           let after =
-            List.map (fun (_, ty, _, index) -> Models.rank context ty (argument_at index)) parts
+            List.map
+              (fun (_, ty, _, index) ->
+                Models.rank context.environment context.query ty (argument_at index))
+              parts
           in
           Smaller_part
             {
@@ -116,8 +121,8 @@ let check_recursive_call (context : State.context) (frame : State.frame) locatio
         smaller
   | Uncompared -> ()
 
-let find_induction_premise context (clauses : State.clauses) ~is_self_call ~callee_entry
-    ~argument_at =
+let find_induction_premise (context : State.context) (clauses : State.clauses) ~is_self_call
+    ~callee_entry ~argument_at =
   match compare_with_entry context clauses ~is_self_call ~callee_entry ~argument_at with
   | Smaller_measures smaller | Smaller_part { smaller; _ } -> Some smaller
   | Unmeasured | Uncompared -> None
@@ -131,7 +136,7 @@ let find_recursive_callee (context : State.context) (frame : State.frame) locati
   in
   match group_member with
   | Some target when frame.makes_obligations -> (
-      match context.lookups.mir.find_form_origin target with
+      match context.environment.lookups.mir.find_form_origin target with
       | Some (Derived _, _) when context.termination.terminates -> reject target Derives
       | Some (Inherited _, _) when context.termination.terminates -> reject target Inherits
       | Some ((Written _ | Derived _ | Inherited _), _) | None -> Some target)
@@ -153,7 +158,7 @@ let reject_recursion_through_supplied_code (context : State.context) (frame : St
       (Logic.Boolean false)
   in
   let reject_supply (supplier : Mir.Call_edges.supplier) code =
-    let recursive = List.filter (Cycles.is_in_recursion_group context) code in
+    let recursive = List.filter (Cycles.is_in_recursion_group context.environment) code in
     (match supplier with
     | Named_function path when List.exists (Path.equal path) recursive ->
         reject (Named_function path)
@@ -174,14 +179,15 @@ let reject_recursion_through_supplied_code (context : State.context) (frame : St
     List.iter
       (fun (edge : Mir.Call_edges.edge) ->
         match edge with Calls _ -> () | Supplies { supplier; code } -> reject_supply supplier code)
-      (Mir.Call_edges.list_statement_edges context.lookups.interface frame.substitution statement)
+      (Mir.Call_edges.list_statement_edges context.environment.lookups.interface frame.substitution
+         statement)
 
 type loop_measure = { read : State.frame -> Logic.term list; at_head : Logic.term list }
 
 let find_written_measures (clauses : Mir.loop_clause list) =
   List.find_map (function Mir.Decreases measures -> Some measures | _ -> None) clauses
 
-let read_measures context (at : State.frame) measures =
+let read_measures (context : State.context) (at : State.frame) measures =
   List.map
     (fun measure ->
       snd (Validity.read_specification context { at with makes_obligations = false } measure))
@@ -206,7 +212,8 @@ let make_comparison_measure (context : State.context) measure_operands =
           | Equal | Not_equal -> Facts.raise_bug "an equality gives a loop its measure")
   | Some _ | None -> None
 
-let read_loop_measure ?implicit context (clauses : Mir.loop_clause list) ~(head : State.frame) =
+let read_loop_measure ?implicit (context : State.context) (clauses : Mir.loop_clause list)
+    ~(head : State.frame) =
   let read =
     match find_written_measures clauses with
     | Some written -> Some (fun at -> read_measures context at written)
@@ -218,7 +225,7 @@ let require_measure (context : State.context) ~loop ~is_measured =
   if context.termination.terminates && not is_measured then
     Facts.raise_bug "%s has no measure in a body that terminates" loop
 
-let check_loop_measure context (frame : State.frame) location measure =
+let check_loop_measure (context : State.context) (frame : State.frame) location measure =
   Option.iter
     (fun measure ->
       Obligations.oblige context frame location Loop_measure_may_not_decrease

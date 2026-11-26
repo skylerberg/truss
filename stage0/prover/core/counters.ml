@@ -26,9 +26,9 @@ let start (context : State.context) (frame : State.frame) =
   { frame with spent = List.map (fun counter -> (counter, Costs.zero)) context.cost.counters }
 
 let read_condition (context : State.context) counter =
-  if List.mem counter context.cost.conditional_counters then context.condition else []
+  if List.mem counter context.cost.conditional_counters then context.environment.condition else []
 
-let list_loop_counters context locals (body : Mir.body) =
+let list_loop_counters (context : State.context) locals (body : Mir.body) =
   let counters = ref [] in
   let note (loop : Mir.loop) =
     List.iter
@@ -94,19 +94,19 @@ let spend (context : State.context) (frame : State.frame) (amount_of : Costs.cou
           frame.spent;
     }
 
-let declare_unknown_amount context frame (counter : Costs.counter) =
-  let amount = Facts.declare_fresh context frame "spent" Logic.Int in
-  Facts.assume context frame (Logic.less_equal (Costs.least_amount counter.resource) amount);
+let declare_unknown_amount (frame : State.frame) (counter : Costs.counter) =
+  let amount = Facts.declare_fresh frame "spent" Logic.Int in
+  Facts.assume frame (Logic.less_equal (Costs.least_amount counter.resource) amount);
   amount
 
-let make_potential_credit (context : State.context) change =
-  if Option.is_none (Facts.find_argument_sorts context Costs.credit_symbol) then begin
+let make_potential_credit (query : Query.t) change =
+  if Option.is_none (Query.find_argument_sorts query Costs.credit_symbol) then begin
     let is_credited = Logic.Symbol.Variable { label = "cost.is_credited"; numbers = [] }
     and saved = Logic.Symbol.Variable { label = "cost.saved"; numbers = [] } in
-    Facts.declare context (Logic.Constant (is_credited, Logic.Bool));
-    Facts.declare context (Logic.Function (Costs.credit_symbol, [ Logic.Int ], Logic.Int));
+    Query.declare query (Logic.Constant (is_credited, Logic.Bool));
+    Query.declare query (Logic.Function (Costs.credit_symbol, [ Logic.Int ], Logic.Int));
     let applied = Logic.Apply (Costs.credit_symbol, [ Logic.Symbol saved ]) in
-    Facts.add_fact context
+    Query.add_fact query
       (Logic.forall ~trigger:[ applied ]
          ( [ (saved, Logic.Int) ],
            Logic.equal applied
@@ -128,20 +128,21 @@ let count_held_potential (context : State.context) ~holder change =
     change
   end
 
-let count_declared_potential context ~(of_ : Types.ty) change =
+let count_declared_potential (context : State.context) ~(of_ : Types.ty) change =
   match Types.erase_views of_ with
   | Named { path; _ } -> count_held_potential context ~holder:(Path.show path) change
   | _ -> count_held_potential context ~holder:whole_values change
 
-let count_whole_potential context change = count_held_potential context ~holder:whole_values change
+let count_whole_potential (context : State.context) change =
+  count_held_potential context ~holder:whole_values change
 
-let rec list_reached_types (context : State.context) ?(entered = []) (ty : Types.ty) =
+let rec list_reached_types (environment : State.environment) ?(entered = []) (ty : Types.ty) =
   match Types.erase_views ty with
   | Named { path; arguments } when not (List.exists (Path.equal path) entered) ->
       Path.show path
       :: List.concat_map
-           (list_reached_types context ~entered:(path :: entered))
-           (Mir.Call_edges.list_instance_field_types context.lookups.interface ty
+           (list_reached_types environment ~entered:(path :: entered))
+           (Mir.Call_edges.list_instance_field_types environment.lookups.interface ty
            @ List.filter_map (function Types.Type argument -> Some argument | _ -> None) arguments)
   | _ -> []
 
@@ -151,7 +152,7 @@ let block_saved_potential (context : State.context) (held : Types.ty list) =
     List.filter
       (fun holder -> not (List.mem holder blocked))
       (List.sort_uniq String.compare
-         (match List.concat_map (list_reached_types context) held with
+         (match List.concat_map (list_reached_types context.environment) held with
          | [] -> []
          | reached -> whole_values :: reached))
   with
@@ -161,7 +162,7 @@ let block_saved_potential (context : State.context) (held : Types.ty list) =
         raise (Blocks_credited_potential (reached @ blocked));
       context.cost.blocked_holders <- reached @ blocked
 
-let spend_operation context frame ~potential_change ~held ?(note = fun _ _ -> ())
+let spend_operation (context : State.context) frame ~potential_change ~held ?(note = fun _ _ -> ())
     (charge_of : Costs.counter -> Costs.charge) =
   let change = Option.map Lazy.from_fun potential_change in
   spend context frame (fun counter ->
@@ -180,21 +181,22 @@ let spend_operation context frame ~potential_change ~held ?(note = fun _ _ -> ()
         | No_potential, true -> (
             match find_change () with
             | Some change -> Logic.add amount (count_whole_potential context change)
-            | None -> declare_unknown_amount context frame counter)
+            | None -> declare_unknown_amount frame counter)
         | Potential_change, false -> (
             match find_change () with
-            | Some change -> Logic.subtract amount (make_potential_credit context change)
-            | None -> declare_unknown_amount context frame counter)
+            | Some change -> Logic.subtract amount (make_potential_credit context.query change)
+            | None -> declare_unknown_amount frame counter)
         | Potential_growth, false -> (
             match find_change () with
             | Some change ->
-                Logic.subtract amount (make_potential_credit context (Logic.at_least_zero change))
+                Logic.subtract amount
+                  (make_potential_credit context.query (Logic.at_least_zero change))
             | None -> amount)
       in
       note counter amount;
       amount)
 
-let spend_quantifier context frame ~count ~mark ~bound ~(before : State.frame)
+let spend_quantifier (context : State.context) frame ~count ~mark ~bound ~(before : State.frame)
     ~(after : State.frame) =
   spend context frame (fun counter ->
       let spent =
@@ -202,8 +204,8 @@ let spend_quantifier context frame ~count ~mark ~bound ~(before : State.frame)
         | Some start, Some total -> Costs.since ~start total
         | _ -> Costs.zero
       in
-      if Facts.mentions_fresh_since context mark spent || Logic.mentions [ bound ] spent then
-        declare_unknown_amount context frame counter
+      if Query.mentions_fresh_since context.query mark spent || Logic.mentions [ bound ] spent then
+        declare_unknown_amount frame counter
       else
         match counter.counting with
         | Units ->
@@ -211,9 +213,9 @@ let spend_quantifier context frame ~count ~mark ~bound ~(before : State.frame)
               (Logic.multiply (Logic.at_least_zero count) (Logic.add spent (Logic.int 1)))
               (Logic.int 1)
         | At_most | Exactly ->
-            if spent = Costs.zero then Costs.zero else declare_unknown_amount context frame counter)
+            if spent = Costs.zero then Costs.zero else declare_unknown_amount frame counter)
 
-let enter_body context (frame : State.frame) sources ~body =
+let enter_body (context : State.context) (frame : State.frame) sources ~body =
   assign context
     (sources
     @ match body with Some body -> list_loop_counters context frame.locals body | None -> []);
@@ -279,7 +281,7 @@ let enter_lambda (context : State.context) (inside : State.frame)
                || List.mem enclosing context.cost.conditional_counters)
              context.cost.counters
          in
-         (counter, if is_conditional then context.condition else []))
+         (counter, if is_conditional then context.environment.condition else []))
        operand_counters
     @ List.map (fun (counter, _) -> (counter, [])) promised
     @ list_loop_counters context inside.locals body);
@@ -296,7 +298,8 @@ let leave_lambda (context : State.context) counters =
   context.cost.counters <- counters.enclosing_counters;
   context.cost.conditional_counters <- counters.enclosing_conditional_counters
 
-let check_lambda_exits context counters (exits : State.frame list) location ~type_ ~mark =
+let check_lambda_exits (context : State.context) counters (exits : State.frame list) location ~type_
+    ~mark =
   List.iter
     (fun (exit_ : State.frame) ->
       List.iter
@@ -336,11 +339,11 @@ let check_lambda_exits context counters (exits : State.frame list) location ~typ
             ( bound,
               List.filter_map
                 (fun ((exit_ : State.frame), spent) ->
-                  Obligations.make_closed_obligation context exit_ location
+                  Obligations.make_closed_obligation exit_ location
                     (Lambda_call_above_bound { metric })
                     (Logic.less_equal spent bound))
                 (List.combine exits spent) ) ))
-        (Costs.find_cost_bound ~varies:(Facts.mentions_fresh_since context mark) ~facts most))
+        (Costs.find_cost_bound ~varies:(Query.mentions_fresh_since context.query mark) ~facts most))
     counters.operand_counters
 
 let list_bound_terms bounds = List.map (fun (metric, (bound, _)) -> (metric, bound)) bounds

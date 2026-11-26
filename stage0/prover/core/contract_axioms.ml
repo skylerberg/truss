@@ -14,13 +14,13 @@ let find_innermost_axiom (context : State.context) (frame : State.frame) term =
       Some axiom
   | _ -> None
 
-let assume_typed context (frame : State.frame) term =
+let assume_typed (context : State.context) (frame : State.frame) term =
   let guarded = Logic.( ==> ) frame.condition term in
   match find_innermost_axiom context frame guarded with
   | Some axiom -> axiom.hypotheses <- guarded :: axiom.hypotheses
-  | None -> Facts.assume context frame term
+  | None -> Facts.assume frame term
 
-let rec map_each_value context (frame : State.frame) value make =
+let rec map_each_value (context : State.context) (frame : State.frame) value make =
   if not (Logic.mentions frame.bound value) then make frame value
   else
     match find_innermost_axiom context frame value with
@@ -37,10 +37,10 @@ type application = {
   is_limited : bool;
 }
 
-let declare_function context ~path ~type_arguments ~sorts ~result_type =
+let declare_function query ~path ~type_arguments ~sorts ~result_type =
   let symbol = Logic.Symbol.Function { callee = path; type_arguments } in
   let result_sort = Encoding.sort_of result_type in
-  Facts.declare context (Logic.Function (symbol, sorts, result_sort));
+  Query.declare query (Logic.Function (symbol, sorts, result_sort));
   symbol
 
 let make_numbered_parameters label sorts =
@@ -53,12 +53,12 @@ let apply (context : State.context) (frame : State.frame) ~path ~type_arguments 
   let symbol =
     if is_limited then begin
       let limited = Logic.Symbol.Limited { callee = path; type_arguments } in
-      Facts.declare context (Logic.Function (limited, sorts, Encoding.sort_of result_type));
-      Facts.run_once context (Limited_link function_symbol) (fun () ->
+      Query.declare context.query (Logic.Function (limited, sorts, Encoding.sort_of result_type));
+      Query.run_once context.query (Limited_link function_symbol) (fun () ->
           let parameters = make_numbered_parameters "linked" sorts in
           let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
           let applied = Logic.Apply (function_symbol, inputs) in
-          Facts.add_fact context
+          Query.add_fact context.query
             (Logic.forall ~trigger:[ applied ]
                (parameters, Logic.equal applied (Logic.Apply (limited, inputs)))));
       limited
@@ -66,26 +66,26 @@ let apply (context : State.context) (frame : State.frame) ~path ~type_arguments 
     else function_symbol
   in
   let term = Logic.Apply (symbol, arguments) in
-  Facts.assume context frame (Encoding.make_in_range result_type term);
+  Facts.assume frame (Encoding.make_in_range result_type term);
   if Encoding.find_bounds result_type <> None && is_on_bound_values then
-    Facts.run_once context (In_range symbol) (fun () ->
+    Query.run_once context.query (In_range symbol) (fun () ->
         let parameters = make_numbered_parameters "ranged" sorts in
-        Facts.add_fact context
+        Query.add_fact context.query
           (Logic.forall
              ( parameters,
                Encoding.make_in_range result_type
                  (Logic.Apply (symbol, List.map (fun (name, _) -> Logic.Symbol name) parameters)) )));
   { symbol; sorts; term; is_limited }
 
-let make_fresh_parameters (context : State.context) label sorts =
-  let axiom = Query.take_fresh_number context.query in
+let make_fresh_parameters (query : Query.t) label sorts =
+  let axiom = Query.take_fresh_number query in
   List.mapi
     (fun index sort -> (Logic.Symbol.Variable { label; numbers = [ axiom; index ] }, sort))
     sorts
 
-let find_readable_clause context mark clause inside =
+let find_readable_clause (context : State.context) mark clause inside =
   match snd (Validity.read_specification context inside clause) with
-  | term when not (Facts.mentions_fresh_since context mark term) -> Some term
+  | term when not (Query.mentions_fresh_since context.query mark term) -> Some term
   | _ -> None
   | exception Facts.Unsupported _ -> None
 
@@ -103,7 +103,7 @@ let axiomatize (context : State.context) symbol parameters make =
       let stated, newest_facts = Query.run_in_scope context.query (List.map fst parameters) make in
       let drop_fresh_terms terms =
         List.filter
-          (fun term -> not (Facts.mentions_fresh_since context mark term))
+          (fun term -> not (Query.mentions_fresh_since context.query mark term))
           (List.rev terms)
       in
       axiom.hypotheses <- drop_fresh_terms axiom.hypotheses;
@@ -115,14 +115,15 @@ let find_smaller_than_entry (context : State.context) (callee_clauses : State.cl
   | None -> Some (Logic.Boolean true)
   | Some member ->
       Termination.find_induction_premise context callee_clauses
-        ~is_self_call:(Path.equal member context.node) ~callee_entry ~argument_at:(List.nth inputs)
+        ~is_self_call:(Path.equal member context.environment.node)
+        ~callee_entry ~argument_at:(List.nth inputs)
 
 let state_with_trigger (context : State.context) (outer : State.frame) (application : application)
     (contract : State.contract) ~substitution_of ~result_type ~group_member ~is_triggered =
   let symbol = application.symbol and sorts = application.sorts in
   let callee_clauses = contract.callee_clauses in
-  Facts.run_once context (Contract_of symbol) (fun () ->
-      let parameters = make_fresh_parameters context "ensured" sorts in
+  Query.run_once context.query (Contract_of symbol) (fun () ->
+      let parameters = make_fresh_parameters context.query "ensured" sorts in
       let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
       let arguments = List.mapi (fun index input -> (index, input)) inputs in
       let applied = Logic.Apply (symbol, inputs) in
@@ -190,8 +191,8 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
             match smaller with
             | Some smaller ->
                 let premise = Logic.( &&& ) valid smaller in
-                if readable_clauses = [] || Facts.mentions_fresh_since context mark premise then
-                  None
+                if readable_clauses = [] || Query.mentions_fresh_since context.query mark premise
+                then None
                 else Some (premise, readable_clauses)
             | None -> None)
       in
@@ -236,8 +237,8 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
           | Some (required, body) ->
               let unspecified = Logic.Symbol.Unspecified symbol
               and result_sort = Encoding.sort_of result_type in
-              Facts.declare context (Logic.Function (unspecified, sorts, result_sort));
-              Facts.declare context
+              Query.declare context.query (Logic.Function (unspecified, sorts, result_sort));
+              Query.declare context.query
                 (Logic.Definition
                    {
                      symbol;
@@ -250,7 +251,7 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
                          (Logic.Apply (unspecified, inputs));
                    })
           | None ->
-              Facts.add_fact context
+              Query.add_fact context.query
                 (Logic.forall
                    ~trigger:(if is_triggered then [ applied ] else [])
                    ( parameters,
@@ -264,8 +265,8 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
                                    (Logic.conjunction (List.map snd ensures)))
                                readable_clauses)) ))))
 
-let state context outer (application : application) (contract : State.contract) ~substitution_of
-    ~result_type ~group_member ~is_on_bound_values =
+let state (context : State.context) outer (application : application) (contract : State.contract)
+    ~substitution_of ~result_type ~group_member ~is_on_bound_values =
   let add =
     state_with_trigger context outer application contract ~substitution_of ~result_type
       ~group_member

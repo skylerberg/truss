@@ -371,6 +371,20 @@ develop as well as make it easier to bootstrap the compiler in parts.
   and `Contracts.make_exit_frame` to the values at return, with the entry
   values as `old`. A call, a callback, a contract axiom and the clauses a
   method takes from its trait all read through them.
+- **A function takes the least state that it reads, and its type says
+  which.**
+
+  | Parameter | Holds | Taken by a function that |
+  |---|---|---|
+  | None | | Builds a term or reads a type, such as `Encoding.sort_of` |
+  | `State.environment` | The definition being proven and the database it is proven against: the lookups, the node, the condition and its bounds, the obligation policy. It does not change during a proof | Reads the program away from a point of it, such as `Callee.may_abort` or `Cycles.is_in_proof_cycle` |
+  | `State.frame` | The logical context at a point of the program: the environment, the bindings, the path condition, and the query that its facts are added to | Reads the program at a point or adds a fact there, such as `Encoding.substitute_type` or `Facts.assume` |
+  | `Query.t` | The query under construction | Declares a symbol or states a fact where no frame is at hand, such as `Models.make_sequence_length` |
+  | `State.context` | The state of each owner and the outcome of the proof | Makes an obligation, reads a specification, or uses an owner's state |
+
+  `Facts.assume` guards a fact with the path condition of its frame.
+  `Facts.add_frame_fact` and `Query.add_fact` add a fact with no guard, so
+  each use of them states the definition of a new symbol or an axiom.
 - **Each rule of the prover has one owner module, and each record of its
   state one owner.** `Reader`, `Calls`, `Loops` and `Lambdas` execute the
   MIR and call an owner at each statement, so a new rule edits its owner.
