@@ -1,6 +1,7 @@
 type quoted = { key : Path.key; origin : Core.origin }
 type location = Node of Core.origin | Whole_definition
 type call = { at : location; callee : Path.t option }
+type returning = This_method | Named_function of Path.t | This_lambda
 type counting = Upper_bound | Exact
 type moment = On_entry | After_iteration | Where_left
 type value = Named of string | Quoted of quoted | Temporary | Self_value | Compiler_local
@@ -126,7 +127,7 @@ type obligation =
   | Float_conversion of { at : quoted; target : Types.ty }
   | Not_a_scalar_value of { at : quoted }
   | Unreachable_reached
-  | May_not_return_under_no_allocation of { function_ : Path.t option }
+  | May_not_return_under_no_allocation of returning
   | Cost_promise of promise
   | Impl_precondition of { clause : quoted }
   | Impl_panic_condition of { clause : quoted }

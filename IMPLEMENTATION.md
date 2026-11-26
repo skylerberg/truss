@@ -245,10 +245,13 @@ develop as well as make it easier to bootstrap the compiler in parts.
 
   Where no code is known, `cost allocations == 0` stands for "returns": at a
   bound of the enclosing definition and at a function value that is no
-  lambda and no named function. Two obligations make that hold of code
-  that could reach `intrinsic.crash`, which allocates nothing: an `impl`
+  lambda and no named function. Three obligations make that hold of code
+  that could reach `intrinsic.crash`, which allocates nothing. An `impl`
   method whose trait states the clause for it, and a function that states
-  it and is named as a value, are rejected where their `may_abort` holds.
+  it and is named as a value, are rejected where their `may_abort` holds. A
+  lambda whose type states it is rejected where its body, or a lambda made
+  in its body, holds an abort site or calls a function that may abort. So
+  every function value of such a type was made from code that returns.
   The call of a function value that is no parameter of its definition has no
   call site that judges the value, so it is an abort site of the definition
   where the function's result type has no value that is valid without a

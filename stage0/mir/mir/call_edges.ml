@@ -605,6 +605,35 @@ let is_abort_site (lookups : lookups) instance ~parameters (statement : Tree.sta
           | _ -> false)
       | Some _ | None -> false)
 
+let rec body_may_abort (lookups : lookups) instance ~lambdas (body : Tree.body) ~may_abort =
+  let nested_may_abort index =
+    body_may_abort lookups instance ~lambdas lambdas.(index) ~may_abort
+  in
+  let aborts = ref false in
+  Walk.iter_run_block
+    (fun statement ->
+      if
+        is_abort_site lookups instance ~parameters:body.parameters statement
+        || List.exists
+             (function
+               | Calls callee -> may_abort callee
+               | Supplies { code; _ } -> List.exists may_abort code)
+             (list_statement_edges lookups.interface instance statement)
+        ||
+        match statement.kind with
+        | Basic (Assign { value = Lambda { body = nested; _ }; _ }) -> nested_may_abort nested
+        | Basic (Call { call; _ } | Lend { call; _ }) ->
+            List.exists
+              (fun (argument : Tree.argument) ->
+                match argument.function_ with
+                | Some (Lambda_expression { body = nested; _ }) -> nested_may_abort nested
+                | Some (Function_reference _) | None -> false)
+              call.arguments
+        | _ -> false
+      then aborts := true)
+    body.code;
+  !aborts
+
 let has_abort_site (lookups : lookups) path =
   match Intrinsic.find_contract_operation path with
   | Some operation -> Intrinsic.may_abort operation
