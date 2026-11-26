@@ -296,7 +296,7 @@ type t =
   | Shift_amount_not_unsigned of { at : Core.origin; excluded : shown }
   | Try_error_mismatch of { at : Core.origin; output_error : Types.ty; error : Types.ty }
   | Try_misused of { at : Core.origin }
-  | String_addition of { at : Core.origin; join : (joined_piece * joined_piece) option }
+  | String_addition of { at : Core.origin; join : joined_piece list option }
   | Alternative_type_mismatch of {
       at : Core.origin;
       name : string;
