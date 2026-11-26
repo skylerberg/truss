@@ -242,6 +242,12 @@ develop as well as make it easier to bootstrap the compiler in parts.
 
   A storage of capacity zero allocates nothing, so the call that builds one,
   which an empty list literal makes, is no abort site.
+
+  `Query.note_withheld` records each call whose contract a specification
+  did not learn, by the symbol of its function. An obligation keeps the
+  callees among them that its pruned query declares, and a failed one names
+  them, so the diagnostic says why a fact that the code seems to state is
+  missing.
 - **The semantics of a storage operation is a contract written in Truss.**
   `standard.intrinsic_contracts` declares a function with the name and the
   signature of the intrinsic and a `todo` body, as `standard.specification`

@@ -624,6 +624,18 @@ let describe_failure = function
         else "")
       :: describe_failed_runs failed_runs
 
+let describe_withheld = function
+  | [] -> []
+  | callees ->
+      Description.Text " A specification learns nothing here from the contract of "
+      :: join_with_and
+           (List.map
+              (fun callee -> [ Description.Text ("`" ^ Build.show_callee callee ^ "`") ])
+              callees)
+      @ say
+          ", since the call may not return: the function, or code supplied to it, may run out of \
+           memory."
+
 let advise_other_ways : Diagnostic.Code.prover -> _ = function
   | Overflow | Division | Shift ->
       say " It can also be checked first with an `if`, or done with the checked operation."
@@ -800,11 +812,11 @@ let describe : Prover.t -> Nodes.description = function
   | Proves { location; instance; obligation } ->
       make (find_code obligation) (locate location)
         (describe_instance instance @ describe_obligation obligation)
-  | Unproven { location; instance; obligation; failure; fixes; cited = _ } ->
+  | Unproven { location; instance; obligation; failure; fixes; withheld; cited = _ } ->
       let code = find_code obligation in
       make code (locate location) ~fixes:(List.map describe_fix fixes)
         (describe_instance instance @ describe_obligation obligation @ describe_failure failure
-       @ advise_other_ways code)
+       @ describe_withheld withheld @ advise_other_ways code)
   | Unreadable { location; construct; foreign } ->
       make Unsupported (locate location)
         (say

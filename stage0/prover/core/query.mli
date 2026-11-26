@@ -42,4 +42,5 @@ val make_obligation :
   Obligation.t
 
 val add_obligation : t -> Obligation.t -> unit
+val note_withheld : t -> Logic.symbol -> Path.t -> unit
 val list_obligations : t -> Obligation.t list
