@@ -669,6 +669,14 @@ let negate : Language.Comparison.t -> Language.Comparison.t = function
   | Greater -> Less_equal
   | Greater_equal -> Less
 
+let is_negation (first : Code.t) (second : Code.t) =
+  match (first, second) with
+  | Compared first, Compared second ->
+      first.left = second.left && first.right = second.right
+      && negate first.comparison = second.comparison
+  | Not negated, other | other, Not negated -> negated = other
+  | _ -> false
+
 let rec show_value level (code : Code.t) =
   let parenthesize inner text = if inner < level then "(" ^ text ^ ")" else text in
   match code with
@@ -732,6 +740,11 @@ let add_clause (place : Prover.clause_place) line : _ Description.edit =
 
 let describe_fix = function
   | Prover.Add_requires { place; required; premise; condition } ->
+      let premise =
+        match (premise, required) with
+        | Some premise, [ Clause clause ] when is_negation premise clause -> None
+        | _ -> premise
+      in
       let required = List.map describe_required required in
       let required =
         match condition with

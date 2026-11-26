@@ -1,0 +1,9 @@
+fn choose(number: Int64) -> Int64
+  ensures result == 7
+{
+  if number > 0 {
+    7
+  } else {
+    8
+  }
+}

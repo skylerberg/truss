@@ -1,0 +1,9 @@
+fn clamp(value: mut Int64)
+  ensures value >= 0
+{
+  if value < 0 {
+    value = 0
+  } else {
+    value = -1
+  }
+}

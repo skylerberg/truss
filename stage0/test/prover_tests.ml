@@ -212,10 +212,7 @@ let () =
       expect_not_proven Fixtures.Prover.early_return_of_a_negative "prover.ensures"
         ~fixed:
           ( "ensures result >= 0\n{\n  if value < 0 { return value }",
-            "ensures result >= 0\n\
-            \  requires (value < 0) ==> (value >= 0)\n\
-             {\n\
-            \  if value < 0 { return value }" ));
+            "ensures result >= 0\n  requires value >= 0\n{\n  if value < 0 { return value }" ));
   Harness.test "a callee's ensures is a fact after the call" (fun () ->
       expect_proven Fixtures.Prover.bump_ensures_after_the_call);
   Harness.test "a mut argument is mutated only through the callee's ensures" (fun () ->
@@ -434,7 +431,7 @@ let () =
   Harness.test "code that reads a computed constant knows its value, and trusts compiled code"
     (fun () ->
       expect_proven_trusting_compiled_code Fixtures.Prover.computed_constants ~code:"prover.ensures"
-        ~count:4);
+        ~count:6);
   Harness.test "a proof that needs the value of an unfinished constant says that it has none"
     (fun () ->
       Support.expect_one_diagnostic ~check
@@ -1692,6 +1689,19 @@ let () =
     (fun () ->
       expect_not_proven Fixtures.Prover.early_return_breaking_its_ensures_after_a_call
         "prover.ensures" ~says:fails_every_time);
+  Harness.test "an ensures that one branch of a final `if` breaks is refuted at that branch's value"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.final_if_breaking_its_ensures_in_one_branch "prover.ensures"
+        ~says:fails_every_time ~at:("8", 1));
+  Harness.test "an ensures that one arm of a final `match` breaks is refuted at that arm's value"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.final_match_breaking_its_ensures_in_one_arm "prover.ensures"
+        ~says:fails_every_time ~at:("8", 1));
+  Harness.test
+    "an ensures on a `mut` parameter that one branch of a final `if` breaks is refuted at that \
+     branch's end" (fun () ->
+      expect_not_proven Fixtures.Prover.final_if_breaking_a_mut_parameters_ensures_in_one_branch
+        "prover.ensures" ~says:fails_every_time ~at:("value = -1", 1));
   Harness.test "an obligation that the facts refute says it fails every time it is reached"
     (fun () ->
       let message = read_message Fixtures.Prover.element_past_the_end_of_a_literal in
