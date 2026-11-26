@@ -1,0 +1,7 @@
+fn two(first: fn(UInt8) -> UInt8, second: (fn(y: UInt8) -> UInt8 ensures first.ensures(y, result))) -> UInt8 {
+  second(0)
+}
+
+fn pass() -> UInt8 {
+  two(fn(x) { x }, fn(y) { y })
+}

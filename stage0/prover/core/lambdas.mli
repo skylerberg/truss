@@ -1,6 +1,3 @@
-val make_parameter_symbols :
-  State.context -> State.frame -> Types.function_type -> ('a Logic.Symbol.t * Logic.sort) list
-
 val remove_temporaries : 'a Locals.t -> 'a Locals.t
 
 val run_lambda_body :
@@ -19,12 +16,7 @@ val translate_lambda :
   State.frame ->
   site:Invocation.site ->
   State.lambda_code ->
-  list_facts:(Logic.term list -> Logic.term list) ->
-  list_promises:
-    (entries:Logic.term list ->
-    exits:Logic.term list ->
-    result:Logic.term ->
-    (Catalog.Prover.quoted * Logic.term) list) ->
+  stated:Callbacks.parameter_contract ->
   State.frame * Logic.term
 
 val make_passed_values :

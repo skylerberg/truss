@@ -27,15 +27,6 @@ val project_field :
   Logic.term ->
   Logic.term
 
-val translate_global_value :
-  State.context ->
-  State.frame ->
-  Invocation.site ->
-  Path.t ->
-  Types.argument list ->
-  is_argument:bool ->
-  Logic.term
-
 val evaluate_constant : State.context -> State.frame -> Path.t -> Logic.term
 
 val apply_construct :

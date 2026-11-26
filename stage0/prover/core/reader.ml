@@ -117,13 +117,11 @@ let read_root context frame run (root : Mir.root) =
               Facts.raise_bug "`%s` reads `self` outside a method"
                 (Resolve.Names.show_key frame.source.key))
       | key -> (
-          (if frame.makes_obligations && not (Callbacks.is_reading context) then
-             match key with
-             | Core_local core -> Callbacks.check_escaping_callback context frame core
-             | Mir_local _ -> (
-                 match Hashtbl.find_opt run.held_callbacks local with
-                 | Some core -> Callbacks.check_escaping_callback context frame core
-                 | None -> ()));
+          Option.iter
+            (Callbacks.check_escaping_callback context frame)
+            (match key with
+            | Core_local core -> Some core
+            | Mir_local _ -> Hashtbl.find_opt run.held_callbacks local);
           match Locals.find_opt key frame.locals with
           | Some term -> term
           | None ->
@@ -428,7 +426,8 @@ let find_held_callback context run held (value : Mir.rvalue) =
 
 let classify_shape run ?function_ (value : Mir.operand) : Invocation.shape =
   match (function_, find_whole_local value) with
-  | Some (Mir.Function_reference { path; origin }), _ -> Named_function { origin; path }
+  | Some (Mir.Function_reference { path; instantiation; origin }), _ ->
+      Named_function { origin; path; instantiation }
   | (Some (Lambda_expression _) | None), Some local -> (
       match (run.infos.(local).kind, Hashtbl.find_opt run.held_callbacks local) with
       | Source { local = core; _ }, _ | (Temporary | Lent _), Some core -> Forwarded core
@@ -672,9 +671,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Convert { conversion = From_integer; value; _ } ->
       (frame, Operations.convert_from_integer context frame site (translate_operand value))
   | Function_value { path; instantiation; is_argument } ->
-      ( frame,
-        Values.translate_global_value context frame site path instantiation.type_arguments
-          ~is_argument )
+      (frame, Callbacks.read_named_function context frame site path instantiation ~is_argument)
   | Operation { operation; operands; type_arguments } ->
       let types =
         List.filter_map
@@ -695,8 +692,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Lambda { body; _ } ->
       Lambdas.translate_lambda context frame ~site
         { code = run.lambdas.(body); lambdas = run.lambdas }
-        ~list_facts:(fun _ -> [])
-        ~list_promises:(fun ~entries:_ ~exits:_ ~result:_ -> [])
+        ~stated:None
   | Specification Result -> (
       match frame.result with
       | Some result -> (frame, result)

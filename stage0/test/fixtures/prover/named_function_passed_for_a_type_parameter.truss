@@ -1,0 +1,13 @@
+fn halve(n: UInt8) -> UInt8
+{
+  n / 2
+}
+
+fn keep[T](value: own T) -> T {
+  value
+}
+
+fn run() -> UInt8 {
+  let function = keep(halve)
+  function(3)
+}

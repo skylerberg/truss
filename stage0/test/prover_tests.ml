@@ -1762,6 +1762,29 @@ let () =
   Harness.test "a quantifier over a range of characters ranges over no surrogate" (fun () ->
       expect_proven quantified;
       expect_not_proven (Support.apply_edit quantified ("  false\n", "  true\n")) "prover.ensures");
+  let promising = Fixtures.Prover.lambda_promising_the_ensures_of_an_earlier_lambda in
+  Harness.test "a lambda meets a parameter's `ensures` that names an earlier lambda" (fun () ->
+      expect_proven promising;
+      expect_not_proven
+        (Support.apply_edit promising ("fn(y) { y })", "fn(y) { y / 2 })"))
+        "prover.ensures");
+  let generic = Fixtures.Prover.generic_function_passed_for_a_parameter_with_a_contract in
+  Harness.test "a generic function passed as a value is read at its type arguments" (fun () ->
+      expect_proven generic;
+      expect_not_proven
+        (Support.apply_edit generic
+           ("-> UInt64 ensures result == items.length()))", "-> UInt64 ensures result == 0))"))
+        "prover.ensures");
+  Harness.test "a function named as a value in its own ensures is read once" (fun () ->
+      expect_codes Fixtures.Prover.function_named_as_a_value_in_its_own_ensures
+        [ "prover.circular_proof" ]);
+  let kept = Fixtures.Prover.named_function_passed_for_a_type_parameter in
+  Harness.test "a named function passed for a type parameter meets its requires for every argument"
+    (fun () ->
+      expect_proven kept;
+      expect_not_proven
+        (Support.apply_edit kept ("-> UInt8\n{", "-> UInt8\n  requires n % 2 == 0\n{"))
+        "prover.requires");
   Harness.test "the contract of a function that can panic is assumed only where it returns"
     (fun () ->
       expect_codes Fixtures.Prover.contract_of_a_function_that_panics_assumed_where_it_panics
