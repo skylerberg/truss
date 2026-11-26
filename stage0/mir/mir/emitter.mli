@@ -47,7 +47,6 @@ val end_loans : t -> int list -> Core.origin -> unit
 type scope
 
 val make_block_scope : unit -> scope
-val run_in_block_scope : t -> scope -> Core.origin -> (unit -> 'a) -> 'a
 val run_in_scope : t -> Core.origin -> (unit -> 'a) -> 'a
 val run_in_statement : t -> Core.origin -> (unit -> 'a) -> 'a
 val run_in_value_scope : t -> Core.origin -> (unit -> Tree.operand option) -> Tree.operand option
