@@ -3266,6 +3266,11 @@ way.
   does not depend on it. A theorem that a law proof calls is therefore
   proven without the laws of that `impl`, and so is a method that the laws
   call.
+- A callee's contract is used whole, with the laws that its own proof
+  assumes. So where the proof of an `impl`'s laws depends on a definition,
+  and that definition calls a generic function at a type whose bound the
+  `impl` satisfies, the call is an error: the laws would be proven from
+  themselves.
 - The proof of an `impl`'s laws, and each of its law proofs, assumes the
   laws of the traits that its trait requires, and never the laws that the
   `impl` proves.

@@ -328,6 +328,9 @@ let () =
   Harness.test "a law is not proven through a generic function named as a value" (fun () ->
       expect_codes Fixtures.Prover.law_proven_through_a_function_value_that_assumes_it
         [ "prover.circular_proof" ]);
+  Harness.test "a law is not proven through a helper whose callee assumes it" (fun () ->
+      expect_codes Fixtures.Prover.law_proven_through_a_helper_whose_callee_assumes_it
+        [ "prover.circular_proof" ]);
   Harness.test "a law is not proven through a derived impl that assumes its argument's laws"
     (fun () ->
       expect_codes Fixtures.Prover.law_proven_through_a_derived_impl_that_assumes_it

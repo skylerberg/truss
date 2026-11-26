@@ -139,7 +139,7 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
     | Constant | Member_constant ->
         Obligations (Translate.translate_constant lookups source ~path:key.path)
     | Impl -> (
-        match Translate.find_circular_laws lookups source ~path:key.path with
+        match Translate.find_circular_proof lookups source ~path:key.path with
         | Some outcome -> Obligations outcome
         | None ->
             let outcomes = translate_impl lookups key source in
@@ -154,7 +154,7 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                 evaluation = None;
               })
     | Law_proof -> (
-        match Translate.find_circular_laws lookups source ~path:key.path with
+        match Translate.find_circular_proof lookups source ~path:key.path with
         | Some outcome -> Obligations outcome
         | None -> Not_proven_here)
     | Type -> (

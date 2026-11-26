@@ -126,16 +126,25 @@ let list_impls_of_required_traits (environment : State.environment) =
            impl.implements)
   | None -> []
 
+let proves_laws (environment : State.environment) =
+  match Interface.Definition.find_interface environment.lookups.interface environment.node with
+  | Some (Interface.Environment.Law_proof_interface _) -> true
+  | Some _ | None ->
+      Option.is_some
+        (Interface.Definition.find_impl_interface environment.lookups.interface environment.node)
+
 let list_circular_laws (frame : State.frame) =
   let lookups : Mir.Call_edges.lookups =
     { interface = frame.environment.lookups.interface; mir = frame.environment.lookups.mir }
   in
   let required = list_impls_of_required_traits frame.environment in
+  let assumes_its_own = proves_laws frame.environment in
   List.filter_map
     (fun (laws : Mir.Call_edges.assumed_laws) ->
       if
         is_in_proof_cycle frame.environment laws.impl
-        && (laws.is_assumed_by_the_callee || not (List.exists (Path.equal laws.impl) required))
+        && (laws.is_assumed_by_the_callee
+           || (assumes_its_own && not (List.exists (Path.equal laws.impl) required)))
       then
         Some
           {
@@ -200,6 +209,10 @@ let list_circular_contracts (frame : State.frame) =
     | circular ->
         let group = frame.environment.lookups.list_proof_group frame.environment.node in
         if List.exists (has_circular_clause lookups group) group then [] else circular
+
+let list_circular_proofs (frame : State.frame) =
+  list_circular_laws frame
+  @ if proves_laws frame.environment then [] else list_circular_contracts frame
 
 let reject_circular_proof frame (circular : circular_proof) =
   Obligations.oblige frame circular.location (Circular_proof circular.proof) (Logic.Boolean false)
