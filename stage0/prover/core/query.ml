@@ -10,6 +10,7 @@ type t = {
   written_quantifiers : unit Tables.Term_table.t;
   mutable quantifier_symbols : Logic.symbol list;
   mutable obligations : Obligation.t list;
+  withheld : Path.t Tables.Symbol_table.t;
   mutable fresh : int;
   fresh_order : int Tables.Symbol_table.t;
 }
@@ -27,6 +28,7 @@ let create () =
     written_quantifiers = Tables.Term_table.create 4;
     quantifier_symbols = [];
     obligations = [];
+    withheld = Tables.Symbol_table.create 4;
     fresh = 0;
     fresh_order = Tables.Symbol_table.create 64;
   }
@@ -218,6 +220,13 @@ let make_obligation query ~condition location obligation goal : Obligation.t =
     has_untriggered_written_fact =
       Logic.has_untriggered_fact pruned
         ~is_counted:(Tables.Term_table.mem query.written_quantifiers);
+    withheld =
+      List.sort_uniq Path.compare
+        (List.filter_map
+           (function
+             | Logic.Function (symbol, _, _) -> Tables.Symbol_table.find_opt query.withheld symbol
+             | Constant _ | Definition _ | Datatype _ -> None)
+           pruned.declarations);
     refutation =
       (match goal with
       | Logic.Boolean false -> None
@@ -225,4 +234,5 @@ let make_obligation query ~condition location obligation goal : Obligation.t =
   }
 
 let add_obligation query obligation = query.obligations <- obligation :: query.obligations
+let note_withheld query symbol callee = Tables.Symbol_table.replace query.withheld symbol callee
 let list_obligations query = List.rev query.obligations

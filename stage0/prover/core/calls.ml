@@ -367,6 +367,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
   let havoc = havoc_mut context frame values ~list_modified in
   let after = havoc.after and changed = List.rev havoc.written in
   let applied, result = make_result after in
+  (match result with
+  | Logic.Apply (symbol, _) when is_unspecified_application ->
+      Query.note_withheld context.query symbol path
+  | _ -> ());
   assume_changed_validity after ~changed ~left_valid:None;
   run_instantiating (fun () ->
       state_axiom after applied;

@@ -214,6 +214,7 @@ type t =
       obligation : obligation;
       failure : failure;
       fixes : fix list;
+      withheld : Path.t list;
       cited : quoted option;
     }
   | Unreadable of { location : location; construct : construct; foreign : Path.t option }

@@ -380,6 +380,7 @@ let list_states posed ~answers ~refutations =
                       obligation = obligation.obligation;
                       failure;
                       fixes = obligation.fixes;
+                      withheld = obligation.withheld;
                       cited =
                         Option.map
                           (fun ((key : Resolve.Names.key), origin) : Catalog.Prover.quoted ->

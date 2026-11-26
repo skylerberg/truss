@@ -3002,6 +3002,17 @@ let expect_a_message_saying ~says diagnostics =
     Harness.fail "no message says %S: %s" says (String.concat "; " messages)
 
 let () =
+  Harness.test "a failed obligation names a call whose contract a specification did not learn"
+    (fun () ->
+      expect_a_message_saying
+        ~says:
+          "`never() == 5 && other == 7` may not hold. A specification learns nothing here from the \
+           contract of `never`, since the call may not return: the function, or code supplied to \
+           it, may run out of memory."
+        (list_diagnostics Fixtures.Prover.specification_naming_a_function_that_aborts);
+      expect_a_message_saying
+        ~says:"the contract of `rendered_length`, since the call may not return"
+        (list_diagnostics Fixtures.Prover.specification_naming_a_generic_function_whose_bound_aborts));
   Harness.test "a loop that calls a function with no cost clause names the function" (fun () ->
       expect_a_message_saying
         ~says:
