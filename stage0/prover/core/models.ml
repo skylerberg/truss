@@ -20,7 +20,7 @@ let run_under_binder :
   in
   (body_frame, body, with_facts)
 
-let make_sequence_length query element term =
+let make_sequence_length element term =
   let symbol =
     Logic.Symbol.Function
       {
@@ -28,8 +28,6 @@ let make_sequence_length query element term =
         type_arguments = [ Types.Type element ];
       }
   in
-  Query.declare query
-    (Logic.Function (symbol, [ Encoding.sort_of (Encoding.make_sequence_type element) ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
 let rec index_sequence (environment : State.environment) query element term index =
@@ -61,7 +59,7 @@ let rec index_sequence (environment : State.environment) query element term inde
                 ( [ (each, Encoding.sort_of sequence); (index, Logic.Int) ],
                   Logic.(
                     less_equal (int 0) position
-                    &&& less position (make_sequence_length query element ranked)
+                    &&& less position (make_sequence_length element ranked)
                     ==> less below (rank environment query sequence ranked)) )
             in
             Query.add_fact query fact);
@@ -156,7 +154,7 @@ let compute_model_function (environment : State.environment) query (ty : Types.t
                 (Logic.forall
                    ( [ (each, Encoding.sort_of ty) ],
                      Logic.equal
-                       (make_sequence_length query element elements)
+                       (make_sequence_length element elements)
                        (substitute_value_term count) )))
       | _ -> ());
       Some (fun term -> Logic.Apply (symbol, [ term ]))
@@ -232,9 +230,7 @@ let make_array_model (context : State.context) (frame : State.frame) (ty : Types
       match find_model context ty term ~element with
       | Some sequence ->
           Facts.assume frame
-            (Logic.equal
-               (make_sequence_length context.query element sequence)
-               (make_value_term frame count));
+            (Logic.equal (make_sequence_length element sequence) (make_value_term frame count));
           sequence
       | None -> Facts.raise_unsupported Whole_definition (Elements_of ty))
   | _ -> Facts.raise_unsupported Whole_definition (Elements_of ty)

@@ -221,7 +221,7 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) (context : State.context) 
   let loop = enter_loop ~holds context frame ~entry clauses ~changed in
   let costs = loop.costs and head = for_loop.bind_parts loop.havocked in
   let before = start head in
-  let iterations = Models.make_sequence_length context.query element_type before in
+  let iterations = Models.make_sequence_length element_type before in
   let head =
     Loop_costs.enter_head context
       { head with visited = Some before }
@@ -252,7 +252,7 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) (context : State.context) 
         Loop_costs.leave_counted context ~clause_at:left_at left_at costs
           ~iterations:(Some (Logic.add iterations (Logic.int 1)))
           ~most
-          ~count:(Models.make_sequence_length context.query element_type through)
+          ~count:(Models.make_sequence_length element_type through)
           ~since:ended_mark)
       breaks
   in
@@ -265,8 +265,7 @@ let declare_visited (frame : State.frame) element =
   let visited =
     Facts.declare_fresh frame "parts" (Encoding.sort_of (Encoding.make_sequence_type element))
   in
-  Facts.assume frame
-    Logic.(greater_equal (Models.make_sequence_length frame.query element visited) (int 0));
+  Facts.assume frame Logic.(greater_equal (Models.make_sequence_length element visited) (int 0));
   visited
 
 let names_visited (clauses : Mir.loop_clause list) =
@@ -279,7 +278,7 @@ let names_visited (clauses : Mir.loop_clause list) =
     clauses
 
 let assume_visited_is_a_prefix (head : State.frame) ~element ~visited ~entry_model ~model =
-  let length = Models.make_sequence_length head.query element in
+  let length = Models.make_sequence_length element in
   let position = Query.make_fresh_name head.query "position" in
   let index = Logic.Symbol position in
   let is_below bound = Logic.(less_equal (int 0) index &&& less index bound) in
@@ -304,7 +303,7 @@ let assume_visited_is_a_prefix (head : State.frame) ~element ~visited ~entry_mod
 
 let oblige_next_gives_the_model (after : State.frame) location ~element ~has_another ~pulled ~model
     ~model_after =
-  let length = Models.make_sequence_length after.query element in
+  let length = Models.make_sequence_length element in
   let position = Query.make_fresh_name after.query "position" in
   let index = Logic.Symbol position in
   match
@@ -390,10 +389,8 @@ let prove_cursor_loop ~(for_loop : for_loop) (context : State.context) (frame : 
       | Some entry, Some [ now ] ->
           Facts.assume head
             Logic.(
-              less_equal
-                (add (Models.make_sequence_length context.query element_type before) now)
-                entry
-              &&& less_equal (Models.make_sequence_length context.query element_type before) entry)
+              less_equal (add (Models.make_sequence_length element_type before) now) entry
+              &&& less_equal (Models.make_sequence_length element_type before) entry)
       | _ -> ());
       (match (entry_model, find_model head) with
       | Some entry_model, Some model ->
@@ -479,8 +476,7 @@ let run_for_loop (context : State.context) (frame : State.frame) (for_loop : for
       Facts.assume head
         Logic.(less_equal (int 0) iterations &&& less_equal iterations (at_least_zero count));
       let before = declare_visited head element in
-      Facts.assume head
-        (Logic.equal (Models.make_sequence_length context.query element before) iterations);
+      Facts.assume head (Logic.equal (Models.make_sequence_length element before) iterations);
       (let position = Query.make_fresh_name context.query "index" in
        match
          if over_positions then None

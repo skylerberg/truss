@@ -258,7 +258,7 @@ let compute_step_amount ?result (context : State.context) (frame : State.frame) 
                       match Well_known.find_builtin_type path with
                       | Some Storage ->
                           count
-                            (Models.make_sequence_length context.query element
+                            (Models.make_sequence_length element
                                (Intrinsics.make_buffer_model Storage element passed.term))
                       | _ -> unknown ())
                   | _ -> unknown ())
@@ -652,9 +652,7 @@ let spend_copy ?literal (context : State.context) (frame : State.frame) ~(declar
             then Costs.least_amount (Metric metric)
             else declare_copy_cost_of metric element
           in
-          Logic.multiply
-            (Models.make_sequence_length context.query element (model_of term))
-            per_element)
+          Logic.multiply (Models.make_sequence_length element (model_of term)) per_element)
         (Potentials.find_buffer context ty)
     in
     Counters.spend_operation context frame

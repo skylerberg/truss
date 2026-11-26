@@ -40,7 +40,12 @@ type application = {
 let declare_function query ~path ~type_arguments ~sorts ~result_type =
   let symbol = Logic.Symbol.Function { callee = path; type_arguments } in
   let result_sort = Encoding.sort_of result_type in
-  Query.declare query (Logic.Function (symbol, sorts, result_sort));
+  (match Signatures.find_signature symbol with
+  | None -> Query.declare query (Logic.Function (symbol, sorts, result_sort))
+  | Some derived ->
+      if derived <> (sorts, result_sort) then
+        Facts.raise_bug "the call of `%s` has another signature than the one derived for it"
+          (Path.show path));
   symbol
 
 let make_numbered_parameters label sorts =

@@ -19,7 +19,7 @@ let assume_extensional (frame : State.frame) (ty : Types.ty) left right =
           Models.index_sequence frame.environment frame.query element right (Logic.Symbol index) )
       with
       | Some at_a, Some at_b ->
-          let length = Models.make_sequence_length frame.query element in
+          let length = Models.make_sequence_length element in
           Facts.add_axiom frame
             Logic.(
               equal (length left) (length right)
@@ -80,7 +80,7 @@ let make_sequence (context : State.context) (frame : State.frame) (ty : Types.ty
       Validity.assume_valid context frame ty literal;
       Facts.assume frame
         (Logic.equal
-           (Models.make_sequence_length context.query element sequence)
+           (Models.make_sequence_length element sequence)
            (Logic.int (List.length values)));
       List.iteri
         (fun index item ->
@@ -221,7 +221,7 @@ let rec make_literal_value (context : State.context) (frame : State.frame) (ty :
       in
       let assume_holds model =
         Query.add_fact context.query
-          (Logic.equal (Models.make_sequence_length context.query element model) (Logic.int count));
+          (Logic.equal (Models.make_sequence_length element model) (Logic.int count));
         List.iteri
           (fun index at_index ->
             match
@@ -403,9 +403,7 @@ let make_text_match (context : State.context) location ty term text =
   match Models.find_model context ty term ~element:byte with
   | Some model ->
       Logic.conjunction
-        (Logic.equal
-           (Models.make_sequence_length context.query byte model)
-           (Logic.int (String.length text))
+        (Logic.equal (Models.make_sequence_length byte model) (Logic.int (String.length text))
         :: List.init (String.length text) (fun index ->
             match
               Models.index_sequence context.environment context.query byte model (Logic.int index)
