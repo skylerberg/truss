@@ -1,0 +1,16 @@
+type Window(span: Range[Int64], label: UInt8)
+  derives Equal
+
+fn same(first: Window, second: Window) -> Bool
+  cost time O(1)
+  cost allocations == 0
+{
+  first == second
+}
+
+fn holds(window: Window, value: Int64) -> Bool
+  cost time O(1)
+  cost allocations == 0
+{
+  !window.span.is_empty() && window.span.contains(value)
+}

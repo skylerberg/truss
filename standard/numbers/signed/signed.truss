@@ -46,6 +46,7 @@ impl Add[Int8] for Int8 {
   fn add_is_defined(self, right: Int8) -> Bool
     ensures result == (Int8.minimum <= self + right && self + right <= Int8.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.add_overflows(self, right: right)
   }
@@ -54,6 +55,7 @@ impl Add[Int8] for Int8 {
     uses Panic unless Int8.minimum <= self + right && self + right <= Int8.maximum
     ensures result == self + right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.add(self, right)
   }
@@ -65,6 +67,7 @@ impl Subtract[Int8] for Int8 {
   fn subtract_is_defined(self, right: Int8) -> Bool
     ensures result == (Int8.minimum <= self - right && self - right <= Int8.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.subtract_overflows(self, right: right)
   }
@@ -73,6 +76,7 @@ impl Subtract[Int8] for Int8 {
     uses Panic unless Int8.minimum <= self - right && self - right <= Int8.maximum
     ensures result == self - right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.subtract(self, right)
   }
@@ -84,6 +88,7 @@ impl Multiply[Int8] for Int8 {
   fn multiply_is_defined(self, right: Int8) -> Bool
     ensures result == (Int8.minimum <= self * right && self * right <= Int8.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.multiply_overflows(self, right: right)
   }
@@ -92,6 +97,7 @@ impl Multiply[Int8] for Int8 {
     uses Panic unless Int8.minimum <= self * right && self * right <= Int8.maximum
     ensures result == self * right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.multiply(self, right)
   }
@@ -103,6 +109,7 @@ impl Divide[Int8] for Int8 {
   fn divide_is_defined(self, right: Int8) -> Bool
     ensures result == (right != 0 && !(self == Int8.minimum && right == -1))
     cost time O(1)
+    cost allocations == 0
   {
     right != 0 && !(self == Int8.minimum && right == -1)
   }
@@ -111,6 +118,7 @@ impl Divide[Int8] for Int8 {
     uses Panic unless right != 0 && !(self == Int8.minimum && right == -1)
     ensures result == self / right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.divide(self, right)
   }
@@ -122,6 +130,7 @@ impl Remainder[Int8] for Int8 {
   fn remainder_is_defined(self, right: Int8) -> Bool
     ensures result == (right != 0 && !(self == Int8.minimum && right == -1))
     cost time O(1)
+    cost allocations == 0
   {
     right != 0 && !(self == Int8.minimum && right == -1)
   }
@@ -130,6 +139,7 @@ impl Remainder[Int8] for Int8 {
     uses Panic unless right != 0 && !(self == Int8.minimum && right == -1)
     ensures result == self % right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.remainder(self, right)
   }
@@ -141,6 +151,7 @@ impl Negate for Int8 {
   fn negate_is_defined(self) -> Bool
     ensures result == (self != Int8.minimum)
     cost time O(1)
+    cost allocations == 0
   {
     self != Int8.minimum
   }
@@ -149,6 +160,7 @@ impl Negate for Int8 {
     uses Panic unless self != Int8.minimum
     ensures result == -self
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.negate(self)
   }
@@ -213,6 +225,7 @@ impl Add[Int16] for Int16 {
   fn add_is_defined(self, right: Int16) -> Bool
     ensures result == (Int16.minimum <= self + right && self + right <= Int16.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.add_overflows(self, right: right)
   }
@@ -221,6 +234,7 @@ impl Add[Int16] for Int16 {
     uses Panic unless Int16.minimum <= self + right && self + right <= Int16.maximum
     ensures result == self + right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.add(self, right)
   }
@@ -232,6 +246,7 @@ impl Subtract[Int16] for Int16 {
   fn subtract_is_defined(self, right: Int16) -> Bool
     ensures result == (Int16.minimum <= self - right && self - right <= Int16.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.subtract_overflows(self, right: right)
   }
@@ -240,6 +255,7 @@ impl Subtract[Int16] for Int16 {
     uses Panic unless Int16.minimum <= self - right && self - right <= Int16.maximum
     ensures result == self - right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.subtract(self, right)
   }
@@ -251,6 +267,7 @@ impl Multiply[Int16] for Int16 {
   fn multiply_is_defined(self, right: Int16) -> Bool
     ensures result == (Int16.minimum <= self * right && self * right <= Int16.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.multiply_overflows(self, right: right)
   }
@@ -259,6 +276,7 @@ impl Multiply[Int16] for Int16 {
     uses Panic unless Int16.minimum <= self * right && self * right <= Int16.maximum
     ensures result == self * right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.multiply(self, right)
   }
@@ -270,6 +288,7 @@ impl Divide[Int16] for Int16 {
   fn divide_is_defined(self, right: Int16) -> Bool
     ensures result == (right != 0 && !(self == Int16.minimum && right == -1))
     cost time O(1)
+    cost allocations == 0
   {
     right != 0 && !(self == Int16.minimum && right == -1)
   }
@@ -278,6 +297,7 @@ impl Divide[Int16] for Int16 {
     uses Panic unless right != 0 && !(self == Int16.minimum && right == -1)
     ensures result == self / right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.divide(self, right)
   }
@@ -289,6 +309,7 @@ impl Remainder[Int16] for Int16 {
   fn remainder_is_defined(self, right: Int16) -> Bool
     ensures result == (right != 0 && !(self == Int16.minimum && right == -1))
     cost time O(1)
+    cost allocations == 0
   {
     right != 0 && !(self == Int16.minimum && right == -1)
   }
@@ -297,6 +318,7 @@ impl Remainder[Int16] for Int16 {
     uses Panic unless right != 0 && !(self == Int16.minimum && right == -1)
     ensures result == self % right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.remainder(self, right)
   }
@@ -308,6 +330,7 @@ impl Negate for Int16 {
   fn negate_is_defined(self) -> Bool
     ensures result == (self != Int16.minimum)
     cost time O(1)
+    cost allocations == 0
   {
     self != Int16.minimum
   }
@@ -316,6 +339,7 @@ impl Negate for Int16 {
     uses Panic unless self != Int16.minimum
     ensures result == -self
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.negate(self)
   }
@@ -380,6 +404,7 @@ impl Add[Int32] for Int32 {
   fn add_is_defined(self, right: Int32) -> Bool
     ensures result == (Int32.minimum <= self + right && self + right <= Int32.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.add_overflows(self, right: right)
   }
@@ -388,6 +413,7 @@ impl Add[Int32] for Int32 {
     uses Panic unless Int32.minimum <= self + right && self + right <= Int32.maximum
     ensures result == self + right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.add(self, right)
   }
@@ -399,6 +425,7 @@ impl Subtract[Int32] for Int32 {
   fn subtract_is_defined(self, right: Int32) -> Bool
     ensures result == (Int32.minimum <= self - right && self - right <= Int32.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.subtract_overflows(self, right: right)
   }
@@ -407,6 +434,7 @@ impl Subtract[Int32] for Int32 {
     uses Panic unless Int32.minimum <= self - right && self - right <= Int32.maximum
     ensures result == self - right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.subtract(self, right)
   }
@@ -418,6 +446,7 @@ impl Multiply[Int32] for Int32 {
   fn multiply_is_defined(self, right: Int32) -> Bool
     ensures result == (Int32.minimum <= self * right && self * right <= Int32.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.multiply_overflows(self, right: right)
   }
@@ -426,6 +455,7 @@ impl Multiply[Int32] for Int32 {
     uses Panic unless Int32.minimum <= self * right && self * right <= Int32.maximum
     ensures result == self * right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.multiply(self, right)
   }
@@ -437,6 +467,7 @@ impl Divide[Int32] for Int32 {
   fn divide_is_defined(self, right: Int32) -> Bool
     ensures result == (right != 0 && !(self == Int32.minimum && right == -1))
     cost time O(1)
+    cost allocations == 0
   {
     right != 0 && !(self == Int32.minimum && right == -1)
   }
@@ -445,6 +476,7 @@ impl Divide[Int32] for Int32 {
     uses Panic unless right != 0 && !(self == Int32.minimum && right == -1)
     ensures result == self / right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.divide(self, right)
   }
@@ -456,6 +488,7 @@ impl Remainder[Int32] for Int32 {
   fn remainder_is_defined(self, right: Int32) -> Bool
     ensures result == (right != 0 && !(self == Int32.minimum && right == -1))
     cost time O(1)
+    cost allocations == 0
   {
     right != 0 && !(self == Int32.minimum && right == -1)
   }
@@ -464,6 +497,7 @@ impl Remainder[Int32] for Int32 {
     uses Panic unless right != 0 && !(self == Int32.minimum && right == -1)
     ensures result == self % right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.remainder(self, right)
   }
@@ -475,6 +509,7 @@ impl Negate for Int32 {
   fn negate_is_defined(self) -> Bool
     ensures result == (self != Int32.minimum)
     cost time O(1)
+    cost allocations == 0
   {
     self != Int32.minimum
   }
@@ -483,6 +518,7 @@ impl Negate for Int32 {
     uses Panic unless self != Int32.minimum
     ensures result == -self
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.negate(self)
   }
@@ -547,6 +583,7 @@ impl Add[Int64] for Int64 {
   fn add_is_defined(self, right: Int64) -> Bool
     ensures result == (Int64.minimum <= self + right && self + right <= Int64.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.add_overflows(self, right: right)
   }
@@ -555,6 +592,7 @@ impl Add[Int64] for Int64 {
     uses Panic unless Int64.minimum <= self + right && self + right <= Int64.maximum
     ensures result == self + right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.add(self, right)
   }
@@ -566,6 +604,7 @@ impl Subtract[Int64] for Int64 {
   fn subtract_is_defined(self, right: Int64) -> Bool
     ensures result == (Int64.minimum <= self - right && self - right <= Int64.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.subtract_overflows(self, right: right)
   }
@@ -574,6 +613,7 @@ impl Subtract[Int64] for Int64 {
     uses Panic unless Int64.minimum <= self - right && self - right <= Int64.maximum
     ensures result == self - right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.subtract(self, right)
   }
@@ -585,6 +625,7 @@ impl Multiply[Int64] for Int64 {
   fn multiply_is_defined(self, right: Int64) -> Bool
     ensures result == (Int64.minimum <= self * right && self * right <= Int64.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.multiply_overflows(self, right: right)
   }
@@ -593,6 +634,7 @@ impl Multiply[Int64] for Int64 {
     uses Panic unless Int64.minimum <= self * right && self * right <= Int64.maximum
     ensures result == self * right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.multiply(self, right)
   }
@@ -604,6 +646,7 @@ impl Divide[Int64] for Int64 {
   fn divide_is_defined(self, right: Int64) -> Bool
     ensures result == (right != 0 && !(self == Int64.minimum && right == -1))
     cost time O(1)
+    cost allocations == 0
   {
     right != 0 && !(self == Int64.minimum && right == -1)
   }
@@ -612,6 +655,7 @@ impl Divide[Int64] for Int64 {
     uses Panic unless right != 0 && !(self == Int64.minimum && right == -1)
     ensures result == self / right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.divide(self, right)
   }
@@ -623,6 +667,7 @@ impl Remainder[Int64] for Int64 {
   fn remainder_is_defined(self, right: Int64) -> Bool
     ensures result == (right != 0 && !(self == Int64.minimum && right == -1))
     cost time O(1)
+    cost allocations == 0
   {
     right != 0 && !(self == Int64.minimum && right == -1)
   }
@@ -631,6 +676,7 @@ impl Remainder[Int64] for Int64 {
     uses Panic unless right != 0 && !(self == Int64.minimum && right == -1)
     ensures result == self % right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.remainder(self, right)
   }
@@ -642,6 +688,7 @@ impl Negate for Int64 {
   fn negate_is_defined(self) -> Bool
     ensures result == (self != Int64.minimum)
     cost time O(1)
+    cost allocations == 0
   {
     self != Int64.minimum
   }
@@ -650,6 +697,7 @@ impl Negate for Int64 {
     uses Panic unless self != Int64.minimum
     ensures result == -self
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.negate(self)
   }
@@ -672,6 +720,7 @@ impl FixedWidthInteger for Int8 {
   fn minimum_value() -> Int8
     ensures result == Int8.minimum
     cost time O(1)
+    cost allocations == 0
   {
     Int8.minimum
   }
@@ -679,6 +728,7 @@ impl FixedWidthInteger for Int8 {
   fn maximum_value() -> Int8
     ensures result == Int8.maximum
     cost time O(1)
+    cost allocations == 0
   {
     Int8.maximum
   }
@@ -686,6 +736,7 @@ impl FixedWidthInteger for Int8 {
   fn bit_width() -> UInt64
     ensures result == Int8.bits
     cost time O(1)
+    cost allocations == 0
   {
     Int8.bits
   }
@@ -695,6 +746,7 @@ impl FixedWidthInteger for Int8 {
   fn to_big_endian_bytes(self) -> Array[UInt8, 1]
     ensures identical(result, self.to_unsigned_bits().to_big_endian_bytes())
     cost time O(1)
+    cost allocations == 0
   {
     self.to_unsigned_bits().to_big_endian_bytes()
   }
@@ -702,6 +754,7 @@ impl FixedWidthInteger for Int8 {
   fn to_little_endian_bytes(self) -> Array[UInt8, 1]
     ensures identical(result, self.to_unsigned_bits().to_little_endian_bytes())
     cost time O(1)
+    cost allocations == 0
   {
     self.to_unsigned_bits().to_little_endian_bytes()
   }
@@ -709,6 +762,7 @@ impl FixedWidthInteger for Int8 {
   fn from_big_endian_bytes(bytes: Array[UInt8, 1]) -> Int8
     ensures result == (UInt8.from_big_endian_bytes(bytes).to_signed_bits())
     cost time O(1)
+    cost allocations == 0
   {
     UInt8.from_big_endian_bytes(bytes).to_signed_bits()
   }
@@ -716,12 +770,14 @@ impl FixedWidthInteger for Int8 {
   fn from_little_endian_bytes(bytes: Array[UInt8, 1]) -> Int8
     ensures result == (UInt8.from_little_endian_bytes(bytes).to_signed_bits())
     cost time O(1)
+    cost allocations == 0
   {
     UInt8.from_little_endian_bytes(bytes).to_signed_bits()
   }
 
   fn reverse_bits(self) -> Int8
     cost time O(1)
+    cost allocations == 0
   {
     self.to_unsigned_bits().reverse_bits().to_signed_bits()
   }
@@ -735,6 +791,7 @@ impl FixedWidthInteger for Int16 {
   fn minimum_value() -> Int16
     ensures result == Int16.minimum
     cost time O(1)
+    cost allocations == 0
   {
     Int16.minimum
   }
@@ -742,6 +799,7 @@ impl FixedWidthInteger for Int16 {
   fn maximum_value() -> Int16
     ensures result == Int16.maximum
     cost time O(1)
+    cost allocations == 0
   {
     Int16.maximum
   }
@@ -749,6 +807,7 @@ impl FixedWidthInteger for Int16 {
   fn bit_width() -> UInt64
     ensures result == Int16.bits
     cost time O(1)
+    cost allocations == 0
   {
     Int16.bits
   }
@@ -758,6 +817,7 @@ impl FixedWidthInteger for Int16 {
   fn to_big_endian_bytes(self) -> Array[UInt8, 2]
     ensures identical(result, self.to_unsigned_bits().to_big_endian_bytes())
     cost time O(1)
+    cost allocations == 0
   {
     self.to_unsigned_bits().to_big_endian_bytes()
   }
@@ -765,6 +825,7 @@ impl FixedWidthInteger for Int16 {
   fn to_little_endian_bytes(self) -> Array[UInt8, 2]
     ensures identical(result, self.to_unsigned_bits().to_little_endian_bytes())
     cost time O(1)
+    cost allocations == 0
   {
     self.to_unsigned_bits().to_little_endian_bytes()
   }
@@ -772,6 +833,7 @@ impl FixedWidthInteger for Int16 {
   fn from_big_endian_bytes(bytes: Array[UInt8, 2]) -> Int16
     ensures result == (UInt16.from_big_endian_bytes(bytes).to_signed_bits())
     cost time O(1)
+    cost allocations == 0
   {
     UInt16.from_big_endian_bytes(bytes).to_signed_bits()
   }
@@ -779,12 +841,14 @@ impl FixedWidthInteger for Int16 {
   fn from_little_endian_bytes(bytes: Array[UInt8, 2]) -> Int16
     ensures result == (UInt16.from_little_endian_bytes(bytes).to_signed_bits())
     cost time O(1)
+    cost allocations == 0
   {
     UInt16.from_little_endian_bytes(bytes).to_signed_bits()
   }
 
   fn reverse_bits(self) -> Int16
     cost time O(1)
+    cost allocations == 0
   {
     self.to_unsigned_bits().reverse_bits().to_signed_bits()
   }
@@ -798,6 +862,7 @@ impl FixedWidthInteger for Int32 {
   fn minimum_value() -> Int32
     ensures result == Int32.minimum
     cost time O(1)
+    cost allocations == 0
   {
     Int32.minimum
   }
@@ -805,6 +870,7 @@ impl FixedWidthInteger for Int32 {
   fn maximum_value() -> Int32
     ensures result == Int32.maximum
     cost time O(1)
+    cost allocations == 0
   {
     Int32.maximum
   }
@@ -812,6 +878,7 @@ impl FixedWidthInteger for Int32 {
   fn bit_width() -> UInt64
     ensures result == Int32.bits
     cost time O(1)
+    cost allocations == 0
   {
     Int32.bits
   }
@@ -821,6 +888,7 @@ impl FixedWidthInteger for Int32 {
   fn to_big_endian_bytes(self) -> Array[UInt8, 4]
     ensures identical(result, self.to_unsigned_bits().to_big_endian_bytes())
     cost time O(1)
+    cost allocations == 0
   {
     self.to_unsigned_bits().to_big_endian_bytes()
   }
@@ -828,6 +896,7 @@ impl FixedWidthInteger for Int32 {
   fn to_little_endian_bytes(self) -> Array[UInt8, 4]
     ensures identical(result, self.to_unsigned_bits().to_little_endian_bytes())
     cost time O(1)
+    cost allocations == 0
   {
     self.to_unsigned_bits().to_little_endian_bytes()
   }
@@ -835,6 +904,7 @@ impl FixedWidthInteger for Int32 {
   fn from_big_endian_bytes(bytes: Array[UInt8, 4]) -> Int32
     ensures result == (UInt32.from_big_endian_bytes(bytes).to_signed_bits())
     cost time O(1)
+    cost allocations == 0
   {
     UInt32.from_big_endian_bytes(bytes).to_signed_bits()
   }
@@ -842,12 +912,14 @@ impl FixedWidthInteger for Int32 {
   fn from_little_endian_bytes(bytes: Array[UInt8, 4]) -> Int32
     ensures result == (UInt32.from_little_endian_bytes(bytes).to_signed_bits())
     cost time O(1)
+    cost allocations == 0
   {
     UInt32.from_little_endian_bytes(bytes).to_signed_bits()
   }
 
   fn reverse_bits(self) -> Int32
     cost time O(1)
+    cost allocations == 0
   {
     self.to_unsigned_bits().reverse_bits().to_signed_bits()
   }
@@ -861,6 +933,7 @@ impl FixedWidthInteger for Int64 {
   fn minimum_value() -> Int64
     ensures result == Int64.minimum
     cost time O(1)
+    cost allocations == 0
   {
     Int64.minimum
   }
@@ -868,6 +941,7 @@ impl FixedWidthInteger for Int64 {
   fn maximum_value() -> Int64
     ensures result == Int64.maximum
     cost time O(1)
+    cost allocations == 0
   {
     Int64.maximum
   }
@@ -875,6 +949,7 @@ impl FixedWidthInteger for Int64 {
   fn bit_width() -> UInt64
     ensures result == Int64.bits
     cost time O(1)
+    cost allocations == 0
   {
     Int64.bits
   }
@@ -884,6 +959,7 @@ impl FixedWidthInteger for Int64 {
   fn to_big_endian_bytes(self) -> Array[UInt8, 8]
     ensures identical(result, self.to_unsigned_bits().to_big_endian_bytes())
     cost time O(1)
+    cost allocations == 0
   {
     self.to_unsigned_bits().to_big_endian_bytes()
   }
@@ -891,6 +967,7 @@ impl FixedWidthInteger for Int64 {
   fn to_little_endian_bytes(self) -> Array[UInt8, 8]
     ensures identical(result, self.to_unsigned_bits().to_little_endian_bytes())
     cost time O(1)
+    cost allocations == 0
   {
     self.to_unsigned_bits().to_little_endian_bytes()
   }
@@ -898,6 +975,7 @@ impl FixedWidthInteger for Int64 {
   fn from_big_endian_bytes(bytes: Array[UInt8, 8]) -> Int64
     ensures result == (UInt64.from_big_endian_bytes(bytes).to_signed_bits())
     cost time O(1)
+    cost allocations == 0
   {
     UInt64.from_big_endian_bytes(bytes).to_signed_bits()
   }
@@ -905,12 +983,14 @@ impl FixedWidthInteger for Int64 {
   fn from_little_endian_bytes(bytes: Array[UInt8, 8]) -> Int64
     ensures result == (UInt64.from_little_endian_bytes(bytes).to_signed_bits())
     cost time O(1)
+    cost allocations == 0
   {
     UInt64.from_little_endian_bytes(bytes).to_signed_bits()
   }
 
   fn reverse_bits(self) -> Int64
     cost time O(1)
+    cost allocations == 0
   {
     self.to_unsigned_bits().reverse_bits().to_signed_bits()
   }

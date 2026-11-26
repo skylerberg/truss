@@ -41,6 +41,7 @@ internal fn Character.scalar_index(self) -> UInt32
   ensures self.code() < 55296 ==> result == self.code()
   ensures self.code() >= 55296 ==> result == self.code() - 2048
   cost time O(1)
+  cost allocations == 0
 {
   if self.code() < 55296 { self.code() } else { self.code() - 2048 }
 }
@@ -49,6 +50,7 @@ internal fn Character.at_scalar_index(index: UInt32) -> Character
   requires index < 1112064
   ensures result.scalar_index() == index
   cost time O(1)
+  cost allocations == 0
 {
   if index < 55296 { intrinsic.convert(index) } else { intrinsic.convert(index + 2048) }
 }
@@ -282,6 +284,7 @@ impl core.Countable for Character {
     ensures (result is None) == (self.scalar_index() == 1112063)
     ensures !(result is Some(next) && next.scalar_index() != self.scalar_index() + 1)
     cost time O(1)
+    cost allocations == 0
   {
     let index = self.scalar_index()
     if index == 1112063 { None } else { Some(Character.at_scalar_index(index + 1)) }
@@ -291,6 +294,7 @@ impl core.Countable for Character {
     ensures (result is None) == (self.scalar_index() == 0)
     ensures !(result is Some(previous) && previous.scalar_index() != self.scalar_index() - 1)
     cost time O(1)
+    cost allocations == 0
   {
     let index = self.scalar_index()
     if index == 0 { None } else { Some(Character.at_scalar_index(index - 1)) }
@@ -300,6 +304,7 @@ impl core.Countable for Character {
     ensures (result is None) == (by > 1112063 - self.scalar_index())
     ensures !(result is Some(value) && value.scalar_index() != self.scalar_index() + by)
     cost time O(1)
+    cost allocations == 0
   {
     let index: UInt64 = intrinsic.convert(self.scalar_index())
     if by > 1112063 - index { None } else { Some(Character.at_scalar_index(intrinsic.convert(index + by))) }
@@ -309,6 +314,7 @@ impl core.Countable for Character {
     ensures (result is None) == (by > self.scalar_index())
     ensures !(result is Some(value) && value.scalar_index() != self.scalar_index() - by)
     cost time O(1)
+    cost allocations == 0
   {
     let index: UInt64 = intrinsic.convert(self.scalar_index())
     if by > index { None } else { Some(Character.at_scalar_index(intrinsic.convert(index - by))) }
@@ -318,6 +324,7 @@ impl core.Countable for Character {
     ensures (result is None) == (other.scalar_index() < self.scalar_index())
     ensures !(result is Some(steps) && steps != other.scalar_index() - self.scalar_index())
     cost time O(1)
+    cost allocations == 0
   {
     let from = self.scalar_index()
     let to = other.scalar_index()

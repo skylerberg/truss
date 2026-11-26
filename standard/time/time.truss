@@ -1467,6 +1467,7 @@ public fn Date.week_of_year(self) -> UInt8
 
 public fn Date.plus_days(self, days: Int32) -> Option[Date]
   cost time O(1)
+  cost allocations == 0
 {
   Some(Date(days_since_epoch: self.days_since_epoch.checked_add(days)?))
 }
@@ -1530,18 +1531,21 @@ impl text.Parse for Date {
 impl core.Countable for Date {
   fn successor(self) -> Option[Date]
     cost time O(1)
+    cost allocations == 0
   {
     self.plus_days(1)
   }
 
   fn predecessor(self) -> Option[Date]
     cost time O(1)
+    cost allocations == 0
   {
     self.plus_days(-1)
   }
 
   fn advanced(self, by: UInt64) -> Option[Date]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self.days_since_epoch + by > Int32.maximum)
     ensures !(result is Some(value) && value.days_since_epoch != self.days_since_epoch + by)
   {
@@ -1553,6 +1557,7 @@ impl core.Countable for Date {
 
   fn retreated(self, by: UInt64) -> Option[Date]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self.days_since_epoch - by < Int32.minimum)
     ensures !(result is Some(value) && value.days_since_epoch != self.days_since_epoch - by)
   {
@@ -1564,6 +1569,7 @@ impl core.Countable for Date {
 
   fn steps_to(self, other: Date) -> Option[UInt64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (other.days_since_epoch < self.days_since_epoch)
     ensures !(result is Some(steps) && steps != other.days_since_epoch - self.days_since_epoch)
   {

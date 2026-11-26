@@ -2,12 +2,16 @@ use standard.core
 
 public fn Range[Value: Ordered].is_empty(self) -> Bool
   ensures result == (if self.inclusive { self.start > self.stop } else { self.start >= self.stop })
+  cost time O(1 + time(Value.compare))
+  cost allocations <= allocations(Value.compare)
 {
   if self.inclusive { self.start > self.stop } else { self.start >= self.stop }
 }
 
 public fn Range[Value: Ordered].contains(self, value: Value) -> Bool
   ensures result == (self.start <= value && (if self.inclusive { value <= self.stop } else { value < self.stop }))
+  cost time O(1 + time(Value.compare))
+  cost allocations <= 2 * allocations(Value.compare)
 {
   self.start <= value && (if self.inclusive { value <= self.stop } else { value < self.stop })
 }
@@ -54,6 +58,8 @@ impl Equal for Range[Value: core.Countable] {
     } else {
       self.start == other.start && self.length() == other.length()
     })
+    cost time O(1 + time(Value.compare) + time(Value.equal))
+    cost allocations <= 4 * allocations(Value.compare) + allocations(Value.equal)
   {
     if self.is_empty() || other.is_empty() {
       self.is_empty() && other.is_empty()
@@ -122,6 +128,7 @@ impl Iterable for Stepped[Value: core.Countable] {
 
 public fn Range[Value: core.Countable].length(self) -> Option[UInt64]
   cost time O(1)
+  cost allocations == 0
 {
   match self.start.steps_to(self.stop) {
     Some(count) => if self.inclusive { count.checked_add(1) } else { Some(count) }

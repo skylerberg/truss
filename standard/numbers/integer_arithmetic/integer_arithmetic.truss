@@ -6,6 +6,7 @@ public let Int8.bits: UInt64 = 8
 impl core.Countable for Int8 {
   fn successor(self) -> Option[Int8]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == Int8.maximum)
     ensures !(result is Some(next) && next != self + 1)
   {
@@ -14,6 +15,7 @@ impl core.Countable for Int8 {
 
   fn predecessor(self) -> Option[Int8]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == Int8.minimum)
     ensures !(result is Some(previous) && previous != self - 1)
   {
@@ -22,6 +24,7 @@ impl core.Countable for Int8 {
 
   fn advanced(self, by: UInt64) -> Option[Int8]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self + by > Int8.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
@@ -39,6 +42,7 @@ impl core.Countable for Int8 {
 
   fn retreated(self, by: UInt64) -> Option[Int8]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self - by < Int8.minimum)
     ensures !(result is Some(value) && value != self - by)
   {
@@ -56,6 +60,7 @@ impl core.Countable for Int8 {
 
   fn steps_to(self, other: Int8) -> Option[UInt64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
   {
@@ -68,6 +73,7 @@ public let Int16.bits: UInt64 = 16
 impl core.Countable for Int16 {
   fn successor(self) -> Option[Int16]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == Int16.maximum)
     ensures !(result is Some(next) && next != self + 1)
   {
@@ -76,6 +82,7 @@ impl core.Countable for Int16 {
 
   fn predecessor(self) -> Option[Int16]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == Int16.minimum)
     ensures !(result is Some(previous) && previous != self - 1)
   {
@@ -84,6 +91,7 @@ impl core.Countable for Int16 {
 
   fn advanced(self, by: UInt64) -> Option[Int16]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self + by > Int16.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
@@ -101,6 +109,7 @@ impl core.Countable for Int16 {
 
   fn retreated(self, by: UInt64) -> Option[Int16]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self - by < Int16.minimum)
     ensures !(result is Some(value) && value != self - by)
   {
@@ -118,6 +127,7 @@ impl core.Countable for Int16 {
 
   fn steps_to(self, other: Int16) -> Option[UInt64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
   {
@@ -130,6 +140,7 @@ public let Int32.bits: UInt64 = 32
 impl core.Countable for Int32 {
   fn successor(self) -> Option[Int32]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == Int32.maximum)
     ensures !(result is Some(next) && next != self + 1)
   {
@@ -138,6 +149,7 @@ impl core.Countable for Int32 {
 
   fn predecessor(self) -> Option[Int32]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == Int32.minimum)
     ensures !(result is Some(previous) && previous != self - 1)
   {
@@ -146,6 +158,7 @@ impl core.Countable for Int32 {
 
   fn advanced(self, by: UInt64) -> Option[Int32]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self + by > Int32.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
@@ -163,6 +176,7 @@ impl core.Countable for Int32 {
 
   fn retreated(self, by: UInt64) -> Option[Int32]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self - by < Int32.minimum)
     ensures !(result is Some(value) && value != self - by)
   {
@@ -180,6 +194,7 @@ impl core.Countable for Int32 {
 
   fn steps_to(self, other: Int32) -> Option[UInt64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
   {
@@ -192,6 +207,7 @@ public let Int64.bits: UInt64 = 64
 impl core.Countable for Int64 {
   fn successor(self) -> Option[Int64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == Int64.maximum)
     ensures !(result is Some(next) && next != self + 1)
   {
@@ -200,6 +216,7 @@ impl core.Countable for Int64 {
 
   fn predecessor(self) -> Option[Int64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == Int64.minimum)
     ensures !(result is Some(previous) && previous != self - 1)
   {
@@ -208,6 +225,7 @@ impl core.Countable for Int64 {
 
   fn advanced(self, by: UInt64) -> Option[Int64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self + by > Int64.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
@@ -225,6 +243,7 @@ impl core.Countable for Int64 {
 
   fn retreated(self, by: UInt64) -> Option[Int64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self - by < Int64.minimum)
     ensures !(result is Some(value) && value != self - by)
   {
@@ -242,6 +261,7 @@ impl core.Countable for Int64 {
 
   fn steps_to(self, other: Int64) -> Option[UInt64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
   {
@@ -254,6 +274,7 @@ public let UInt8.bits: UInt64 = 8
 impl core.Countable for UInt8 {
   fn successor(self) -> Option[UInt8]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == UInt8.maximum)
     ensures !(result is Some(next) && next != self + 1)
   {
@@ -262,6 +283,7 @@ impl core.Countable for UInt8 {
 
   fn predecessor(self) -> Option[UInt8]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == UInt8.minimum)
     ensures !(result is Some(previous) && previous != self - 1)
   {
@@ -270,6 +292,7 @@ impl core.Countable for UInt8 {
 
   fn advanced(self, by: UInt64) -> Option[UInt8]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self + by > UInt8.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
@@ -279,6 +302,7 @@ impl core.Countable for UInt8 {
 
   fn retreated(self, by: UInt64) -> Option[UInt8]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (by > self)
     ensures !(result is Some(value) && value != self - by)
   {
@@ -288,6 +312,7 @@ impl core.Countable for UInt8 {
 
   fn steps_to(self, other: UInt8) -> Option[UInt64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
   {
@@ -300,6 +325,7 @@ public let UInt16.bits: UInt64 = 16
 impl core.Countable for UInt16 {
   fn successor(self) -> Option[UInt16]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == UInt16.maximum)
     ensures !(result is Some(next) && next != self + 1)
   {
@@ -308,6 +334,7 @@ impl core.Countable for UInt16 {
 
   fn predecessor(self) -> Option[UInt16]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == UInt16.minimum)
     ensures !(result is Some(previous) && previous != self - 1)
   {
@@ -316,6 +343,7 @@ impl core.Countable for UInt16 {
 
   fn advanced(self, by: UInt64) -> Option[UInt16]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self + by > UInt16.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
@@ -325,6 +353,7 @@ impl core.Countable for UInt16 {
 
   fn retreated(self, by: UInt64) -> Option[UInt16]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (by > self)
     ensures !(result is Some(value) && value != self - by)
   {
@@ -334,6 +363,7 @@ impl core.Countable for UInt16 {
 
   fn steps_to(self, other: UInt16) -> Option[UInt64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
   {
@@ -346,6 +376,7 @@ public let UInt32.bits: UInt64 = 32
 impl core.Countable for UInt32 {
   fn successor(self) -> Option[UInt32]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == UInt32.maximum)
     ensures !(result is Some(next) && next != self + 1)
   {
@@ -354,6 +385,7 @@ impl core.Countable for UInt32 {
 
   fn predecessor(self) -> Option[UInt32]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == UInt32.minimum)
     ensures !(result is Some(previous) && previous != self - 1)
   {
@@ -362,6 +394,7 @@ impl core.Countable for UInt32 {
 
   fn advanced(self, by: UInt64) -> Option[UInt32]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self + by > UInt32.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
@@ -371,6 +404,7 @@ impl core.Countable for UInt32 {
 
   fn retreated(self, by: UInt64) -> Option[UInt32]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (by > self)
     ensures !(result is Some(value) && value != self - by)
   {
@@ -380,6 +414,7 @@ impl core.Countable for UInt32 {
 
   fn steps_to(self, other: UInt32) -> Option[UInt64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
   {
@@ -392,6 +427,7 @@ public let UInt64.bits: UInt64 = 64
 impl core.Countable for UInt64 {
   fn successor(self) -> Option[UInt64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == UInt64.maximum)
     ensures !(result is Some(next) && next != self + 1)
   {
@@ -400,6 +436,7 @@ impl core.Countable for UInt64 {
 
   fn predecessor(self) -> Option[UInt64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self == UInt64.minimum)
     ensures !(result is Some(previous) && previous != self - 1)
   {
@@ -408,6 +445,7 @@ impl core.Countable for UInt64 {
 
   fn advanced(self, by: UInt64) -> Option[UInt64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (self + by > UInt64.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
@@ -417,6 +455,7 @@ impl core.Countable for UInt64 {
 
   fn retreated(self, by: UInt64) -> Option[UInt64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (by > self)
     ensures !(result is Some(value) && value != self - by)
   {
@@ -425,6 +464,7 @@ impl core.Countable for UInt64 {
 
   fn steps_to(self, other: UInt64) -> Option[UInt64]
     cost time O(1)
+    cost allocations == 0
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
   {
