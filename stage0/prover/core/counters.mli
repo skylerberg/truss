@@ -3,6 +3,7 @@ val lookup_spent : State.frame -> Costs.counter -> Logic.term
 val read_condition : State.context -> Costs.counter -> Types.condition
 val spend : State.context -> State.frame -> (Costs.counter -> Logic.term) -> State.frame
 val declare_unknown_amount : State.context -> State.frame -> Costs.counter -> Logic.term
+val make_potential_credit : State.context -> Logic.term -> Logic.term
 
 val spend_operation :
   State.context ->
