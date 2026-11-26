@@ -568,7 +568,9 @@ let is_abort_site (lookups : lookups) instance (statement : Tree.statement) =
       | Some { target = Indirect called; _ } -> (
           match substitute_type lookups.interface instance (Walk.extract_operand_type called) with
           | Function function_type -> not (Types.states_no_allocation function_type.costs)
-          | _ -> false)
+          | called_type ->
+              Compiler_bug.raise_bug ~stage:"MIR" "a call through a value of type `%s`"
+                (Types.show called_type))
       | Some { target = Trait_method { trait; name; receiver; _ } as target; _ } -> (
           let declaration = Path.Method { owner = trait.trait; name; receiver } in
           match (resolve_callee lookups.interface instance target).target with
