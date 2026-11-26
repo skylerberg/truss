@@ -333,8 +333,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   then
     Obligations.oblige context frame location (May_not_return_under_no_allocation This_lambda)
       (Logic.Boolean false);
-  let called = Facts.declare_fresh context frame "called" Logic.Bool in
-  let inside = { (Facts.restrict frame called) with result = None } in
+  let called, supposed = Facts.suppose context frame "called" in
+  let inside = { supposed with result = None } in
   let start = Query.mark context.query in
   let arguments =
     List.map

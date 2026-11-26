@@ -1,0 +1,20 @@
+fn never(count: UInt64) -> UInt64
+  ensures result == 5
+  ensures result == 6
+{
+  let long = "ab".repeated(9223372036854775807)
+  long.length() + count
+}
+
+fn takes(
+  limit: UInt64,
+  read: (fn(count: UInt64) -> UInt64 requires count <= limit ensures result == 5 ensures result == 6),
+) -> UInt64 {
+  limit
+}
+
+fn passes(limit: UInt64) -> UInt64
+  ensures limit < 18446744073709551615
+{
+  takes(limit, read: never)
+}
