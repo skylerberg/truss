@@ -131,7 +131,7 @@ let make_derived_equal (frame : State.frame) (ty : Types.ty) left right =
                    Logic.(is_variant left &&& is_variant right &&& fields_equal one))
                  variants)
       in
-      Facts.add_axiom frame (Logic.equal equal defined)
+      Facts.define frame equal defined
   | _ -> ());
   equal
 
@@ -263,10 +263,9 @@ let make_power (context : State.context) (frame : State.frame) base exponent =
   (match (base, exponent) with
   | Logic.Integer base_value, Logic.Integer exponent_value
     when Z.sign exponent_value >= 0 && Z.leq exponent_value (Z.of_int 256) ->
-      Facts.add_axiom frame
-        (Logic.equal
-           (Logic.Apply (Logic.Symbol.Integer_power, [ base; exponent ]))
-           (Logic.Integer (Z.pow base_value (Z.to_int exponent_value))))
+      Facts.define frame
+        (Logic.Apply (Logic.Symbol.Integer_power, [ base; exponent ]))
+        (Logic.Integer (Z.pow base_value (Z.to_int exponent_value)))
   | _ -> ());
   Logic.Apply (Logic.Symbol.Integer_power, [ base; exponent ])
 

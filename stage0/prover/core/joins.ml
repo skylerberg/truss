@@ -37,7 +37,7 @@ let name_path_condition (frame : State.frame) condition =
   | _ when (not frame.makes_obligations) || Logic.mentions frame.bound condition -> condition
   | _ ->
       let path = Facts.declare_fresh frame "path" Logic.Bool in
-      Facts.add_axiom frame (Logic.equal path condition);
+      Facts.define frame path condition;
       path
 
 let merge (context : State.context) ?value_type ~condition
@@ -159,7 +159,7 @@ let merge (context : State.context) ?value_type ~condition
         if Logic.mentions first.bound amount then amount
         else
           let symbol = Facts.declare_fresh first "spent" Logic.Int in
-          Facts.add_axiom first (Logic.equal symbol amount);
+          Facts.define first symbol amount;
           symbol)
   in
   let value =

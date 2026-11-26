@@ -6,6 +6,7 @@ val declare : t -> Logic.declaration -> unit
 val find_argument_sorts : t -> Logic.symbol -> Logic.sort list option
 val list_defined_symbols : t -> Logic.symbol list
 val add_fact : t -> Logic.term -> unit
+val define : t -> Logic.term -> Logic.term -> unit
 
 type mark
 

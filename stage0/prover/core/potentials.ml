@@ -195,17 +195,16 @@ and compute_potential (context : State.context) (frame : State.frame) ?(seen = [
                       (Logic.multiply (Logic.int 2) length)
                       (Intrinsics.make_buffer_capacity element term)
                   in
-                  Facts.add_axiom frame
-                    (Logic.equal slack
-                       (Logic.ite (Logic.greater_equal saved (Logic.int 0)) saved (Logic.int 0)))
-              | _, Array -> Facts.add_axiom frame (Logic.equal slack (Logic.int 0))
+                  Facts.define frame slack
+                    (Logic.ite (Logic.greater_equal saved (Logic.int 0)) saved (Logic.int 0))
+              | _, Array -> Facts.define frame slack (Logic.int 0)
               | _ -> ());
               let elements =
                 if has_potential context (find_declared_element declared ~erased:element) then
                   sum_element_potentials context element sequence
                 else Costs.zero
               in
-              Facts.add_axiom frame (Logic.equal held (Logic.add slack elements))
+              Facts.define frame held (Logic.add slack elements)
           | None -> ())
       | _, Some shape -> (
           try
@@ -214,7 +213,7 @@ and compute_potential (context : State.context) (frame : State.frame) ?(seen = [
               choose_by_variant ty term shape
                 (compute_parts_potential context frame ~seen declared term)
             in
-            Facts.add_axiom frame (Logic.equal held (Logic.add declared_potential parts))
+            Facts.define frame held (Logic.add declared_potential parts)
           with Facts.Unsupported _ -> ())
       | _ -> ()
     end;

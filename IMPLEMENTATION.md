@@ -384,9 +384,12 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `Query.t` | The query under construction | Declares a symbol or states a fact where no frame is at hand, such as `Models.make_sequence_length` |
   | `State.context` | The state of each owner and the outcome of the proof | Reads a specification, runs a body, or uses an owner's state |
 
-  `Facts.assume` guards a fact with the path condition of its frame.
-  `Facts.add_axiom` and `Query.add_fact` add a fact with no guard, so
-  each use of them states the definition of a new symbol or an axiom.
+  `Facts.assume` guards a fact with the path condition of its frame. The
+  other three add a fact with no guard. `Facts.define` states that a term
+  equals a value, and a second definition of the term with another value is
+  a compiler bug: two values for one term make the query inconsistent, and
+  every obligation that reaches the term would prove. `Facts.add_axiom` and
+  `Query.add_fact` state an axiom, which has to hold on every path.
 - **Each rule of the prover has one owner module, and each record of its
   state one owner.** `Reader`, `Calls`, `Loops` and `Lambdas` execute the
   MIR and call an owner at each statement, so a new rule edits its owner.

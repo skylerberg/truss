@@ -453,10 +453,9 @@ let make_log (context : State.context) (frame : State.frame) log_argument =
   if not (Logic.mentions frame.bound log_argument) then add log_argument ~halving:true;
   (match log_argument with
   | Logic.Integer limit ->
-      Facts.add_axiom frame
-        (Logic.equal
-           (Logic.Apply (Logic.Symbol.Integer_log, [ log_argument ]))
-           (Logic.int (if Z.sign limit <= 0 then 0 else Z.numbits limit)))
+      Facts.define frame
+        (Logic.Apply (Logic.Symbol.Integer_log, [ log_argument ]))
+        (Logic.int (if Z.sign limit <= 0 then 0 else Z.numbits limit))
   | _ -> ());
   Logic.Apply (Logic.Symbol.Integer_log, [ log_argument ])
 

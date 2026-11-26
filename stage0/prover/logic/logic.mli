@@ -177,4 +177,5 @@ val declare_derived :
   query
 
 val list_conjunct_queries : query -> query list
+val show_term : term -> string
 val show_query : query -> string

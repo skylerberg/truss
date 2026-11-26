@@ -310,7 +310,7 @@ let make_callback_cost (context : State.context) (frame : State.frame) (metric :
       let cost = Logic.Apply (symbol, [ term ]) in
       let least = Costs.least_amount (Metric metric) in
       Facts.add_axiom frame (Logic.less_equal least cost);
-      let state_value value = Facts.add_axiom frame (Logic.equal cost (Logic.larger least value)) in
+      let state_value value = Facts.define frame cost (Logic.larger least value) in
       (match term with
       | Logic.Symbol (Function_value { callee; _ }) ->
           Option.iter state_value

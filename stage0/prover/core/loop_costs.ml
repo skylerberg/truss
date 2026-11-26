@@ -367,8 +367,7 @@ let check_iterations (context : State.context) loop_at (head : State.frame) loop
              else if moves_in_potential () then Potential_without_elements
              else Whole_potential);
           Option.iter
-            (fun gained ->
-              Facts.add_axiom head (Logic.equal gained (cost.measure_gained clause.gain head)))
+            (fun gained -> Facts.define head gained (cost.measure_gained clause.gain head))
             clause.gained_at_head;
           List.iter
             (fun (frame, moment) ->
@@ -414,7 +413,7 @@ let check_iterations (context : State.context) loop_at (head : State.frame) loop
           in
           match find_bounded [] per_iteration.rules with
           | Ok (gain, per, spent, bound) ->
-              Facts.add_axiom head (Logic.equal per bound);
+              Facts.define head per bound;
               (match constant_count with
               | Some (iterations, count)
                 when cost.counter.counting = Units && gain = No_gain && not spends_potential ->
