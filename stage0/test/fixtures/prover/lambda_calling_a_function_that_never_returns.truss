@@ -1,0 +1,31 @@
+fn never_in_range(count: UInt64) -> UInt8
+  ensures result == 300
+{
+  let long = "ab".repeated(9223372036854775807)
+  if long.length() + count == 0 { 0 } else { 1 }
+}
+
+fn applied_in_a_proof(other: UInt64) -> UInt64 {
+  let read = fn(count: UInt64) { never_in_range(count) }
+  proof {
+    assert read(0) == 5 && other == 7
+  }
+  other
+}
+
+fn bounded(limit: UInt64) -> UInt64
+  ensures limit < 5
+{
+  let long = "ab".repeated(9223372036854775807)
+  long.length() + limit
+}
+
+fn holds(read: fn(UInt64) -> UInt64, other: UInt64) -> UInt64 {
+  other
+}
+
+fn never_called(limit: UInt64) -> UInt64
+  ensures limit < 5
+{
+  holds(fn(_) { bounded(limit) }, other: limit)
+}

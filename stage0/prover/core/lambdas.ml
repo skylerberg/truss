@@ -222,6 +222,7 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
         Callbacks.make_input_variables context function_type ~label:"parameter"
           ~numbers:[ List.length frame.bound ]
       in
+      let explored, supposed = Facts.suppose context frame "explored" in
       let defined =
         let mark = Query.mark context.query in
         Counters.run_without_counters context (fun () ->
@@ -239,7 +240,7 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
               match
                 run_lambda_body ~enter context
                   {
-                    frame with
+                    supposed with
                     bound = List.map fst bound @ frame.bound;
                     makes_obligations = false;
                     result = None;
@@ -248,7 +249,7 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
                   ~type_:(compute_returned_type context frame written.code)
               with
               | Some (_, defined) when not (Facts.mentions_fresh_since context mark defined) ->
-                  Some defined
+                  Some (Logic.replace ~from:explored ~into:(Logic.Boolean true) defined)
               | Some _ | None -> None
             with Facts.Unsupported _ -> None)
       in
@@ -323,16 +324,15 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   in
   if List.length written.code.parameters <> List.length function_type.inputs then
     Facts.raise_bug "a lambda whose parameters do not match %s" (Types.show ty);
-  if
-    frame.makes_obligations
-    && Types.states_no_allocation function_type.costs
-    && Mir.Call_edges.body_may_abort
-         { interface = context.lookups.interface; mir = context.lookups.mir }
-         frame.substitution ~lambdas:written.lambdas written.code
-         ~may_abort:context.lookups.may_abort
-  then
+  let may_abort =
+    Mir.Call_edges.body_may_abort
+      { interface = context.lookups.interface; mir = context.lookups.mir }
+      frame.substitution ~lambdas:written.lambdas written.code ~may_abort:context.lookups.may_abort
+  in
+  if frame.makes_obligations && Types.states_no_allocation function_type.costs && may_abort then
     Obligations.oblige context frame location (May_not_return_under_no_allocation This_lambda)
       (Logic.Boolean false);
+  let states_application = Callbacks.is_in_the_logic function_type && not may_abort in
   let called, supposed = Facts.suppose context frame "called" in
   let inside = { supposed with result = None } in
   let start = Query.mark context.query in
@@ -443,7 +443,10 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   let end_ = Query.mark context.query in
   let shown = Query.list_facts_since context.query body in
   let term =
-    match find_lambda_definition context frame function_type written with
+    match
+      if states_application then find_lambda_definition context frame function_type written
+      else None
+    with
     | Some term
       when not
              (frame.makes_obligations
@@ -452,15 +455,16 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         term
     | Some _ | None ->
         let term = Encoding.arrive context frame "lambda" ty in
-        if Callbacks.is_in_the_logic function_type then
+        if states_application then
           add_lambda_facts context frame ~capture_free function_type term ~called ~arguments ~start
             ~end_ ~premises ~shown ~ended:!ended;
         term
   in
-  Option.iter
-    (add_quantified_fact context frame ~capture_free)
-    (Callbacks.find_logic_link context function_type term);
-  if not (Callbacks.is_in_the_logic function_type) then
+  if states_application then
+    Option.iter
+      (add_quantified_fact context frame ~capture_free)
+      (Callbacks.find_logic_link context function_type term)
+  else
     add_lambda_relation context frame ~capture_free function_type term ~called ~arguments ~start
       ~end_ ~premises ~shown ~ended:!ended ~read_exits;
   Counters.note_lambda context frame counters term ~captures:(list_captured_locals written)

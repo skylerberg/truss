@@ -1878,6 +1878,9 @@ let () =
     (fun () ->
       expect_codes Fixtures.Prover.room_built_under_a_cost_clause
         [ "prover.invariant"; "prover.invariant" ]);
+  Harness.test "a lambda whose body may not return gives no fact where it is not called" (fun () ->
+      expect_codes Fixtures.Prover.lambda_calling_a_function_that_never_returns
+        [ "prover.assertion"; "prover.ensures" ]);
   Harness.test "a call that returned from a function that may abort keeps its contract" (fun () ->
       expect_proven Fixtures.Prover.call_that_returned_from_a_function_that_may_abort);
   Harness.test "a specification learns nothing from a generic function whose bound's method aborts"
