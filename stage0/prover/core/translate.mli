@@ -1,3 +1,4 @@
+val merge_outcomes : Obligation.outcome list -> Obligation.outcome
 val find_circular_proof : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome option
 
 val translate_function :

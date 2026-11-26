@@ -133,28 +133,12 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                   })
                 instances
             in
-            Obligations
-              {
-                obligations =
-                  List.concat_map
-                    (fun (outcome : Obligation.outcome) -> outcome.obligations)
-                    outcomes;
-                holes =
-                  List.sort_uniq compare
-                    (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
-                evaluation = None;
-              })
+            Obligations (Translate.merge_outcomes outcomes))
     | (Constant | Member_constant), _ ->
         Obligations (Translate.translate_constant lookups source ~path:key.path)
     | Impl, _ ->
         let outcomes = translate_impl lookups key source in
-        Obligations
-          {
-            obligations =
-              List.concat_map (fun (outcome : Obligation.outcome) -> outcome.obligations) outcomes;
-            holes = List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes;
-            evaluation = None;
-          }
+        Obligations (Translate.merge_outcomes outcomes)
     | Law_proof, _ -> Not_proven_here
     | Type, _ -> (
         let has_defaults () =
