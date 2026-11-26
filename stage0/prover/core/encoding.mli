@@ -5,19 +5,19 @@ val make_selector_symbol : Types.ty -> string option -> string -> 'a Logic.Symbo
 val is_standard_equal : Path.t -> bool
 
 val find_visible_type :
-  State.context -> Types.ty -> (Types.type_interface * Types.substitution) option
+  State.environment -> Types.ty -> (Types.type_interface * Types.substitution) option
 
 val find_constructors :
-  State.context -> Types.ty -> (string option * (string * Types.ty) list) list option
+  State.environment -> Types.ty -> (string option * (string * Types.ty) list) list option
 
 val sort_of : Types.ty -> Logic.sort
 val sequence_path : Path.t
 val make_sequence_type : Types.ty -> Types.ty
 
 val list_constructors :
-  State.context -> Types.ty -> (Logic.symbol * (Logic.symbol * Logic.sort) list) list option
+  State.environment -> Types.ty -> (Logic.symbol * (Logic.symbol * Logic.sort) list) list option
 
-val is_equality_identity : State.context -> ?seen:Types.ty list -> Types.ty -> bool
+val is_equality_identity : State.environment -> ?seen:Types.ty list -> Types.ty -> bool
 val make_in_range : Types.ty -> Logic.term -> Logic.term
 
 val make_in_values :
@@ -25,30 +25,29 @@ val make_in_values :
 
 val count_values : Types.ty -> low:Logic.term -> high:Logic.term -> inclusive:bool -> Logic.term
 val offset_value : Types.ty -> low:Logic.term -> Logic.term -> Logic.term
-val arrive : State.context -> State.frame -> string -> Types.ty -> Logic.term
+val arrive : State.frame -> string -> Types.ty -> Logic.term
 
 val list_definition_bounds :
   Lookups.t -> current:Path.t -> condition:Types.condition -> Interface.Impls.bounds
 
-val substitute_declared_type : State.context -> State.frame -> Types.ty -> Types.ty
-val substitute_type : State.context -> State.frame -> Types.ty -> Types.ty
-val find_local_type : State.context -> State.frame -> Locals.key -> Types.ty option
+val substitute_declared_type : State.frame -> Types.ty -> Types.ty
+val substitute_type : State.frame -> Types.ty -> Types.ty
+val find_local_type : State.frame -> Locals.key -> Types.ty option
 
 val find_impl :
-  State.context -> Types.trait_reference -> Types.ty -> (Path.t * Types.substitution) option
+  State.environment -> Types.trait_reference -> Types.ty -> (Path.t * Types.substitution) option
 
-val select_field : State.context -> Types.ty -> string option -> string -> Logic.term -> Logic.term
+val select_field :
+  State.environment -> Types.ty -> string option -> string -> Logic.term -> Logic.term
 
 val replace_field :
-  State.context -> Types.ty -> string option -> string -> Logic.term -> Logic.term -> Logic.term
+  State.environment -> Types.ty -> string option -> string -> Logic.term -> Logic.term -> Logic.term
 
-val find_root : State.context -> State.frame -> Locals.local -> (Types.ty * Logic.term) option
-
-val find_changed_part :
-  State.context -> State.frame -> State.changed_part -> (Types.ty * Logic.term) option
+val find_root : State.frame -> Locals.local -> (Types.ty * Logic.term) option
+val find_changed_part : State.frame -> State.changed_part -> (Types.ty * Logic.term) option
 
 val replace_part :
-  State.context ->
+  State.environment ->
   Types.ty ->
   Logic.term ->
   string list ->

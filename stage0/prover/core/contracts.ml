@@ -88,11 +88,11 @@ let list_law_holes (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_re
           (list_law_proofs lookups (Path.locate_package impl) trait for_type)
   | None -> []
 
-let find_callee (context : State.context) path : State.known_callee =
-  match Tables.Path_table.find_opt context.callees path with
+let find_callee (environment : State.environment) path : State.known_callee =
+  match Tables.Path_table.find_opt environment.callees path with
   | Some callee -> callee
   | None ->
-      let lookups = context.lookups in
+      let lookups = environment.lookups in
       let callee : State.known_callee =
         {
           known_signature = lazy (Interface.Impls.read_signature lookups.interface path);
@@ -103,20 +103,21 @@ let find_callee (context : State.context) path : State.known_callee =
                  (find_source lookups path));
         }
       in
-      Tables.Path_table.replace context.callees path callee;
+      Tables.Path_table.replace environment.callees path callee;
       callee
 
-let read_signature context path = Lazy.force (find_callee context path).known_signature
+let read_signature (environment : State.environment) path =
+  Lazy.force (find_callee environment path).known_signature
 
-let list_modified_parts context path position =
-  Option.bind (read_signature context path) (fun signature ->
+let list_modified_parts (environment : State.environment) path position =
+  Option.bind (read_signature environment path) (fun signature ->
       Types.list_modified_parts signature position)
 
-let find_callee_clauses context path =
-  Option.bind (Lazy.force (find_callee context path).known_clauses) snd
+let find_callee_clauses (environment : State.environment) path =
+  Option.bind (Lazy.force (find_callee environment path).known_clauses) snd
 
-let make_contract ?trait_clauses context path callee_clauses =
-  let signature = read_signature context path in
+let make_contract ?trait_clauses (environment : State.environment) path callee_clauses =
+  let signature = read_signature environment path in
   let is_logic_function =
     match signature with
     | Some (signature : Types.signature) -> (
@@ -155,20 +156,20 @@ let list_promises (contract : State.contract) =
 let find_declared_clauses lookups path =
   Option.bind (find_source lookups path) (fun (callee, _, _) -> find_clauses lookups path callee)
 
-let find_inherited_clauses (context : State.context) (path : Path.t) =
-  Option.bind (Interface.Impls.find_implemented_method context.lookups.interface path)
+let find_inherited_clauses (environment : State.environment) (path : Path.t) =
+  Option.bind (Interface.Impls.find_implemented_method environment.lookups.interface path)
     (fun (implemented : Interface.Impls.implemented_method) ->
       Option.map
         (fun (clauses : State.clauses) ->
           ({ clauses with inherited = true }, implemented.implementation.substitution))
-        (find_callee_clauses context implemented.declaration))
+        (find_callee_clauses environment implemented.declaration))
 
-let find_function_contract context (path : Path.t) =
+let find_function_contract (environment : State.environment) (path : Path.t) =
   Option.map
     (make_contract
-       ?trait_clauses:(Option.map fst (find_inherited_clauses context path))
-       context path)
-    (find_callee_clauses context path)
+       ?trait_clauses:(Option.map fst (find_inherited_clauses environment path))
+       environment path)
+    (find_callee_clauses environment path)
 
 let find_restated_trait (lookups : Lookups.t) ~self_type (subtrait : Types.trait_reference)
     (restated : Types.restated_method) =
@@ -228,45 +229,45 @@ let list_implemented_traits (lookups : Lookups.t) ~list_bounds (self_type : Type
         (fun (bound : Types.trait_reference) -> is_wanted bound.trait)
         (Interface.Properties.list_known_bounds lookups.interface ~list_bounds self_type)
 
-let list_restated_clauses (context : State.context) ~packages ~self_type
+let list_restated_clauses (environment : State.environment) ~packages ~self_type
     (trait : Types.trait_reference) name receiver =
   let restates_a_method subtrait =
-    match Interface.Definition.find_trait_interface context.lookups.interface subtrait with
+    match Interface.Definition.find_trait_interface environment.lookups.interface subtrait with
     | Some interface -> interface.restated <> []
     | None -> false
   in
   List.filter_map
     (fun (subtrait : Types.trait_reference) ->
-      if restates context.lookups ~self_type subtrait trait ~name ~receiver then
+      if restates environment.lookups ~self_type subtrait trait ~name ~receiver then
         Option.map
           (fun clauses -> (subtrait, clauses))
-          (find_callee_clauses context (Path.Method { owner = subtrait.trait; name; receiver }))
+          (find_callee_clauses environment (Path.Method { owner = subtrait.trait; name; receiver }))
       else None)
     (List.sort_uniq compare
-       (list_implemented_traits context.lookups ~list_bounds:context.bounds self_type ~packages
-          ~is_wanted:restates_a_method))
+       (list_implemented_traits environment.lookups ~list_bounds:environment.bounds self_type
+          ~packages ~is_wanted:restates_a_method))
 
-let find_capability_contract context (capability : Path.t) name =
+let find_capability_contract (environment : State.environment) (capability : Path.t) name =
   let path = Path.make_capability_method capability name in
   Option.map
     (fun callee_clauses ->
-      { (make_contract context path callee_clauses) with is_logic_function = false })
-    (find_callee_clauses context path)
+      { (make_contract environment path callee_clauses) with is_logic_function = false })
+    (find_callee_clauses environment path)
 
-let find_method_contract context (trait : Types.trait_reference) name receiver
-    (evidence : Types.evidence) =
+let find_method_contract (environment : State.environment) (trait : Types.trait_reference) name
+    receiver (evidence : Types.evidence) =
   let declaration = Path.Method { owner = trait.trait; name; receiver } in
   let find_declared_contract path =
     Option.map
       (fun (clauses : State.clauses) ->
-        make_contract context path { clauses with inherited = true })
-      (find_callee_clauses context declaration)
+        make_contract environment path { clauses with inherited = true })
+      (find_callee_clauses environment declaration)
   in
   match evidence with
   | Impl { impl; _ } | Derived_for_view { viewed = impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
-      match Lazy.force (find_callee context path).known_clauses with
-      | Some ((Written _ | Derived _), _) -> find_function_contract context path
+      match Lazy.force (find_callee environment path).known_clauses with
+      | Some ((Written _ | Derived _), _) -> find_function_contract environment path
       | Some (Inherited _, _) | None -> find_declared_contract path)
   | Bound -> find_declared_contract declaration
 

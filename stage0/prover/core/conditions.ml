@@ -21,23 +21,28 @@ let decide (context : State.context) ~substitution (holds_when : Types.condition
   | [] -> Always
   | _ -> (
       match
-        Interface.Impls.decide_condition context.lookups.interface
+        Interface.Impls.decide_condition context.environment.lookups.interface
           ~list_bounds:
-            (Encoding.list_definition_bounds context.lookups ~current:context.current ~condition:[])
+            (Encoding.list_definition_bounds context.environment.lookups
+               ~current:context.environment.current ~condition:[])
           (Types.substitute_condition substitution holds_when)
       with
       | None -> Elsewhere
       | Some [] -> Always
       | Some undecided ->
-          if implies context.lookups ~current:context.current context.condition undecided then
-            In_run undecided
+          if
+            implies context.environment.lookups ~current:context.environment.current
+              context.environment.condition undecided
+          then In_run undecided
           else begin
-            if context.condition = [] && not (List.mem undecided context.skipped_conditions) then
-              context.skipped_conditions <- undecided :: context.skipped_conditions;
+            if
+              context.environment.condition = []
+              && not (List.mem undecided context.skipped_conditions)
+            then context.skipped_conditions <- undecided :: context.skipped_conditions;
             Elsewhere
           end)
 
-let holds_here context ?(substitution = Types.no_substitution) holds_when =
+let holds_here (context : State.context) ?(substitution = Types.no_substitution) holds_when =
   match decide context ~substitution holds_when with
   | Always | In_run _ -> true
   | Elsewhere -> false
@@ -47,7 +52,7 @@ let find_obligation_condition = function
   | In_run undecided -> Some undecided
   | Elsewhere -> None
 
-let keep_holding context ~substitution (clauses : State.clauses) =
+let keep_holding (context : State.context) ~substitution (clauses : State.clauses) =
   let decide holds_when = find_obligation_condition (decide context ~substitution holds_when) in
   let keep (clause : Mir.formula) =
     Option.map (fun holds_when -> { clause with holds_when }) (decide clause.holds_when)

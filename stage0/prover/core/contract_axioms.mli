@@ -12,7 +12,7 @@ type application = {
 }
 
 val declare_function :
-  State.context ->
+  Query.t ->
   path:Path.t ->
   type_arguments:Types.argument list ->
   sorts:Logic.sort list ->

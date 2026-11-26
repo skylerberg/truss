@@ -7,7 +7,7 @@ let lookup_argument_at_index (values : State.passed list) index =
   | Some term -> term
   | None -> Logic.Boolean false
 
-let name_term context ty term =
+let name_term query ty term =
   let rec holds_call = function
     | Logic.Apply ((Logic.Symbol.Function _ | Logic.Symbol.Limited _), _) -> true
     | Logic.Forall (_, _, body) | Logic.Exists (_, body) -> holds_call body
@@ -17,9 +17,9 @@ let name_term context ty term =
   else
     let symbol = Logic.Symbol.Named_term term in
     let named = Logic.Symbol symbol in
-    Facts.run_once context (Value_of symbol) (fun () ->
-        Facts.declare context (Logic.Constant (symbol, Encoding.sort_of ty));
-        Facts.add_fact context (Logic.equal named term));
+    Query.run_once query (Value_of symbol) (fun () ->
+        Query.declare query (Logic.Constant (symbol, Encoding.sort_of ty));
+        Query.add_fact query (Logic.equal named term));
     named
 
 type applied = {
@@ -37,19 +37,20 @@ type havoc = {
 let find_written havoc (passed : State.passed) =
   Option.value (List.assoc_opt passed.position havoc.written) ~default:passed.term
 
-let havoc_mut context (frame : State.frame) (values : State.passed list) ~list_modified =
+let havoc_mut (context : State.context) (frame : State.frame) (values : State.passed list)
+    ~list_modified =
   List.fold_left
     (fun havoc (passed : State.passed) ->
       let frame = havoc.after in
       match (passed.mode, passed.passed_place) with
       | Language.Mode.Mut, Some place ->
-          let arrive ty = Encoding.arrive context frame "changed" ty in
+          let arrive ty = Encoding.arrive frame "changed" ty in
           let changed =
             Option.bind (list_modified passed.position) (fun parts ->
                 List.fold_left
                   (fun whole (part : Types.modified) ->
                     Option.bind whole (fun whole ->
-                        Encoding.replace_part context passed.type_ whole part.field_path
+                        Encoding.replace_part context.environment passed.type_ whole part.field_path
                           (fun part_type before ->
                             if part.is_elements then
                               Intrinsics.replace_elements context frame part_type before
@@ -70,11 +71,11 @@ let havoc_mut context (frame : State.frame) (values : State.passed list) ~list_m
     { after = frame; written = []; end_writes = ignore }
     values
 
-let call_contract context (frame : State.frame) (site : Invocation.site) (callee : Callee.t)
-    (definition : Callee.definition) (contract : State.contract) (values : State.passed list)
-    ~recursive_callee =
+let call_contract (context : State.context) (frame : State.frame) (site : Invocation.site)
+    (callee : Callee.t) (definition : Callee.definition) (contract : State.contract)
+    (values : State.passed list) ~recursive_callee =
   let path = definition.path and type_arguments = definition.type_arguments in
-  let may_abort = Callee.may_abort context definition in
+  let may_abort = Callee.may_abort context.environment definition in
   let is_unspecified_application = may_abort && (frame : State.frame).is_ghost in
   let substitution_of = definition.substitution_of in
   let keep_holding_clauses clauses =
@@ -96,11 +97,11 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
       List.map
         (fun (passed : State.passed) ->
           if passed.mode = Language.Mode.Mut || Logic.mentions frame.bound passed.term then passed
-          else { passed with term = name_term context passed.type_ passed.term })
+          else { passed with term = name_term context.query passed.type_ passed.term })
         values
     else values
   in
-  let location = Facts.locate context frame.source site.origin in
+  let location = Facts.locate frame site.origin in
   let find_argument_at index =
     List.find_map
       (fun (passed : State.passed) -> if passed.position = index then Some passed.term else None)
@@ -119,7 +120,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
   Option.iter
     (fun recursive ->
       Termination.check_recursive_call context frame location ~path callee_clauses
-        ~is_self_call:(Path.equal recursive context.node)
+        ~is_self_call:(Path.equal recursive context.environment.node)
         ~callee_entry:(read_entry_frame frame callee_clauses)
         ~argument_at:(lookup_argument_at_index values))
     recursive_callee;
@@ -186,10 +187,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
   let callee_bindings = list_bindings callee_clauses in
   let callee_arguments = List.filter_map snd callee_bindings in
   let is_on_bound_values = List.exists (Logic.mentions frame.bound) callee_arguments in
-  let declared_result_type = Encoding.substitute_declared_type context frame site.type_ in
+  let declared_result_type = Encoding.substitute_declared_type frame site.type_ in
   let result_type = Types.erase_views declared_result_type in
   let defining_term = ref None in
-  let list_modified = Contracts.list_modified_parts context path in
+  let list_modified = Contracts.list_modified_parts context.environment path in
   let make_result (after : State.frame) =
     let applied =
       if is_logic_call && List.length callee_arguments = List.length callee_bindings then begin
@@ -203,22 +204,23 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
               | None ->
                   Encoding.sort_of
                     (Types.erase_views
-                       ((Interface.Impls.normalize context.lookups.interface
-                           ~list_bounds:context.bounds)
+                       ((Interface.Impls.normalize context.environment.lookups.interface
+                           ~list_bounds:context.environment.bounds)
                           (Types.substitute (substitution_of callee_clauses) parameter.type_))))
             callee_bindings
         in
         let function_symbol =
-          Contract_axioms.declare_function context ~path ~type_arguments ~sorts ~result_type
+          Contract_axioms.declare_function context.query ~path ~type_arguments ~sorts ~result_type
         in
         (match (path, callee_bindings) with
         | Method { owner = Impl { trait; _ } as impl; name; receiver }, [ (self, _) ]
           when self.local = Self
                && Well_known.is_method Model_model (Method { owner = trait.path; name; receiver })
           ->
-            Models.rank_model context
+            Models.rank_model context.environment context.query
               (Types.erase_views
-                 ((Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
+                 ((Interface.Impls.normalize context.environment.lookups.interface
+                     ~list_bounds:context.environment.bounds)
                     (Types.substitute (substitution_of callee_clauses) self.type_)))
               ~model:result_type ~impl function_symbol
         | _ -> ());
@@ -231,7 +233,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
     let result =
       match applied with
       | Some application -> application.term
-      | None -> Encoding.arrive context after "result" result_type
+      | None -> Encoding.arrive after "result" result_type
     in
     if not is_unspecified_application then
       Validity.assume_valid context (Facts.restrict_unless_proven after required) result_type result;
@@ -247,7 +249,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
                 Validity.make_validity context after ~assuming:true
                   ~includes_invariants:(not passed.is_step_self) passed.type_ term
               in
-              Facts.assume context after
+              Facts.assume after
                 (match left_valid with Some left -> Logic.( ==> ) left valid | None -> valid)
           | None -> ())
       values
@@ -280,8 +282,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
   let returns_where_its_condition_holds =
     (not may_abort)
     && not
-         (Conditions.may_panic_for_every_value context.lookups ~current:context.current
-            ~condition:context.condition callee.uses)
+         (Conditions.may_panic_for_every_value context.environment.lookups
+            ~current:context.environment.current ~condition:context.environment.condition
+            callee.uses)
   in
   let state_axiom (after : State.frame) applied =
     if returns_where_its_condition_holds then
@@ -331,8 +334,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
                   | Some application, None ->
                       defining_term := Contract_axioms.find_definition application term
                   | _ -> ());
-                  Facts.assume context after
-                    (Logic.( ==> ) (compute_required base proven_under) term)
+                  Facts.assume after (Logic.( ==> ) (compute_required base proven_under) term)
               | exception Facts.Unsupported _ -> ())
           clauses.ensures)
       (Contracts.list_promises contract)
@@ -412,18 +414,19 @@ type modelled =
   | Without_contract of (State.frame * Logic.term) option
   | Lent_without_contract of applied
 
-let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : Callee.t) ~through
-    (values : State.passed list) =
-  let location = Facts.locate context frame.source site.origin in
-  (match Obligations.find_ruled_out_panic context frame with
+let apply_lend (context : State.context) (frame : State.frame) (site : Invocation.site)
+    (callee : Callee.t) ~through (values : State.passed list) =
+  let location = Facts.locate frame site.origin in
+  (match Obligations.find_ruled_out_panic frame with
   | Some condition
-    when Conditions.may_panic_for_every_value context.lookups ~current:context.current
-           ~condition:context.condition callee.uses ->
+    when Conditions.may_panic_for_every_value context.environment.lookups
+           ~current:context.environment.current ~condition:context.environment.condition callee.uses
+    ->
       Obligations.oblige context frame location
         (Panics_where_ruled_out { call = { at = location; callee = None }; condition })
         (Logic.Boolean false)
   | Some _ | None -> ());
-  let declared_result_type = Encoding.substitute_declared_type context frame site.type_ in
+  let declared_result_type = Encoding.substitute_declared_type frame site.type_ in
   let result_type = Types.erase_views declared_result_type in
   (match callee.target with
   | Intrinsic _ -> ()
@@ -444,7 +447,7 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
         By_contract
           (call_contract ~recursive_callee context frame site callee definition contract values)
     | None -> (
-        let list_modified = Contracts.list_modified_parts context definition.path in
+        let list_modified = Contracts.list_modified_parts context.environment definition.path in
         let havoc_and_spend frame =
           let havoc = havoc_mut context frame values ~list_modified in
           let frame = Amounts.spend_call_without_a_contract context havoc.after callee values in
@@ -457,7 +460,7 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
             Lent_without_contract
               {
                 frame;
-                result = Encoding.arrive context frame "result" result_type;
+                result = Encoding.arrive frame "result" result_type;
                 end_lend =
                   Some
                     (fun ended final ->
@@ -467,7 +470,7 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
               }
         | Some (Read | Own) | None ->
             let frame = havoc_and_spend frame in
-            Without_contract (Some (frame, Encoding.arrive context frame "result" result_type)))
+            Without_contract (Some (frame, Encoding.arrive frame "result" result_type)))
   in
   let modelled =
     match callee.target with
@@ -496,8 +499,8 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
                   Some (frame, Logic.Integer high)
               | Some Fixed_width_integer_bit_width, _, Some (bits, _) -> Some (frame, Logic.int bits)
               | _ -> None)
-        | Some Equal_equal, _, [ left; right ] when Encoding.is_equality_identity context self_type
-          ->
+        | Some Equal_equal, _, [ left; right ]
+          when Encoding.is_equality_identity context.environment self_type ->
             Without_contract (Some (frame, Logic.equal left right))
         | ( Some Equal_equal,
             (Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ }),
@@ -527,12 +530,12 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
         let result =
           if Callbacks.is_in_the_logic function_type then begin
             let term = Callbacks.apply_function function_type called entries in
-            Facts.assume context
+            Facts.assume
               (Facts.restrict_unless_proven frame is_defined)
               (Encoding.make_in_range result_type term);
             term
           end
-          else Encoding.arrive context frame "result" result_type
+          else Encoding.arrive frame "result" result_type
         in
         let is_unspecified_application =
           frame.is_ghost && not (Types.states_no_allocation function_type.costs)
@@ -569,8 +572,7 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
         let changed = List.map (find_written havoc) values in
         let types =
           List.filter_map
-            (function
-              | Types.Type ty -> Some (Encoding.substitute_type context frame ty) | _ -> None)
+            (function Types.Type ty -> Some (Encoding.substitute_type frame ty) | _ -> None)
             type_arguments
         in
         let result =
@@ -593,7 +595,7 @@ let apply_lend context (frame : State.frame) (site : Invocation.site) (callee : 
       Termination.reject_uncompared_recursion context frame location recursive_callee;
       Some applied
 
-let apply_call context frame site callee ~through values =
+let apply_call (context : State.context) frame site callee ~through values =
   Option.map
     (fun { frame; result; _ } -> (frame, result))
     (apply_lend context frame site callee ~through values)

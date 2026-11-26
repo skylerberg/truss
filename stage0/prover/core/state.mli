@@ -37,7 +37,30 @@ type known_function =
     }
   | Own of { name : string; callback : Mir.callback }
 
+type obligation_policy = {
+  panic_condition : Catalog.Prover.quoted list option;
+  keeps_termination : bool;
+  keeps_failures : bool;
+}
+
+type environment = {
+  lookups : Lookups.t;
+  current : Path.t;
+  node : Path.t;
+  home : Resolve.Names.key;
+  condition : Types.condition;
+  bounds : Interface.Impls.bounds;
+  disjoint : (Core.id list * Core.id list) list;
+  inherits_precondition : bool;
+  ranking : bool;
+  policy : obligation_policy;
+  visible_types : (Types.type_interface * Types.substitution) option Tables.Type_table.t;
+  callees : known_callee Tables.Path_table.t;
+}
+
 type frame = {
+  environment : environment;
+  query : Query.t;
   source : source;
   locals : Logic.term Locals.t;
   types : Types.ty Locals.t;
@@ -100,21 +123,6 @@ type call_argument =
       site : Invocation.site;
       lambda : lambda_code;
     }
-
-type stated = Tables.stated =
-  | In_range of Logic.symbol
-  | Field_in_range of Logic.term
-  | Value_of of Logic.symbol
-  | Contract_of of Logic.symbol
-  | Limited_link of Logic.symbol
-  | Exclusive of Logic.symbol
-  | Total_order of Logic.symbol
-  | Array_length of Logic.symbol
-  | Ranked_model of Logic.symbol
-  | Ranked_elements of Types.ty
-  | Range_elements of Types.ty
-  | Non_negative_rank of Types.ty
-  | Method_cost_bound of Logic.symbol
 
 type call_amount = {
   call : Catalog.Prover.quoted;
@@ -181,18 +189,8 @@ type validity_state = {
 
 type callback_state = { mutable named : (Logic.term * (Types.function_type * known_function)) list }
 
-type obligation_policy = {
-  panic_condition : Catalog.Prover.quoted list option;
-  keeps_termination : bool;
-  keeps_failures : bool;
-}
-
 type context = {
-  lookups : Lookups.t;
-  current : Path.t;
-  node : Path.t;
-  visible_types : (Types.type_interface * Types.substitution) option Tables.Type_table.t;
-  callees : known_callee Tables.Path_table.t;
+  environment : environment;
   mutable parameter_names : (Logic.symbol * string) list;
   local_names : string Tables.Local_table.t;
   local_origins : Core.origin Tables.Local_table.t;
@@ -202,11 +200,8 @@ type context = {
   termination : termination_state;
   validity : validity_state;
   callbacks : callback_state;
-  policy : obligation_policy;
-  disjoint : (Core.id list * Core.id list) list;
   mutable indexes : (Core.id * noted_place) list;
   lending : lending_state;
-  home : Resolve.Names.key;
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   cost : cost_state;
   mutable logs : (Logic.term * bool) list;
@@ -215,12 +210,8 @@ type context = {
   models : (Logic.term -> Logic.term) option Tables.Model_table.t;
   mutable equalities : Logic.term list;
   mutable entry : Logic.symbol list;
-  inherits_precondition : bool;
   mutable holes : (Resolve.Names.key * Obligation.location) list;
   mutable unfinished : Logic.term list;
-  ranking : bool;
-  condition : Types.condition;
-  bounds : Interface.Impls.bounds;
   mutable skipped_conditions : Types.condition list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;
   read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;

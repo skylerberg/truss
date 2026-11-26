@@ -1,10 +1,10 @@
-let list_laws (context : State.context) trait =
-  match context.lookups.interface.names.find_key trait with
+let list_laws (environment : State.environment) trait =
+  match environment.lookups.interface.names.find_key trait with
   | Some key ->
-      let source = Contracts.read_source_at_key context.lookups key in
+      let source = Contracts.read_source_at_key environment.lookups key in
       List.map
         (fun (law : Mir.law) -> (source, law))
-        (context.lookups.mir.read_contract_part key).laws
+        (environment.lookups.mir.read_contract_part key).laws
   | None -> []
 
 let list_law_parameter_types ~substitution (law : Mir.law) =
@@ -82,13 +82,17 @@ let assume_laws (context : State.context) frame (trait : Types.trait_reference) 
   List.iter
     (fun (required : Types.trait_reference) ->
       let key = (required, ty) in
-      let impl = Option.map fst (Encoding.find_impl context required ty) in
+      let impl = Option.map fst (Encoding.find_impl context.environment required ty) in
       let is_proven_with_this_proof =
-        match impl with Some impl -> Cycles.is_in_proof_cycle context impl | None -> false
+        match impl with
+        | Some impl -> Cycles.is_in_proof_cycle context.environment impl
+        | None -> false
       in
       if not (is_proven_with_this_proof || List.mem key context.laws_assumed) then begin
         context.laws_assumed <- key :: context.laws_assumed;
-        let substitution = Contracts.make_trait_substitution context.lookups required ty in
+        let substitution =
+          Contracts.make_trait_substitution context.environment.lookups required ty
+        in
         List.iter
           (fun (source, (law : Mir.law)) ->
             match make_law_fact context frame source ~substitution law with
@@ -96,10 +100,11 @@ let assume_laws (context : State.context) frame (trait : Types.trait_reference) 
                 Option.iter
                   (fun impl ->
                     List.iter (Facts.add_hole context)
-                      (Contracts.list_law_holes context.lookups impl required ty law.name))
+                      (Contracts.list_law_holes context.environment.lookups impl required ty
+                         law.name))
                   impl;
-                Facts.add_frame_fact context frame fact_
+                Facts.add_frame_fact frame fact_
             | None -> ())
-          (list_laws context required.trait)
+          (list_laws context.environment required.trait)
       end)
-    (Interface.Properties.list_bound_closure context.lookups.interface ~self:ty trait)
+    (Interface.Properties.list_bound_closure context.environment.lookups.interface ~self:ty trait)

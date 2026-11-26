@@ -1,7 +1,5 @@
 val run_ghost_code : State.context -> State.frame -> Mir.t -> Logic.term
-
-val assume_extensional :
-  State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> unit
+val assume_extensional : State.frame -> Types.ty -> Logic.term -> Logic.term -> unit
 
 val apply_list_literal :
   State.context -> State.frame -> Invocation.site -> Logic.term list -> State.frame * Logic.term

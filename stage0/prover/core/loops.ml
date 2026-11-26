@@ -54,10 +54,10 @@ let find_clause_condition : Mir.loop_clause -> Types.condition = function
   | Decreases [] -> []
   | Cost cost -> cost.holds_when
 
-let keep_holding_clauses context (clauses : Mir.loop_clause list) =
+let keep_holding_clauses (context : State.context) (clauses : Mir.loop_clause list) =
   List.filter (fun clause -> Conditions.holds_here context (find_clause_condition clause)) clauses
 
-let havoc context frame (changed : State.changed_part list) =
+let havoc (frame : State.frame) (changed : State.changed_part list) =
   List.fold_left
     (fun (frame : State.frame) (part : State.changed_part) ->
       let held =
@@ -65,7 +65,7 @@ let havoc context frame (changed : State.changed_part list) =
         | Core_local Self -> Option.map (fun whole -> (frame.self_type, whole)) frame.self
         | root ->
             Option.map
-              (fun whole -> (Encoding.find_local_type context frame root, whole))
+              (fun whole -> (Encoding.find_local_type frame root, whole))
               (Locals.find_opt root frame.locals)
       in
       match held with
@@ -73,8 +73,8 @@ let havoc context frame (changed : State.changed_part list) =
       | Some (None, _) -> Facts.raise_bug "a loop changes a local that has a value and no type"
       | Some (Some ty, whole) -> (
           match
-            Encoding.replace_part context ty whole part.fields (fun part_type _ ->
-                Encoding.arrive context frame "loop" part_type)
+            Encoding.replace_part frame.environment ty whole part.fields (fun part_type _ ->
+                Encoding.arrive frame "loop" part_type)
           with
           | None ->
               Facts.raise_bug "a loop changes a field of `%s`, whose fields the prover cannot see"
@@ -85,10 +85,11 @@ let havoc context frame (changed : State.changed_part list) =
               | root -> { frame with locals = Locals.add root term frame.locals })))
     frame changed
 
-let list_validity_obligations context (entry : State.frame) (changed : State.changed_part list) =
+let list_validity_obligations (context : State.context) (entry : State.frame)
+    (changed : State.changed_part list) =
   List.filter_map
     (fun root ->
-      match Encoding.find_root context entry root with
+      match Encoding.find_root entry root with
       | Some (ty, before) -> (
           match Validity.make_validity context entry ~assuming:false ~deep:true ty before with
           | Logic.Boolean true -> None
@@ -97,22 +98,22 @@ let list_validity_obligations context (entry : State.frame) (changed : State.cha
                 ( Facts.describe_local context entry root,
                   ty,
                   valid,
-                  fun (at : State.frame) -> Option.map snd (Encoding.find_root context at root) ))
+                  fun (at : State.frame) -> Option.map snd (Encoding.find_root at root) ))
       | None -> None)
     (List.sort_uniq compare (List.map (fun (part : State.changed_part) -> part.root) changed))
 
-let assume_preserved_validity context head preserved =
+let assume_preserved_validity (context : State.context) head preserved =
   List.iter
     (fun (_, ty, valid_on_entry, read) ->
       match read head with
       | Some term ->
-          Facts.assume context head
+          Facts.assume head
             (Logic.( ==> ) valid_on_entry
                (Validity.make_validity context head ~assuming:true ~deep:true ty term))
       | None -> ())
     preserved
 
-let check_preserved_validity context end_ location preserved =
+let check_preserved_validity (context : State.context) end_ location preserved =
   List.iter
     (fun (described, ty, valid_on_entry, read) ->
       match read end_ with
@@ -124,7 +125,7 @@ let check_preserved_validity context end_ location preserved =
       | None -> ())
     preserved
 
-let check_loop_clauses context frame clauses ~moment =
+let check_loop_clauses (context : State.context) frame clauses ~moment =
   List.iter
     (fun (clause : Mir.loop_clause) ->
       match clause with
@@ -133,7 +134,7 @@ let check_loop_clauses context frame clauses ~moment =
             Validity.read_specification ~holds_when:invariant.holds_when context frame invariant
           in
           Obligations.oblige ~holds_when:invariant.holds_when context frame
-            (Facts.locate context frame.source invariant.origin)
+            (Facts.locate frame invariant.origin)
             (Loop_invariant { clause = Facts.quote frame.source invariant.origin; moment })
             term
       | Decreases measures ->
@@ -144,32 +145,33 @@ let check_loop_clauses context frame clauses ~moment =
       | Cost _ -> ())
     clauses
 
-let assume_invariants context frame clauses =
+let assume_invariants (context : State.context) frame clauses =
   List.iter
     (fun (invariant : Mir.formula) ->
       let _, term =
         Validity.read_specification context { frame with makes_obligations = false } invariant
       in
-      Facts.assume context frame term)
+      Facts.assume frame term)
     (Validity.list_invariants clauses)
 
-let enter_loop ?holds context frame ~entry clauses ~changed =
+let enter_loop ?holds (context : State.context) frame ~entry clauses ~changed =
   let holds = Option.value holds ~default:changed in
   let costs = Loop_costs.enter context frame ~entry clauses ~holds ~changed in
   let preserved = list_validity_obligations context frame changed in
-  let head = havoc context frame changed in
+  let head = havoc frame changed in
   assume_preserved_validity context head preserved;
   { costs; preserved; havocked = head }
 
 let end_scope ~(outer : State.frame) (frame : State.frame) =
   { frame with locals = Locals.filter (fun id _ -> Locals.mem id outer.locals) frame.locals }
 
-let leave_loop context frame frames =
+let leave_loop (context : State.context) frame frames =
   Option.map (end_scope ~outer:frame) (Joins.join_frames context frames)
 
-let end_iterations context (frame : State.frame) loop_at clauses measure (start : loop_start) ~head
-    ~(inside : State.frame) ~iterations ~iteration_bounds ~ends ~breaks ~with_through =
-  let location = Facts.locate context frame.source loop_at in
+let end_iterations (context : State.context) (frame : State.frame) loop_at clauses measure
+    (start : loop_start) ~head ~(inside : State.frame) ~iterations ~iteration_bounds ~ends ~breaks
+    ~with_through =
+  let location = Facts.locate frame loop_at in
   Loop_costs.check_iterations context loop_at head start.costs ~iterations ~iteration_bounds ~inside
     ~ends:(List.map with_through ends) ~breaks:(List.map with_through breaks);
   List.iter
@@ -180,12 +182,12 @@ let end_iterations context (frame : State.frame) loop_at clauses measure (start 
       Termination.check_loop_measure context through location measure)
     ends
 
-let declare_elements_so_far context (head : State.frame) ~element ~collection ~count visited
-    find_element_at =
-  let symbol = Facts.make_fresh_name context "position" in
+let declare_elements_so_far (context : State.context) (head : State.frame) ~element ~collection
+    ~count visited find_element_at =
+  let symbol = Query.make_fresh_name context.query "position" in
   let position = Logic.Symbol symbol in
   let premise = Logic.(less_equal (int 0) position &&& less position count) in
-  (match Models.index_sequence context element visited position with
+  (match Models.index_sequence context.environment context.query element visited position with
   | Some earlier ->
       let _, same, with_facts =
         Models.run_under_binder context
@@ -195,7 +197,7 @@ let declare_elements_so_far context (head : State.frame) ~element ~collection ~c
       in
       Option.iter
         (fun same ->
-          Facts.assume context head
+          Facts.assume head
             (with_facts (Logic.forall ([ (symbol, Logic.Int) ], Logic.( ==> ) premise same))))
         same
   | None -> ());
@@ -203,23 +205,23 @@ let declare_elements_so_far context (head : State.frame) ~element ~collection ~c
   | Some read ->
       let collection_type, collected = read head in
       Option.iter
-        (Values.assume_extensional context head (Encoding.make_sequence_type element) visited)
+        (Values.assume_extensional head (Encoding.make_sequence_type element) visited)
         (Models.find_model context
-           (Encoding.substitute_type context head collection_type)
+           (Encoding.substitute_type head collection_type)
            collected ~element)
   | None -> ()
 
-let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_type ~changed ~holds
-    ~start ~receive =
+let prove_receiving_loop ~most ~(for_loop : for_loop) (context : State.context) frame ~element_type
+    ~changed ~holds ~start ~receive =
   let clauses = for_loop.for_clauses in
   let entry =
-    { frame with State.visited = Some (Intrinsics.make_empty_sequence context frame element_type) }
+    { frame with State.visited = Some (Intrinsics.make_empty_sequence frame element_type) }
   in
   check_loop_clauses context entry clauses ~moment:On_entry;
   let loop = enter_loop ~holds context frame ~entry clauses ~changed in
   let costs = loop.costs and head = for_loop.bind_parts loop.havocked in
   let before = start head in
-  let iterations = Models.make_sequence_length context element_type before in
+  let iterations = Models.make_sequence_length context.query element_type before in
   let head =
     Loop_costs.enter_head context
       { head with visited = Some before }
@@ -250,7 +252,7 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_typ
         Loop_costs.leave_counted context ~clause_at:left_at left_at costs
           ~iterations:(Some (Logic.add iterations (Logic.int 1)))
           ~most
-          ~count:(Models.make_sequence_length context element_type through)
+          ~count:(Models.make_sequence_length context.query element_type through)
           ~since:ended_mark)
       breaks
   in
@@ -259,13 +261,12 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_typ
        (fun (exit_frame : State.frame) -> { exit_frame with visited = frame.visited })
        (exit_ :: left))
 
-let declare_visited context frame element =
+let declare_visited (frame : State.frame) element =
   let visited =
-    Facts.declare_fresh context frame "parts"
-      (Encoding.sort_of (Encoding.make_sequence_type element))
+    Facts.declare_fresh frame "parts" (Encoding.sort_of (Encoding.make_sequence_type element))
   in
-  Facts.assume context frame
-    Logic.(greater_equal (Models.make_sequence_length context element visited) (int 0));
+  Facts.assume frame
+    Logic.(greater_equal (Models.make_sequence_length frame.query element visited) (int 0));
   visited
 
 let names_visited (clauses : Mir.loop_clause list) =
@@ -277,19 +278,20 @@ let names_visited (clauses : Mir.loop_clause list) =
           Contracts.mentions_visited bound)
     clauses
 
-let assume_visited_is_a_prefix context (head : State.frame) ~element ~visited ~entry_model ~model =
-  let length = Models.make_sequence_length context element in
-  let position = Facts.make_fresh_name context "position" in
+let assume_visited_is_a_prefix (head : State.frame) ~element ~visited ~entry_model ~model =
+  let length = Models.make_sequence_length head.query element in
+  let position = Query.make_fresh_name head.query "position" in
   let index = Logic.Symbol position in
   let is_below bound = Logic.(less_equal (int 0) index &&& less index bound) in
   match
-    ( Models.index_sequence context element visited index,
-      Models.index_sequence context element entry_model index,
-      Models.index_sequence context element model index,
-      Models.index_sequence context element entry_model (Logic.add (length visited) index) )
+    ( Models.index_sequence head.environment head.query element visited index,
+      Models.index_sequence head.environment head.query element entry_model index,
+      Models.index_sequence head.environment head.query element model index,
+      Models.index_sequence head.environment head.query element entry_model
+        (Logic.add (length visited) index) )
   with
   | Some visited_value, Some entry_value, Some remaining_value, Some entry_value_ahead ->
-      Facts.assume context head
+      Facts.assume head
         Logic.(
           equal (add (length visited) (length model)) (length entry_model)
           &&& forall
@@ -297,20 +299,19 @@ let assume_visited_is_a_prefix context (head : State.frame) ~element ~visited ~e
           &&& forall
                 ( [ (position, Int) ],
                   is_below (length model) ==> equal remaining_value entry_value_ahead ));
-      Values.assume_extensional context head
-        (Encoding.make_sequence_type element)
-        visited entry_model
+      Values.assume_extensional head (Encoding.make_sequence_type element) visited entry_model
   | _ -> ()
 
-let oblige_next_gives_the_model context (after : State.frame) location ~element ~has_another ~pulled
-    ~model ~model_after =
-  let length = Models.make_sequence_length context element in
-  let position = Facts.make_fresh_name context "position" in
+let oblige_next_gives_the_model (context : State.context) (after : State.frame) location ~element
+    ~has_another ~pulled ~model ~model_after =
+  let length = Models.make_sequence_length context.query element in
+  let position = Query.make_fresh_name context.query "position" in
   let index = Logic.Symbol position in
   match
-    ( Models.index_sequence context element model (Logic.int 0),
-      Models.index_sequence context element model_after index,
-      Models.index_sequence context element model (Logic.add index (Logic.int 1)) )
+    ( Models.index_sequence context.environment context.query element model (Logic.int 0),
+      Models.index_sequence context.environment context.query element model_after index,
+      Models.index_sequence context.environment context.query element model
+        (Logic.add index (Logic.int 1)) )
   with
   | Some first, Some value_after, Some value_ahead ->
       Obligations.oblige context after location Visited_out_of_order
@@ -327,16 +328,16 @@ let oblige_next_gives_the_model context (after : State.frame) location ~element 
           &&& (not_ has_another ==> equal (length model) (int 0)))
   | _ -> ()
 
-let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
+let prove_cursor_loop ~(for_loop : for_loop) (context : State.context) (frame : State.frame)
     (cursor_access : State.passed_place) (next : Callee.t) ~cursor_type ~next_origin =
-  let location = Facts.locate context frame.source for_loop.for_at in
+  let location = Facts.locate frame for_loop.for_at in
   let clauses = for_loop.for_clauses in
   ignore (cursor_access.read frame);
-  let element_type = Encoding.substitute_type context frame for_loop.element_type in
+  let element_type = Encoding.substitute_type frame for_loop.element_type in
   let find_model (at : State.frame) =
     if names_visited clauses then
       Models.find_model context
-        (Encoding.substitute_type context frame cursor_type)
+        (Encoding.substitute_type frame cursor_type)
         (cursor_access.read at) ~element:element_type
     else None
   in
@@ -384,18 +385,19 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     ~changed:(for_loop.compute_changed_in frame)
     ~holds ~most:(Option.to_list entry_measure)
     ~start:(fun head ->
-      let before = declare_visited context head element_type in
+      let before = declare_visited head element_type in
       (match (entry_measure, find_measured head) with
       | Some entry, Some [ now ] ->
-          Facts.assume context head
+          Facts.assume head
             Logic.(
-              less_equal (add (Models.make_sequence_length context element_type before) now) entry
-              &&& less_equal (Models.make_sequence_length context element_type before) entry)
+              less_equal
+                (add (Models.make_sequence_length context.query element_type before) now)
+                entry
+              &&& less_equal (Models.make_sequence_length context.query element_type before) entry)
       | _ -> ());
       (match (entry_model, find_model head) with
       | Some entry_model, Some model ->
-          assume_visited_is_a_prefix context head ~element:element_type ~visited:before ~entry_model
-            ~model
+          assume_visited_is_a_prefix head ~element:element_type ~visited:before ~entry_model ~model
       | _ -> ());
       before)
     ~receive:(fun head before ->
@@ -438,7 +440,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       {
         has_another;
         element;
-        through = Intrinsics.append_element context inside element_type before element;
+        through = Intrinsics.append_element inside element_type before element;
         advance =
           (fun (frame : State.frame) ->
             let now = cursor_access.read after in
@@ -447,12 +449,12 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
             { advanced with spent = after.spent });
       })
 
-let run_for_loop context frame (for_loop : for_loop) =
+let run_for_loop (context : State.context) frame (for_loop : for_loop) =
   let clauses = for_loop.for_clauses in
   match for_loop.iterable with
   | Over_range { low; high; inclusive } ->
       let element =
-        Encoding.substitute_type context frame
+        Encoding.substitute_type frame
           (Option.value for_loop.lent_element ~default:for_loop.element_type)
       in
       let over_positions = Option.is_some for_loop.lent_element in
@@ -466,7 +468,7 @@ let run_for_loop context frame (for_loop : for_loop) =
       let bind_at_index (exit_frame : State.frame) next = for_loop.bind_element exit_frame next in
       let entry =
         bind_at_index
-          { frame with visited = Some (Intrinsics.make_empty_sequence context frame element) }
+          { frame with visited = Some (Intrinsics.make_empty_sequence frame element) }
           low
       in
       check_loop_clauses context entry clauses ~moment:On_entry;
@@ -475,19 +477,21 @@ let run_for_loop context frame (for_loop : for_loop) =
       in
       let costs = start.costs and head = for_loop.bind_parts start.havocked in
       let count = Logic.normalize_linear (Encoding.count_values ranged ~low ~high ~inclusive) in
-      let iterations = Facts.declare_fresh context head "iterations" Logic.Int in
-      Facts.assume context head
+      let iterations = Facts.declare_fresh head "iterations" Logic.Int in
+      Facts.assume head
         Logic.(less_equal (int 0) iterations &&& less_equal iterations (at_least_zero count));
-      let before = declare_visited context head element in
-      Facts.assume context head
-        (Logic.equal (Models.make_sequence_length context element before) iterations);
-      (let position = Facts.make_fresh_name context "index" in
+      let before = declare_visited head element in
+      Facts.assume head
+        (Logic.equal (Models.make_sequence_length context.query element before) iterations);
+      (let position = Query.make_fresh_name context.query "index" in
        match
          if over_positions then None
-         else Models.index_sequence context element before (Logic.Symbol position)
+         else
+           Models.index_sequence context.environment context.query element before
+             (Logic.Symbol position)
        with
        | Some visited_index ->
-           Facts.assume context head
+           Facts.assume head
              (Logic.forall
                 ( [ (position, Logic.Int) ],
                   Logic.(
@@ -511,15 +515,14 @@ let run_for_loop context frame (for_loop : for_loop) =
       let find_kept_count (at : State.frame) =
         Option.map (fun count_of -> Logic.equal (count_of at) high) for_loop.invariant_count
       in
-      Option.iter (Facts.assume context head)
-        (find_kept_count { head with makes_obligations = false });
+      Option.iter (Facts.assume head) (find_kept_count { head with makes_obligations = false });
       let inside = Facts.restrict head (Logic.less iterations count) in
       let through =
-        Intrinsics.append_element context inside element before
+        Intrinsics.append_element inside element before
           (if over_positions then
              match find_element_at { inside with makes_obligations = false } index with
              | Some lent -> lent
-             | None -> Encoding.arrive context inside "element" element
+             | None -> Encoding.arrive inside "element" element
            else index)
       in
       let inside = { inside with visited = outer_visited } in
@@ -538,7 +541,7 @@ let run_for_loop context frame (for_loop : for_loop) =
         (fun (end_ : State.frame) ->
           Option.iter
             (Obligations.oblige context end_
-               (Facts.locate context frame.source for_loop.for_at)
+               (Facts.locate frame for_loop.for_at)
                Element_count_changes)
             (find_kept_count end_))
         ends;
@@ -564,12 +567,12 @@ let run_for_loop context frame (for_loop : for_loop) =
   | Over_cursor { cursor; cursor_type; next; next_origin } ->
       prove_cursor_loop ~for_loop context frame cursor next ~cursor_type ~next_origin
 
-let run_while_loop context (frame : State.frame) (loop : while_loop) =
+let run_while_loop (context : State.context) (frame : State.frame) (loop : while_loop) =
   let clauses = loop.while_clauses in
   check_loop_clauses context frame clauses ~moment:On_entry;
   let start = enter_loop context frame ~entry:frame clauses ~changed:loop.changed in
   let costs = start.costs and head = loop.bind_parts start.havocked in
-  let iterations = Loop_costs.declare_iterations context head costs in
+  let iterations = Loop_costs.declare_iterations head costs in
   let head = Loop_costs.enter_head context head costs ~iterations in
   assume_invariants context head clauses;
   let tested = loop.test head in
@@ -599,8 +602,8 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
         iterations )
     with
     | Some ([ at_head ], [ on_entry ]), Some iterations ->
-        let last = Facts.declare_fresh context head "last" Logic.Int in
-        Facts.assume context head
+        let last = Facts.declare_fresh head "last" Logic.Int in
+        Facts.assume head
           Logic.(
             equal iterations (int 0)
             ==> less_equal at_head on_entry

@@ -1,10 +1,10 @@
-val declare_bounded_amount : State.context -> State.frame -> Logic.term -> Logic.term
+val declare_bounded_amount : State.frame -> Logic.term -> Logic.term
 
 val make_callback_cost :
   State.context -> State.frame -> Language.Metric.t -> Types.ty -> Logic.term -> Logic.term
 
 val compute_construction_amount :
-  State.context -> State.frame -> Types.ty -> string option -> Costs.counter -> Logic.term
+  State.frame -> Types.ty -> string option -> Costs.counter -> Logic.term
 
 val compute_method_cost :
   State.context -> State.frame -> Language.Metric.t -> Callee.t -> Logic.term

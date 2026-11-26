@@ -16,7 +16,7 @@ val check_defined :
   State.context -> State.frame -> holds_when:Types.condition -> Mir.formula -> unit
 
 val make_type_frame :
-  State.context -> State.frame -> State.source -> Types.ty -> self:Logic.term option -> State.frame
+  State.frame -> State.source -> Types.ty -> self:Logic.term option -> State.frame
 
 val find_type_source : State.context -> Types.ty -> State.source option
 val find_type_clauses : State.context -> Types.ty -> (State.source * Mir.type_clauses) option

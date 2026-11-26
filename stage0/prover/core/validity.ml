@@ -42,7 +42,7 @@ let read_innermost selection =
 
 let note_place (context : State.context) (frame : State.frame) ~node ~origin value =
   let mentions (first, second) = List.mem node first || List.mem node second in
-  if Facts.is_home context frame.source && List.exists mentions context.disjoint then begin
+  if Facts.is_home frame && List.exists mentions context.environment.disjoint then begin
     context.indexes <- (node, { State.origin; value }) :: context.indexes;
     let quote selection =
       Facts.quote frame.source (List.assoc (read_innermost selection) context.indexes).origin
@@ -67,12 +67,11 @@ let note_place (context : State.context) (frame : State.frame) ~node ~origin val
                         Logic.less_equal other_stop other_start;
                       ]
               in
-              Obligations.oblige context frame
-                (Facts.locate context frame.source origin)
+              Obligations.oblige context frame (Facts.locate frame origin)
                 (May_alias { first = quote first; second = quote second })
                 apart
           | _ -> ())
-      context.disjoint
+      context.environment.disjoint
   end
 
 let run_as_specification (context : State.context) (frame : State.frame) read =
@@ -97,12 +96,12 @@ let read_specification ?holds_when (context : State.context) (frame : State.fram
     },
     term )
 
-let check_defined context frame ~holds_when (formula : Mir.formula) =
+let check_defined (context : State.context) frame ~holds_when (formula : Mir.formula) =
   ignore (read_specification ~holds_when context frame formula)
 
-let make_type_frame context frame source (ty : Types.ty) ~self =
+let make_type_frame (frame : State.frame) source (ty : Types.ty) ~self =
   let substitution =
-    match Encoding.find_visible_type context ty with
+    match Encoding.find_visible_type frame.environment ty with
     | Some (_, substitution) -> substitution
     | None -> Types.no_substitution
   in
@@ -127,58 +126,60 @@ let find_type_declaration (context : State.context) (ty : Types.ty) =
       | Some declaration -> declaration
       | None ->
           let declaration =
-            if Resolve.Names.find_kind context.lookups.interface.names path = Some Type then
+            if Resolve.Names.find_kind context.environment.lookups.interface.names path = Some Type
+            then
               Option.map
                 (fun (source, _, _) ->
                   ( source,
                     lazy
                       (Option.map
                          (fun ({ form; _ } : Mir.type_clauses Mir.sourced) -> form)
-                         (Mir.read_type_clauses context.lookups.mir path)) ))
-                (Contracts.find_source context.lookups path)
+                         (Mir.read_type_clauses context.environment.lookups.mir path)) ))
+                (Contracts.find_source context.environment.lookups path)
             else None
           in
           Tables.Path_table.replace context.validity.type_clauses path declaration;
           declaration)
   | _ -> None
 
-let find_type_source context ty = Option.map fst (find_type_declaration context ty)
+let find_type_source (context : State.context) ty =
+  Option.map fst (find_type_declaration context ty)
 
-let find_type_clauses context ty =
+let find_type_clauses (context : State.context) ty =
   Option.bind (find_type_declaration context ty) (fun (source, clauses) ->
       Option.map (fun clauses -> (source, clauses)) (Lazy.force clauses))
 
 let list_invariants (clauses : Mir.loop_clause list) =
   List.filter_map (function Mir.Invariant value -> Some value | _ -> None) clauses
 
-let find_invariants context (ty : Types.ty) =
+let find_invariants (context : State.context) (ty : Types.ty) =
   match find_type_clauses context ty with
   | Some (source, { invariants = _ :: _ as invariants; _ }) ->
       Some (source, List.map (fun (invariant : Mir.requirement) -> invariant.clause) invariants)
   | _ -> None
 
-let find_module (context : State.context) path =
+let find_module (environment : State.environment) path =
   Option.map
     (fun (key : Resolve.Names.key) -> key.module_)
-    (context.lookups.interface.names.find_key path)
+    (environment.lookups.interface.names.find_key path)
 
-let is_private_to_another_module (context : State.context) ~current path =
-  match context.lookups.interface.names.find_key path with
+let is_private_to_another_module (environment : State.environment) ~current path =
+  match environment.lookups.interface.names.find_key path with
   | Some key ->
-      (context.lookups.interface.names.read_declaration key).visibility = Resolve.Names.Private
+      (environment.lookups.interface.names.read_declaration key).visibility = Resolve.Names.Private
       && Some key.module_ <> current
   | None -> false
 
-let names_private_definition context ~current (clause : Mir.formula) =
+let names_private_definition (environment : State.environment) ~current (clause : Mir.formula) =
   let is_hidden = ref false in
   Mir.iter_formula
     (fun statement ->
       List.iter
         (fun (edge : Mir.Call_edges.edge) ->
           let paths = match edge with Calls path -> [ path ] | Supplies { code; _ } -> code in
-          if List.exists (is_private_to_another_module context ~current) paths then
+          if List.exists (is_private_to_another_module environment ~current) paths then
             is_hidden := true)
-        (Mir.Call_edges.list_statement_edges context.lookups.interface Types.no_substitution
+        (Mir.Call_edges.list_statement_edges environment.lookups.interface Types.no_substitution
            statement))
     clause;
   !is_hidden
@@ -196,11 +197,13 @@ let rec make_validity (context : State.context) (frame : State.frame) ~assuming 
     let invariants_hold =
       match find_invariants context ty with
       | _ when not includes_invariants -> Logic.Boolean true
-      | Some _ when Encoding.find_constructors context ty = None -> Logic.Boolean true
+      | Some _ when Encoding.find_constructors context.environment ty = None -> Logic.Boolean true
       | Some (source, written) -> (
-          let current = find_module context context.current in
-          let hidden, shown = List.partition (names_private_definition context ~current) written in
-          let inner = make_type_frame context frame source ty ~self:(Some term) in
+          let current = find_module context.environment context.environment.current in
+          let hidden, shown =
+            List.partition (names_private_definition context.environment ~current) written
+          in
+          let inner = make_type_frame frame source ty ~self:(Some term) in
           try
             Logic.conjunction
               ((if hidden = [] then [] else [ apply_opaque_validity ty term ])
@@ -211,7 +214,7 @@ let rec make_validity (context : State.context) (frame : State.frame) ~assuming 
     let fields =
       if not deep then Logic.Boolean true
       else
-        match Encoding.find_constructors context ty with
+        match Encoding.find_constructors context.environment ty with
         | Some shape ->
             Logic.conjunction
               (List.concat_map
@@ -221,7 +224,7 @@ let rec make_validity (context : State.context) (frame : State.frame) ~assuming 
                        let part =
                          make_validity context frame ~assuming ~deep ~includes_ranges
                            ~seen:(ty :: seen) field_type
-                           (Encoding.select_field context ty variant field term)
+                           (Encoding.select_field context.environment ty variant field term)
                        in
                        match (variant, part) with
                        | _, Logic.Boolean true -> part
@@ -236,13 +239,12 @@ let rec make_validity (context : State.context) (frame : State.frame) ~assuming 
     in
     Logic.( &&& ) invariants_hold fields
 
-let assume_valid ?(includes_invariants = true) context frame ty term =
-  Facts.assume context frame
-    (make_validity context frame ~assuming:true ~includes_invariants ty term);
+let assume_valid ?(includes_invariants = true) (context : State.context) frame ty term =
+  Facts.assume frame (make_validity context frame ~assuming:true ~includes_invariants ty term);
   if includes_invariants then note_valid context frame ty term
 
-let check_valid ?(includes_invariants = true) context (frame : State.frame) location ty term ~deep
-    ~moment =
+let check_valid ?(includes_invariants = true) (context : State.context) (frame : State.frame)
+    location ty term ~deep ~moment =
   if not (is_known_valid context frame ty term) then
     match make_validity context frame ~assuming:false ~deep ~includes_invariants ty term with
     | Logic.Boolean true -> ()
