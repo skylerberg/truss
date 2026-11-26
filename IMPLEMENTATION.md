@@ -134,8 +134,15 @@ develop as well as make it easier to bootstrap the compiler in parts.
 - **The cost modules hold the rules of cost checking.** A cost is ghost
   state of the one symbolic execution, so the modules that execute the MIR
   call the cost modules at each statement, and a new cost rule edits a cost
-  module. The state of cost checking is one record, `context.cost`, and CI
-  rejects a use of it outside the cost modules.
+  module. Each cost module keeps its own state, and another cost module
+  reads it through that module's functions:
+
+  | Module | State |
+  |---|---|
+  | `Counters` | The counters being counted, the bounds and captures of each lambda read, how many recursive costs were assumed, and the types whose saved potential is credited or blocked |
+  | `Cost_promises` | The call targets and the counters that the definition's own clauses bound |
+  | `Amounts` | The amount of each call, which a loop's cost reads |
+  | `Potentials` | Memo tables of the types that hold potential and of the buffers |
 
   | Module | Holds |
   |---|---|
@@ -307,14 +314,15 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `Contract_axioms` builds the axiom for a call and for a function used as a
   value, with every premise its proof had: arguments in range that meet
   their invariants, the `requires`, and, for a callee in the recursion group
-  of the definition being proven, arguments below the entry measure. Its
-  state is one record, `context.axioms`, and CI rejects a use of it outside
-  `Contract_axioms`.
+  of the definition being proven, arguments below the entry measure.
 - **`Termination` holds the rules that show a body to end.** It compares a
   recursive call with the entry of the definition being proven: the call
   obliges the comparison, and the axiom of a callee in the recursion group
   takes it as a premise, so the two never differ. It also holds the measure
-  of a loop. Its state is one record, `context.termination`.
+  of a loop. It has no state: the definition's measures are a field of the
+  environment, and `Termination.enter_definition` gives the start frame the
+  entry of the definition, `definition_entry`, which every later frame
+  carries.
 - **`Cycles` reads the recursion group and the proof group, and rejects a
   proof that assumes a fact whose own proof assumes it back.** Every fact
   that a proof takes from another definition is an edge of the proof graph,
@@ -368,8 +376,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `Lambdas.make_passed_values` checks each argument of a call against its
   parameter's contract: it runs a lambda's body against the contract, which
   it reads through `Callbacks.read_requires` and `Callbacks.read_ensures`,
-  and gives every other value to `check_passed`. The state of `Callbacks`
-  is one record, `context.callbacks`.
+  and gives every other value to `check_passed`.
 - **One function builds the frame that reads a callee's clause.**
   `Contracts.make_entry_frame` binds a clause's parameters to the arguments,
   and `Contracts.make_exit_frame` to the values at return, with the entry
@@ -381,10 +388,15 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | Parameter | Holds | Taken by a function that |
   |---|---|---|
   | None | | Builds a term or reads a type, such as `Encoding.sort_of` |
-  | `State.environment` | The definition being proven and the database it is proven against: the lookups, the node, the condition and its bounds, the obligation policy. It does not change during a proof | Reads the program away from a point of it, such as `Callee.may_abort` or `Cycles.is_in_proof_cycle` |
+  | `State.environment` | The definition being proven and the database it is proven against: the lookups, the node, the condition and its bounds, the measures, the obligation policy, and the reader of a formula and of a body. It does not change during a proof | Reads the program away from a point of it, such as `Callee.may_abort` or `Cycles.is_in_proof_cycle` |
   | `State.frame` | The logical context at a point of the program: the environment, the bindings, the path condition, the symbols of the definition's parameters at entry, and the query that its facts and obligations are added to | Reads the program at a point, adds a fact there or makes an obligation there, such as `Encoding.substitute_type`, `Facts.assume` or `Obligations.oblige` |
-  | `Query.t` | The query under construction | Declares a symbol or states a fact where no frame is at hand, such as `Contract_axioms.declare_function` |
-  | `State.context` | The state of each owner and the outcome of the proof | Reads a specification, runs a body, or uses an owner's state |
+  | `Query.t` | The query under construction, the holes of the proof, and the private state of each module | Declares a symbol or states a fact where no frame is at hand, such as `Contract_axioms.declare_function` |
+
+  A function that reads the environment and writes the query, and reads no
+  path, takes the two: `Conditions.decide`, `Models.rank`. One function,
+  `Translate.make_empty_frame`, gives a frame its environment and its
+  query, and every other frame is a copy of a frame, so the frames of a
+  proof share one of each.
 
   `Facts.assume` guards a fact with the path condition of its frame. The
   other three add a fact with no guard. `Facts.define` states that a term
@@ -395,8 +407,18 @@ develop as well as make it easier to bootstrap the compiler in parts.
 - **Each rule of the prover has one owner module, and each record of its
   state one owner.** `Reader`, `Calls`, `Loops` and `Lambdas` execute the
   MIR and call an owner at each statement, so a new rule edits its owner.
-  An owner's state is an abstract type or a record of `State.context` that
-  `for_prover_state.sh` lets only the owner use.
+  `State` has no mutable field. An owner's state is a type that the owner's
+  module defines and does not export. The module makes a key for the type
+  with `Private_state.make_key` and reads the state with
+  `Query.read_state`, which makes it on the first read. No other module can
+  name the type, so none reads or writes the state. A memo table of a
+  function of the environment is kept the same way in the environment's
+  `memos`: the visible types of `Encoding`, the callees of `Contracts`, the
+  type declarations of `Validity`.
+
+  What a run of a body gives is a result and not state. `Reader.read_body`
+  returns the returns and the lent parts of the body, and a changed part
+  carries the description of its root that a diagnostic shows.
 
   | Module | Holds |
   |---|---|
@@ -463,8 +485,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   the values already shown valid, so a value is proven once. A write
   through a passed place returns the end of the write, and the call ends it
   after its postconditions: an element is checked there, and a step's
-  `self` is a value not known to be valid until then. Its state is one
-  record, `context.validity`.
+  `self` is a value not known to be valid until then.
 - **A call's callee is resolved once.** `Callee.resolve` turns the target
   that the MIR writes into the definition that runs, its contract, the
   substitution of each of its clauses, and the type arguments that key its
@@ -477,10 +498,11 @@ develop as well as make it easier to bootstrap the compiler in parts.
 - **`Lending` decides where each clause of a lending method holds.**
   `Lending.holds_where_lent` separates the clauses on the lent part from
   the clauses that hold when the lend ends, and the method's proof and
-  every caller read a clause in the state that it names. A method's proof
-  records each part it lends in `context.lending`, and `Translate` checks
-  the method's own clauses and its trait's at each lent part and at each
-  exit. `Calls.call_contract` gives a `mut` lend two moments: it assumes
+  every caller read a clause in the state that it names. The type of the
+  lent part is a field of the frame, `lent_part_type`. `Lending.lend_part`
+  returns each part that a method's proof lends, `Reader.read_body` returns
+  them with the body's returns, and `Translate` checks the method's own
+  clauses and its trait's at each lent part and at each exit. `Calls.call_contract` gives a `mut` lend two moments: it assumes
   the clauses on the lent part where the method lends, and returns the end
   of the lend, which takes the part as the caller left it, checks its
   invariant, and assumes the other clauses. `visited` and `final(result)`

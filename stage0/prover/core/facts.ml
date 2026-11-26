@@ -87,9 +87,6 @@ let locate_source environment source origin =
 
 let locate (frame : State.frame) origin = locate_source frame.environment frame.source origin
 
-let add_hole (context : State.context) hole =
-  if not (List.mem hole context.holes) then context.holes <- hole :: context.holes
-
 let remove_panic (uses : Types.capability_set) =
   Types.replace_capabilities
     (function
@@ -98,18 +95,6 @@ let remove_panic (uses : Types.capability_set) =
     uses
 
 let quote (source : State.source) origin : Catalog.Prover.quoted = { key = source.key; origin }
-
-let describe_local (context : State.context) (frame : State.frame) :
-    Locals.local -> Catalog.Prover.value = function
-  | Core_local Self -> Self_value
-  | local -> (
-      match
-        ( Tables.Local_table.find_opt context.local_names local,
-          Tables.Local_table.find_opt context.local_origins local )
-      with
-      | Some name, _ -> Named name
-      | None, Some origin -> Quoted (quote frame.source origin)
-      | None, None -> Temporary)
 
 let bind (frame : State.frame) local ty term =
   {

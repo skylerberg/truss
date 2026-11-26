@@ -1,54 +1,31 @@
-let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_failures = true)
+let make_environment ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_failures = true)
     ?panic_condition ?blocked_holders ?proven_laws (lookups : Lookups.t) ~home ~current ~terminates
     ~measures ~inherits_precondition =
   let node = Option.value node ~default:current in
-  let rec context =
-    {
-      State.environment =
-        {
-          lookups;
-          current;
-          node;
-          home;
-          condition;
-          bounds = Encoding.list_definition_bounds lookups ~current ~condition;
-          disjoint = lookups.list_must_be_disjoint home;
-          inherits_precondition;
-          ranking = terminates && measures = [] && lookups.list_recursion_group node <> [];
-          terminates;
-          proven_laws;
-          policy = Obligations.make_policy ~keeps_termination ~keeps_failures ~panic_condition;
-          visible_types = Tables.Type_table.create 16;
-          callees = Tables.Path_table.create 16;
-        };
-      skipped_conditions = [];
-      run_body = (fun frame ~lambdas body -> Reader.read_body context frame ~lambdas body);
-      read_formula =
-        (fun frame formula ~arguments -> Reader.read_formula context frame formula ~arguments);
-      local_names = Tables.Local_table.create 16;
-      local_origins = Tables.Local_table.create 16;
-      query = Query.create ();
-      axioms = Contract_axioms.make_state ();
-      termination = Termination.make_state ~measures;
-      validity = Validity.make_state ();
-      callbacks = Callbacks.make_state ();
-      lending = Lending.make_state ();
-      cost = Counters.make_state ?blocked_holders ();
-      logs = [];
-      powers = [];
-      lambda_definitions = Tables.Symbol_table.create 8;
-      models = Tables.Model_table.create 16;
-      holes = [];
-      unfinished = [];
-      indexes = [];
-    }
-  in
-  context
-
-let make_outcome (context : State.context) =
   {
-    Obligation.obligations = Query.list_obligations context.query;
-    holes = List.rev context.holes;
+    State.lookups;
+    current;
+    node;
+    home;
+    condition;
+    bounds = Encoding.list_definition_bounds lookups ~current ~condition;
+    disjoint = lookups.list_must_be_disjoint home;
+    inherits_precondition;
+    ranking = terminates && measures = [] && lookups.list_recursion_group node <> [];
+    terminates;
+    measures;
+    blocked_holders = Option.value blocked_holders ~default:[];
+    proven_laws;
+    policy = Obligations.make_policy ~keeps_termination ~keeps_failures ~panic_condition;
+    memos = Private_state.create ();
+    read_formula = Reader.read_formula;
+    run_body = Reader.read_body;
+  }
+
+let make_outcome (query : Query.t) =
+  {
+    Obligation.obligations = Query.list_obligations query;
+    holes = Query.list_holes query;
     evaluation = None;
   }
 
@@ -89,6 +66,8 @@ let make_empty_frame (environment : State.environment) (query : Query.t) source 
     is_reading_callback = false;
     validating = [];
     terminates = environment.terminates;
+    lent_part_type = None;
+    definition_entry = None;
     visited = None;
     final_result = None;
     spent = [];
@@ -104,9 +83,9 @@ let is_capability_implementation (lookups : Lookups.t) (path : Path.t) =
       | None -> false)
   | _ -> false
 
-let read_requires (context : State.context) (frame : State.frame) (requirement : Mir.formula) =
+let read_requires (frame : State.frame) (requirement : Mir.formula) =
   let after, term =
-    Validity.read_specification ~holds_when:requirement.holds_when context
+    Validity.read_specification ~holds_when:requirement.holds_when
       { frame with requires_being_read = Some requirement.origin }
       requirement
   in
@@ -168,8 +147,9 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
       (fun (measure : Mir.formula) -> implies condition measure.holds_when)
       contract.decreases
   in
-  let context =
-    make_context lookups ~condition ~keeps_termination ~keeps_failures ?panic_condition
+  let query = Query.create () in
+  let environment =
+    make_environment lookups ~condition ~keeps_termination ~keeps_failures ?panic_condition
       ?blocked_holders ~home ~current:path
       ~node:
         (Mir.Call_edges.resolve_node
@@ -181,16 +161,17 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
   in
   List.iter
     (fun (measure : Mir.formula) ->
-      ignore (Conditions.decide context ~substitution:Types.no_substitution measure.holds_when))
+      ignore
+        (Conditions.decide environment query ~substitution:Types.no_substitution measure.holds_when))
     contract.decreases;
-  let keep_clauses = Conditions.keep_holding context in
+  let keep_clauses = Conditions.keep_holding environment query in
   let inherited =
     Option.map
       (fun (clauses, substitution) -> (keep_clauses ~substitution clauses, substitution))
-      (Contracts.find_inherited_clauses context.environment path)
+      (Contracts.find_inherited_clauses environment path)
   in
   let own, promises =
-    match Contracts.find_function_contract context.environment path with
+    match Contracts.find_function_contract environment path with
     | Some resolved ->
         let own =
           keep_clauses ~substitution:Types.no_substitution
@@ -219,17 +200,16 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
         | Self ->
             let self_type = Encoding.substitute_type frame parameter.type_ in
             let self = Encoding.arrive frame "self" self_type in
-            Validity.assume_valid context frame ~includes_invariants:(not is_update_step) self_type
-              self;
+            Validity.assume_valid frame ~includes_invariants:(not is_update_step) self_type self;
             { (note_entry frame self ~name:None) with self = Some self; self_type = Some self_type }
         | local ->
             let ty = Encoding.substitute_type frame parameter.type_ in
             let name = Facts.read_parameter_name parameter in
             let term = Encoding.arrive frame ("parameter." ^ name) ty in
-            Validity.assume_valid context frame ty term;
+            Validity.assume_valid frame ty term;
             Facts.bind (note_entry frame term ~name:(Some name)) (Core_local local) ty term)
       {
-        (make_empty_frame context.environment context.query source) with
+        (make_empty_frame environment query source) with
         substitution;
         is_ghost = is_specification_only;
         panics;
@@ -248,7 +228,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
              (List.nth_opt parameters position))
          contract.callbacks)
   in
-  Termination.enter_definition context start;
+  let start = Termination.enter_definition start in
   let trait_declaration =
     match (Interface.Impls.find_implemented_method lookups.interface path, path) with
     | Some { declaration; _ }, _ -> Some declaration
@@ -261,19 +241,19 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
   (match Option.bind trait_declaration (Interface.Impls.read_signature lookups.interface) with
   | Some declared
     when condition = []
-         && lookups.may_abort context.environment.node
+         && lookups.may_abort environment.node
          && Types.states_no_allocation declared.costs ->
       Obligations.oblige start Whole_definition (May_not_return_under_no_allocation This_method)
         (Logic.Boolean false)
   | Some _ | None -> ());
   let output = Option.map (Encoding.substitute_type start) output in
-  let lends =
+  let start =
     match signature with
     | Some { output = Lends (_, part); _ } ->
-        Lending.enter_method context ~part_type:(Encoding.substitute_type start part);
-        true
-    | Some { output = Returns _; _ } | None -> false
+        { start with lent_part_type = Some (Encoding.substitute_type start part) }
+    | Some { output = Returns _; _ } | None -> start
   in
+  let lends = Option.is_some start.lent_part_type in
   let list_values (at : State.frame) =
     List.filter_map
       (fun (parameter : Mir.parameter) ->
@@ -307,7 +287,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
         Logic.conjunction
           (List.map
              (fun requirement ->
-               snd (Validity.read_specification context (read_in start clauses) requirement))
+               snd (Validity.read_specification (read_in start clauses) requirement))
              (Facts.list_clauses clauses.requires))
     | None -> Logic.Boolean true
   in
@@ -320,21 +300,20 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
   let promised =
     List.concat_map
       (fun ({ made_by; _ } : Contracts.promise) ->
-        Cost_promises.list_promises context made_by.callee (read_in start made_by).locals
+        Cost_promises.list_promises environment query made_by.callee (read_in start made_by).locals
           made_by.costs ~inherited:made_by.inherited ~counts_provider_potential)
       promises
   in
-  let start = Cost_promises.enter_definition context start promised ~body:(Some mir.body) in
+  let start = Cost_promises.enter_definition start promised ~body:(Some mir.body) in
   let declared_requires = Facts.list_clauses own.requires in
-  if context.environment.inherits_precondition then
+  if environment.inherits_precondition then
     if declared_requires = [] then Facts.assume start trait_requires
     else
       ignore
         (List.fold_left
            (fun frame (requirement : Mir.formula) ->
              let frame, term =
-               Validity.read_specification ~holds_when:requirement.holds_when context frame
-                 requirement
+               Validity.read_specification ~holds_when:requirement.holds_when frame requirement
              in
              Obligations.oblige ~holds_when:requirement.holds_when frame
                (Facts.locate frame requirement.origin)
@@ -350,14 +329,13 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
            Logic.conjunction
              (List.map
                 (fun (requirement : Mir.requirement) ->
-                  snd
-                    (Validity.read_specification context (read_in start clauses) requirement.clause))
+                  snd (Validity.read_specification (read_in start clauses) requirement.clause))
                 clauses.panics_unless)
          in
          ignore
            (List.fold_left
               (fun frame (requirement : Mir.requirement) ->
-                let frame, term = Validity.read_specification context frame requirement.clause in
+                let frame, term = Validity.read_specification frame requirement.clause in
                 Obligations.oblige frame
                   (Facts.locate frame requirement.clause.origin)
                   (Impl_panic_condition { clause = Facts.quote source requirement.clause.origin })
@@ -369,7 +347,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
   let start =
     List.fold_left
       (fun frame (requirement : Mir.formula) ->
-        let frame, term = read_requires context frame requirement in
+        let frame, term = read_requires frame requirement in
         Facts.assume frame term;
         frame)
       start declared_requires
@@ -378,18 +356,19 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
     if assumes_panic_condition then
       List.fold_left
         (fun frame (requirement : Mir.requirement) ->
-          let frame, term = Validity.read_specification context frame requirement.clause in
+          let frame, term = Validity.read_specification frame requirement.clause in
           Facts.assume frame term;
           frame)
         start own.panics_unless
     else start
   in
-  Cost_promises.check_promise_amounts context start promised ~output;
+  Cost_promises.check_promise_amounts start promised ~output;
   List.iter
     (fun (measure : Mir.formula) ->
-      Validity.check_defined context start ~holds_when:measure.holds_when measure)
+      Validity.check_defined start ~holds_when:measure.holds_when measure)
     measures;
-  let returns = List.rev (Reader.read_body context start ~lambdas:mir.lambdas mir.body) in
+  let exits = Reader.read_body start ~lambdas:mir.lambdas mir.body in
+  let returns = List.rev exits.returns in
   let mut_parameters =
     List.filter
       (fun (parameter : Mir.parameter) ->
@@ -411,7 +390,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
           (fun (ensured : Mir.formula) ->
             if is_checked ensured then
               let _, term =
-                Validity.read_specification ~holds_when:ensured.holds_when context inside ensured
+                Validity.read_specification ~holds_when:ensured.holds_when inside ensured
               in
               Obligations.oblige ~holds_when:ensured.holds_when
                 ~cited:(made_by.callee.key, ensured.origin)
@@ -433,7 +412,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
     (fun ({ lent_frame; lent_origin } : State.lent_part) ->
       let location = Facts.locate lent_frame lent_origin in
       check_promises lent_frame location ~is_checked:Lending.holds_where_lent ~moment:Where_lent)
-    (Lending.list_lent_parts context);
+    (List.rev exits.lends);
   let holds_at_exit clause = not (lends && Lending.holds_where_lent clause) in
   let exit_moment : Catalog.Prover.postcondition_moment =
     if lends then At_lend_end else At_return
@@ -444,8 +423,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
       let exit_location = Facts.locate frame return_origin in
       (match (returned, output) with
       | Some term, Some output ->
-          Validity.check_valid context frame exit_location output term ~deep:true
-            ~moment:Returned_value
+          Validity.check_valid frame exit_location output term ~deep:true ~moment:Returned_value
       | _ -> ());
       List.iter
         (fun (parameter : Mir.parameter) ->
@@ -454,13 +432,13 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
               Encoding.find_local_type frame (Core_local parameter.local) )
           with
           | Some term, Some ty ->
-              Validity.check_valid context frame exit_location ty term ~deep:true
+              Validity.check_valid frame exit_location ty term ~deep:true
                 ~moment:(Mut_parameter_at_return (Facts.read_parameter_name parameter))
           | _ -> ())
         mut_parameters;
       (match (mut_self, frame.self, frame.self_type) with
       | true, Some self, Some self_type ->
-          Validity.check_valid context frame exit_location self_type self ~deep:true
+          Validity.check_valid frame exit_location self_type self ~deep:true
             ~includes_invariants:(not is_update_step) ~moment:Self_at_return
       | _ -> ());
       check_promises frame exit_location ~is_checked:holds_at_exit ~moment:exit_moment;
@@ -470,28 +448,29 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
           let cited = (promise.written_in.key, promise.clause.origin) in
           if promise.inherited then
             let inside = read_in ~result:returned frame (fst (Option.get inherited)) in
-            Cost_promises.check_promise ~cited context under_trait promise
+            Cost_promises.check_promise ~cited under_trait promise
               ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
               ~location:exit_location
           else
-            Cost_promises.check_promise ~cited context frame promise
+            Cost_promises.check_promise ~cited frame promise
               ~at:{ frame with locals = frame.old_locals; self = frame.old_self; result = returned }
               ~location:exit_location)
         promised)
     returns;
-  (make_outcome context, context.skipped_conditions)
+  (make_outcome query, Conditions.list_undecided query)
 
 let find_circular_proof (lookups : Lookups.t) (source : State.source) ~path =
-  let context =
-    make_context lookups ~home:source.key ~current:path ~terminates:false ~measures:[]
+  let query = Query.create () in
+  let environment =
+    make_environment lookups ~home:source.key ~current:path ~terminates:false ~measures:[]
       ~inherits_precondition:false
   in
-  let start = make_empty_frame context.environment context.query source in
+  let start = make_empty_frame environment query source in
   match Cycles.list_circular_proofs start with
   | [] -> None
   | circular ->
       List.iter (Cycles.reject_circular_proof start) circular;
-      Some (make_outcome context)
+      Some (make_outcome query)
 
 let translate_function ?(substitution = Types.no_substitution) (lookups : Lookups.t)
     (source : State.source) ~path =
@@ -538,11 +517,12 @@ let translate_function ?(substitution = Types.no_substitution) (lookups : Lookup
 let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~proofs ~at
     =
   let home = source.key in
-  let context =
-    make_context lookups ~home ~current:impl ~terminates:false ~measures:[]
+  let query = Query.create () in
+  let environment =
+    make_environment lookups ~home ~current:impl ~terminates:false ~measures:[]
       ~inherits_precondition:false ~proven_laws:(trait, for_type)
   in
-  let start = make_empty_frame context.environment context.query source in
+  let start = make_empty_frame environment query source in
   let substitution = Contracts.make_trait_substitution lookups trait for_type in
   List.iter
     (fun (law_source, (law : Mir.law)) ->
@@ -552,14 +532,13 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
           List.map
             (fun ty ->
               let term = Encoding.arrive start "law" ty in
-              Validity.assume_valid context start ty term;
+              Validity.assume_valid start ty term;
               term)
             types
         in
         let inside = Laws.bind_law_parameters start law_source ~substitution law terms in
         List.iter
-          (fun clause ->
-            Facts.assume start (snd (Validity.read_specification context inside clause)))
+          (fun clause -> Facts.assume start (snd (Validity.read_specification inside clause)))
           law.requires;
         let start =
           List.fold_left
@@ -592,7 +571,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
               in
               Facts.restrict start
                 (Logic.not_
-                   (Values.run_ghost_code context
+                   (Values.run_ghost_code
                       {
                         start with
                         source = proof_source;
@@ -607,15 +586,15 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
                (fun (name, proof) -> if name = law.name then Some proof else None)
                proofs)
         in
-        let _, holds = Validity.read_specification context inside law.states in
+        let _, holds = Validity.read_specification inside law.states in
         Obligations.oblige start at (Law_may_fail { trait; law = law.name; for_type }) holds
       end)
-    (Laws.list_laws context.environment trait.trait);
-  make_outcome context
+    (Laws.list_laws environment trait.trait);
+  make_outcome query
 
-let prove_restated_method (context : State.context) (start : State.frame) ~at ~impl_interface ~trait
-    ~for_type (restated : Types.restated_method) (clauses : State.clauses) =
-  let lookups = context.environment.lookups in
+let prove_restated_method (start : State.frame) ~at ~impl_interface ~trait ~for_type
+    (restated : Types.restated_method) (clauses : State.clauses) =
+  let lookups = start.environment.lookups in
   let name = restated.restated_name and receiver = restated.restated_receiver in
   let restated_path = Path.Method { owner = trait.Types.trait; name; receiver } in
   let list_bounds =
@@ -683,7 +662,7 @@ let prove_restated_method (context : State.context) (start : State.frame) ~at ~i
                 let term =
                   Encoding.arrive frame ("parameter." ^ Facts.read_parameter_name parameter) ty
                 in
-                Validity.assume_valid context frame ty term;
+                Validity.assume_valid frame ty term;
                 write_place parameter frame term)
               start clauses.parameters
           in
@@ -697,16 +676,16 @@ let prove_restated_method (context : State.context) (start : State.frame) ~at ~i
               ~substitution:subtrait_substitution
           in
           let promised =
-            Cost_promises.list_promises context clauses.callee (reading entry).locals clauses.costs
-              ~inherited:true ~counts_provider_potential:false
+            Cost_promises.list_promises start.environment start.query clauses.callee
+              (reading entry).locals clauses.costs ~inherited:true ~counts_provider_potential:false
           in
-          let entry = Cost_promises.enter_definition context entry promised ~body:None in
+          let entry = Cost_promises.enter_definition entry promised ~body:None in
           let result_type =
             Types.substitute_erased subtrait_substitution
               (Types.extract_result_type signature.output)
           in
           let ({ frame = lent; result; end_lend } : Calls.applied) =
-            Calls.call_contract context entry
+            Calls.call_contract entry
               { origin = at; type_ = result_type }
               callee definition contract
               (List.mapi
@@ -750,7 +729,7 @@ let prove_restated_method (context : State.context) (start : State.frame) ~at ~i
             List.iter
               (fun (clause : Mir.formula) ->
                 if is_checked clause then
-                  let _, term = Validity.read_specification context ensuring clause in
+                  let _, term = Validity.read_specification ensuring clause in
                   Obligations.oblige after location
                     (Restated_contract
                        {
@@ -774,7 +753,7 @@ let prove_restated_method (context : State.context) (start : State.frame) ~at ~i
                   match end_lend with
                   | Some end_lend ->
                       let final = Encoding.arrive lent "final" result_type in
-                      Validity.assume_valid context lent result_type final;
+                      Validity.assume_valid lent result_type final;
                       (final, end_lend lent final)
                   | None -> (result, lent)
                 in
@@ -784,7 +763,7 @@ let prove_restated_method (context : State.context) (start : State.frame) ~at ~i
           in
           List.iter
             (fun promise ->
-              Cost_promises.check_promise context after promise ~at:entry_reading ~location
+              Cost_promises.check_promise after promise ~at:entry_reading ~location
                 ~restated:(for_type, name, trait, declared))
             promised)
   | Some Built_in ->
@@ -799,8 +778,9 @@ let translate_restated_clauses (lookups : Lookups.t) (source : State.source) ~im
     ~at =
   run_blocking @@ fun ?blocked_holders () ->
   let home = source.key in
-  let context =
-    make_context lookups ?blocked_holders ~home ~current:impl ~terminates:false ~measures:[]
+  let query = Query.create () in
+  let environment =
+    make_environment lookups ?blocked_holders ~home ~current:impl ~terminates:false ~measures:[]
       ~inherits_precondition:false
   in
   let impl_interface = Interface.Definition.read_impl_interface lookups.interface impl in
@@ -816,17 +796,18 @@ let translate_restated_clauses (lookups : Lookups.t) (source : State.source) ~im
       in
       match Contracts.find_declared_clauses lookups path with
       | Some clauses ->
-          prove_restated_method context
-            (make_empty_frame context.environment context.query source)
+          prove_restated_method
+            (make_empty_frame environment query source)
             ~at ~impl_interface ~trait ~for_type restated clauses
       | None -> Facts.raise_bug "the restated method `%s` has no contract" (Path.show path))
     (Interface.Definition.read_trait_interface lookups.interface trait.trait).restated;
-  make_outcome context
+  make_outcome query
 
 let translate_type (lookups : Lookups.t) (source : State.source) ~path =
   let home = source.key in
-  let context =
-    make_context lookups ~home ~current:path ~terminates:false ~measures:[]
+  let query = Query.create () in
+  let environment =
+    make_environment lookups ~home ~current:path ~terminates:false ~measures:[]
       ~inherits_precondition:false
   in
   (match Mir.read_type_clauses lookups.mir path with
@@ -837,15 +818,13 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
             Types.Named { path; arguments = Types.list_generic_arguments interface.type_generics }
         | _ -> Facts.raise_bug "%s is not a type" (Path.show path)
       in
-      let start =
-        { (make_empty_frame context.environment context.query source) with self_type = Some ty }
-      in
+      let start = { (make_empty_frame environment query source) with self_type = Some ty } in
       (match Mir.read_defaults lookups.mir path with
       | Some { form = Field_defaults defaults; _ } ->
           List.iter
             (fun (default : Mir.t Mir.field_default) ->
               ignore
-                (Lambdas.run_code context start default.value
+                (Lambdas.run_code start default.value
                    ~type_:(Encoding.substitute_type start default.type_)))
             defaults
       | Some { form = Parameter_defaults _; _ } | None -> ());
@@ -854,44 +833,42 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
       | [] ->
           let value_ = Encoding.arrive start "value" ty in
           Facts.assume start
-            (Validity.make_validity context start ~assuming:true ~includes_invariants:false ty
-               value_);
+            (Validity.make_validity start ~assuming:true ~includes_invariants:false ty value_);
           let at_value = { start with self = Some value_; old_self = Some value_ } in
           List.iter
             (fun (invariant : Mir.requirement) ->
-              let after, holds = Validity.read_specification context at_value invariant.clause in
+              let after, holds = Validity.read_specification at_value invariant.clause in
               Facts.assume after holds)
             invariants;
           Option.iter
             (fun (written : Mir.formula) ->
-              let _, potential_term = Validity.read_specification context at_value written in
+              let _, potential_term = Validity.read_specification at_value written in
               Obligations.oblige at_value
                 (Facts.locate at_value written.origin)
                 (Negative_potential { type_ = ty })
                 (Logic.less_equal (Logic.int 0) potential_term))
             potential)
   | None -> ());
-  make_outcome context
+  make_outcome query
 
 let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
   let home = source.key in
-  let context =
-    make_context lookups ~home ~current:path ~terminates:false ~measures:[]
+  let query = Query.create () in
+  let environment =
+    make_environment lookups ~home ~current:path ~terminates:false ~measures:[]
       ~inherits_precondition:false
   in
   match Mir.read_initializer lookups.mir path with
   | Some { form = code; _ } ->
-      let frame = make_empty_frame context.environment context.query source in
+      let frame = make_empty_frame environment query source in
       Cycles.reject_constant_cycle frame code;
       ignore
-        (Lambdas.run_code context frame code
-           ~type_:
-             (Interface.Definition.read_constant_type context.environment.lookups.interface path));
+        (Lambdas.run_code frame code
+           ~type_:(Interface.Definition.read_constant_type environment.lookups.interface path));
       {
-        (make_outcome context) with
+        (make_outcome query) with
         evaluation =
-          (if Cycles.is_evaluated_constant context.environment path code then
-             Some (Constant_value path)
+          (if Cycles.is_evaluated_constant environment path code then Some (Constant_value path)
            else None);
       }
   | None -> Facts.raise_bug "the constant `%s` has no MIR" (Path.show path)

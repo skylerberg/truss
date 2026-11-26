@@ -1,9 +1,4 @@
 val read_formula :
-  State.context ->
-  State.frame ->
-  Mir.formula ->
-  arguments:Logic.term list ->
-  State.frame * Logic.term
+  State.frame -> Mir.formula -> arguments:Logic.term list -> State.frame * Logic.term
 
-val read_body :
-  State.context -> State.frame -> lambdas:Mir.body array -> Mir.body -> State.function_exit list
+val read_body : State.frame -> lambdas:Mir.body array -> Mir.body -> State.body_exits

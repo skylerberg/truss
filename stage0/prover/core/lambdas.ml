@@ -1,11 +1,13 @@
-let make_lifting (context : State.context) (frame : State.frame) ~called ~arguments ~start ~end_
-    parameters =
-  let declared_here = Query.list_declarations_since context.query start in
-  let find_made_in_body = Query.is_made_between context.query start end_ in
+let definitions : Logic.term Tables.Symbol_table.t Private_state.key =
+  Private_state.make_key (fun () -> Tables.Symbol_table.create 8)
+
+let make_lifting (frame : State.frame) ~called ~arguments ~start ~end_ parameters =
+  let declared_here = Query.list_declarations_since frame.query start in
+  let find_made_in_body = Query.is_made_between frame.query start end_ in
   let captures_fresh = function
     | Logic.Symbol.Lambda _ as name when Option.is_none (find_made_in_body name) -> (
-        match Tables.Symbol_table.find_opt context.lambda_definitions name with
-        | Some defined -> Query.mentions_fresh_since context.query start defined
+        match Tables.Symbol_table.find_opt (Query.read_state frame.query definitions) name with
+        | Some defined -> Query.mentions_fresh_since frame.query start defined
         | None -> false)
     | _ -> false
   in
@@ -31,14 +33,14 @@ let make_lifting (context : State.context) (frame : State.frame) ~called ~argume
           in
           if is_fresh_in_body then begin
             let lifted = Logic.Symbol.Lifted name in
-            Query.declare context.query (Logic.Function (lifted, List.map snd parameters, sort));
+            Query.declare frame.query (Logic.Function (lifted, List.map snd parameters, sort));
             Tables.Symbol_table.replace renamed name (Logic.Apply (lifted, variables))
           end
       | Logic.Function (name, inputs, sort) when frame.binders <> [] -> (
           match find_made_in_body name with
           | Some true ->
               let lifted = Logic.Symbol.Lifted name in
-              Query.declare context.query
+              Query.declare frame.query
                 (Logic.Function (lifted, inputs @ List.map snd parameters, sort));
               Tables.Symbol_table.replace functions name lifted
           | _ -> ())
@@ -66,14 +68,13 @@ let add_quantified_fact (frame : State.frame) ~capture_free stated =
     | Some closed -> Query.add_fact frame.query closed
     | None -> ()
 
-let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_free
-    (function_type : Types.function_type) term ~called ~arguments ~start ~end_ ~premises ~shown
-    ~ended =
+let add_lambda_facts (frame : State.frame) ~capture_free (function_type : Types.function_type) term
+    ~called ~arguments ~start ~end_ ~premises ~shown ~ended =
   let parameters =
     Callbacks.make_input_variables function_type ~label:"lambda"
-      ~numbers:[ Query.take_fresh_number context.query ]
+      ~numbers:[ Query.take_fresh_number frame.query ]
   in
-  let lift = make_lifting context frame ~called ~arguments ~start ~end_ parameters in
+  let lift = make_lifting frame ~called ~arguments ~start ~end_ parameters in
   let premise = lift (Logic.conjunction premises) in
   let applied_here =
     Callbacks.apply_function function_type term
@@ -95,15 +96,14 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
         (Logic.forall (parameters, Logic.( ==> ) premise statement)))
     statements
 
-let add_lambda_relation (context : State.context) (frame : State.frame) ~capture_free
-    (function_type : Types.function_type) term ~called ~arguments ~start ~end_ ~premises ~shown
-    ~ended ~read_exits =
+let add_lambda_relation (frame : State.frame) ~capture_free (function_type : Types.function_type)
+    term ~called ~arguments ~start ~end_ ~premises ~shown ~ended ~read_exits =
   let ({ inputs; changed; returned; entries; exits; result } : Callbacks.relation_variables) =
     Callbacks.make_relation_variables function_type ~label:"lambda"
-      ~numbers:[ Query.take_fresh_number context.query ]
+      ~numbers:[ Query.take_fresh_number frame.query ]
   in
   let parameters = inputs @ List.map snd changed @ returned in
-  let lift = make_lifting context frame ~called ~arguments ~start ~end_ parameters in
+  let lift = make_lifting frame ~called ~arguments ~start ~end_ parameters in
   let holds = Callbacks.make_callback_ensures function_type term ~entries ~exits ~result in
   let premise = lift (Logic.conjunction premises) in
   let exited =
@@ -144,22 +144,26 @@ let remove_temporaries locals =
     (fun key _ -> match key with Locals.Mir_local _ -> false | Core_local _ -> true)
     locals
 
-let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.frame)
-    ~(lambdas : Mir.body array) (body : Mir.body) ~type_ =
+let run_lambda_body ?(enter = Fun.id) (frame : State.frame) ~(lambdas : Mir.body array)
+    (body : Mir.body) ~type_ =
   let inside =
     enter
       (Obligations.set_panics { frame with locals = remove_temporaries frame.locals } ~panics:false)
   in
-  let returns = Facts.run_in_source frame (fun () -> context.run_body inside ~lambdas body) in
+  let exits =
+    Facts.run_in_source frame (fun () -> frame.environment.run_body inside ~lambdas body)
+  in
   match
-    Joins.join context ~value_type:type_
-      (List.rev_map (fun (exit_ : State.function_exit) -> (exit_.frame, exit_.returned)) returns)
+    Joins.join ~value_type:type_
+      (List.rev_map
+         (fun (exit_ : State.function_exit) -> (exit_.frame, exit_.returned))
+         exits.returns)
   with
   | Some (returned, Some term) -> Some ({ frame with spent = returned.spent }, term)
   | Some (_, None) | None -> None
 
-let run_code (context : State.context) (frame : State.frame) (code : Mir.t) ~type_ =
-  match run_lambda_body context frame ~lambdas:code.lambdas code.body ~type_ with
+let run_code (frame : State.frame) (code : Mir.t) ~type_ =
+  match run_lambda_body frame ~lambdas:code.lambdas code.body ~type_ with
   | Some returned -> returned
   | None -> (frame, Encoding.arrive frame "unfinished" type_)
 
@@ -209,8 +213,8 @@ let canonicalize_binders term =
   in
   walk [] term
 
-let find_lambda_definition (context : State.context) (frame : State.frame)
-    (function_type : Types.function_type) (written : State.lambda_code) ~stated =
+let find_lambda_definition (frame : State.frame) (function_type : Types.function_type)
+    (written : State.lambda_code) ~stated =
   match written.code.is_functional with
   | true when Callbacks.is_in_the_logic function_type -> (
       let bound =
@@ -219,8 +223,8 @@ let find_lambda_definition (context : State.context) (frame : State.frame)
       in
       let explored, supposed = Facts.suppose frame "explored" in
       let defined =
-        let mark = Query.mark context.query in
-        Counters.run_without_counters context (fun () ->
+        let mark = Query.mark frame.query in
+        Counters.run_without_counters frame.query (fun () ->
             try
               let enter inside =
                 List.fold_left2
@@ -233,7 +237,7 @@ let find_lambda_definition (context : State.context) (frame : State.frame)
                   inside written.code.parameters bound
               in
               match
-                run_lambda_body ~enter context
+                run_lambda_body ~enter
                   {
                     supposed with
                     bound = List.map fst bound @ frame.bound;
@@ -243,8 +247,7 @@ let find_lambda_definition (context : State.context) (frame : State.frame)
                   ~lambdas:written.lambdas written.code
                   ~type_:(compute_returned_type frame written.code)
               with
-              | Some (_, defined) when not (Query.mentions_fresh_since context.query mark defined)
-                ->
+              | Some (_, defined) when not (Query.mentions_fresh_since frame.query mark defined) ->
                   Some (Logic.replace ~from:explored ~into:(Logic.Boolean true) defined)
               | Some _ | None -> None
             with Facts.Unsupported _ -> None)
@@ -254,27 +257,27 @@ let find_lambda_definition (context : State.context) (frame : State.frame)
         List.filter (fun name -> not (List.mem name quantified)) frame.bound
       in
       let entries = List.map (fun (name, _) -> Logic.Symbol name) bound in
-      let mark = Query.mark context.query in
+      let mark = Query.mark frame.query in
       let are_valid, required =
-        Query.run_dropping_facts context.query
+        Query.run_dropping_facts frame.query
           ~drop:(fun fact ->
             Logic.mentions (List.map fst bound) fact
-            || Query.mentions_fresh_since context.query mark fact)
+            || Query.mentions_fresh_since frame.query mark fact)
           (fun () ->
             ( Logic.conjunction
                 (List.map2
                    (fun (_, input) entry ->
-                     Validity.make_validity context frame ~assuming:true ~includes_ranges:true
+                     Validity.make_validity frame ~assuming:true ~includes_ranges:true
                        (Encoding.substitute_type frame input)
                        entry)
                    function_type.inputs entries),
-              Logic.conjunction (List.map snd (Callbacks.read_requires context stated entries)) ))
+              Logic.conjunction (List.map snd (Callbacks.read_requires stated entries)) ))
       in
       let domain = Logic.( &&& ) are_valid required in
       match defined with
       | Some defined
         when Logic.mentions enclosing_parameters defined
-             || Query.mentions_fresh_since context.query mark domain ->
+             || Query.mentions_fresh_since frame.query mark domain ->
           None
       | Some defined ->
           let defined = canonicalize_binders defined in
@@ -298,7 +301,7 @@ let find_lambda_definition (context : State.context) (frame : State.frame)
               symbol sort
           in
           let application = Callbacks.apply_function function_type term entries in
-          Tables.Symbol_table.replace context.lambda_definitions symbol defined;
+          Tables.Symbol_table.replace (Query.read_state frame.query definitions) symbol defined;
           Facts.add_axiom frame (Logic.forall (bound, Logic.equal application defined));
           (match written.code.value_type with
           | Some value_type -> (
@@ -312,8 +315,8 @@ let find_lambda_definition (context : State.context) (frame : State.frame)
       | _ -> None)
   | _ -> None
 
-let read_lambda ?(capture_free = false) (context : State.context) (frame : State.frame)
-    ~(site : Invocation.site) (written : State.lambda_code) ~stated =
+let read_lambda ?(capture_free = false) (frame : State.frame) ~(site : Invocation.site)
+    (written : State.lambda_code) ~stated =
   let location = Facts.locate frame site.origin in
   let ty = Encoding.substitute_type frame site.type_ in
   let function_type =
@@ -325,9 +328,9 @@ let read_lambda ?(capture_free = false) (context : State.context) (frame : State
     Facts.raise_bug "a lambda whose parameters do not match %s" (Types.show ty);
   let may_abort =
     Mir.Call_edges.body_may_abort
-      { interface = context.environment.lookups.interface; mir = context.environment.lookups.mir }
+      { interface = frame.environment.lookups.interface; mir = frame.environment.lookups.mir }
       frame.substitution ~lambdas:written.lambdas written.code
-      ~may_abort:context.environment.lookups.may_abort
+      ~may_abort:frame.environment.lookups.may_abort
   in
   if frame.makes_obligations && Types.states_no_allocation function_type.costs && may_abort then
     Obligations.oblige frame location (May_not_return_under_no_allocation This_lambda)
@@ -335,20 +338,20 @@ let read_lambda ?(capture_free = false) (context : State.context) (frame : State
   let states_application = Callbacks.is_in_the_logic function_type && not may_abort in
   let called, supposed = Facts.suppose frame "called" in
   let inside = { supposed with result = None } in
-  let start = Query.mark context.query in
+  let start = Query.mark frame.query in
   let arguments =
     List.map
       (fun (_, input) ->
         let input = Encoding.substitute_type frame input in
         let argument = Encoding.arrive inside "argument" input in
-        Validity.assume_valid context inside input argument;
+        Validity.assume_valid inside input argument;
         argument)
       function_type.inputs
   in
   List.iter
     (fun (_, required) -> Facts.assume inside required)
-    (Callbacks.read_requires context stated arguments);
-  let counters, inside = Counters.enter_lambda context inside function_type written.code in
+    (Callbacks.read_requires stated arguments);
+  let counters, inside = Counters.enter_lambda inside function_type written.code in
   let read_exits (exit_ : State.frame) =
     List.filter_map
       (fun (index, (parameter, ((mode : Language.Mode.t), _))) ->
@@ -360,12 +363,12 @@ let read_lambda ?(capture_free = false) (context : State.context) (frame : State
          (fun index pair -> (index, pair))
          (List.combine written.code.parameters function_type.inputs))
   in
-  let body = Query.mark context.query in
-  let premises = Query.list_facts_since context.query start in
+  let body = Query.mark frame.query in
+  let premises = Query.list_facts_since frame.query start in
   let ended = ref [] in
   let inferred_bounds =
     Fun.protect
-      ~finally:(fun () -> Counters.leave_lambda context counters)
+      ~finally:(fun () -> Counters.leave_lambda frame.query counters)
       (fun () ->
         let inside =
           Obligations.set_panics
@@ -375,8 +378,8 @@ let read_lambda ?(capture_free = false) (context : State.context) (frame : State
               terminates = Types.terminates function_type.uses;
             }
             ~panics:
-              (Conditions.may_panic context.environment.lookups ~current:context.environment.current
-                 ~condition:context.environment.condition function_type.uses)
+              (Conditions.may_panic frame.environment.lookups ~current:frame.environment.current
+                 ~condition:frame.environment.condition function_type.uses)
         in
         let inside =
           List.fold_left2
@@ -388,7 +391,9 @@ let read_lambda ?(capture_free = false) (context : State.context) (frame : State
                 argument)
             inside written.code.parameters arguments
         in
-        let returns = context.run_body inside ~lambdas:written.lambdas written.code in
+        let returns =
+          (frame.environment.run_body inside ~lambdas:written.lambdas written.code).returns
+        in
         let exits = List.map (fun (exit_ : State.function_exit) -> exit_.frame) returns in
         ended :=
           List.map (fun (exit_ : State.function_exit) -> (exit_.frame, exit_.returned)) returns;
@@ -396,7 +401,7 @@ let read_lambda ?(capture_free = false) (context : State.context) (frame : State
           (fun ((exit_ : State.frame), returned) ->
             Option.iter
               (fun term ->
-                Validity.check_valid context exit_ location
+                Validity.check_valid exit_ location
                   (Encoding.substitute_type frame function_type.output)
                   term ~deep:true ~moment:Lambda_result)
               returned;
@@ -406,7 +411,7 @@ let read_lambda ?(capture_free = false) (context : State.context) (frame : State
                 | Language.Mode.Mut, Source { local; _ } -> (
                     match Locals.find_opt (Core_local local) exit_.locals with
                     | Some term ->
-                        Validity.check_valid context exit_ location
+                        Validity.check_valid exit_ location
                           (Encoding.substitute_type frame input)
                           term ~deep:true ~moment:Lambda_mut_parameter
                     | None -> ())
@@ -433,29 +438,29 @@ let read_lambda ?(capture_free = false) (context : State.context) (frame : State
                 List.iter
                   (fun (promise, term) ->
                     Obligations.oblige exit_ location (Lambda_promise { promise }) term)
-                  (Callbacks.read_ensures context stated ~entries:arguments ~exits ~result))
+                  (Callbacks.read_ensures stated ~entries:arguments ~exits ~result))
               result)
           !ended;
-        Counters.check_lambda_exits context.query counters exits location ~type_:ty ~mark:body)
+        Counters.check_lambda_exits frame.query counters exits location ~type_:ty ~mark:body)
   in
-  let end_ = Query.mark context.query in
-  let shown = Query.list_facts_since context.query body in
+  let end_ = Query.mark frame.query in
+  let shown = Query.list_facts_since frame.query body in
   let term =
     match
-      if states_application then find_lambda_definition context frame function_type written ~stated
+      if states_application then find_lambda_definition frame function_type written ~stated
       else None
     with
     | Some term
       when not
              (frame.makes_obligations
-             && Counters.has_another_cost context term ~captures:(list_captured_locals written)
+             && Counters.has_another_cost frame.query term ~captures:(list_captured_locals written)
                   ~bounds:inferred_bounds) ->
         term
     | Some _ | None ->
         let term = Encoding.arrive frame "lambda" ty in
         if states_application then
-          add_lambda_facts context frame ~capture_free function_type term ~called ~arguments ~start
-            ~end_ ~premises ~shown ~ended:!ended;
+          add_lambda_facts frame ~capture_free function_type term ~called ~arguments ~start ~end_
+            ~premises ~shown ~ended:!ended;
         term
   in
   if states_application then
@@ -463,14 +468,14 @@ let read_lambda ?(capture_free = false) (context : State.context) (frame : State
       (add_quantified_fact frame ~capture_free)
       (Callbacks.find_logic_link function_type term)
   else
-    add_lambda_relation context frame ~capture_free function_type term ~called ~arguments ~start
-      ~end_ ~premises ~shown ~ended:!ended ~read_exits;
-  Counters.note_lambda context frame counters term ~captures:(list_captured_locals written)
+    add_lambda_relation frame ~capture_free function_type term ~called ~arguments ~start ~end_
+      ~premises ~shown ~ended:!ended ~read_exits;
+  Counters.note_lambda frame counters term ~captures:(list_captured_locals written)
     ~bounds:inferred_bounds;
   (frame, term)
 
-let translate_lambda (context : State.context) (frame : State.frame) ~(site : Invocation.site)
-    (written : State.lambda_code) ~stated =
+let translate_lambda (frame : State.frame) ~(site : Invocation.site) (written : State.lambda_code)
+    ~stated =
   let find_captured (local : Core.local) =
     match local with Self -> frame.self | local -> Locals.find_opt (Core_local local) frame.locals
   in
@@ -484,14 +489,14 @@ let translate_lambda (context : State.context) (frame : State.frame) ~(site : In
          (list_captured_locals written)
   then
     let _, term =
-      read_lambda ~capture_free:true context
+      read_lambda ~capture_free:true
         { frame with binders = []; condition = Logic.Boolean true }
         ~site written ~stated
     in
     (frame, term)
-  else read_lambda context frame ~site written ~stated
+  else read_lambda frame ~site written ~stated
 
-let make_passed_values (context : State.context) (frame : State.frame) ~at (callee : Callee.t)
+let make_passed_values (frame : State.frame) ~at (callee : Callee.t)
     (arguments : State.call_argument list) =
   let values =
     List.filter_map
@@ -504,11 +509,11 @@ let make_passed_values (context : State.context) (frame : State.frame) ~at (call
     (List.fold_left_map
        (fun known -> function
          | State.Value_argument passed ->
-             Callbacks.check_passed context frame ~at callee passed ~arguments:known;
+             Callbacks.check_passed frame ~at callee passed ~arguments:known;
              (known, passed)
          | Lambda_argument { position; mode; site; lambda = written } ->
              let _, term =
-               translate_lambda context frame ~site written
+               translate_lambda frame ~site written
                  ~stated:(Callee.find_callback frame callee position ~known)
              in
              ( (position, term) :: known,

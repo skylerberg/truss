@@ -16,34 +16,39 @@ let may_panic lookups ~current ~condition (uses : Types.capability_set) =
   may_panic_for_every_value lookups ~current ~condition uses
   || Types.has_capability (Capability_unless_values (Built_in Panic)) uses
 
-let decide (context : State.context) ~substitution (holds_when : Types.condition) =
+type state = { mutable undecided : Types.condition list }
+
+let state = Private_state.make_key (fun () -> { undecided = [] })
+let list_undecided query = (Query.read_state query state).undecided
+
+let decide (environment : State.environment) (query : Query.t) ~substitution
+    (holds_when : Types.condition) =
   match holds_when with
   | [] -> Always
   | _ -> (
       match
-        Interface.Impls.decide_condition context.environment.lookups.interface
+        Interface.Impls.decide_condition environment.lookups.interface
           ~list_bounds:
-            (Encoding.list_definition_bounds context.environment.lookups
-               ~current:context.environment.current ~condition:[])
+            (Encoding.list_definition_bounds environment.lookups ~current:environment.current
+               ~condition:[])
           (Types.substitute_condition substitution holds_when)
       with
       | None -> Elsewhere
       | Some [] -> Always
       | Some undecided ->
           if
-            implies context.environment.lookups ~current:context.environment.current
-              context.environment.condition undecided
+            implies environment.lookups ~current:environment.current environment.condition undecided
           then In_run undecided
           else begin
-            if
-              context.environment.condition = []
-              && not (List.mem undecided context.skipped_conditions)
-            then context.skipped_conditions <- undecided :: context.skipped_conditions;
+            let state = Query.read_state query state in
+            if environment.condition = [] && not (List.mem undecided state.undecided) then
+              state.undecided <- undecided :: state.undecided;
             Elsewhere
           end)
 
-let holds_here (context : State.context) ?(substitution = Types.no_substitution) holds_when =
-  match decide context ~substitution holds_when with
+let holds_here (environment : State.environment) (query : Query.t)
+    ?(substitution = Types.no_substitution) holds_when =
+  match decide environment query ~substitution holds_when with
   | Always | In_run _ -> true
   | Elsewhere -> false
 
@@ -52,8 +57,11 @@ let find_obligation_condition = function
   | In_run undecided -> Some undecided
   | Elsewhere -> None
 
-let keep_holding (context : State.context) ~substitution (clauses : State.clauses) =
-  let decide holds_when = find_obligation_condition (decide context ~substitution holds_when) in
+let keep_holding (environment : State.environment) (query : Query.t) ~substitution
+    (clauses : State.clauses) =
+  let decide holds_when =
+    find_obligation_condition (decide environment query ~substitution holds_when)
+  in
   let keep (clause : Mir.formula) =
     Option.map (fun holds_when -> { clause with holds_when }) (decide clause.holds_when)
   in

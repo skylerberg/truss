@@ -5,15 +5,25 @@ type promise = {
   inherited : bool;
 }
 
-let list_promises (context : State.context) (source : State.source) locals (costs : Mir.cost list)
-    ~inherited ~counts_provider_potential =
+type state = {
+  mutable call_targets : (Logic.term * Core.local) list;
+  mutable bounded_counters : Costs.counter list;
+}
+
+let state = Private_state.make_key (fun () -> { call_targets = []; bounded_counters = [] })
+
+let find_call_target query target =
+  List.assoc_opt target (Query.read_state query state).call_targets
+
+let is_bounded query counter = List.mem counter (Query.read_state query state).bounded_counters
+
+let list_promises (environment : State.environment) (query : Query.t) (source : State.source) locals
+    (costs : Mir.cost list) ~inherited ~counts_provider_potential =
   List.filter_map
     (fun (cost : Mir.cost) ->
       match Costs.find_resource cost ~locals with
       | None ->
-          Facts.raise_unsupported
-            (Facts.locate_source context.environment source cost.origin)
-            Calls_target
+          Facts.raise_unsupported (Facts.locate_source environment source cost.origin) Calls_target
       | Some resource ->
           let counting = Costs.classify_counting cost in
           let counter =
@@ -26,21 +36,22 @@ let list_promises (context : State.context) (source : State.source) locals (cost
                    && match resource with Metric _ -> true | Calls _ -> false);
             }
           in
+          let state = Query.read_state query state in
           (match (cost.resource, resource) with
           | Calls (Function_parameter local), Calls (Through term) ->
-              context.cost.call_targets <- (term, local) :: context.cost.call_targets
+              state.call_targets <- (term, local) :: state.call_targets
           | _ -> ());
-          if counter.counting = Units && not (List.mem counter context.cost.bounded_counters) then
-            context.cost.bounded_counters <- counter :: context.cost.bounded_counters;
+          if counter.counting = Units && not (List.mem counter state.bounded_counters) then
+            state.bounded_counters <- counter :: state.bounded_counters;
           Some { counter; clause = cost; written_in = source; inherited })
     costs
 
-let enter_definition (context : State.context) (frame : State.frame) promises ~body =
-  Counters.enter_body context frame
+let enter_definition (frame : State.frame) promises ~body =
+  Counters.enter_body frame
     (List.map (fun promise -> (promise.counter, promise.clause.holds_when)) promises)
     ~body
 
-let check_promise_amounts (context : State.context) (start : State.frame) promises ~output =
+let check_promise_amounts (start : State.frame) promises ~output =
   List.iter
     (fun promise ->
       if not promise.inherited then
@@ -51,20 +62,19 @@ let check_promise_amounts (context : State.context) (start : State.frame) promis
               | Some output when Contracts.mentions_result amount ->
                   let _, returned = Facts.suppose start "returned" in
                   let result = Encoding.arrive returned "result" output in
-                  Validity.assume_valid context returned output result;
+                  Validity.assume_valid returned output result;
                   { returned with result = Some result }
               | Some _ | None -> start
             in
-            Validity.check_defined context at_return ~holds_when:promise.clause.holds_when amount)
+            Validity.check_defined at_return ~holds_when:promise.clause.holds_when amount)
     promises
 
-let check_promise ?restated ?cited (context : State.context) (frame : State.frame) promise
-    ~(at : State.frame) ~location =
+let check_promise ?restated ?cited (frame : State.frame) promise ~(at : State.frame) ~location =
   let spent = Counters.lookup_spent frame promise.counter in
   let amount =
     match promise.clause.bound with
     | Order_of amount | At_most amount | Exactly amount ->
-        snd (Validity.read_specification context { at with makes_obligations = false } amount)
+        snd (Validity.read_specification { at with makes_obligations = false } amount)
   in
   let goal =
     match promise.counter.counting with
@@ -85,7 +95,7 @@ let check_promise ?restated ?cited (context : State.context) (frame : State.fram
            Inherited_promise
              {
                counting;
-               promiser = Contracts.find_promiser context.environment.lookups promise.written_in;
+               promiser = Contracts.find_promiser frame.environment.lookups promise.written_in;
                clause;
              }
        | None -> Own_promise { counting; clause }))

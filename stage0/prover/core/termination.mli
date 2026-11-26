@@ -1,7 +1,6 @@
-val enter_definition : State.context -> State.frame -> unit
+val enter_definition : State.frame -> State.frame
 
 val check_recursive_call :
-  State.context ->
   State.frame ->
   Obligation.location ->
   path:Path.t ->
@@ -12,7 +11,7 @@ val check_recursive_call :
   unit
 
 val find_induction_premise :
-  State.context ->
+  State.frame ->
   State.clauses ->
   is_self_call:bool ->
   callee_entry:State.frame ->
@@ -25,22 +24,18 @@ val reject_uncompared_recursion : State.frame -> Obligation.location -> Path.t o
 val reject_recursion_through_supplied_code :
   State.frame -> Obligation.location -> Mir.statement -> unit
 
-val make_state : measures:Mir.formula list -> State.termination_state
-
 type loop_measure = { read : State.frame -> Logic.term list; at_head : Logic.term list }
 
 val find_written_measures : Mir.loop_clause list -> Mir.formula list option
-val read_measures : State.context -> State.frame -> Mir.formula list -> Logic.term list
+val read_measures : State.frame -> Mir.formula list -> Logic.term list
 
 val make_comparison_measure :
-  State.context ->
   State.frame ->
   (Language.Comparison.t * (State.frame -> Logic.term * Logic.term)) option ->
   (State.frame -> Logic.term list) option
 
 val read_loop_measure :
   ?implicit:(State.frame -> Logic.term list) ->
-  State.context ->
   Mir.loop_clause list ->
   head:State.frame ->
   loop_measure option

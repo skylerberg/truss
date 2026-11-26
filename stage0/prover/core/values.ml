@@ -1,13 +1,22 @@
-let run_ghost_code (context : State.context) (frame : State.frame) (code : Mir.t) =
-  let unfinished = context.unfinished in
-  context.unfinished <- [];
+type state = { mutable logs : (Logic.term * bool) list; mutable unfinished : Logic.term list }
+
+let state = Private_state.make_key (fun () -> { logs = []; unfinished = [] })
+
+let note_unfinished (frame : State.frame) =
+  let state = Query.read_state frame.query state in
+  state.unfinished <- frame.condition :: state.unfinished
+
+let run_ghost_code (frame : State.frame) (code : Mir.t) =
+  let state = Query.read_state frame.query state in
+  let unfinished = state.unfinished in
+  state.unfinished <- [];
   Fun.protect
-    ~finally:(fun () -> context.unfinished <- unfinished)
+    ~finally:(fun () -> state.unfinished <- unfinished)
     (fun () ->
       ignore
-        (Lambdas.run_lambda_body context { frame with is_ghost = true } ~lambdas:code.lambdas
-           code.body ~type_:Types.unit);
-      Logic.disjunction context.unfinished)
+        (Lambdas.run_lambda_body { frame with is_ghost = true } ~lambdas:code.lambdas code.body
+           ~type_:Types.unit);
+      Logic.disjunction state.unfinished)
 
 let assume_extensional (frame : State.frame) (ty : Types.ty) left right =
   match ty with
@@ -66,18 +75,18 @@ let assume_extensional (frame : State.frame) (ty : Types.ty) left right =
       | _ -> ())
   | _ -> ()
 
-let make_sequence (context : State.context) (frame : State.frame) (ty : Types.ty) ~element values =
+let make_sequence (frame : State.frame) (ty : Types.ty) ~element values =
   let literal = Encoding.arrive frame "literal" ty in
   let sequence =
     match ty with
     | Types.Named { path; _ } when Path.equal path Encoding.sequence_path -> Some literal
     | Types.Named { path; _ } when Well_known.find_builtin_type path = Some Array ->
-        Models.find_model context ty literal ~element
+        Models.find_model frame.environment frame.query ty literal ~element
     | _ -> None
   in
   Option.map
     (fun sequence ->
-      Validity.assume_valid context frame ty literal;
+      Validity.assume_valid frame ty literal;
       Facts.assume frame
         (Logic.equal
            (Models.make_sequence_length element sequence)
@@ -85,8 +94,7 @@ let make_sequence (context : State.context) (frame : State.frame) (ty : Types.ty
       List.iteri
         (fun index item ->
           match
-            Models.index_sequence context.environment context.query element sequence
-              (Logic.int index)
+            Models.index_sequence frame.environment frame.query element sequence (Logic.int index)
           with
           | Some at -> Facts.assume frame (Logic.equal at item)
           | None -> ())
@@ -102,7 +110,7 @@ let assume_only_members (frame : State.frame) label sort contains members =
          Logic.( ==> ) (contains (Logic.Symbol each))
            (Logic.disjunction (List.map (Logic.equal (Logic.Symbol each)) members)) ))
 
-let make_set (context : State.context) (frame : State.frame) (ty : Types.ty) ~element values =
+let make_set (frame : State.frame) (ty : Types.ty) ~element values =
   let arguments = [ Types.Type element ] in
   let literal = Encoding.arrive frame "literal" ty in
   let model =
@@ -112,24 +120,23 @@ let make_set (context : State.context) (frame : State.frame) (ty : Types.ty) ~el
   in
   Option.map
     (fun model ->
-      Validity.assume_valid context frame ty literal;
+      Validity.assume_valid frame ty literal;
       let element_sort = Encoding.sort_of element in
       let contains value =
-        Models.make_finite_function context.query Finite_set_contains ~arguments Logic.Bool
+        Models.make_finite_function frame.query Finite_set_contains ~arguments Logic.Bool
           [ (value, element_sort) ]
           model
       in
       List.iter (fun value -> Facts.assume frame (contains value)) values;
       assume_only_members frame "value" element_sort contains values;
       let size =
-        Models.make_finite_function context.query Finite_set_size ~arguments Logic.Int [] model
+        Models.make_finite_function frame.query Finite_set_size ~arguments Logic.Int [] model
       in
       Facts.assume frame (Logic.less_equal size (Logic.int (List.length values)));
       literal)
     model
 
-let apply_list_literal (context : State.context) (frame : State.frame) (site : Invocation.site)
-    values =
+let apply_list_literal (frame : State.frame) (site : Invocation.site) values =
   let ty = Encoding.substitute_type frame site.type_ in
   let location = Facts.locate frame site.origin in
   let element =
@@ -138,17 +145,16 @@ let apply_list_literal (context : State.context) (frame : State.frame) (site : I
     | _ -> Facts.raise_unsupported location (Literal_of ty)
   in
   let literal =
-    match make_sequence context frame ty ~element values with
+    match make_sequence frame ty ~element values with
     | Some literal -> literal
     | None -> (
-        match make_set context frame ty ~element values with
+        match make_set frame ty ~element values with
         | Some literal -> literal
         | None -> Facts.raise_unsupported location (Literal_of ty))
   in
   (frame, literal)
 
-let apply_map_literal (context : State.context) (frame : State.frame) ~(ty : Types.ty) ~location
-    terms =
+let apply_map_literal (frame : State.frame) ~(ty : Types.ty) ~location terms =
   let key_type, value_type =
     match ty with
     | Types.Named { arguments = [ Types.Type key; Types.Type value_type ]; _ } -> (key, value_type)
@@ -172,16 +178,15 @@ let apply_map_literal (context : State.context) (frame : State.frame) ~(ty : Typ
     | Types.Named { path; _ } when Well_known.is Finite_map path -> literal
     | _ -> Facts.raise_unsupported location (Literal_of ty)
   in
-  Validity.assume_valid context frame ty literal;
+  Validity.assume_valid frame ty literal;
   let key_sort = Encoding.sort_of key_type in
   let has key =
-    Models.make_finite_function context.query Finite_map_contains_key ~arguments Logic.Bool
+    Models.make_finite_function frame.query Finite_map_contains_key ~arguments Logic.Bool
       [ (key, key_sort) ]
       model
   in
   let get key =
-    Models.make_finite_function context.query Finite_map_get ~arguments
-      (Encoding.sort_of value_type)
+    Models.make_finite_function frame.query Finite_map_get ~arguments (Encoding.sort_of value_type)
       [ (key, key_sort) ]
       model
   in
@@ -191,18 +196,17 @@ let apply_map_literal (context : State.context) (frame : State.frame) ~(ty : Typ
   assume_only_members frame "key" key_sort has (List.map (fun (_, key, _) -> key) terms);
   Facts.assume frame
     (Logic.equal
-       (Models.make_finite_function context.query Finite_map_size ~arguments Logic.Int [] model)
+       (Models.make_finite_function frame.query Finite_map_size ~arguments Logic.Int [] model)
        (Logic.int (List.length terms)));
   (frame, literal)
 
 let literal_bytes_limit = 256
 
-let rec make_literal_value (context : State.context) (frame : State.frame) (ty : Types.ty)
-    (value : Language.Literal.t) =
+let rec make_literal_value (frame : State.frame) (ty : Types.ty) (value : Language.Literal.t) =
   let symbol = Logic.Symbol.Literal { type_ = ty; value } in
   let literal = Logic.Symbol symbol in
-  Query.run_once context.query (Value_of symbol) (fun () ->
-      Validity.assume_valid context
+  Query.run_once frame.query (Value_of symbol) (fun () ->
+      Validity.assume_valid
         { frame with condition = Logic.Boolean true; bound = []; binders = [] }
         ty literal;
       let element, count, elements =
@@ -214,36 +218,33 @@ let rec make_literal_value (context : State.context) (frame : State.frame) (ty :
                 List.init (String.length text) (fun index -> Logic.int (Char.code text.[index]))
               else [] )
         | Elements elements, Types.Named { arguments = [ Types.Type element ]; _ } ->
-            ( element,
-              List.length elements,
-              List.map (make_literal_value context frame element) elements )
+            (element, List.length elements, List.map (make_literal_value frame element) elements)
         | Elements _, _ -> Facts.raise_bug "a literal of elements has the type `%s`" (Types.show ty)
       in
       let assume_holds model =
-        Query.add_fact context.query
+        Query.add_fact frame.query
           (Logic.equal (Models.make_sequence_length element model) (Logic.int count));
         List.iteri
           (fun index at_index ->
             match
-              Models.index_sequence context.environment context.query element model
-                (Logic.int index)
+              Models.index_sequence frame.environment frame.query element model (Logic.int index)
             with
-            | Some at -> Query.add_fact context.query (Logic.equal at at_index)
+            | Some at -> Query.add_fact frame.query (Logic.equal at at_index)
             | None -> ())
           elements
       in
-      Option.iter assume_holds (Models.find_model context ty literal ~element);
-      match Encoding.find_constructors context.environment ty with
+      Option.iter assume_holds (Models.find_model frame.environment frame.query ty literal ~element);
+      match Encoding.find_constructors frame.environment ty with
       | Some [ (None, [ (field, field_type) ]) ] -> (
-          let part = Encoding.select_field context.environment ty None field literal in
+          let part = Encoding.select_field frame.environment ty None field literal in
           match field_type with
           | Types.Named { path; arguments = [ Types.Type stored ] }
             when Option.is_some (Well_known.find_builtin_type path) ->
               if Well_known.find_builtin_type path = Some Storage && Types.equal stored element then
                 assume_holds (Intrinsics.make_buffer_model Storage element part)
           | _ ->
-              Query.add_fact context.query
-                (Logic.equal part (make_literal_value context frame field_type value)))
+              Query.add_fact frame.query
+                (Logic.equal part (make_literal_value frame field_type value)))
       | _ -> ());
   literal
 
@@ -286,28 +287,28 @@ let assume_field_range_of_every_result (environment : State.environment) query t
               Query.add_fact query (Logic.forall ~trigger:[ selection ] (parameters, range))))
   | None -> ()
 
-let project_field (context : State.context) (frame : State.frame) ty variant field field_type term =
-  let part = Encoding.select_field context.environment ty variant field term in
-  Contract_axioms.assume_typed context frame (Encoding.make_in_range field_type part);
+let project_field (frame : State.frame) ty variant field field_type term =
+  let part = Encoding.select_field frame.environment ty variant field term in
+  Contract_axioms.assume_typed frame (Encoding.make_in_range field_type part);
   if Logic.mentions (List.map (fun (name, _, _) -> name) frame.binders) term then
-    assume_field_range_of_every_result context.environment context.query ty variant field field_type
+    assume_field_range_of_every_result frame.environment frame.query ty variant field field_type
       term;
-  if context.environment.ranking then begin
+  if frame.environment.ranking then begin
     Facts.assume frame
       (Logic.less
-         (Models.rank context.environment context.query field_type part)
-         (Models.rank context.environment context.query ty term))
+         (Models.rank frame.environment frame.query field_type part)
+         (Models.rank frame.environment frame.query ty term))
   end;
   part
 
-let evaluate_constant (context : State.context) (frame : State.frame) path =
+let evaluate_constant (frame : State.frame) path =
   match
-    ( Contracts.find_source context.environment.lookups path,
-      Mir.read_initializer context.environment.lookups.mir path )
+    ( Contracts.find_source frame.environment.lookups path,
+      Mir.read_initializer frame.environment.lookups.mir path )
   with
   | Some (constant_source, _, _), Some { form = code; _ } ->
       let symbol : Logic.symbol =
-        if Cycles.is_evaluated_constant context.environment path code then
+        if Cycles.is_evaluated_constant frame.environment path code then
           Evaluated (Constant_value path)
         else Constant path
       in
@@ -324,23 +325,23 @@ let evaluate_constant (context : State.context) (frame : State.frame) path =
           binders = [];
         }
       in
-      Query.run_once context.query (Value_of symbol) (fun () ->
+      Query.run_once frame.query (Value_of symbol) (fun () ->
           let ty =
-            Interface.Definition.read_constant_type context.environment.lookups.interface path
+            Interface.Definition.read_constant_type frame.environment.lookups.interface path
           in
-          Query.declare context.query (Logic.Constant (symbol, Encoding.sort_of ty));
+          Query.declare frame.query (Logic.Constant (symbol, Encoding.sort_of ty));
           let _, defined_value =
-            Counters.run_without_counters context (fun () ->
-                Lambdas.run_code context empty code ~type_:ty)
+            Counters.run_without_counters frame.query (fun () ->
+                Lambdas.run_code empty code ~type_:ty)
           in
-          Query.add_fact context.query (Logic.equal (Logic.Symbol symbol) defined_value));
+          Query.add_fact frame.query (Logic.equal (Logic.Symbol symbol) defined_value));
       Logic.Symbol symbol
   | _ -> Facts.raise_bug "the constant %s has no initializer" (Path.show path)
 
-let evaluate_field_default (context : State.context) (frame : State.frame) ty variant field =
-  match (ty, Validity.find_type_source context ty) with
+let evaluate_field_default (frame : State.frame) ty variant field =
+  match (ty, Validity.find_type_source frame.environment ty) with
   | Types.Named { path; _ }, Some source -> (
-      match Mir.read_defaults context.environment.lookups.mir path with
+      match Mir.read_defaults frame.environment.lookups.mir path with
       | Some { form = Field_defaults defaults; _ } -> (
           match
             List.find_opt
@@ -351,7 +352,7 @@ let evaluate_field_default (context : State.context) (frame : State.frame) ty va
           | Some default ->
               let inside = Validity.make_type_frame frame source ty ~self:None in
               let evaluated, value =
-                Lambdas.run_code context inside default.value
+                Lambdas.run_code inside default.value
                   ~type_:(Encoding.substitute_type inside default.type_)
               in
               ({ frame with spent = evaluated.spent }, value)
@@ -360,11 +361,10 @@ let evaluate_field_default (context : State.context) (frame : State.frame) ty va
           Facts.raise_bug "a type with no MIR of its defaults")
   | _ -> Facts.raise_bug "a default of %s, which has no source" (Types.show ty)
 
-let check_built (context : State.context) (frame : State.frame) (site : Invocation.site) ty term =
-  Validity.check_valid context frame (Facts.locate frame site.origin) ty term ~deep:false
-    ~moment:Built_here
+let check_built (frame : State.frame) (site : Invocation.site) ty term =
+  Validity.check_valid frame (Facts.locate frame site.origin) ty term ~deep:false ~moment:Built_here
 
-let apply_construct (context : State.context) (frame : State.frame) (site : Invocation.site) variant
+let apply_construct (frame : State.frame) (site : Invocation.site) variant
     (fields : (string * Logic.term option) list) =
   let ty = Encoding.substitute_type frame site.type_ in
   if Types.equal ty Types.unit then (frame, Logic.Apply (Logic.Symbol.Unit, []))
@@ -375,14 +375,14 @@ let apply_construct (context : State.context) (frame : State.frame) (site : Invo
           match written with
           | Some term -> (frame, field_terms @ [ (field, term) ])
           | None ->
-              let frame, value = evaluate_field_default context frame ty variant field in
+              let frame, value = evaluate_field_default frame ty variant field in
               (frame, field_terms @ [ (field, value) ]))
         (frame, []) fields
     in
     let frame =
-      Counters.spend context frame (Amounts.compute_construction_amount frame ty variant)
+      Counters.spend frame (Amounts.compute_construction_amount frame.environment ty variant)
     in
-    match Encoding.find_constructors context.environment ty with
+    match Encoding.find_constructors frame.environment ty with
     | Some shape ->
         let shaped = match List.assoc_opt variant shape with Some fields -> fields | None -> [] in
         let read_field_value (name, _) =
@@ -393,21 +393,19 @@ let apply_construct (context : State.context) (frame : State.frame) (site : Invo
         let built =
           Logic.Apply (Encoding.make_constructor_symbol ty variant, List.map read_field_value shaped)
         in
-        check_built context frame site ty built;
-        let frame = Potentials.spend_declared_potential context frame ty built in
+        check_built frame site ty built;
+        let frame = Potentials.spend_declared_potential frame ty built in
         (frame, built)
     | None -> (frame, Encoding.arrive frame "built" ty)
 
-let make_text_match (context : State.context) location ty term text =
+let make_text_match (environment : State.environment) (query : Query.t) location ty term text =
   let byte = Types.make_builtin UInt8 in
-  match Models.find_model context ty term ~element:byte with
+  match Models.find_model environment query ty term ~element:byte with
   | Some model ->
       Logic.conjunction
         (Logic.equal (Models.make_sequence_length byte model) (Logic.int (String.length text))
         :: List.init (String.length text) (fun index ->
-            match
-              Models.index_sequence context.environment context.query byte model (Logic.int index)
-            with
+            match Models.index_sequence environment query byte model (Logic.int index) with
             | Some at -> Logic.equal at (Logic.int (Char.code text.[index]))
             | None -> Logic.Boolean false))
   | None -> Facts.raise_unsupported location (String_pattern_on ty)
@@ -433,17 +431,18 @@ let make_log_order left right =
     ==> less_equal (log left) (log right)
     &&& (less_equal right left ==> less_equal (log right) (log left)))
 
-let make_log (context : State.context) (frame : State.frame) log_argument =
+let make_log (frame : State.frame) log_argument =
+  let state = Query.read_state frame.query state in
   let rec add log_argument ~halving =
-    match List.assoc_opt log_argument context.logs with
+    match List.assoc_opt log_argument state.logs with
     | Some true -> ()
     | Some false when not halving -> ()
     | seen ->
         if seen = None then
           List.iter
             (fun (other, _) -> Facts.add_axiom frame (make_log_order log_argument other))
-            context.logs;
-        context.logs <- (log_argument, halving) :: List.remove_assoc log_argument context.logs;
+            state.logs;
+        state.logs <- (log_argument, halving) :: List.remove_assoc log_argument state.logs;
         let facts, half = make_log_facts log_argument ~halving in
         List.iter (Facts.add_axiom frame) facts;
         Option.iter (fun half -> add half ~halving:false) half
@@ -457,20 +456,20 @@ let make_log (context : State.context) (frame : State.frame) log_argument =
   | _ -> ());
   Logic.Apply (Logic.Symbol.Integer_log, [ log_argument ])
 
-let apply_specification_function (context : State.context) (frame : State.frame) ~location
+let apply_specification_function (frame : State.frame) ~location
     (measure : Core.specification_function) values ~unconverted ~types =
   match (measure, values, unconverted, types) with
   | Log, [ log_argument ], [ unconverted ], _ ->
-      let log = make_log context frame log_argument in
+      let log = make_log frame log_argument in
       (match Encoding.find_bounds unconverted with
       | Some (_, high) when not (Logic.mentions frame.bound log_argument) ->
           Facts.add_axiom frame
             Logic.(less_equal log_argument (Integer high) ==> less_equal log (int (Z.numbits high)))
       | _ -> ());
       (frame, log)
-  | Power, [ base; exponent ], _, _ -> (frame, Operations.make_power context frame base exponent)
+  | Power, [ base; exponent ], _, _ -> (frame, Operations.make_power frame base exponent)
   | Callback_cost metric, [ function_term ], _, [ function_type ] ->
-      (frame, Amounts.make_callback_cost context frame metric function_type function_term)
+      (frame, Amounts.make_callback_cost frame metric function_type function_term)
   | Callback_ensures, _, _, Types.Function function_type :: _ ->
       (frame, Callbacks.apply_callback_ensures function_type values)
   | _ -> Facts.raise_unsupported location Specification_function

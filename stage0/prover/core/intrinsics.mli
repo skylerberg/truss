@@ -1,10 +1,9 @@
 val keeps_potential : Intrinsic.operation -> bool
 val make_buffer_slack : Types.ty -> Logic.term -> Logic.term
-val replace_elements : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term
+val replace_elements : State.frame -> Types.ty -> Logic.term -> Logic.term
 val find_sequence_element : State.frame -> Types.ty -> Types.ty
 
 val read_sequence_element :
-  State.context ->
   State.frame ->
   Types.ty ->
   Logic.term ->
@@ -14,10 +13,9 @@ val read_sequence_element :
   Logic.term
 
 val write_sequence_element :
-  State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term -> Logic.term
+  State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term -> Logic.term
 
 val write_sequence_range :
-  State.context ->
   State.frame ->
   Types.ty ->
   Logic.term ->
@@ -28,7 +26,6 @@ val write_sequence_range :
   Logic.term
 
 val apply_range :
-  State.context ->
   State.frame ->
   node:Core.id ->
   Invocation.site ->
@@ -46,7 +43,6 @@ val make_empty_sequence : State.frame -> Types.ty -> Logic.term
 val append_element : State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
 
 val translate_intrinsic :
-  State.context ->
   State.frame ->
   site:Invocation.site ->
   Intrinsic.operation ->

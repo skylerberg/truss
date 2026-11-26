@@ -3435,6 +3435,9 @@ let () =
       expected
   in
   let impl_precondition = "may not follow from the trait's precondition" in
+  Harness.test "a parameter that a loop leaves invalid is named" (fun () ->
+      expect_messages_saying Fixtures.Prover.parameter_zeroed_in_a_loop
+        [ "may not hold for `item` after an iteration" ]);
   Harness.test "a precondition of a `for` loop's call names the loop" (fun () ->
       expect_messages_saying Fixtures.Prover.sum_over_a_short_bag
         [

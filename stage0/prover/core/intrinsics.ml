@@ -53,8 +53,8 @@ let make_sequence_range (environment : State.environment) query element sequence
       | _ -> ());
   range_of sequence start stop
 
-let apply_range (context : State.context) (frame : State.frame) ~node (site : Invocation.site)
-    ~(base_type : Types.ty) ~collection ~low ~high =
+let apply_range (frame : State.frame) ~node (site : Invocation.site) ~(base_type : Types.ty)
+    ~collection ~low ~high =
   let location = Facts.locate frame site.origin in
   let element =
     match base_type with
@@ -70,7 +70,7 @@ let apply_range (context : State.context) (frame : State.frame) ~node (site : In
   let model =
     if is_sequence then collection
     else
-      match Models.find_model context base_type collection ~element with
+      match Models.find_model frame.environment frame.query base_type collection ~element with
       | Some model -> model
       | None -> Facts.raise_unsupported location (Range_of base_type)
   in
@@ -91,21 +91,21 @@ let apply_range (context : State.context) (frame : State.frame) ~node (site : In
       Logic.(less_equal (int 0) low &&& less_equal low high &&& less_equal high length);
   let range =
     if is_whole then model
-    else make_sequence_range context.environment context.query element model ~start:low ~stop:high
+    else make_sequence_range frame.environment frame.query element model ~start:low ~stop:high
   in
   if is_sequence then (frame, range, low, high)
   else begin
-    Validity.note_place context frame ~node ~origin:site.origin (Run (low, high));
+    Validity.note_place frame ~node ~origin:site.origin (Run (low, high));
     let range_type_of_site = Encoding.substitute_type frame site.type_ in
     let symbol = Logic.Symbol.Range_of base_type in
-    Query.declare context.query
+    Query.declare frame.query
       (Logic.Function
          ( symbol,
            [ Encoding.sort_of base_type; Logic.Int; Logic.Int ],
            Encoding.sort_of range_type_of_site ));
     let viewed = Logic.Apply (symbol, [ collection; low; high ]) in
     Facts.assume frame (Encoding.make_in_range range_type_of_site viewed);
-    (match Models.find_model context range_type_of_site viewed ~element with
+    (match Models.find_model frame.environment frame.query range_type_of_site viewed ~element with
     | Some viewed_model -> Facts.assume frame (Logic.equal viewed_model range)
     | None -> ());
     (frame, viewed, low, high)
@@ -331,9 +331,8 @@ let require_precondition (frame : State.frame) (site : Invocation.site) requirem
       condition;
   Facts.restrict_unless_proven frame condition
 
-let translate_buffer_operation (context : State.context) (frame : State.frame)
-    ~(site : Invocation.site) (operation : Intrinsic.buffer) element (values : State.passed list)
-    ~changed result_type known =
+let translate_buffer_operation (frame : State.frame) ~(site : Invocation.site)
+    (operation : Intrinsic.buffer) element (values : State.passed list) ~changed result_type known =
   let read_passed position =
     match List.nth_opt values position with
     | Some passed -> passed
@@ -349,8 +348,8 @@ let translate_buffer_operation (context : State.context) (frame : State.frame)
   let require ?(requirement = Catalog.Prover.Room_written) condition =
     require_precondition frame site requirement condition
   in
-  let at = index_element context.environment context.query element in
-  let make_index_name () = Query.make_fresh_name context.query "index" in
+  let at = index_element frame.environment frame.query element in
+  let make_index_name () = Query.make_fresh_name frame.query "index" in
   let in_interval index low high = Logic.(less_equal low index &&& less index high) in
   let all name low high body =
     Logic.forall ([ (name, Logic.Int) ], Logic.(in_interval (Symbol name) low high ==> body))
@@ -360,7 +359,7 @@ let translate_buffer_operation (context : State.context) (frame : State.frame)
   | Storage_model -> storage (read_operand 0)
   | Array_model ->
       let array = read_passed 0 in
-      Models.make_array_model context frame array.type_ array.term
+      Models.make_array_model frame array.type_ array.term
   | Storage_length -> length (storage (read_operand 0))
   | Storage_capacity ->
       let buffer = read_operand 0 in
@@ -403,8 +402,8 @@ let translate_buffer_operation (context : State.context) (frame : State.frame)
       let built =
         Logic.Apply (Encoding.make_constructor_symbol result_type None, [ read_operand 0 ])
       in
-      Validity.check_valid context frame (Facts.locate frame site.origin) result_type built
-        ~deep:false ~moment:Built_here;
+      Validity.check_valid frame (Facts.locate frame site.origin) result_type built ~deep:false
+        ~moment:Built_here;
       built
   | Storage_address -> (
       match find_scalar_bytes element with
@@ -440,29 +439,28 @@ let translate_lend (frame : State.frame) ~(site : Invocation.site) (lend : Intri
       Facts.raise_bug "`%s` without an element type, a container, and an index"
         (Intrinsic.show_operation (Lend lend))
 
-let read_invariant (context : State.context) (frame : State.frame) (values : State.passed list)
-    result_type =
+let read_invariant (frame : State.frame) (values : State.passed list) result_type =
   match values with
   | [ subject; clause ] -> (
-      match (clause.term, Validity.find_invariants context subject.type_) with
+      match (clause.term, Validity.find_invariants frame.environment subject.type_) with
       | Logic.Integer index, Some (source, written) -> (
           match List.nth_opt written (Z.to_int index) with
           | Some invariant ->
               let inner =
                 Validity.make_type_frame frame source subject.type_ ~self:(Some subject.term)
               in
-              snd (Validity.read_specification context inner invariant)
+              snd (Validity.read_specification inner invariant)
           | None -> Encoding.arrive frame "holds" result_type)
       | _ -> Encoding.arrive frame "holds" result_type)
   | _ -> Encoding.arrive frame "holds" result_type
 
-let translate_runtime (context : State.context) (frame : State.frame) ~(site : Invocation.site)
-    (runtime : Intrinsic.runtime) (values : State.passed list) ~changed result_type known =
+let translate_runtime (frame : State.frame) ~(site : Invocation.site) (runtime : Intrinsic.runtime)
+    (values : State.passed list) ~changed result_type known =
   let operands = List.map (fun (passed : State.passed) -> passed.term) values in
   match runtime with
-  | Holds_invariant -> read_invariant context frame values result_type
+  | Holds_invariant -> read_invariant frame values result_type
   | Shared_update ->
-      Validity.assume_valid context frame result_type (Lazy.force known);
+      Validity.assume_valid frame result_type (Lazy.force known);
       Lazy.force known
   | Libc function_ -> call_libc frame ~site function_ operands ~changed (Lazy.force known)
   | Libc_number number -> make_libc_number number
@@ -472,7 +470,7 @@ let translate_runtime (context : State.context) (frame : State.frame) ~(site : I
       let model = make_buffer_model Storage byte (Lazy.force known) in
       let length = Models.make_sequence_length byte model in
       (match
-         Models.index_sequence context.environment context.query byte model
+         Models.index_sequence frame.environment frame.query byte model
            (Logic.Symbol (Query.make_variable "entry.index"))
        with
       | Some at ->
@@ -502,12 +500,12 @@ let translate_runtime (context : State.context) (frame : State.frame) ~(site : I
   | Coroutine_resume | Coroutine_suspend | Tasks_spawn | Shared_new | Shared_key ->
       Lazy.force known
 
-let translate_intrinsic (context : State.context) (frame : State.frame) ~(site : Invocation.site)
+let translate_intrinsic (frame : State.frame) ~(site : Invocation.site)
     (operation : Intrinsic.operation) types (values : State.passed list) ~changed result_type =
   let known = lazy (Encoding.arrive frame "result" result_type) in
   match operation with
   | Scalar scalar ->
-      Operations.translate_primitive_operation context frame ~site scalar types
+      Operations.translate_primitive_operation frame ~site scalar types
         (List.map (fun (passed : State.passed) -> passed.term) values)
         ~arguments:(List.map (fun (passed : State.passed) -> passed.origin) values)
         ~fallback:(fun () -> Lazy.force known)
@@ -518,11 +516,10 @@ let translate_intrinsic (context : State.context) (frame : State.frame) ~(site :
         | _, element :: _ -> element
         | _, [] -> Facts.raise_bug "`%s` has no element type" (Intrinsic.show_operation operation)
       in
-      translate_buffer_operation context frame ~site buffer element values ~changed result_type
+      translate_buffer_operation frame ~site buffer element values ~changed result_type
         (Lazy.force known)
   | Lend lend -> translate_lend frame ~site lend types values
-  | Runtime runtime ->
-      translate_runtime context frame ~site runtime values ~changed result_type known
+  | Runtime runtime -> translate_runtime frame ~site runtime values ~changed result_type known
 
 let replace_element (frame : State.frame) element ~before ~after index part =
   let length sequence = Models.make_sequence_length element sequence in
@@ -566,13 +563,14 @@ let find_sequence_element (frame : State.frame) (sequence : Types.ty) =
   | text when Types.is_well_known String text -> Types.make_builtin UInt8
   | _ -> Facts.raise_bug "an element of `%s`, which is no sequence" (Types.show sequence)
 
-let find_sequence_model (context : State.context) (frame : State.frame) (sequence : Types.ty) term =
+let find_sequence_model (frame : State.frame) (sequence : Types.ty) term =
   match sequence with
   | Types.Named { path; _ } when Well_known.find_builtin_type path = Some Array ->
-      Models.make_array_model context frame sequence term
+      Models.make_array_model frame sequence term
   | _ -> (
       match
-        Models.find_model context sequence term ~element:(find_sequence_element frame sequence)
+        Models.find_model frame.environment frame.query sequence term
+          ~element:(find_sequence_element frame sequence)
       with
       | Some model -> model
       | None -> Facts.raise_unsupported Whole_definition (Elements_of sequence))
@@ -582,34 +580,32 @@ let oblige_in_bounds (frame : State.frame) ~origin condition =
     (Out_of_bounds { at = Facts.quote frame.source origin })
     condition
 
-let read_sequence_element (context : State.context) (frame : State.frame) (sequence : Types.ty) term
-    index ~node ~origin =
+let read_sequence_element (frame : State.frame) (sequence : Types.ty) term index ~node ~origin =
   let element = find_sequence_element frame sequence in
-  let model = find_sequence_model context frame sequence term in
+  let model = find_sequence_model frame sequence term in
   let is_in_bounds =
     Logic.(less_equal (int 0) index &&& less index (Models.make_sequence_length element model))
   in
   oblige_in_bounds frame ~origin is_in_bounds;
-  Validity.note_place context frame ~node ~origin (One index);
-  let read = index_element context.environment context.query element model index in
+  Validity.note_place frame ~node ~origin (One index);
+  let read = index_element frame.environment frame.query element model index in
   let defined = Facts.restrict_unless_proven frame is_in_bounds in
   Facts.assume defined (Encoding.make_in_range element read);
-  Validity.assume_valid context defined element read;
+  Validity.assume_valid defined element read;
   read
 
-let write_sequence (context : State.context) (frame : State.frame) (sequence : Types.ty) before
-    ~write_model =
+let write_sequence (frame : State.frame) (sequence : Types.ty) before ~write_model =
   let element = find_sequence_element frame sequence in
   let after =
-    match (sequence, Encoding.find_constructors context.environment sequence) with
+    match (sequence, Encoding.find_constructors frame.environment sequence) with
     | Types.Named { path; _ }, _ when Well_known.find_builtin_type path = Some Array ->
         let after = Encoding.arrive frame "changed" sequence in
         write_model
-          ~before:(Models.make_array_model context frame sequence before)
-          ~after:(Models.make_array_model context frame sequence after);
+          ~before:(Models.make_array_model frame sequence before)
+          ~after:(Models.make_array_model frame sequence after);
         after
     | _, Some [ (None, [ (field, buffer_type) ]) ] ->
-        let buffer = Encoding.select_field context.environment sequence None field before in
+        let buffer = Encoding.select_field frame.environment sequence None field before in
         let written = Encoding.arrive frame "changed" buffer_type in
         if not (Types.is_builtin Storage buffer_type) then
           Facts.raise_bug "the field of `%s` is no buffer" (Types.show sequence);
@@ -620,48 +616,47 @@ let write_sequence (context : State.context) (frame : State.frame) (sequence : T
           (Logic.equal (make_buffer_capacity element written) (make_buffer_capacity element buffer));
         let after = Logic.Apply (Encoding.make_constructor_symbol sequence None, [ written ]) in
         write_model
-          ~before:(find_sequence_model context frame sequence before)
-          ~after:(find_sequence_model context frame sequence after);
+          ~before:(find_sequence_model frame sequence before)
+          ~after:(find_sequence_model frame sequence after);
         after
     | _, None ->
         let after = Encoding.arrive frame "changed" sequence in
         write_model
-          ~before:(find_sequence_model context frame sequence before)
-          ~after:(find_sequence_model context frame sequence after);
+          ~before:(find_sequence_model frame sequence before)
+          ~after:(find_sequence_model frame sequence after);
         Facts.assume frame
           (Logic.equal (make_buffer_slack sequence after) (make_buffer_slack sequence before));
         after
     | _, Some _ -> Facts.raise_bug "a sequence `%s` with more than one field" (Types.show sequence)
   in
-  Validity.assume_valid context frame sequence after;
+  Validity.assume_valid frame sequence after;
   after
 
-let write_sequence_element (context : State.context) (frame : State.frame) (sequence : Types.ty)
-    before index part =
+let write_sequence_element (frame : State.frame) (sequence : Types.ty) before index part =
   let element = find_sequence_element frame sequence in
-  write_sequence context frame sequence before ~write_model:(fun ~before ~after ->
+  write_sequence frame sequence before ~write_model:(fun ~before ~after ->
       replace_element frame element ~before ~after index part)
 
-let write_sequence_range (context : State.context) (frame : State.frame) (sequence : Types.ty)
-    before ~start ~stop ~(range_type : Types.ty) range =
+let write_sequence_range (frame : State.frame) (sequence : Types.ty) before ~start ~stop
+    ~(range_type : Types.ty) range =
   let element = find_sequence_element frame sequence in
-  let range_model = find_sequence_model context frame range_type range in
-  write_sequence context frame sequence before ~write_model:(fun ~before ~after ->
+  let range_model = find_sequence_model frame range_type range in
+  write_sequence frame sequence before ~write_model:(fun ~before ~after ->
       assume_unchanged_outside frame element ~before ~after ~start ~stop;
       Facts.assume frame
         (Logic.equal
-           (make_sequence_range context.environment context.query element after ~start ~stop)
+           (make_sequence_range frame.environment frame.query element after ~start ~stop)
            range_model);
       let replaced =
-        make_sequence_range context.environment context.query element before ~start ~stop
+        make_sequence_range frame.environment frame.query element before ~start ~stop
       in
       Facts.assume frame
-        (make_each_sum context.query element (fun sum _ ->
+        (make_each_sum frame.query element (fun sum _ ->
              Logic.equal
                (Logic.add (sum after) (sum replaced))
                (Logic.add (sum before) (sum range_model)))))
 
-let replace_elements (context : State.context) (frame : State.frame) (sequence : Types.ty) before =
+let replace_elements (frame : State.frame) (sequence : Types.ty) before =
   let element = find_sequence_element frame sequence in
   let keep_length ~before ~after =
     Facts.assume frame
@@ -678,4 +673,4 @@ let replace_elements (context : State.context) (frame : State.frame) (sequence :
       (Logic.equal (make_buffer_capacity element after) (make_buffer_capacity element before));
     after
   end
-  else write_sequence context frame sequence before ~write_model:keep_length
+  else write_sequence frame sequence before ~write_model:keep_length

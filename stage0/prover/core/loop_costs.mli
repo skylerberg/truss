@@ -1,7 +1,6 @@
 type t
 
 val enter :
-  State.context ->
   State.frame ->
   entry:State.frame ->
   Mir.loop_clause list ->
@@ -10,11 +9,10 @@ val enter :
   t
 
 val declare_iterations : State.frame -> t -> Logic.term option
-val enter_head : State.context -> State.frame -> t -> iterations:Logic.term option -> State.frame
-val spend_step : State.context -> State.frame -> State.frame
+val enter_head : State.frame -> t -> iterations:Logic.term option -> State.frame
+val spend_step : State.frame -> State.frame
 
 val check_iterations :
-  State.context ->
   Core.origin ->
   State.frame ->
   t ->
@@ -26,7 +24,6 @@ val check_iterations :
   unit
 
 val leave :
-  State.context ->
   clause_at:State.frame ->
   State.frame ->
   t ->
@@ -35,7 +32,7 @@ val leave :
   State.frame
 
 val leave_counted :
-  State.context ->
+  Query.t ->
   clause_at:State.frame ->
   State.frame ->
   t ->
