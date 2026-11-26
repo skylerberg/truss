@@ -242,7 +242,7 @@ let make_power_order base left right =
         ==> less_equal (power left) (power right)
         &&& (less_equal right left ==> less_equal (power right) (power left))))
 
-let declare_power (context : State.context) (frame : State.frame) base exponent =
+let make_power (context : State.context) (frame : State.frame) base exponent =
   let add exponent =
     if not (List.mem (base, exponent) context.powers) then begin
       List.iter
@@ -344,7 +344,7 @@ let translate_primitive_operation (context : State.context) (frame : State.frame
       (match (Encoding.find_bounds ty, find_width ty) with
       | Some (low, high), Some bits
         when Z.equal low Z.zero && not (Logic.mentions frame.bound right) ->
-          let scale = declare_power context frame (Logic.int 2) right in
+          let scale = make_power context frame (Logic.int 2) right in
           Facts.assume frame
             Logic.(
               less_equal (int 0) right
@@ -439,7 +439,7 @@ let translate_primitive_operation (context : State.context) (frame : State.frame
              let leading = count Leading_zeros value
              and trailing = count Trailing_zeros value
              and ones = count Count_ones value in
-             let power exponent = declare_power context frame (Logic.int 2) exponent in
+             let power exponent = make_power context frame (Logic.int 2) exponent in
              let width = Logic.int bits in
              let nonzero = Logic.not_ (Logic.equal value (Logic.int 0)) in
              let below_highest = Logic.subtract width leading in

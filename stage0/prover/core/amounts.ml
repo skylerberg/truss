@@ -578,7 +578,7 @@ let find_method_cost_bound (context : State.context) (frame : State.frame)
         | None -> None)
   | _ -> None
 
-let declare_method_cost (context : State.context) (frame : State.frame) (metric : Language.Metric.t)
+let make_method_cost (context : State.context) (frame : State.frame) (metric : Language.Metric.t)
     (method_ : Path.t) ~trait_arguments self_type =
   let symbol = Logic.Symbol.Method_cost { metric; method_; trait_arguments; self_type } in
   Query.run_once context.query (Method_cost_bound symbol) (fun () ->
@@ -595,7 +595,7 @@ let compute_method_cost (context : State.context) (frame : State.frame) (metric 
     (callee : Callee.t) =
   match callee.target with
   | Definition { trait_method = Some { trait; name; receiver; self_type; _ }; _ } ->
-      declare_method_cost context frame metric
+      make_method_cost context frame metric
         (Path.Method { owner = trait.trait; name; receiver })
         ~trait_arguments:trait.trait_arguments self_type
   | Definition _ | Function_value | Intrinsic _ ->
@@ -641,7 +641,7 @@ let spend_copy ?literal (context : State.context) (frame : State.frame) ~(declar
   then frame
   else
     let declare_copy_cost_of metric copied =
-      declare_method_cost context frame metric
+      make_method_cost context frame metric
         (Well_known.make_method_path Copyable_copy)
         ~trait_arguments:[] copied
     in

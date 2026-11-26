@@ -7,7 +7,7 @@ val list_impl_packages : State.environment -> Types.ty -> Path.package list
 val make_equality :
   State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
 
-val declare_power : State.context -> State.frame -> Logic.term -> Logic.term -> Logic.term
+val make_power : State.context -> State.frame -> Logic.term -> Logic.term -> Logic.term
 
 val translate_primitive_operation :
   State.context ->

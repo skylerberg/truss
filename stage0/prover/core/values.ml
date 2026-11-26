@@ -435,7 +435,7 @@ let make_log_order left right =
     ==> less_equal (log left) (log right)
     &&& (less_equal right left ==> less_equal (log right) (log left)))
 
-let declare_log (context : State.context) (frame : State.frame) log_argument =
+let make_log (context : State.context) (frame : State.frame) log_argument =
   let rec add log_argument ~halving =
     match List.assoc_opt log_argument context.logs with
     | Some true -> ()
@@ -464,14 +464,14 @@ let apply_specification_function (context : State.context) (frame : State.frame)
     (measure : Core.specification_function) values ~unconverted ~types =
   match (measure, values, unconverted, types) with
   | Log, [ log_argument ], [ unconverted ], _ ->
-      let log = declare_log context frame log_argument in
+      let log = make_log context frame log_argument in
       (match Encoding.find_bounds unconverted with
       | Some (_, high) when not (Logic.mentions frame.bound log_argument) ->
           Facts.add_frame_fact frame
             Logic.(less_equal log_argument (Integer high) ==> less_equal log (int (Z.numbits high)))
       | _ -> ());
       (frame, log)
-  | Power, [ base; exponent ], _, _ -> (frame, Operations.declare_power context frame base exponent)
+  | Power, [ base; exponent ], _, _ -> (frame, Operations.make_power context frame base exponent)
   | Callback_cost metric, [ function_term ], _, [ function_type ] ->
       (frame, Amounts.make_callback_cost context frame metric function_type function_term)
   | Callback_ensures, _, _, Types.Function function_type :: _ ->

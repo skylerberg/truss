@@ -12,7 +12,7 @@ let find_typed (context : State.context) (frame : State.frame) term =
 let find_known (context : State.context) (frame : State.frame) term =
   Option.map snd (find_typed context frame term)
 
-let declare_own (frame : State.frame) own =
+let bind_own (frame : State.frame) own =
   List.fold_left
     (fun (frame : State.frame) (local, name, callback) ->
       match

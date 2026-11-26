@@ -133,7 +133,7 @@ let assume_unchanged_outside (frame : State.frame) element ~before ~after ~start
 
 let make_handle_descriptor handle = Logic.Apply (Logic.Symbol.Handle_descriptor, [ handle ])
 
-let declare_libc_number (frame : State.frame) (number : Libc.number) =
+let make_libc_number (frame : State.frame) (number : Libc.number) =
   let term = Logic.Symbol (Logic.Symbol.Libc_number number) in
   Facts.assume frame
     (Encoding.make_in_range
@@ -172,7 +172,7 @@ let call_libc (frame : State.frame) ~(site : Invocation.site) (function_ : Libc.
           (fun value -> if each = 1 then value else Logic.multiply (Logic.int each) value)
           (find_value by)
     | Exactly elements -> Some (Logic.int elements)
-    | Number number -> Some (declare_libc_number frame number)
+    | Number number -> Some (make_libc_number frame number)
     | Through_zero -> None
   in
   let require requirement condition =
@@ -508,7 +508,7 @@ let read_invariant (context : State.context) (frame : State.frame) (values : Sta
       | _ -> Encoding.arrive frame "holds" result_type)
   | _ -> Encoding.arrive frame "holds" result_type
 
-let declare_system query (runtime : Intrinsic.runtime) kind =
+let make_system_flag query (runtime : Intrinsic.runtime) kind =
   let make_symbol runtime = Logic.Symbol.System runtime in
   Query.run_once query
     (Exclusive (make_symbol runtime))
@@ -533,12 +533,12 @@ let translate_runtime (context : State.context) (frame : State.frame) ~(site : I
       Validity.assume_valid context frame result_type (Lazy.force known);
       Lazy.force known
   | Libc function_ -> call_libc frame ~site function_ operands ~changed (Lazy.force known)
-  | Libc_number number -> declare_libc_number frame number
+  | Libc_number number -> make_libc_number frame number
   | System_is_os _ ->
-      declare_system context.query runtime
+      make_system_flag context.query runtime
         (List.map (fun os -> Intrinsic.System_is_os os) Libc.oses)
   | System_is_architecture _ ->
-      declare_system context.query runtime
+      make_system_flag context.query runtime
         (List.map
            (fun architecture -> Intrinsic.System_is_architecture architecture)
            Libc.architectures)

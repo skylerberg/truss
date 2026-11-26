@@ -44,7 +44,7 @@ let find_buffer (context : State.context) (ty : Types.ty) =
       Tables.Type_table.replace context.cost.buffers key buffer;
       buffer
 
-let declare_potential_measure (context : State.context) element =
+let make_potential_measure (context : State.context) element =
   let symbol = Logic.Symbol.Potential_measure element in
   let measure = Intrinsics.measure_type element in
   let term = Logic.Symbol symbol in
@@ -62,7 +62,7 @@ let declare_potential_measure (context : State.context) element =
 
 let sum_element_potentials (context : State.context) element sequence =
   Intrinsics.make_sequence_sum context.query element sequence
-    (declare_potential_measure context element)
+    (make_potential_measure context element)
 
 let choose_by_variant ty term shape compute_variant =
   match shape with
