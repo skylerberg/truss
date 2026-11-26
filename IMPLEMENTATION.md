@@ -418,12 +418,18 @@ develop as well as make it easier to bootstrap the compiler in parts.
   with `Query.count_facts` and reads the ones added since, and a module that
   reads code under a binder takes the facts of that scope from
   `Query.run_in_scope`.
-- **The sort of a type is a function of the type, and an obligation
-  declares the datatypes that its query names.** `Encoding.sort_of` reads no
-  state. `Query.make_obligation` takes the constructors of each type from
-  `Encoding.list_constructors` and declares a datatype for every sort that
-  a declaration, a bound variable, a constructor or a field of the pruned
-  query names, so no reader declares a type before it builds a term of it.
+- **A term is built without the query.** The sort of a type is
+  `Encoding.sort_of`, a function of the type. A symbol whose structure
+  fixes its signature, such as `Capacity` of a type or `Apply` of a list of
+  sorts, has it in `Signatures.find_signature`, and no reader declares it.
+  `Logic.prune` reads such a symbol as declared, and `Logic.declare_derived`
+  completes the pruned query of an obligation: a declaration for each such
+  symbol that a fact or the goal names, and a datatype, with the
+  constructors that `Encoding.list_constructors` gives, for each sort that
+  a declaration, a bound variable, a constructor or a field names. It
+  rejects a written declaration of a derived symbol, so each symbol has one
+  source of its signature. A symbol that names a definition or a fresh
+  value is declared by the module that makes it.
 - **`Validity` decides each check of an invariant.** Every moment that
   obliges one calls `Validity.check_valid`, which first asks its record of
   the values already shown valid, so a value is proven once. A write

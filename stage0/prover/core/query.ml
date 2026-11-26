@@ -192,10 +192,11 @@ let mentions_fresh_since query since term =
   in
   walk term
 
-let make_obligation query ~list_constructors ~condition location obligation goal : Obligation.t =
+let make_obligation query ~find_signature ~list_constructors ~condition location obligation goal :
+    Obligation.t =
   let pruned =
-    Logic.declare_datatypes ~list_constructors
-      (Logic.prune
+    Logic.declare_derived ~find_signature ~list_constructors
+      (Logic.prune ~find_signature
          {
            declarations = List.rev query.declarations;
            facts = Fact_list.list_oldest_first query.facts;

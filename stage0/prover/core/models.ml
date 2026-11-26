@@ -20,11 +20,6 @@ let run_under_binder :
   in
   (body_frame, body, with_facts)
 
-let sequence_path : Path.t = Well_known.make_path Sequence
-
-let make_sequence_type element =
-  Types.Named { path = sequence_path; arguments = [ Types.Type element ] }
-
 let make_sequence_length context element term =
   let symbol =
     Logic.Symbol.Function
@@ -34,15 +29,15 @@ let make_sequence_length context element term =
       }
   in
   Facts.declare context
-    (Logic.Function (symbol, [ Encoding.sort_of (make_sequence_type element) ], Logic.Int));
+    (Logic.Function (symbol, [ Encoding.sort_of (Encoding.make_sequence_type element) ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
 let rec index_sequence (context : State.context) element term index =
-  let sequence = make_sequence_type element in
+  let sequence = Encoding.make_sequence_type element in
   let index_trait = Well_known.make_path Index in
   match
     Interface.Impls.list_impls_of_trait_for_type context.lookups.interface ~trait:index_trait
-      ~type_:sequence_path Path.standard_package
+      ~type_:Encoding.sequence_path Path.standard_package
   with
   | impl :: _ ->
       let symbol =
@@ -75,7 +70,6 @@ let rec index_sequence (context : State.context) element term index =
 
 and rank context ty term =
   let symbol = Logic.Symbol.Rank ty in
-  Facts.declare context (Logic.Function (symbol, [ Encoding.sort_of ty ], Logic.Int));
   Facts.run_once context (Non_negative_rank ty) (fun () ->
       let each = Logic.Symbol.Variable { label = "ranked.value"; numbers = [] } in
       Facts.add_fact context
@@ -84,7 +78,7 @@ and rank context ty term =
              Logic.less_equal (Logic.int 0) (Logic.Apply (symbol, [ Logic.Symbol each ])) )));
   (match ty with
   | Types.Named { path; arguments = [ Types.Type element ] }
-    when context.ranking && Path.equal path sequence_path ->
+    when context.ranking && Path.equal path Encoding.sequence_path ->
       ignore (index_sequence context element term (Logic.int 0))
   | _ -> ());
   Logic.Apply (symbol, [ term ])
@@ -107,7 +101,6 @@ let substitute_value_term context (value : Types.value) =
   | Value_parameter parameter ->
       let symbol = Logic.Symbol.Generic_value { owner = parameter.owner; name = parameter.name } in
       Facts.run_once context (In_range symbol) (fun () ->
-          Facts.declare context (Logic.Constant (symbol, Int));
           Facts.add_fact context
             (Encoding.make_in_range (Types.make_builtin UInt64) (Logic.Symbol symbol)));
       Logic.Symbol symbol
@@ -191,7 +184,7 @@ let find_model_function (context : State.context) (ty : Types.ty) ~(model : Type
 let find_model context (ty : Types.ty) term ~element =
   Option.map
     (fun model_of -> model_of term)
-    (find_model_function context ty ~model:(make_sequence_type element))
+    (find_model_function context ty ~model:(Encoding.make_sequence_type element))
 
 let quantify_over (context : State.context) (frame : State.frame)
     (quantifier : Language.Quantifier.t) (range : quantified_range) ~bind ~read =

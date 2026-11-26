@@ -3,9 +3,7 @@ val make_state : unit -> State.callback_state
 val declare_own :
   State.context -> State.frame -> (Core.local * string * Mir.callback) list -> State.frame
 
-val apply_function :
-  State.context -> Types.function_type -> Logic.term -> Logic.term list -> Logic.term
-
+val apply_function : Types.function_type -> Logic.term -> Logic.term list -> Logic.term
 val returns_value : Types.function_type -> bool
 val is_in_the_logic : Types.function_type -> bool
 
@@ -25,7 +23,6 @@ val make_relation_variables :
   Types.function_type -> label:string -> numbers:int list -> relation_variables
 
 val make_callback_ensures :
-  State.context ->
   Types.function_type ->
   Logic.term ->
   entries:Logic.term list ->
@@ -33,8 +30,8 @@ val make_callback_ensures :
   result:Logic.term ->
   Logic.term
 
-val apply_callback_ensures : State.context -> Types.function_type -> Logic.term list -> Logic.term
-val find_logic_link : State.context -> Types.function_type -> Logic.term -> Logic.term option
+val apply_callback_ensures : Types.function_type -> Logic.term list -> Logic.term
+val find_logic_link : Types.function_type -> Logic.term -> Logic.term option
 
 type parameter_contract = (State.source * State.frame * Mir.callback) option
 

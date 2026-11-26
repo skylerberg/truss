@@ -1,6 +1,5 @@
-let declare_held_symbol context ty term =
+let make_held_potential ty term =
   let symbol = Logic.Symbol.Potential ty in
-  Facts.declare context (Logic.Function (symbol, [ Encoding.sort_of ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
 let compute_buffer context (ty : Types.ty) : State.buffer option =
@@ -9,14 +8,14 @@ let compute_buffer context (ty : Types.ty) : State.buffer option =
     when Well_known.find_builtin_type path = Some Array ->
       Option.map
         (fun model_of -> { State.kind = Array; element; model_of })
-        (Models.find_model_function context ty ~model:(Models.make_sequence_type element))
+        (Models.find_model_function context ty ~model:(Encoding.make_sequence_type element))
   | Types.Named { path; arguments = [ Types.Type element ] }
     when Well_known.find_builtin_type path = Some Storage ->
       Some
         {
           kind = Storage;
           element;
-          model_of = (fun term -> Intrinsics.make_buffer_model context Storage element term);
+          model_of = (fun term -> Intrinsics.make_buffer_model Storage element term);
         }
   | Types.Named { path; arguments } when Types.find_builtin ty = None -> (
       match Interface.Definition.find_interface context.lookups.interface path with
@@ -30,7 +29,7 @@ let compute_buffer context (ty : Types.ty) : State.buffer option =
                   Option.map
                     (fun model_of -> { State.kind = Storage; element; model_of })
                     (Models.find_model_function context ty
-                       ~model:(Models.make_sequence_type element))
+                       ~model:(Encoding.make_sequence_type element))
               | _ -> None)
           | _ -> None)
       | _ -> None)
@@ -45,10 +44,9 @@ let find_buffer (context : State.context) (ty : Types.ty) =
       Tables.Type_table.replace context.cost.buffers key buffer;
       buffer
 
-let declare_potential_measure context element =
+let declare_potential_measure (context : State.context) element =
   let symbol = Logic.Symbol.Potential_measure element in
   let measure = Intrinsics.measure_type element in
-  Facts.declare context (Logic.Constant (symbol, Encoding.sort_of (Types.Function measure)));
   let term = Logic.Symbol symbol in
   if not (List.mem term context.cost.potentials) then begin
     context.cost.potentials <- term :: context.cost.potentials;
@@ -57,8 +55,8 @@ let declare_potential_measure context element =
       (Logic.forall
          ( [ (each, Encoding.sort_of element) ],
            Logic.equal
-             (Callbacks.apply_function context measure term [ Logic.Symbol each ])
-             (declare_held_symbol context element (Logic.Symbol each)) ))
+             (Callbacks.apply_function measure term [ Logic.Symbol each ])
+             (make_held_potential element (Logic.Symbol each)) ))
   end;
   term
 
@@ -168,7 +166,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (declared : Typ
   if not (has_potential context declared) then Costs.zero
   else begin
     let ty = Types.erase_views declared in
-    let held = declare_held_symbol context declared term in
+    let held = make_held_potential declared term in
     if (not (List.mem held context.cost.potentials)) && not (Logic.mentions frame.bound term) then begin
       context.cost.potentials <- held :: context.cost.potentials;
       Facts.add_frame_fact context frame
@@ -179,7 +177,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (declared : Typ
           match find_buffer context ty with
           | Some { kind; element; model_of } ->
               let sequence = model_of term in
-              let slack = Intrinsics.declare_buffer_slack context ty term in
+              let slack = Intrinsics.make_buffer_slack ty term in
               let length = Models.make_sequence_length context element sequence in
               Facts.add_frame_fact context frame
                 Logic.(less_equal (int 0) slack &&& less_equal slack (multiply (int 2) length));
@@ -188,7 +186,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (declared : Typ
                   let saved =
                     Logic.subtract
                       (Logic.multiply (Logic.int 2) length)
-                      (Intrinsics.make_buffer_capacity context element term)
+                      (Intrinsics.make_buffer_capacity element term)
                   in
                   Facts.add_frame_fact context frame
                     (Logic.equal slack
@@ -233,7 +231,7 @@ and compute_parts_potential context frame ~seen declared term (variant, fields) 
         let part = Encoding.select_field context ty variant field term in
         Logic.add total
           (if List.exists (Types.equal field_type) (declared :: seen) then
-             declare_held_symbol context field_type part
+             make_held_potential field_type part
            else compute_potential context frame ~seen:(declared :: seen) field_type part)
       else total)
     Costs.zero fields

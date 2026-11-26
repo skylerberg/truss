@@ -767,15 +767,14 @@ let has_untriggered_fact ?(is_counted = fun _ -> true) query =
   in
   List.exists is_untriggered query.facts
 
-let list_declared_symbols declared term =
+let list_declared_symbols ~is_declared term =
   let symbols = ref [] in
   let rec walk bound = function
     | Symbol name ->
-        if (not (List.mem name bound)) && Symbol_table.mem declared name then
-          symbols := name :: !symbols
+        if (not (List.mem name bound)) && is_declared name then symbols := name :: !symbols
     | Integer _ | Boolean _ | Bits _ -> ()
     | Apply (name, arguments) ->
-        if Symbol_table.mem declared name then symbols := name :: !symbols;
+        if is_declared name then symbols := name :: !symbols;
         List.iter (walk bound) arguments
     | Operation (_, arguments) -> List.iter (walk bound) arguments
     | Is (_, argument) -> walk bound argument
@@ -785,7 +784,7 @@ let list_declared_symbols declared term =
   walk [] term;
   !symbols
 
-let prune query =
+let prune ~find_signature query =
   let declared = Symbol_table.create 64 in
   let bodies = Symbol_table.create 8 in
   List.iter
@@ -796,6 +795,14 @@ let prune query =
           Symbol_table.replace bodies symbol body
       | Datatype _ -> ())
     query.declarations;
+  let is_declared name =
+    Symbol_table.mem declared name
+    || Option.is_some (find_signature name)
+       && begin
+         Symbol_table.replace declared name ();
+         true
+       end
+  in
   let reached = Symbol_table.create 64 in
   let rec reach symbols =
     List.iter
@@ -803,13 +810,17 @@ let prune query =
         if not (Symbol_table.mem reached symbol) then begin
           Symbol_table.replace reached symbol ();
           Option.iter
-            (fun body -> reach (list_declared_symbols declared body))
+            (fun body -> reach (list_declared_symbols ~is_declared body))
             (Symbol_table.find_opt bodies symbol)
         end)
       symbols
   in
-  reach (list_declared_symbols declared query.goal);
-  let is_triggering = make_triggering_test query.declarations in
+  reach (list_declared_symbols ~is_declared query.goal);
+  let is_declared_function = make_triggering_test query.declarations in
+  let is_triggering name =
+    is_declared_function name
+    || match find_signature name with Some (_ :: _, _) -> true | Some ([], _) | None -> false
+  in
   let rec needs fact symbols =
     match fact with
     | Operation (Implies, [ _; (Forall _ as inner) ]) -> needs inner symbols
@@ -817,7 +828,9 @@ let prune query =
         match choose_triggers ~is_triggering variables trigger body with
         | [] -> fun () -> List.exists (Symbol_table.mem reached) symbols
         | triggers ->
-            let triggers = List.map (List.concat_map (list_declared_symbols declared)) triggers in
+            let triggers =
+              List.map (List.concat_map (list_declared_symbols ~is_declared)) triggers
+            in
             fun () ->
               List.exists (fun trigger -> List.for_all (Symbol_table.mem reached) trigger) triggers)
     | _ -> fun () -> List.exists (Symbol_table.mem reached) symbols
@@ -844,7 +857,7 @@ let prune query =
     Array.of_list
       (List.map
          (fun fact ->
-           let symbols = list_declared_symbols declared fact in
+           let symbols = list_declared_symbols ~is_declared fact in
            (symbols, needs fact symbols))
          query.facts)
   in
@@ -863,9 +876,23 @@ let prune query =
   done;
   { query with facts = List.filteri (fun index _ -> is_needed.(index)) query.facts }
 
-let declare_datatypes ~list_constructors query =
+let declare_derived ~find_signature ~list_constructors query =
+  let declared = Symbol_table.create 64 in
+  List.iter
+    (function
+      | Constant (name, _) | Function (name, _, _) | Definition { symbol = name; _ } ->
+          if Option.is_some (find_signature name) then
+            invalid_arg
+              ("Logic.declare_derived: a declaration of " ^ show_symbol name
+             ^ ", whose signature is derived");
+          Symbol_table.replace declared name ()
+      | Datatype (ty, _) ->
+          invalid_arg
+            ("Logic.declare_derived: a declaration of the datatype of " ^ Types.show ty
+           ^ ", which is derived"))
+    query.declarations;
   let reached = Sort_table.create 16 in
-  let datatypes = ref [] in
+  let derived = ref [] in
   let rec reach_sort = function
     | Int | Bool | Float _ | Function_sort _ -> ()
     | Type_sort ty as sort ->
@@ -873,7 +900,7 @@ let declare_datatypes ~list_constructors query =
           Sort_table.replace reached sort ();
           Option.iter
             (fun constructors ->
-              datatypes := Datatype (ty, constructors) :: !datatypes;
+              derived := Datatype (ty, constructors) :: !derived;
               List.iter
                 (fun (_, fields) -> List.iter (fun (_, sort) -> reach_sort sort) fields)
                 constructors)
@@ -883,7 +910,19 @@ let declare_datatypes ~list_constructors query =
   let reach_symbol : symbol -> unit = function
     | Constructor { type_; _ } | Field { type_; _ } -> reach_sort (Type_sort type_)
     | Unit -> reach_sort (Type_sort Types.unit)
-    | _ -> ()
+    | name ->
+        if not (Symbol_table.mem declared name) then
+          Option.iter
+            (fun (inputs, output) ->
+              Symbol_table.replace declared name ();
+              List.iter reach_sort inputs;
+              reach_sort output;
+              derived :=
+                (match inputs with
+                | [] -> Constant (name, output)
+                | _ -> Function (name, inputs, output))
+                :: !derived)
+            (find_signature name)
   in
   let reach_variables = List.iter (fun (_, sort) -> reach_sort sort) in
   let rec reach_term = function
@@ -910,12 +949,11 @@ let declare_datatypes ~list_constructors query =
           reach_variables parameters;
           reach_sort result;
           reach_term body
-      | Datatype (ty, _) ->
-          invalid_arg ("Logic.declare_datatypes: a datatype of " ^ Types.show ty ^ " is declared"))
+      | Datatype _ -> ())
     query.declarations;
   List.iter reach_term query.facts;
   reach_term query.goal;
-  { query with declarations = query.declarations @ List.rev !datatypes }
+  { query with declarations = query.declarations @ List.rev !derived }
 
 type numbering = {
   declared : declaration Symbol_table.t;
@@ -938,7 +976,7 @@ let list_conjunct_queries query =
   in
   match list_conjuncts query.goal with
   | [] | [ _ ] -> []
-  | goals -> List.map (fun goal -> prune { query with goal }) goals
+  | goals -> List.map (fun goal -> prune ~find_signature:(fun _ -> None) { query with goal }) goals
 
 let rec render_sort_name numbering = function
   | Int -> "Int"

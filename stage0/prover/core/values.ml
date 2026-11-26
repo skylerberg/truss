@@ -12,7 +12,7 @@ let run_ghost_code (context : State.context) (frame : State.frame) (code : Mir.t
 let assume_extensional context frame (ty : Types.ty) left right =
   match ty with
   | Types.Named { path; arguments = [ Types.Type element ] }
-    when Path.equal path Models.sequence_path -> (
+    when Path.equal path Encoding.sequence_path -> (
       let index = Facts.make_fresh_name context "index" in
       match
         ( Models.index_sequence context element left (Logic.Symbol index),
@@ -70,7 +70,7 @@ let make_sequence context frame (ty : Types.ty) ~element values =
   let literal = Encoding.arrive context frame "literal" ty in
   let sequence =
     match ty with
-    | Types.Named { path; _ } when Path.equal path Models.sequence_path -> Some literal
+    | Types.Named { path; _ } when Path.equal path Encoding.sequence_path -> Some literal
     | Types.Named { path; _ } when Well_known.find_builtin_type path = Some Array ->
         Models.find_model context ty literal ~element
     | _ -> None
@@ -197,7 +197,6 @@ let rec make_literal_value context frame (ty : Types.ty) (value : Language.Liter
   let symbol = Logic.Symbol.Literal { type_ = ty; value } in
   let literal = Logic.Symbol symbol in
   Facts.run_once context (Value_of symbol) (fun () ->
-      Facts.declare context (Logic.Constant (symbol, Encoding.sort_of ty));
       Validity.assume_valid context
         { frame with condition = Logic.Boolean true; bound = []; binders = [] }
         ty literal;
@@ -233,7 +232,7 @@ let rec make_literal_value context frame (ty : Types.ty) (value : Language.Liter
           | Types.Named { path; arguments = [ Types.Type stored ] }
             when Option.is_some (Well_known.find_builtin_type path) ->
               if Well_known.find_builtin_type path = Some Storage && Types.equal stored element then
-                assume_holds (Intrinsics.make_buffer_model context Storage element part)
+                assume_holds (Intrinsics.make_buffer_model Storage element part)
           | _ ->
               Facts.add_fact context
                 (Logic.equal part (make_literal_value context frame field_type value)))
@@ -419,8 +418,7 @@ let make_log_order left right =
     ==> less_equal (log left) (log right)
     &&& (less_equal right left ==> less_equal (log right) (log left)))
 
-let declare_log context frame log_argument =
-  Facts.declare context (Logic.Function (Logic.Symbol.Integer_log, [ Logic.Int ], Logic.Int));
+let declare_log (context : State.context) frame log_argument =
   let rec add log_argument ~halving =
     match List.assoc_opt log_argument context.logs with
     | Some true -> ()
@@ -461,5 +459,5 @@ let apply_specification_function context frame ~location (measure : Core.specifi
   | Callback_cost metric, [ function_term ], _, [ function_type ] ->
       (frame, Amounts.make_callback_cost context frame metric function_type function_term)
   | Callback_ensures, _, _, Types.Function function_type :: _ ->
-      (frame, Callbacks.apply_callback_ensures context function_type values)
+      (frame, Callbacks.apply_callback_ensures function_type values)
   | _ -> Facts.raise_unsupported location Specification_function

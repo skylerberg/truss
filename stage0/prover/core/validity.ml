@@ -183,9 +183,8 @@ let names_private_definition context ~current (clause : Mir.formula) =
     clause;
   !is_hidden
 
-let apply_opaque_validity context ty term =
+let apply_opaque_validity ty term =
   let symbol = Logic.Symbol.Valid ty in
-  Facts.declare context (Logic.Function (symbol, [ Encoding.sort_of ty ], Logic.Bool));
   Logic.Apply (symbol, [ term ])
 
 let rec make_validity (context : State.context) (frame : State.frame) ~assuming ?(deep = true)
@@ -204,7 +203,7 @@ let rec make_validity (context : State.context) (frame : State.frame) ~assuming 
           let inner = make_type_frame context frame source ty ~self:(Some term) in
           try
             Logic.conjunction
-              ((if hidden = [] then [] else [ apply_opaque_validity context ty term ])
+              ((if hidden = [] then [] else [ apply_opaque_validity ty term ])
               @ List.map (fun invariant -> snd (read_specification context inner invariant)) shown)
           with Facts.Unsupported _ when assuming -> Logic.Boolean true)
       | None -> Logic.Boolean true

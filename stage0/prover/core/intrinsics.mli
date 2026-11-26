@@ -1,5 +1,5 @@
 val keeps_potential : Intrinsic.operation -> bool
-val declare_buffer_slack : State.context -> Types.ty -> Logic.term -> Logic.term
+val make_buffer_slack : Types.ty -> Logic.term -> Logic.term
 val replace_elements : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term
 val find_sequence_element : State.context -> State.frame -> Types.ty -> Types.ty
 
@@ -38,11 +38,8 @@ val apply_range :
   high:Logic.term option ->
   State.frame * Logic.term * Logic.term * Logic.term
 
-val make_buffer_capacity : State.context -> Types.ty -> Logic.term -> Logic.term
-
-val make_buffer_model :
-  State.context -> Language.Builtin_type.t -> Types.ty -> Logic.term -> Logic.term
-
+val make_buffer_capacity : Types.ty -> Logic.term -> Logic.term
+val make_buffer_model : Language.Builtin_type.t -> Types.ty -> Logic.term -> Logic.term
 val measure_type : Types.ty -> Types.function_type
 val make_sequence_sum : State.context -> Types.ty -> Logic.term -> Logic.term -> Logic.term
 val make_empty_sequence : State.context -> State.frame -> Types.ty -> Logic.term
