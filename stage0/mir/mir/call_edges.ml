@@ -249,7 +249,7 @@ let list_statement_edges interface instance (statement : Tree.statement) =
             _;
           }
       | Call _ | Lend _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _
-      | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _ )
+      | Ghost_assert _ | Proof _ | Evaluated_assert _ )
   | For _
   | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)
   | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Resume _ | Yield _ ->
@@ -328,8 +328,8 @@ let collect_dependencies (lookups : lookups) instance visit_roots =
                 | Copy _ | Function_value _ | Lambda _ | Value_parameter _ | Specification _ );
               _;
             }
-        | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
-        | Path_note _ | Proof _ | Evaluated_assert _ )
+        | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Proof _
+        | Evaluated_assert _ )
     | For _
     | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)
     | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Provide _ | Resume _ | Yield _ ->

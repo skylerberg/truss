@@ -1,3 +1,0 @@
-fn f(point: Point) -> Int64 {
-  if point.y == 3 { point.x + 1 } else { 0 }
-}

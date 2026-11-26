@@ -295,7 +295,12 @@ let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.f
     (fun () ->
       let inside = enter { frame with locals = remove_temporaries frame.locals } in
       Facts.run_in_source context frame.source (fun () -> context.run_body inside ~lambdas body);
-      match Facts.join context ~value_type:type_ (List.rev context.returns) with
+      match
+        Facts.join context ~value_type:type_
+          (List.rev_map
+             (fun (exit_ : State.function_exit) -> (exit_.frame, exit_.returned))
+             context.returns)
+      with
       | Some (returned, Some term) -> Some ({ frame with spent = returned.spent }, term)
       | Some (_, None) | None -> None)
 
@@ -512,28 +517,23 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         context.can_declare_panic <- saved_can_declare_panic;
         Counters.leave_lambda context counters)
       (fun () ->
-        let finished =
-          let inside = { inside with locals = remove_temporaries inside.locals } in
-          let inside =
-            List.fold_left2
-              (fun inside parameter argument ->
-                let info = written.code.locals.(parameter) in
-                Facts.bind inside
-                  (Locals.make_key written.code.locals parameter)
-                  (Facts.substitute_type context inside info.type_)
-                  argument)
-              inside written.code.parameters arguments
-          in
-          context.run_body inside ~lambdas:written.lambdas written.code;
-          None
+        let inside = { inside with locals = remove_temporaries inside.locals } in
+        let inside =
+          List.fold_left2
+            (fun inside parameter argument ->
+              let info = written.code.locals.(parameter) in
+              Facts.bind inside
+                (Locals.make_key written.code.locals parameter)
+                (Facts.substitute_type context inside info.type_)
+                argument)
+            inside written.code.parameters arguments
         in
-        let exits =
-          (match finished with Some (frame, _) -> [ frame ] | None -> [])
-          @ List.map fst context.returns
-        in
+        context.run_body inside ~lambdas:written.lambdas written.code;
+        let exits = List.map (fun (exit_ : State.function_exit) -> exit_.frame) context.returns in
         ended :=
-          (match finished with Some (frame, value) -> [ (frame, Some value) ] | None -> [])
-          @ context.returns;
+          List.map
+            (fun (exit_ : State.function_exit) -> (exit_.frame, exit_.returned))
+            context.returns;
         List.iter
           (fun ((exit_ : State.frame), returned) ->
             Option.iter

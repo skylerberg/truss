@@ -39,7 +39,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       quantifier_symbols = [];
       obligations = [];
       fresh = 0;
-      values = [];
+      parameter_names = [];
       local_names = Tables.Local_table.create 16;
       local_origins = Tables.Local_table.create 16;
       returns = [];
@@ -59,7 +59,6 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       lambda_definitions = Tables.Symbol_table.create 8;
       models = Tables.Model_table.create 16;
       equalities = [];
-      path_notes = [];
       entry = [];
       inherits_precondition;
       holes = [];
@@ -281,7 +280,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
             let term = Facts.arrive context frame ("parameter." ^ name) ty in
             (match term with
             | Logic.Symbol symbol ->
-                context.values <- (symbol, name) :: context.values;
+                context.parameter_names <- (symbol, name) :: context.parameter_names;
                 context.entry <- symbol :: context.entry
             | _ -> ());
             Validity.assume_valid context frame ty term;
@@ -452,11 +451,12 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
       parameters
   in
   List.iter
-    (fun ((frame : State.frame), returned) ->
+    (fun ({ frame; returned; return_origin } : State.function_exit) ->
       let frame = { frame with result = returned } in
+      let exit_location = Facts.locate context frame.source return_origin in
       (match (returned, output) with
       | Some term, Some output ->
-          Lambdas.check_valid context frame Whole_definition output term ~deep:true
+          Lambdas.check_valid context frame exit_location output term ~deep:true
             ~moment:Returned_value
       | _ -> ());
       List.iter
@@ -466,13 +466,13 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
               Facts.find_local_type context frame (Core_local parameter.local) )
           with
           | Some term, Some ty ->
-              Lambdas.check_valid context frame Whole_definition ty term ~deep:true
+              Lambdas.check_valid context frame exit_location ty term ~deep:true
                 ~moment:(Mut_parameter_at_return (Facts.read_parameter_name parameter))
           | _ -> ())
         mut_parameters;
       (match (mut_self, frame.self, frame.self_type) with
       | true, Some self, Some self_type ->
-          Lambdas.check_valid context frame Whole_definition self_type self ~deep:true
+          Lambdas.check_valid context frame exit_location self_type self ~deep:true
             ~includes_invariants:(not is_update_step) ~moment:Self_at_return
       | _ -> ());
       (match (context.lending, frame.yielded_so_far) with
@@ -484,8 +484,8 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                   { frame with yielded = Some yielded_so_far }
                   ensured
               in
-              Facts.oblige ~holds_when:ensured.holds_when context frame
-                (Facts.locate context frame.source ensured.origin)
+              Facts.oblige ~holds_when:ensured.holds_when ~cited:(source.key, ensured.origin)
+                context frame exit_location
                 (Ensures_at_method_end { clause = Facts.quote source ensured.origin })
                 term)
             return_postconditions
@@ -496,32 +496,35 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                 Conditions.with_obligation_condition context ensured.holds_when (fun () ->
                     Validity.read_specification context frame ensured)
               in
-              Facts.oblige ~holds_when:ensured.holds_when context frame
-                (Facts.locate context frame.source ensured.origin)
+              Facts.oblige ~holds_when:ensured.holds_when ~cited:(source.key, ensured.origin)
+                context frame exit_location
                 (Ensures_at_return { clause = Facts.quote source ensured.origin })
                 term)
             declared_ensures);
       let under_trait = Facts.restrict frame trait_requires in
       List.iter
         (fun (promise : Cost_promises.promise) ->
+          let cited = (promise.written_in.key, promise.clause.origin) in
           if promise.inherited then
             match find_trait_frame frame ~result:returned with
             | Some (_, inside) ->
-                Cost_promises.check_promise context under_trait promise
+                Cost_promises.check_promise ~cited context under_trait promise
                   ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
-                  ~location:Whole_definition
+                  ~location:exit_location
             | None -> ()
           else
-            Cost_promises.check_promise context frame promise
+            Cost_promises.check_promise ~cited context frame promise
               ~at:{ frame with locals = frame.old_locals; self = frame.old_self; result = returned }
-              ~location:(Facts.locate context source promise.clause.origin))
+              ~location:exit_location)
         promised;
       match find_trait_frame frame ~result:returned with
       | Some (clauses, inside) ->
           List.iter
             (fun (clause : Mir.formula) ->
               let _, term = Validity.read_specification context inside clause in
-              Facts.oblige ~holds_when:clause.holds_when context under_trait Whole_definition
+              Facts.oblige ~holds_when:clause.holds_when
+                ~cited:(clauses.callee.key, clause.origin)
+                context under_trait exit_location
                 (Promiser_ensures
                    {
                      promiser = Contracts.find_promiser lookups clauses.callee;

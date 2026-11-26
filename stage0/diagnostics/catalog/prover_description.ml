@@ -59,9 +59,10 @@ let describe_invariant_moment = function
   | When_passed call -> Text "when it is passed to " :: describe_call call
   | Lambda_result -> say "for the value this lambda returns"
   | Lambda_mut_parameter -> say "for a `mut` parameter when this lambda ends"
-  | Returned_value -> say "for the value returned"
-  | Mut_parameter_at_return name -> say (Printf.sprintf "for `%s` when the function returns" name)
-  | Self_at_return -> say "for `self` when the method returns"
+  | Returned_value -> say "for the value returned here"
+  | Mut_parameter_at_return name ->
+      say (Printf.sprintf "for `%s` when the function returns here" name)
+  | Self_at_return -> say "for `self` when the method returns here"
   | Built_here -> say "for the value built here"
   | At_scope_end value ->
       (Description.Text "for " :: describe_value value) @ [ Text " when its scope ends" ]
@@ -233,17 +234,17 @@ let describe_promise = function
   | Prover.Own_promise { counting; clause } ->
       let difference, verb = describe_difference counting in
       [
-        Description.Text (Printf.sprintf "This may spend %s `" difference);
+        Description.Text (Printf.sprintf "The function may spend %s `" difference);
         quote_in clause;
-        Text (Printf.sprintf "` %s." verb);
+        Text (Printf.sprintf "` %s before it returns here." verb);
       ]
   | Inherited_promise { counting; promiser; clause } ->
       let difference, verb = describe_difference counting in
       [
         Text
-          (Printf.sprintf "This method may spend %s its %s's `" difference (show_promiser promiser));
+          (Printf.sprintf "The method may spend %s its %s's `" difference (show_promiser promiser));
         quote_in clause;
-        Text (Printf.sprintf "` %s." verb);
+        Text (Printf.sprintf "` %s before it returns here." verb);
       ]
   | Restated_promise { counting; for_type; name; clause; trait; declared } ->
       let difference, verb = describe_difference counting in
@@ -478,14 +479,15 @@ let describe_obligation = function
              `Panic` proves only the trait's condition, so this `impl` could panic in code that \
              has no `Panic`.";
         ]
-  | Ensures_at_method_end { clause } -> tick clause @ [ Text " may not hold when the method ends." ]
+  | Ensures_at_method_end { clause } ->
+      tick clause @ [ Text " may not hold when the method ends here." ]
   | Ensures_at_return { clause } ->
-      tick clause @ [ Text " may not hold when the function returns." ]
+      tick clause @ [ Text " may not hold when the function returns here." ]
   | Promiser_ensures { promiser; clause } ->
       [
         Text (Printf.sprintf "The %s's `" (show_promiser promiser));
         quote_in clause;
-        Text "` may not hold when this method returns.";
+        Text "` may not hold when the method returns here.";
       ]
   | Law_may_fail { trait; law; for_type } ->
       say
@@ -594,17 +596,6 @@ let locate : Prover.location -> _ = function
   | Node origin -> Build.at origin
   | Whole_definition -> At Definition
 
-let describe_path_note = function
-  | Prover.Arm_taken patterns ->
-      Description.Text "the arm `"
-      :: join ", " (List.map (fun pattern -> [ Build.quote pattern ]) patterns)
-      @ [ Text "` is taken" ]
-  | Condition_holds { condition; holds; _ } ->
-      [ Text "`"; Build.quote condition; Text (Printf.sprintf "` is %b" holds) ]
-  | Else_runs pattern ->
-      [ Text "`"; Build.quote pattern; Text "` does not match, so the `else` runs" ]
-  | Returns_early tried -> [ Text "`"; Build.quote tried; Text "` returns early" ]
-
 let describe_stop = Codegen_description.describe_stop ~show_file:Path.show_file
 
 let describe_stop_sentence stop =
@@ -627,83 +618,18 @@ let describe_failed_runs failed_runs =
                (describe_stop_sentence stop)))
     failed_runs
 
-let spell_shortest ~most ~is_same value =
-  let rec spell_digits digits =
-    let text = Printf.sprintf "%.*g" digits value in
-    if digits >= most || is_same (float_of_string text) then text else spell_digits (digits + 1)
-  in
-  spell_digits 1
-
-let show_float value ~is_single =
-  if Float.is_nan value then "NaN"
-  else if value = Float.infinity then "infinity"
-  else if value = Float.neg_infinity then "-infinity"
-  else
-    let text =
-      if is_single then
-        spell_shortest ~most:9
-          ~is_same:(fun read -> Int32.bits_of_float read = Int32.bits_of_float value)
-          value
-      else spell_shortest ~most:17 ~is_same:(fun read -> read = value) value
-    in
-    if String.contains text '.' then text
-    else
-      match String.split_first ~sep:"e" text with
-      | Some (mantissa, exponent) -> mantissa ^ ".0e" ^ exponent
-      | None -> text ^ ".0"
-
-let rec show_model_value : Model_value.t -> string = function
-  | Integer value -> Z.to_string value
-  | Boolean value -> if value then "true" else "false"
-  | Float { value; is_single } -> show_float value ~is_single
-  | Unit_value -> "()"
-  | Variant_value { variant; fields } -> variant ^ show_model_fields fields
-  | Record_value { type_ = Named { path; _ }; fields } ->
-      Path.show_name path ^ show_model_fields fields
-  | Record_value { type_; fields } -> Types.show type_ ^ show_model_fields fields
-  | Unknown -> "a value the prover knows nothing more about"
-
-and show_model_fields = function
-  | [] -> ""
-  | fields ->
-      "("
-      ^ String.concat ", "
-          (List.map
-             (fun (field : Model_value.field) -> field.field ^ ": " ^ show_model_value field.value)
-             fields)
-      ^ ")"
-
 let describe_failure = function
   | Prover.Refuted -> say " This fails every time the code reaches it."
-  | Counterexample { values; path; failed_runs } ->
-      (match values with
-        | [] -> []
-        | values ->
-            [
-              Description.Text
-                (" For example, when "
-                ^ String.concat ", "
-                    (List.map
-                       (fun (name, value) ->
-                         Printf.sprintf "`%s` is %s" name (show_model_value value))
-                       values)
-                ^ ".");
-            ])
-      @ (match path with
-        | [] -> []
-        | path ->
-            (Description.Text " On that path, " :: join ", " (List.map describe_path_note path))
-            @ [ Text "." ])
-      @ describe_failed_runs failed_runs
+  | Falsifiable { failed_runs } -> describe_failed_runs failed_runs
   | Undecided { unknown; has_untriggered_fact; failed_runs } ->
       Text
         ((match unknown with
            | Out_of_steps ->
-               " The solver reached its step limit before it found a proof or a counterexample."
+               " The solver reached its step limit before it decided whether this holds."
            | Incomplete reason ->
                Printf.sprintf
                  " The solver's decision procedures are incomplete for this query, so it stopped \
-                  without a proof or a counterexample. Z3 gives the reason `%s`."
+                  without deciding whether this holds. Z3 gives the reason `%s`."
                  reason)
         ^ " If the code is correct, a `proof` block or a theorem can lead the solver to the proof."
         ^

@@ -177,133 +177,6 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
   with Facts.Unsupported { location; construct; foreign_definition } ->
     Unsupported { location; construct; foreign = foreign_definition }
 
-let is_opaque atom = String.contains atom '!'
-
-let read_bit_vector atom =
-  let fold_digits ~digit_width digits =
-    String.fold_left
-      (fun value digit ->
-        Int64.logor
-          (Int64.shift_left value digit_width)
-          (Int64.of_int (Char.Ascii.hex_digit_to_int digit)))
-      0L digits
-  in
-  match String.cut_first 2 atom with
-  | "#b", digits when digits <> "" -> (fold_digits ~digit_width:1 digits, String.length digits)
-  | "#x", digits when digits <> "" -> (fold_digits ~digit_width:4 digits, 4 * String.length digits)
-  | _ -> Facts.raise_bug "the model gives `%s` for the bits of a float" atom
-
-let read_float sign exponent fraction : Catalog.Model_value.t =
-  let sign, _ = read_bit_vector sign
-  and exponent, exponent_width = read_bit_vector exponent
-  and fraction, fraction_width = read_bit_vector fraction in
-  let bits =
-    Int64.logor
-      (Int64.shift_left sign (exponent_width + fraction_width))
-      (Int64.logor (Int64.shift_left exponent fraction_width) fraction)
-  in
-  match 1 + exponent_width + fraction_width with
-  | 64 -> Float { value = Int64.float_of_bits bits; is_single = false }
-  | 32 -> Float { value = Int32.float_of_bits (Int64.to_int32 bits); is_single = true }
-  | width -> Facts.raise_bug "the model gives a float of %d bits" width
-
-let read_special_float special exponent_width : Catalog.Model_value.t =
-  let value =
-    match special with
-    | "+zero" -> 0.0
-    | "-zero" -> -0.0
-    | "+oo" -> Float.infinity
-    | "-oo" -> Float.neg_infinity
-    | "NaN" -> Float.nan
-    | _ -> Facts.raise_bug "the model gives the float `%s`" special
-  in
-  Float { value; is_single = exponent_width = "8" }
-
-let make_constructed (constructor : Logic.symbol) fields : Catalog.Model_value.t =
-  match constructor with
-  | Constructor { variant = Some variant; _ } -> Variant_value { variant; fields }
-  | Constructor { type_; variant = None } -> Record_value { type_; fields }
-  | Unit -> Unit_value
-  | other -> Facts.raise_bug "the model constructs a value with %s" (Logic.show_symbol other)
-
-let read_selector : Logic.symbol -> string = function
-  | Field { field; _ } -> field
-  | other -> Facts.raise_bug "the model selects a field with %s" (Logic.show_symbol other)
-
-let find_natural atom =
-  if atom <> "" && String.for_all Char.Ascii.is_digit atom then Some (Z.of_string atom) else None
-
-let rec expand_lets bindings : Solver.sexp -> Solver.sexp = function
-  | List [ Atom "let"; List definitions; body ] ->
-      let bind scope : Solver.sexp -> (string * Solver.sexp) list = function
-        | List [ Atom name; value ] -> (name, expand_lets bindings value) :: scope
-        | _ -> Facts.raise_bug "the model binds a `let` without a name and a value"
-      in
-      expand_lets (List.fold_left bind bindings definitions) body
-  | Atom atom as term -> Option.value (List.assoc_opt atom bindings) ~default:term
-  | List terms -> List (List.map (expand_lets bindings) terms)
-
-let rec read_model_value members : Solver.sexp -> Catalog.Model_value.t = function
-  | List [ Atom "let"; _; _ ] as term -> read_model_value members (expand_lets [] term)
-  | List [ Atom "fp"; Atom sign; Atom exponent; Atom fraction ] -> read_float sign exponent fraction
-  | List [ Atom "_"; Atom special; Atom exponent_width; Atom _ ] ->
-      read_special_float special exponent_width
-  | Atom atom when is_opaque atom -> Unknown
-  | Atom "true" -> Boolean true
-  | Atom "false" -> Boolean false
-  | Atom atom -> (
-      match (List.assoc_opt atom members, find_natural atom) with
-      | Some (constructor, _), _ -> make_constructed constructor []
-      | None, Some value -> Integer value
-      | None, None -> Facts.raise_bug "the model gives the atom `%s`" atom)
-  | List [ Atom "-"; Atom number ] -> (
-      match find_natural number with
-      | Some value -> Integer (Z.neg value)
-      | None -> Facts.raise_bug "the model negates `%s`" number)
-  | List (Atom head :: arguments) -> (
-      match List.assoc_opt head members with
-      | Some (constructor, selectors) when List.length selectors = List.length arguments ->
-          make_constructed constructor
-            (List.map2
-               (fun selector argument : Catalog.Model_value.field ->
-                 { field = read_selector selector; value = read_model_value members argument })
-               selectors arguments)
-      | Some _ -> Facts.raise_bug "the model gives `%s` the wrong number of fields" head
-      | None -> Facts.raise_bug "the model applies `%s`, which constructs no value" head)
-  | List _ ->
-      Facts.raise_bug "the model gives a value that is neither a constant nor a construction"
-
-let list_counterexample_values members (obligation : Obligation.t) answer_values =
-  List.filter_map
-    (fun (symbol, name) ->
-      match List.assoc_opt symbol answer_values with
-      | Some (Solver.Atom atom) when is_opaque atom -> None
-      | Some value -> Some (name, read_model_value members value)
-      | None -> None)
-    (List.rev obligation.values
-    @ List.rev_map (fun (term, name) -> (Logic.Symbol.Named_term term, name)) obligation.locals)
-
-let list_path_notes (obligation : Obligation.t) answer_values =
-  let is_shown_with_its_value (term, value) =
-    let shown_as =
-      match term with
-      | Logic.Symbol symbol when List.mem_assoc symbol obligation.values -> Some symbol
-      | _ when List.mem_assoc term obligation.locals -> Some (Logic.Symbol.Named_term term)
-      | _ -> None
-    in
-    Option.bind shown_as (fun symbol -> List.assoc_opt symbol answer_values)
-    = Some (Solver.Atom (string_of_bool value))
-  in
-  List.filter_map Fun.id
-    (List.mapi
-       (fun index (noted : Obligation.noted_path) ->
-         match List.assoc_opt (Logic.Symbol.Reached index) answer_values with
-         | Some (Solver.Atom "true")
-           when not (Option.fold ~none:false ~some:is_shown_with_its_value noted.tested) ->
-             Some noted.note
-         | _ -> None)
-       obligation.path_notes)
-
 type state = {
   site : Catalog.Prover.t;
   is_proven : bool;
@@ -407,16 +280,7 @@ let pose_obligation runs site (obligation : Obligation.t) =
     { site; obligation; query = obligation.query; has_run_result = false; failed_runs = [] }
     obligation.query.declarations
 
-let make_request ({ obligation; query; _ } : posed_obligation) =
-  let terms =
-    List.map (fun (term, _) -> (Logic.Symbol.Named_term term, term)) obligation.locals
-    @ List.concat
-        (List.mapi
-           (fun index (noted : Obligation.noted_path) ->
-             [ (Logic.Symbol.Reached index, noted.reached) ])
-           obligation.path_notes)
-  in
-  Solver.make_request ~symbols:(List.map fst obligation.values) ~terms query
+let make_request ({ query; _ } : posed_obligation) = Solver.make_request query
 
 let make_refutation_request ({ query; _ } : posed_obligation) =
   Solver.make_request { query with goal = Logic.not_ query.goal }
@@ -461,7 +325,7 @@ let list_posed = function Unreadable _ -> [] | Posed { obligations; _ } -> oblig
 let list_requests posed = List.map make_request (list_posed posed)
 
 let is_refutable (posed : posed_obligation) = function
-  | Solver.Counterexample _ -> not posed.obligation.is_rejection
+  | Solver.Falsifiable -> not posed.obligation.is_rejection
   | Proven | Unknown _ -> false
 
 let list_refutation_requests posed answers =
@@ -473,16 +337,8 @@ let list_refutation_requests posed answers =
 let explain_failure (posed : posed_obligation) answer ~is_refuted : Catalog.Prover.failure option =
   match answer with
   | Solver.Proven -> None
-  | Counterexample _ when is_refuted -> Some Refuted
-  | Counterexample values ->
-      Some
-        (Counterexample
-           {
-             values =
-               list_counterexample_values (Logic.list_members posed.query) posed.obligation values;
-             path = list_path_notes posed.obligation values;
-             failed_runs = posed.failed_runs;
-           })
+  | Falsifiable when is_refuted -> Some Refuted
+  | Falsifiable -> Some (Falsifiable { failed_runs = posed.failed_runs })
   | Unknown unknown ->
       Some
         (Undecided

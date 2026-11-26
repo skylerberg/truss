@@ -218,7 +218,9 @@ let make_panic_fix (context : State.context) : Catalog.Prover.fix list =
 
 let find_parameter_name (context : State.context) symbol =
   if List.mem symbol context.entry then
-    match List.assoc_opt symbol context.values with Some name -> Some name | None -> Some "self"
+    match List.assoc_opt symbol context.parameter_names with
+    | Some name -> Some name
+    | None -> Some "self"
   else None
 
 let collect_codes codes = if List.mem None codes then None else Some (List.filter_map Fun.id codes)
@@ -360,27 +362,10 @@ and make_obligation (context : State.context) (frame : State.frame) location obl
     cited = None;
     fixes = [];
     query;
-    values = context.values;
-    path_notes = List.rev context.path_notes;
     has_untriggered_written_fact =
       Logic.has_untriggered_fact query
         ~is_counted:(Tables.Term_table.mem context.written_quantifiers);
     is_rejection = goal = Logic.Boolean false;
-    locals =
-      (let is_parameter = function
-         | Logic.Symbol symbol -> List.mem_assoc symbol context.values
-         | _ -> false
-       in
-       Locals.fold
-         (fun local term shown ->
-           match Tables.Local_table.find_opt context.local_names local with
-           | Some name when not (is_parameter term || List.mem_assoc term shown) ->
-               (term, name) :: shown
-           | _ -> shown)
-         frame.locals
-         (match frame.result with
-         | Some term when not (is_parameter term) -> [ (term, "result") ]
-         | _ -> []));
   }
 
 let remove_panic_condition (uses : Types.capability_set) =

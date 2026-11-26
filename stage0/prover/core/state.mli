@@ -51,6 +51,7 @@ type frame = {
 type changed_part = { root : Locals.local; declared_root_type : Types.ty; fields : string list }
 type place_value = One of Logic.term | Run of Logic.term * Logic.term
 type noted_place = { origin : Core.origin; value : place_value }
+type function_exit = { frame : frame; returned : Logic.term option; return_origin : Core.origin }
 
 type passed_place = {
   read : frame -> Logic.term;
@@ -148,10 +149,10 @@ type context = {
   mutable facts : Fact_list.t;
   mutable obligations : Obligation.t list;
   mutable fresh : int;
-  mutable values : (Logic.symbol * string) list;
+  mutable parameter_names : (Logic.symbol * string) list;
   local_names : string Tables.Local_table.t;
   local_origins : Core.origin Tables.Local_table.t;
-  mutable returns : (frame * Logic.term option) list;
+  mutable returns : function_exit list;
   mutable enclosing_provides : Mir.provided list list;
   mutable instantiating : Path.t list;
   mutable callees_whose_requires_are_read : Path.t list;
@@ -171,7 +172,6 @@ type context = {
   lambda_definitions : Logic.term Tables.Symbol_table.t;
   models : (Logic.term -> Logic.term) option Tables.Model_table.t;
   mutable equalities : Logic.term list;
-  mutable path_notes : Obligation.noted_path list;
   mutable entry : Logic.symbol list;
   inherits_precondition : bool;
   mutable holes : (Resolve.Names.key * Obligation.location) list;

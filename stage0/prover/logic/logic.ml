@@ -51,7 +51,6 @@ module Symbol = struct
     | Cost_most
     | Integer_log
     | Integer_power
-    | Reached of int
 end
 
 type rounding_mode = Nearest_ties_to_even | Toward_positive | Toward_negative | Toward_zero
@@ -289,7 +288,6 @@ let rec show_symbol : symbol -> string = function
   | Cost_most -> "cost.most"
   | Integer_log -> "integer.log"
   | Integer_power -> "integer.power"
-  | Reached index -> Printf.sprintf "reached.%d" index
 
 and show_term term =
   let rec show = function
@@ -1154,54 +1152,8 @@ let render_with ~cardinality_bound query =
     numbering;
   }
 
-let render query = render_with ~cardinality_bound:None query
-let rendered_text rendering = rendering.text
 let show_query ?cardinality_bound query = (render_with ~cardinality_bound query).text
 
 let has_uninterpreted_sort query =
-  let { numbering; _ } = render query in
+  let { numbering; _ } = render_with ~cardinality_bound:None query in
   Dynarray.exists (fun sort -> not (Sort_table.mem numbering.datatypes sort)) numbering.sort_order
-
-let render_term { numbering; _ } term =
-  let is_member_of_a_declared_datatype name =
-    match Symbol_table.find_opt numbering.member_of name with
-    | Some (datatype, _) -> Sort_table.mem numbering.sort_names datatype
-    | None -> false
-  in
-  let rec is_named = function
-    | Symbol name -> Symbol_table.mem numbering.symbol_names name
-    | Integer _ | Boolean _ | Bits _ -> true
-    | Apply (name, arguments) ->
-        (is_member_of_a_declared_datatype name || Symbol_table.mem numbering.symbol_names name)
-        && List.for_all is_named arguments
-    | Operation (_, arguments) -> List.for_all is_named arguments
-    | Is (constructor, argument) ->
-        is_member_of_a_declared_datatype constructor && is_named argument
-    | Forall _ | Exists _ -> false
-  in
-  if is_named term then begin
-    let buffer = Buffer.create 64 in
-    print numbering [] buffer term;
-    Some (Buffer.contents buffer)
-  end
-  else None
-
-let list_symbols { numbering; _ } =
-  List.map
-    (fun name -> (name, Symbol_table.find numbering.symbol_names name))
-    (Dynarray.to_list numbering.symbol_order)
-
-let list_members query =
-  let { numbering; _ } = render query in
-  Sort_table.fold
-    (fun datatype constructors entries ->
-      match Sort_table.find_opt numbering.sort_names datatype with
-      | Some sort ->
-          List.mapi
-            (fun index (constructor, fields) ->
-              (Printf.sprintf "%s_c%d" sort index, (constructor, List.map fst fields)))
-            constructors
-          @ entries
-      | None -> entries)
-    numbering.datatypes []
-  |> List.sort compare

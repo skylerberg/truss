@@ -1,7 +1,0 @@
-fn f(items: List[Int64], value: UInt64) -> Int64 {
-  var at: UInt64 = 0
-  if value > 5 {
-    at = value
-  }
-  items[at]
-}

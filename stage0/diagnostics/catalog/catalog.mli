@@ -78,7 +78,6 @@ val cover_path : Syntax.path -> Core.origin range
 module Code = Code
 module Codegen = Codegen
 module Codegen_description = Codegen_description
-module Model_value = Model_value
 module Usage = Usage
 module Usage_description = Usage_description
 module Package = Package

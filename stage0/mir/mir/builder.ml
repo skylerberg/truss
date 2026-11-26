@@ -196,15 +196,6 @@ let lower_condition_block builder build : Tree.block option =
       Emitter.mark_unreachable builder;
       None
 
-let is_written : Core.origin -> bool = function Written _ -> true | Desugared _ -> false
-let emit_path_note builder note origin = Emitter.emit builder (Basic (Path_note note)) origin
-
-let rec find_tested_local (expression : Core.expression) ~holds =
-  match expression.kind with
-  | Use (Local { local = Declared _ as local; _ }) -> Some (local, holds)
-  | Not inner -> find_tested_local inner ~holds:(not holds)
-  | _ -> None
-
 let rec lower_expression builder (node : Core.expression) : Tree.operand option =
   let origin = node.origin in
   let hold value = Emitter.hold builder node.type_ origin value in
@@ -291,17 +282,8 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
         let scope = Emitter.make_block_scope () in
         let* condition = lower_condition builder scope tested in
         let result = allocate_value_local builder node in
-        let lower_branch ~holds run (body : Core.block option) =
+        let lower_branch run (body : Core.block option) =
           Emitter.build_block builder (fun () ->
-              if is_written node.origin then
-                emit_path_note builder
-                  (Condition_holds
-                     {
-                       condition = tested.origin;
-                       holds;
-                       tested_local = find_tested_local tested ~holds;
-                     })
-                  tested.origin;
               run (fun () ->
                   match (Option.map (lower_block builder) body, result) with
                   | Some (Some value), Some local ->
@@ -313,12 +295,10 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
                   | (Some (Some _) | None), _ -> Some Emitter.unit_value))
         in
         let then_ =
-          lower_branch ~holds:true
-            (Emitter.run_in_guarded_block builder scope tested.origin)
-            (Some then_)
+          lower_branch (Emitter.run_in_guarded_block builder scope tested.origin) (Some then_)
         in
         let else_ =
-          lower_branch ~holds:false
+          lower_branch
             (fun lower ->
               emit_statements builder (Emitter.list_scope_ends scope tested.origin);
               Emitter.run_in_scope builder origin lower)
@@ -375,10 +355,6 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
         end
         else held
     | Return returned ->
-        (match node.origin with
-        | Desugared { desugaring = Try; _ } ->
-            emit_path_note builder (Returns_early node.origin) origin
-        | Written _ | Desugared { desugaring = Rewrite | For_loop | Quantifier | Derived; _ } -> ());
         (match returned with
         | None -> Emitter.return_ builder None origin
         | Some returned ->
@@ -803,7 +779,6 @@ and match_patterns ?(covers = false) ?owned builder (patterns : Core.pattern lis
 and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : Tree.operand option
     =
   let origin = node.origin in
-  let is_noted = is_written origin && List.compare_length_with arms 1 > 0 in
   let scrutinee_values, scrutinee_lends =
     Emitter.run_in_scrutinee_frame builder (fun () ->
         let* scrutinee_values =
@@ -863,10 +838,6 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
     unmatched_ends := Emitter.list_unmatched_ends scope ~scrutinee:scrutinee_lends arm.origin;
     let value =
       Emitter.build_block builder (fun () ->
-          if is_noted && arm.patterns <> [] then
-            emit_path_note builder
-              (Arm_taken (List.map (fun (pattern : Core.pattern) -> pattern.origin) arm.patterns))
-              arm.origin;
           Emitter.run_in_guarded_block builder scope arm.origin (fun () ->
               match (lower_block builder arm.body, result) with
               | Some value, Some local ->
@@ -1107,8 +1078,6 @@ and lower_statement builder (node : Core.statement) =
                   let then_ = Emitter.build_block builder (fun () -> Some Emitter.unit_value) in
                   let else_ =
                     Emitter.build_block builder (fun () ->
-                        if is_written origin then
-                          emit_path_note builder (Else_runs pattern.origin) pattern.origin;
                         ignore
                           (Emitter.run_in_scope builder origin (fun () -> lower_block builder else_));
                         Emitter.jump builder Unreachable origin;

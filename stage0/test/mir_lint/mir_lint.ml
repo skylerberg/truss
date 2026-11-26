@@ -103,7 +103,7 @@ and collect_effects : Mir.basic -> Mir.local list * Mir.local list * Mir.local l
   | Dead locals -> ([], [], locals)
   | Assert value | Echo value -> (list_operand_locals value, [], [])
   | Loan_start { borrowed; _ } -> (list_operand_locals borrowed, [], [])
-  | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _ -> ([], [], [])
+  | Loan_end _ | Ghost_assert _ | Proof _ | Evaluated_assert _ -> ([], [], [])
 
 let collect_graph_effects :
     Mir.Graph.statement_kind -> Mir.local list * Mir.local list * Mir.local list = function

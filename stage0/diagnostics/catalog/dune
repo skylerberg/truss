@@ -3,7 +3,6 @@
  (modules_without_implementation
   code
   codegen
-  model_value
   nodes
   usage
   package

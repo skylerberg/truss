@@ -102,16 +102,6 @@ type rvalue =
   | Parameter_default of { definition : Path.t; position : int; substitution : Types.substitution }
   | Specification of specification
 
-and path_note = Catalog.Prover.path_note =
-  | Arm_taken of Core.origin list
-  | Condition_holds of {
-      condition : Core.origin;
-      holds : bool;
-      tested_local : (Core.local * bool) option;
-    }
-  | Else_runs of Core.origin
-  | Returns_early of Core.origin
-
 and choice =
   | Conditional of { condition : block; then_ : block; else_ : block }
   | Cases of case list
@@ -208,7 +198,6 @@ and basic =
     }
   | Loan_end of int list
   | Ghost_assert of { condition : formula; by_bit_vector : bool }
-  | Path_note of path_note
   | Proof of t
   | Evaluated_assert of t
 

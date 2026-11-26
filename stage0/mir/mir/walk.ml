@@ -32,7 +32,7 @@ let list_nested_blocks (statement : Tree.statement) : Tree.block list =
             _;
           }
       | Call _ | Lend _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _
-      | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _ )
+      | Ghost_assert _ | Proof _ | Evaluated_assert _ )
   | Yield _
   | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo) ->
       []
@@ -130,8 +130,7 @@ let visit_statement_places visit (statement : Tree.statement) =
   | Jump (Return returned) -> Option.iter visit_operand returned
   | Jump (Cancel { returned; _ }) -> Option.iter (fun (value, _) -> visit_operand value) returned
   | Jump (Break | Continue | Unreachable | Written_unreachable | Todo)
-  | Basic
-      (Live _ | Dead _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _)
+  | Basic (Live _ | Dead _ | Loan_end _ | Ghost_assert _ | Proof _ | Evaluated_assert _)
   | While _ | Fork _ | Resume _ ->
       ()
 
@@ -145,7 +144,7 @@ let rec visit_block ~on_locals ~on_value visit (block : Tree.block) =
       | While { loop; _ } | For { loop; _ } -> visit_loop ~on_locals ~on_value visit loop
       | Basic
           ( Assign _ | Call _ | Lend _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
-          | Loan_end _ | Path_note _ )
+          | Loan_end _ )
       | Choose _ | Assert_by_bit_vector _ | Fork _ | Provide _ | Resume _ | Yield _ | Jump _ ->
           ());
       List.iter (visit_block ~on_locals ~on_value visit) (list_nested_blocks statement))
@@ -283,7 +282,7 @@ let list_changed_places ~list_modified (blocks : Tree.block list) =
             Option.iter (fun (_, local) -> note_local origin local) returned
         | Basic
             ( Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
-            | Path_note _ | Proof _ | Evaluated_assert _ )
+            | Proof _ | Evaluated_assert _ )
         | Assert_by_bit_vector _ | While _ | Fork _ | Resume _
         | For { iteration = Range _; _ }
         | Yield { mode = Read | Own; _ }
@@ -301,7 +300,7 @@ let find_callee (statement : Tree.statement) : Tree.callee option =
   | For { iteration = Pull { next; _ }; _ } -> Some next
   | Basic
       ( Assign _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
-      | Path_note _ | Proof _ | Evaluated_assert _ )
+      | Proof _ | Evaluated_assert _ )
   | For { iteration = Range _; _ }
   | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Provide _ | Resume _ | Yield _ | Jump _
     ->
