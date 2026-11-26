@@ -175,6 +175,8 @@ let resolve_callee (interface : Interface.Lookups.t) instance (callee : _ Core.t
               lazy (list_code_supplied_to_declaration ()) )
       in
       { target; supplied }
+  | Intrinsic { operation; _ } when Intrinsic.has_contract operation ->
+      { target = Some (Intrinsic.make_contract_path operation); supplied = lazy [] }
   | Capability_method _ | Intrinsic _ | Indirect _ -> { target = None; supplied = lazy [] }
 
 let resolve_node (lookups : lookups) (declaration : Path.t) instance =

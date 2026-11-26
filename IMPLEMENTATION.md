@@ -179,6 +179,21 @@ develop as well as make it easier to bootstrap the compiler in parts.
   inside a quantifier's body proves its `requires` for each bound value, so
   its `ensures` hold for each bound value and for nothing outside the
   quantifier, whose range may be empty.
+- **The semantics of a storage operation is a contract written in Truss.**
+  `standard.intrinsic_contracts` declares a function with the name and the
+  signature of the intrinsic and a `todo` body, as `standard.specification`
+  declares `Sequence`. `Intrinsic.has_contract` lists these operations.
+  `Callee.resolve_target` resolves a call of one to its declaration, so the
+  rules of a call prove its `requires` and assume its `ensures` and its
+  costs, and `Mir.Call_edges` gives the call an edge to the declaration. The
+  contract is trusted: no proof compares it with the generated code.
+
+  | Operations | Semantics |
+  |---|---|
+  | `storage_empty`, `storage_shorten`, `storage_push`, `storage_pop`, `storage_insert`, `storage_remove`, `storage_swap`, `find_byte` | A contract in `standard.intrinsic_contracts` |
+  | `storage_length`, `storage_capacity`, `storage_model`, `array_model` | Terms of the logic, which the contracts are written in |
+  | Scalar operations | Terms of the logic, in `Operations` |
+  | Every other buffer operation, and the runtime operations | `Intrinsics` |
 - **One module states the contract of a logic function as an axiom.**
   `Contract_axioms` builds the axiom for a call and for a function used as a
   value, with every premise its proof had: arguments in range that meet

@@ -413,6 +413,7 @@ let make_variant_type_path =
 let show_field = index_rows "field" (List.map (fun (field, _, name) -> (field, name)) fields)
 let specification = Path.make_standard_module [ "specification" ]
 let intrinsic_module = Path.make_standard_module [ "intrinsic" ]
+let intrinsic_contracts = Path.make_standard_module [ "intrinsic_contracts" ]
 
 let make_builtin_type_path builtin_type =
   Path.Top { module_ = intrinsic_module; name = Language.Builtin_type.show builtin_type }
