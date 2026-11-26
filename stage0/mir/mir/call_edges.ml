@@ -270,30 +270,59 @@ type assumed_laws = {
   trait : Types.trait_reference;
   type_ : Types.ty;
   origin : Core.origin option;
+  is_assumed_by_the_callee : bool;
 }
 
 let states_laws (interface : Interface.Lookups.t) trait =
   match interface.find_trait_header trait with Some header -> header.laws <> [] | None -> false
 
+let list_laws_of_bound (interface : Interface.Lookups.t) ~self_type ~is_assumed_by_the_callee trait
+    =
+  List.filter_map
+    (fun (required : Types.trait_reference) ->
+      if states_laws interface required.trait then
+        match
+          Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type
+            ~trait:required Bound
+        with
+        | Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ } | Bound -> None
+        | Impl { impl; _ } | Derived_for_view { viewed = impl; _ } ->
+            Some
+              { impl; trait = required; type_ = self_type; origin = None; is_assumed_by_the_callee }
+      else None)
+    (Interface.Properties.list_bound_closure interface ~self:self_type trait)
+
+let list_laws_of_generics (interface : Interface.Lookups.t) instance path
+    (instantiation : Types.instantiation) =
+  match Interface.Impls.read_signature interface path with
+  | Some signature ->
+      let arguments = Types.make_substitution signature.generics instantiation.type_arguments in
+      List.concat_map
+        (fun (generic : Types.generic) ->
+          match Types.find_argument generic.generic arguments with
+          | Some (Type argument) ->
+              let self_type = substitute_type interface instance argument in
+              List.concat_map
+                (fun bound ->
+                  list_laws_of_bound interface ~self_type ~is_assumed_by_the_callee:true
+                    (substitute_trait interface instance (Types.substitute_trait arguments bound)))
+                (Types.list_bounds signature.generics generic.generic)
+          | Some (Value _) | None -> [])
+        signature.generics
+  | None -> []
+
 let list_laws_assumed_at (interface : Interface.Lookups.t) instance (callee : _ Core.target) =
   match callee with
-  | Trait_method { trait; self_type; _ } ->
-      let self_type = substitute_type interface instance self_type in
-      let trait = substitute_trait interface instance trait in
-      List.filter_map
-        (fun (required : Types.trait_reference) ->
-          if states_laws interface required.trait then
-            match
-              Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type
-                ~trait:required Bound
-            with
-            | Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ } | Bound ->
-                None
-            | Impl { impl; _ } | Derived_for_view { viewed = impl; _ } ->
-                Some (impl, required, self_type)
-          else None)
-        (Interface.Properties.list_bound_closure interface ~self:self_type trait)
-  | Function _ | Capability_method _ | Intrinsic _ | Indirect _ -> []
+  | Trait_method { trait; self_type; name; receiver; instantiation; _ } ->
+      list_laws_of_bound interface
+        ~self_type:(substitute_type interface instance self_type)
+        ~is_assumed_by_the_callee:false
+        (substitute_trait interface instance trait)
+      @ list_laws_of_generics interface instance
+          (Path.Method { owner = trait.trait; name; receiver })
+          instantiation
+  | Function { path; instantiation } -> list_laws_of_generics interface instance path instantiation
+  | Capability_method _ | Intrinsic _ | Indirect _ -> []
 
 let collect (lookups : lookups) instance visit_roots =
   let dependencies = ref [] in
@@ -332,11 +361,11 @@ let collect (lookups : lookups) instance visit_roots =
     Option.iter
       (fun (callee : Tree.callee) ->
         List.iter
-          (fun (impl, trait, type_) ->
+          (fun (assumed : assumed_laws) ->
             let origin =
               match through with Some (origin, _) -> origin | None -> statement.origin
             in
-            laws := { impl; trait; type_; origin = Some origin } :: !laws)
+            laws := { assumed with origin = Some origin } :: !laws)
           (list_laws_assumed_at lookups.interface instance callee.target))
       (Walk.find_callee statement);
     match statement.kind with
@@ -713,7 +742,8 @@ let list_assumed_laws (lookups : lookups) path =
   in
   let proven = find_proven_impl lookups path in
   List.filter
-    (fun (laws : assumed_laws) -> not (Option.equal Path.equal proven (Some laws.impl)))
+    (fun (laws : assumed_laws) ->
+      laws.is_assumed_by_the_callee || not (Option.equal Path.equal proven (Some laws.impl)))
     (of_code @ of_contract @ of_inherited_contract @ of_type_clauses @ of_proven_laws)
 
 let list_own_law_proofs (lookups : lookups) path =
