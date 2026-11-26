@@ -1148,17 +1148,51 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
       match elaborate_trait_reference ~capability:true context trait_ with
       | Error report -> (Error report, context)
       | Ok implements ->
+          let is_defined_by_this_impl ~capability base (trait : Types.trait_reference) name =
+            Types.equal base for_type
+            && Option.equal Path.equal
+                 (find_declaring_trait ~capability context trait.trait name)
+                 (Some implements.trait)
+          in
           let associated =
             List.sort compare
-              (List.filter_map
-                 (fun (line : Syntax.impl_member Syntax.node) ->
+              (List.fold_left
+                 (fun defined (line : Syntax.impl_member Syntax.node) ->
                    match line.kind with
+                   | Associated_definition (name, _) when List.mem_assoc name.text defined ->
+                       defined
                    | Associated_definition (name, written) ->
-                       Some
-                         ( name.text,
-                           elaborate_type { context with self_type = Some for_type } written )
-                   | Capability_definition _ | Impl_member_error -> None)
-                 members)
+                       let type_ =
+                         elaborate_type
+                           {
+                             context with
+                             self_type = Some for_type;
+                             self_trait = Some implements;
+                             self_associated = defined;
+                           }
+                           written
+                       in
+                       let is_self_defined =
+                         Types.exists
+                           (function
+                             | Types.Projection { base; trait; name } ->
+                                 is_defined_by_this_impl ~capability:false base trait name
+                             | _ -> false)
+                           type_
+                       in
+                       ( name.text,
+                         if is_self_defined then
+                           report_error_type context
+                             (Self_defined_associated
+                                {
+                                  at = Written name.id;
+                                  name = name.text;
+                                  associated = Associated_type;
+                                })
+                         else type_ )
+                       :: defined
+                   | Capability_definition _ | Impl_member_error -> defined)
+                 [] members)
           in
           let implements = { implements with associated } in
           let context =
@@ -1180,21 +1214,25 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
                            { context with self_capabilities = sets }
                            written)
                     in
-                    let is_defined_by_this_impl = function
-                      | Types.Capability_projection { base; trait; name } ->
-                          Types.equal base for_type
-                          && Option.equal Path.equal
-                               (find_declaring_trait ~capability:true context trait.trait name)
-                               (Some implements.trait)
-                      | _ -> false
+                    let is_self_defined =
+                      Types.exists_capability
+                        (function
+                          | Types.Capability_projection { base; trait; name } ->
+                              is_defined_by_this_impl ~capability:true base trait name
+                          | _ -> false)
+                        set
                     in
                     if List.mem_assoc name.text sets then sets
-                    else if Types.exists_capability is_defined_by_this_impl set then
+                    else if is_self_defined then
                       ( name.text,
                         Types.make_capability_set
                           (report_error_capability context
-                             (Self_defined_capability_set { at = Written name.id; name = name.text }))
-                      )
+                             (Self_defined_associated
+                                {
+                                  at = Written name.id;
+                                  name = name.text;
+                                  associated = Associated_capability_set;
+                                })) )
                       :: sets
                     else (name.text, set) :: sets
                 | Associated_definition _ | Impl_member_error -> sets)

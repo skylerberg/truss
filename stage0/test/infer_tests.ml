@@ -2525,6 +2525,9 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.blue_car_given_a_black_sedan "types.unsatisfied_bound"
         ~says:"its `Color` is `Black`");
+  Harness.test "an impl's associated type may name its required trait's through `Self`" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.pairs_of_a_point_listing_its_keys
+        "types.unsatisfied_bound" ~says:"its `Pair` is `List[Int64]`");
   Harness.test "a constraint fixes only the associated type it names" (fun () ->
       expect_one_diagnostic Fixtures.Infer.pair_with_a_fixed_first_passed_for_a_fixed_second
         "types.unsatisfied_bound" ~says:"its `Second` is `Value.Second`");

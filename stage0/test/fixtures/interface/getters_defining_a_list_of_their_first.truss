@@ -1,0 +1,14 @@
+trait Get {
+  type First
+  type Second
+}
+
+impl Get for Int64 {
+  type First = Bool
+  type Second = List[Self.First]
+}
+
+impl Get for Bool {
+  type Second = List[Self.First]
+  type First = Int64
+}

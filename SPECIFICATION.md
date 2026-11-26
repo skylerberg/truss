@@ -2938,6 +2938,11 @@ trait IntoCursor {
 
 - A trait's associated type is chosen by each `impl`, with
   `type Key = ...`, which appears only in an `impl`.
+- **An `impl`'s associated type may name one that the `impl` defines
+  before it,** as in `type Items = List[Self.Item]`, and an associated type
+  of a trait that the trait requires. It cannot name itself or one that the
+  `impl` defines after it. An associated capability set follows the same
+  rule.
 - **A bound on an associated type holds for every `impl`.** The type that an
   `impl` chooses for `type Cursor: Cursor` implements `Cursor`, so code
   bounded by `Source: IntoCursor` calls `Cursor`'s methods on

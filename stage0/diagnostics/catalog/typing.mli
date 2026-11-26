@@ -45,7 +45,7 @@ type t =
       name : string;
       associated : associated;
     }
-  | Self_defined_capability_set of { at : Core.origin; name : string }
+  | Self_defined_associated of { at : Core.origin; name : string; associated : associated }
   | Arity of {
       at : Core.origin;
       written : Core.origin Description.range;

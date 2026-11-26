@@ -1102,6 +1102,16 @@ let () =
         \  type Unit = Bool\n\
          }\n"
         "types.duplicate_member" ~says:"This `impl` already defines `Unit`.");
+  Harness.test "an impl's associated type may name one that the impl defines before it" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.getters_defining_a_list_of_their_first
+        "types.unknown_associated_type"
+        ~says:
+          "`Second` is defined from itself, or from an associated type that this `impl` defines \
+           after it."
+        ~at:("Second", 3);
+      expect_one_diagnostic
+        "trait Get {\n  type Value\n}\n\nimpl Get for Int64 {\n  type Value = Self.Value\n}\n"
+        "types.unknown_associated_type" ~says:"`Value` is defined from itself");
   Harness.test "an impl gives no associated type that its trait does not declare" (fun () ->
       expect_one_diagnostic "trait Measure {}\n\nimpl Measure for Int64 {\n  type Unit = Int64\n}\n"
         "types.extra_member" ~says:"`Measure` declares no associated type `Unit`.");

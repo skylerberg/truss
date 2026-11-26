@@ -132,11 +132,16 @@ let describe : Typing.t -> Nodes.description = function
         (say
            (Printf.sprintf "More than one trait gives `%s` an %s `%s`: %s.%s" (Types.show base)
               (show_associated associated) name listed advice))
-  | Self_defined_capability_set { at = origin; name } ->
-      make Unknown_associated_capability (Build.at origin)
+  | Self_defined_associated { at = origin; name; associated } ->
+      make
+        (match associated with
+        | Associated_type -> Unknown_associated_type
+        | Associated_capability_set -> Unknown_associated_capability)
+        (Build.at origin)
         (say
            (Printf.sprintf
-              "`%s` is defined from itself, or from a set that this `impl` defines after it." name))
+              "`%s` is defined from itself, or from an %s that this `impl` defines after it." name
+              (show_associated associated)))
   | Arity { at = origin; written; expected; given } ->
       make Arity (Build.at origin)
         (tick written
