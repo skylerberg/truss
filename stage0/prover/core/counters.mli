@@ -4,6 +4,8 @@ type lambda_bound = Logic.term * Obligation.t list
 
 val count_recursive_costs_assumed : Query.t -> int
 val note_recursive_cost_assumed : Query.t -> unit
+val note_unbounded_method_cost : Query.t -> Logic.symbol -> Path.t -> self_type:Types.ty -> unit
+val list_unbounded_method_costs : Query.t -> Logic.term -> (Path.t * Types.ty) list
 val find_lambda_captures : Query.t -> Logic.term -> Core.local list option
 val assumes_recursive_costs : Query.t -> Logic.term -> bool
 val take_lambda_cost : Query.t -> Logic.term -> Language.Metric.t -> lambda_bound option

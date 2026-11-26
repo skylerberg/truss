@@ -82,21 +82,32 @@ let check_promise ?restated ?cited (frame : State.frame) promise ~(at : State.fr
     | Exactly -> Logic.equal spent amount
     | At_most -> Logic.less_equal spent amount
   in
+  let unstated =
+    List.filter
+      (fun unbounded ->
+        not (List.mem unbounded (Counters.list_unbounded_method_costs frame.query amount)))
+      (Counters.list_unbounded_method_costs frame.query spent)
+  in
+  let goal = if unstated = [] then goal else Logic.Boolean false in
   let counting : Catalog.Prover.counting =
     match promise.counter.counting with Units | At_most -> Upper_bound | Exactly -> Exact
   and clause = Facts.quote promise.written_in promise.clause.origin in
   Obligations.oblige ?cited frame location ~holds_when:promise.clause.holds_when
     ~can_be_required:(promise.counter.counting <> Units)
     (Cost_promise
-       (match restated with
-       | Some (for_type, name, trait, declared) ->
-           Restated_promise { counting; for_type; name; clause; trait; declared }
-       | None when promise.inherited ->
-           Inherited_promise
-             {
-               counting;
-               promiser = Contracts.find_promiser frame.environment.lookups promise.written_in;
-               clause;
-             }
-       | None -> Own_promise { counting; clause }))
+       {
+         unstated;
+         promise =
+           (match restated with
+           | Some (for_type, name, trait, declared) ->
+               Restated_promise { counting; for_type; name; clause; trait; declared }
+           | None when promise.inherited ->
+               Inherited_promise
+                 {
+                   counting;
+                   promiser = Contracts.find_promiser frame.environment.lookups promise.written_in;
+                   clause;
+                 }
+           | None -> Own_promise { counting; clause });
+       })
     goal

@@ -586,11 +586,11 @@ let make_method_cost (frame : State.frame) (metric : Language.Metric.t) (method_
       let least = Costs.least_amount (Metric metric) in
       Query.add_theorem frame.query ~because:(Specifies (Logic.Symbol symbol))
         (Logic.less_equal least (Logic.Symbol symbol));
-      Option.iter
-        (fun bound ->
+      match find_method_cost_bound frame metric method_ ~trait_arguments self_type with
+      | Some bound ->
           Query.add_theorem frame.query ~because:Generalizes_an_execution
-            (Logic.less_equal (Logic.Symbol symbol) (Logic.larger bound least)))
-        (find_method_cost_bound frame metric method_ ~trait_arguments self_type));
+            (Logic.less_equal (Logic.Symbol symbol) (Logic.larger bound least))
+      | None -> Counters.note_unbounded_method_cost frame.query symbol method_ ~self_type);
   Logic.Symbol symbol
 
 let compute_method_cost (frame : State.frame) (metric : Language.Metric.t) (callee : Callee.t) =

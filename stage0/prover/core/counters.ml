@@ -4,6 +4,7 @@ type lambda_bound = Logic.term * Obligation.t list
 
 type state = {
   mutable recursive_costs_assumed : int;
+  mutable unbounded_method_costs : (Logic.symbol * (Path.t * Types.ty)) list;
   mutable lambdas_assuming_recursive_costs : Logic.term list;
   mutable lambda_costs : ((Logic.term * Language.Metric.t) * lambda_bound) list;
   mutable lambda_bounds :
@@ -17,6 +18,7 @@ let state =
   Private_state.make_key (fun () ->
       {
         recursive_costs_assumed = 0;
+        unbounded_method_costs = [];
         lambdas_assuming_recursive_costs = [];
         lambda_costs = [];
         lambda_bounds = [];
@@ -31,6 +33,17 @@ let count_recursive_costs_assumed query = (read_state query).recursive_costs_ass
 let note_recursive_cost_assumed query =
   let state = read_state query in
   state.recursive_costs_assumed <- state.recursive_costs_assumed + 1
+
+let note_unbounded_method_cost query symbol method_ ~self_type =
+  let state = read_state query in
+  state.unbounded_method_costs <- (symbol, (method_, self_type)) :: state.unbounded_method_costs
+
+let list_unbounded_method_costs query amount =
+  let symbols = Logic.list_free_constants amount in
+  List.sort_uniq compare
+    (List.filter_map
+       (fun (symbol, method_) -> if List.mem symbol symbols then Some method_ else None)
+       (read_state query).unbounded_method_costs)
 
 let find_lambda_captures query lambda = List.assoc_opt lambda (read_state query).lambda_captures
 

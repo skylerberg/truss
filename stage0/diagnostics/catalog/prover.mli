@@ -128,7 +128,7 @@ type obligation =
   | Not_a_scalar_value of { at : quoted }
   | Unreachable_reached
   | May_not_return_under_no_allocation of returning
-  | Cost_promise of promise
+  | Cost_promise of { promise : promise; unstated : (Path.t * Types.ty) list }
   | Impl_precondition of { clause : quoted }
   | Impl_panic_condition of { clause : quoted }
   | Postcondition of { clause : quoted; promiser : promiser option; moment : postcondition_moment }
