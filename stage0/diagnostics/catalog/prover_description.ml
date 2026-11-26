@@ -461,7 +461,23 @@ let describe_obligation = function
         ^ " may not return: its code, or a function it calls, may run out of memory. `cost \
            allocations == 0` is stated for it, and a call through a bound, or of a function value, \
            takes that clause to mean that the function returns.")
-  | Cost_promise promise -> describe_promise promise
+  | Cost_promise { promise; unstated = [] } -> describe_promise promise
+  | Cost_promise { promise; unstated } ->
+      describe_promise promise
+      @ Description.Text " No cost is stated for "
+        :: join_with_and
+             (List.map
+                (fun (method_, self_type) ->
+                  [
+                    Description.Text
+                      (Printf.sprintf "`%s` of `%s`" (show_callee method_) (Types.show self_type));
+                  ])
+                unstated)
+      @ [
+          Description.Text
+            (Printf.sprintf ", so the prover has no bound for %s calls."
+               (match unstated with [ _ ] -> "its" | _ -> "their"));
+        ]
   | Impl_precondition { clause } ->
       tick clause
       @ [
