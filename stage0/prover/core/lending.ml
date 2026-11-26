@@ -4,8 +4,7 @@ let enter_method (context : State.context) ~part_type = context.lending.part_typ
 let holds_where_lent (clause : Mir.formula) =
   Contracts.mentions_result clause && not (Contracts.mentions_final_result clause)
 
-let find_part_sort (context : State.context) =
-  Option.map (Encoding.declare_sort context) context.lending.part_type
+let find_part_sort (context : State.context) = Option.map Encoding.sort_of context.lending.part_type
 
 let lend_part (context : State.context) (frame : State.frame) origin (mode : Language.Mode.t)
     ~handed ~lends_places ~write_back =

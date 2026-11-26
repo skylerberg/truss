@@ -112,9 +112,7 @@ let assert_bit_vector (context : State.context) frame ~named ~origin
       let isolated =
         List.fold_left
           (fun (inside : State.frame) (local, ty) ->
-            let symbol =
-              Facts.declare_fresh context inside "asserted" (Encoding.declare_sort context ty)
-            in
+            let symbol = Facts.declare_fresh context inside "asserted" (Encoding.sort_of ty) in
             Facts.assume context inside (Encoding.make_in_range ty symbol);
             match local with
             | Core.Self -> { inside with self = Some symbol }

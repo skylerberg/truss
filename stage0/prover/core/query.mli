@@ -3,11 +3,6 @@ type t
 val create : unit -> t
 val make_variable : ?numbers:int list -> string -> 'a Logic.Symbol.t
 val declare : t -> Logic.declaration -> unit
-val has_datatype : t -> Types.ty -> bool
-
-val declare_datatype :
-  t -> Types.ty -> (unit -> (Logic.symbol * (Logic.symbol * Logic.sort) list) list) -> unit
-
 val find_argument_sorts : t -> Logic.symbol -> Logic.sort list option
 val list_defined_symbols : t -> Logic.symbol list
 val add_fact : t -> Logic.term -> unit
@@ -35,6 +30,7 @@ val make_ordered_fresh_name : t -> string -> 'a Logic.Symbol.t
 
 val make_obligation :
   t ->
+  list_constructors:(Types.ty -> (Logic.symbol * (Logic.symbol * Logic.sort) list) list option) ->
   condition:Logic.term ->
   Obligation.location ->
   Catalog.Prover.obligation ->

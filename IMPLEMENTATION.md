@@ -418,6 +418,12 @@ develop as well as make it easier to bootstrap the compiler in parts.
   with `Query.count_facts` and reads the ones added since, and a module that
   reads code under a binder takes the facts of that scope from
   `Query.run_in_scope`.
+- **The sort of a type is a function of the type, and an obligation
+  declares the datatypes that its query names.** `Encoding.sort_of` reads no
+  state. `Query.make_obligation` takes the constructors of each type from
+  `Encoding.list_constructors` and declares a datatype for every sort that
+  a declaration, a bound variable, a constructor or a field of the pruned
+  query names, so no reader declares a type before it builds a term of it.
 - **`Validity` decides each check of an invariant.** Every moment that
   obliges one calls `Validity.check_valid`, which first asks its record of
   the values already shown valid, so a value is proven once. A write

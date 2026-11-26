@@ -83,14 +83,14 @@ let find_written_equal context ty left right =
                 type_arguments = [ Types.Type ty ];
               }
           in
-          let sort = Encoding.declare_sort context ty in
+          let sort = Encoding.sort_of ty in
           Facts.declare context (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
           Some (Logic.Apply (symbol, [ left; right ]))
       | _ -> None)
   | _ -> None
 
 let make_derived_equal context (frame : State.frame) (ty : Types.ty) left right =
-  let sort = Encoding.declare_sort context ty in
+  let sort = Encoding.sort_of ty in
   let symbol = Logic.Symbol.Equal ty in
   Facts.declare context (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
   let equal = Logic.Apply (symbol, [ left; right ]) in
@@ -118,10 +118,7 @@ let make_derived_equal context (frame : State.frame) (ty : Types.ty) left right 
                      Facts.declare context
                        (Logic.Function
                           ( symbol,
-                            [
-                              Encoding.declare_sort context field_type;
-                              Encoding.declare_sort context field_type;
-                            ],
+                            [ Encoding.sort_of field_type; Encoding.sort_of field_type ],
                             Logic.Bool ));
                      Logic.Apply (symbol, [ left; right ]))
              fields)
@@ -162,7 +159,7 @@ let declare_opaque_operation context frame ty operation arguments =
       (find_width ty)
   in
   let symbol = Logic.Symbol.Opaque_operation { operation; type_ = ty; integer } in
-  Facts.declare context (Logic.Function (symbol, sorts, Encoding.declare_sort context ty));
+  Facts.declare context (Logic.Function (symbol, sorts, Encoding.sort_of ty));
   let term = Logic.Apply (symbol, arguments) in
   Facts.assume context frame (Encoding.make_in_range ty term);
   term
@@ -516,10 +513,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
                   { operation = To_bits; type_ = bits; integer = Some (width, false) }
               in
               Facts.declare context
-                (Logic.Function
-                   ( symbol,
-                     [ Encoding.declare_sort context source ],
-                     Encoding.declare_sort context bits ));
+                (Logic.Function (symbol, [ Encoding.sort_of source ], Encoding.sort_of bits));
               let term = Logic.Apply (symbol, [ value ]) in
               Facts.assume context frame (Encoding.make_in_range bits term);
               Facts.assume context frame

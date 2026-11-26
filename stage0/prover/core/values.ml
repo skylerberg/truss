@@ -39,7 +39,7 @@ let assume_extensional context frame (ty : Types.ty) left right =
           let apply_function method_ output inputs =
             Models.make_finite_function context method_ ~arguments output inputs
           in
-          let key_sort = Encoding.declare_sort context key in
+          let key_sort = Encoding.sort_of key in
           let has =
             apply_function
               (if finite_map then Well_known.Finite_map_contains_key else Finite_set_contains)
@@ -51,8 +51,7 @@ let assume_extensional context frame (ty : Types.ty) left right =
               match rest with
               | [ Types.Type value_type ] ->
                   let get =
-                    apply_function Finite_map_get
-                      (Encoding.declare_sort context value_type)
+                    apply_function Finite_map_get (Encoding.sort_of value_type)
                       [ (Logic.Symbol each, key_sort) ]
                   in
                   Logic.(
@@ -111,7 +110,7 @@ let make_set context frame (ty : Types.ty) ~element values =
   Option.map
     (fun model ->
       Validity.assume_valid context frame ty literal;
-      let element_sort = Encoding.declare_sort context element in
+      let element_sort = Encoding.sort_of element in
       let contains value =
         Models.make_finite_function context Finite_set_contains ~arguments Logic.Bool
           [ (value, element_sort) ]
@@ -171,15 +170,14 @@ let apply_map_literal context frame ~(ty : Types.ty) ~location terms =
     | _ -> Facts.raise_unsupported location (Literal_of ty)
   in
   Validity.assume_valid context frame ty literal;
-  let key_sort = Encoding.declare_sort context key_type in
+  let key_sort = Encoding.sort_of key_type in
   let has key =
     Models.make_finite_function context Finite_map_contains_key ~arguments Logic.Bool
       [ (key, key_sort) ]
       model
   in
   let get key =
-    Models.make_finite_function context Finite_map_get ~arguments
-      (Encoding.declare_sort context value_type)
+    Models.make_finite_function context Finite_map_get ~arguments (Encoding.sort_of value_type)
       [ (key, key_sort) ]
       model
   in
@@ -199,7 +197,7 @@ let rec make_literal_value context frame (ty : Types.ty) (value : Language.Liter
   let symbol = Logic.Symbol.Literal { type_ = ty; value } in
   let literal = Logic.Symbol symbol in
   Facts.run_once context (Value_of symbol) (fun () ->
-      Facts.declare context (Logic.Constant (symbol, Encoding.declare_sort context ty));
+      Facts.declare context (Logic.Constant (symbol, Encoding.sort_of ty));
       Validity.assume_valid context
         { frame with condition = Logic.Boolean true; bound = []; binders = [] }
         ty literal;
@@ -315,7 +313,7 @@ let evaluate_constant (context : State.context) frame path =
       in
       Facts.run_once context (Value_of symbol) (fun () ->
           let ty = Interface.Definition.read_constant_type context.lookups.interface path in
-          Facts.declare context (Logic.Constant (symbol, Encoding.declare_sort context ty));
+          Facts.declare context (Logic.Constant (symbol, Encoding.sort_of ty));
           let _, defined_value =
             Counters.run_without_counters context (fun () ->
                 Lambdas.run_code context empty code ~type_:ty)
@@ -355,10 +353,7 @@ let check_built context frame (site : Invocation.site) ty term =
 let apply_construct context frame (site : Invocation.site) variant
     (fields : (string * Logic.term option) list) =
   let ty = Encoding.substitute_type context frame site.type_ in
-  if Types.equal ty Types.unit then begin
-    ignore (Encoding.declare_sort context Types.unit);
-    (frame, Logic.Apply (Logic.Symbol.Unit, []))
-  end
+  if Types.equal ty Types.unit then (frame, Logic.Apply (Logic.Symbol.Unit, []))
   else
     let frame, field_terms =
       List.fold_left
@@ -375,7 +370,6 @@ let apply_construct context frame (site : Invocation.site) variant
     in
     match Encoding.find_constructors context ty with
     | Some shape ->
-        ignore (Encoding.declare_sort context ty);
         let shaped = match List.assoc_opt variant shape with Some fields -> fields | None -> [] in
         let read_field_value (name, _) =
           match List.assoc_opt name field_terms with

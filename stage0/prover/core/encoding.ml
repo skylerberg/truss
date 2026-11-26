@@ -96,34 +96,27 @@ let find_constructors context ty =
       | Todo_type | Builtin_type _ -> None)
   | None -> None
 
-let rec declare_sort (context : State.context) (ty : Types.ty) : Logic.sort =
+let sort_of (ty : Types.ty) : Logic.sort =
   let ty = Types.erase_views ty in
   if is_numeric ty then Int
   else if is_bool ty then Bool
   else
     match (ty, find_float_format ty) with
     | _, Some (exponent, significand) -> Float (exponent, significand)
-    | _ when Types.equal ty Types.unit ->
-        if not (Query.has_datatype context.query ty) then
-          Query.declare_datatype context.query ty (fun () -> [ (Logic.Symbol.Unit, []) ]);
-        Type_sort ty
     | Function function_type, _ -> Function_sort (List.length function_type.inputs)
-    | _ -> begin
-        (if not (Query.has_datatype context.query ty) then
-           match find_constructors context ty with
-           | Some shape ->
-               Query.declare_datatype context.query ty (fun () ->
-                   List.map
-                     (fun (variant, fields) ->
-                       ( make_constructor_symbol ty variant,
-                         List.map
-                           (fun (field, field_type) ->
-                             (make_selector_symbol ty variant field, declare_sort context field_type))
-                           fields ))
-                     shape)
-           | None -> ());
-        Type_sort ty
-      end
+    | _ -> Type_sort ty
+
+let list_constructors context (ty : Types.ty) =
+  if Types.equal ty Types.unit then Some [ (Logic.Symbol.Unit, []) ]
+  else
+    Option.map
+      (List.map (fun (variant, fields) ->
+           ( make_constructor_symbol ty variant,
+             List.map
+               (fun (field, field_type) ->
+                 (make_selector_symbol ty variant field, sort_of field_type))
+               fields )))
+      (find_constructors context ty)
 
 let rec is_equality_identity context ?(seen = []) (ty : Types.ty) =
   is_numeric ty || is_bool ty || Types.is_builtin Character ty || Types.equal ty Types.unit
@@ -151,7 +144,7 @@ let make_in_range ty term =
            ranges)
 
 let arrive context frame prefix ty =
-  let value = Facts.declare_fresh context frame prefix (declare_sort context ty) in
+  let value = Facts.declare_fresh context frame prefix (sort_of ty) in
   Facts.assume context frame (make_in_range ty value);
   value
 

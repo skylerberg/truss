@@ -748,20 +748,14 @@ let make_triggering_test declarations =
   List.iter
     (function
       | Function (name, _, _) -> Symbol_table.replace functions name ()
-      | Datatype (_, constructors) ->
-          List.iter
-            (fun (constructor, fields) ->
-              Symbol_table.replace functions constructor ();
-              List.iter (fun (selector, _) -> Symbol_table.replace functions selector ()) fields)
-            constructors
-      | Constant _ | Definition _ -> ())
+      | Constant _ | Definition _ | Datatype _ -> ())
     declarations;
   List.iter
     (function
       | Definition { symbol; _ } -> Symbol_table.remove functions symbol
       | Constant _ | Function _ | Datatype _ -> ())
     declarations;
-  Symbol_table.mem functions
+  function Symbol.Constructor _ | Field _ | Unit -> true | name -> Symbol_table.mem functions name
 
 let has_untriggered_fact ?(is_counted = fun _ -> true) query =
   let is_triggering = make_triggering_test query.declarations in
@@ -868,6 +862,60 @@ let prune query =
       facts
   done;
   { query with facts = List.filteri (fun index _ -> is_needed.(index)) query.facts }
+
+let declare_datatypes ~list_constructors query =
+  let reached = Sort_table.create 16 in
+  let datatypes = ref [] in
+  let rec reach_sort = function
+    | Int | Bool | Float _ | Function_sort _ -> ()
+    | Type_sort ty as sort ->
+        if not (Sort_table.mem reached sort) then begin
+          Sort_table.replace reached sort ();
+          Option.iter
+            (fun constructors ->
+              datatypes := Datatype (ty, constructors) :: !datatypes;
+              List.iter
+                (fun (_, fields) -> List.iter (fun (_, sort) -> reach_sort sort) fields)
+                constructors)
+            (list_constructors ty)
+        end
+  in
+  let reach_symbol : symbol -> unit = function
+    | Constructor { type_; _ } | Field { type_; _ } -> reach_sort (Type_sort type_)
+    | Unit -> reach_sort (Type_sort Types.unit)
+    | _ -> ()
+  in
+  let reach_variables = List.iter (fun (_, sort) -> reach_sort sort) in
+  let rec reach_term = function
+    | Symbol name -> reach_symbol name
+    | Integer _ | Boolean _ | Bits _ -> ()
+    | Apply (name, arguments) ->
+        reach_symbol name;
+        List.iter reach_term arguments
+    | Operation (_, arguments) -> List.iter reach_term arguments
+    | Is (name, argument) ->
+        reach_symbol name;
+        reach_term argument
+    | Forall (variables, _, body) | Exists (variables, body) ->
+        reach_variables variables;
+        reach_term body
+  in
+  List.iter
+    (function
+      | Constant (_, sort) -> reach_sort sort
+      | Function (_, inputs, output) ->
+          List.iter reach_sort inputs;
+          reach_sort output
+      | Definition { parameters; result; body; _ } ->
+          reach_variables parameters;
+          reach_sort result;
+          reach_term body
+      | Datatype (ty, _) ->
+          invalid_arg ("Logic.declare_datatypes: a datatype of " ^ Types.show ty ^ " is declared"))
+    query.declarations;
+  List.iter reach_term query.facts;
+  reach_term query.goal;
+  { query with declarations = query.declarations @ List.rev !datatypes }
 
 type numbering = {
   declared : declaration Symbol_table.t;

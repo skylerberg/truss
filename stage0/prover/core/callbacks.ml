@@ -27,11 +27,9 @@ let declare_own context (frame : State.frame) own =
     frame own
 
 let apply_function context (function_type : Types.function_type) callee arguments =
-  let inputs =
-    List.map (fun (_, input) -> Encoding.declare_sort context input) function_type.inputs
-  in
-  let output = Encoding.declare_sort context function_type.output in
-  let value_sort = Encoding.declare_sort context (Types.Function function_type) in
+  let inputs = List.map (fun (_, input) -> Encoding.sort_of input) function_type.inputs in
+  let output = Encoding.sort_of function_type.output in
+  let value_sort = Encoding.sort_of (Types.Function function_type) in
   let symbol = Logic.Symbol.Apply ((value_sort :: inputs) @ [ output ]) in
   Facts.declare context (Logic.Function (symbol, value_sort :: inputs, output));
   Logic.Apply (symbol, callee :: arguments)
@@ -39,11 +37,11 @@ let apply_function context (function_type : Types.function_type) callee argument
 let returns_value (function_type : Types.function_type) =
   not (Types.equal function_type.output Types.unit)
 
-let make_input_variables context (function_type : Types.function_type) ~label ~numbers =
+let make_input_variables (function_type : Types.function_type) ~label ~numbers =
   List.mapi
     (fun index (_, input) ->
       ( Facts.make_variable (label ^ ".argument") ~numbers:(numbers @ [ index ]),
-        Encoding.declare_sort context input ))
+        Encoding.sort_of input ))
     function_type.inputs
 
 type relation_variables = {
@@ -55,8 +53,8 @@ type relation_variables = {
   result : Logic.term;
 }
 
-let make_relation_variables context (function_type : Types.function_type) ~label ~numbers =
-  let inputs = make_input_variables context function_type ~label ~numbers in
+let make_relation_variables (function_type : Types.function_type) ~label ~numbers =
+  let inputs = make_input_variables function_type ~label ~numbers in
   let changed =
     List.filter_map
       (fun (index, ((mode : Language.Mode.t), input)) ->
@@ -65,16 +63,13 @@ let make_relation_variables context (function_type : Types.function_type) ~label
             Some
               ( index,
                 ( Facts.make_variable (label ^ ".changed") ~numbers:(numbers @ [ index ]),
-                  Encoding.declare_sort context input ) )
+                  Encoding.sort_of input ) )
         | Read | Own -> None)
       (List.mapi (fun index input -> (index, input)) function_type.inputs)
   in
   let returned =
     if returns_value function_type then
-      [
-        ( Facts.make_variable (label ^ ".result") ~numbers,
-          Encoding.declare_sort context function_type.output );
-      ]
+      [ (Facts.make_variable (label ^ ".result") ~numbers, Encoding.sort_of function_type.output) ]
     else []
   in
   let entries = List.map (fun (name, _) -> Logic.Symbol name) inputs in
@@ -96,15 +91,13 @@ let make_relation_variables context (function_type : Types.function_type) ~label
 let make_callback_ensures context (function_type : Types.function_type) callee ~entries ~exits
     ~result =
   let sorts =
-    Encoding.declare_sort context (Types.Function function_type)
+    Encoding.sort_of (Types.Function function_type)
     :: List.concat_map
          (fun ((mode : Language.Mode.t), input) ->
-           let sort = Encoding.declare_sort context input in
+           let sort = Encoding.sort_of input in
            match mode with Mut -> [ sort; sort ] | Read | Own -> [ sort ])
          function_type.inputs
-    @
-    if returns_value function_type then [ Encoding.declare_sort context function_type.output ]
-    else []
+    @ if returns_value function_type then [ Encoding.sort_of function_type.output ] else []
   in
   let arguments =
     List.concat
@@ -375,7 +368,7 @@ let assume_returned context frame (function_type : Types.function_type) called ~
 let find_logic_link context (function_type : Types.function_type) term =
   if is_in_the_logic function_type && returns_value function_type then
     let { inputs; returned; entries; result; _ } =
-      make_relation_variables context function_type ~label:"relation" ~numbers:[]
+      make_relation_variables function_type ~label:"relation" ~numbers:[]
     in
     let holds = make_callback_ensures context function_type term ~entries ~exits:entries ~result in
     Some
@@ -387,7 +380,7 @@ let find_logic_link context (function_type : Types.function_type) term =
 
 let state_relation context (frame : State.frame) (function_type : Types.function_type) term known =
   let { inputs; changed; returned; entries; exits; result } =
-    make_relation_variables context function_type ~label:"named" ~numbers:[]
+    make_relation_variables function_type ~label:"named" ~numbers:[]
   in
   let parameters = inputs @ List.map snd changed @ returned in
   let holds = make_callback_ensures context function_type term ~entries ~exits ~result in
@@ -419,8 +412,7 @@ let state_relation context (frame : State.frame) (function_type : Types.function
 let state_definition context (frame : State.frame) (function_type : Types.function_type) term ~path
     ~contract ~substitution_of ~type_arguments ~group_member =
   let parameters =
-    make_input_variables context function_type ~label:"parameter"
-      ~numbers:[ List.length frame.bound ]
+    make_input_variables function_type ~label:"parameter" ~numbers:[ List.length frame.bound ]
   in
   let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
   let sorts = List.map snd parameters in
@@ -450,7 +442,7 @@ let read_named_function (context : State.context) (frame : State.frame) (site : 
         Obligations.oblige context frame location
           (May_not_return_under_no_allocation (Named_function path)) (Logic.Boolean false);
       let symbol = Logic.Symbol.Function_value { callee = path; type_arguments } in
-      Facts.declare context (Logic.Constant (symbol, Encoding.declare_sort context type_));
+      Facts.declare context (Logic.Constant (symbol, Encoding.sort_of type_));
       let term = Logic.Symbol symbol in
       note_named context term function_type known;
       Facts.run_once context (Value_of symbol) (fun () ->

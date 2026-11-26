@@ -261,8 +261,7 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_typ
 
 let declare_visited context frame element =
   let visited =
-    Facts.declare_fresh context frame "parts"
-      (Encoding.declare_sort context (Models.make_sequence_type element))
+    Facts.declare_fresh context frame "parts" (Encoding.sort_of (Models.make_sequence_type element))
   in
   Facts.assume context frame
     Logic.(greater_equal (Models.make_sequence_length context element visited) (int 0));

@@ -70,7 +70,7 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
     (function_type : Types.function_type) term ~called ~arguments ~start ~end_ ~premises ~shown
     ~ended =
   let parameters =
-    Callbacks.make_input_variables context function_type ~label:"lambda"
+    Callbacks.make_input_variables function_type ~label:"lambda"
       ~numbers:[ Query.take_fresh_number context.query ]
   in
   let lift = make_lifting context frame ~called ~arguments ~start ~end_ parameters in
@@ -99,7 +99,7 @@ let add_lambda_relation (context : State.context) (frame : State.frame) ~capture
     (function_type : Types.function_type) term ~called ~arguments ~start ~end_ ~premises ~shown
     ~ended ~read_exits =
   let ({ inputs; changed; returned; entries; exits; result } : Callbacks.relation_variables) =
-    Callbacks.make_relation_variables context function_type ~label:"lambda"
+    Callbacks.make_relation_variables function_type ~label:"lambda"
       ~numbers:[ Query.take_fresh_number context.query ]
   in
   let parameters = inputs @ List.map snd changed @ returned in
@@ -223,7 +223,7 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
   match written.code.is_functional with
   | true when Callbacks.is_in_the_logic function_type -> (
       let bound =
-        Callbacks.make_input_variables context function_type ~label:"parameter"
+        Callbacks.make_input_variables function_type ~label:"parameter"
           ~numbers:[ List.length frame.bound ]
       in
       let explored, supposed = Facts.suppose context frame "explored" in
@@ -297,7 +297,7 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
           let symbol =
             Logic.Symbol.Lambda { sorts = List.map snd bound; definition = named_by_position }
           in
-          let sort = Encoding.declare_sort context (Types.Function function_type) in
+          let sort = Encoding.sort_of (Types.Function function_type) in
           let term =
             if Logic.mentions frame.bound defined then
               Facts.declare_value_symbol context frame symbol sort

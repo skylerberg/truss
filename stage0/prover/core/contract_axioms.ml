@@ -39,7 +39,7 @@ type application = {
 
 let declare_function context ~path ~type_arguments ~sorts ~result_type =
   let symbol = Logic.Symbol.Function { callee = path; type_arguments } in
-  let result_sort = Encoding.declare_sort context result_type in
+  let result_sort = Encoding.sort_of result_type in
   Facts.declare context (Logic.Function (symbol, sorts, result_sort));
   symbol
 
@@ -53,8 +53,7 @@ let apply (context : State.context) (frame : State.frame) ~path ~type_arguments 
   let symbol =
     if is_limited then begin
       let limited = Logic.Symbol.Limited { callee = path; type_arguments } in
-      Facts.declare context
-        (Logic.Function (limited, sorts, Encoding.declare_sort context result_type));
+      Facts.declare context (Logic.Function (limited, sorts, Encoding.sort_of result_type));
       Facts.run_once context (Limited_link function_symbol) (fun () ->
           let parameters = make_numbered_parameters "linked" sorts in
           let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
@@ -236,7 +235,7 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
           match definition with
           | Some (required, body) ->
               let unspecified = Logic.Symbol.Unspecified symbol
-              and result_sort = Encoding.declare_sort context result_type in
+              and result_sort = Encoding.sort_of result_type in
               Facts.declare context (Logic.Function (unspecified, sorts, result_sort));
               Facts.declare context
                 (Logic.Definition

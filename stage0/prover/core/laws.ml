@@ -70,7 +70,7 @@ let make_law_fact (context : State.context) (frame : State.frame) source ~substi
       let _, holds = Validity.read_specification context inside law.states in
       Some
         (Logic.forall
-           ( List.map2 (fun symbol ty -> (symbol, Encoding.declare_sort context ty)) symbols types,
+           ( List.map2 (fun symbol ty -> (symbol, Encoding.sort_of ty)) symbols types,
              Logic.( ==> ) (Logic.( &&& ) valid premise) holds ))
     with Facts.Unsupported _ -> None
   end

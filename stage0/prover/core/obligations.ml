@@ -7,7 +7,9 @@ let find_ruled_out_panic (context : State.context) (frame : State.frame) =
 let set_panics (frame : State.frame) ~panics = { frame with panics; can_declare_panic = false }
 
 let make_obligation (context : State.context) (frame : State.frame) location obligation goal =
-  Query.make_obligation context.query ~condition:frame.condition location obligation goal
+  Query.make_obligation context.query
+    ~list_constructors:(Encoding.list_constructors context)
+    ~condition:frame.condition location obligation goal
 
 let make_closed_obligation (context : State.context) (frame : State.frame) location obligation goal
     =
