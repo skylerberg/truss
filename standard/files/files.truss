@@ -1124,9 +1124,12 @@ impl FromTemplate for Glob {
 
   fn from_template(template: Template[Never]) -> Glob
   {
-    match Glob.parse(template.literals[0].text()) {
-      Ok(glob) => glob
-      Err(_) => Glob(components: [], absolute: false)
+    match template.literals.get(0) {
+      Some(literal) => match Glob.parse(literal.text()) {
+        Ok(glob) => glob
+        Err(_) => Glob(components: [], absolute: false)
+      }
+      None => Glob(components: [], absolute: false)
     }
   }
 }

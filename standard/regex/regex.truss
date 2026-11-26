@@ -1472,7 +1472,10 @@ fn Regex.captures_from(self, text: String, offset: UInt64) -> Option[Captures]
 }
 
 public fn Regex.captures(self, text: String) -> Option[Captures]
-  ensures (result is Some(_)) == self.is_match(text)
+  ensures (result is Some(_)) == (match self.run(text, from: 0, whole: false) {
+      Some(slots) => match_from(slots, text: text, offset: 0) is Some(_)
+      None => false
+    })
 {
   match self.run(text, from: 0, whole: false) {
     Some(slots) => self.captures_of(slots, text: text, offset: 0)
