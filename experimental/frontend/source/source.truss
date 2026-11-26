@@ -1,5 +1,3 @@
-use standard.core
-
 internal type Span(start: UInt64, stop: UInt64)
   derives Equal, Hash, Ordered
   invariant start <= stop
@@ -133,23 +131,39 @@ internal fn delete(span: Span) -> Edit {
 type Ranked(start: UInt64, sequence: UInt64)
   derives Equal, Ordered
 
-fn sort_stably[Item](items: own List[Item], read_start: fn(Item) -> UInt64) -> List[Item] {
-  var indexed: List[core.Indexed[Item]] = []
-  for item in own items {
-    mut indexed.push(core.Indexed(index: indexed.length(), element: own item))
+fn sort_stably[Item](items: own List[Item], read_start: fn(Item) -> UInt64) -> List[Item]
+  uses Panic
+{
+  var ranked: List[Ranked] = []
+  for entry in items.enumerate() {
+    mut ranked.push(Ranked(start: read_start(entry.element), sequence: entry.index))
   }
-  mut indexed.sort_by_key(fn(entry) { Ranked(start: read_start(entry.element), sequence: entry.index) })
+  mut ranked.sort()
+  var slots: List[Option[Item]] = []
+  for item in own items {
+    mut slots.push(Some(own item))
+  }
   var sorted: List[Item] = []
-  for entry in own indexed {
-    mut sorted.push(own entry.element)
+  for rank in ranked {
+    if rank.sequence >= slots.length() {
+      Panic.crash("each rank is the sequence number of an item")
+    }
+    let Some(item) = mut slots[rank.sequence].take() else {
+      Panic.crash("each item is taken once")
+    }
+    mut sorted.push(own item)
   }
   sorted
 }
 
-internal fn sort_by_start(diagnostics: own List[Diagnostic]) -> List[Diagnostic] {
+internal fn sort_by_start(diagnostics: own List[Diagnostic]) -> List[Diagnostic]
+  uses Panic
+{
   sort_stably(own diagnostics, read_start: fn(diagnostic) { diagnostic.span.start })
 }
 
-internal fn sort_edits_by_start(edits: own List[Edit]) -> List[Edit] {
+internal fn sort_edits_by_start(edits: own List[Edit]) -> List[Edit]
+  uses Panic
+{
   sort_stably(own edits, read_start: fn(edit) { edit.span.start })
 }
