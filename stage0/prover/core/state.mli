@@ -158,11 +158,15 @@ type validity_state = {
   valid_values : (Types.ty * Logic.term) list Tables.Term_table.t;
 }
 
+type callback_state = {
+  mutable own : (Core.local * string * Mir.callback) list;
+  mutable is_reading : bool;
+}
+
 type context = {
   lookups : Lookups.t;
   current : Path.t;
   node : Path.t;
-  mutable callbacks : (Core.local * string * Mir.callback) list;
   visible_types : (Types.type_interface * Types.substitution) option Tables.Type_table.t;
   callees : known_callee Tables.Path_table.t;
   mutable parameter_names : (Logic.symbol * string) list;
@@ -176,6 +180,7 @@ type context = {
   axioms : axiom_state;
   termination : termination_state;
   validity : validity_state;
+  callbacks : callback_state;
   disjoint : (Core.id list * Core.id list) list;
   mutable indexes : (Core.id * noted_place) list;
   mutable lending : lending option;
@@ -191,7 +196,6 @@ type context = {
   inherits_precondition : bool;
   mutable holes : (Resolve.Names.key * Obligation.location) list;
   mutable unfinished : Logic.term list;
-  mutable reading_callback : bool;
   ranking : bool;
   condition : Types.condition;
   bounds : Interface.Impls.bounds;

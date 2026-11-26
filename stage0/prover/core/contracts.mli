@@ -58,3 +58,19 @@ val mentions_specification : Mir.formula -> (Mir.specification -> bool) -> bool
 val mentions_result : Mir.formula -> bool
 val mentions_history : Mir.formula -> bool
 val find_promiser : Lookups.t -> State.source -> Catalog.Prover.promiser
+
+val make_entry_frame :
+  State.frame ->
+  State.clauses ->
+  arguments:(int * Logic.term) list ->
+  substitution:Types.substitution ->
+  State.frame
+
+val make_exit_frame :
+  State.frame ->
+  State.clauses ->
+  entries:(int * Logic.term) list ->
+  exits:(int * Logic.term) list ->
+  result:Logic.term option ->
+  substitution:Types.substitution ->
+  State.frame

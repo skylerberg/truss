@@ -297,10 +297,10 @@ let translate_named_function (context : State.context) (frame : State.frame)
   (match ty with
   | Types.Function function_type
     when callee_clauses.requires <> [] && frame.makes_obligations && not is_argument ->
-      let inputs = Validity.declare_callback_arguments context frame function_type.inputs in
+      let inputs = Callbacks.declare_callback_arguments context frame function_type.inputs in
       if List.length callee_clauses.parameters = List.length inputs then begin
         let inside =
-          Validity.bind_arguments frame callee_clauses
+          Contracts.make_entry_frame frame callee_clauses
             ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
             ~substitution:Types.no_substitution
         in
@@ -322,7 +322,7 @@ let translate_named_function (context : State.context) (frame : State.frame)
   let term = Logic.Symbol symbol in
   (match ty with
   | Types.Function function_type
-    when Lambdas.is_in_the_logic function_type && contract.is_logic_function ->
+    when Callbacks.is_in_the_logic function_type && contract.is_logic_function ->
       let parameters = Lambdas.make_parameter_symbols context frame function_type in
       let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
       let sorts = List.map snd parameters in
@@ -344,7 +344,8 @@ let translate_named_function (context : State.context) (frame : State.frame)
           ~is_on_bound_values:true;
       Facts.add_frame_fact context frame
         (Logic.forall
-           (parameters, Logic.equal (Lambdas.apply_function context function_type term inputs) value))
+           ( parameters,
+             Logic.equal (Callbacks.apply_function context function_type term inputs) value ))
   | _ -> ());
   term
 
@@ -534,5 +535,5 @@ let apply_specification_function context frame ~location (measure : Core.specifi
   | Callback_cost metric, [ function_term ], _, [ function_type ] ->
       (frame, Amounts.make_callback_cost context frame metric function_type function_term)
   | Callback_ensures, _, _, Types.Function function_type :: _ ->
-      (frame, Lambdas.apply_callback_ensures context function_type values)
+      (frame, Callbacks.apply_callback_ensures context function_type values)
   | _ -> Facts.raise_unsupported location Specification_function

@@ -201,38 +201,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       (fun index (parameter : Mir.parameter) -> (parameter, find_argument_at index))
       clauses.parameters
   in
-  let bind bindings =
-    List.fold_left
-      (fun (locals, types, self) ((parameter : Mir.parameter), term) ->
-        match (parameter.local, term) with
-        | Self, Some term -> (locals, types, Some (term, parameter.type_))
-        | local, Some term ->
-            ( Locals.add (Core_local local) term locals,
-              Locals.add (Core_local local) parameter.type_ types,
-              self )
-        | _, None -> (locals, types, self))
-      (Locals.empty, Locals.empty, None)
-      bindings
-  in
-  let self_of self = Option.map fst self
-  and find_self_type clauses self =
-    Option.map (fun (_, ty) -> Types.substitute_erased (substitution_of clauses) ty) self
-  in
+  let arguments = List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values in
   let read_entry_frame (clauses : State.clauses) =
-    let locals, types, self = bind (list_bindings clauses) in
-    {
-      frame with
-      source = clauses.callee;
-      locals;
-      types;
-      old_locals = locals;
-      self = self_of self;
-      old_self = self_of self;
-      self_type = find_self_type clauses self;
-      result = None;
-      makes_obligations = false;
-      substitution = substitution_of clauses;
-    }
+    Contracts.make_entry_frame frame clauses ~arguments ~substitution:(substitution_of clauses)
   in
   let callee_clauses = contract.callee_clauses in
   Option.iter
@@ -406,33 +377,22 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     let assume_ensures is_kept =
       List.iter
         (fun (clauses : State.clauses) ->
-          let entry = list_bindings clauses in
-          let exit_bindings =
-            List.mapi
-              (fun index (parameter, term) ->
-                ( parameter,
-                  match List.assoc_opt index changed with Some term -> Some term | None -> term ))
-              entry
+          let exits =
+            List.map
+              (fun (position, entry) ->
+                (position, Option.value (List.assoc_opt position changed) ~default:entry))
+              arguments
           in
-          let entry_locals, types, entry_self = bind entry in
-          let exit_locals, _, exit_self = bind exit_bindings in
+          let entry_frame = read_entry_frame clauses in
           let is_unbound_in_quantifier = in_quantifier && not is_on_bound_values in
           let ensures_frame =
             {
-              frame with
-              source = clauses.callee;
+              (Contracts.make_exit_frame frame clauses ~entries:arguments ~exits
+                 ~result:(Some result) ~substitution:(substitution_of clauses))
+              with
               condition = (if is_unbound_in_quantifier then Logic.Boolean true else after.condition);
               bound = (if is_unbound_in_quantifier then [] else frame.bound);
               binders = (if is_unbound_in_quantifier then [] else frame.binders);
-              locals = exit_locals;
-              types;
-              old_locals = entry_locals;
-              self = self_of exit_self;
-              old_self = self_of entry_self;
-              self_type = find_self_type clauses entry_self;
-              result = Some result;
-              makes_obligations = false;
-              substitution = substitution_of clauses;
             }
           in
           let ensures_frame =
@@ -453,8 +413,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                   if contract.result_kind = `Lends && Contracts.mentions_result clause then
                     {
                       ensures_frame with
-                      locals = entry_locals;
-                      self = self_of entry_self;
+                      locals = entry_frame.locals;
+                      self = entry_frame.self;
                       yielded = None;
                     }
                   else ensures_frame
@@ -512,13 +472,14 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
       | Named_function { origin; path; _ } -> (
           match Contracts.find_function_contract context path with
           | Some contract ->
-              Laws.check_named_callback context frame invocation passed ~origin path contract values
+              Callbacks.check_named_callback context frame invocation passed ~origin path contract
+                values
           | None -> ())
       | Forwarded local ->
-          Validity.check_forwarded_callback context frame site invocation passed local values
+          Callbacks.check_forwarded_callback context frame site invocation passed local values
       | Other ->
-          Validity.check_callback_promises context frame ~location invocation passed
-            ~unpromised:Nothing_promises ~assume:Validity.assume_nothing values
+          Callbacks.check_callback_promises context frame ~location invocation passed
+            ~unpromised:Nothing_promises ~assume:Callbacks.assume_nothing values
       | Lambda -> ())
     values;
   let declared_result_type = Facts.substitute_declared_type context frame site.type_ in
@@ -666,16 +627,16 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                     receiver)
                  (Contracts.find_method_contract context trait name receiver evidence)))
     | Indirect () ->
-        Laws.check_callback_requires context frame site through values;
+        Callbacks.check_callback_requires context frame site through values;
         let before = frame in
         let havoc = havoc_whole_arguments frame in
         let frame = havoc.after in
         let result =
           match through with
           | Some (Types.Function function_type, callee_term, _)
-            when Lambdas.is_in_the_logic function_type ->
+            when Callbacks.is_in_the_logic function_type ->
               let term =
-                Lambdas.apply_function context function_type callee_term
+                Callbacks.apply_function context function_type callee_term
                   (List.map (fun (passed : State.passed) -> passed.term) values)
               in
               Facts.assume context frame (Facts.make_in_range result_type term);
@@ -693,11 +654,11 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             let entries = List.map (fun (passed : State.passed) -> passed.term) values in
             let exits = List.map (find_written havoc) values in
             Facts.assume context frame
-              (Lambdas.make_callback_ensures context function_type callee_term ~entries ~exits
+              (Callbacks.make_callback_ensures context function_type callee_term ~entries ~exits
                  ~result);
             match shape with
             | Invocation.Forwarded local ->
-                Validity.assume_own_callback_ensures context frame local ~entries ~exits ~result
+                Callbacks.assume_own_callback_ensures context frame local ~entries ~exits ~result
             | Named_function _ | Lambda | Other -> ())
         | _ -> ());
         List.iter

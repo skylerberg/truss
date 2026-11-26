@@ -35,8 +35,8 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       axioms = Contract_axioms.make_state ();
       termination = Termination.make_state ~terminates ~measures;
       validity = Validity.make_state ();
+      callbacks = Callbacks.make_state ();
       lending = None;
-      callbacks = [];
       cost = Counters.make_state ();
       logs = [];
       powers = [];
@@ -47,7 +47,6 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       inherits_precondition;
       holes = [];
       unfinished = [];
-      reading_callback = false;
       ranking = terminates && measures = [] && lookups.list_recursion_group node <> [];
       disjoint = lookups.list_must_be_disjoint home;
       indexes = [];
@@ -233,14 +232,14 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
         (keep_clauses ~substitution clauses, substitution))
       inherited
   in
-  context.callbacks <-
-    List.filter_map
-      (fun (position, callback) ->
-        Option.map
-          (fun (parameter : Mir.parameter) ->
-            (parameter.local, Facts.read_parameter_name parameter, callback))
-          (List.nth_opt parameters position))
-      contract.callbacks;
+  Callbacks.declare_own context
+    (List.filter_map
+       (fun (position, callback) ->
+         Option.map
+           (fun (parameter : Mir.parameter) ->
+             (parameter.local, Facts.read_parameter_name parameter, callback))
+           (List.nth_opt parameters position))
+       contract.callbacks);
   let declared_requires = Facts.list_clauses contract.requires
   and declared_ensures = contract.ensures in
   let output = match signature with Some { output = Returns ty; _ } -> Some ty | _ -> None in
@@ -301,34 +300,15 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   let find_trait_frame (at : State.frame) ~result =
     match inherited with
     | Some ((clauses : State.clauses), substitution) when has_trait_frame ->
-        let locals, types, self, old_locals =
-          List.fold_left2
-            (fun (locals, types, self, old_locals) (parameter : Mir.parameter) (entry, exit_) ->
-              match parameter.local with
-              | Self -> (locals, types, Some (exit_, parameter.type_), old_locals)
-              | local ->
-                  ( Locals.add (Core_local local) exit_ locals,
-                    Locals.add (Core_local local) parameter.type_ types,
-                    self,
-                    Locals.add (Core_local local) entry old_locals ))
-            (Locals.empty, Locals.empty, None, Locals.empty)
-            clauses.parameters
-            (List.combine entry_terms (list_paired_values at))
-        in
+        let number terms = List.mapi (fun position term -> (position, term)) terms in
         Some
           ( clauses,
             {
-              at with
-              source = clauses.callee;
-              locals;
-              types;
-              old_locals;
-              self = Option.map fst self;
+              (Contracts.make_exit_frame at clauses ~entries:(number entry_terms)
+                 ~exits:(number (list_paired_values at))
+                 ~result ~substitution)
+              with
               old_self = start.self;
-              self_type = Option.map (fun (_, ty) -> Types.substitute_erased substitution ty) self;
-              result;
-              makes_obligations = false;
-              substitution;
             } )
     | _ -> None
   in
@@ -754,7 +734,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
               clauses.parameters
           in
           let reading (frame : State.frame) =
-            Validity.bind_arguments frame clauses ~arguments:(list_arguments frame)
+            Contracts.make_entry_frame frame clauses ~arguments:(list_arguments frame)
               ~substitution:subtrait_substitution
           in
           let promised =

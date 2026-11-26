@@ -58,7 +58,7 @@ let declare_potential_measure context element =
       (Logic.forall
          ( [ (each, Facts.declare_sort context element) ],
            Logic.equal
-             (Lambdas.apply_function context measure term [ Logic.Symbol each ])
+             (Callbacks.apply_function context measure term [ Logic.Symbol each ])
              (declare_held_symbol context element (Logic.Symbol each)) ))
   end;
   term
