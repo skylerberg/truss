@@ -3315,6 +3315,11 @@ an invariant, a law, or a proof.
   specification neither its `ensures` nor the invariant of its result. A
   scalar result is still within the range of its type. The same call in
   code keeps its contract once it has returned.
+- A proof block, a loop's clauses, a theorem, and a function whose
+  signature has a specification-only type never run. Each is a
+  specification throughout: a call in one allocates nothing, so it does
+  not make the function around it one that may run out of memory, and a
+  theorem always gives its `ensures`.
 - A method called through a bound, and a function passed as a value, give
   a specification their contract only where the trait or the function's
   type states `cost allocations == 0`, since an `impl` or the function

@@ -58,5 +58,7 @@ val list_assumed_laws : lookups -> Path.t -> assumed_laws list
 val list_assumed_paths : lookups -> Path.t -> Path.t list
 val resolve_node : lookups -> Path.t -> Types.substitution -> Path.t
 val list_path_edges : lookups -> Path.t -> Path.t list
+val is_specification_only : lookups -> Path.t -> bool
 val has_abort_site : lookups -> Path.t -> bool
+val list_callees_that_run : lookups -> Path.t -> Path.t list
 val list_instance_field_types : Interface.Lookups.t -> Types.ty -> Types.ty list

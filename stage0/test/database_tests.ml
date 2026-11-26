@@ -1019,6 +1019,36 @@ let () =
       expect_may_abort source ~of_:"grow" ~expected:true;
       expect_may_abort source ~of_:"outer" ~expected:true;
       expect_may_abort source ~of_:"add" ~expected:false);
+  Harness.test "a definition does not abort through code that never runs" (fun () ->
+      let source =
+        "fn doubled(text: String) -> String {\n\
+        \  text.repeated(2)\n\
+         }\n\n\
+         theorem named_in_a_theorem(text: String)\n\
+        \  ensures text.length() == text.length()\n\
+         {\n\
+        \  let _ = doubled(text)\n\
+         }\n\n\
+         fn named_in_a_proof(text: String) -> UInt64 {\n\
+        \  proof {\n\
+        \    let _ = doubled(text)\n\
+        \  }\n\
+        \  text.length()\n\
+         }\n\n\
+         fn named_in_an_invariant(text: String) -> UInt64 {\n\
+        \  var count: UInt64 = 0\n\
+        \  while count < text.length()\n\
+        \    invariant doubled(text).length() >= 0\n\
+        \  {\n\
+        \    count += 1\n\
+        \  }\n\
+        \  count\n\
+         }\n"
+      in
+      expect_may_abort source ~of_:"doubled" ~expected:true;
+      expect_may_abort source ~of_:"named_in_a_theorem" ~expected:false;
+      expect_may_abort source ~of_:"named_in_a_proof" ~expected:false;
+      expect_may_abort source ~of_:"named_in_an_invariant" ~expected:false);
   Harness.test "a recursion group may abort where one member allocates" (fun () ->
       let source =
         "fn first(count: UInt64, items: mut List[Int64]) {\n\

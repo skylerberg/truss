@@ -104,7 +104,7 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
     match declaration.kind with
     | (Function | Method | Test) when Mir.find_code (lookups.mir.read_body_part key) = None ->
         Not_proven_here
-    | Theorem -> Obligations (Translate.translate_theorem lookups source ~path:key.path)
+    | Theorem -> Obligations (Translate.translate_function lookups source ~path:key.path)
     | Function | Method | Test -> (
         let prove_with substitution =
           Translate.translate_function ~substitution lookups source ~path:key.path

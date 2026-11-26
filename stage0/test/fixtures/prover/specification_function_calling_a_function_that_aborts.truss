@@ -1,0 +1,13 @@
+fn never() -> UInt64
+  ensures result == 5
+  ensures result == 6
+{
+  let long = "ab".repeated(9223372036854775807)
+  long.length()
+}
+
+fn measured(counts: Sequence[UInt64]) -> UInt64
+  ensures result == 5
+{
+  never()
+}
