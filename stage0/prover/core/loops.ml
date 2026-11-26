@@ -28,7 +28,7 @@ type iterable =
   | Over_cursor of {
       cursor : State.passed_place;
       cursor_type : Types.ty;
-      next : Invocation.t;
+      next : Callee.t;
       next_origin : Core.origin;
     }
 
@@ -260,8 +260,6 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_typ
        (fun (exit_frame : State.frame) -> { exit_frame with visited = frame.visited })
        (exit_ :: left))
 
-let cursor_trait : Path.t = Well_known.make_path Cursor
-
 let declare_visited context frame element =
   let visited =
     Facts.declare_fresh context frame "parts"
@@ -329,7 +327,7 @@ let oblige_next_gives_the_model context (after : State.frame) location ~element 
   | _ -> ()
 
 let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
-    (cursor_access : State.passed_place) (next : Invocation.t) ~cursor_type ~next_origin =
+    (cursor_access : State.passed_place) (next : Callee.t) ~cursor_type ~next_origin =
   let location = Facts.locate context frame.source for_loop.for_at in
   let clauses = for_loop.for_clauses in
   ignore (cursor_access.read frame);
@@ -342,38 +340,14 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     else None
   in
   let entry_model = find_model frame in
-  let trait, evidence =
-    match next.callee with
-    | Trait_method { trait; evidence; _ } ->
-        ( trait,
-          Interface.Impls.resolve_evidence context.lookups.interface frame.substitution
-            ~self_type:cursor_type ~trait evidence )
-    | _ -> Facts.raise_bug "a loop over `%s` pulls no `Cursor`" (Types.show cursor_type)
-  in
-  let self_type = Encoding.substitute_type context frame cursor_type in
-  let self_binding =
-    Types.bind_argument
-      (Types.make_self_parameter cursor_trait)
-      (Types.Type cursor_type) Types.no_substitution
-  in
-  let path, callee_substitution =
-    match evidence with
-    | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
-        ( Well_known.make_impl_method_path Cursor_next ~impl,
-          Types.combine_substitutions substitution self_binding )
-    | Bound -> (Well_known.make_method_path Cursor_next, self_binding)
-  in
-  let cursor_next = Well_known.locate_method Cursor_next in
-  let contract =
-    match
-      Contracts.find_method_contract context trait cursor_next.name cursor_next.receiver evidence
-    with
-    | Some contract ->
-        Calls.add_restated_clauses context ~self_type
-          ~bind:(fun subtrait _ ->
-            Contracts.make_trait_substitution context.lookups subtrait self_type)
-          cursor_trait cursor_next.name cursor_next.receiver contract
-    | None -> Facts.raise_unsupported location (Unreadable_cursor cursor_type)
+  let definition, contract =
+    match next.target with
+    | Definition ({ trait_method = Some _; contract = Some contract; _ } as definition) ->
+        (definition, contract)
+    | Definition { trait_method = Some _; contract = None; _ } ->
+        Facts.raise_unsupported location (Unreadable_cursor cursor_type)
+    | Definition _ | Function_value | Intrinsic _ ->
+        Facts.raise_bug "a loop over `%s` pulls no `Cursor`" (Types.show cursor_type)
   in
   let option_type =
     Types.Named { path = Well_known.make_path Option; arguments = [ Types.Type element_type ] }
@@ -425,9 +399,11 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       before)
     ~receive:(fun head before ->
       let cursor = cursor_access.read head in
-      let recursive_callee = Termination.find_recursive_callee context head location next.callee in
+      let recursive_callee =
+        Termination.find_recursive_callee context head location next.group_member
+      in
       let ({ frame = after; result = pulled; _ } : Calls.applied) =
-        Calls.call_contract ~recursive_callee context head pulling next path contract
+        Calls.call_contract ~recursive_callee context head pulling next definition contract
           [
             {
               position = 0;
@@ -441,8 +417,6 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
               term = cursor;
             };
           ]
-          ~substitution_of:(fun _ -> callee_substitution)
-          ~type_arguments:[ Types.Type cursor_type ]
       in
       let some_variant = Some (Well_known.show_variant Option_some) in
       let has_another =

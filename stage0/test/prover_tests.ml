@@ -1729,6 +1729,23 @@ let () =
 let dice = Fixtures.Prover.dice
 
 let () =
+  let choosing = Fixtures.Prover.capability_method_taking_a_callback in
+  Harness.test
+    "a lambda passed to a capability method assumes its parameter's `requires` and meets its \
+     `ensures`" (fun () -> expect_proven choosing);
+  Harness.test "a lambda passed to a capability method must meet its parameter's `ensures`"
+    (fun () ->
+      expect_not_proven
+        (Support.apply_edit choosing ("100 / n % n", "n.saturating_add(1)"))
+        "prover.ensures");
+  Harness.test "a trait method called through two instances of its trait is two functions"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.trait_method_called_through_two_instances_of_its_trait
+        "prover.ensures");
+  Harness.test "a trait method called at two result types is two functions" (fun () ->
+      expect_not_proven Fixtures.Prover.trait_method_called_at_two_result_types "prover.ensures");
+  Harness.test "a recursive call at another instance is not compared by its parts" (fun () ->
+      expect_not_proven Fixtures.Prover.recursion_at_another_instance "prover.termination");
   Harness.test "a capability's method keeps its ensures" (fun () ->
       expect_proven (dice ^ Fixtures.Prover.dice_roll_ensured_at_most_six));
   Harness.test "two calls of a capability's method may differ" (fun () ->

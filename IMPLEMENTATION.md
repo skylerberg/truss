@@ -187,6 +187,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `Termination` | Measures, and the comparison of a recursive call |
   | `Contract_axioms` | The contract of a logic function as an axiom |
   | `Validity` | The invariant of a value, and each check of it |
+  | `Callee` | The callee of a call: the definition that it runs, its contract, its substitutions and the key of its logic symbol |
   | `Callbacks` | A function passed as a value |
   | `Lending` | The contract of a lending method: where each clause holds, and the part as the caller left it |
   | `Laws` | The laws of a trait |
@@ -204,6 +205,15 @@ develop as well as make it easier to bootstrap the compiler in parts.
   after its postconditions: an element is checked there, and a step's
   `self` is a value not known to be valid until then. Its state is one
   record, `context.validity`.
+- **A call's callee is resolved once.** `Callee.resolve` turns the target
+  that the MIR writes into the definition that runs, its contract, the
+  substitution of each of its clauses, and the type arguments that key its
+  logic symbol: a trait's own arguments, the type of `self`, and the
+  method's. The reader resolves it before it reads the arguments, and the
+  contract call, the callback rules, the costs, the cursor loop and the
+  check of a restated contract all read that value. A capability's method
+  is a definition like any other, so a callback that it takes has its
+  contract.
 - **`Lending` decides where each clause of a lending method holds.**
   `Lending.holds_where_lent` separates the clauses on the lent part from
   the clauses that hold when the lend ends, and the method's proof and
