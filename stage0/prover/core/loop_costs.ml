@@ -440,12 +440,6 @@ let check_iterations context loop_at (head : State.frame) loop ~iterations ~iter
                 (Logic.Boolean false)))
     loop.costs
 
-let list_facts (context : State.context) loop =
-  Fact_list.list_newest_since context.facts ~count:loop.facts_mark
-
-let list_upper_bounds context loop ~facts term =
-  Costs.list_upper_bounds ~varies:(Facts.mentions_fresh_after context loop.fresh_mark) ~facts term
-
 let leave context ~(clause_at : State.frame) (exit_ : State.frame) loop ~iterations ~most =
   let iterations = Option.value iterations ~default:Costs.zero in
   let assumes_recursive_costs = assumes_recursive_costs context loop in
@@ -494,3 +488,15 @@ let leave context ~(clause_at : State.frame) (exit_ : State.frame) loop ~iterati
       loop.costs
   in
   { exit_ with spent }
+
+let leave_counted (context : State.context) ~clause_at exit_ loop ~iterations ~most ~count ~since =
+  let facts =
+    Fact_list.list_newest_since context.facts ~count:since
+    @ Fact_list.list_newest_since context.facts ~count:loop.facts_mark
+  in
+  leave context ~clause_at exit_ loop ~iterations
+    ~most:
+      (most
+      @ Costs.list_upper_bounds
+          ~varies:(Facts.mentions_fresh_after context loop.fresh_mark)
+          ~facts count)

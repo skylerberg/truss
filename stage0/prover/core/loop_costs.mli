@@ -25,9 +25,6 @@ val check_iterations :
   breaks:State.frame list ->
   unit
 
-val list_facts : State.context -> t -> Logic.term list
-val list_upper_bounds : State.context -> t -> facts:Logic.term list -> Logic.term -> Logic.term list
-
 val leave :
   State.context ->
   clause_at:State.frame ->
@@ -35,4 +32,15 @@ val leave :
   t ->
   iterations:Logic.term option ->
   most:Logic.term list ->
+  State.frame
+
+val leave_counted :
+  State.context ->
+  clause_at:State.frame ->
+  State.frame ->
+  t ->
+  iterations:Logic.term option ->
+  most:Logic.term list ->
+  count:Logic.term ->
+  since:int ->
   State.frame

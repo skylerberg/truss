@@ -368,3 +368,40 @@ let find_shared_potential_summands
                   (List.filter (fun (atom, _) -> not (List.mem_assoc atom shared)) sums, constant)
               ))
             aligned )
+
+let join_spent spent ~paths ~name =
+  List.map
+    (fun (counter, term) ->
+      let values =
+        List.map
+          (fun (on, renamings, spent_on_path) ->
+            ( on,
+              renamings,
+              List.fold_left
+                (fun amount (from, into) -> Logic.replace ~from ~into amount)
+                (Option.value (List.assoc_opt counter spent_on_path) ~default:term)
+                renamings ))
+          paths
+      in
+      let choose_amount values =
+        match List.rev values with
+        | (_, last) :: earlier ->
+            List.fold_left (fun otherwise (on, value) -> Logic.ite on value otherwise) last earlier
+        | [] -> term
+      in
+      let name_amount amount = if mentions_potential amount then amount else name amount in
+      match values with
+      | (_, _, first_value) :: rest
+        when List.for_all (fun (_, _, other) -> other == first_value || other = first_value) rest ->
+          (counter, first_value)
+      | _ -> (
+          match find_shared_potential_summands values with
+          | None ->
+              ( counter,
+                name_amount (choose_amount (List.map (fun (on, _, value) -> (on, value)) values)) )
+          | Some (shared, (_, first_rest) :: others)
+            when List.for_all (fun (_, other) -> other = first_rest) others ->
+              (counter, Logic.plus shared first_rest)
+          | Some (shared, rests) -> (counter, Logic.plus shared (name_amount (choose_amount rests)))
+          ))
+    spent

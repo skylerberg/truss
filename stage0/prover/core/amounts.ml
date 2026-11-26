@@ -723,3 +723,120 @@ let spend_wait_for_tasks context frame =
       match counter.resource with
       | Metric Time -> Counters.declare_unknown_amount context frame counter
       | Metric (Allocations | Allocated_bytes) | Calls _ -> Costs.zero)
+
+let spend_contract_call (context : State.context) ~(before : State.frame) ~(after : State.frame)
+    (site : Invocation.site) (invocation : Invocation.t) path (contract : State.contract)
+    (values : State.passed list) ~changed ~result ~result_type ~lent_final ~is_recursive ~bind_frame
+    =
+  let compute_potential_change () =
+    Logic.plus
+      (Potentials.compute_arguments_potential_change context ~before ~after values ~changed)
+      (match contract.result_kind with
+      | `Lends -> (
+          match lent_final with
+          | Some leave ->
+              Logic.minus
+                (Potentials.compute_potential context after result_type result)
+                (Potentials.compute_potential context after result_type (leave result))
+          | None -> Costs.zero)
+      | `Returns -> Potentials.compute_potential context after result_type result)
+  in
+  let declared_clauses = Contracts.list_declared_clauses contract in
+  let method_cost =
+    lazy
+      (if has_method_cost context invocation.callee path then
+         Some (fun metric -> compute_method_cost context before metric invocation.callee)
+       else None)
+  in
+  let list_metric_costs metric =
+    List.concat_map
+      (fun (clauses : State.clauses) ->
+        List.filter (fun (cost : Mir.cost) -> cost.resource = Metric metric) clauses.costs)
+      declared_clauses
+  in
+  let counts_provider_potential =
+    match invocation.callee with
+    | Capability_method _ -> true
+    | Function _ | Trait_method _ | Indirect () | Intrinsic _ -> false
+  in
+  let note_amount (counter : Costs.counter) amount =
+    match counter.resource with
+    | Metric metric when Facts.is_home context before.source ->
+        context.cost.call_amounts <-
+          {
+            call = Facts.quote before.source site.origin;
+            callee = path;
+            states_cost = Option.is_some (Lazy.force method_cost) || list_metric_costs metric <> [];
+            counts_potential =
+              counts_provider_potential
+              || (metric = Time && Option.is_some (Lazy.force method_cost))
+              || List.exists (fun (cost : Mir.cost) -> cost.amortized) (list_metric_costs metric);
+            counter;
+            amount;
+          }
+          :: context.cost.call_amounts
+    | Metric _ | Calls _ -> ()
+  in
+  Counters.spend_operation context after ~potential_change:(Some compute_potential_change)
+    ~note:note_amount (fun counter ->
+      match (invocation.callee, counter.resource) with
+      | Capability_method _, Calls _ -> compute_step_amount context after invocation values counter
+      | _ ->
+          compute_callee_amount ?method_cost:(Lazy.force method_cost) context after ~is_recursive
+            ~clauses:declared_clauses ~bind_frame ~uses:invocation.uses ~values
+            ~counts_provider_potential counter)
+
+let spend_call_without_a_contract context frame invocation values =
+  Counters.spend_operation context frame ~potential_change:None
+    (compute_step_amount context frame invocation values)
+
+let spend_derived_equality context frame (invocation : Invocation.t) values ~result_type ~result =
+  Counters.spend_operation context frame
+    ~potential_change:
+      (Some
+         (fun () ->
+           Potentials.compute_call_potential_change context ~before:frame ~after:frame values
+             ~changed:[] ~result_type ~result))
+    (compute_callee_amount
+       ~method_cost:(fun metric -> compute_method_cost context frame metric invocation.callee)
+       context frame ~is_recursive:false ~clauses:[]
+       ~bind_frame:(fun _ -> frame)
+       ~uses:invocation.uses ~values ~counts_provider_potential:false)
+
+let spend_indirect_call context ~before ~(after : State.frame) ~location through
+    (values : State.passed list) ~result_type ~result =
+  match through with
+  | Some (Types.Function function_type, callee_term, _) ->
+      Counters.spend_operation context after
+        ~potential_change:
+          (Some
+             (fun () ->
+               Potentials.compute_call_potential_change context ~before ~after values
+                 ~changed:
+                   (List.filter_map
+                      (fun (passed : State.passed) ->
+                        match (passed.mode, passed.passed_place) with
+                        | Language.Mode.Mut, Some place -> Some (passed.position, place.read after)
+                        | _ -> None)
+                      values)
+                 ~result_type ~result))
+        (compute_function_value_amount context after ~location function_type callee_term ~values)
+  | _ -> Counters.spend context after (Counters.declare_unknown_amount context after)
+
+let spend_intrinsic context frame invocation operation (values : State.passed list) ~changed
+    ~result_type ~result =
+  Counters.spend_operation context frame
+    ~potential_change:
+      (Some
+         (fun () ->
+           if Intrinsics.keeps_potential operation then Costs.zero
+           else
+             Potentials.compute_call_potential_change context ~before:frame ~after:frame values
+               ~changed:
+                 (List.filter_map
+                    (fun ((passed : State.passed), later) ->
+                      if passed.mode = Language.Mode.Mut then Some (passed.position, later)
+                      else None)
+                    (List.combine values changed))
+               ~result_type ~result))
+    (compute_step_amount ~result context frame invocation values)

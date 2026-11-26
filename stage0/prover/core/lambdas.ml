@@ -357,7 +357,7 @@ let find_lambda_definition context frame (function_type : Types.function_type)
       let bound = make_parameter_symbols context frame function_type in
       let defined =
         let mark = context.fresh in
-        Validity.run_without_costs context (fun () ->
+        Counters.run_without_counters context (fun () ->
             try
               let enter inside =
                 List.fold_left2

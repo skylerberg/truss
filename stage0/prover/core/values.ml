@@ -424,7 +424,7 @@ let evaluate_constant (context : State.context) frame path =
           let ty = Interface.Definition.read_constant_type context.lookups.interface path in
           Facts.declare context (Logic.Constant (symbol, Facts.declare_sort context ty));
           let _, defined_value =
-            Validity.run_without_costs context (fun () ->
+            Counters.run_without_counters context (fun () ->
                 Lambdas.run_code context empty code ~type_:ty)
           in
           Facts.add_fact context (Logic.equal (Logic.Symbol symbol) defined_value));

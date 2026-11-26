@@ -57,12 +57,6 @@ let note_place (context : State.context) (frame : State.frame) ~node ~origin val
       context.disjoint
   end
 
-let run_without_costs : 'a. _ -> (unit -> 'a) -> 'a =
- fun (context : State.context) read ->
-  let saved = context.cost.counters in
-  context.cost.counters <- [];
-  Fun.protect ~finally:(fun () -> context.cost.counters <- saved) read
-
 let run_as_specification (context : State.context) read =
   let panics = context.panics and can_declare_panic = context.can_declare_panic in
   context.panics <- false;
@@ -71,7 +65,7 @@ let run_as_specification (context : State.context) read =
     ~finally:(fun () ->
       context.panics <- panics;
       context.can_declare_panic <- can_declare_panic)
-    (fun () -> run_without_costs context read)
+    (fun () -> Counters.run_without_counters context read)
 
 let read_specification (context : State.context) frame (formula : Mir.formula) =
   run_as_specification context (fun () -> context.read_formula frame formula ~arguments:[])

@@ -156,6 +156,7 @@ val truncated_divide : term -> term -> term
 val truncated_remainder : term -> term -> term
 val integer_of_bits : is_signed:bool -> width:int -> term -> term
 val mentions : symbol list -> term -> bool
+val decreases_lexicographically : term list -> term list -> term
 val is_refuted : term -> bool
 val is_valid : term -> bool
 val list_free_constants : term -> symbol list

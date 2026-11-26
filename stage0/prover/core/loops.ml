@@ -202,7 +202,7 @@ let end_iterations context (frame : State.frame) loop_at (measured : measured_cl
       Option.iter
         (fun measure ->
           Facts.oblige context through location Loop_measure_may_not_decrease
-            (Operations.compare_lexicographically measure.at_head (measure.read through)))
+            (Logic.decreases_lexicographically measure.at_head (measure.read through)))
         measured.measure)
     ends
 
@@ -264,26 +264,20 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_typ
     loop ~head ~inside ~iterations:(Some iterations) ~iteration_bounds:most ~ends ~breaks
     ~with_through;
   let ended = received.advance (Facts.restrict head (Logic.not_ received.has_another)) in
-  let ended_facts =
-    Fact_list.list_newest_since context.facts ~count:ended_mark
-    @ Loop_costs.list_facts context costs
-  in
   let exit_ =
-    Loop_costs.leave context ~clause_at:head
+    Loop_costs.leave_counted context ~clause_at:head
       { ended with yielded = Some before }
-      costs ~iterations:(Some iterations)
-      ~most:(most @ Loop_costs.list_upper_bounds context costs ~facts:ended_facts iterations)
+      costs ~iterations:(Some iterations) ~most ~count:iterations ~since:ended_mark
   in
   let left =
     List.map
       (fun (exit_frame : State.frame) ->
         let left_at = with_through exit_frame in
-        Loop_costs.leave context ~clause_at:left_at left_at costs
+        Loop_costs.leave_counted context ~clause_at:left_at left_at costs
           ~iterations:(Some (Logic.plus iterations (Logic.int 1)))
-          ~most:
-            (most
-            @ Loop_costs.list_upper_bounds context costs ~facts:ended_facts
-                (Models.make_sequence_length context element_type through)))
+          ~most
+          ~count:(Models.make_sequence_length context element_type through)
+          ~since:ended_mark)
       breaks
   in
   leave_loop context frame
@@ -642,7 +636,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
         Some
           (fun (at : State.frame) ->
             let left, right =
-              Validity.run_without_costs context (fun () ->
+              Counters.run_without_counters context (fun () ->
                   read_operands { at with makes_obligations = false })
             in
             let distance from into = Logic.subtract into from in

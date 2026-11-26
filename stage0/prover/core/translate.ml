@@ -365,16 +365,16 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   in
   let counts_provider_potential = is_capability_implementation lookups path in
   let promised =
-    Counters.list_promises context source start.locals contract.costs ~inherited:false
+    Cost_promises.list_promises context source start.locals contract.costs ~inherited:false
       ~counts_provider_potential
     @
     match find_trait_frame start ~result:None with
     | Some (clauses, inside) ->
-        Counters.list_promises context clauses.callee inside.locals clauses.costs ~inherited:true
-          ~counts_provider_potential
+        Cost_promises.list_promises context clauses.callee inside.locals clauses.costs
+          ~inherited:true ~counts_provider_potential
     | None -> []
   in
-  let start = Counters.enter_definition context start promised ~body:(Some mir.body) in
+  let start = Cost_promises.enter_definition context start promised ~body:(Some mir.body) in
   if context.inherits_precondition then
     if declared_requires = [] then Facts.assume context start trait_requires
     else
@@ -432,7 +432,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
         start contract.panics_unless
     else start
   in
-  Counters.check_promise_amounts context start promised ~output;
+  Cost_promises.check_promise_amounts context start promised ~output;
   List.iter
     (fun (measure : Mir.formula) ->
       Validity.check_defined context start ~holds_when:measure.holds_when measure)
@@ -503,16 +503,16 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
             declared_ensures);
       let under_trait = Facts.restrict frame trait_requires in
       List.iter
-        (fun (promise : Counters.promise) ->
+        (fun (promise : Cost_promises.promise) ->
           if promise.inherited then
             match find_trait_frame frame ~result:returned with
             | Some (_, inside) ->
-                Counters.check_promise context under_trait promise
+                Cost_promises.check_promise context under_trait promise
                   ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
                   ~location:Whole_definition
             | None -> ()
           else
-            Counters.check_promise context frame promise
+            Cost_promises.check_promise context frame promise
               ~at:{ frame with locals = frame.old_locals; self = frame.old_self; result = returned }
               ~location:(Facts.locate context source promise.clause.origin))
         promised;
@@ -759,10 +759,10 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
               ~substitution:subtrait_substitution
           in
           let promised =
-            Counters.list_promises context clauses.callee (reading entry).locals clauses.costs
+            Cost_promises.list_promises context clauses.callee (reading entry).locals clauses.costs
               ~inherited:true ~counts_provider_potential:false
           in
-          let entry = Counters.enter_definition context entry promised ~body:None in
+          let entry = Cost_promises.enter_definition context entry promised ~body:None in
           let result_type =
             Types.substitute_erased subtrait_substitution
               (Types.extract_result_type signature.output)
@@ -842,7 +842,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
             clauses.ensures;
           List.iter
             (fun promise ->
-              Counters.check_promise context after promise ~at:entry_reading ~location
+              Cost_promises.check_promise context after promise ~at:entry_reading ~location
                 ~restated:(for_type, name, trait, declared))
             promised)
   | Some Built_in ->

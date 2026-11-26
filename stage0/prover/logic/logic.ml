@@ -516,6 +516,14 @@ let rec linearize term =
 
 and normalize_linear term = combine_linear (linearize term)
 
+let rec decreases_lexicographically before after =
+  match (before, after) with
+  | [ right ], [ left ] -> less_equal (Integer Z.zero) right &&& less left right
+  | right :: before, left :: after ->
+      less_equal (Integer Z.zero) right
+      &&& (less left right ||| (equal left right &&& decreases_lexicographically before after))
+  | _ -> Boolean true
+
 let find_constant_difference left right =
   let rec collect coefficient term ((constant, atoms) as sums) =
     match term with
