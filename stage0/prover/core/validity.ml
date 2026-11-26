@@ -1,5 +1,24 @@
 let make_state () : State.validity_state =
-  { validating = []; type_clauses = Tables.Path_table.create 16 }
+  {
+    validating = [];
+    type_clauses = Tables.Path_table.create 16;
+    valid_values = Tables.Term_table.create 16;
+  }
+
+let list_valid_at (context : State.context) term =
+  Option.value (Tables.Term_table.find_opt context.validity.valid_values term) ~default:[]
+
+let is_known_valid (context : State.context) (frame : State.frame) ty term =
+  List.exists
+    (fun (valid_type, condition) ->
+      Types.equal valid_type ty
+      && (condition = Logic.Boolean true || Fact_list.encloses condition ~inner:frame.condition))
+    (list_valid_at context term)
+
+let note_valid (context : State.context) (frame : State.frame) ty term =
+  if not (Logic.mentions frame.bound term || Logic.mentions frame.bound frame.condition) then
+    Tables.Term_table.replace context.validity.valid_values term
+      ((ty, frame.condition) :: list_valid_at context term)
 
 let find_selected_place (context : State.context) selection =
   let shift offset : State.place_value -> State.place_value = function
@@ -305,14 +324,20 @@ let rec find_parts_in_range context ?(seen = []) ty term =
         then Some (Facts.make_in_range ty term)
         else None
 
-let assume_valid ?includes_invariants context frame ty term =
+let assume_valid ?(includes_invariants = true) context frame ty term =
   Facts.assume context frame
-    (make_validity context frame ~assuming:true ?includes_invariants ty term)
+    (make_validity context frame ~assuming:true ~includes_invariants ty term);
+  if includes_invariants then note_valid context frame ty term
 
-let check_valid ?includes_invariants context frame location ty term ~deep ~moment =
-  match make_validity context frame ~assuming:false ~deep ?includes_invariants ty term with
-  | Logic.Boolean true -> ()
-  | valid -> Facts.oblige context frame location (Invariant_may_fail { type_ = ty; moment }) valid
+let check_valid ?(includes_invariants = true) context (frame : State.frame) location ty term ~deep
+    ~moment =
+  if not (is_known_valid context frame ty term) then
+    match make_validity context frame ~assuming:false ~deep ~includes_invariants ty term with
+    | Logic.Boolean true -> ()
+    | valid ->
+        Facts.oblige context frame location (Invariant_may_fail { type_ = ty; moment }) valid;
+        if deep && includes_invariants && frame.makes_obligations then
+          note_valid context frame ty term
 
 let declare_callback_arguments context frame inputs =
   List.map

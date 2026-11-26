@@ -155,6 +155,7 @@ type termination_state = {
 type validity_state = {
   mutable validating : Types.ty list;
   type_clauses : (source * Mir.type_clauses option Lazy.t) option Tables.Path_table.t;
+  valid_values : (Types.ty * Logic.term) list Tables.Term_table.t;
 }
 
 type context = {
