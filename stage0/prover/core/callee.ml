@@ -78,7 +78,7 @@ let add_restated_clauses (context : State.context) (method_ : trait_method) inst
           })
         (Contracts.list_restated_clauses context
            ~packages:(Operations.list_impl_packages context method_.self_type)
-           ~self_type:method_.self_type method_.trait.trait method_.name method_.receiver);
+           ~self_type:method_.self_type method_.trait method_.name method_.receiver);
   }
 
 let bind_clauses substitution_of (clauses : State.clauses) =

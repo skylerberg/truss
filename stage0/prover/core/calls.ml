@@ -75,23 +75,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
     ~recursive_callee =
   let path = definition.path and type_arguments = definition.type_arguments in
   let substitution_of = definition.substitution_of in
-  let find_clause_condition (clauses : State.clauses) holds_when =
-    Conditions.find_obligation_condition
-      (Conditions.decide context ~substitution:(substitution_of clauses) holds_when)
-  in
-  let keep_holding_clauses (clauses : State.clauses) =
-    let holds holds_when = Option.is_some (find_clause_condition clauses holds_when) in
-    {
-      clauses with
-      requires =
-        List.filter
-          (fun (requirement : Mir.requirement) -> holds requirement.clause.holds_when)
-          clauses.requires;
-      ensures = List.filter (fun (clause : Mir.formula) -> holds clause.holds_when) clauses.ensures;
-      decreases =
-        List.filter (fun (measure : Mir.formula) -> holds measure.holds_when) clauses.decreases;
-      costs = List.filter (fun (cost : Mir.cost) -> holds cost.holds_when) clauses.costs;
-    }
+  let keep_holding_clauses clauses =
+    Conditions.keep_holding context ~substitution:(substitution_of clauses) clauses
   in
   let contract =
     {
@@ -148,9 +133,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
           Fixes.list_required_fixes context frame precondition_clauses requirement term values
             ~type_names:(Fixes.list_type_names (substitution_of precondition_clauses))
         in
-        Obligations.oblige ?cited ~fixes
-          ?holds_when:(find_clause_condition precondition_clauses clause.holds_when)
-          context frame location
+        Obligations.oblige ?cited ~fixes ~holds_when:clause.holds_when context frame location
           (Precondition_may_fail
              {
                clause = Facts.quote precondition_clauses.callee clause.origin;
@@ -199,7 +182,6 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
              snd (Validity.read_specification context (read_entry_frame base clauses) requirement))
            (Facts.list_clauses clauses.requires))
   in
-  let in_quantifier = is_logic_call && frame.binders <> [] in
   let callee_bindings = list_bindings callee_clauses in
   let callee_arguments = List.filter_map snd callee_bindings in
   let is_on_bound_values = List.exists (Logic.mentions frame.bound) callee_arguments in
@@ -268,9 +250,29 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
           | None -> ())
       values
   in
+  let instantiation_size =
+    let size = ref 0 in
+    List.iter
+      (function
+        | Types.Type argument ->
+            ignore
+              (Types.exists
+                 (fun _ ->
+                   incr size;
+                   false)
+                 argument)
+        | Types.Value _ -> ())
+      type_arguments;
+    !size
+  in
   let run_instantiating run =
-    if not (List.exists (Path.equal path) context.instantiating) then begin
-      context.instantiating <- path :: context.instantiating;
+    if
+      List.for_all
+        (fun (outer, outer_size) ->
+          (not (Path.equal path outer)) || instantiation_size < outer_size)
+        context.instantiating
+    then begin
+      context.instantiating <- (path, instantiation_size) :: context.instantiating;
       Fun.protect ~finally:(fun () -> context.instantiating <- List.tl context.instantiating) run
     end
   in
@@ -283,38 +285,30 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
   in
   let assume_ensures (base : State.frame) (after : State.frame) ~changed ~applied ~result ~final
       is_kept =
-    let returned_without_its_axiom (clauses : State.clauses) =
-      clauses.panics_unless <> [] && Obligations.may_panic context
+    let proves_the_axiom_domain =
+      callee_clauses.panics_unless = [] || not (Obligations.may_panic context)
     in
     let is_in_axiom (clauses : State.clauses) (clause : Mir.formula) =
       match applied with
       | Some (application : Contract_axioms.application) ->
           application.is_limited
-          || Contract_axioms.states context application clauses clause
-             && not (returned_without_its_axiom clauses)
+          || (proves_the_axiom_domain && Contract_axioms.states context application clauses clause)
       | None -> false
     in
-    let state term =
-      if in_quantifier then Facts.add_frame_fact context after term
-      else Facts.assume context after term
-    in
     List.iter
-      (fun (clauses : State.clauses) ->
+      (fun ({ made_by = clauses; proven_under } : Contracts.promise) ->
         let exits =
           List.map
             (fun (position, entry) ->
               (position, Option.value (List.assoc_opt position changed) ~default:entry))
             arguments
         in
-        let is_unbound_in_quantifier = in_quantifier && not is_on_bound_values in
         let ensures_frame =
           {
             (Contracts.make_exit_frame base clauses ~entries:arguments ~exits ~result:(Some result)
                ~substitution:(substitution_of clauses))
             with
-            condition = (if is_unbound_in_quantifier then Logic.Boolean true else after.condition);
-            bound = (if is_unbound_in_quantifier then [] else base.bound);
-            binders = (if is_unbound_in_quantifier then [] else base.binders);
+            condition = after.condition;
           }
         in
         let ensures_frame =
@@ -331,10 +325,11 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (callee
                   | Some application, None ->
                       defining_term := Contract_axioms.find_definition application term
                   | _ -> ());
-                  state (Logic.( ==> ) (compute_required base clauses) term)
+                  Facts.assume context after
+                    (Logic.( ==> ) (compute_required base proven_under) term)
               | exception Facts.Unsupported _ -> ())
           clauses.ensures)
-      (Contracts.list_declared_clauses contract)
+      (Contracts.list_promises contract)
   in
   let assume_hypotheses (after : State.frame) applied =
     Option.iter

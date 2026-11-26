@@ -46,3 +46,24 @@ let find_obligation_condition = function
   | Always -> Some []
   | In_run undecided -> Some undecided
   | Elsewhere -> None
+
+let keep_holding context ~substitution (clauses : State.clauses) =
+  let decide holds_when = find_obligation_condition (decide context ~substitution holds_when) in
+  let keep (clause : Mir.formula) =
+    Option.map (fun holds_when -> { clause with holds_when }) (decide clause.holds_when)
+  in
+  {
+    clauses with
+    requires =
+      List.filter_map
+        (fun (requirement : Mir.requirement) ->
+          Option.map (fun clause -> { requirement with clause }) (keep requirement.clause))
+        clauses.requires;
+    ensures = List.filter_map keep clauses.ensures;
+    decreases = List.filter_map keep clauses.decreases;
+    costs =
+      List.filter_map
+        (fun (cost : Mir.cost) ->
+          Option.map (fun holds_when -> { cost with holds_when }) (decide cost.holds_when))
+        clauses.costs;
+  }

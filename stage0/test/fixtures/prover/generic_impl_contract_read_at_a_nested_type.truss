@@ -1,0 +1,30 @@
+trait Size {
+  fn size(self) -> Int64
+    ensures result >= 0 && result <= 10
+}
+
+type Leaf(x: Int64)
+
+type Box[Item](value: Item)
+
+impl Size for Leaf {
+  fn size(self) -> Int64
+    ensures result == 8
+  {
+    8
+  }
+}
+
+impl Size for Box[Item: Size] {
+  fn size(self) -> Int64
+    ensures result == self.value.size() / 2 + 1
+  {
+    self.value.size() / 2 + 1
+  }
+}
+
+fn direct(b: Box[Box[Leaf]]) -> Int64
+  ensures result == 3
+{
+  b.size()
+}

@@ -1,0 +1,38 @@
+trait Conv[Target] {
+  fn conv(self) -> Target
+}
+
+trait Sub: Conv[Int64] {
+  fn conv(self) -> Int64
+    ensures result == 5
+}
+
+type X(v: Int64)
+
+impl Conv[Int64] for X {
+  fn conv(self) -> Int64
+    ensures result == 5
+  {
+    5
+  }
+}
+
+impl Conv[Bool] for X {
+  fn conv(self) -> Bool {
+    false
+  }
+}
+
+impl Sub for X {}
+
+fn as_integer(x: X) -> Int64
+  ensures result == 5
+{
+  Conv[Int64].conv(x)
+}
+
+fn as_bool(x: X) -> Bool
+  ensures result
+{
+  Conv[Bool].conv(x)
+}

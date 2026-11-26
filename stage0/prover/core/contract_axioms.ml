@@ -160,14 +160,19 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
             in
             let readable_clauses =
               List.filter_map
-                (fun (clauses : State.clauses) ->
+                (fun ({ made_by = clauses; proven_under } : Contracts.promise) ->
                   let inside =
                     { (bind clauses) with result = Some applied; makes_obligations = false }
                   in
-                  let required =
+                  let read_required (stated_by : State.clauses) requirements =
                     List.map
-                      (fun requirement -> find_readable_clause context mark requirement inside)
-                      (Facts.list_clauses (clauses.requires @ clauses.panics_unless))
+                      (fun requirement ->
+                        find_readable_clause context mark requirement (bind stated_by))
+                      (Facts.list_clauses requirements)
+                  in
+                  let required =
+                    read_required proven_under proven_under.requires
+                    @ read_required callee_clauses callee_clauses.panics_unless
                   in
                   if List.mem None required then None
                   else
@@ -181,7 +186,7 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
                     with
                     | [] -> None
                     | ensures -> Some (clauses, List.filter_map Fun.id required, ensures))
-                (Contracts.list_declared_clauses contract)
+                (Contracts.list_promises contract)
             in
             match smaller with
             | Some smaller ->

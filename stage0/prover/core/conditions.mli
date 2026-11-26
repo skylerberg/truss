@@ -11,3 +11,6 @@ val may_panic_for_every_value :
 val decide : State.context -> substitution:Types.substitution -> Types.condition -> decision
 val holds_here : State.context -> ?substitution:Types.substitution -> Types.condition -> bool
 val find_obligation_condition : decision -> Types.condition option
+
+val keep_holding :
+  State.context -> substitution:Types.substitution -> State.clauses -> State.clauses

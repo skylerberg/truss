@@ -14,13 +14,6 @@ type proof =
     }
   | Not_proven_here
 
-let find_inherited_clauses (lookups : Lookups.t) (path : Path.t) =
-  Option.bind (Interface.Impls.find_implemented_method lookups.interface path)
-    (fun (implemented : Interface.Impls.implemented_method) ->
-      Option.map
-        (fun clauses -> (clauses, implemented.implementation.substitution))
-        (Contracts.find_declared_clauses lookups implemented.declaration))
-
 let translate_impl (lookups : Lookups.t) (key : Resolve.Names.key) source =
   let interface = Interface.Definition.read_impl_interface lookups.interface key.path in
   match Contracts.list_impl_holes lookups key with
@@ -114,9 +107,7 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
     | Theorem -> Obligations (Translate.translate_theorem lookups source ~path:key.path)
     | Function | Method | Test -> (
         let prove_with substitution =
-          Translate.translate_function
-            ?inherited:(find_inherited_clauses lookups key.path)
-            ~substitution lookups source ~path:key.path
+          Translate.translate_function ~substitution lookups source ~path:key.path
         in
         match list_integer_instances lookups key.path with
         | [] -> Obligations (prove_with Types.no_substitution)
