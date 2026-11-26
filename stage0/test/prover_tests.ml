@@ -1239,6 +1239,19 @@ let () =
           \  advance(mut scanner)\n\
            }\n")
          "prover.ensures");
+   Harness.test "a modifies entry that the body never changes leaves the proof to run" (fun () ->
+       let packages =
+         Support.setup [ ("app.main", Fixtures.Prover.increment_under_an_unchanged_modifies_entry) ]
+       in
+       let file = Support.parse_file "app.main" in
+       (match Support.list_codes (check packages file) with
+       | [ "usage.unmodified_part" ] -> ()
+       | codes -> Harness.fail "checking: %s" (String.concat ", " codes));
+       match
+         Support.list_codes (Support.list_proof_diagnostics (Support.make_database packages) file)
+       with
+       | [ "prover.overflow" ] -> ()
+       | codes -> Harness.fail "proving: %s" (String.concat ", " codes));
    Harness.test "a loop keeps the parts that its body and its callees do not change" (fun () ->
        let loop ~body =
          scanner

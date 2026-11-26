@@ -24,9 +24,7 @@ fn scan_source(source: own source.Source) -> Attempt
   first_attempt
 }
 
-fn mark_inserted_closers(tokens: mut List[token.Token])
-  uses Panic
-{
+fn mark_inserted_closers(tokens: mut List[token.Token]) {
   for current in mut tokens {
     let is_closer = match current.kind {
       Punctuation(punctuation) => match punctuation {
@@ -61,7 +59,7 @@ fn find_rename(text: String, diagnostic: source.Diagnostic) -> Option[Rename]
 fn remove_colliding_renames(
   text: String,
   tables: token.Tables,
-  name_indices: collections.SortedMap[String, UInt64],
+  interned_names: collections.SortedMap[String, InternedName],
   diagnostics: mut List[source.Diagnostic],
 )
   uses Panic
@@ -88,7 +86,7 @@ fn remove_colliding_renames(
     let collides = match find_rename(text, diagnostic) {
       Some(rename) => {
         var is_written = false
-        if name_indices.get(rename.renamed) is Some(index) && index < written.length() && written[index] {
+        if interned_names.get(rename.renamed) is Some(interned) && interned.index < written.length() && written[interned.index] {
           is_written = true
         }
         var is_shared = false
@@ -293,7 +291,7 @@ internal fn lex(input: own source.Source) -> LexResult
   let scanned = scan_source(own input)
   var scanner = own scanned.scanner
   var diagnostics = source.sort_by_start(own scanner.diagnostics)
-  remove_colliding_renames(scanner.source.text, tables: scanner.tables, name_indices: scanner.name_indices, diagnostics: mut diagnostics)
+  remove_colliding_renames(scanner.source.text, tables: scanner.tables, interned_names: scanner.interned_names, diagnostics: mut diagnostics)
   let edits = list_machine_applicable_edits(diagnostics)
   if edits.is_empty() {
     mark_inserted_closers(mut scanner.tables.tokens)

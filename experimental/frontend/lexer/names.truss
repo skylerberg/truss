@@ -1,16 +1,18 @@
 use frontend.token
 
-fn is_upper(byte: UInt8) -> Bool {
+fn is_upper(byte: UInt8) -> Bool
+  ensures result == (byte >= 65 && byte <= 90)
+{
   byte >= 65 && byte <= 90
 }
 
-fn is_lower(byte: UInt8) -> Bool {
+fn is_lower(byte: UInt8) -> Bool
+  ensures result == (byte >= 97 && byte <= 122)
+{
   byte >= 97 && byte <= 122
 }
 
-fn classify_is_upper(name: String) -> Bool
-  uses Panic
-{
+fn classify_is_upper(name: String) -> Bool {
   for byte in name.bytes() {
     if byte != 95 {
       return is_upper(byte)
@@ -19,9 +21,7 @@ fn classify_is_upper(name: String) -> Bool
   false
 }
 
-fn split_name(name: String) -> List[view String]
-  uses Panic
-{
+fn split_name(name: String) -> List[view String] {
   var parts: List[view String] = []
   for part in name.split("_") {
     if !part.is_empty() {
@@ -50,21 +50,21 @@ fn has_lower(name: String) -> Bool {
 }
 
 fn lowercase_byte(byte: UInt8) -> view String
-  uses Panic
+  requires is_upper(byte)
 {
   let index = UInt64.from_integer(byte - 65)
   "abcdefghijklmnopqrstuvwxyz".substring(index, to: index + 1)
 }
 
 fn uppercase_byte(byte: UInt8) -> view String
-  uses Panic
+  requires is_lower(byte)
 {
   let index = UInt64.from_integer(byte - 97)
   "ABCDEFGHIJKLMNOPQRSTUVWXYZ".substring(index, to: index + 1)
 }
 
 fn to_snake(name: String) -> String
-  uses Panic
+  requires name.is_ascii()
 {
   let length = name.length()
   var buffer = ""
@@ -86,23 +86,19 @@ fn to_snake(name: String) -> String
   split_name(buffer).join("_")
 }
 
-fn capitalize(part: String) -> String
-  uses Panic
-{
+fn capitalize(part: String) -> String {
   if part.is_empty() {
     return ""
   }
   let first = part.byte(0)
-  if is_lower(first) {
-    "${uppercase_byte(first)}${part.substring(1, to: part.length())}"
-  } else {
-    part.copy()
+  if !is_lower(first) {
+    return part.copy()
   }
+  let rest = part.substring(1, to: part.length())
+  "${uppercase_byte(first)}${rest}"
 }
 
-fn to_camel(name: String) -> String
-  uses Panic
-{
+fn to_camel(name: String) -> String {
   var text = ""
   for entry in split_name(name).enumerate() {
     if entry.index == 0 {
@@ -115,13 +111,13 @@ fn to_camel(name: String) -> String
 }
 
 fn correct_case(name: String) -> String
-  uses Panic
+  requires name.is_ascii()
 {
   let parts = split_name(name)
-  let Some(first) = parts.get(0) else {
+  if parts.is_empty() {
     return name.copy()
   }
-  if is_upper(first.byte(0)) {
+  if classify_is_upper(name) {
     if !name.contains("_") {
       name.copy()
     } else if !has_lower(name) {
@@ -134,9 +130,7 @@ fn correct_case(name: String) -> String
   }
 }
 
-fn find_case_problem(name: String) -> Option[String]
-  uses Panic
-{
+fn find_case_problem(name: String) -> Option[String] {
   if name.starts_with("_") {
     return Some("Names cannot start with `_`.")
   }
@@ -161,14 +155,14 @@ fn find_case_problem(name: String) -> Option[String]
   None
 }
 
-fn check_name(name: String) -> NameCheck
-  uses Panic
-{
+fn check_name(name: String) -> NameCheck {
   let is_upper_name = classify_is_upper(name)
-  for index in 0..name.length() {
+  for index in 0..name.length()
+    invariant forall i in 0..index => name.model()[i] <= 127
+  {
     if !is_ascii(name.byte(index)) {
-      let decoded = decode_text(name, index)
-      let character = "`${name.substring(index, to: index + decoded.length)}` (U+${format_hexadecimal(decoded.code, minimum_digits: 4)})"
+      let first = name.character_at(index)
+      let character = "`${name.substring(index, to: index + first.utf8_length())}` (U+${format_hexadecimal(first.code(), minimum_digits: 4)})"
       return NameCheck(
         is_upper: is_upper_name,
         problem: Some(

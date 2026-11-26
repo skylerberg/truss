@@ -30,6 +30,7 @@ internal fn String.decode(self, offset: UInt64) -> Decoded
   ensures result.length <= self.length() - offset
   ensures self.is_boundary(offset + result.length)
   ensures result.length < 4 ==> result.character.code() < 65536
+  ensures result.character.utf8_length() == result.length
   cost time O(1)
   cost allocations == 0
 {
@@ -293,6 +294,19 @@ public fn String.last_character(self) -> Option[Character]
   } else {
     Some(self.decode(self.previous_start(self.length())).character)
   }
+}
+
+public fn String.character_at(self, offset: UInt64) -> Character
+  uses Panic unless offset < self.length() && self.is_boundary(offset)
+  ensures result.utf8_length() <= self.length() - offset
+  ensures self.is_boundary(offset + result.utf8_length())
+  cost time O(1)
+  cost allocations == 0
+{
+  if offset >= self.length() || !self.is_boundary(offset) {
+    Panic.crash("offset out of bounds")
+  }
+  self.decode(offset).character
 }
 
 public fn String.graphemes(self) -> List[view String]

@@ -1,0 +1,7 @@
+type Scanner(position: UInt64, count: UInt64)
+
+fn f(scanner: mut Scanner)
+  modifies scanner.position, scanner.count
+{
+  scanner.position += 1
+}
