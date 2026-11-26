@@ -276,7 +276,7 @@ let find_promiser (lookups : Lookups.t) (source : State.source) : Catalog.Prover
       Capability_promiser
   | _ -> Trait_promiser
 
-let bind_arguments frame (clauses : State.clauses) ~arguments ~substitution =
+let make_entry_frame frame (clauses : State.clauses) ~arguments ~substitution =
   let locals, types, self =
     List.fold_left
       (fun (locals, types, self) (position, (parameter : Mir.parameter)) ->
@@ -303,3 +303,8 @@ let bind_arguments frame (clauses : State.clauses) ~arguments ~substitution =
     makes_obligations = false;
     substitution;
   }
+
+let make_exit_frame frame (clauses : State.clauses) ~entries ~exits ~result ~substitution =
+  let entry = make_entry_frame frame clauses ~arguments:entries ~substitution in
+  let exit_ = make_entry_frame frame clauses ~arguments:exits ~substitution in
+  { exit_ with old_locals = entry.locals; old_self = entry.self; result }

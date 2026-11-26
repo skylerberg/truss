@@ -152,6 +152,17 @@ develop as well as make it easier to bootstrap the compiler in parts.
   which `Mir.Call_edges` lists: a callee's contract, a type's invariant, and
   the laws of an `impl`. `Laws` assumes no law of an `impl` in the proof
   group of the definition being proven.
+- **`Callbacks` holds the rules of a function passed as a value.** The
+  contract that a callee declares for a callback parameter, the promises a
+  caller proves of the function it passes, the relation that a function
+  value's `ensures` states, and the check of a callback that escapes are its
+  functions, and its state is one record, `context.callbacks`. `Lambdas`
+  reads a lambda's body and calls `Callbacks` for the relation's variables.
+- **One function builds the frame that reads a callee's clause.**
+  `Contracts.make_entry_frame` binds a clause's parameters to the arguments,
+  and `Contracts.make_exit_frame` to the values at return, with the entry
+  values as `old`. A call, a callback, a contract axiom and the clauses a
+  method takes from its trait all read through them.
 - **`Query` holds the query under construction.** Its declarations, facts,
   fresh names, scopes and posed obligations are fields of an abstract type,
   `context.query`, so no other module writes them: a module marks the facts

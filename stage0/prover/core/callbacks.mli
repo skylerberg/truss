@@ -8,6 +8,25 @@ val apply_function :
 val returns_value : Types.function_type -> bool
 val is_in_the_logic : Types.function_type -> bool
 
+val make_input_variables :
+  State.context ->
+  Types.function_type ->
+  label:string ->
+  numbers:int list ->
+  (Logic.symbol * Logic.sort) list
+
+type relation_variables = {
+  inputs : (Logic.symbol * Logic.sort) list;
+  changed : (int * (Logic.symbol * Logic.sort)) list;
+  returned : (Logic.symbol * Logic.sort) list;
+  entries : Logic.term list;
+  exits : Logic.term list;
+  result : Logic.term;
+}
+
+val make_relation_variables :
+  State.context -> Types.function_type -> label:string -> numbers:int list -> relation_variables
+
 val make_callback_ensures :
   State.context ->
   Types.function_type ->

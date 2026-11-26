@@ -13,6 +13,60 @@ let apply_function context (function_type : Types.function_type) callee argument
 let returns_value (function_type : Types.function_type) =
   not (Types.equal function_type.output Types.unit)
 
+let make_input_variables context (function_type : Types.function_type) ~label ~numbers =
+  List.mapi
+    (fun index (_, input) ->
+      ( Facts.make_variable (label ^ ".argument") ~numbers:(numbers @ [ index ]),
+        Facts.declare_sort context input ))
+    function_type.inputs
+
+type relation_variables = {
+  inputs : (Logic.symbol * Logic.sort) list;
+  changed : (int * (Logic.symbol * Logic.sort)) list;
+  returned : (Logic.symbol * Logic.sort) list;
+  entries : Logic.term list;
+  exits : Logic.term list;
+  result : Logic.term;
+}
+
+let make_relation_variables context (function_type : Types.function_type) ~label ~numbers =
+  let inputs = make_input_variables context function_type ~label ~numbers in
+  let changed =
+    List.filter_map
+      (fun (index, ((mode : Language.Mode.t), input)) ->
+        match mode with
+        | Mut ->
+            Some
+              ( index,
+                ( Facts.make_variable (label ^ ".changed") ~numbers:(numbers @ [ index ]),
+                  Facts.declare_sort context input ) )
+        | Read | Own -> None)
+      (List.mapi (fun index input -> (index, input)) function_type.inputs)
+  in
+  let returned =
+    if returns_value function_type then
+      [
+        ( Facts.make_variable (label ^ ".result") ~numbers,
+          Facts.declare_sort context function_type.output );
+      ]
+    else []
+  in
+  let entries = List.map (fun (name, _) -> Logic.Symbol name) inputs in
+  let exits =
+    List.mapi
+      (fun index entry ->
+        match List.assoc_opt index changed with
+        | Some (name, _) -> Logic.Symbol name
+        | None -> entry)
+      entries
+  in
+  let result =
+    match returned with
+    | [ (name, _) ] -> Logic.Symbol name
+    | _ -> Logic.Apply (Logic.Symbol.Unit, [])
+  in
+  { inputs; changed; returned; entries; exits; result }
+
 let make_callback_ensures context (function_type : Types.function_type) callee ~entries ~exits
     ~result =
   let sorts =
@@ -170,7 +224,7 @@ let read_callee_callback (context : State.context) frame (invocation : Invocatio
           match List.assoc_opt position clauses.callbacks with
           | Some callback ->
               read clauses.callee
-                (Contracts.bind_arguments frame clauses ~arguments:known ~substitution)
+                (Contracts.make_entry_frame frame clauses ~arguments:known ~substitution)
                 callback
           | None -> [])
       | None -> [])
@@ -325,7 +379,7 @@ let check_callback_requires context frame (site : Invocation.site) through
 
 let read_named_requires context (frame : State.frame) (clauses : State.clauses) ~entries =
   let inside =
-    Contracts.bind_arguments frame clauses
+    Contracts.make_entry_frame frame clauses
       ~arguments:(List.mapi (fun index entry -> (index, entry)) entries)
       ~substitution:Types.no_substitution
   in
@@ -336,24 +390,12 @@ let read_named_requires context (frame : State.frame) (clauses : State.clauses) 
       else None)
     (Facts.list_clauses clauses.requires)
 
-let read_named_ensures context (frame : State.frame) (clauses : State.clauses)
-    (expected : Types.function_type) ~entries ~exits ~result =
+let read_named_ensures context (frame : State.frame) (clauses : State.clauses) ~entries ~exits
+    ~result =
+  let number terms = List.mapi (fun position term -> (position, term)) terms in
   let inside =
-    Contracts.bind_arguments frame clauses
-      ~arguments:(List.mapi (fun index entry -> (index, entry)) entries)
-      ~substitution:Types.no_substitution
-  in
-  let inside =
-    List.fold_left2
-      (fun (inside : State.frame) (parameter : Mir.parameter) (((mode : Language.Mode.t), _), exit_)
-         ->
-        match (mode, parameter.local) with
-        | Mut, Self -> { inside with self = Some exit_ }
-        | Mut, local -> { inside with locals = Locals.add (Core_local local) exit_ inside.locals }
-        | (Read | Own), _ -> inside)
-      { inside with result = Some result }
-      clauses.parameters
-      (List.combine expected.inputs exits)
+    Contracts.make_exit_frame frame clauses ~entries:(number entries) ~exits:(number exits)
+      ~result:(Some result) ~substitution:Types.no_substitution
   in
   List.filter_map
     (fun (clause : Mir.formula) ->
@@ -367,28 +409,10 @@ let read_named_ensures context (frame : State.frame) (clauses : State.clauses)
 
 let add_named_relation context frame (expected : Types.function_type) callee_term
     (clauses : State.clauses) =
-  let variable label index input =
-    (Facts.make_variable label ~numbers:[ index ], Facts.declare_sort context input)
+  let { inputs; changed; returned; entries; exits; result } =
+    make_relation_variables context expected ~label:"named" ~numbers:[]
   in
-  let inputs =
-    List.mapi (fun index (_, input) -> variable "named.argument" index input) expected.inputs
-  in
-  let changed =
-    List.mapi
-      (fun index ((mode : Language.Mode.t), input) ->
-        match mode with Mut -> Some (variable "named.changed" index input) | Read | Own -> None)
-      expected.inputs
-  in
-  let returned = variable "named.result" 0 expected.output in
-  let entries = List.map (fun (name, _) -> Logic.Symbol name) inputs in
-  let exits =
-    List.map2
-      (fun entry changed ->
-        match changed with Some (name, _) -> Logic.Symbol name | None -> entry)
-      entries changed
-  in
-  let result = Logic.Symbol (fst returned) in
-  let parameters = inputs @ List.filter_map Fun.id changed @ [ returned ] in
+  let parameters = inputs @ List.map snd changed @ returned in
   let holds = make_callback_ensures context expected callee_term ~entries ~exits ~result in
   if is_in_the_logic expected then
     Facts.add_frame_fact context frame
@@ -412,7 +436,7 @@ let add_named_relation context frame (expected : Types.function_type) callee_ter
                expected.inputs entries
             @ read_named_requires context frame clauses ~entries)
         in
-        (premise, read_named_ensures context frame clauses expected ~entries ~exits ~result))
+        (premise, read_named_ensures context frame clauses ~entries ~exits ~result))
   in
   match read with
   | [] -> ()
@@ -437,7 +461,7 @@ let check_named_callback context (frame : State.frame) (invocation : Invocation.
       let at_call = Facts.restrict frame promised in
       if List.length callee_clauses.parameters = List.length inputs then (
         let inside =
-          Contracts.bind_arguments frame callee_clauses
+          Contracts.make_entry_frame frame callee_clauses
             ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
             ~substitution:Types.no_substitution
         in
@@ -452,9 +476,9 @@ let check_named_callback context (frame : State.frame) (invocation : Invocation.
           add_named_relation context frame expected passed.term callee_clauses;
           check_callback_promises context frame ~location invocation passed
             ~unpromised:(Ensures_may_not_promise path)
-            ~assume:(fun at_call expected ~entries ~exits ~result ->
+            ~assume:(fun at_call _ ~entries ~exits ~result ->
               List.iter (Facts.assume context at_call)
-                (read_named_ensures context at_call callee_clauses expected ~entries ~exits ~result))
+                (read_named_ensures context at_call callee_clauses ~entries ~exits ~result))
             values
         end)
   | _ ->

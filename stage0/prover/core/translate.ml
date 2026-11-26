@@ -300,34 +300,15 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   let find_trait_frame (at : State.frame) ~result =
     match inherited with
     | Some ((clauses : State.clauses), substitution) when has_trait_frame ->
-        let locals, types, self, old_locals =
-          List.fold_left2
-            (fun (locals, types, self, old_locals) (parameter : Mir.parameter) (entry, exit_) ->
-              match parameter.local with
-              | Self -> (locals, types, Some (exit_, parameter.type_), old_locals)
-              | local ->
-                  ( Locals.add (Core_local local) exit_ locals,
-                    Locals.add (Core_local local) parameter.type_ types,
-                    self,
-                    Locals.add (Core_local local) entry old_locals ))
-            (Locals.empty, Locals.empty, None, Locals.empty)
-            clauses.parameters
-            (List.combine entry_terms (list_paired_values at))
-        in
+        let number terms = List.mapi (fun position term -> (position, term)) terms in
         Some
           ( clauses,
             {
-              at with
-              source = clauses.callee;
-              locals;
-              types;
-              old_locals;
-              self = Option.map fst self;
+              (Contracts.make_exit_frame at clauses ~entries:(number entry_terms)
+                 ~exits:(number (list_paired_values at))
+                 ~result ~substitution)
+              with
               old_self = start.self;
-              self_type = Option.map (fun (_, ty) -> Types.substitute_erased substitution ty) self;
-              result;
-              makes_obligations = false;
-              substitution;
             } )
     | _ -> None
   in
@@ -753,7 +734,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
               clauses.parameters
           in
           let reading (frame : State.frame) =
-            Contracts.bind_arguments frame clauses ~arguments:(list_arguments frame)
+            Contracts.make_entry_frame frame clauses ~arguments:(list_arguments frame)
               ~substitution:subtrait_substitution
           in
           let promised =

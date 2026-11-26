@@ -201,38 +201,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       (fun index (parameter : Mir.parameter) -> (parameter, find_argument_at index))
       clauses.parameters
   in
-  let bind bindings =
-    List.fold_left
-      (fun (locals, types, self) ((parameter : Mir.parameter), term) ->
-        match (parameter.local, term) with
-        | Self, Some term -> (locals, types, Some (term, parameter.type_))
-        | local, Some term ->
-            ( Locals.add (Core_local local) term locals,
-              Locals.add (Core_local local) parameter.type_ types,
-              self )
-        | _, None -> (locals, types, self))
-      (Locals.empty, Locals.empty, None)
-      bindings
-  in
-  let self_of self = Option.map fst self
-  and find_self_type clauses self =
-    Option.map (fun (_, ty) -> Types.substitute_erased (substitution_of clauses) ty) self
-  in
+  let arguments = List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values in
   let read_entry_frame (clauses : State.clauses) =
-    let locals, types, self = bind (list_bindings clauses) in
-    {
-      frame with
-      source = clauses.callee;
-      locals;
-      types;
-      old_locals = locals;
-      self = self_of self;
-      old_self = self_of self;
-      self_type = find_self_type clauses self;
-      result = None;
-      makes_obligations = false;
-      substitution = substitution_of clauses;
-    }
+    Contracts.make_entry_frame frame clauses ~arguments ~substitution:(substitution_of clauses)
   in
   let callee_clauses = contract.callee_clauses in
   Option.iter
@@ -406,33 +377,22 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     let assume_ensures is_kept =
       List.iter
         (fun (clauses : State.clauses) ->
-          let entry = list_bindings clauses in
-          let exit_bindings =
-            List.mapi
-              (fun index (parameter, term) ->
-                ( parameter,
-                  match List.assoc_opt index changed with Some term -> Some term | None -> term ))
-              entry
+          let exits =
+            List.map
+              (fun (position, entry) ->
+                (position, Option.value (List.assoc_opt position changed) ~default:entry))
+              arguments
           in
-          let entry_locals, types, entry_self = bind entry in
-          let exit_locals, _, exit_self = bind exit_bindings in
+          let entry_frame = read_entry_frame clauses in
           let is_unbound_in_quantifier = in_quantifier && not is_on_bound_values in
           let ensures_frame =
             {
-              frame with
-              source = clauses.callee;
+              (Contracts.make_exit_frame frame clauses ~entries:arguments ~exits
+                 ~result:(Some result) ~substitution:(substitution_of clauses))
+              with
               condition = (if is_unbound_in_quantifier then Logic.Boolean true else after.condition);
               bound = (if is_unbound_in_quantifier then [] else frame.bound);
               binders = (if is_unbound_in_quantifier then [] else frame.binders);
-              locals = exit_locals;
-              types;
-              old_locals = entry_locals;
-              self = self_of exit_self;
-              old_self = self_of entry_self;
-              self_type = find_self_type clauses entry_self;
-              result = Some result;
-              makes_obligations = false;
-              substitution = substitution_of clauses;
             }
           in
           let ensures_frame =
@@ -453,8 +413,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                   if contract.result_kind = `Lends && Contracts.mentions_result clause then
                     {
                       ensures_frame with
-                      locals = entry_locals;
-                      self = self_of entry_self;
+                      locals = entry_frame.locals;
+                      self = entry_frame.self;
                       yielded = None;
                     }
                   else ensures_frame

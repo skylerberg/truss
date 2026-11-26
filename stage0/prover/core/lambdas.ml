@@ -66,17 +66,12 @@ let add_quantified_fact (context : State.context) (frame : State.frame) ~capture
     | Some closed -> Facts.add_fact context closed
     | None -> ()
 
-let make_input_variables context ~start_fresh (function_type : Types.function_type) =
-  List.mapi
-    (fun index (_, input) ->
-      ( Facts.make_variable "lambda.argument" ~numbers:[ start_fresh; index ],
-        Facts.declare_sort context input ))
-    function_type.inputs
-
 let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_free
     (function_type : Types.function_type) term ~called ~arguments ~start_fresh ~end_fresh
     ~start_declarations ~premises ~shown ~ended =
-  let parameters = make_input_variables context ~start_fresh function_type in
+  let parameters =
+    Callbacks.make_input_variables context function_type ~label:"lambda" ~numbers:[ start_fresh ]
+  in
   let lift =
     make_lifting context frame ~called ~arguments ~start_fresh ~end_fresh ~start_declarations
       parameters
@@ -105,45 +100,13 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
 let add_lambda_relation (context : State.context) (frame : State.frame) ~capture_free
     (function_type : Types.function_type) term ~called ~arguments ~start_fresh ~end_fresh
     ~start_declarations ~premises ~shown ~ended ~read_exits =
-  let inputs = make_input_variables context ~start_fresh function_type in
-  let changed =
-    List.filter_map
-      (fun (index, ((mode : Language.Mode.t), input)) ->
-        match mode with
-        | Mut ->
-            Some
-              ( index,
-                ( Facts.make_variable "lambda.changed" ~numbers:[ start_fresh; index ],
-                  Facts.declare_sort context input ) )
-        | Read | Own -> None)
-      (List.mapi (fun index input -> (index, input)) function_type.inputs)
-  in
-  let returned =
-    if Callbacks.returns_value function_type then
-      [
-        ( Facts.make_variable "lambda.result" ~numbers:[ start_fresh ],
-          Facts.declare_sort context function_type.output );
-      ]
-    else []
+  let ({ inputs; changed; returned; entries; exits; result } : Callbacks.relation_variables) =
+    Callbacks.make_relation_variables context function_type ~label:"lambda" ~numbers:[ start_fresh ]
   in
   let parameters = inputs @ List.map snd changed @ returned in
   let lift =
     make_lifting context frame ~called ~arguments ~start_fresh ~end_fresh ~start_declarations
       parameters
-  in
-  let entries = List.map (fun (name, _) -> Logic.Symbol name) inputs in
-  let exits =
-    List.mapi
-      (fun index entry ->
-        match List.assoc_opt index changed with
-        | Some (name, _) -> Logic.Symbol name
-        | None -> entry)
-      entries
-  in
-  let result =
-    match returned with
-    | [ (name, _) ] -> Logic.Symbol name
-    | _ -> Logic.Apply (Logic.Symbol.Unit, [])
   in
   let holds = Callbacks.make_callback_ensures context function_type term ~entries ~exits ~result in
   let premise = lift (Logic.conjunction premises) in
@@ -183,25 +146,17 @@ let add_lambda_relation (context : State.context) (frame : State.frame) ~capture
 let add_logic_relation (context : State.context) (frame : State.frame) ~capture_free
     (function_type : Types.function_type) term =
   if Callbacks.returns_value function_type then begin
-    let inputs =
-      List.mapi
-        (fun index (_, input) ->
-          ( Facts.make_variable "relation.argument" ~numbers:[ index ],
-            Facts.declare_sort context input ))
-        function_type.inputs
+    let ({ inputs; returned; entries; result; _ } : Callbacks.relation_variables) =
+      Callbacks.make_relation_variables context function_type ~label:"relation" ~numbers:[]
     in
-    let returned = Facts.make_variable "relation.result" ~numbers:[] in
-    let entries = List.map (fun (name, _) -> Logic.Symbol name) inputs in
     let holds =
-      Callbacks.make_callback_ensures context function_type term ~entries ~exits:entries
-        ~result:(Logic.Symbol returned)
+      Callbacks.make_callback_ensures context function_type term ~entries ~exits:entries ~result
     in
     add_quantified_fact context frame ~capture_free
       (Logic.forall ~trigger:[ holds ]
-         ( inputs @ [ (returned, Facts.declare_sort context function_type.output) ],
+         ( inputs @ returned,
            Logic.equal holds
-             (Logic.equal (Logic.Symbol returned)
-                (Callbacks.apply_function context function_type term entries)) ))
+             (Logic.equal result (Callbacks.apply_function context function_type term entries)) ))
   end
 
 let make_parameter_symbols context (frame : State.frame) (function_type : Types.function_type) =

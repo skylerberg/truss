@@ -300,7 +300,7 @@ let translate_named_function (context : State.context) (frame : State.frame)
       let inputs = Callbacks.declare_callback_arguments context frame function_type.inputs in
       if List.length callee_clauses.parameters = List.length inputs then begin
         let inside =
-          Contracts.bind_arguments frame callee_clauses
+          Contracts.make_entry_frame frame callee_clauses
             ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
             ~substitution:Types.no_substitution
         in

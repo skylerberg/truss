@@ -137,7 +137,8 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
         }
       in
       let bind (clauses : State.clauses) =
-        Contracts.bind_arguments outside clauses ~arguments ~substitution:(substitution_of clauses)
+        Contracts.make_entry_frame outside clauses ~arguments
+          ~substitution:(substitution_of clauses)
       in
       let mark = Query.count_fresh context.query in
       let stated, facts, axiom =

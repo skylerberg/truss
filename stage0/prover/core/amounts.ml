@@ -313,7 +313,7 @@ let compute_step_amount ?result context frame (invocation : Invocation.t)
           match Contracts.find_capability_clauses context capability name with
           | Some capability_clauses ->
               let inside =
-                Contracts.bind_arguments frame capability_clauses
+                Contracts.make_entry_frame frame capability_clauses
                   ~arguments:
                     (List.map
                        (fun (passed : State.passed) -> (passed.position, passed.term))
