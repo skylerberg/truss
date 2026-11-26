@@ -1174,6 +1174,28 @@ theorem entries_inclusion_is_transitive[Key: Hash + Ordered, Value: Equal](
   )
 }
 
+theorem equal_maps_include_each_other[Key: Hash + Ordered, Value: Equal](
+  first: Map[Key, Value],
+  second: Map[Key, Value],
+)
+  requires first == second
+  ensures first.keys.length() == second.keys.length()
+  ensures first.entries_included_in(second)
+  ensures second.entries_included_in(first)
+{
+}
+
+theorem maps_including_each_other_are_equal[Key: Hash + Ordered, Value: Equal](
+  first: Map[Key, Value],
+  second: Map[Key, Value],
+)
+  requires first.keys.length() == second.keys.length()
+  requires first.entries_included_in(second)
+  requires second.entries_included_in(first)
+  ensures first == second
+{
+}
+
 theorem equality_is_transitive[Key: Hash + Ordered, Value: Equal](
   first: Map[Key, Value],
   second: Map[Key, Value],
@@ -1183,13 +1205,11 @@ theorem equality_is_transitive[Key: Hash + Ordered, Value: Equal](
   requires second == third
   ensures first == third
 {
-  assert first.entries_included_in(second)
-  assert second.entries_included_in(first)
-  assert second.entries_included_in(third)
-  assert third.entries_included_in(second)
+  equal_maps_include_each_other(first, second: second)
+  equal_maps_include_each_other(second, second: third)
   entries_inclusion_is_transitive(first, second: second, third: third)
   entries_inclusion_is_transitive(first: third, second: second, third: first)
-  assert first.keys.length() == third.keys.length()
+  maps_including_each_other_are_equal(first, second: third)
 }
 
 proof Equal.reflexive for Map[Key: Hash + Ordered, Value: Equal] {
