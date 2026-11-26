@@ -566,6 +566,8 @@ let item_graph : Store.item_graph =
     claim_kinds = [ Kind.rank_stage Claim_roots; Kind.rank_stage Prove ];
   }
 
+let evaluation_graph = { item_graph with claim_kinds = [ Kind.rank_stage Prove ] }
+
 let ensure_item (database : Tracker.t) (item : Lowered.Item.t) =
   let id = Ids.of_item item in
   if
@@ -1686,7 +1688,7 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
       run_each (fun database id -> recipe.run database (read_first_definition database recipe id)));
   stale <> []
 
-let drain_test_keys (database : Tracker.t) ?on_bug packages =
+let drain_test_keys (database : Tracker.t) ?on_bug ~graph packages =
   let rank = Kind.rank_stage Key_tests in
   let candidates = Hashtbl.create 64 in
   let lower_rank = Kind.rank_stage Lower in
@@ -1730,8 +1732,7 @@ let drain_test_keys (database : Tracker.t) ?on_bug packages =
       end
     in
     List.iter reach
-      (Store.list_claimed_among database.store item_graph ~items:(list_sorted_ids candidates)
-         ~packages);
+      (Store.list_claimed_among database.store graph ~items:(list_sorted_ids candidates) ~packages);
     List.iter
       (fun component ->
         let was_stale =
@@ -1746,7 +1747,7 @@ let drain_test_keys (database : Tracker.t) ?on_bug packages =
          (list_sorted_ids reached))
   end
 
-let drain_claimed_items (database : Tracker.t) ?on_bug packages =
+let drain_items_claimed_in (database : Tracker.t) ?on_bug ~graph packages =
   let rec lower_each = function
     | [] -> ()
     | id :: pending ->
@@ -1759,7 +1760,7 @@ let drain_claimed_items (database : Tracker.t) ?on_bug packages =
     match
       List.filter
         (fun item ->
-          Store.is_item_claimed database.store item_graph ~item ~over:(Settled_edges { packages }))
+          Store.is_item_claimed database.store graph ~item ~over:(Settled_edges { packages }))
         (list_stale_units database Lower ~scope:Everything)
     with
     | [] -> ()
@@ -1768,7 +1769,13 @@ let drain_claimed_items (database : Tracker.t) ?on_bug packages =
         lower_claimed ()
   in
   lower_claimed ();
-  drain_test_keys database ?on_bug packages
+  drain_test_keys database ?on_bug ~graph packages
+
+let drain_claimed_items database ?on_bug packages =
+  drain_items_claimed_in database ?on_bug ~graph:item_graph packages
+
+let drain_evaluated_items database ?on_bug packages =
+  drain_items_claimed_in database ?on_bug ~graph:evaluation_graph packages
 
 let render_units (database : Tracker.t) ?on_bug profile items =
   run_units database ?on_bug (Render profile) items (run_render profile)
