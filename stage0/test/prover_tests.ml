@@ -4242,6 +4242,50 @@ let expect_proven_in_standard text =
            (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual))
 
 let () =
+  Harness.test "a query's triggers hold no connective and no conditional" (fun () ->
+      expect_proven_in_standard Fixtures.Prover.narrowing_conversion_stored_in_a_list;
+      let database =
+        Support.extend_standard_library
+          (Support.setup
+             [ ("standard.probe", Fixtures.Prover.narrowing_conversion_stored_in_a_list) ])
+      and file = Support.parse_file "standard.probe" in
+      let declaration = List.hd ((Database.make_name_lookups database).list_declarations_in file) in
+      let rec find_trigger_end text ~from ~depth =
+        match text.[from] with
+        | '(' -> find_trigger_end text ~from:(from + 1) ~depth:(depth + 1)
+        | ')' when depth = 1 -> from
+        | ')' -> find_trigger_end text ~from:(from + 1) ~depth:(depth - 1)
+        | _ -> find_trigger_end text ~from:(from + 1) ~depth
+      in
+      let marker = ":pattern " in
+      let rec find_trigger text ~from =
+        if from + String.length marker > String.length text then None
+        else if String.sub text from (String.length marker) = marker then Some from
+        else find_trigger text ~from:(from + 1)
+      in
+      let rec check_triggers text ~from =
+        match find_trigger text ~from with
+        | None -> ()
+        | Some found ->
+            let opening = found + String.length marker in
+            let closing = find_trigger_end text ~from:opening ~depth:0 in
+            let trigger = String.sub text opening (closing - opening + 1) in
+            List.iter
+              (fun word ->
+                if String.includes ~affix:word trigger then
+                  Harness.fail "the trigger %s holds `%s`" trigger word)
+              [ "(ite "; "(and "; "(or "; "(not "; "(=> " ];
+            check_triggers text ~from:closing
+      in
+      match Support.read_proofs database file declaration.key with
+      | Obligations { obligations = _ :: _ as obligations; _ } ->
+          List.iter
+            (fun (obligation : Prover.Obligation.t) ->
+              check_triggers (Logic.show_query obligation.query) ~from:0)
+            obligations
+      | _ -> Harness.fail "expected obligations")
+
+let () =
   Harness.test "a function that may abort is rejected where a zero allocation bound says it returns"
     (fun () ->
       let diagnostics =

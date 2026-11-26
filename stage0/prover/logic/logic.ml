@@ -614,12 +614,19 @@ let rec substitute substitution term =
 and remove_bound bound substitution =
   List.filter (fun (name, _) -> not (List.mem_assoc name bound)) substitution
 
+let rec is_matchable = function
+  | Operation ((Not | And | Or | Implies | Ite), _) | Forall _ | Exists _ -> false
+  | Apply (_, arguments) | Operation (_, arguments) -> List.for_all is_matchable arguments
+  | Is (_, argument) -> is_matchable argument
+  | Symbol _ | Integer _ | Boolean _ | Bits _ -> true
+
 let list_triggers ~is_triggering variables body =
   let names = List.map fst variables in
   let rec is_trigger_term = function
     | Symbol _ | Integer _ | Boolean _ | Bits _ -> true
     | Apply (name, arguments) when is_triggering name -> List.for_all is_trigger_term arguments
-    | (Apply _ | Operation _ | Is _ | Forall _ | Exists _) as term -> not (mentions names term)
+    | (Apply _ | Operation _ | Is _ | Forall _ | Exists _) as term ->
+        (not (mentions names term)) && is_matchable term
   in
   let is_candidate = function
     | Apply (name, _ :: _) as term ->
