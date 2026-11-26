@@ -227,7 +227,7 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_typ
       costs ~iterations:(Some iterations)
   in
   assume_invariants context head clauses;
-  let ended_mark = Query.count_facts context.query in
+  let ended_mark = Query.mark context.query in
   let received = receive head before in
   let through = received.through in
   let inside = received.advance (Facts.restrict head received.has_another) in

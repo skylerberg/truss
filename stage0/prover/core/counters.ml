@@ -121,7 +121,7 @@ let spend_operation context frame ~potential_change ?(note = fun _ _ -> ())
       note counter amount;
       amount)
 
-let spend_quantifier context frame ~count ~fresh_mark ~bound ~(before : State.frame)
+let spend_quantifier context frame ~count ~mark ~bound ~(before : State.frame)
     ~(after : State.frame) =
   spend context frame (fun counter ->
       let spent =
@@ -129,7 +129,7 @@ let spend_quantifier context frame ~count ~fresh_mark ~bound ~(before : State.fr
         | Some start, Some total -> Costs.since ~start total
         | _ -> Costs.zero
       in
-      if Facts.mentions_fresh_after context fresh_mark spent || Logic.mentions [ bound ] spent then
+      if Facts.mentions_fresh_since context mark spent || Logic.mentions [ bound ] spent then
         declare_unknown_amount context frame counter
       else
         match counter.counting with
@@ -223,8 +223,7 @@ let leave_lambda (context : State.context) counters =
   context.cost.counters <- counters.enclosing_counters;
   context.cost.conditional_counters <- counters.enclosing_conditional_counters
 
-let check_lambda_exits context counters (exits : State.frame list) location ~type_ ~fresh_mark
-    ~facts_mark =
+let check_lambda_exits context counters (exits : State.frame list) location ~type_ ~mark =
   List.iter
     (fun (exit_ : State.frame) ->
       List.iter
@@ -247,7 +246,7 @@ let check_lambda_exits context counters (exits : State.frame list) location ~typ
         counters.promised)
     exits;
   let facts =
-    Query.list_facts_since context.query ~count:facts_mark
+    Query.list_facts_since context.query mark
     @ List.map (fun (exit_ : State.frame) -> exit_.condition) exits
   in
   List.filter_map
@@ -268,7 +267,7 @@ let check_lambda_exits context counters (exits : State.frame list) location ~typ
                     (Lambda_call_above_bound { metric })
                     (Logic.less_equal spent bound))
                 (List.combine exits spent) ) ))
-        (Costs.find_cost_bound ~varies:(Facts.mentions_fresh_after context fresh_mark) ~facts most))
+        (Costs.find_cost_bound ~varies:(Facts.mentions_fresh_since context mark) ~facts most))
     counters.operand_counters
 
 let note_lambda (context : State.context) counters term ~captures ~bounds =

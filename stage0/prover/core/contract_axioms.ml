@@ -86,12 +86,12 @@ let make_fresh_parameters (context : State.context) label sorts =
 
 let find_readable_clause context mark clause inside =
   match snd (Validity.read_specification context inside clause) with
-  | term when not (Facts.mentions_fresh_after context mark term) -> Some term
+  | term when not (Facts.mentions_fresh_since context mark term) -> Some term
   | _ -> None
   | exception Facts.Unsupported _ -> None
 
 let axiomatize (context : State.context) symbol parameters make =
-  let mark = Query.count_fresh context.query in
+  let mark = Query.mark context.query in
   let axiom = { State.parameters = List.map fst parameters; hypotheses = []; at_calls = [] } in
   let open_axioms = context.axioms.open_axioms in
   context.axioms.axiomatizing <- symbol :: context.axioms.axiomatizing;
@@ -104,7 +104,7 @@ let axiomatize (context : State.context) symbol parameters make =
       let stated, newest_facts = Query.run_in_scope context.query (List.map fst parameters) make in
       let drop_fresh_terms terms =
         List.filter
-          (fun term -> not (Facts.mentions_fresh_after context mark term))
+          (fun term -> not (Facts.mentions_fresh_since context mark term))
           (List.rev terms)
       in
       axiom.hypotheses <- drop_fresh_terms axiom.hypotheses;
@@ -140,7 +140,7 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
         Contracts.make_entry_frame outside clauses ~arguments
           ~substitution:(substitution_of clauses)
       in
-      let mark = Query.count_fresh context.query in
+      let mark = Query.mark context.query in
       let stated, facts, axiom =
         axiomatize context symbol parameters (fun () ->
             let valid =
@@ -191,7 +191,7 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
             match smaller with
             | Some smaller ->
                 let premise = Logic.( &&& ) valid smaller in
-                if readable_clauses = [] || Facts.mentions_fresh_after context mark premise then
+                if readable_clauses = [] || Facts.mentions_fresh_since context mark premise then
                   None
                 else Some (premise, readable_clauses)
             | None -> None)

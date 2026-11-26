@@ -333,7 +333,7 @@ let make_byte_order context left right =
     Encoding.declare_sort context (Models.make_sequence_type (Types.make_builtin UInt8))
   in
   let symbol = Logic.Symbol.Compare_bytes_order in
-  let first = not (Query.is_declared context.query symbol) in
+  let first = Option.is_none (Facts.find_argument_sorts context symbol) in
   Facts.declare context (Logic.Function (symbol, [ sequence; sequence ], Logic.Int));
   let order first_term second_term = Logic.Apply (symbol, [ first_term; second_term ]) in
   if first then begin

@@ -42,5 +42,5 @@ val leave_counted :
   iterations:Logic.term option ->
   most:Logic.term list ->
   count:Logic.term ->
-  since:int ->
+  since:Query.mark ->
   State.frame
