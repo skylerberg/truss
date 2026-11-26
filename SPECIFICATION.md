@@ -1786,7 +1786,11 @@ impl IterableMut for List[Element] {
   method lends,** where `result` is the lent part, and the caller may rely
   on it. A parameter in it has its value where the method lends, so a
   caller knows a `mut` parameter there only by `old`.
-- **Every other clause holds when the lend ends.**
+- **Every other clause holds when the lend ends,** of the value that lent
+  the part, as the end of the lend leaves it. Another `mut` parameter in
+  such a clause has its value where the method lent. The method returned
+  before the lend began, so no clause of it covers a write that the caller
+  made to that parameter during the lend.
 - **`final(result)` is the part as the caller left it,** as `old(value)` is
   a value when the method was called. In a clause that mentions it,
   `result` is still the part as the method lent it.
