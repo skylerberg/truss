@@ -1,0 +1,9 @@
+fn exploit(text: String, other: UInt64) -> UInt64
+  requires text.length() == 2
+  ensures result == other
+{
+  proof {
+    assert text.repeated(9223372036854775807).length() <= 9223372036854775807 && other == 7
+  }
+  7
+}

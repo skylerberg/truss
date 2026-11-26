@@ -20,6 +20,7 @@ type stage =
   | Generate_mir
   | List_calls
   | Group_recursion
+  | Find_aborts
   | Check_usage
   | Check_ownership
   | Check_sealed
@@ -60,6 +61,7 @@ let stages =
     Generate_mir;
     List_calls;
     Group_recursion;
+    Find_aborts;
     Check_usage;
     Check_ownership;
     Check_sealed;
@@ -113,6 +115,8 @@ type fact =
   | Callees
   | Recursion_group
   | Proof_group
+  | Aborts_outside_group
+  | May_abort
   | Usage_check
   | Ownership
   | Dependency_use
@@ -149,6 +153,8 @@ let facts =
     Callees;
     Recursion_group;
     Proof_group;
+    Aborts_outside_group;
+    May_abort;
     Usage_check;
     Ownership;
     Dependency_use;
@@ -266,6 +272,7 @@ let show_stage = function
   | Generate_mir -> "generated MIR"
   | List_calls -> "call edges"
   | Group_recursion -> "recursion group"
+  | Find_aborts -> "abort sites"
   | Check_usage -> "usage check"
   | Check_ownership -> "ownership check"
   | Check_sealed | Check_impl | Check_type | Check_instantiation | Check_test | Check_unexported
@@ -300,6 +307,7 @@ let show_fact = function
   | Callees -> "call edges"
   | Recursion_group -> "recursion group"
   | Proof_group -> "proof group"
+  | Aborts_outside_group | May_abort -> "abort sites"
   | Usage_check -> "usage check"
   | Ownership -> "ownership check"
   | Dependency_use -> "package check"
@@ -339,8 +347,9 @@ let is_signature = function
   | Type_facts | Signature_check | Checked_interface | Contract | Contract_mir ->
       true
   | Resolved _ | Grant | Body_form | Body_tables | Run_forever | Ownership_modes | Body_mir
-  | Generated_mir | Callees | Recursion_group | Proof_group | Usage_check | Ownership
-  | Dependency_use | Proof | Lowered | Test_key | Evaluation | Test_run | Unit _ ->
+  | Generated_mir | Callees | Recursion_group | Proof_group | Aborts_outside_group | May_abort
+  | Usage_check | Ownership | Dependency_use | Proof | Lowered | Test_key | Evaluation | Test_run
+  | Unit _ ->
       false
 
 let list_read_targets = function
@@ -349,8 +358,8 @@ let list_read_targets = function
   | ( Resolved _ | Grant | Trait_header | Constant_value | Header | Elaboration | Derived_interface
     | Type_facts | Checked_interface | Contract | Body_form | Body_tables | Run_forever
     | Ownership_modes | Body_mir | Contract_mir | Generated_mir | Callees | Recursion_group
-    | Proof_group | Usage_check | Ownership | Dependency_use | Proof | Lowered | Test_key
-    | Evaluation | Test_run | Unit _ ) as fact ->
+    | Proof_group | Aborts_outside_group | May_abort | Usage_check | Ownership | Dependency_use
+    | Proof | Lowered | Test_key | Evaluation | Test_run | Unit _ ) as fact ->
       [ fact ]
 
 let lookups_of_definition = [ Imports; Declaration; Tree; Text; Place; Container; Contained ]

@@ -1852,6 +1852,20 @@ let () =
       expect_proven Fixtures.Prover.amortized_bounds_that_spend_held_potential);
   Harness.test "potential that a callee saved offsets potential that a later call spends" (fun () ->
       expect_proven Fixtures.Prover.true_bounds_that_pay_for_saved_potential);
+  Harness.test "a specification learns nothing from a function that never returns" (fun () ->
+      expect_codes Fixtures.Prover.specification_naming_a_function_that_aborts
+        [ "prover.assertion" ]);
+  Harness.test "a specification learns nothing from a result past the allocation limit" (fun () ->
+      expect_codes Fixtures.Prover.specification_naming_a_result_past_the_allocation_limit
+        [ "prover.assertion" ]);
+  Harness.test "a specification learns nothing from a method of a bound that may abort" (fun () ->
+      expect_codes Fixtures.Prover.specification_naming_a_method_of_a_bound_that_aborts
+        [ "prover.assertion" ]);
+  Harness.test "a specification learns nothing from a function value that may abort" (fun () ->
+      expect_codes Fixtures.Prover.specification_applying_a_function_value_that_aborts
+        [ "prover.assertion" ]);
+  Harness.test "a call that returned from a function that may abort keeps its contract" (fun () ->
+      expect_proven Fixtures.Prover.call_that_returned_from_a_function_that_may_abort);
   Harness.test "the contract of a function that can panic is assumed only where it returns"
     (fun () ->
       expect_codes Fixtures.Prover.contract_of_a_function_that_panics_assumed_where_it_panics

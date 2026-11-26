@@ -522,6 +522,20 @@ let find_code (lookups : lookups) path =
   | Some { form = Body code | Initializer code; _ } -> Some code.tree
   | Some { form = No_code; _ } | None -> None
 
+let has_abort_site (lookups : lookups) path =
+  match find_code lookups path with
+  | None -> false
+  | Some code ->
+      let has_site = ref false in
+      Walk.iter_code
+        (fun statement ->
+          match Walk.find_callee statement with
+          | Some { target = Intrinsic { operation; _ }; _ } when Intrinsic.may_abort operation ->
+              has_site := true
+          | Some _ | None -> ())
+        code;
+      !has_site
+
 let list_path_edges (lookups : lookups) path =
   List.sort_uniq Path.compare
     (List.concat_map

@@ -20,6 +20,7 @@ type stage =
   | Generate_mir
   | List_calls
   | Group_recursion
+  | Find_aborts
   | Check_usage
   | Check_ownership
   | Check_sealed
@@ -63,6 +64,8 @@ type fact =
   | Callees
   | Recursion_group
   | Proof_group
+  | Aborts_outside_group
+  | May_abort
   | Usage_check
   | Ownership
   | Dependency_use

@@ -318,6 +318,11 @@ let has_contract = function
   | Scalar _ | Lend _ | Runtime _ ->
       false
 
+let may_abort = function
+  | Runtime Crash | Buffer (Storage_with_capacity | Storage_set_capacity | Storage_from_array) ->
+      true
+  | Scalar _ | Lend _ | Buffer _ | Runtime _ -> false
+
 let make_contract_path operation =
   Path.Top { module_ = Well_known.intrinsic_contracts; name = show_operation operation }
 

@@ -3309,6 +3309,21 @@ an invariant, a law, or a proof.
   capability parameter in the callee's `uses` stands for nothing at that
   call: `values.map(fn(value) { value + 1 })` is
   such a call, although `map` passes a capability parameter on.
+- A specification names the value that a call returns, so it learns a
+  callee's contract only where the callee returns. A function that may run
+  out of memory, because it or a function it calls allocates, gives a
+  specification neither its `ensures` nor the invariant of its result. A
+  scalar result is still within the range of its type. The same call in
+  code keeps its contract once it has returned.
+- A method called through a bound, and a function passed as a value, give
+  a specification their contract only where the trait or the function's
+  type states `cost allocations == 0`, since an `impl` or the function
+  passed may allocate.
+- A specification that needs the result of a function that may run out of
+  memory names the call that the code made, as
+  `ensures (result is Some(_)) == (self.find(separator) is Some(_))` does in
+  a function that calls `self.find(separator)`, or states the result
+  through a model.
 - Every specification is well defined: each call meets its callee's
   `requires` and the condition of a callee's `Panic unless`, and each index
   is in bounds. `&&`, `||`, `==>`, and `if` read
