@@ -214,7 +214,7 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_typ
     ~start ~receive =
   let clauses = for_loop.for_clauses in
   let entry =
-    { frame with State.visited = Some (Intrinsics.make_empty_parts context frame element_type) }
+    { frame with State.visited = Some (Intrinsics.make_empty_sequence context frame element_type) }
   in
   check_loop_clauses context entry clauses ~moment:On_entry;
   let loop = enter_loop ~holds context frame ~entry clauses ~changed in
@@ -262,14 +262,14 @@ let prove_receiving_loop ~most ~(for_loop : for_loop) context frame ~element_typ
 
 let cursor_trait : Path.t = Well_known.make_path Cursor
 
-let declare_some_parts context frame element =
-  let parts =
+let declare_visited context frame element =
+  let visited =
     Facts.declare_fresh context frame "parts"
       (Encoding.declare_sort context (Models.make_sequence_type element))
   in
   Facts.assume context frame
-    Logic.(greater_equal (Models.make_sequence_length context element parts) (int 0));
-  parts
+    Logic.(greater_equal (Models.make_sequence_length context element visited) (int 0));
+  visited
 
 let names_visited (clauses : Mir.loop_clause list) =
   List.exists
@@ -409,7 +409,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     ~changed:(for_loop.compute_changed_in frame)
     ~holds ~most:(Option.to_list entry_measure)
     ~start:(fun head ->
-      let before = declare_some_parts context head element_type in
+      let before = declare_visited context head element_type in
       (match (entry_measure, find_measured head) with
       | Some entry, Some [ now ] ->
           Facts.assume context head
@@ -464,7 +464,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       {
         has_another;
         element;
-        through = Intrinsics.append_part context inside element_type before element;
+        through = Intrinsics.append_element context inside element_type before element;
         advance =
           (fun (frame : State.frame) ->
             let now = cursor_access.read after in
@@ -491,7 +491,7 @@ let run_for_loop context frame (for_loop : for_loop) =
       let bind_at_index (exit_frame : State.frame) next = for_loop.bind_element exit_frame next in
       let entry =
         bind_at_index
-          { frame with visited = Some (Intrinsics.make_empty_parts context frame element) }
+          { frame with visited = Some (Intrinsics.make_empty_sequence context frame element) }
           low
       in
       check_loop_clauses context entry clauses ~moment:On_entry;
@@ -507,7 +507,7 @@ let run_for_loop context frame (for_loop : for_loop) =
       let iterations = Facts.declare_fresh context head "iterations" Logic.Int in
       Facts.assume context head
         Logic.(less_equal (int 0) iterations &&& less_equal iterations (at_least_zero count));
-      let before = declare_some_parts context head element in
+      let before = declare_visited context head element in
       Facts.assume context head
         (Logic.equal (Models.make_sequence_length context element before) iterations);
       (let position = Facts.make_fresh_name context "index" in
@@ -543,7 +543,7 @@ let run_for_loop context frame (for_loop : for_loop) =
         (find_kept_count { head with makes_obligations = false });
       let inside = Facts.restrict head (Logic.less iterations count) in
       let through =
-        Intrinsics.append_part context inside element before
+        Intrinsics.append_element context inside element before
           (if over_positions then
              match find_element_at { inside with makes_obligations = false } index with
              | Some lent -> lent

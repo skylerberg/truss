@@ -45,8 +45,10 @@ val make_buffer_model :
 
 val measure_type : Types.ty -> Types.function_type
 val make_sequence_sum : State.context -> Types.ty -> Logic.term -> Logic.term -> Logic.term
-val make_empty_parts : State.context -> State.frame -> Types.ty -> Logic.term
-val append_part : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
+val make_empty_sequence : State.context -> State.frame -> Types.ty -> Logic.term
+
+val append_element :
+  State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
 
 val translate_intrinsic :
   State.context ->

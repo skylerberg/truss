@@ -1241,6 +1241,9 @@ let () =
   Harness.test "a method that lends `mut` a part with an invariant assumes the caller left it valid"
     (fun () -> expect_proven Fixtures.Prover.holder_lending_a_part_with_an_invariant);
   Harness.test
+    "a proof reads a receiver whose part is lent `mut` as the method left it where it lent"
+    (fun () -> expect_proven Fixtures.Prover.deque_read_while_its_element_is_lent);
+  Harness.test
     "a restated clause of a lending method is proven where it lends and when its lend ends"
     (fun () ->
       let restated = Fixtures.Prover.restated_lending_clause_that_the_contract_does_not_give in

@@ -363,16 +363,22 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       ~is_recursive:(Option.is_some recursive_callee) ~bind_frame:(fun clauses ->
         { (read_entry_frame before clauses) with result = Some result; condition = after.condition })
   in
+  let havoc = havoc_mut context frame values ~list_modified in
+  let after = havoc.after and changed = List.rev havoc.written in
+  let applied, result = make_result after in
+  assume_changed_validity after ~changed ~left_valid:None;
+  run_instantiating (fun () ->
+      state_axiom after applied;
+      match contract.result_kind with
+      | `Lends ->
+          let assume = assume_ensures frame after ~changed ~applied ~result ~final:(Some result) in
+          assume Lending.holds_where_lent;
+          assume (fun clause -> not (Lending.holds_where_lent clause))
+      | `Returns -> assume_ensures frame after ~changed ~applied ~result ~final:None (fun _ -> true));
+  assume_hypotheses after applied;
   match (contract.result_kind, invocation.lends) with
   | `Lends, Some Language.Mode.Mut ->
-      let where_lent = havoc_mut context frame values ~list_modified in
-      let lent = where_lent.after in
-      let applied, result = make_result lent in
-      run_instantiating (fun () ->
-          state_axiom lent applied;
-          assume_ensures frame lent ~changed:(List.rev where_lent.written) ~applied ~result
-            ~final:None Lending.holds_where_lent);
-      assume_hypotheses lent applied;
+      havoc.end_writes after;
       let end_lend (ended : State.frame) final =
         let havoc = havoc_mut context ended values ~list_modified in
         let after = havoc.after and changed = List.rev havoc.written in
@@ -389,22 +395,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         havoc.end_writes after;
         after
       in
-      { frame = lent; result = Option.value !definition ~default:result; end_lend = Some end_lend }
+      { frame = after; result = Option.value !definition ~default:result; end_lend = Some end_lend }
   | (`Lends | `Returns), _ ->
-      let havoc = havoc_mut context frame values ~list_modified in
-      let after = havoc.after and changed = List.rev havoc.written in
-      let applied, result = make_result after in
-      assume_changed_validity after ~changed ~left_valid:None;
-      let final = match contract.result_kind with `Lends -> Some result | `Returns -> None in
-      run_instantiating (fun () ->
-          state_axiom after applied;
-          let assume = assume_ensures frame after ~changed ~applied ~result ~final in
-          match contract.result_kind with
-          | `Lends ->
-              assume Lending.holds_where_lent;
-              assume (fun clause -> not (Lending.holds_where_lent clause))
-          | `Returns -> assume (fun _ -> true));
-      assume_hypotheses after applied;
       let after = spend ~before:frame ~after ~changed ~result ~final:None in
       havoc.end_writes after;
       { frame = after; result = Option.value !definition ~default:result; end_lend = None }
