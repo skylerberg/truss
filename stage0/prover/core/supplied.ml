@@ -1,32 +1,6 @@
-let rec has_valid_value (context : State.context) ?(entered = []) (ty : Types.ty) =
-  match (Types.find_builtin ty, ty) with
-  | ( Some
-        ( Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | Float32 | Float64 | Bool
-        | Character | Unit | Integer ),
-      _ )
-  | None, Integer ->
-      true
-  | Some (Never | Array | Storage | View | Handle | Shared), _ -> false
-  | None, Named { path; arguments } when not (List.exists (Path.equal path) entered) -> (
-      let have_values fields =
-        List.for_all
-          (fun (field : Types.field) ->
-            has_valid_value context ~entered:(path :: entered) field.field_type)
-          fields
-      in
-      Option.is_none (Validity.find_invariants context ty)
-      &&
-      match Interface.Definition.find_interface context.lookups.interface path with
-      | Some (Type_interface ({ shape = Record _; _ } as declared)) ->
-          Option.fold ~none:false ~some:have_values (Types.instantiate_fields declared arguments)
-      | Some (Type_interface ({ shape = Sum _; _ } as declared)) ->
-          List.exists
-            (fun (variant : Types.variant) -> have_values (Option.value ~default:[] variant.fields))
-            (Option.value ~default:[] (Types.instantiate_variants declared arguments))
-      | Some _ | None -> false)
-  | None, (Named _ | Parameter _ | Projection _ | Function _ | Never | Variable _ | Hole | Error _)
-    ->
-      false
+let has_valid_value (context : State.context) =
+  Mir.Call_edges.has_valid_value
+    { interface = context.lookups.interface; mir = context.lookups.mir }
 
 type supplied_method = { teaches : bool; states_no_allocation : bool }
 
@@ -81,7 +55,7 @@ let rec bound_may_abort (context : State.context) ?(depth = 0) ?(entered = []) ~
                | Lends _ -> true
                | Returns output -> not (has_valid_value context output))
                && not (has_default_that_returns ());
-          states_no_allocation = Costs.states_no_allocation signature.costs;
+          states_no_allocation = Types.states_no_allocation signature.costs;
         }
   in
   depth > deepest_supplied_bound
@@ -180,7 +154,7 @@ let function_value_may_abort context (callee : Callee.t) (passed : State.passed)
           context.lookups.may_abort path
           || generics_may_abort context path (make_own_substitution substitution_of contract)
       | term, known ->
-          (not (Costs.states_no_allocation function_type.costs))
+          (not (Types.states_no_allocation function_type.costs))
           && ((not (has_valid_value context function_type.output))
              ||
              match (term, known) with

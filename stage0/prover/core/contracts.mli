@@ -45,7 +45,6 @@ val list_modified_parts : State.context -> Path.t -> int -> Types.modified list 
 val find_inherited_clauses : State.context -> Path.t -> (State.clauses * Types.substitution) option
 val find_function_contract : State.context -> Path.t -> State.contract option
 val find_capability_contract : State.context -> Path.t -> string -> State.contract option
-val find_capability_clauses : State.context -> Path.t -> string -> State.clauses option
 
 val list_restated_clauses :
   State.context ->

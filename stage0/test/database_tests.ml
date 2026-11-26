@@ -1049,6 +1049,18 @@ let () =
       expect_may_abort "fn no_elements() -> List[UInt64] {\n  []\n}\n" ~of_:"no_elements"
         ~expected:false;
       expect_may_abort source ~of_:"named_in_a_theorem" ~expected:false;
+      let held =
+        "type Holder(read: fn() -> List[UInt64])\n\n\
+         fn read_from_a_field(holder: Holder) -> UInt64 {\n\
+        \  let read = holder.read\n\
+        \  read().length()\n\
+         }\n\n\
+         fn read_from_a_parameter(read: fn() -> List[UInt64]) -> UInt64 {\n\
+        \  read().length()\n\
+         }\n"
+      in
+      expect_may_abort held ~of_:"read_from_a_field" ~expected:true;
+      expect_may_abort held ~of_:"read_from_a_parameter" ~expected:false;
       expect_may_abort source ~of_:"named_in_a_proof" ~expected:false;
       expect_may_abort source ~of_:"named_in_an_invariant" ~expected:false);
   Harness.test "a recursion group may abort where one member allocates" (fun () ->

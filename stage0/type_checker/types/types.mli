@@ -102,6 +102,7 @@ val sealed_traits : Well_known.t list
 val is_float_type : ty -> bool
 val make_capability_set : capability list -> capability_set
 val no_capabilities : capability_set
+val states_no_allocation : cost list -> bool
 val union_capabilities : capability_set -> capability_set -> capability_set
 val make_capability : Path.t -> capability
 val make_condition : condition -> condition

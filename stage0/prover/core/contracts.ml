@@ -253,9 +253,6 @@ let find_capability_contract context (capability : Path.t) name =
       { (make_contract context path callee_clauses) with is_logic_function = false })
     (find_callee_clauses context path)
 
-let find_capability_clauses context (capability : Path.t) name =
-  find_callee_clauses context (Path.make_capability_method capability name)
-
 let find_method_contract context (trait : Types.trait_reference) name receiver
     (evidence : Types.evidence) =
   let declaration = Path.Method { owner = trait.trait; name; receiver } in

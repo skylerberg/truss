@@ -4242,6 +4242,17 @@ let expect_proven_in_standard text =
            (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual))
 
 let () =
+  Harness.test "a function that may abort is rejected where a zero allocation bound says it returns"
+    (fun () ->
+      let diagnostics =
+        check_in_standard Fixtures.Prover.function_that_may_abort_under_no_allocation
+      in
+      expect_a_message_saying ~says:"This method may not return" diagnostics;
+      expect_a_message_saying ~says:"`narrowed` may not return" diagnostics;
+      if List.length diagnostics <> 2 then
+        Harness.fail "%d diagnostics, not 2" (List.length diagnostics))
+
+let () =
   Harness.test "two calls of a function that uses `System` are not known to return one value"
     (fun () ->
       let probe = Support.parse_file "standard.probe" in
