@@ -58,15 +58,19 @@ let rec decide context (type_ : Types.ty) =
 
 and holds_array context type_ = Lazy.force (decide context type_).holds_array
 
-and compute_holds_array context (type_ : Types.ty) =
+and compute_holds_array ?(containing = []) context (type_ : Types.ty) =
   match type_ with
+  | Named _ when List.exists (Types.equal type_) containing -> false
   | Named { path; arguments } -> (
       Types.is_builtin Array type_
       ||
       match Interface.Definition.find_type_interface context.lookups.interface path with
       | Some interface ->
           let holds_array_in fields =
-            List.exists (fun (field : Types.field) -> holds_array context field.field_type) fields
+            List.exists
+              (fun (field : Types.field) ->
+                compute_holds_array ~containing:(type_ :: containing) context field.field_type)
+              fields
           in
           Option.fold ~none:false ~some:holds_array_in
             (Types.instantiate_fields interface arguments)
