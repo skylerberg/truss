@@ -1364,7 +1364,7 @@ public type Rounding =
   | Floor
   derives Equal
 
-public opaque type Decimal(coefficient: BigInteger, scale: Int32)
+public opaque type Decimal(coefficient: BigInteger, scale: Int32, key: DecimalKey)
   derives Copyable
 
 fn power_of_ten(exponent: UInt32) -> BigInteger
@@ -1416,16 +1416,15 @@ fn rounded_quotient(dividend: BigInteger, divisor: BigInteger, rounding: Roundin
 }
 
 public fn Decimal.new(coefficient: own BigInteger, scale: Int32) -> Decimal
-  cost time O(1)
 {
-  Decimal(coefficient: own coefficient, scale: scale)
+  keyed(own coefficient, scale: scale)
 }
 
 public fn Decimal.zero() -> Decimal
   cost time O(1)
   cost allocations == 0
 {
-  Decimal(coefficient: BigInteger.zero(), scale: 0)
+  Decimal(coefficient: BigInteger.zero(), scale: 0, key: DecimalKey(sign: 0, exponent: 0, digits: []))
 }
 
 public fn Decimal.coefficient(self) -> BigInteger
@@ -1453,7 +1452,7 @@ public fn Decimal.is_negative(self) -> Bool
 
 public fn Decimal.absolute(self) -> Decimal
 {
-  Decimal(coefficient: self.coefficient.absolute(), scale: self.scale)
+  keyed(self.coefficient.absolute(), scale: self.scale)
 }
 
 fn Decimal.coefficient_at(self, scale: Int32) -> BigInteger
@@ -1469,10 +1468,10 @@ fn Decimal.coefficient_at(self, scale: Int32) -> BigInteger
 public fn Decimal.rounded(self, decimals: Int32, rounding: Rounding = Rounding.HalfToEven) -> Decimal
 {
   if self.scale <= decimals {
-    return Decimal(coefficient: self.coefficient_at(decimals), scale: decimals)
+    return keyed(self.coefficient_at(decimals), scale: decimals)
   }
   let divisor = power_of_ten(scale_gap(self.scale, smaller: decimals))
-  Decimal(coefficient: rounded_quotient(self.coefficient, divisor: divisor, rounding: rounding), scale: decimals)
+  keyed(rounded_quotient(self.coefficient, divisor: divisor, rounding: rounding), scale: decimals)
 }
 
 public fn Decimal.quotient(
@@ -1490,14 +1489,14 @@ public fn Decimal.quotient(
   }
   if shift >= 0 {
     let numerator = self.coefficient.times(power_of_ten(intrinsic.convert(shift)))
-    Decimal(
-      coefficient: rounded_quotient(numerator, divisor: divisor.coefficient, rounding: rounding),
+    keyed(
+      rounded_quotient(numerator, divisor: divisor.coefficient, rounding: rounding),
       scale: decimals,
     )
   } else {
     let denominator = divisor.coefficient.times(power_of_ten(intrinsic.convert(-shift)))
-    Decimal(
-      coefficient: rounded_quotient(self.coefficient, divisor: denominator, rounding: rounding),
+    keyed(
+      rounded_quotient(self.coefficient, divisor: denominator, rounding: rounding),
       scale: decimals,
     )
   }
@@ -1536,10 +1535,10 @@ public fn Decimal.from_float64(value: Float64) -> Option[Decimal]
   let negative = bits >= 9223372036854775808
   if exponent >= 0 {
     var scaled = BigInteger.from_limb(mantissa).times(BigInteger.from_limb(2).power(intrinsic.convert(exponent)))
-    Some(Decimal(coefficient: with_sign(negative, magnitude: own scaled.magnitude), scale: 0))
+    Some(keyed(with_sign(negative, magnitude: own scaled.magnitude), scale: 0))
   } else {
     var scaled = BigInteger.from_limb(mantissa).times(BigInteger.from_limb(5).power(intrinsic.convert(-exponent)))
-    Some(Decimal(coefficient: with_sign(negative, magnitude: own scaled.magnitude), scale: intrinsic.convert(-exponent)))
+    Some(keyed(with_sign(negative, magnitude: own scaled.magnitude), scale: intrinsic.convert(-exponent)))
   }
 }
 
@@ -1554,13 +1553,13 @@ public fn Decimal.truncated(self) -> BigInteger
 
 impl From[Int64] for Decimal {
   fn from(value: own Int64) -> Decimal {
-    Decimal(coefficient: BigInteger.from(value), scale: 0)
+    keyed(BigInteger.from(value), scale: 0)
   }
 }
 
 impl From[BigInteger] for Decimal {
   fn from(value: own BigInteger) -> Decimal {
-    Decimal(coefficient: own value, scale: 0)
+    keyed(own value, scale: 0)
   }
 }
 
@@ -1576,7 +1575,7 @@ impl Add[Decimal] for Decimal {
 
   fn add(self, right: Decimal) -> Decimal {
     let scale = if self.scale >= right.scale { self.scale } else { right.scale }
-    Decimal(coefficient: self.coefficient_at(scale).plus(right.coefficient_at(scale)), scale: scale)
+    keyed(self.coefficient_at(scale).plus(right.coefficient_at(scale)), scale: scale)
   }
 }
 
@@ -1592,7 +1591,7 @@ impl Subtract[Decimal] for Decimal {
 
   fn subtract(self, right: Decimal) -> Decimal {
     let scale = if self.scale >= right.scale { self.scale } else { right.scale }
-    Decimal(coefficient: self.coefficient_at(scale).minus(right.coefficient_at(scale)), scale: scale)
+    keyed(self.coefficient_at(scale).minus(right.coefficient_at(scale)), scale: scale)
   }
 }
 
@@ -1610,7 +1609,7 @@ impl Multiply[Decimal] for Decimal {
   fn multiply(self, right: Decimal) -> Decimal
     uses Panic unless self.multiply_is_defined(right)
   {
-    Decimal(coefficient: self.coefficient.times(right.coefficient), scale: self.scale + right.scale)
+    keyed(self.coefficient.times(right.coefficient), scale: self.scale + right.scale)
   }
 }
 
@@ -1625,19 +1624,19 @@ impl Negate for Decimal {
   }
 
   fn negate(self) -> Decimal {
-    Decimal(coefficient: self.coefficient.negate(), scale: self.scale)
+    keyed(self.coefficient.negate(), scale: self.scale)
   }
 }
 
 type DecimalKey(sign: Int64, exponent: Int64, digits: List[UInt8])
   derives Equal
 
-fn Decimal.key(self) -> DecimalKey
+fn key_of(coefficient: BigInteger, scale: Int32) -> DecimalKey
 {
-  if self.coefficient.is_zero() {
+  if coefficient.is_zero() {
     return DecimalKey(sign: 0, exponent: 0, digits: [])
   }
-  let text = self.coefficient.absolute().format()
+  let text = coefficient.absolute().format()
   if text.length() > 4294967295 {
     intrinsic.crash("a decimal cannot hold that many digits")
   }
@@ -1660,10 +1659,18 @@ fn Decimal.key(self) -> DecimalKey
   }
   let places: Int64 = intrinsic.convert[UInt64, Int64](text.length())
   DecimalKey(
-    sign: self.coefficient.sign(),
-    exponent: places - intrinsic.convert[Int32, Int64](self.scale),
+    sign: coefficient.sign(),
+    exponent: places - intrinsic.convert[Int32, Int64](scale),
     digits: own digits,
   )
+}
+
+fn keyed(coefficient: own BigInteger, scale: Int32) -> Decimal
+  ensures identical(result.coefficient, coefficient)
+  ensures result.scale == scale
+{
+  let key = key_of(coefficient, scale: scale)
+  Decimal(coefficient: own coefficient, scale: scale, key: own key)
 }
 
 fn key_order(first: DecimalKey, second: DecimalKey) -> Ordering
@@ -1698,17 +1705,17 @@ fn key_order(first: DecimalKey, second: DecimalKey) -> Ordering
 
 impl Equal for Decimal {
   fn equal(self, other: Decimal) -> Bool
-    ensures result == (self.key() == other.key())
+    ensures result == (self.key == other.key)
   {
-    self.key() == other.key()
+    self.key == other.key
   }
 }
 
 impl Ordered for Decimal {
   fn compare(self, other: Decimal) -> Ordering
-    ensures result == (key_order(self.key(), second: other.key()))
+    ensures result == (key_order(self.key, second: other.key))
   {
-    key_order(self.key(), second: other.key())
+    key_order(self.key, second: other.key)
   }
 }
 
@@ -1718,7 +1725,7 @@ theorem key_order_agrees_with_equal(first: DecimalKey, second: DecimalKey)
 }
 
 proof Ordered.agrees_with_equal for Decimal {
-  key_order_agrees_with_equal(first.key(), second: second.key())
+  key_order_agrees_with_equal(first.key, second: second.key)
 }
 
 theorem key_order_is_transitive(first: DecimalKey, second: DecimalKey, third: DecimalKey)
@@ -1754,7 +1761,7 @@ theorem decimal_order_is_transitive(first: Decimal, second: Decimal, third: Deci
   requires second <= third
   ensures first <= third
 {
-  key_order_is_transitive(first.key(), second: second.key(), third: third.key())
+  key_order_is_transitive(first.key, second: second.key, third: third.key)
 }
 
 proof Ordered.transitive for Decimal {
@@ -1763,16 +1770,16 @@ proof Ordered.transitive for Decimal {
 
 impl Hash for Decimal {
   fn hash(self, hasher: Hasher) -> Hasher
-    ensures identical(result, self.key().digits.hash(self.key().exponent.hash(self.key().sign.hash(hasher))))
+    ensures identical(result, self.key.digits.hash(self.key.exponent.hash(self.key.sign.hash(hasher))))
   {
-    let key = self.key()
+    let key = self.key
     key.digits.hash(key.exponent.hash(key.sign.hash(hasher)))
   }
 }
 
 proof Hash.agrees_with_equal for Decimal {
-  let first_key = first.key()
-  let second_key = second.key()
+  let first_key = first.key
+  let second_key = second.key
   assert first_key == second_key
   assert first_key.sign == second_key.sign
   assert first_key.exponent == second_key.exponent
@@ -1910,7 +1917,7 @@ fn parse_decimal(text: String) -> Result[Decimal, core.ParseFloatError]
   if !intrinsic.fits[Int64, Int32](scale) {
     return Err(core.ParseFloatError.InvalidCharacter(offset: text.length()))
   }
-  Ok(Decimal(coefficient: with_sign(negative, magnitude: own limbs), scale: intrinsic.convert(scale)))
+  Ok(keyed(with_sign(negative, magnitude: own limbs), scale: intrinsic.convert(scale)))
 }
 
 impl text.Parse for Decimal {
