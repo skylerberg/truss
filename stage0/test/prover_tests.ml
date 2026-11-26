@@ -4249,8 +4249,9 @@ let () =
       in
       expect_a_message_saying ~says:"This method may not return" diagnostics;
       expect_a_message_saying ~says:"`narrowed` may not return" diagnostics;
-      if List.length diagnostics <> 2 then
-        Harness.fail "%d diagnostics, not 2" (List.length diagnostics))
+      expect_a_message_saying ~says:"This lambda may not return" diagnostics;
+      if List.length diagnostics <> 3 then
+        Harness.fail "%d diagnostics, not 3" (List.length diagnostics))
 
 let () =
   Harness.test "two calls of a function that uses `System` are not known to return one value"

@@ -64,6 +64,15 @@ val list_path_edges : lookups -> Path.t -> Path.t list
 val is_specification_only : lookups -> Path.t -> bool
 val has_abort_site : lookups -> Path.t -> bool
 val has_valid_value : lookups -> ?entered:Path.t list -> Types.ty -> bool
+
+val body_may_abort :
+  lookups ->
+  Types.substitution ->
+  lambdas:Tree.body array ->
+  Tree.body ->
+  may_abort:(Path.t -> bool) ->
+  bool
+
 val list_callees_that_run : lookups -> Path.t -> Path.t list
 val list_bound_methods_run : lookups -> Path.t -> Path.t list
 val list_instance_field_types : Interface.Lookups.t -> Types.ty -> Types.ty list

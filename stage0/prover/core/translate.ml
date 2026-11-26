@@ -245,8 +245,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
               ~some:(fun (declared : Types.signature) -> Types.states_no_allocation declared.costs)
               (Interface.Impls.read_signature lookups.interface declaration) ->
       Obligations.oblige context start Whole_definition
-        (May_not_return_under_no_allocation { function_ = None })
-        (Logic.Boolean false)
+        (May_not_return_under_no_allocation This_method) (Logic.Boolean false)
   | Some _ | None -> ());
   let output = Option.map (Encoding.substitute_type context start) output in
   let lends =

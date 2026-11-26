@@ -452,11 +452,12 @@ let describe_obligation = function
   | Not_a_scalar_value { at } ->
       tick at @ [ Text " may not be a Unicode scalar value, which a `Character` must be." ]
   | Unreachable_reached -> say "This `unreachable` may be reached."
-  | May_not_return_under_no_allocation { function_ } ->
+  | May_not_return_under_no_allocation returning ->
       say
-        ((match function_ with
-           | Some function_ -> Printf.sprintf "`%s`" (Build.show_callee function_)
-           | None -> "This method")
+        ((match returning with
+           | Named_function function_ -> Printf.sprintf "`%s`" (Build.show_callee function_)
+           | This_method -> "This method"
+           | This_lambda -> "This lambda")
         ^ " may not return: its code, or a function it calls, may run out of memory. `cost \
            allocations == 0` is stated for it, and a call through a bound, or of a function value, \
            takes that clause to mean that the function returns.")

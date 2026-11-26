@@ -323,6 +323,16 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   in
   if List.length written.code.parameters <> List.length function_type.inputs then
     Facts.raise_bug "a lambda whose parameters do not match %s" (Types.show ty);
+  if
+    frame.makes_obligations
+    && Types.states_no_allocation function_type.costs
+    && Mir.Call_edges.body_may_abort
+         { interface = context.lookups.interface; mir = context.lookups.mir }
+         frame.substitution ~lambdas:written.lambdas written.code
+         ~may_abort:context.lookups.may_abort
+  then
+    Obligations.oblige context frame location (May_not_return_under_no_allocation This_lambda)
+      (Logic.Boolean false);
   let called = Facts.declare_fresh context frame "called" Logic.Bool in
   let inside = { (Facts.restrict frame called) with result = None } in
   let start = Query.mark context.query in

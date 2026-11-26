@@ -32,3 +32,12 @@ fn applied(make: (fn(UInt64) -> UInt64 cost allocations == 0)) -> UInt64 {
 fn named_as_a_value() -> UInt64 {
   applied(narrowed)
 }
+
+fn given_a_lambda() -> UInt64 {
+  applied(fn(width) {
+    if width > 3 {
+      intrinsic.crash("too wide")
+    }
+    width
+  })
+}
