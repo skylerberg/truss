@@ -579,6 +579,11 @@ let find_item_outcome (database : t) fact item =
 
 let list_evaluations proofs =
   let database = proofs.database in
+  run_past_bugs database (fun ~on_bug ->
+      Recipes.drain_evaluated_items database ~on_bug
+        (Some
+           (List.map Path.show_package
+              (Lookups.sort_in_dependency_order database (list_proof_packages proofs)))));
   match
     List.sort_uniq compare
       (List.concat_map
@@ -594,7 +599,6 @@ let list_evaluations proofs =
   with
   | [] -> []
   | evaluations ->
-      drain_lowering database (list_proof_packages proofs);
       List.filter
         (fun root ->
           match find_item_outcome proofs.database Facts.test_key root with

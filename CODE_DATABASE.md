@@ -308,6 +308,8 @@ A command says how far to drain: `check` drains through Decide, and `test`
 and `build` through Key tests, for the packages they name and the packages
 those depend on. Saving a file drains through the checks of packages. Lower
 and Key tests drain the items that the claims of those packages reach, and
+for `check` the items that the claims of its proofs reach, which are the
+evaluations, and
 Prove and Decide the definitions of the packages a command names, or of the
 files an editor has open. A build drains Render of its profile for the items
 that its roots reach.
@@ -351,6 +353,12 @@ without the result. An evaluation can stop without a value: it reaches a
 `todo`, it panics, or it reaches its limit of CPU time. A Decide unit that
 read such a result stays stale, and the next command that needs the value
 runs the evaluation again.
+
+A Decide unit is marked stale by a changed test key, and a test key changes
+only when Key tests runs. So before a `check` lists its stale Decide units,
+it drains Lower and Key tests for the items that a proof's claim reaches.
+Without that, an edit to a function that a computed constant calls left
+every proof that reads the constant standing.
 
 ## Questions
 

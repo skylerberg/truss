@@ -2410,6 +2410,29 @@ let () =
       match check 86401 with
       | 1, output when String.includes ~affix:"prover.ensures" output -> ()
       | _, output -> fail "accepted another value: %s" output);
+  test "check proves again a function that reads a computed constant whose code changed" (fun () ->
+      let write base =
+        Printf.sprintf
+          "fn base() -> UInt8 {\n\
+          \  %d\n\
+           }\n\n\
+           let limit: UInt8 = base()\n\n\
+           public fn add(x: UInt8) -> UInt8\n\
+          \  requires x <= 100\n\
+           {\n\
+          \  x + limit\n\
+           }\n"
+          base
+      in
+      let root = make_package [ ("main.truss", write 10) ] in
+      let check () =
+        capture (fun () -> Cli.Main.run_client [ "truss"; "--no-server"; "check"; "-C"; root ])
+      in
+      (match check () with 0, _ -> () | _, output -> fail "did not prove the sum: %s" output);
+      rewrite root "main.truss" (write 200);
+      match check () with
+      | 1, output when String.includes ~affix:"prover.overflow" output -> ()
+      | _, output -> fail "kept the proof of the old value: %s" output);
   test "check rejects an HTML template that interpolates into an event handler or a script"
     (fun () ->
       List.iter

@@ -18,6 +18,9 @@ val drain_stage :
 val drain_claimed_items :
   Tracker.t -> ?on_bug:(Compiler_bug.t -> unit) -> string list option -> unit
 
+val drain_evaluated_items :
+  Tracker.t -> ?on_bug:(Compiler_bug.t -> unit) -> string list option -> unit
+
 val render_units : Tracker.t -> ?on_bug:(Compiler_bug.t -> unit) -> Profile.t -> int list -> unit
 val make_evaluation_root : Prover.Obligation.evaluation -> Lowered.Item.t
 val ensure_item : Tracker.t -> Lowered.Item.t -> unit
