@@ -442,10 +442,10 @@ public fn List[Element].generate(
 
 public fn List[Element].collect[Source: Cursor[Element = Element]](source: own Source) -> List[Element]
   uses Source.Uses, RunForever unless Source: FiniteCursor
+  ensures result.length() <= old(source.remaining()) when Source: FiniteCursor
+  cost amortized time O((source.remaining() + 1) * time(Source.next)) when Source: FiniteCursor
 {
-  var items: List[Element] = []
-  mut items.extend(own source)
-  items
+  Cursor.to_list(own source)
 }
 
 public fn List[Element].capacity(self) -> UInt64
@@ -644,10 +644,18 @@ public fn List[Element: Copyable].append_items(mut self, items: List[Element])
 
 public fn List[Element].extend[Source: Cursor[Element = Element]](mut self, items: own Source)
   uses Source.Uses, RunForever unless Source: FiniteCursor
+  ensures old(self.length()) <= self.length()
+  ensures self.length() <= old(self.length()) + old(items.remaining()) when Source: FiniteCursor
+  cost amortized time O((items.remaining() + 1) * time(Source.next)) when Source: FiniteCursor
 {
   var cursor = own items
   while mut cursor.next() is Some(item)
+    invariant old(self.length()) <= self.length()
+    invariant cursor.remaining() <= old(items.remaining()) when Source: FiniteCursor
+    invariant self.length() + cursor.remaining() <= old(self.length()) + old(items.remaining())
+      when Source: FiniteCursor
     decreases cursor.remaining() when Source: FiniteCursor
+    cost time O((old(items.remaining()) - cursor.remaining()) * time(Source.next)) when Source: FiniteCursor
   {
     mut self.push(own item)
   }

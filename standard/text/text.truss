@@ -577,11 +577,16 @@ public fn String.from_utf16(units: List[UInt16]) -> Result[String, Utf16Error]
 
 public fn String.collect[Source: Cursor[Element = Character]](source: own Source) -> String
   uses Source.Uses, RunForever unless Source: FiniteCursor
+  ensures result.length() <= 4 * old(source.remaining()) when Source: FiniteCursor
+  cost amortized time O((source.remaining() + 1) * time(Source.next)) when Source: FiniteCursor
 {
   var cursor = own source
   var text: String = ""
   while mut cursor.next() is Some(character)
+    invariant cursor.remaining() <= old(source.remaining()) when Source: FiniteCursor
+    invariant text.length() + 4 * cursor.remaining() <= 4 * old(source.remaining()) when Source: FiniteCursor
     decreases cursor.remaining() when Source: FiniteCursor
+    cost time O((old(source.remaining()) - cursor.remaining()) * time(Source.next)) when Source: FiniteCursor
   {
     mut text.push_character(character)
   }
