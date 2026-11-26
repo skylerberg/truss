@@ -438,9 +438,7 @@ let apply_lend (context : State.context) (frame : State.frame) (site : Invocatio
             ~moment:(When_passed { at = location; callee = None }))
         values);
   let havoc_whole_arguments frame = havoc_mut context frame values ~list_modified:(fun _ -> None) in
-  let recursive_callee =
-    Termination.find_recursive_callee context frame location callee.group_member
-  in
+  let recursive_callee = Termination.find_recursive_callee frame location callee.group_member in
   let call_definition (definition : Callee.definition) =
     match definition.contract with
     | Some contract ->
@@ -509,8 +507,7 @@ let apply_lend (context : State.context) (frame : State.frame) (site : Invocatio
               Amounts.spend_derived_equality context frame callee values
                 ~result_type:declared_result_type ~result:(Logic.equal left right)
             in
-            Without_contract
-              (Some (spent, Operations.make_equality context frame self_type left right))
+            Without_contract (Some (spent, Operations.make_equality frame self_type left right))
         | _ -> call_definition definition)
     | Definition definition -> call_definition definition
     | Function_value ->

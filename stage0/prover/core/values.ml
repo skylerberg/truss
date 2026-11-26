@@ -162,7 +162,7 @@ let apply_map_literal (context : State.context) (frame : State.frame) ~(ty : Typ
             Obligations.oblige frame
               (match other_key with Some origin -> Facts.locate frame origin | None -> location)
               (Duplicate_key { key = Option.map (Facts.quote frame.source) other_key })
-              (Logic.not_ (Operations.make_equality context frame key_type key_term other_term)))
+              (Logic.not_ (Operations.make_equality frame key_type key_term other_term)))
         terms)
     terms;
   let arguments = [ Types.Type key_type; Types.Type value_type ] in

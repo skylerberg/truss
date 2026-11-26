@@ -298,8 +298,7 @@ let leave_lambda (context : State.context) counters =
   context.cost.counters <- counters.enclosing_counters;
   context.cost.conditional_counters <- counters.enclosing_conditional_counters
 
-let check_lambda_exits (context : State.context) counters (exits : State.frame list) location ~type_
-    ~mark =
+let check_lambda_exits (query : Query.t) counters (exits : State.frame list) location ~type_ ~mark =
   List.iter
     (fun (exit_ : State.frame) ->
       List.iter
@@ -322,7 +321,7 @@ let check_lambda_exits (context : State.context) counters (exits : State.frame l
         counters.promised)
     exits;
   let facts =
-    Query.list_facts_since context.query mark
+    Query.list_facts_since query mark
     @ List.map (fun (exit_ : State.frame) -> exit_.condition) exits
   in
   List.filter_map
@@ -343,7 +342,7 @@ let check_lambda_exits (context : State.context) counters (exits : State.frame l
                     (Lambda_call_above_bound { metric })
                     (Logic.less_equal spent bound))
                 (List.combine exits spent) ) ))
-        (Costs.find_cost_bound ~varies:(Query.mentions_fresh_since context.query mark) ~facts most))
+        (Costs.find_cost_bound ~varies:(Query.mentions_fresh_since query mark) ~facts most))
     counters.operand_counters
 
 let list_bound_terms bounds = List.map (fun (metric, (bound, _)) -> (metric, bound)) bounds

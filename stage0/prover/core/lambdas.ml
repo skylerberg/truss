@@ -434,7 +434,7 @@ let read_lambda ?(capture_free = false) (context : State.context) (frame : State
                   (Callbacks.read_ensures context stated ~entries:arguments ~exits ~result))
               result)
           !ended;
-        Counters.check_lambda_exits context counters exits location ~type_:ty ~mark:body)
+        Counters.check_lambda_exits context.query counters exits location ~type_:ty ~mark:body)
   in
   let end_ = Query.mark context.query in
   let shown = Query.list_facts_since context.query body in

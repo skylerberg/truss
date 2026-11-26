@@ -19,13 +19,11 @@ val find_induction_premise :
   argument_at:(int -> Logic.term) ->
   Logic.term option
 
-val find_recursive_callee :
-  State.context -> State.frame -> Obligation.location -> Path.t option -> Path.t option
-
+val find_recursive_callee : State.frame -> Obligation.location -> Path.t option -> Path.t option
 val reject_uncompared_recursion : State.frame -> Obligation.location -> Path.t option -> unit
 
 val reject_recursion_through_supplied_code :
-  State.context -> State.frame -> Obligation.location -> Mir.statement -> unit
+  State.frame -> Obligation.location -> Mir.statement -> unit
 
 val make_state : measures:Mir.formula list -> State.termination_state
 
