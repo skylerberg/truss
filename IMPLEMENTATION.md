@@ -179,17 +179,20 @@ develop as well as make it easier to bootstrap the compiler in parts.
   A fact of a frame is assumed wherever the frame's condition holds, so a
   fact about code that may not run must not enter a frame that does. The
   prover reads three executions that it only supposes: a lambda's body,
-  where the lambda is made; a call of a function passed for a parameter,
+  where the lambda is made, both when it is checked and when it is explored
+  for a definition; a call of a function passed for a parameter,
   where its contract is compared with the parameter's; and the return of a
   definition, where a cost clause that names `result` is checked to be
   defined. `Facts.suppose` makes the frame for each: it restricts the frame
   by a new Boolean, so every fact and obligation of the supposed execution
   has that Boolean as a premise, and the query stays satisfiable where the
-  execution is impossible. Two false proofs came from a supposed value in a
-  frame that runs: the `ensures` of a function that never returns, which no
-  result meets, denied the `requires` it was assumed under; and the
+  execution is impossible. Three false proofs came from a supposed execution
+  in a frame that runs: the `ensures` of a function that never returns,
+  which no result meets, denied the `requires` it was assumed under; the
   invariant of a supposed result of type `Room[capacity]` gave the body a
-  fact about `capacity`.
+  fact about `capacity`; and a call in a lambda's body, explored where the
+  lambda was made, gave the code around the lambda the callee's `ensures`
+  about a captured value.
 - **A contract is resolved once, and its three readers differ only in what
   they prove and what they assume.** The rules are those of modular
   verification with pre- and postconditions. A definition is proven against
@@ -327,7 +330,11 @@ develop as well as make it easier to bootstrap the compiler in parts.
   has a relation and no definition: its application is a term that nothing
   specifies, as its call in a specification is. `Callee.may_abort` decides
   that for a call and for a function named as a value, and
-  `State.known_function` carries the answer with the contract.
+  `State.known_function` carries the answer with the contract. A lambda
+  follows the same rule. Its definition and the facts of its application
+  are those of its body where the body returns, so where the body may abort
+  `Lambdas.read_lambda` states only the relation of the body, which a call
+  that returned makes hold.
 
   `Lambdas.make_passed_values` checks each argument of a call against its
   parameter's contract: it runs a lambda's body against the contract, which
