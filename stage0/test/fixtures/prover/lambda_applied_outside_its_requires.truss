@@ -1,0 +1,14 @@
+fn takes(flag: Bool, read: (fn(x: UInt64) -> UInt64 requires x > 0 cost allocations == 0)) -> UInt64
+  requires !flag
+  ensures flag ==> result == read(0)
+{
+  7
+}
+
+fn passes(flag: Bool, other: UInt64) -> UInt64
+  requires !flag
+  ensures result == 7
+{
+  let got = takes(flag, read: fn(x) { x - 1 })
+  if got == 7 { other } else { 7 }
+}

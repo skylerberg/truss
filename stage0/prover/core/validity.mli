@@ -29,9 +29,6 @@ val make_validity :
   Logic.term ->
   Logic.term
 
-val find_parts_in_range :
-  State.context -> ?seen:Types.ty list -> Types.ty -> Logic.term -> Logic.term option
-
 val assume_valid :
   ?includes_invariants:bool -> State.context -> State.frame -> Types.ty -> Logic.term -> unit
 

@@ -92,7 +92,14 @@ let find_readable_clause context mark clause inside =
 
 let axiomatize (context : State.context) symbol parameters make =
   let mark = Query.mark context.query in
-  let axiom = { State.parameters = List.map fst parameters; hypotheses = []; at_calls = [] } in
+  let axiom =
+    {
+      State.parameters = List.map fst parameters;
+      hypotheses = [];
+      at_calls = [];
+      required = Logic.Boolean true;
+    }
+  in
   let open_axioms = context.axioms.open_axioms in
   context.axioms.axiomatizing <- symbol :: context.axioms.axiomatizing;
   context.axioms.open_axioms <- axiom :: open_axioms;
@@ -109,6 +116,18 @@ let axiomatize (context : State.context) symbol parameters make =
       in
       axiom.hypotheses <- drop_fresh_terms axiom.hypotheses;
       (stated, Logic.conjunction (drop_fresh_terms newest_facts), axiom))
+
+let restrict_to_requires (context : State.context) frame =
+  match context.axioms.open_axioms with
+  | axiom :: _ -> Facts.restrict frame axiom.required
+  | [] -> frame
+
+let read_under_requires (context : State.context) required read =
+  match context.axioms.open_axioms with
+  | axiom :: _ ->
+      axiom.required <- Logic.conjunction required;
+      Fun.protect ~finally:(fun () -> axiom.required <- Logic.Boolean true) read
+  | [] -> read ()
 
 let find_smaller_than_entry (context : State.context) (callee_clauses : State.clauses) ~group_member
     ~callee_entry ~inputs =
@@ -176,16 +195,18 @@ let state_with_trigger (context : State.context) (outer : State.frame) (applicat
                   in
                   if List.mem None required then None
                   else
+                    let required = List.filter_map Fun.id required in
                     match
-                      List.filter_map
-                        (fun (clause : Mir.formula) ->
-                          Option.map
-                            (fun term -> (clause, term))
-                            (find_readable_clause context mark clause inside))
-                        clauses.ensures
+                      read_under_requires context required (fun () ->
+                          List.filter_map
+                            (fun (clause : Mir.formula) ->
+                              Option.map
+                                (fun term -> (clause, term))
+                                (find_readable_clause context mark clause inside))
+                            clauses.ensures)
                     with
                     | [] -> None
-                    | ensures -> Some (clauses, List.filter_map Fun.id required, ensures))
+                    | ensures -> Some (clauses, required, ensures))
                 (Contracts.list_promises contract)
             in
             match smaller with

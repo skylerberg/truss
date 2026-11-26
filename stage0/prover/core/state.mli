@@ -135,6 +135,7 @@ type open_axiom = {
   parameters : Logic.symbol list;
   mutable hypotheses : Logic.term list;
   mutable at_calls : (frame -> (Logic.term -> Logic.term) -> unit) list;
+  mutable required : Logic.term;
 }
 
 type axiom_state = {

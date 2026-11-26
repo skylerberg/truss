@@ -215,7 +215,7 @@ let canonicalize_binders term =
   walk [] term
 
 let find_lambda_definition context (frame : State.frame) (function_type : Types.function_type)
-    (written : State.lambda_code) =
+    (written : State.lambda_code) ~stated =
   match written.code.is_functional with
   | true when Callbacks.is_in_the_logic function_type -> (
       let bound =
@@ -257,8 +257,28 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
       let enclosing_parameters =
         List.filter (fun name -> not (List.mem name quantified)) frame.bound
       in
+      let entries = List.map (fun (name, _) -> Logic.Symbol name) bound in
+      let mark = Query.mark context.query in
+      let are_valid, required =
+        Query.run_dropping_facts context.query
+          ~drop:(fun fact ->
+            Logic.mentions (List.map fst bound) fact || Facts.mentions_fresh_since context mark fact)
+          (fun () ->
+            ( Logic.conjunction
+                (List.map2
+                   (fun (_, input) entry ->
+                     Validity.make_validity context frame ~assuming:true ~includes_ranges:true
+                       (Encoding.substitute_type context frame input)
+                       entry)
+                   function_type.inputs entries),
+              Logic.conjunction (List.map snd (Callbacks.read_requires context stated entries)) ))
+      in
+      let domain = Logic.( &&& ) are_valid required in
       match defined with
-      | Some defined when Logic.mentions enclosing_parameters defined -> None
+      | Some defined
+        when Logic.mentions enclosing_parameters defined
+             || Facts.mentions_fresh_since context mark domain ->
+          None
       | Some defined ->
           let defined = canonicalize_binders defined in
           let named_by_position =
@@ -279,10 +299,7 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
               Facts.declare_value_symbol context frame symbol sort
             else Facts.declare_value_symbol context { frame with binders = [] } symbol sort
           in
-          let application =
-            Callbacks.apply_function context function_type term
-              (List.map (fun (name, _) -> Logic.Symbol name) bound)
-          in
+          let application = Callbacks.apply_function context function_type term entries in
           Tables.Symbol_table.replace context.lambda_definitions symbol defined;
           Facts.add_frame_fact context frame (Logic.forall (bound, Logic.equal application defined));
           (match written.code.value_type with
@@ -293,21 +310,9 @@ let find_lambda_definition context (frame : State.frame) (function_type : Types.
                   application
               with
               | Logic.Boolean true -> ()
-              | range -> (
-                  let find_argument_in_range (name, _) (_, input) =
-                    Validity.find_parts_in_range context
-                      (Encoding.substitute_type context frame input)
-                      (Logic.Symbol name)
-                  in
-                  match List.map2 find_argument_in_range bound function_type.inputs with
-                  | arguments when List.for_all Option.is_some arguments ->
-                      Facts.add_frame_fact context frame
-                        (Logic.forall
-                           ( bound,
-                             Logic.( ==> )
-                               (Logic.conjunction (List.filter_map Fun.id arguments))
-                               range ))
-                  | _ -> ()))
+              | range ->
+                  Facts.add_frame_fact context frame
+                    (Logic.forall (bound, Logic.( ==> ) domain range)))
           | None -> ());
           Some term
       | _ -> None)
@@ -444,7 +449,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   let shown = Query.list_facts_since context.query body in
   let term =
     match
-      if states_application then find_lambda_definition context frame function_type written
+      if states_application then find_lambda_definition context frame function_type written ~stated
       else None
     with
     | Some term

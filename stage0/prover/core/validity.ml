@@ -234,40 +234,6 @@ let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
     in
     Logic.( &&& ) invariants_hold fields
 
-let rec find_parts_in_range context ?(seen = []) ty term =
-  if List.exists (Types.equal ty) seen || Option.is_some (find_invariants context ty) then None
-  else
-    match Encoding.find_constructors context ty with
-    | Some shape ->
-        let parts =
-          List.concat_map
-            (fun (variant, fields) ->
-              List.map
-                (fun (field, field_type) ->
-                  Option.map
-                    (fun part ->
-                      match (variant, part) with
-                      | _, Logic.Boolean true | None, _ -> part
-                      | Some name_, _ ->
-                          Logic.( ==> )
-                            (Logic.Is (Encoding.make_constructor_symbol ty (Some name_), term))
-                            part)
-                    (find_parts_in_range context ~seen:(ty :: seen) field_type
-                       (Encoding.select_field context ty variant field term)))
-                fields)
-            shape
-        in
-        if List.for_all Option.is_some parts then
-          Some (Logic.conjunction (List.filter_map Fun.id parts))
-        else None
-    | None ->
-        if
-          Option.is_some (Encoding.find_bounds ty)
-          || Option.is_some (Encoding.find_float_format ty)
-          || Types.is_builtin Bool ty || Types.is_builtin Unit ty
-        then Some (Encoding.make_in_range ty term)
-        else None
-
 let assume_valid ?(includes_invariants = true) context frame ty term =
   Facts.assume context frame
     (make_validity context frame ~assuming:true ~includes_invariants ty term);
