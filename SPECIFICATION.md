@@ -566,8 +566,11 @@ public type Interval =
   assumes that a `String` field holds UTF-8, and leaves it holding UTF-8.
   A method written in a trait, a capability, or an `impl` is never one: a caller that reaches it through the trait assumes that
   `self` meets its invariant when the call returns, and would otherwise
-  observe a broken value. A step states its precondition and postcondition
-  with `requires` and `ensures`:
+  observe a broken value. For the same reason a step is not a function
+  value: `apply(mut span, Span.narrow)` is an error, and
+  `apply(mut span, fn(narrowed) { mut narrowed.narrow() })` is accepted
+  where the lambda leaves `narrowed` meeting its invariant. A step states
+  its precondition and postcondition with `requires` and `ensures`:
 
   ```truss
   fn SortedList[Element: Ordered].sift_into_place(mut self, index: UInt64)
