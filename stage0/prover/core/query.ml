@@ -255,7 +255,7 @@ let make_obligation query ~find_signature ~list_axioms ~list_constructors ~condi
   in
   {
     obligation;
-    instance = [];
+    instance = { builtins = []; condition = [] };
     location;
     cited = None;
     fixes = [];

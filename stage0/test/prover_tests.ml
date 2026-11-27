@@ -654,7 +654,7 @@ let () =
   Harness.test "a restated method is proven under the precondition of the method that it restates"
     (fun () ->
       expect_not_proven Fixtures.Prover.restated_method_whose_declaration_requires "prover.ensures"
-        ~says:"The trait's `result >= by` may not hold when the method returns here");
+        ~says:"`LongSteps`'s `result >= by` may not hold when the method returns here");
   Harness.test "a method's contract depends on the methods that a restated clause of it names"
     (fun () ->
       expect_codes Fixtures.Prover.lemma_reaching_a_method_through_a_restated_clause
@@ -676,7 +676,7 @@ let () =
       expect_not_proven Fixtures.Prover.restated_clause_outside_the_precondition "prover.ensures");
   Harness.test "a restated method may panic where the method that it restates may" (fun () ->
       expect_not_proven Fixtures.Prover.restated_method_with_a_panic_condition "prover.ensures"
-        ~says:"The trait's `result >= by` may not hold when the method returns here");
+        ~says:"`LongSteps`'s `result >= by` may not hold when the method returns here");
   Harness.test
     "a restated clause is proven where its condition and the bounds of the restating impl hold"
     (fun () ->
@@ -1289,14 +1289,14 @@ let () =
       expect_not_proven
         (Support.apply_edit slotted (kept, kept ^ " + 1"))
         "prover.ensures" ~at:("self.count\n  }\n}", 1)
-        ~says:"The trait's `result == old(self.count()) + 1` may not hold for the part lent here.");
+        ~says:"`Slotted`'s `result == old(self.count()) + 1` may not hold for the part lent here.");
   Harness.test "a trait's clause on `final(result)` is checked when the impl's lend ends" (fun () ->
       let kept = "ensures self.count() == final(result)" in
       expect_not_proven
         (Support.apply_edit slotted (kept, kept ^ " + 1"))
         "prover.ensures"
         ~says:
-          "The trait's `self.count() == final(result) + 1` may not hold when the method ends here.");
+          "`Slotted`'s `self.count() == final(result) + 1` may not hold when the method ends here.");
   Harness.test "a method that lends `mut` a part with an invariant assumes the caller left it valid"
     (fun () -> expect_proven Fixtures.Prover.holder_lending_a_part_with_an_invariant);
   Harness.test
@@ -2038,7 +2038,7 @@ let () =
       expect_not_proven (dice ^ Fixtures.Prover.loaded_dice_rolling_nine) "prover.ensures");
   Harness.test "a capability's broken contract is named as the capability's" (fun () ->
       let actual = read_message (dice ^ Fixtures.Prover.loaded_dice_rolling_nine) in
-      if not (String.includes ~affix:"The capability's `result >= 1 && result <= 6`" actual) then
+      if not (String.includes ~affix:"`Dice`'s `result >= 1 && result <= 6`" actual) then
         Harness.fail "found: %s" actual);
   Harness.test "an implementation of a capability that keeps its contract proves" (fun () ->
       expect_proven (dice ^ Fixtures.Prover.fair_dice));
@@ -3509,6 +3509,13 @@ let () =
         [
           "The prover has no bound for the cost of `Iterable.count` of `Countdown` and \
            `Iterable.element` of `Countdown`, which the cost here depends on.";
+        ]);
+  Harness.test "a clause that fails in a run under a condition names the condition and its trait"
+    (fun () ->
+      expect_messages_saying Fixtures.Prover.restated_clauses_with_a_condition
+        [
+          "Where `Item: Plain`: `FarSteps`'s `result >= by` may not hold when the method returns \
+           here.";
         ]);
   Harness.test "a parameter that a loop leaves invalid is named" (fun () ->
       expect_messages_saying Fixtures.Prover.parameter_zeroed_in_a_loop

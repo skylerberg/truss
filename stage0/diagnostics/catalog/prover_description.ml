@@ -85,10 +85,6 @@ let describe_difference = function
   | Prover.Upper_bound -> ("more than", "allows")
   | Exact -> ("more or less than", "states")
 
-let show_promiser = function
-  | Prover.Trait_promiser -> "trait"
-  | Capability_promiser -> "capability"
-
 let name_dependency { Prover.kind; path; _ } =
   match kind with Reads -> Path.show path | Calls | Uses -> show_callee path
 
@@ -241,7 +237,7 @@ let describe_promise = function
       let difference, verb = describe_difference counting in
       [
         Text
-          (Printf.sprintf "The method may spend %s its %s's `" difference (show_promiser promiser));
+          (Printf.sprintf "The method may spend %s `%s`'s `" difference (Path.show_name promiser));
         quote_in clause;
         Text (Printf.sprintf "` %s before it returns here." verb);
       ]
@@ -498,7 +494,7 @@ let describe_obligation = function
       | None -> tick clause @ [ Text failure ]
       | Some promiser ->
           [
-            Text (Printf.sprintf "The %s's `" (show_promiser promiser));
+            Text (Printf.sprintf "`%s`'s `" (Path.show_name promiser));
             quote_in clause;
             Text ("`" ^ failure);
           ])
@@ -808,19 +804,16 @@ let show_construct = function
   | String_pattern_on type_ -> Printf.sprintf "a string pattern on `%s`" (Types.show type_)
   | Specification_function -> "this specification function"
 
-let describe_instance = function
+let describe_instance ({ builtins; condition } : Prover.instance) =
+  match
+    List.map
+      (fun (parameter, builtin) ->
+        Printf.sprintf "`%s` is `%s`" parameter (Language.Builtin_type.show builtin))
+      builtins
+    @ if condition = [] then [] else [ Printf.sprintf "`%s`" (Types.show_condition condition) ]
+  with
   | [] -> []
-  | instance ->
-      [
-        Description.Text
-          ("Where "
-          ^ String.concat " and "
-              (List.map
-                 (fun (parameter, builtin) ->
-                   Printf.sprintf "`%s` is `%s`" parameter (Language.Builtin_type.show builtin))
-                 instance)
-          ^ ": ");
-      ]
+  | facts -> [ Description.Text ("Where " ^ String.concat " and " facts ^ ": ") ]
 
 let describe : Prover.t -> Nodes.description = function
   | Proves { location; instance; obligation } ->

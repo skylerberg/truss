@@ -61,7 +61,7 @@ val mentions_specification : Mir.formula -> (Mir.specification -> bool) -> bool
 val mentions_result : Mir.formula -> bool
 val mentions_visited : Mir.formula -> bool
 val mentions_final_result : Mir.formula -> bool
-val find_promiser : Lookups.t -> State.source -> Catalog.Prover.promiser
+val find_promiser : State.source -> Path.t
 
 val make_entry_frame :
   State.frame ->

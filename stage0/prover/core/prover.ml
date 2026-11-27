@@ -121,13 +121,14 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
         | instances ->
             let outcomes =
               List.map
-                (fun (instance, substitution) ->
+                (fun (builtins, substitution) ->
                   let outcome = prove_with substitution in
                   {
                     outcome with
                     Obligation.obligations =
                       List.map
-                        (fun (obligation : Obligation.t) -> { obligation with instance })
+                        (fun (obligation : Obligation.t) ->
+                          { obligation with instance = { obligation.instance with builtins } })
                         outcome.obligations;
                   })
                 instances
