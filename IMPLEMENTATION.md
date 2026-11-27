@@ -245,6 +245,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
   proven under the precondition of the method's contract, which is all that
   the proof of the `impl` assumes, so a call and the axiom of a logic
   function assume them under that precondition and for no other argument.
+  A `cost` clause has the premise of its clause set, as an `ensures` has. A
+  call that takes its amount from a clause set proven under other
+  `requires` than the ones it met spends that amount where those `requires`
+  hold of its arguments, and an unknown amount elsewhere.
 
   | Reader | Proves | Assumes |
   |---|---|---|

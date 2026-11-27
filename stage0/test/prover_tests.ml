@@ -683,6 +683,9 @@ let () =
       expect_proven Fixtures.Prover.restated_method_called_through_its_trait);
   Harness.test "a loop over a take of a list ends through FiniteCursor's restated next" (fun () ->
       expect_proven Fixtures.Prover.loop_over_a_take_of_a_list);
+  Harness.test "a call has its trait's cost only where it meets the trait's precondition" (fun () ->
+      expect_not_proven Fixtures.Prover.trait_cost_beyond_the_trait_precondition "prover.cost"
+        ~says:"The function may spend more than `cost calls(Journal.write) <= 1` allows");
   Harness.test "an impl whose method's cost exceeds the restated cost is rejected" (fun () ->
       expect_not_proven Fixtures.Prover.restated_cost_that_the_contract_breaks "prover.cost");
   Harness.test "an impl whose method's cost meets the restated cost is proven" (fun () ->

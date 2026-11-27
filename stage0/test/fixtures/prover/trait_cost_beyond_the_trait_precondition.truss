@@ -1,0 +1,39 @@
+capability Journal {
+  fn write(line: UInt64)
+}
+
+trait Steps {
+  fn step(self, by: UInt64) -> UInt64
+    uses Journal
+    requires by < 10
+    cost calls(Journal.write) <= 1
+}
+
+type Walker(x: Int64)
+
+impl Steps for Walker {
+  fn step(self, by: UInt64) -> UInt64
+    uses Journal
+    requires by < 100
+  {
+    Journal.write(by)
+    if by >= 10 {
+      Journal.write(by)
+    }
+    by
+  }
+}
+
+fn within(walker: Walker) -> UInt64
+  uses Journal
+  cost calls(Journal.write) <= 1
+{
+  walker.step(5)
+}
+
+fn beyond(walker: Walker) -> UInt64
+  uses Journal
+  cost calls(Journal.write) <= 1
+{
+  walker.step(50)
+}
