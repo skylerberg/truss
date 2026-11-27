@@ -307,6 +307,12 @@ develop as well as make it easier to bootstrap the compiler in parts.
   another law the clauses of any trait, so a law can rest on the clause
   that it would help to prove.
 
+  A use of an added clause depends on the contracts that the clause's own
+  formula names. `Mir.Call_edges.collect` visits, at a call of a trait's
+  method on a type whose head is known, the clauses that each restating
+  trait adds for that type, so the proof graph has the edge and
+  `Cycles` finds a proof that reaches itself through such a clause.
+
   A use has only the clauses whose condition holds for its type arguments.
   `Callee.resolve` decides each clause's condition once, with
   `Conditions.keep_holding`, so the contract of a resolved callee holds no
