@@ -2,7 +2,6 @@ type stage =
   | Parse
   | Declare
   | Supply
-  | Claim_roots
   | Resolve
   | Resolve_grant
   | Check_imports
@@ -43,7 +42,6 @@ let stages =
     Parse;
     Declare;
     Supply;
-    Claim_roots;
     Resolve;
     Resolve_grant;
     Check_imports;
@@ -254,7 +252,6 @@ let show_stage = function
   | Parse -> "parsed file"
   | Declare -> "declarations"
   | Supply -> "supplied methods"
-  | Claim_roots -> "roots of lowering"
   | Resolve -> "resolved names"
   | Resolve_grant -> "grant"
   | Check_imports -> "import check"
@@ -365,7 +362,7 @@ let list_read_targets = function
 let lookups_of_definition = [ Imports; Declaration; Tree; Text; Place; Container; Contained ]
 let facts_of_definition = facts
 
-type marker = Reads | References | Calls | Assumes | Instantiates | Grows | Claims
+type marker = Reads | References | Calls | Assumes | Instantiates | Grows | Roots
 
 let rank_marker = function
   | Reads -> 1
@@ -373,7 +370,7 @@ let rank_marker = function
   | Calls -> 4
   | Instantiates -> 8
   | Grows -> 16
-  | Claims -> 32
+  | Roots -> 32
   | Assumes -> 64
 
 let encode_markers markers =
