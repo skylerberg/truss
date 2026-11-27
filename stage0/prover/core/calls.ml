@@ -503,9 +503,8 @@ let apply_lend (frame : State.frame) (site : Invocation.site) (callee : Callee.t
           | Some _ | None -> Facts.raise_bug "a call through a value that is not a function"
         in
         let entries = List.map (fun (passed : State.passed) -> passed.term) values in
-        Callbacks.check_called frame site called entries;
+        let is_defined = Callbacks.oblige_requires frame site called entries in
         let before = frame in
-        let is_defined = Logic.conjunction (Callbacks.list_called_requires before called entries) in
         let havoc = havoc_whole_arguments frame in
         let frame = havoc.after in
         let result =

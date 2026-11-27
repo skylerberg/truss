@@ -56,8 +56,7 @@ val check_passed :
   arguments:(int * Logic.term) list ->
   unit
 
-val check_called : State.frame -> Invocation.site -> Logic.term -> Logic.term list -> unit
-val list_called_requires : State.frame -> Logic.term -> Logic.term list -> Logic.term list
+val oblige_requires : State.frame -> Invocation.site -> Logic.term -> Logic.term list -> Logic.term
 
 val assume_returned :
   State.frame ->

@@ -228,9 +228,12 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | Contract 1 refines contract 2: the statement of 1 implements 2 | `assume pre2; assert pre1; havoc w; assume post1; assert post2` |
 
   `Specification.t` is a contract read at given entry and exit values. It
-  has the four readings that the relations are made of, `assume_requires`,
-  `oblige_requires`, `assume_ensures` and `oblige_ensures`, and `refine`,
-  which is the third row. `Callbacks` reads a function value's contract
+  has the readings that the relations are made of, `assume_requires`,
+  `oblige_requires` and `assume_ensures`, and `refine`, which is the third
+  row. `oblige_requires` returns the conjunction that it obliged, which is
+  the condition under which the call is defined, so its caller states the
+  facts of the call in `Facts.restrict_unless_proven` of that condition and
+  reads the `requires` once. `Callbacks` reads a function value's contract
   through it: a value passed for a parameter refines the parameter's
   contract, a call of a value obliges its `requires`, and a call that
   returned assumes its `ensures`.
