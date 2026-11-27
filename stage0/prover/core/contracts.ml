@@ -250,9 +250,22 @@ let list_restated_clauses (environment : State.environment) ~packages ~self_type
     | Some interface -> interface.restated <> []
     | None -> false
   in
+  let is_proven_before_this_proof (subtrait : Types.trait_reference) =
+    match environment.proven_impl with
+    | None -> true
+    | Some (proven, for_type) ->
+        (not (Path.equal subtrait.trait proven.trait))
+        && List.exists
+             (fun (required : Types.trait_reference) -> Path.equal required.trait subtrait.trait)
+             (Interface.Properties.list_bound_closure environment.lookups.interface ~self:for_type
+                proven)
+  in
   List.filter_map
     (fun (subtrait : Types.trait_reference) ->
-      if restates environment.lookups ~self_type subtrait trait ~name ~receiver then
+      if
+        is_proven_before_this_proof subtrait
+        && restates environment.lookups ~self_type subtrait trait ~name ~receiver
+      then
         Option.map
           (fun clauses -> (subtrait, clauses))
           (find_callee_clauses environment (Path.Method { owner = subtrait.trait; name; receiver }))

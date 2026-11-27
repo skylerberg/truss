@@ -291,6 +291,18 @@ develop as well as make it easier to bootstrap the compiler in parts.
   proof that reads no body, of a law, a type or a constant, starts from
   `Translate.start_proof`.
 
+  The clauses that restating traits add are a conservative extension of
+  the contracts of the methods: each is derived from those contracts and
+  from added clauses that were derived before it, so assuming them proves
+  nothing that the contracts do not. The order is the order in which traits
+  require each other, which has no cycle. `environment.proven_impl` names
+  the `impl` whose laws or restated clauses a proof proves, and in such a
+  proof a call has the clauses of a restating trait only where the proven
+  trait requires that trait, and never the proven trait's own
+  (`Contracts.list_restated_clauses`). A proof that assumed its own clauses
+  proved two clauses from each other, and a law's proof proved the law from
+  a clause whose proof could assume the law.
+
   A use has only the clauses whose condition holds for its type arguments.
   `Callee.resolve` decides each clause's condition once, with
   `Conditions.keep_holding`, so the contract of a resolved callee holds no

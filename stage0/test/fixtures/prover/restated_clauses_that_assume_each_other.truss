@@ -1,0 +1,87 @@
+trait Steps {
+  fn left(self) -> Int64
+  fn right(self) -> Int64
+}
+
+trait LinkedSteps: Steps {
+  fn left(self) -> Int64
+    ensures result == self.right() + 6
+
+  fn right(self) -> Int64
+    ensures result == self.left() - 6
+}
+
+type Walker(x: Int64)
+
+impl Steps for Walker {
+  fn left(self) -> Int64
+    ensures result == 1
+  {
+    1
+  }
+
+  fn right(self) -> Int64
+    ensures result == 1
+  {
+    1
+  }
+}
+
+impl LinkedSteps for Walker {
+}
+
+trait LeftSteps: Steps {
+  fn left(self) -> Int64
+    ensures result == self.right() + 6
+}
+
+trait RightSteps: Steps {
+  fn right(self) -> Int64
+    ensures result == self.left() - 6
+}
+
+type Runner(x: Int64)
+
+impl Steps for Runner {
+  fn left(self) -> Int64
+    ensures result == 1
+  {
+    1
+  }
+
+  fn right(self) -> Int64
+    ensures result == 1
+  {
+    1
+  }
+}
+
+impl LeftSteps for Runner {
+}
+
+impl RightSteps for Runner {
+}
+
+trait Paces {
+  fn pace(self) -> Int64
+
+  law seven(value: Self) {
+    value.pace() == 7
+  }
+}
+
+trait LinkedPaces: Paces {
+  fn pace(self) -> Int64
+    ensures result == 7
+}
+
+type Pacer(x: Int64)
+
+impl Paces for Pacer {
+  fn pace(self) -> Int64 {
+    1
+  }
+}
+
+impl LinkedPaces for Pacer {
+}
