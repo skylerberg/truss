@@ -3559,6 +3559,8 @@ let () =
       expect_proven Fixtures.Prover.range_count_and_element_in_constant_time);
   Harness.test "a string's characters collect into a list in time linear in its length" (fun () ->
       expect_proven Fixtures.Prover.characters_collected_in_linear_time);
+  Harness.test "List.collect and String.collect of a string's characters are linear in its length"
+    (fun () -> expect_proven Fixtures.Prover.characters_collected_into_a_list_and_a_string);
   Harness.test "a copy of a string or a list costs time in its length and one allocation" (fun () ->
       expect_proven Fixtures.Prover.copies_of_a_string_and_a_list_within_their_lengths);
   Harness.test "a copy of a string does not cost constant time" (fun () ->
