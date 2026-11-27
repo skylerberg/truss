@@ -114,8 +114,7 @@ internal fn Map[Key: Hash + Ordered, Value].index_of(self, key: Key) -> UInt64
   ensures result < self.keys.length() ==> forall other: Key =>
     self.model().contains_key(other) && other == key ==> identical(other, self.keys.model()[result])
   cost time O(time(Key.hash) + time(Key.equal) + (1 + log(self.length())) * (1 + time(Key.compare)))
-  cost allocations <= allocations(Key.hash) + 16 * allocations(Key.equal)
-    + (2 * log(self.length()) + 2) * allocations(Key.compare)
+  cost allocations == 0
 {
   proof {
     overflow_within_log(self)
@@ -132,8 +131,7 @@ internal fn Map[Key: Hash + Ordered, Value].index_of(self, key: Key) -> UInt64
 public fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool
   ensures result == contains_equal_key(self.model(), key: key)
   cost time O(time(Key.hash) + time(Key.equal) + (1 + log(self.length())) * (1 + time(Key.compare)))
-  cost allocations <= allocations(Key.hash) + 16 * allocations(Key.equal)
-    + (2 * log(self.length()) + 2) * allocations(Key.compare)
+  cost allocations == 0
 {
   self.index_of(key) < self.keys.length()
 }
@@ -498,8 +496,7 @@ public fn Map[Key: Hash + Ordered, Value].get(self, key: Key) lends Option[Value
     !(result is Some(value) && self.model().contains_key(other) && other == key
       && !identical(self.model().get(other), value))
   cost time O(time(Key.hash) + time(Key.equal) + (1 + log(self.length())) * (1 + time(Key.compare)))
-  cost allocations <= allocations(Key.hash) + 16 * allocations(Key.equal)
-    + (2 * log(self.length()) + 2) * allocations(Key.compare)
+  cost allocations == 0
 {
   let position = self.index_of(key)
   if position < self.keys.length() {
@@ -772,8 +769,7 @@ impl Index for Map[Key: Hash + Ordered, Value] {
 
   fn contains_key(self, key: Key) -> Bool
     ensures result == self.contains(key)
-    cost allocations <= allocations(Key.hash) + 16 * allocations(Key.equal)
-      + (2 * log(self.length()) + 2) * allocations(Key.compare)
+    cost allocations == 0
   {
     self.contains(key)
   }
@@ -783,8 +779,7 @@ impl Index for Map[Key: Hash + Ordered, Value] {
     ensures forall other: Key =>
       self.model().contains_key(other) && other == key ==> identical(self.model().get(other), result)
     cost time O(time(Key.hash) + time(Key.equal) + (1 + log(self.length())) * (1 + time(Key.compare)))
-    cost allocations <= allocations(Key.hash) + 16 * allocations(Key.equal)
-      + (2 * log(self.length()) + 2) * allocations(Key.compare)
+    cost allocations == 0
   {
     self.values[self.index_of(key)]
   }
@@ -794,8 +789,7 @@ impl IndexMut for Map[Key: Hash + Ordered, Value] {
   fn at(mut self, key: Key) lends mut Value
     requires self.contains(key)
     cost time O(time(Key.hash) + time(Key.equal) + (1 + log(self.length())) * (1 + time(Key.compare)))
-    cost allocations <= allocations(Key.hash) + 16 * allocations(Key.equal)
-      + (2 * log(self.length()) + 2) * allocations(Key.compare)
+    cost allocations == 0
   {
     let position = self.index_of(key)
     mut self.values[position]
@@ -1091,8 +1085,7 @@ internal fn Map[Key: Hash + Ordered, Value: Equal].entries_included_in(self, oth
   )
   cost time O(1 + self.length() * (time(Key.hash) + time(Key.equal) + time(Value.equal)
     + (1 + log(other.length())) * (1 + time(Key.compare))))
-  cost allocations <= self.length() * (allocations(Key.hash) + 16 * allocations(Key.equal)
-    + (2 * log(other.length()) + 2) * allocations(Key.compare) + allocations(Value.equal))
+  cost allocations == 0
 {
   proof {
     assert self.length() == self.keys.length() && other.length() == other.keys.length()
@@ -1105,8 +1098,7 @@ internal fn Map[Key: Hash + Ordered, Value: Equal].entries_included_in(self, oth
     decreases self.keys.length() - index
     cost time O(index * (time(Key.hash) + time(Key.equal) + time(Value.equal)
       + (1 + log(other.length())) * (1 + time(Key.compare))))
-    cost allocations <= index * (allocations(Key.hash) + 16 * allocations(Key.equal)
-      + (2 * log(other.length()) + 2) * allocations(Key.compare) + allocations(Value.equal))
+    cost allocations == 0
   {
     let position = other.index_of(self.keys[index])
     if position == other.keys.length() || !(self.values[index] == other.values[position]) {
@@ -1125,10 +1117,7 @@ impl Equal for Map[Key: Hash + Ordered, Value: Equal] {
       + (1 + log(other.length())) * (1 + time(Key.compare)))
       + other.length() * (time(Key.hash) + time(Key.equal) + time(Value.equal)
       + (1 + log(self.length())) * (1 + time(Key.compare))))
-    cost allocations <= self.length() * (allocations(Key.hash) + 16 * allocations(Key.equal)
-      + (2 * log(other.length()) + 2) * allocations(Key.compare) + allocations(Value.equal))
-      + other.length() * (allocations(Key.hash) + 16 * allocations(Key.equal)
-      + (2 * log(self.length()) + 2) * allocations(Key.compare) + allocations(Value.equal))
+    cost allocations == 0
   {
     self.keys.length() == other.keys.length() && self.entries_included_in(other) && other.entries_included_in(self)
   }

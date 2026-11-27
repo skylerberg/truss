@@ -28,9 +28,11 @@ public fn Ordering.then(self, next: Ordering) -> Ordering
 
 public trait Equal {
   fn equal(self, other: Self) -> Bool
+    cost allocations == 0
 
   fn not_equal(self, other: Self) -> Bool
     ensures result == !self.equal(other)
+    cost allocations == 0
   {
     !self.equal(other)
   }
@@ -55,10 +57,12 @@ public trait Equal {
 
 public trait Ordered: Equal {
   fn compare(self, other: Self) -> Ordering
+    cost allocations == 0
 
   fn max(own self, other: own Self) -> Self
     ensures identical(result, self) || identical(result, other)
     ensures self <= result && other <= result
+    cost allocations == 0
   {
     if self.compare(other) == Ordering.Less { other } else { self }
   }
@@ -66,6 +70,7 @@ public trait Ordered: Equal {
   fn min(own self, other: own Self) -> Self
     ensures identical(result, self) || identical(result, other)
     ensures result <= self && result <= other
+    cost allocations == 0
   {
     if self.compare(other) == Ordering.Greater { other } else { self }
   }
@@ -114,6 +119,7 @@ internal theorem less_is_transitive[Element: Ordered](first: Element, second: El
 
 public trait Hash: Equal {
   fn hash(self, hasher: Hasher) -> Hasher
+    cost allocations == 0
 
   law agrees_with_equal(first: Self, second: Self, hasher: Hasher)
     requires first == second
@@ -568,6 +574,7 @@ public trait Cursor {
 
 public trait FiniteCursor: Cursor {
   fn remaining(self) -> UInt64
+    cost allocations == 0
 
   fn next(mut self) -> Option[Self.Element]
     uses Self.Uses
@@ -583,18 +590,23 @@ public trait IntoCursor {
 public trait Countable: Ordered + Plain {
   fn successor(self) -> Option[Self]
     cost time O(1)
+    cost allocations == 0
 
   fn predecessor(self) -> Option[Self]
     cost time O(1)
+    cost allocations == 0
 
   fn advanced(self, by: UInt64) -> Option[Self]
     cost time O(1)
+    cost allocations == 0
 
   fn retreated(self, by: UInt64) -> Option[Self]
     cost time O(1)
+    cost allocations == 0
 
   fn steps_to(self, other: Self) -> Option[UInt64]
     cost time O(1)
+    cost allocations == 0
 
   law steps_to_follows_order(start: Self, stop: Self) {
     (start.steps_to(stop) is None) == (stop < start)

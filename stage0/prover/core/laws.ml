@@ -1,10 +1,10 @@
-let list_laws (context : State.context) trait =
-  match context.lookups.interface.names.find_key trait with
+let list_laws (environment : State.environment) trait =
+  match environment.lookups.interface.names.find_key trait with
   | Some key ->
-      let source = Contracts.read_source_at_key context.lookups key in
+      let source = Contracts.read_source_at_key environment.lookups key in
       List.map
         (fun (law : Mir.law) -> (source, law))
-        (context.lookups.mir.read_contract_part key).laws
+        (environment.lookups.mir.read_contract_part key).laws
   | None -> []
 
 let list_law_parameter_types ~substitution (law : Mir.law) =
@@ -34,12 +34,11 @@ let bind_law_parameters frame source ~substitution (law : Mir.law) terms =
     self_type = None;
   }
 
-let make_law_fact (context : State.context) (frame : State.frame) source ~substitution
-    (law : Mir.law) =
+let make_law_fact (frame : State.frame) source ~substitution (law : Mir.law) =
   let types = list_law_parameter_types ~substitution law in
   if List.exists (fun ty -> Types.is_error ty) types then None
   else begin
-    let number = Query.take_fresh_number context.query in
+    let number = Query.take_fresh_number frame.query in
     let symbols =
       List.mapi
         (fun index _ -> Logic.Symbol.Variable { label = "law"; numbers = [ number; index ] })
@@ -54,49 +53,57 @@ let make_law_fact (context : State.context) (frame : State.frame) source ~substi
     try
       let premise =
         Logic.conjunction
-          (List.map
-             (fun clause -> snd (Validity.read_specification context inside clause))
-             law.requires)
+          (List.map (fun clause -> snd (Validity.read_specification inside clause)) law.requires)
       in
-      let range =
+      let valid =
         Logic.conjunction
           (List.map2
-             (fun symbol ty -> Encoding.make_in_range ty (Logic.Symbol symbol))
+             (fun symbol ty ->
+               Logic.( &&& )
+                 (Encoding.make_in_range ty (Logic.Symbol symbol))
+                 (Validity.make_validity inside ~assuming:true ty (Logic.Symbol symbol)))
              symbols types)
       in
-      let _, holds = Validity.read_specification context inside law.states in
+      let _, holds = Validity.read_specification inside law.states in
       Some
         (Logic.forall
-           ( List.map2 (fun symbol ty -> (symbol, Encoding.declare_sort context ty)) symbols types,
-             Logic.( ==> ) (Logic.( &&& ) range premise) holds ))
+           ( List.map2 (fun symbol ty -> (symbol, Encoding.sort_of ty)) symbols types,
+             Logic.( ==> ) (Logic.( &&& ) valid premise) holds ))
     with Facts.Unsupported _ -> None
   end
 
-let enter_proof (context : State.context) (trait : Types.trait_reference) (ty : Types.ty) =
-  context.laws_assumed <- (trait, ty) :: context.laws_assumed
-
-let assume_laws (context : State.context) frame (trait : Types.trait_reference) (ty : Types.ty) =
+let assume_laws (frame : State.frame) (trait : Types.trait_reference) (ty : Types.ty) =
   List.iter
     (fun (required : Types.trait_reference) ->
-      let key = (required, ty) in
-      let impl = Option.map fst (Encoding.find_impl context required ty) in
+      let impl = Option.map fst (Encoding.find_impl frame.environment required ty) in
       let is_proven_with_this_proof =
-        match impl with Some impl -> Cycles.is_in_proof_cycle context impl | None -> false
+        match impl with
+        | Some impl -> Cycles.is_in_proof_cycle frame.environment impl
+        | None -> false
       in
-      if not (is_proven_with_this_proof || List.mem key context.laws_assumed) then begin
-        context.laws_assumed <- key :: context.laws_assumed;
-        let substitution = Contracts.make_trait_substitution context.lookups required ty in
+      let is_assumed =
+        match frame.environment.proven_impl with
+        | Some (Proves_restated_clauses _) -> false
+        | Some (Proves_laws (proven, for_type)) -> (proven, for_type) <> (required, ty)
+        | None -> true
+      in
+      if is_assumed && not is_proven_with_this_proof then
+        Query.run_once frame.query (Laws_of (required, ty)) @@ fun () ->
+        let substitution =
+          Contracts.make_trait_substitution frame.environment.lookups required ty
+        in
         List.iter
           (fun (source, (law : Mir.law)) ->
-            match make_law_fact context frame source ~substitution law with
+            match make_law_fact frame source ~substitution law with
             | Some fact_ ->
                 Option.iter
                   (fun impl ->
-                    List.iter (Facts.add_hole context)
-                      (Contracts.list_law_holes context.lookups impl required ty law.name))
+                    List.iter (Query.add_hole frame.query)
+                      (Contracts.list_law_holes frame.environment.lookups impl required ty law.name))
                   impl;
-                Facts.add_frame_fact context frame fact_
+                Facts.add_theorem frame
+                  ~because:(match impl with Some impl -> Proven_by impl | None -> Hypothesis)
+                  fact_
             | None -> ())
-          (list_laws context required.trait)
-      end)
-    (Interface.Properties.list_bound_closure context.lookups.interface ~self:ty trait)
+          (list_laws frame.environment required.trait))
+    (Interface.Properties.list_bound_closure frame.environment.lookups.interface ~self:ty trait)

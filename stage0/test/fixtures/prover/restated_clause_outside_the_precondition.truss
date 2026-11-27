@@ -1,0 +1,35 @@
+trait Steps {
+  fn step(self, by: Int64) -> Int64
+    requires by > 0
+}
+
+trait CheckedSteps: Steps {
+  fn step(self, by: Int64) -> Int64
+    ensures by > 0
+}
+
+type Walker(x: Int64)
+
+impl Steps for Walker {
+  fn step(self, by: Int64) -> Int64
+    requires by > 0
+  {
+    by
+  }
+}
+
+impl CheckedSteps for Walker {
+}
+
+fn guarded(walker: Walker, flag: Bool) -> Int64
+  requires !flag
+  ensures flag ==> result == walker.step(0)
+{
+  1
+}
+
+fn caller(walker: Walker) -> Int64
+  ensures result == 7
+{
+  guarded(walker, false)
+}

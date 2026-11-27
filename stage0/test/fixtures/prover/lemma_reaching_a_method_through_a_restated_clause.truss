@@ -1,0 +1,42 @@
+trait Steps {
+  fn first(self) -> Int64
+  fn second(self) -> Int64
+}
+
+trait Linked: Steps {
+  fn first(self) -> Int64
+    ensures self.second() == self.second()
+}
+
+type Walker(x: Int64)
+
+impl Steps for Walker {
+  fn first(self) -> Int64
+    ensures result == 1
+  {
+    1
+  }
+
+  fn second(self) -> Int64
+    ensures self.first() == 7
+  {
+    lemma(self)
+    0
+  }
+}
+
+impl Linked for Walker {
+}
+
+fn lemma(walker: Walker)
+  ensures walker.first() == 7
+{
+  let _ = walker.first()
+}
+
+fn caller(walker: Walker) -> Int64
+  ensures result == 7
+{
+  lemma(walker)
+  walker.first()
+}

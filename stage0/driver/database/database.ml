@@ -309,8 +309,8 @@ let find_checker (stage : Kind.stage) : checker option =
   | Check_unexported -> Some Unexported
   | Declare | Supply | Claim_roots | Resolve_grant | Read_trait_header | Evaluate_constant
   | Derive_interface | Compute_type_facts | Build_body_mir | Build_contract_mir | Generate_mir
-  | List_calls | Group_recursion | Check_dependency | Prove | Lower | Key_tests | Evaluate
-  | Run_test | Render _ | Decide ->
+  | List_calls | Group_recursion | Find_aborts | Check_dependency | Prove | Lower | Key_tests
+  | Evaluate | Run_test | Render _ | Decide ->
       None
 
 let has_unchecked_body (database : t) (package : Path.package) =
@@ -579,6 +579,11 @@ let find_item_outcome (database : t) fact item =
 
 let list_evaluations proofs =
   let database = proofs.database in
+  run_past_bugs database (fun ~on_bug ->
+      Recipes.drain_evaluated_items database ~on_bug
+        (Some
+           (List.map Path.show_package
+              (Lookups.sort_in_dependency_order database (list_proof_packages proofs)))));
   match
     List.sort_uniq compare
       (List.concat_map
@@ -594,7 +599,6 @@ let list_evaluations proofs =
   with
   | [] -> []
   | evaluations ->
-      drain_lowering database (list_proof_packages proofs);
       List.filter
         (fun root ->
           match find_item_outcome proofs.database Facts.test_key root with

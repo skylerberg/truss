@@ -283,7 +283,7 @@ impl Equal for collections.Deque[Element: Equal] {
     ensures result == (self.length() == other.length()
       && forall i in 0..self.length() => self[i] == other[i])
     cost time O(self.length() * time(Element.equal))
-    cost allocations <= self.length() * allocations(Element.equal)
+    cost allocations == 0
   {
     if !(self.length() == other.length()) {
       return false
@@ -294,7 +294,7 @@ impl Equal for collections.Deque[Element: Equal] {
       invariant forall i in 0..index => self[i] == other[i]
       decreases self.length() - index
       cost time O(index * time(Element.equal))
-      cost allocations <= index * allocations(Element.equal)
+      cost allocations == 0
     {
       if !(self[index] == other[index]) {
         return false
@@ -342,7 +342,7 @@ impl Hash for collections.Deque[Element: Hash] {
   fn hash(self, hasher: Hasher) -> Hasher
     ensures identical(result, hash_positions(self.length().hash(hasher), deque: self, count: self.length()))
     cost time O(self.length() * time(Element.hash))
-    cost allocations <= self.length() * allocations(Element.hash)
+    cost allocations == 0
   {
     let start = self.length().hash(hasher)
     var state = start

@@ -348,9 +348,7 @@ fn find_character_literal_end(scanner: Scanner, start: UInt64, after_prefix: Boo
   }
 }
 
-fn decode_character_escape(content: String) -> String
-  uses Panic
-{
+fn decode_character_escape(content: String) -> String {
   match content {
     "\\n" => "\n"
     "\\t" => "\t"
@@ -360,24 +358,26 @@ fn decode_character_escape(content: String) -> String
     "\\\"" => "\""
     "\\'" => "'"
     _ => {
-      if !content.starts_with("\\u{") {
+      let Some(braced) = content.strip_prefix("\\u{") else {
         return content.copy()
       }
-      let digits = content.substring(3, to: content.length() - 1)
+      let Some(digits) = braced.strip_suffix("}") else {
+        return ""
+      }
       if digits.is_empty() || digits.length() > 7 {
         return ""
       }
-      var value: UInt64 = 0
+      var value: UInt32 = 0
       for byte in digits.bytes() {
         if !is_hexadecimal_digit(byte) {
           return ""
         }
-        value = value * 16 + UInt64.from_integer(hexadecimal_value(byte))
+        value = (value << 4) | UInt32.from_integer(hexadecimal_value(byte))
       }
       if value > 1114111 {
         return ""
       }
-      match Character.try_from_code(UInt32.from_integer(value)) {
+      match Character.try_from_code(value) {
         Ok(character) => {
           var text = ""
           mut text.push_character(character)
@@ -390,7 +390,6 @@ fn decode_character_escape(content: String) -> String
 }
 
 fn lex_character_literal(scanner: mut Scanner, tag: String, literal_start: UInt64, stop: UInt64) -> token.Kind
-  uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.tables
   requires scanner.is_at(scanner.position, byte: 39) && scanner.position + 3 <= stop && scanner.is_at(stop - 1, byte: 39)
   ensures scanner.position == stop
@@ -425,8 +424,24 @@ fn is_format_plain(byte: UInt8) -> Bool {
     || byte == 43 || byte == 45 || byte == 42 || byte == 47
 }
 
+fn find_field_close(scanner: Scanner, start: UInt64, stop: UInt64) -> Option[UInt64]
+  requires stop <= scanner.length
+  ensures !(result is Some(close) && stop <= close)
+{
+  var field_end = start
+  while field_end < stop {
+    if scanner.is_at(field_end, byte: 125) {
+      return Some(field_end)
+    }
+    if !is_format_plain(scanner.lookup(field_end)) {
+      return None
+    }
+    field_end += 1
+  }
+  None
+}
+
 fn format_field_edits(scanner: Scanner, start: UInt64, stop: UInt64) -> Option[List[source.Edit]]
-  uses Panic
   requires stop <= scanner.length
 {
   var edits: List[source.Edit] = []
@@ -440,19 +455,7 @@ fn format_field_edits(scanner: Scanner, start: UInt64, stop: UInt64) -> Option[L
       mut edits.push(source.replace(source.make_span(position, stop: position + 2), replacement: single))
       position += 2
     } else if current == 123 {
-      var field_end = position + 1
-      var field_close: Option[UInt64] = None
-      while field_end < stop {
-        if scanner.is_at(field_end, byte: 125) {
-          field_close = Some(field_end)
-          break
-        }
-        if !is_format_plain(scanner.lookup(field_end)) {
-          break
-        }
-        field_end += 1
-      }
-      match field_close {
+      match find_field_close(scanner, start: position + 1, stop: stop) {
         Some(close) => if scanner.skip_spaces(position + 1) < close {
           mut edits.push(source.insert(source.make_zero_width(position), replacement: "$"))
           position = close + 1
@@ -483,8 +486,9 @@ fn open_prefixed_string(scanner: mut Scanner, start: UInt64, nesting: UInt64, in
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
     scanner.unterminated_at_end, scanner.semicolons, scanner.tables
-  requires scanner.is_at(scanner.position, byte: 34)
+  requires scanner.is_at(scanner.position, byte: 34) && start < scanner.position && scanner.is_boundary(start)
   ensures old(scanner.position) <= scanner.position
+  ensures result.fits(scanner.source.text, position: scanner.position)
 {
   let quote_start = scanner.position
   let quotes = scanner.run_length(quote_start, byte: 34)
@@ -702,6 +706,7 @@ fn open_quoted_string(scanner: mut Scanner, nesting: UInt64, inline: Bool, delim
     scanner.semicolons, scanner.tables
   requires scanner.is_at(scanner.position, byte: delimiter) && is_ascii(delimiter)
   ensures old(scanner.position) < scanner.position
+  ensures result.fits(scanner.source.text, position: scanner.position)
 {
   let start = scanner.position
   open_ordinary(mut scanner, tag: None, nesting: nesting, inline: inline, origin: StringOrigin.QuotedString(start, delimiter), closing: delimiter)
@@ -812,6 +817,7 @@ fn scan_string_form(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Opti
   ensures result is None ==> scanner.position == old(scanner.position)
   ensures result is Some(_) ==> old(scanner.position) < scanner.position
   ensures old(scanner.position) <= scanner.position
+  ensures !(result is Some(FormScanned(scan)) && !scan.fits(scanner.source.text, position: scanner.position))
 {
   let start = scanner.position
   if scanner.is_at(start, byte: 39) {
@@ -867,6 +873,7 @@ fn lex_after_name(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UI
     scanner.unterminated_at_end, scanner.semicolons, scanner.tables
   requires start < scanner.position && scanner.is_boundary(start)
   ensures old(scanner.position) <= scanner.position
+  ensures !(result is Some(scan) && !scan.fits(scanner.source.text, position: scanner.position))
 {
   let Lower(_) = name else {
     return None

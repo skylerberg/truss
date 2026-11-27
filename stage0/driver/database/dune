@@ -4,7 +4,6 @@
   (language c)
   (names sql_stubs))
  (libraries
-  structural_key
   language
   compiler_bug
   path
@@ -33,7 +32,6 @@
   lowered
   c_compiler
   profile
-  ground
   libc
   prover
   inspect

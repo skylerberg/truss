@@ -163,7 +163,19 @@ val substitute : (symbol * term) list -> term -> term
 val replace : from:term -> into:term -> term -> term
 val has_untriggered_fact : ?is_counted:(term -> bool) -> query -> bool
 val hash_term : term -> int
-val prune : query -> query
+
+val prune :
+  find_signature:(symbol -> (sort list * sort) option) ->
+  list_axioms:(symbol -> term list) ->
+  query ->
+  query
+
+val declare_derived :
+  find_signature:(symbol -> (sort list * sort) option) ->
+  list_constructors:(Types.ty -> (symbol * (symbol * sort) list) list option) ->
+  query ->
+  query
+
 val list_conjunct_queries : query -> query list
+val show_term : term -> string
 val show_query : query -> string
-val show_symbol : symbol -> string

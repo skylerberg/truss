@@ -298,8 +298,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
       make ~output:(Returns (make_libc_scalar_type (Libc.classify_number number))) []
 
 type time = Constant_time | Linear_in of int | Linear_in_result | Unbounded_time
-type amount = Argument of int | Generic of string
-type allocations = No_allocations | One_if_positive of amount | Unknown_allocations
+type allocations = No_allocations | Unknown_allocations
 type cost = { time : time; allocations : allocations }
 
 let classify_cost (operation : Intrinsic.operation) =
@@ -324,11 +323,8 @@ let classify_cost (operation : Intrinsic.operation) =
   | Buffer (Compare_bytes | Storage_remove | Storage_insert) | Runtime Environment_entry ->
       { time = Linear_in 0; allocations = No_allocations }
   | Buffer Find_byte -> { time = Linear_in_result; allocations = No_allocations }
-  | Buffer Storage_set_capacity -> { time = Linear_in 0; allocations = Unknown_allocations }
-  | Buffer Storage_with_capacity ->
-      { time = Constant_time; allocations = One_if_positive (Argument 0) }
-  | Buffer Storage_from_array ->
-      { time = Constant_time; allocations = One_if_positive (Generic "count") }
+  | Buffer (Storage_set_capacity | Storage_with_capacity | Storage_from_array) ->
+      { time = Linear_in 0; allocations = Unknown_allocations }
   | Runtime
       ( Run_test | Libc _ | Coroutine_start | Coroutine_resume | Coroutine_suspend | Tasks_spawn
       | Shared_new | Shared_update | Shared_key ) ->

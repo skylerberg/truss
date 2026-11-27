@@ -1515,6 +1515,15 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.lending_method_as_a_value "types.not_a_value"
         ~says:"a function value cannot lend");
+  let step = Fixtures.Infer.step_of_an_update_as_a_value in
+  Harness.test "a step of an update is not a function value, because it may break the invariant"
+    (fun () ->
+      expect_one_diagnostic step "types.not_a_value" ~says:"is a step of an update";
+      expect_fine (Support.apply_edit step ("fn Span.narrow", "public fn Span.narrow"));
+      expect_fine
+        (Support.apply_edit step
+           ( "apply(mut span, Span.narrow)",
+             "apply(mut span, fn(narrowed) { mut narrowed.narrow() })" )));
   Harness.test "a variant is looked up under its type" (fun () ->
       expect_fine Fixtures.Infer.shape_variants_built);
   Harness.test "a constant under a type is read by name" (fun () ->

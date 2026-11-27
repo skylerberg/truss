@@ -1,10 +1,7 @@
-val has_potential : State.context -> ?seen:Types.ty list -> Types.ty -> bool
-
-val compute_potential :
-  State.context -> State.frame -> ?seen:Types.ty list -> Types.ty -> Logic.term -> Logic.term
+val has_potential : State.environment -> Query.t -> ?seen:Types.ty list -> Types.ty -> bool
+val compute_potential : State.frame -> ?seen:Types.ty list -> Types.ty -> Logic.term -> Logic.term
 
 val compute_arguments_potential_change :
-  State.context ->
   before:State.frame ->
   after:State.frame ->
   State.passed list ->
@@ -12,7 +9,6 @@ val compute_arguments_potential_change :
   Logic.term
 
 val compute_call_potential_change :
-  State.context ->
   before:State.frame ->
   after:State.frame ->
   State.passed list ->
@@ -21,10 +17,10 @@ val compute_call_potential_change :
   result:Logic.term ->
   Logic.term
 
-val compute_elements_potential : State.context -> Types.ty -> Logic.term -> Logic.term
+val compute_elements_potential :
+  State.environment -> Query.t -> Types.ty -> Logic.term -> Logic.term
 
 val assume_element_potential_change :
-  State.context ->
   State.frame ->
   Types.ty ->
   before:Logic.term ->
@@ -33,16 +29,21 @@ val assume_element_potential_change :
   written:Logic.term ->
   unit
 
-val find_buffer : State.context -> Types.ty -> State.buffer option
+type buffer = {
+  kind : Language.Builtin_type.t;
+  element : Types.ty;
+  model_of : Logic.term -> Logic.term;
+}
+
+val find_buffer : State.environment -> Query.t -> Types.ty -> buffer option
 val find_declared_element : Types.ty -> erased:Types.ty -> Types.ty
 
 val list_declared_fields :
-  State.context -> Types.ty -> ((string option * string) * Types.ty) list option
+  State.environment -> Types.ty -> ((string option * string) * Types.ty) list option
 
-val spend_declared_potential : State.context -> State.frame -> Types.ty -> Logic.term -> State.frame
+val spend_declared_potential : State.frame -> Types.ty -> Logic.term -> State.frame
 
 val spend_enclosing_change :
-  State.context ->
   before:State.frame ->
   after:State.frame ->
   (Logic.term * Mir.place) list ->
@@ -51,10 +52,6 @@ val spend_enclosing_change :
   State.frame
 
 val spend_forgotten :
-  State.context ->
-  (Locals.local * Types.ty) list ->
-  before:State.frame ->
-  after:State.frame ->
-  State.frame
+  (Locals.local * Types.ty) list -> before:State.frame -> after:State.frame -> State.frame
 
-val spend_provided : State.context -> State.frame -> Logic.term Lazy.t -> State.frame
+val spend_provided : State.frame -> Logic.term Lazy.t -> State.frame

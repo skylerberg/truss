@@ -30,18 +30,17 @@ type t = {
 }
 
 val resolve :
-  State.context ->
   State.frame ->
   'operand Core.target ->
   lends:Language.Mode.t option ->
   uses:Types.capability_set ->
   t
 
-val is_update_step : State.context -> t -> bool
-val find_parameter_type : State.context -> t -> int -> Types.ty option
+val may_abort : State.environment -> definition -> bool
+val is_update_step : State.environment -> t -> bool
+val find_parameter_type : State.environment -> t -> int -> Types.ty option
 
 val find_callback :
-  State.context ->
   State.frame ->
   t ->
   int ->

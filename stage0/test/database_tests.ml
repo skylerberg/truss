@@ -41,6 +41,7 @@ type part =
   | Generated_mir of Path.t
   | Call_edges of Path.t
   | Recursion_group of Path.t
+  | Abort_sites of Path.t
   | Type_check of Resolve.Names.key
   | Proof of Resolve.Names.key
   | Verdicts of Resolve.Names.key
@@ -81,6 +82,7 @@ let locate (part : part) : Database.For_testing.computed =
   | Generated_mir path -> of_path Generate_mir path
   | Call_edges path -> of_path List_calls path
   | Recursion_group path -> of_path Group_recursion path
+  | Abort_sites path -> of_path Find_aborts path
   | Type_check key -> of_key Check_type key
   | Proof key -> of_key Prove key
   | Verdicts key -> of_key Decide key
@@ -114,6 +116,7 @@ let list_targets : read -> (Database.Kind.target * int * string) list = function
       | Generated_mir _ -> of_facts [ Generated_mir ]
       | Call_edges _ -> of_facts [ Callees ]
       | Recursion_group _ -> of_facts [ Recursion_group ]
+      | Abort_sites _ -> of_facts [ May_abort ]
       | Proof _ -> of_facts [ Proof ]
       | Lowered _ -> of_facts [ Lowered ]
       | Test_key _ -> of_facts [ Test_key ]
@@ -420,6 +423,11 @@ let expect_recursion_group text ~of_:name ~expected =
   if not (List.equal Path.equal group expected) then
     Harness.fail "the recursion group of %s is [%s], not [%s]" name (show_paths group)
       (show_paths expected)
+
+let expect_may_abort text ~of_:name ~expected =
+  let database = build [ ("app.main", text) ] in
+  if (Database.For_testing.make_proof_lookups database).may_abort (make_main_path name) <> expected
+  then Harness.fail "%s %s" name (if expected then "may not abort" else "may abort")
 
 let expect_proof_group text ~of_:name ~expected =
   let database = build [ ("app.main", text) ] in
@@ -932,14 +940,18 @@ let () =
             Proof (make_main_key "g");
           ];
       expect_untouched recomputed ~is_excluded:(fun part ->
-          is_part_of [ make_main_path "h" ] part || part = locate (Checked_body (make_main_key "f"))));
+          is_part_of [ make_main_path "h" ] part
+          && part <> locate (Abort_sites (make_main_path "h"))
+          || part = locate (Checked_body (make_main_key "f"))));
   Harness.test "removing the call that closes a cycle splits its recursion group" (fun () ->
       let recomputed =
         list_propagated ~before:[ ("app.main", cyclic) ] ~after:[ ("app.main", acyclic) ]
       in
       expect_included recomputed ~parts:[ Proof (make_main_key "f"); Proof (make_main_key "g") ];
       expect_untouched recomputed ~is_excluded:(fun part ->
-          is_part_of [ make_main_path "h" ] part || part = locate (Checked_body (make_main_key "f"))));
+          is_part_of [ make_main_path "h" ] part
+          && part <> locate (Abort_sites (make_main_path "h"))
+          || part = locate (Checked_body (make_main_key "f"))));
   Harness.test "a function's call edges read the dependencies of no package" (fun () ->
       expect_reads
         (build [ ("app.main", stepper_that_runs) ])
@@ -990,6 +1002,158 @@ let () =
           | Some (Failed | Blocked) | None ->
               Harness.fail "%s has no proof" (Path.show declaration.key.path))
         ((Database.make_name_lookups database).list_declarations_in file));
+  Harness.test "a definition may abort where it or a callee allocates" (fun () ->
+      let source =
+        "fn grow(items: mut List[Int64]) {\n\
+        \  mut items.push(1)\n\
+         }\n\n\
+         fn outer(items: mut List[Int64]) {\n\
+        \  grow(mut items)\n\
+         }\n\n\
+         fn add(left: Int64, right: Int64) -> Int64\n\
+        \  requires left == 0\n\
+         {\n\
+        \  left + right\n\
+         }\n"
+      in
+      expect_may_abort source ~of_:"grow" ~expected:true;
+      expect_may_abort source ~of_:"outer" ~expected:true;
+      expect_may_abort source ~of_:"add" ~expected:false);
+  Harness.test "a caller whose call edges failed may abort, whatever the order of the units"
+    (fun () ->
+      let source =
+        "fn one() -> Int64 {\n\
+        \  1\n\
+         }\n\n\
+         fn take(n: Int64 = one()) -> Int64 {\n\
+        \  n\n\
+         }\n\n\
+         fn first() -> Int64 {\n\
+        \  take()\n\
+         }\n\n\
+         fn second() -> Int64 {\n\
+        \  take()\n\
+         }\n\n\
+         fn third() -> Int64 {\n\
+        \  take()\n\
+         }\n\n\
+         fn fourth() -> Int64 {\n\
+        \  take()\n\
+         }\n"
+      in
+      let lookups = Database.For_testing.make_proof_lookups (build [ ("app.main", source) ]) in
+      List.iter
+        (fun caller ->
+          if not (lookups.may_abort (make_main_path caller)) then
+            Harness.fail "%s is known not to abort" caller)
+        [ "first"; "second"; "third"; "fourth" ]);
+  Harness.test "a caller is run after a callee that an edit to its own callee made stale" (fun () ->
+      let write_callers addend =
+        String.concat ""
+          (List.map
+             (fun name -> Printf.sprintf "fn %s() -> Int64 {\n  middle() + %d\n}\n\n" name addend)
+             [ "first"; "second"; "third"; "fourth"; "fifth"; "sixth" ])
+      in
+      let write_package ~innermost_body addend =
+        Printf.sprintf
+          "fn innermost() -> Int64 {\n  %s\n}\n\nfn middle() -> Int64 {\n  innermost()\n}\n\n%s"
+          innermost_body (write_callers addend)
+      in
+      ignore
+        (list_propagated
+           ~before:[ ("app.main", write_package ~innermost_body:"missing" 1) ]
+           ~after:[ ("app.main", write_package ~innermost_body:"1" 2) ]));
+  Harness.test "a definition does not abort through code that never runs" (fun () ->
+      let source =
+        "fn doubled(text: String) -> String {\n\
+        \  text.repeated(2)\n\
+         }\n\n\
+         theorem named_in_a_theorem(text: String)\n\
+        \  ensures text.length() == text.length()\n\
+         {\n\
+        \  let _ = doubled(text)\n\
+         }\n\n\
+         fn named_in_a_proof(text: String) -> UInt64 {\n\
+        \  proof {\n\
+        \    let _ = doubled(text)\n\
+        \  }\n\
+        \  text.length()\n\
+         }\n\n\
+         fn named_in_an_invariant(text: String) -> UInt64 {\n\
+        \  var count: UInt64 = 0\n\
+        \  while count < text.length()\n\
+        \    invariant doubled(text).length() >= 0\n\
+        \  {\n\
+        \    count += 1\n\
+        \  }\n\
+        \  count\n\
+         }\n"
+      in
+      expect_may_abort source ~of_:"doubled" ~expected:true;
+      expect_may_abort "fn no_elements() -> List[UInt64] {\n  []\n}\n" ~of_:"no_elements"
+        ~expected:false;
+      expect_may_abort source ~of_:"named_in_a_theorem" ~expected:false;
+      expect_may_abort source ~of_:"named_in_a_proof" ~expected:false;
+      expect_may_abort source ~of_:"named_in_an_invariant" ~expected:false);
+  Harness.test
+    "a call through a bound or of a function value is an abort site unless it states no allocation"
+    (fun () ->
+      let source =
+        "trait Measured {\n\
+        \  fn size(self) -> UInt64\n\n\
+        \  fn width(self) -> UInt64\n\
+        \    cost allocations == 0\n\
+         }\n\n\
+         fn size_of[Item: Measured](item: Item) -> UInt64 {\n\
+        \  item.size()\n\
+         }\n\n\
+         fn width_of[Item: Measured](item: Item) -> UInt64 {\n\
+        \  item.width()\n\
+         }\n\n\
+         fn length_read(read: fn() -> List[UInt64]) -> UInt64 {\n\
+        \  read().length()\n\
+         }\n\n\
+         fn length_read_without_allocating(read: (fn() -> List[UInt64] cost allocations == 0)) -> \
+         UInt64 {\n\
+        \  read().length()\n\
+         }\n\n\
+         fn count_read(read: fn() -> UInt64) -> UInt64 {\n\
+        \  read()\n\
+         }\n"
+      in
+      expect_may_abort source ~of_:"size_of" ~expected:true;
+      expect_may_abort source ~of_:"width_of" ~expected:false;
+      expect_may_abort source ~of_:"length_read" ~expected:true;
+      expect_may_abort source ~of_:"length_read_without_allocating" ~expected:false;
+      expect_may_abort source ~of_:"count_read" ~expected:true);
+  Harness.test "a recursion group may abort where one member allocates" (fun () ->
+      let source =
+        "fn first(count: UInt64, items: mut List[Int64]) {\n\
+        \  if count > 0 {\n\
+        \    second(count - 1, items: mut items)\n\
+        \  }\n\
+         }\n\n\
+         fn second(count: UInt64, items: mut List[Int64]) {\n\
+        \  mut items.push(1)\n\
+        \  if count > 0 {\n\
+        \    first(count - 1, items: mut items)\n\
+        \  }\n\
+         }\n\n\
+         fn third(count: UInt64) {\n\
+        \  if count > 0 {\n\
+        \    fourth(count - 1)\n\
+        \  }\n\
+         }\n\n\
+         fn fourth(count: UInt64) {\n\
+        \  if count > 0 {\n\
+        \    third(count - 1)\n\
+        \  }\n\
+         }\n"
+      in
+      expect_may_abort source ~of_:"first" ~expected:true;
+      expect_may_abort source ~of_:"second" ~expected:true;
+      expect_may_abort source ~of_:"third" ~expected:false;
+      expect_may_abort source ~of_:"fourth" ~expected:false);
   Harness.test
     "a field's type whose impl calls back joins the recursion group of a function that passes the \
      derived impl where a bound needs one" (fun () ->

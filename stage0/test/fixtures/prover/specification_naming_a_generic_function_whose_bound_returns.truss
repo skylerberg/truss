@@ -1,0 +1,105 @@
+trait Measured {
+  fn size(self) -> UInt64
+    ensures result >= 1
+    cost allocations == 0
+}
+
+type Leaf(width: UInt64)
+
+impl Measured for Leaf {
+  fn size(self) -> UInt64
+    ensures result == 1
+  {
+    1
+  }
+}
+
+fn measured[Item: Measured](item: Item) -> UInt64
+  ensures result >= 1
+{
+  item.size()
+}
+
+fn at_an_impl(leaf: Leaf) -> UInt64 {
+  proof {
+    assert measured(leaf) >= 1
+  }
+  leaf.width
+}
+
+fn at_a_bound[Item: Measured](item: Item) -> UInt64 {
+  proof {
+    assert measured(item) >= 1
+  }
+  item.size()
+}
+
+fn apply(change: (fn(UInt64) -> UInt64 cost allocations == 0), value: UInt64) -> UInt64
+  ensures result == change(value)
+{
+  change(value)
+}
+
+fn given_its_parameter(change: (fn(UInt64) -> UInt64 cost allocations == 0), value: UInt64) -> UInt64 {
+  proof {
+    assert apply(change, value: value) == change(value)
+  }
+  value
+}
+
+trait Labelled {
+  fn width(self) -> UInt64
+    cost allocations == 0
+
+  fn label(self) -> String
+    ensures result.length() == self.width()
+}
+
+type Wide(width: UInt64)
+
+impl Labelled for Wide {
+  fn width(self) -> UInt64
+    ensures result == self.width
+  {
+    self.width
+  }
+
+  fn label(self) -> String
+    ensures result.length() == self.width()
+  {
+    "a".repeated(self.width)
+  }
+}
+
+fn width_of[Item: Labelled](item: Item) -> UInt64
+  ensures result == item.width()
+{
+  item.width()
+}
+
+fn at_an_impl_whose_other_method_aborts(wide: Wide) -> UInt64 {
+  proof {
+    assert width_of(wide) == wide.width
+  }
+  wide.width
+}
+
+fn at_a_bound_whose_other_method_teaches[Item: Labelled](item: Item) -> UInt64 {
+  proof {
+    assert width_of(item) == item.width()
+  }
+  item.width()
+}
+
+fn no_elements() -> List[UInt64]
+  ensures result.length() == 0
+{
+  []
+}
+
+fn given_an_empty_list(other: UInt64) -> UInt64 {
+  proof {
+    assert no_elements().length() == 0
+  }
+  other
+}

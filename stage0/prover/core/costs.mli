@@ -1,4 +1,5 @@
 val zero : Logic.term
+val credit_symbol : Logic.symbol
 
 type target = Through of Logic.term | Capability of Path.t | Capability_method of Path.t * string
 type resource = Metric of Language.Metric.t | Calls of target

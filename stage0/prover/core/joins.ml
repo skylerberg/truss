@@ -31,17 +31,16 @@ let merge_known_on_paths (paths : (Logic.term * State.frame) list) =
   let lends = merge_known (fun frame -> frame.lends) ~is_same:( == ) ~on_differing:guard_each in
   (aliases, lends)
 
-let name_path_condition context (frame : State.frame) condition =
+let name_path_condition (frame : State.frame) condition =
   match condition with
   | Logic.Boolean _ | Logic.Symbol _ -> condition
   | _ when (not frame.makes_obligations) || Logic.mentions frame.bound condition -> condition
   | _ ->
-      let path = Facts.declare_fresh context frame "path" Logic.Bool in
-      Facts.add_frame_fact context frame (Logic.equal path condition);
+      let path = Facts.declare_fresh frame "path" Logic.Bool in
+      Facts.define frame path condition;
       path
 
-let merge context ?value_type ~condition
-    (paths : (Logic.term * State.frame * Logic.term option) list) =
+let merge ?value_type ~condition (paths : (Logic.term * State.frame * Logic.term option) list) =
   let first =
     match paths with (_, first, _) :: _ -> first | [] -> Facts.raise_bug "no paths meet"
   in
@@ -55,6 +54,10 @@ let merge context ?value_type ~condition
     | [] -> Facts.raise_bug "a value that no path gives"
   in
   let define prefix sort (values : (Logic.term * State.frame * Logic.term) list) =
+    (match values with
+    | (_, _, term) :: rest when List.exists (fun (_, _, other) -> other <> term) rest ->
+        List.iter (fun (_, frame, merged) -> Callbacks.check_read frame merged) values
+    | _ -> ());
     match values with
     | (_, _, term) :: rest
       when List.for_all (fun (_, _, other) -> other == term || other = term) rest ->
@@ -77,10 +80,10 @@ let merge context ?value_type ~condition
                 values ->
         choose values
     | _ ->
-        let symbol = Facts.declare_fresh context first prefix sort in
+        let symbol = Facts.declare_fresh first prefix sort in
         List.iter
           (fun (_, (frame : State.frame), term) ->
-            Facts.add_frame_fact context first
+            Facts.add_theorem first ~because:(Specifies symbol)
               (Logic.( ==> ) frame.condition (Logic.equal symbol term)))
           values;
         symbol
@@ -105,8 +108,8 @@ let merge context ?value_type ~condition
         match find_held (fun frame -> Locals.find_opt id frame.locals) with
         | Some values ->
             let sort =
-              match Encoding.find_local_type context first id with
-              | Some ty -> Encoding.declare_sort context ty
+              match Encoding.find_local_type first id with
+              | Some ty -> Encoding.sort_of ty
               | None -> (
                   match values with (_, _, Logic.Boolean _) :: _ -> Logic.Bool | _ -> Logic.Int)
             in
@@ -129,7 +132,7 @@ let merge context ?value_type ~condition
   in
   let self =
     match (first.self_type, find_held (fun frame -> frame.self)) with
-    | Some ty, Some values -> Some (define "self" (Encoding.declare_sort context ty) values)
+    | Some ty, Some values -> Some (define "self" (Encoding.sort_of ty) values)
     | _ -> first.self
   in
   let list_renamings (frame : State.frame) =
@@ -155,8 +158,8 @@ let merge context ?value_type ~condition
       ~name:(fun amount ->
         if Logic.mentions first.bound amount then amount
         else
-          let symbol = Facts.declare_fresh context first "spent" Logic.Int in
-          Facts.add_frame_fact context first (Logic.equal symbol amount);
+          let symbol = Facts.declare_fresh first "spent" Logic.Int in
+          Facts.define first symbol amount;
           symbol)
   in
   let value =
@@ -168,11 +171,11 @@ let merge context ?value_type ~condition
     if values = [] || List.length values <> List.length paths then None
     else
       match value_type with
-      | Some ty -> Some (define "value" (Encoding.declare_sort context ty) values)
+      | Some ty -> Some (define "value" (Encoding.sort_of ty) values)
       | None -> Some (choose values)
   in
   let merge_part pick =
-    match (Lending.find_part_sort context, find_held pick) with
+    match (Option.map Encoding.sort_of first.lent_part_type, find_held pick) with
     | Some sort, Some values -> Some (define "part" sort values)
     | _ -> pick first
   in
@@ -187,18 +190,17 @@ let merge context ?value_type ~condition
     },
     value )
 
-let join context ?value_type frames =
+let join ?value_type frames =
   match frames with
   | [] -> None
   | [ (frame, value) ] -> Some (frame, value)
   | (first, _) :: _ ->
       let condition =
-        name_path_condition context first
+        name_path_condition first
           (Logic.disjunction (List.map (fun ((frame : State.frame), _) -> frame.condition) frames))
       in
       Some
-        (merge context ?value_type ~condition
+        (merge ?value_type ~condition
            (List.map (fun ((frame : State.frame), value) -> (frame.condition, frame, value)) frames))
 
-let join_frames context frames =
-  Option.map fst (join context (List.map (fun frame -> (frame, None)) frames))
+let join_frames frames = Option.map fst (join (List.map (fun frame -> (frame, None)) frames))

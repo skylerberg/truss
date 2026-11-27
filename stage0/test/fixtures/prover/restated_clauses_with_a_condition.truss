@@ -1,0 +1,62 @@
+trait Marked {
+}
+
+trait Steps {
+  fn step(self, by: Int64) -> Int64
+}
+
+trait LongSteps: Steps {
+  fn step(self, by: Int64) -> Int64
+    ensures result >= by when Self: Marked
+    cost allocations == 0 when Self: Marked
+}
+
+type Unmarked(x: Int64)
+
+impl Steps for Unmarked {
+  fn step(self, by: Int64) -> Int64
+    ensures result == 1
+  {
+    let scratch = List[Int64].with_capacity(8)
+    let _ = scratch.length()
+    1
+  }
+}
+
+impl LongSteps for Unmarked {
+}
+
+type Crawler(x: Int64)
+
+impl Marked for Crawler {
+}
+
+impl Steps for Crawler {
+  fn step(self, by: Int64) -> Int64
+    ensures result == by
+  {
+    let scratch = List[Int64].with_capacity(8)
+    let _ = scratch.length()
+    by
+  }
+}
+
+impl LongSteps for Crawler {
+}
+
+type Holder[Item](item: Item)
+
+impl Marked for Holder[Item: Plain] {
+}
+
+impl Steps for Holder[Item] {
+  fn step(self, by: Int64) -> Int64
+    ensures result == 1
+    cost allocations == 0
+  {
+    1
+  }
+}
+
+impl LongSteps for Holder[Item] {
+}

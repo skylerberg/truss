@@ -16,29 +16,37 @@ public trait FixedWidthInteger:
 
   fn to_big_endian_bytes(self) -> Self.Bytes
     cost time O(1)
+    cost allocations == 0
 
   fn to_little_endian_bytes(self) -> Self.Bytes
     cost time O(1)
+    cost allocations == 0
 
   fn from_big_endian_bytes(bytes: Self.Bytes) -> Self
     cost time O(1)
+    cost allocations == 0
 
   fn from_little_endian_bytes(bytes: Self.Bytes) -> Self
     cost time O(1)
+    cost allocations == 0
 
   fn minimum_value() -> Self
     cost time O(1)
+    cost allocations == 0
 
   fn maximum_value() -> Self
     cost time O(1)
+    cost allocations == 0
 
   fn bit_width() -> UInt64
     cost time O(1)
+    cost allocations == 0
 
   fn from_integer[Source: FixedWidthInteger](value: Source) -> Self
     uses Panic unless Self.minimum_value() <= value && value <= Self.maximum_value()
     ensures result == value
     cost time O(1)
+    cost allocations == 0
   {
     if !intrinsic.fits[Source, Self](value) {
       Panic.crash("conversion out of range")
@@ -50,6 +58,7 @@ public trait FixedWidthInteger:
     ensures (result is Ok(_)) == (Self.minimum_value() <= value && value <= Self.maximum_value())
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic.fits[Source, Self](value) { Ok(intrinsic.convert(value)) } else { Err(core.ConversionError()) }
   }
@@ -95,6 +104,7 @@ public trait FixedWidthInteger:
   fn to_float64(self) -> Float64
     ensures identical(result, intrinsic.convert[Self, Float64](self))
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.convert(self)
   }
@@ -102,6 +112,7 @@ public trait FixedWidthInteger:
   fn to_float32(self) -> Float32
     ensures identical(result, intrinsic.convert[Self, Float32](self))
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.convert(self)
   }
@@ -110,6 +121,7 @@ public trait FixedWidthInteger:
     ensures (result is Ok(_)) == (value == intrinsic.truncate(value) && intrinsic.fits[Float64, Self](value))
     ensures !(result is Ok(converted) && converted != intrinsic.convert[Float64, Self](value))
     cost time O(1)
+    cost allocations == 0
   {
     if value == intrinsic.truncate(value) && intrinsic.fits[Float64, Self](value) {
       Ok(intrinsic.convert(value))
@@ -122,6 +134,7 @@ public trait FixedWidthInteger:
     ensures (result is Ok(_)) == (value == intrinsic.truncate(value) && intrinsic.fits[Float32, Self](value))
     ensures !(result is Ok(converted) && converted != intrinsic.convert[Float32, Self](value))
     cost time O(1)
+    cost allocations == 0
   {
     if value == intrinsic.truncate(value) && intrinsic.fits[Float32, Self](value) {
       Ok(intrinsic.convert(value))
@@ -132,6 +145,7 @@ public trait FixedWidthInteger:
 
   fn saturating_from_float64(value: Float64) -> Self
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic.fits[Float64, Self](value) {
       intrinsic.convert(value)
@@ -195,6 +209,7 @@ public trait FixedWidthInteger:
     ensures result <= Self.bit_width()
     ensures result == intrinsic.count_ones(self)
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.count_ones(self)
   }
@@ -202,6 +217,7 @@ public trait FixedWidthInteger:
   fn count_zeros(self) -> UInt64
     ensures result <= Self.bit_width()
     cost time O(1)
+    cost allocations == 0
   {
     Self.bit_width() - intrinsic.count_ones(self)
   }
@@ -210,6 +226,7 @@ public trait FixedWidthInteger:
     ensures result <= Self.bit_width()
     ensures result == intrinsic.leading_zeros(self)
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.leading_zeros(self)
   }
@@ -218,6 +235,7 @@ public trait FixedWidthInteger:
     ensures result <= Self.bit_width()
     ensures result == intrinsic.trailing_zeros(self)
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.trailing_zeros(self)
   }
@@ -238,6 +256,7 @@ public trait FixedWidthInteger:
 
   fn swap_bytes(self) -> Self
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.swap_bytes(self)
   }
@@ -246,6 +265,7 @@ public trait FixedWidthInteger:
     ensures (result is None) == (amount >= Self.bit_width())
     ensures !(result is Some(shifted) && shifted != (self << amount))
     cost time O(1)
+    cost allocations == 0
   {
     if amount >= Self.bit_width() { None } else { Some(self << amount) }
   }
@@ -254,18 +274,21 @@ public trait FixedWidthInteger:
     ensures (result is None) == (amount >= Self.bit_width())
     ensures !(result is Some(shifted) && shifted != (self >> amount))
     cost time O(1)
+    cost allocations == 0
   {
     if amount >= Self.bit_width() { None } else { Some(self >> amount) }
   }
 
   fn wrapping_shift_left(self, amount: UInt64) -> Self
     cost time O(1)
+    cost allocations == 0
   {
     self << (amount % Self.bit_width())
   }
 
   fn wrapping_shift_right(self, amount: UInt64) -> Self
     cost time O(1)
+    cost allocations == 0
   {
     self >> (amount % Self.bit_width())
   }
@@ -274,6 +297,7 @@ public trait FixedWidthInteger:
     ensures (result is None) == !(Self.minimum_value() <= self + other && self + other <= Self.maximum_value())
     ensures !(result is Some(sum) && sum != self + other)
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic.add_overflows(self, right: other) { None } else { Some(intrinsic.add(self, right: other)) }
   }
@@ -282,6 +306,7 @@ public trait FixedWidthInteger:
     ensures (result is None) == !(Self.minimum_value() <= self - other && self - other <= Self.maximum_value())
     ensures !(result is Some(difference) && difference != self - other)
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic.subtract_overflows(self, right: other) { None } else { Some(intrinsic.subtract(self, right: other)) }
   }
@@ -290,6 +315,7 @@ public trait FixedWidthInteger:
     ensures (result is None) == !(Self.minimum_value() <= self * other && self * other <= Self.maximum_value())
     ensures !(result is Some(product) && product != self * other)
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic.multiply_overflows(self, right: other) { None } else { Some(intrinsic.multiply(self, right: other)) }
   }
@@ -323,6 +349,7 @@ public trait FixedWidthInteger:
     ensures self + other > Self.maximum_value() ==> result == Self.maximum_value()
     ensures Self.minimum_value() <= self + other && self + other <= Self.maximum_value() ==> result == self + other
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic.add_overflows(self, right: other) {
       if other < 0 { Self.minimum_value() } else { Self.maximum_value() }
@@ -335,6 +362,7 @@ public trait FixedWidthInteger:
     ensures (result is None) == (other == 0 || (self == Self.minimum_value() && other + 1 == 0))
     ensures !(result is Some(quotient) && quotient != self / other)
     cost time O(1)
+    cost allocations == 0
   {
     if other == 0 || (self == Self.minimum_value() && other < 0 && other + 1 == 0) {
       None
@@ -347,6 +375,7 @@ public trait FixedWidthInteger:
     ensures (result is None) == (other == 0 || (self == Self.minimum_value() && other + 1 == 0))
     ensures !(result is Some(remainder) && remainder != self % other)
     cost time O(1)
+    cost allocations == 0
   {
     if other == 0 || (self == Self.minimum_value() && other < 0 && other + 1 == 0) {
       None
@@ -369,6 +398,7 @@ public trait FixedWidthInteger:
     ensures self - other > Self.maximum_value() ==> result == Self.maximum_value()
     ensures Self.minimum_value() <= self - other && self - other <= Self.maximum_value() ==> result == self - other
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic.subtract_overflows(self, right: other) {
       if other > 0 { Self.minimum_value() } else { Self.maximum_value() }
@@ -382,6 +412,7 @@ public trait FixedWidthInteger:
     ensures self * other > Self.maximum_value() ==> result == Self.maximum_value()
     ensures Self.minimum_value() <= self * other && self * other <= Self.maximum_value() ==> result == self * other
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic.multiply_overflows(self, right: other) {
       if (self < 0) != (other < 0) { Self.minimum_value() } else { Self.maximum_value() }
@@ -397,6 +428,7 @@ public trait FixedWidthInteger:
     ensures result == self / divisor || result == self / divisor - 1
     ensures self >= 0 && divisor > 0 ==> result == self / divisor
     cost time O(1)
+    cost allocations == 0
   {
     if divisor == 0 {
       Panic.crash("division by zero")
@@ -415,6 +447,7 @@ public trait FixedWidthInteger:
     ensures result == self - self.floor_divide(divisor) * divisor
     ensures self >= 0 && divisor > 0 ==> result == self % divisor
     cost time O(1)
+    cost allocations == 0
   {
     if divisor == 0 {
       Panic.crash("division by zero")
@@ -428,6 +461,7 @@ public trait FixedWidthInteger:
 
   fn reverse_bits(self) -> Self
     cost time O(1)
+    cost allocations == 0
 
   fn parse_radix(text: String, radix: UInt32) -> Result[Self, core.ParseIntegerError]
     uses Panic unless 2 <= radix && radix <= 36
@@ -481,6 +515,7 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
     ensures result == self - other || result == other - self
     ensures result >= 0
     cost time O(1)
+    cost allocations == 0
   {
     let high = if self >= other { self } else { other }
     let low = if self >= other { other } else { self }
@@ -497,6 +532,7 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
     ensures result >= 0
     ensures result == self || result == -self
     cost time O(1)
+    cost allocations == 0
   {
     if self < 0 { -self } else { self }
   }
@@ -505,6 +541,7 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
     ensures (result is None) == (self == Self.minimum_value())
     ensures !(result is Some(magnitude) && (magnitude < 0 || (magnitude != self && magnitude != -self)))
     cost time O(1)
+    cost allocations == 0
   {
     if self == Self.minimum_value() { None } else { Some(self.absolute()) }
   }
@@ -512,6 +549,7 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
   fn unsigned_absolute(self) -> Self.Unsigned
     ensures result == self || result == -self
     cost time O(1)
+    cost allocations == 0
   {
     if self >= 0 {
       intrinsic.convert(self)
@@ -525,6 +563,7 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
     ensures (result is None) == (self == Self.minimum_value())
     ensures !(result is Some(negated) && negated != -self)
     cost time O(1)
+    cost allocations == 0
   {
     if self == Self.minimum_value() { None } else { Some(-self) }
   }
@@ -533,6 +572,7 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
     ensures self == Self.minimum_value() ==> result == Self.minimum_value()
     ensures self != Self.minimum_value() ==> result == -self
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.wrapping_subtract(0, right: self)
   }
@@ -542,6 +582,7 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
     ensures (result == 0) == (self == 0)
     ensures (result == 1) == (self > 0)
     cost time O(1)
+    cost allocations == 0
   {
     if self < 0 { -1 } else if self > 0 { 1 } else { 0 }
   }
@@ -549,6 +590,7 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
   fn is_negative(self) -> Bool
     ensures result == (self < 0)
     cost time O(1)
+    cost allocations == 0
   {
     self < 0
   }
@@ -556,6 +598,7 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
   fn is_positive(self) -> Bool
     ensures result == (self > 0)
     cost time O(1)
+    cost allocations == 0
   {
     self > 0
   }
@@ -564,6 +607,7 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
     ensures self >= 0 ==> result == self
     ensures self < 0 ==> result == self + (Self.maximum_value() - Self.minimum_value() + 1)
     cost time O(1)
+    cost allocations == 0
   {
     if self >= 0 {
       intrinsic.convert(self)
@@ -582,10 +626,12 @@ public trait UnsignedInteger: FixedWidthInteger {
     ensures result * result <= self
     ensures self < (result + 1) * (result + 1)
     cost time O(1)
+    cost allocations == 0
 
   fn absolute_difference(self, other: Self) -> Self
     ensures result == self - other || result == other - self
     cost time O(1)
+    cost allocations == 0
   {
     if self >= other { self - other } else { other - self }
   }
@@ -593,12 +639,14 @@ public trait UnsignedInteger: FixedWidthInteger {
   fn is_power_of_two(self) -> Bool
     ensures result ==> self > 0
     cost time O(1)
+    cost allocations == 0
   {
     self != 0 && (self & (self - 1)) == 0
   }
 
   fn next_power_of_two(self) -> Option[Self]
     cost time O(1)
+    cost allocations == 0
   {
     if self <= 1 {
       return Some(1)
@@ -648,6 +696,7 @@ public trait UnsignedInteger: FixedWidthInteger {
     ensures self <= Self.maximum_value() / 2 ==> result == self
     ensures self > Self.maximum_value() / 2 ==> result == self - (Self.maximum_value() + 1)
     cost time O(1)
+    cost allocations == 0
   {
     let limit = Self.maximum_value() / 2
     if self <= limit {
@@ -661,6 +710,7 @@ public trait UnsignedInteger: FixedWidthInteger {
 
 internal fn reverse_uint64_bits(value: UInt64) -> UInt64
   cost time O(1)
+  cost allocations == 0
 {
   let nibbles = UInt64.maximum / 17
   let twos = UInt64.maximum / 5

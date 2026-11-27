@@ -78,13 +78,8 @@ let show_requirement = function
   | Elements_mutated -> "have the elements it mutates"
   | Elements_read -> "have the elements it reads"
   | Ends_with_zero -> "end with a zero, which it reads up to"
-  | Elements_at_both_indexes -> "have elements at both of its indexes"
-  | Length_within_storage -> "be given a length at most the storage's"
-  | Element_to_pop -> "have an element to pop"
   | Element_at_index -> "have an element at its index"
-  | Index_within_length -> "be given an index at most the storage's length"
   | Range_within_storage -> "be given a range within the storage"
-  | Count_of_array -> "have as many elements as the array's count"
 
 let describe_difference = function
   | Prover.Upper_bound -> ("more than", "allows")
@@ -411,15 +406,6 @@ let describe_obligation = function
       tick clause
       @ (Description.Text " may not hold for " :: describe_call call)
       @ [ Text (Printf.sprintf " through `%s`." name) ]
-  | Parameter_contract { path; clause } ->
-      [
-        Text
-          (Printf.sprintf
-             "`%s` may not accept every argument this parameter's type promises it: its `"
-             (Path.show path));
-        quote_in clause;
-        Text "` may not hold.";
-      ]
   | Loop_cost_clause { clause; moment } ->
       [
         Text "The loop's `";
@@ -466,7 +452,28 @@ let describe_obligation = function
   | Not_a_scalar_value { at } ->
       tick at @ [ Text " may not be a Unicode scalar value, which a `Character` must be." ]
   | Unreachable_reached -> say "This `unreachable` may be reached."
-  | Cost_promise promise -> describe_promise promise
+  | May_not_return_under_no_allocation returning ->
+      say
+        ((match returning with
+           | Named_function function_ -> Printf.sprintf "`%s`" (Build.show_callee function_)
+           | This_method -> "This method"
+           | This_lambda -> "This lambda")
+        ^ " may not return: its code, or a function it calls, may run out of memory. `cost \
+           allocations == 0` is stated for it, and a call through a bound, or of a function value, \
+           takes that clause to mean that the function returns.")
+  | Cost_promise { promise; unstated = [] } -> describe_promise promise
+  | Cost_promise { promise; unstated } ->
+      describe_promise promise
+      @ Description.Text " The prover has no bound for the cost of "
+        :: join_with_and
+             (List.map
+                (fun (method_, self_type) ->
+                  [
+                    Description.Text
+                      (Printf.sprintf "`%s` of `%s`" (show_callee method_) (Types.show self_type));
+                  ])
+                unstated)
+      @ [ Description.Text ", which the cost here depends on." ]
   | Impl_precondition { clause } ->
       tick clause
       @ [
@@ -524,15 +531,19 @@ let describe_obligation = function
         quote_in second;
         Text "` may reach the same elements, which are used together.";
       ]
-  | Callback_requirement { name; reason; clause } ->
+  | Function_requirement { function_; use; clause } ->
       [
         Text
-          (Printf.sprintf "`%s` %s, so its `" name
-             (match reason with
-             | Used_as_unpromising_value ->
-                 "is used as a value whose type promises nothing of its arguments"
-             | Passed_for_unpromising_parameter ->
-                 "is passed for a parameter that may not promise its `requires`"));
+          (Printf.sprintf "`%s` is %s, so its `"
+             (match function_ with
+             | Named_function path -> Path.show path
+             | Callback_parameter name -> name)
+             (match use with
+             | Used_as_value type_ ->
+                 Printf.sprintf "used as a value of `%s`, a type that states no `requires`"
+                   (Types.show type_)
+             | Passed_for_parameter ->
+                 "passed for a parameter whose type may not imply its `requires`"));
         quote_in clause;
         Text "` may not hold.";
       ]
@@ -547,8 +558,6 @@ let describe_obligation = function
           | Nothing_promises -> "and nothing promises it of the function passed here."
           | Type_may_not_promise name ->
               Printf.sprintf "and the type of `%s` may not promise it." name
-          | Type_promises_nothing name ->
-              Printf.sprintf "and the type of `%s` promises nothing of its results." name
           | Ensures_may_not_promise path ->
               Printf.sprintf "and the `ensures` of `%s` may not promise it." (Path.show path));
       ]
@@ -557,15 +566,6 @@ let describe_obligation = function
         Text "The key `";
         (match key with Some key -> quote_in key | None -> Text "this key");
         Text "` may equal an earlier key of this map.";
-      ]
-  | Value_contract { path; type_; clause } ->
-      [
-        Text
-          (Printf.sprintf
-             "`%s` is used as a value of `%s`, which promises nothing of its arguments, so its `"
-             (Path.show path) (Types.show type_));
-        quote_in clause;
-        Text "` may not hold.";
       ]
 
 let find_code : Prover.obligation -> Diagnostic.Code.prover = function
@@ -577,14 +577,13 @@ let find_code : Prover.obligation -> Diagnostic.Code.prover = function
       Termination
   | Constant_cycle _ -> Constant_cycle
   | Circular_proof _ -> Circular_proof
-  | Precondition_may_fail _ | Intrinsic_requirement _ | Callback_precondition _
-  | Parameter_contract _ | Float_conversion _ | Not_a_scalar_value _ | Impl_precondition _
-  | Impl_panic_condition _ | Callback_requirement _ | Value_contract _ ->
+  | Precondition_may_fail _ | Intrinsic_requirement _ | Callback_precondition _ | Float_conversion _
+  | Not_a_scalar_value _ | Impl_precondition _ | Impl_panic_condition _ | Function_requirement _ ->
       Requires
   | Precondition_may_panic _ | Panics_where_ruled_out _ -> Panic
   | Upper_bound_in_exact_cost _ | Lambda_cost _ | Lambda_call_above_bound _ | Loop_cost_clause _
-  | Iteration_above_inferred_bound | Unbounded_iteration_cost _ | Cost_promise _
-  | Negative_potential _ ->
+  | May_not_return_under_no_allocation _ | Iteration_above_inferred_bound
+  | Unbounded_iteration_cost _ | Cost_promise _ | Negative_potential _ ->
       Cost
   | Out_of_bounds _ -> Out_of_bounds
   | Invariant_may_fail _ | Preserved_invariant _ | Derived_default_invariant | Loop_invariant _
@@ -625,7 +624,7 @@ let describe_failed_runs failed_runs =
                (describe_stop_sentence stop)))
     failed_runs
 
-let describe_failure = function
+let describe_failure (code : Diagnostic.Code.prover) = function
   | Prover.Refuted -> say " This fails every time the code reaches it."
   | Falsifiable { failed_runs } -> describe_failed_runs failed_runs
   | Undecided { unknown; has_untriggered_fact; failed_runs } ->
@@ -638,13 +637,32 @@ let describe_failure = function
                  " The solver's decision procedures are incomplete for this query, so it stopped \
                   without deciding whether this holds. Z3 gives the reason `%s`."
                  reason)
-        ^ " If the code is correct, a `proof` block or a theorem can lead the solver to the proof."
+        ^ (match code with
+          | Cost ->
+              " A bound that is too small ends this way too, since only a large input exceeds it \
+               and the solver does not search for one. If the bound is right, a `proof` block or a \
+               theorem can lead the solver to the proof."
+          | _ ->
+              " If the code is correct, a `proof` block or a theorem can lead the solver to the \
+               proof.")
         ^
         if has_untriggered_fact then
           " A quantified fact in the query has no trigger, so an `assert` of that fact at the term \
            the proof needs may be enough."
         else "")
       :: describe_failed_runs failed_runs
+
+let describe_withheld = function
+  | [] -> []
+  | callees ->
+      Description.Text " A specification learns nothing here from the contract of "
+      :: join_with_and
+           (List.map
+              (fun callee -> [ Description.Text ("`" ^ Build.show_callee callee ^ "`") ])
+              callees)
+      @ say
+          ", since the call may not return: the function may run out of memory, or it calls a \
+           method of a bound or a function value that does not state `cost allocations == 0`."
 
 let advise_other_ways : Diagnostic.Code.prover -> _ = function
   | Overflow | Division | Shift ->
@@ -783,8 +801,6 @@ let show_construct = function
   | Negation_of type_ -> Printf.sprintf "negating a value of `%s`" (Types.show type_)
   | Shift_of type_ -> Printf.sprintf "a shift of `%s`" (Types.show type_)
   | Range_of type_ -> Printf.sprintf "a range of `%s`" (Types.show type_)
-  | Unreadable_parameter_type ->
-      "a function passed for a parameter whose type the prover cannot read"
   | Unreadable_cursor type_ ->
       Printf.sprintf "a loop over `%s`, whose `next` the prover cannot read" (Types.show type_)
   | Field field -> Printf.sprintf "the field `%s`" field
@@ -824,11 +840,11 @@ let describe : Prover.t -> Nodes.description = function
   | Proves { location; instance; obligation } ->
       make (find_code obligation) (locate location)
         (describe_instance instance @ describe_obligation obligation)
-  | Unproven { location; instance; obligation; failure; fixes; cited = _ } ->
+  | Unproven { location; instance; obligation; failure; fixes; withheld; cited = _ } ->
       let code = find_code obligation in
       make code (locate location) ~fixes:(List.map describe_fix fixes)
-        (describe_instance instance @ describe_obligation obligation @ describe_failure failure
-       @ advise_other_ways code)
+        (describe_instance instance @ describe_obligation obligation @ describe_failure code failure
+       @ describe_withheld withheld @ advise_other_ways code)
   | Unreadable { location; construct; foreign } ->
       make Unsupported (locate location)
         (say

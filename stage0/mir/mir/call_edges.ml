@@ -1,7 +1,8 @@
 type entered =
   [ `Field_default of Path.t * string option * string
   | `Parameter_default of Path.t * int
-  | `Invariant of Path.t * Z.t ]
+  | `Invariant of Path.t * Z.t
+  | `Restated_clauses of Path.t * Types.ty ]
 
 module Entered_table = Hashtbl.Make (Structural_key.Make (struct
   type t = entered
@@ -46,46 +47,100 @@ let make_impl_method trait_interface impl_interface impl (declared : Types.trait
           ~default:declared.method_receiver;
     }
 
+let find_method_of_evidence (interface : Interface.Lookups.t) ~trait (evidence : Types.evidence)
+    (declared : Types.trait_method) =
+  Option.map
+    (function
+      | Interface.Impls.Declaration_for_view ->
+          Path.Method
+            { owner = trait; name = declared.method_name; receiver = declared.method_receiver }
+      | Method_of_impl { impl; _ } ->
+          make_impl_method
+            (Interface.Definition.read_trait_interface interface trait)
+            (Interface.Definition.read_impl_interface interface impl)
+            impl declared)
+    (Interface.Impls.locate_method interface evidence ~name:declared.method_name
+       ~receiver:declared.method_receiver)
+
 let list_methods_of_evidence (interface : Interface.Lookups.t) ~trait (evidence : Types.evidence) =
-  let trait_interface = Interface.Definition.read_trait_interface interface trait in
   List.filter_map
-    (fun (declared : Types.trait_method) ->
-      Option.map
-        (function
-          | Interface.Impls.Declaration_for_view ->
-              Path.Method
-                { owner = trait; name = declared.method_name; receiver = declared.method_receiver }
-          | Method_of_impl { impl; _ } ->
-              make_impl_method trait_interface
-                (Interface.Definition.read_impl_interface interface impl)
-                impl declared)
-        (Interface.Impls.locate_method interface evidence ~name:declared.method_name
-           ~receiver:declared.method_receiver))
-    trait_interface.methods
+    (find_method_of_evidence interface ~trait evidence)
+    (Interface.Definition.read_trait_interface interface trait).methods
 
 let is_self_of_enclosing_trait (type_ : Types.ty) =
   match type_ with
   | Parameter self | Projection { base = Parameter self; _ } -> Types.is_self_parameter self
   | _ -> false
 
-let rec list_code_of_impl_for interface ((type_ : Types.ty), (bound : Types.trait_reference)) =
+let list_instance_field_types (interface : Interface.Lookups.t) (ty : Types.ty) =
+  match Types.strip_view ty with
+  | Named { path; arguments } -> (
+      match Interface.Definition.find_interface interface path with
+      | Some (Interface.Environment.Type_interface type_interface) ->
+          List.map
+            (fun (field : Types.field) -> field.field_type)
+            (Option.value ~default:[] (Types.instantiate_fields type_interface arguments)
+            @ List.concat_map
+                (fun (variant : Types.variant) -> Option.value ~default:[] variant.fields)
+                (Option.value ~default:[] (Types.instantiate_variants type_interface arguments)))
+      | Some _ | None -> [])
+  | _ -> []
+
+type satisfied_bound = {
+  satisfied : Types.trait_reference;
+  of_type : Types.ty;
+  evidence : Types.evidence;
+  is_assumed_by_an_impl : bool;
+}
+
+let list_bounds_that_evidence_assumes interface ~of_type ~(satisfied : Types.trait_reference)
+    ~derived_through_fields : Types.evidence -> (Types.ty * Types.trait_reference) list = function
+  | Bound -> []
+  | (Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ })
+    when derived_through_fields ->
+      List.map
+        (fun field_type -> (field_type, satisfied))
+        (list_instance_field_types interface of_type)
+  | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
+      let impl_interface = Interface.Definition.read_impl_interface interface impl in
+      Interface.Impls.list_required_bounds impl_interface.impl_generics substitution
+      @ Interface.Impls.list_associated_type_bounds interface impl_interface substitution
+
+let rec list_satisfied_bounds ?(entered = []) ?(is_assumed_by_an_impl = false) interface
+    ~derived_through_fields ((of_type : Types.ty), (bound : Types.trait_reference)) =
   List.concat_map
-    (fun (required : Types.trait_reference) ->
-      if is_self_of_enclosing_trait type_ then list_trait_methods interface required.trait
+    (fun (satisfied : Types.trait_reference) ->
+      let has_entered =
+        List.exists
+          (fun (entered_trait, entered_type) ->
+            Path.equal entered_trait satisfied.trait && Types.equal entered_type of_type)
+          entered
+      in
+      if has_entered then []
       else
-        match
-          Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type:type_
-            ~trait:required Bound
-        with
-        | (Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution }) as
-          evidence ->
-            list_methods_of_evidence interface ~trait:required.trait evidence
-            @ List.concat_map (list_code_of_impl_for interface)
-                (Interface.Impls.list_required_bounds
-                   (Interface.Definition.read_impl_interface interface impl).impl_generics
-                   substitution)
-        | Bound -> [])
-    (Interface.Properties.list_bound_closure interface ~self:type_ bound)
+        let evidence =
+          Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type:of_type
+            ~trait:satisfied Bound
+        in
+        { satisfied; of_type; evidence; is_assumed_by_an_impl }
+        :: List.concat_map
+             (list_satisfied_bounds
+                ~entered:((satisfied.trait, of_type) :: entered)
+                ~is_assumed_by_an_impl:true interface ~derived_through_fields)
+             (list_bounds_that_evidence_assumes interface ~of_type ~satisfied
+                ~derived_through_fields evidence))
+    (Interface.Properties.list_bound_closure interface ~self:of_type bound)
+
+let list_code_of_impl_for interface bound =
+  List.concat_map
+    (fun { satisfied; of_type; evidence; _ } ->
+      match evidence with
+      | Bound ->
+          if is_self_of_enclosing_trait of_type then list_trait_methods interface satisfied.trait
+          else []
+      | Impl _ | Derived_for_view _ ->
+          list_methods_of_evidence interface ~trait:satisfied.trait evidence)
+    (list_satisfied_bounds interface ~derived_through_fields:false bound)
 
 let list_code_supplied_to_self (interface : Interface.Lookups.t) ~trait substitution =
   match Types.find_argument (Types.make_self_parameter trait) substitution with
@@ -175,6 +230,8 @@ let resolve_callee (interface : Interface.Lookups.t) instance (callee : _ Core.t
               lazy (list_code_supplied_to_declaration ()) )
       in
       { target; supplied }
+  | Intrinsic { operation; _ } when Intrinsic.has_contract operation ->
+      { target = Some (Intrinsic.make_contract_path operation); supplied = lazy [] }
   | Capability_method _ | Intrinsic _ | Indirect _ -> { target = None; supplied = lazy [] }
 
 let resolve_node (lookups : lookups) (declaration : Path.t) instance =
@@ -270,32 +327,129 @@ type assumed_laws = {
   trait : Types.trait_reference;
   type_ : Types.ty;
   origin : Core.origin option;
+  is_assumed_by_the_callee : bool;
 }
 
 let states_laws (interface : Interface.Lookups.t) trait =
   match interface.find_trait_header trait with Some header -> header.laws <> [] | None -> false
 
-let list_laws_assumed_at (interface : Interface.Lookups.t) instance (callee : _ Core.target) =
-  match callee with
-  | Trait_method { trait; self_type; _ } ->
-      let self_type = substitute_type interface instance self_type in
-      let trait = substitute_trait interface instance trait in
-      List.filter_map
-        (fun (required : Types.trait_reference) ->
-          if states_laws interface required.trait then
-            match
-              Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type
-                ~trait:required Bound
-            with
-            | Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ } | Bound ->
-                None
-            | Impl { impl; _ } | Derived_for_view { viewed = impl; _ } ->
-                Some (impl, required, self_type)
+let list_laws_of_bound (interface : Interface.Lookups.t) ~self_type ~is_assumed_by_the_callee trait
+    =
+  List.filter_map
+    (fun { satisfied; of_type; evidence; is_assumed_by_an_impl } ->
+      match evidence with
+      | Bound | Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ } -> None
+      | Impl { impl; _ } | Derived_for_view { viewed = impl; _ } ->
+          if states_laws interface satisfied.trait then
+            Some
+              {
+                impl;
+                trait = satisfied;
+                type_ = of_type;
+                origin = None;
+                is_assumed_by_the_callee = is_assumed_by_the_callee || is_assumed_by_an_impl;
+              }
           else None)
-        (Interface.Properties.list_bound_closure interface ~self:self_type trait)
-  | Function _ | Capability_method _ | Intrinsic _ | Indirect _ -> []
+    (list_satisfied_bounds interface ~derived_through_fields:true (self_type, trait))
 
-let collect (lookups : lookups) instance visit_roots =
+let list_laws_of_generics (interface : Interface.Lookups.t) instance path
+    (instantiation : Types.instantiation) =
+  match Interface.Impls.read_signature interface path with
+  | Some signature ->
+      let arguments = Types.make_substitution signature.generics instantiation.type_arguments in
+      List.concat_map
+        (fun (generic : Types.generic) ->
+          match Types.find_argument generic.generic arguments with
+          | Some (Type argument) ->
+              let self_type = substitute_type interface instance argument in
+              List.concat_map
+                (fun bound ->
+                  list_laws_of_bound interface ~self_type ~is_assumed_by_the_callee:true
+                    (substitute_trait interface instance (Types.substitute_trait arguments bound)))
+                (Types.list_bounds signature.generics generic.generic)
+          | Some (Value _) | None -> [])
+        signature.generics
+  | None -> []
+
+let list_laws_assumed_at (interface : Interface.Lookups.t) instance (statement : Tree.statement) =
+  (match Walk.find_callee statement with
+    | Some { target = Trait_method { trait; self_type; name; receiver; instantiation; _ }; _ } ->
+        list_laws_of_bound interface
+          ~self_type:(substitute_type interface instance self_type)
+          ~is_assumed_by_the_callee:false
+          (substitute_trait interface instance trait)
+        @ list_laws_of_generics interface instance
+            (Path.Method { owner = trait.trait; name; receiver })
+            instantiation
+    | Some { target = Function { path; instantiation }; _ } ->
+        list_laws_of_generics interface instance path instantiation
+    | Some { target = Capability_method _ | Intrinsic _ | Indirect _; _ } | None -> [])
+  @
+  match statement.kind with
+  | Basic (Assign { value = Function_value { path; instantiation; _ }; _ }) ->
+      list_laws_of_generics interface instance path instantiation
+  | _ -> []
+
+let list_contract_formulas (contract : Tree.contract) =
+  let list_clauses requirements =
+    List.map (fun (requirement : Tree.requirement) -> requirement.clause) requirements
+  in
+  list_clauses contract.panics_unless
+  @ list_clauses contract.requires @ contract.ensures @ contract.decreases
+  @ List.map
+      (fun (cost : Tree.cost) ->
+        match cost.bound with Order_of amount | At_most amount | Exactly amount -> amount)
+      contract.costs
+  @ List.concat_map
+      (fun (_, (callback : Tree.callback)) -> callback.requires @ callback.ensures)
+      contract.callbacks
+
+let find_contract (lookups : lookups) path =
+  Option.map (fun (read : _ Parts.sourced) -> read.form) (Parts.read_contract lookups.mir path)
+
+let list_restated_clauses_assumed_at (lookups : lookups) ~home instance (statement : Tree.statement)
+    =
+  match Walk.find_callee statement with
+  | Some { target = Trait_method { trait; self_type; name; receiver; _ }; _ } -> (
+      let self_type = substitute_type lookups.interface instance self_type in
+      match find_head self_type with
+      | Some head ->
+          let restates (restated : Types.restated_method) =
+            restated.restated_name = name
+            && restated.restated_receiver = receiver
+            && Path.equal restated.declared_by trait.trait
+          in
+          List.concat_map
+            (fun package ->
+              List.filter_map
+                (fun (restating, impl) ->
+                  let trait_interface =
+                    Interface.Definition.read_trait_interface lookups.interface restating
+                  in
+                  if List.exists restates trait_interface.restated then
+                    let impl_interface =
+                      Interface.Definition.read_impl_interface lookups.interface impl
+                    in
+                    Option.map
+                      (fun arguments ->
+                        ( Path.Method { owner = restating; name; receiver },
+                          self_type,
+                          Types.make_trait_substitution trait_interface.trait_generics
+                            ~self:self_type
+                            (Types.substitute_trait_erased arguments impl_interface.implements) ))
+                      (Interface.Impls.match_type
+                         ~variables:
+                           (List.map
+                              (fun (generic : Types.generic) -> generic.generic)
+                              impl_interface.impl_generics)
+                         Types.no_substitution impl_interface.for_type self_type)
+                  else None)
+                (Interface.Impls.list_impls_for_type lookups.interface head package))
+            (List.sort_uniq compare [ Path.locate_package head; home; Path.standard_package ])
+      | None -> [])
+  | Some { target = Function _ | Capability_method _ | Intrinsic _ | Indirect _; _ } | None -> []
+
+let collect (lookups : lookups) ~home instance visit_roots =
   let dependencies = ref [] in
   let laws = ref [] in
   let entered = Entered_table.create 4 in
@@ -329,16 +483,19 @@ let collect (lookups : lookups) instance visit_roots =
         | Supplies { supplier; code } ->
             List.iter (add ~through statement.origin (Supplied supplier)) code)
       (list_statement_edges lookups.interface instance statement);
-    Option.iter
-      (fun (callee : Tree.callee) ->
-        List.iter
-          (fun (impl, trait, type_) ->
-            let origin =
-              match through with Some (origin, _) -> origin | None -> statement.origin
-            in
-            laws := { impl; trait; type_; origin = Some origin } :: !laws)
-          (list_laws_assumed_at lookups.interface instance callee.target))
-      (Walk.find_callee statement);
+    List.iter
+      (fun (assumed : assumed_laws) ->
+        let origin = match through with Some (origin, _) -> origin | None -> statement.origin in
+        laws := { assumed with origin = Some origin } :: !laws)
+      (list_laws_assumed_at lookups.interface instance statement);
+    List.iter
+      (fun (restating_method, self_type, substitution) ->
+        if enters (`Restated_clauses (restating_method, self_type)) then
+          List.iter
+            (visit_formula ~through ~instance:substitution)
+            (Option.fold ~none:[] ~some:list_contract_formulas
+               (find_contract lookups restating_method)))
+      (list_restated_clauses_assumed_at lookups ~home instance statement);
     match statement.kind with
     | Basic (Call { call; _ } | Lend { call; _ }) -> add_invariant_check ~through ~instance call
     | Basic (Assign { value = Parameter_default { definition; position; substitution }; _ }) ->
@@ -418,13 +575,14 @@ let collect (lookups : lookups) instance visit_roots =
     ~formula:(visit_formula ~through:None ~instance);
   (List.rev !dependencies, List.rev !laws)
 
-let collect_dependencies lookups instance visit_roots = fst (collect lookups instance visit_roots)
+let collect_dependencies lookups ~home instance visit_roots =
+  fst (collect lookups ~home instance visit_roots)
 
-let list_dependencies lookups instance (code : Tree.t) =
-  collect_dependencies lookups instance (fun ~code:visit ~formula:_ -> visit code)
+let list_dependencies lookups ~home instance (code : Tree.t) =
+  collect_dependencies lookups ~home instance (fun ~code:visit ~formula:_ -> visit code)
 
-let list_formula_dependencies lookups instance (formula : Tree.formula) =
-  collect_dependencies lookups instance (fun ~code:_ ~formula:visit -> visit formula)
+let list_formula_dependencies lookups ~home instance (formula : Tree.formula) =
+  collect_dependencies lookups ~home instance (fun ~code:_ ~formula:visit -> visit formula)
 
 let list_paths dependencies =
   List.map (fun (dependency : dependency) -> dependency.path) dependencies
@@ -439,47 +597,131 @@ let find_code (lookups : lookups) path =
   | Some { form = Body code | Initializer code; _ } -> Some code.tree
   | Some { form = No_code; _ } | None -> None
 
+let is_specification_only (lookups : lookups) path =
+  match Interface.Impls.read_signature lookups.interface path with
+  | Some signature -> signature.specification_only
+  | None -> false
+
+let list_run_statements (lookups : lookups) path =
+  let statements = ref [] in
+  Option.iter
+    (Walk.iter_run_code (fun statement -> statements := statement :: !statements))
+    (find_code lookups path);
+  !statements
+
+let list_invariant_clauses (lookups : lookups) type_ =
+  match Parts.read_type_clauses lookups.mir type_ with
+  | Some { form = clauses; _ } ->
+      List.map (fun (requirement : Tree.requirement) -> requirement.clause) clauses.invariants
+  | None -> []
+
+let is_abort_site (lookups : lookups) instance (statement : Tree.statement) =
+  let states_no_allocation declaration =
+    match Interface.Impls.read_signature lookups.interface declaration with
+    | Some signature -> Types.states_no_allocation signature.costs
+    | None -> false
+  in
+  match statement.kind with
+  | Basic
+      (Call
+         {
+           call =
+             {
+               callee = { target = Intrinsic { operation = Buffer Storage_with_capacity; _ }; _ };
+               arguments = [ { value = Immediate { value = Integer capacity; _ }; _ } ];
+               _;
+             };
+           _;
+         }) ->
+      not (Z.equal capacity Z.zero)
+  | _ -> (
+      match Walk.find_callee statement with
+      | Some { target = Intrinsic { operation; _ }; _ } -> Intrinsic.may_abort operation
+      | Some { target = Indirect called; _ } -> (
+          match substitute_type lookups.interface instance (Walk.extract_operand_type called) with
+          | Function function_type -> not (Types.states_no_allocation function_type.costs)
+          | called_type ->
+              Compiler_bug.raise_bug ~stage:"MIR" "a call through a value of type `%s`"
+                (Types.show called_type))
+      | Some { target = Trait_method { trait; name; receiver; _ } as target; _ } -> (
+          let declaration = Path.Method { owner = trait.trait; name; receiver } in
+          match (resolve_callee lookups.interface instance target).target with
+          | Some resolved when not (Path.equal resolved declaration) -> false
+          | Some _ | None -> not (states_no_allocation declaration))
+      | Some { target = Function _ | Capability_method _; _ } | None -> false)
+
+let rec body_may_abort (lookups : lookups) instance ~lambdas (body : Tree.body) ~may_abort =
+  let nested_may_abort index =
+    body_may_abort lookups instance ~lambdas lambdas.(index) ~may_abort
+  in
+  let aborts = ref false in
+  Walk.iter_run_block
+    (fun statement ->
+      if
+        is_abort_site lookups instance statement
+        || List.exists
+             (function
+               | Calls callee -> may_abort callee
+               | Supplies { code; _ } -> List.exists may_abort code)
+             (list_statement_edges lookups.interface instance statement)
+        ||
+        match statement.kind with
+        | Basic (Assign { value = Lambda { body = nested; _ }; _ }) -> nested_may_abort nested
+        | Basic (Call { call; _ } | Lend { call; _ }) ->
+            List.exists
+              (fun (argument : Tree.argument) ->
+                match argument.function_ with
+                | Some (Lambda_expression { body = nested; _ }) -> nested_may_abort nested
+                | Some (Function_reference _) | None -> false)
+              call.arguments
+        | _ -> false
+      then aborts := true)
+    body.code;
+  !aborts
+
+let has_abort_site (lookups : lookups) path =
+  match Intrinsic.find_contract_operation path with
+  | Some operation -> Intrinsic.may_abort operation
+  | None ->
+      List.exists
+        (is_abort_site lookups (find_instance lookups path))
+        (list_run_statements lookups path)
+
+let list_callees_that_run (lookups : lookups) path =
+  let instance = find_instance lookups path in
+  List.sort_uniq Path.compare
+    (List.concat_map
+       (fun statement ->
+         match Walk.find_callee statement with
+         | Some { target = Intrinsic _; _ } -> []
+         | Some _ | None ->
+             List.concat_map
+               (function Calls callee -> [ callee ] | Supplies { code; _ } -> code)
+               (list_statement_edges lookups.interface instance statement))
+       (list_run_statements lookups path))
+
 let list_path_edges (lookups : lookups) path =
   List.sort_uniq Path.compare
     (List.concat_map
-       (fun code -> list_paths (list_dependencies lookups (find_instance lookups path) code))
+       (fun code ->
+         list_paths
+           (list_dependencies lookups ~home:(Path.locate_package path) (find_instance lookups path)
+              code))
        (Option.to_list (find_code lookups path)))
-
-let list_contract_formulas (contract : Tree.contract) =
-  let list_clauses requirements =
-    List.map (fun (requirement : Tree.requirement) -> requirement.clause) requirements
-  in
-  list_clauses contract.panics_unless
-  @ list_clauses contract.requires @ contract.ensures @ contract.decreases
-  @ List.map
-      (fun (cost : Tree.cost) ->
-        match cost.bound with Order_of amount | At_most amount | Exactly amount -> amount)
-      contract.costs
-  @ List.concat_map
-      (fun (_, (callback : Tree.callback)) -> callback.requires @ callback.ensures)
-      contract.callbacks
-
-let find_contract (lookups : lookups) path =
-  Option.map (fun (read : _ Parts.sourced) -> read.form) (Parts.read_contract lookups.mir path)
 
 let list_contract_dependencies (lookups : lookups) path =
   List.concat_map
-    (list_formula_dependencies lookups (find_instance lookups path))
+    (list_formula_dependencies lookups ~home:(Path.locate_package path) (find_instance lookups path))
     (Option.fold ~none:[] ~some:list_contract_formulas (find_contract lookups path))
 
 let list_inherited_contract_dependencies (lookups : lookups) path =
   match Interface.Impls.find_implemented_method lookups.interface path with
   | Some implemented ->
       List.concat_map
-        (list_formula_dependencies lookups implemented.implementation.substitution)
+        (list_formula_dependencies lookups ~home:(Path.locate_package path)
+           implemented.implementation.substitution)
         (Option.fold ~none:[] ~some:list_contract_formulas
            (find_contract lookups implemented.declaration))
-  | None -> []
-
-let list_invariant_clauses (lookups : lookups) type_ =
-  match Parts.read_type_clauses lookups.mir type_ with
-  | Some { form = clauses; _ } ->
-      List.map (fun (requirement : Tree.requirement) -> requirement.clause) clauses.invariants
   | None -> []
 
 let list_potential_clauses (lookups : lookups) type_ =
@@ -489,12 +731,12 @@ let list_potential_clauses (lookups : lookups) type_ =
 
 let list_invariant_dependencies lookups type_ =
   List.concat_map
-    (list_formula_dependencies lookups Types.no_substitution)
+    (list_formula_dependencies lookups ~home:(Path.locate_package type_) Types.no_substitution)
     (list_invariant_clauses lookups type_)
 
 let list_potential_dependencies lookups type_ =
   List.concat_map
-    (list_formula_dependencies lookups Types.no_substitution)
+    (list_formula_dependencies lookups ~home:(Path.locate_package type_) Types.no_substitution)
     (list_potential_clauses lookups type_)
 
 let list_field_types (interface : Interface.Lookups.t) path =
@@ -580,7 +822,7 @@ let list_instance_dependencies (lookups : lookups) (instance : Types.ty) =
             else
               list_paths
                 (List.concat_map
-                   (list_formula_dependencies lookups substitution)
+                   (list_formula_dependencies lookups ~home:(Path.locate_package path) substitution)
                    (list_invariant_clauses lookups path @ list_potential_clauses lookups path))
               @ List.concat_map
                   (fun field_type ->
@@ -671,7 +913,9 @@ let list_trait_laws (lookups : lookups) trait =
 let list_assumed_laws (lookups : lookups) path =
   let instance = find_instance lookups path in
   let list_laws substitution formulas =
-    snd (collect lookups substitution (fun ~code:_ ~formula -> List.iter formula formulas))
+    snd
+      (collect lookups ~home:(Path.locate_package path) substitution (fun ~code:_ ~formula ->
+           List.iter formula formulas))
   in
   let list_laws_of_another_source substitution formulas =
     List.map
@@ -680,7 +924,8 @@ let list_assumed_laws (lookups : lookups) path =
   in
   let of_code =
     snd
-      (collect lookups instance (fun ~code ~formula:_ -> Option.iter code (find_code lookups path)))
+      (collect lookups ~home:(Path.locate_package path) instance (fun ~code ~formula:_ ->
+           Option.iter code (find_code lookups path)))
   in
   let of_contract =
     list_laws instance
@@ -713,7 +958,8 @@ let list_assumed_laws (lookups : lookups) path =
   in
   let proven = find_proven_impl lookups path in
   List.filter
-    (fun (laws : assumed_laws) -> not (Option.equal Path.equal proven (Some laws.impl)))
+    (fun (laws : assumed_laws) ->
+      laws.is_assumed_by_the_callee || not (Option.equal Path.equal proven (Some laws.impl)))
     (of_code @ of_contract @ of_inherited_contract @ of_type_clauses @ of_proven_laws)
 
 let list_own_law_proofs (lookups : lookups) path =

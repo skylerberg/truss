@@ -2,16 +2,20 @@ type t = {
   mutable declarations : Logic.declaration list;
   declared : Logic.sort list Tables.Symbol_table.t;
   definitions : unit Tables.Symbol_table.t;
-  datatypes : unit Tables.Type_table.t;
   stated : unit Tables.Stated_table.t;
+  defined_terms : Logic.term Tables.Term_table.t;
+  specified_terms : unit Tables.Term_table.t;
   mutable facts : Fact_list.t;
   mutable scopes : (Logic.symbol * Logic.term list ref) list;
   quantifier_facts : Logic.term list Tables.Term_table.t;
   written_quantifiers : unit Tables.Term_table.t;
   mutable quantifier_symbols : Logic.symbol list;
   mutable obligations : Obligation.t list;
+  withheld : Path.t Tables.Symbol_table.t;
   mutable fresh : int;
   fresh_order : int Tables.Symbol_table.t;
+  mutable holes : (Resolve.Names.key * Obligation.location) list;
+  private_state : Private_state.t;
 }
 
 let create () =
@@ -19,18 +23,23 @@ let create () =
     declarations = [];
     declared = Tables.Symbol_table.create 64;
     definitions = Tables.Symbol_table.create 8;
-    datatypes = Tables.Type_table.create 16;
     stated = Tables.Stated_table.create 64;
+    defined_terms = Tables.Term_table.create 16;
+    specified_terms = Tables.Term_table.create 16;
     facts = Fact_list.empty;
     scopes = [];
     quantifier_facts = Tables.Term_table.create 16;
     written_quantifiers = Tables.Term_table.create 4;
     quantifier_symbols = [];
     obligations = [];
+    withheld = Tables.Symbol_table.create 4;
     fresh = 0;
     fresh_order = Tables.Symbol_table.create 64;
+    holes = [];
+    private_state = Private_state.create ();
   }
 
+let read_state query key = Private_state.read query.private_state key
 let make_variable ?(numbers = []) label = Logic.Symbol.Variable { label; numbers }
 
 let declare query (declaration : Logic.declaration) =
@@ -48,26 +57,59 @@ let declare query (declaration : Logic.declaration) =
         Tables.Symbol_table.replace query.definitions symbol ();
         query.declarations <- declaration :: query.declarations
       end
-  | Datatype _ -> invalid_arg "Query.declare: a datatype is declared by its sort"
-
-let has_datatype query ty = Tables.Type_table.mem query.datatypes ty
-
-let declare_datatype query ty list_constructors =
-  Tables.Type_table.replace query.datatypes ty ();
-  let constructors = list_constructors () in
-  query.declarations <- Logic.Datatype (ty, constructors) :: query.declarations
+  | Datatype _ -> invalid_arg "Query.declare: a datatype is derived from its sort"
 
 let find_argument_sorts query symbol = Tables.Symbol_table.find_opt query.declared symbol
-let is_declared query symbol = Tables.Symbol_table.mem query.declared symbol
 let list_defined_symbols query = List.of_seq (Tables.Symbol_table.to_seq_keys query.definitions)
-let count_declarations query = List.length query.declarations
-
-let list_declarations_since query ~count =
-  List.take (List.length query.declarations - count) query.declarations
-
 let add_fact query fact = query.facts <- Fact_list.add fact query.facts
-let count_facts query = Fact_list.count query.facts
-let list_facts_since query ~count = Fact_list.list_newest_since query.facts ~count
+let assume query ~under fact = add_fact query (Logic.( ==> ) under fact)
+
+type reason =
+  | Defines of Logic.term
+  | Specifies of Logic.term
+  | Lemma
+  | Proven_by of Path.t
+  | Hypothesis
+  | Generalizes_an_execution
+
+let add_theorem query ~because theorem =
+  match because with
+  | Defines subject -> (
+      if Tables.Term_table.mem query.specified_terms subject then
+        Compiler_bug.raise_bug ~stage:"Prover"
+          "`%s` is defined by `%s` after a fact about it was stated, which may contradict it"
+          (Logic.show_term subject) (Logic.show_term theorem);
+      match Tables.Term_table.find_opt query.defined_terms subject with
+      | Some earlier ->
+          if earlier <> theorem then
+            Compiler_bug.raise_bug ~stage:"Prover" "`%s` is defined by `%s` and again by `%s`"
+              (Logic.show_term subject) (Logic.show_term earlier) (Logic.show_term theorem)
+      | None ->
+          Tables.Term_table.replace query.defined_terms subject theorem;
+          add_fact query theorem)
+  | Specifies subject ->
+      if not (Tables.Term_table.mem query.defined_terms subject) then begin
+        Tables.Term_table.replace query.specified_terms subject ();
+        add_fact query theorem
+      end
+  | Lemma | Proven_by _ | Hypothesis | Generalizes_an_execution -> add_fact query theorem
+
+let define query defined value =
+  add_theorem query ~because:(Defines defined) (Logic.equal defined value)
+
+type mark = { declaration_count : int; fact_count : int; fresh_count : int }
+
+let mark query =
+  {
+    declaration_count = List.length query.declarations;
+    fact_count = Fact_list.count query.facts;
+    fresh_count = query.fresh;
+  }
+
+let list_declarations_since query mark =
+  List.take (List.length query.declarations - mark.declaration_count) query.declarations
+
+let list_facts_since query mark = Fact_list.list_newest_since query.facts ~count:mark.fact_count
 let holds query ~under goal = Fact_list.holds query.facts ~under goal
 
 let run_dropping_facts query ~drop run =
@@ -87,13 +129,20 @@ let run_once query stated make =
   end
 
 let run_without_facts query run =
-  let facts = query.facts and stated = Tables.Stated_table.copy query.stated in
+  let facts = query.facts
+  and stated = Tables.Stated_table.copy query.stated
+  and defined_terms = Tables.Term_table.copy query.defined_terms
+  and specified_terms = Tables.Term_table.copy query.specified_terms in
   query.facts <- Fact_list.empty;
   Fun.protect
     ~finally:(fun () ->
       query.facts <- facts;
       Tables.Stated_table.reset query.stated;
-      Tables.Stated_table.iter (Tables.Stated_table.replace query.stated) stated)
+      Tables.Stated_table.iter (Tables.Stated_table.replace query.stated) stated;
+      Tables.Term_table.reset query.defined_terms;
+      Tables.Term_table.iter (Tables.Term_table.replace query.defined_terms) defined_terms;
+      Tables.Term_table.reset query.specified_terms;
+      Tables.Term_table.iter (Tables.Term_table.replace query.specified_terms) specified_terms)
     run
 
 let run_in_scope query symbols run =
@@ -115,11 +164,14 @@ let list_scope_facts query names =
     (fun (name, facts) -> if List.mem name names then List.rev !facts else [])
     query.scopes
 
-let add_quantifier_symbol query symbol =
-  query.quantifier_symbols <- symbol :: query.quantifier_symbols
-
-let attach_quantifier_facts query term facts =
-  Tables.Term_table.replace query.quantifier_facts term facts
+let run_under_binder query symbol run =
+  query.quantifier_symbols <- symbol :: query.quantifier_symbols;
+  let result, facts = run_in_scope query [ symbol ] run in
+  let attach_facts term =
+    if facts <> [] then Tables.Term_table.replace query.quantifier_facts term (List.rev facts);
+    term
+  in
+  (result, attach_facts)
 
 let note_written_quantifier query term = Tables.Term_table.replace query.written_quantifiers term ()
 
@@ -166,7 +218,6 @@ let take_fresh_number query =
   query.fresh <- query.fresh + 1;
   query.fresh
 
-let count_fresh query = query.fresh
 let make_fresh_name query label = make_variable label ~numbers:[ take_fresh_number query ]
 
 let make_ordered_fresh_name query label =
@@ -174,12 +225,13 @@ let make_ordered_fresh_name query label =
   Tables.Symbol_table.replace query.fresh_order name query.fresh;
   name
 
-let find_fresh_order query name = Tables.Symbol_table.find_opt query.fresh_order name
+let is_made_between query since until name =
+  Option.map
+    (fun order -> order > since.fresh_count && order <= until.fresh_count)
+    (Tables.Symbol_table.find_opt query.fresh_order name)
 
-let mentions_fresh_after query mark term =
-  let is_fresh_after name =
-    match find_fresh_order query name with Some order -> order > mark | None -> false
-  in
+let mentions_fresh_since query since term =
+  let is_fresh_after name = is_made_between query since (mark query) name = Some true in
   let rec walk = function
     | Logic.Symbol name -> is_fresh_after name
     | Logic.Integer _ | Logic.Boolean _ | Logic.Bits _ -> false
@@ -190,14 +242,16 @@ let mentions_fresh_after query mark term =
   in
   walk term
 
-let make_obligation query ~condition location obligation goal : Obligation.t =
+let make_obligation query ~find_signature ~list_axioms ~list_constructors ~condition location
+    obligation goal : Obligation.t =
   let pruned =
-    Logic.prune
-      {
-        declarations = List.rev query.declarations;
-        facts = Fact_list.list_oldest_first query.facts;
-        goal = Logic.( ==> ) condition goal;
-      }
+    Logic.declare_derived ~find_signature ~list_constructors
+      (Logic.prune ~find_signature ~list_axioms
+         {
+           declarations = List.rev query.declarations;
+           facts = Fact_list.list_oldest_first query.facts;
+           goal = Logic.( ==> ) condition goal;
+         })
   in
   {
     obligation;
@@ -209,6 +263,13 @@ let make_obligation query ~condition location obligation goal : Obligation.t =
     has_untriggered_written_fact =
       Logic.has_untriggered_fact pruned
         ~is_counted:(Tables.Term_table.mem query.written_quantifiers);
+    withheld =
+      List.sort_uniq Path.compare
+        (List.filter_map
+           (function
+             | Logic.Function (symbol, _, _) -> Tables.Symbol_table.find_opt query.withheld symbol
+             | Constant _ | Definition _ | Datatype _ -> None)
+           pruned.declarations);
     refutation =
       (match goal with
       | Logic.Boolean false -> None
@@ -216,4 +277,7 @@ let make_obligation query ~condition location obligation goal : Obligation.t =
   }
 
 let add_obligation query obligation = query.obligations <- obligation :: query.obligations
+let note_withheld query symbol callee = Tables.Symbol_table.replace query.withheld symbol callee
 let list_obligations query = List.rev query.obligations
+let add_hole query hole = if not (List.mem hole query.holes) then query.holes <- hole :: query.holes
+let list_holes query = List.rev query.holes

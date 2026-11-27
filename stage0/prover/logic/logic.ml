@@ -614,12 +614,19 @@ let rec substitute substitution term =
 and remove_bound bound substitution =
   List.filter (fun (name, _) -> not (List.mem_assoc name bound)) substitution
 
+let rec is_matchable = function
+  | Operation ((Not | And | Or | Implies | Ite), _) | Forall _ | Exists _ -> false
+  | Apply (_, arguments) | Operation (_, arguments) -> List.for_all is_matchable arguments
+  | Is (_, argument) -> is_matchable argument
+  | Symbol _ | Integer _ | Boolean _ | Bits _ -> true
+
 let list_triggers ~is_triggering variables body =
   let names = List.map fst variables in
   let rec is_trigger_term = function
     | Symbol _ | Integer _ | Boolean _ | Bits _ -> true
     | Apply (name, arguments) when is_triggering name -> List.for_all is_trigger_term arguments
-    | (Apply _ | Operation _ | Is _ | Forall _ | Exists _) as term -> not (mentions names term)
+    | (Apply _ | Operation _ | Is _ | Forall _ | Exists _) as term ->
+        (not (mentions names term)) && is_matchable term
   in
   let is_candidate = function
     | Apply (name, _ :: _) as term ->
@@ -741,20 +748,14 @@ let make_triggering_test declarations =
   List.iter
     (function
       | Function (name, _, _) -> Symbol_table.replace functions name ()
-      | Datatype (_, constructors) ->
-          List.iter
-            (fun (constructor, fields) ->
-              Symbol_table.replace functions constructor ();
-              List.iter (fun (selector, _) -> Symbol_table.replace functions selector ()) fields)
-            constructors
-      | Constant _ | Definition _ -> ())
+      | Constant _ | Definition _ | Datatype _ -> ())
     declarations;
   List.iter
     (function
       | Definition { symbol; _ } -> Symbol_table.remove functions symbol
       | Constant _ | Function _ | Datatype _ -> ())
     declarations;
-  Symbol_table.mem functions
+  function Symbol.Constructor _ | Field _ | Unit -> true | name -> Symbol_table.mem functions name
 
 let has_untriggered_fact ?(is_counted = fun _ -> true) query =
   let is_triggering = make_triggering_test query.declarations in
@@ -766,15 +767,14 @@ let has_untriggered_fact ?(is_counted = fun _ -> true) query =
   in
   List.exists is_untriggered query.facts
 
-let list_declared_symbols declared term =
+let list_declared_symbols ~is_declared term =
   let symbols = ref [] in
   let rec walk bound = function
     | Symbol name ->
-        if (not (List.mem name bound)) && Symbol_table.mem declared name then
-          symbols := name :: !symbols
+        if (not (List.mem name bound)) && is_declared name then symbols := name :: !symbols
     | Integer _ | Boolean _ | Bits _ -> ()
     | Apply (name, arguments) ->
-        if Symbol_table.mem declared name then symbols := name :: !symbols;
+        if is_declared name then symbols := name :: !symbols;
         List.iter (walk bound) arguments
     | Operation (_, arguments) -> List.iter (walk bound) arguments
     | Is (_, argument) -> walk bound argument
@@ -784,7 +784,7 @@ let list_declared_symbols declared term =
   walk [] term;
   !symbols
 
-let prune query =
+let prune ~find_signature ~list_axioms query =
   let declared = Symbol_table.create 64 in
   let bodies = Symbol_table.create 8 in
   List.iter
@@ -795,6 +795,21 @@ let prune query =
           Symbol_table.replace bodies symbol body
       | Datatype _ -> ())
     query.declarations;
+  let without_axioms = ref [] in
+  let is_declared name =
+    Symbol_table.mem declared name
+    || Option.is_some (find_signature name)
+       && begin
+         Symbol_table.replace declared name ();
+         without_axioms := name :: !without_axioms;
+         true
+       end
+  in
+  List.iter
+    (function
+      | Definition { body; _ } -> ignore (list_declared_symbols ~is_declared body)
+      | Constant _ | Function _ | Datatype _ -> ())
+    query.declarations;
   let reached = Symbol_table.create 64 in
   let rec reach symbols =
     List.iter
@@ -802,13 +817,17 @@ let prune query =
         if not (Symbol_table.mem reached symbol) then begin
           Symbol_table.replace reached symbol ();
           Option.iter
-            (fun body -> reach (list_declared_symbols declared body))
+            (fun body -> reach (list_declared_symbols ~is_declared body))
             (Symbol_table.find_opt bodies symbol)
         end)
       symbols
   in
-  reach (list_declared_symbols declared query.goal);
-  let is_triggering = make_triggering_test query.declarations in
+  reach (list_declared_symbols ~is_declared query.goal);
+  let is_declared_function = make_triggering_test query.declarations in
+  let is_triggering name =
+    is_declared_function name
+    || match find_signature name with Some (_ :: _, _) -> true | Some ([], _) | None -> false
+  in
   let rec needs fact symbols =
     match fact with
     | Operation (Implies, [ _; (Forall _ as inner) ]) -> needs inner symbols
@@ -816,7 +835,9 @@ let prune query =
         match choose_triggers ~is_triggering variables trigger body with
         | [] -> fun () -> List.exists (Symbol_table.mem reached) symbols
         | triggers ->
-            let triggers = List.map (List.concat_map (list_declared_symbols declared)) triggers in
+            let triggers =
+              List.map (List.concat_map (list_declared_symbols ~is_declared)) triggers
+            in
             fun () ->
               List.exists (fun trigger -> List.for_all (Symbol_table.mem reached) trigger) triggers)
     | _ -> fun () -> List.exists (Symbol_table.mem reached) symbols
@@ -838,15 +859,24 @@ let prune query =
         is_new)
       query.facts
   in
-  let query = { query with facts = distinct } in
-  let facts =
-    Array.of_list
-      (List.map
-         (fun fact ->
-           let symbols = list_declared_symbols declared fact in
-           (symbols, needs fact symbols))
-         query.facts)
+  let describe fact =
+    let symbols = list_declared_symbols ~is_declared fact in
+    (symbols, needs fact symbols)
   in
+  let stated = List.map describe distinct in
+  let take_axioms_of_new_symbols () =
+    let symbols = List.rev !without_axioms in
+    without_axioms := [];
+    List.concat_map list_axioms symbols
+  in
+  let rec describe_axioms described axioms =
+    match take_axioms_of_new_symbols () with
+    | [] -> (List.rev described, axioms)
+    | added -> describe_axioms (List.rev_append (List.map describe added) described) (axioms @ added)
+  in
+  let described_axioms, axioms = describe_axioms [] [] in
+  let query = { query with facts = axioms @ distinct } in
+  let facts = Array.of_list (described_axioms @ stated) in
   let is_needed = Array.make (Array.length facts) false in
   let changed = ref true in
   while !changed do
@@ -861,6 +891,85 @@ let prune query =
       facts
   done;
   { query with facts = List.filteri (fun index _ -> is_needed.(index)) query.facts }
+
+let declare_derived ~find_signature ~list_constructors query =
+  let declared = Symbol_table.create 64 in
+  List.iter
+    (function
+      | Constant (name, _) | Function (name, _, _) | Definition { symbol = name; _ } ->
+          if Option.is_some (find_signature name) then
+            invalid_arg
+              ("Logic.declare_derived: a declaration of " ^ show_symbol name
+             ^ ", whose signature is derived");
+          Symbol_table.replace declared name ()
+      | Datatype (ty, _) ->
+          invalid_arg
+            ("Logic.declare_derived: a declaration of the datatype of " ^ Types.show ty
+           ^ ", which is derived"))
+    query.declarations;
+  let reached = Sort_table.create 16 in
+  let derived = ref [] in
+  let rec reach_sort = function
+    | Int | Bool | Float _ | Function_sort _ -> ()
+    | Type_sort ty as sort ->
+        if not (Sort_table.mem reached sort) then begin
+          Sort_table.replace reached sort ();
+          Option.iter
+            (fun constructors ->
+              derived := Datatype (ty, constructors) :: !derived;
+              List.iter
+                (fun (_, fields) -> List.iter (fun (_, sort) -> reach_sort sort) fields)
+                constructors)
+            (list_constructors ty)
+        end
+  in
+  let reach_symbol : symbol -> unit = function
+    | Constructor { type_; _ } | Field { type_; _ } -> reach_sort (Type_sort type_)
+    | Unit -> reach_sort (Type_sort Types.unit)
+    | name ->
+        if not (Symbol_table.mem declared name) then
+          Option.iter
+            (fun (inputs, output) ->
+              Symbol_table.replace declared name ();
+              List.iter reach_sort inputs;
+              reach_sort output;
+              derived :=
+                (match inputs with
+                | [] -> Constant (name, output)
+                | _ -> Function (name, inputs, output))
+                :: !derived)
+            (find_signature name)
+  in
+  let reach_variables = List.iter (fun (_, sort) -> reach_sort sort) in
+  let rec reach_term = function
+    | Symbol name -> reach_symbol name
+    | Integer _ | Boolean _ | Bits _ -> ()
+    | Apply (name, arguments) ->
+        reach_symbol name;
+        List.iter reach_term arguments
+    | Operation (_, arguments) -> List.iter reach_term arguments
+    | Is (name, argument) ->
+        reach_symbol name;
+        reach_term argument
+    | Forall (variables, _, body) | Exists (variables, body) ->
+        reach_variables variables;
+        reach_term body
+  in
+  List.iter
+    (function
+      | Constant (_, sort) -> reach_sort sort
+      | Function (_, inputs, output) ->
+          List.iter reach_sort inputs;
+          reach_sort output
+      | Definition { parameters; result; body; _ } ->
+          reach_variables parameters;
+          reach_sort result;
+          reach_term body
+      | Datatype _ -> ())
+    query.declarations;
+  List.iter reach_term query.facts;
+  reach_term query.goal;
+  { query with declarations = query.declarations @ List.rev !derived }
 
 type numbering = {
   declared : declaration Symbol_table.t;
@@ -883,7 +992,11 @@ let list_conjunct_queries query =
   in
   match list_conjuncts query.goal with
   | [] | [ _ ] -> []
-  | goals -> List.map (fun goal -> prune { query with goal }) goals
+  | goals ->
+      List.map
+        (fun goal ->
+          prune ~find_signature:(fun _ -> None) ~list_axioms:(fun _ -> []) { query with goal })
+        goals
 
 let rec render_sort_name numbering = function
   | Int -> "Int"

@@ -134,8 +134,15 @@ develop as well as make it easier to bootstrap the compiler in parts.
 - **The cost modules hold the rules of cost checking.** A cost is ghost
   state of the one symbolic execution, so the modules that execute the MIR
   call the cost modules at each statement, and a new cost rule edits a cost
-  module. The state of cost checking is one record, `context.cost`, and CI
-  rejects a use of it outside the cost modules.
+  module. Each cost module keeps its own state, and another cost module
+  reads it through that module's functions:
+
+  | Module | State |
+  |---|---|
+  | `Counters` | The bounds and captures of each lambda read, how many recursive costs were assumed, and the types whose saved potential is credited or blocked |
+  | `Cost_promises` | The call targets and the counters that the definition's own clauses bound |
+  | `Amounts` | The amount of each call, which a loop's cost reads |
+  | `Potentials` | Memo tables of the types that hold potential and of the buffers |
 
   | Module | Holds |
   |---|---|
@@ -146,40 +153,412 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `Amounts` | The amount that a call or an operation spends |
   | `Loop_costs` | The cost rules of a loop |
 
+- **A worst-case bound is proven at both ends of the exchange rate between
+  a callee's bound and its potential.** A callee's `O(f)` is checked against
+  `2^17 * f + 2^16` of the callee's units and charged to its caller as
+  `f + 1`, so one unit of a callee's bound stands for up to 2^17 of the
+  callee's steps, and one unit of potential for one. The work of a callee
+  with an amortized bound is therefore its bound less its potential change
+  divided by 2^17. An account is affine in that rate, so it is within a
+  bound at that rate where it is within the bound at rate 0 and at rate 1.
+  `Counters.make_potential_credit` builds `credit(change)`, which is
+  `change` or zero by one Boolean that no fact constrains, so each cost
+  obligation is proven for both rates. `Loop_costs` credits the potential
+  that a loop gained by the same term in a plain account.
+
+  An amortized account has the same exchange rate, for each type that
+  holds potential. The potential of a type is worth as many steps as the
+  largest unit of a function that takes credit for releasing it, so a
+  function whose callee's amortized bound covers a change in that type's
+  potential cannot also take that credit at one unit each.
+  `Counters.spend_operation` blocks the types that such a callee reaches,
+  and `Counters.count_held_potential` counts a decrease in a blocked class
+  as zero. A callee that blocks a class which the body already took credit
+  for raises `Counters.Blocks_credited_potential`, and
+  `Translate.run_blocking` translates the definition again with the class
+  blocked from the start, so no term in a query depends on a later call.
+
+  | Rate | Account of a callee with an amortized bound | Rejects |
+  |---|---|---|
+  | 1 | Its bound less its potential change | A bound that ignores potential that the callee spent |
+  | 0 | Its bound | A bound whose steps are paid for by potential that the callee saved |
+- **A supposed execution is read under a condition that nothing asserts.**
+  A fact of a frame is assumed wherever the frame's condition holds, so a
+  fact about code that may not run must not enter a frame that does. The
+  prover reads three executions that it only supposes: a lambda's body,
+  where the lambda is made, both when it is checked and when it is explored
+  for a definition; a call of a function passed for a parameter,
+  where its contract is compared with the parameter's; and the return of a
+  definition, where a cost clause that names `result` is checked to be
+  defined. `Facts.suppose` makes the frame for each: it restricts the frame
+  by a new Boolean, so every fact and obligation of the supposed execution
+  has that Boolean as a premise, and the query stays satisfiable where the
+  execution is impossible. Three false proofs came from a supposed execution
+  in a frame that runs: the `ensures` of a function that never returns,
+  which no result meets, denied the `requires` it was assumed under; the
+  invariant of a supposed result of type `Room[capacity]` gave the body a
+  fact about `capacity`; and a call in a lambda's body, explored where the
+  lambda was made, gave the code around the lambda the callee's `ensures`
+  about a captured value.
+- **The facts of a partial term are assumed under its precondition.** Four
+  terms denote a value only where a condition holds: an application of a
+  function value, under the `requires` of its contract; an element at an
+  index, under the bounds; a call's result, under the callee's `requires`;
+  and the result of an intrinsic, under the intrinsic's precondition, which
+  `Intrinsics.require_precondition` obliges and never assumes. A frame that
+  makes obligations proves the condition before it
+  reads the term, and an obligation that is made is assumed, so the term's
+  facts are stated in that frame as they are. A frame that makes none reads
+  a clause of another definition and proves nothing, so it takes the
+  condition as a premise: `Facts.restrict_unless_proven` gives the frame.
+  That premise is all that keeps the claim "this term is a value of its
+  type" from holding of arguments that the clause's own definition never
+  showed well defined. A callee whose `ensures` names `read(0)` under a
+  premise that its `requires` rules out is such a clause.
+- **A contract is a specification statement, and every reader stands in
+  one of three relations to it.** In the refinement calculus a contract
+  with precondition `pre` and postcondition `post`, over the values `w`
+  that a call may change, is the statement `assert pre; havoc w; assume
+  post`.
+
+  | Relation | In kernel commands |
+  |---|---|
+  | A body implements a contract | `assume pre`; the body; `assert post` at each exit |
+  | A call executes a contract | `assert pre; havoc w; assume post` |
+  | Contract 1 refines contract 2: the statement of 1 implements 2 | `assume pre2; assert pre1; havoc w; assume post1; assert post2` |
+
+  `Specification.t` is a contract read at given entry and exit values. It
+  has the readings that the relations are made of, `assume_requires`,
+  `oblige_requires` and `assume_ensures`, and `refine`, which is the third
+  row. `oblige_requires` returns the conjunction that it obliged, which is
+  the condition under which the call is defined, so its caller states the
+  facts of the call in `Facts.restrict_unless_proven` of that condition and
+  reads the `requires` once. `Callbacks` reads a function value's contract
+  through it: a value passed for a parameter refines the parameter's
+  contract, a call of a value obliges its `requires`, and a call that
+  returned assumes its `ensures`.
+- **A contract is resolved once, and its three readers differ only in what
+  they prove and what they assume.** The rules are those of modular
+  verification with pre- and postconditions. A definition is proven against
+  its contract once, and every use relies on that proof alone, so a use may
+  assume a clause only under the premises that the proof assumed.
+  `Contracts.list_promises` is the one statement of those premises: it lists
+  each clause set with its `Contracts.premise`, which is `The_precondition`
+  or the `Requires_of` another clause set. A reader matches on the premise
+  to reach a clause, so it cannot take a clause set that needs a premise as
+  one that needs none. A contract is a list of specification cases in this sense,
+  as in JML's specification inheritance, and the precondition of the
+  contract is the `requires` that a call must meet: the definition's own,
+  or its trait's where it writes none.
+
+  | Clause set | Proven under | Its `ensures` at a call | Its `cost` at a call | In the axiom of a logic function |
+  |---|---|---|---|---|
+  | The definition's own | The precondition | Assumed, since the call met the precondition | Spent | Under the precondition |
+  | Its trait's, where the definition writes `requires` of its own | The trait's `requires` | Assumed under the trait's `requires` | Spent where the trait's `requires` hold of the arguments, and an unknown amount elsewhere | Under the trait's `requires` |
+  | A restating trait's | The precondition, which is all that the proof of the `impl` assumes | Assumed | Spent | Under the precondition |
+
+  A reader that takes a clause from the list and ignores its premise states
+  the clause of arguments that no proof covers. A change that adds an
+  assumption to one of the proofs changes the premise in `list_promises`
+  with it, since that is where every use reads the premise.
+
+  | Reader | Proves | Assumes |
+  |---|---|---|
+  | The definition's check, `Translate` | Each `ensures` at every return, under its premise, in `check_return`, and the clauses on a lent part in `check_lent_part` | The `requires`, in `enter_function` |
+  | A call, `Calls` | The `requires`, and the Panic condition where the caller may not panic, in `oblige_preconditions` | Each `ensures` under its premise, in the frame of the call, in `call_contract` |
+  | The axiom of a logic function, `Contract_axioms` | Nothing | Each `ensures`, for every argument in the function's domain |
+
+  `Translate.implementation` is a contract that a body implements: the
+  frame at entry, where the parameters are bound and the precondition is
+  assumed, and the contract's cases. A case is a clause set with the
+  premise that its `ensures` and its costs are proven under.
+  `check_lent_part` and `check_return` oblige every case at an exit. Two
+  proofs build an implementation, and they differ in the body.
+
+  | Proof | Cases | Body |
+  |---|---|---|
+  | A function, `translate_run` | Its own clauses and its trait's | Its code, which `Reader.read_body` reads |
+  | A restated method of an `impl`, `prove_restated_method` | The clauses that the trait adds | A call of the declared method, `Calls.call_contract` |
+
+  The second row is a refinement written as an implementation: the
+  contract of the `impl`'s method refines the restated contract where a
+  body that only executes the first implements the second. A restated
+  method has the signature of the method that it restates, so its proof
+  may panic where that signature says so, and proves the added clauses of
+  each call that returns. Each proof runs
+  once for every condition that a clause of its cases leaves undecided, so
+  a clause with a `when` condition is proven where the condition holds. A
+  proof that reads no body, of a law, a type or a constant, starts from
+  `Translate.start_proof`.
+
+  The clauses that restating traits add are a conservative extension of
+  the contracts of the methods: each is derived from those contracts and
+  from added clauses that were derived before it, so assuming them proves
+  nothing that the contracts do not. The order is the order in which traits
+  require each other, which has no cycle. `environment.proven_impl` names
+  the `impl` whose laws or restated clauses a proof proves, and in such a
+  proof a call has the clauses of a restating trait only where the proven
+  trait requires that trait, and never the proven trait's own
+  (`Contracts.list_restated_clauses`). A proof that assumed its own clauses
+  proved two clauses from each other, and a law's proof proved the law from
+  a clause whose proof could assume the law. The proof of restated clauses
+  assumes no law (`Laws.assume_laws`): the proof of a law may assume the
+  clauses of the traits that its trait requires, and through the proof of
+  another law the clauses of any trait, so a law can rest on the clause
+  that it would help to prove.
+
+  A use of an added clause depends on the contracts that the clause's own
+  formula names. `Mir.Call_edges.collect` visits, at a call of a trait's
+  method on a type whose head is known, the clauses that each restating
+  trait adds for that type, so the proof graph has the edge and
+  `Cycles` finds a proof that reaches itself through such a clause.
+
+  A use has only the clauses whose condition holds for its type arguments.
+  `Callee.resolve` decides each clause's condition once, with
+  `Conditions.keep_holding`, so the contract of a resolved callee holds no
+  other clause, and a call, a function value and the axiom of a logic
+  function read the same clauses.
+
+  A logic function is total in the logic and unspecified outside its domain.
+  Its domain is a condition under which the definition returns: valid
+  arguments, the premise of the clause, the Panic condition, and, for a
+  callee in the recursion group of the definition being proven, arguments
+  below the entry measure, which is the induction hypothesis. A call that
+  returned gives its `ensures` without the Panic condition, since
+  `uses Panic unless C` says that `C` rules a panic out, not that a return
+  implies `C`.
+
+  A definition that may abort returns for no argument that the prover
+  knows of, so it has no axiom, and a call of it in a specification or a
+  proof assumes neither its `ensures` nor that its result is valid. It may
+  abort where its code that runs, or a callee's, holds a call of
+  `intrinsic.crash` or of an intrinsic that allocates. That is the fact
+  `may_abort` of the call graph, which the code database computes for a
+  definition from its own code and its callees' facts, and once for the
+  members of a recursion group. A proof block, a loop's clauses, a theorem
+  and a specification-only function never run: each is read in a ghost
+  frame, where a call is a specification's, so none of them holds an abort
+  site or a callee, and a specification-only definition never aborts. A
+  method called through a trait bound and a function value have
+  no code to read, so each may abort unless the trait or the function's
+  type states `cost allocations == 0`, which every `impl` and every
+  function passed then proves. A scalar result keeps its range, since a
+  value in range exists for every argument.
+
+  A definition's own code also calls code that it cannot read: a method
+  through a bound of its generics, and a function value. Its proof assumed
+  the contract of each such call that returned, so its own contract is an
+  axiom only where those calls return. Such a call is an abort site unless
+  the trait's method, or the function's type, states
+  `cost allocations == 0`. A function value has no weaker condition: its
+  call leaves the relation of the value in the frame, which the definition's
+  own `ensures` can state of its result with `visit.ensures(...)`, and that
+  relation holds only of a call that returned.
+  A trait's method on a type whose `impl` is known is a callee like any
+  other: the method that the `impl` writes, derives or inherits has its own
+  fact. So the fact of a definition depends on no code that a caller
+  supplies, and a call is judged by the callee's fact alone.
+
+  A storage of capacity zero allocates nothing, so the call that builds one,
+  which an empty list literal makes, is no abort site.
+
+  So `cost allocations == 0` stands for "returns" on a trait's method and on
+  a function's type. Three obligations make that hold of code
+  that could reach `intrinsic.crash`, which allocates nothing. A method
+  whose trait states the clause for it, and a function that states
+  it and is named as a value, are rejected where their `may_abort` holds.
+  The method is one that an `impl` writes, or the body that the trait gives:
+  that body is judged by the fact of the node it is proven as, which is the
+  trait's method, or the method that an `impl` inherits where the body is
+  proven for that `impl`. A
+  lambda whose type states it is rejected where its body, or a lambda made
+  in its body, holds an abort site or calls a function that may abort. So
+  every function value of such a type was made from code that returns.
+
+  `Query.note_withheld` records each call whose contract a specification
+  did not learn, by the symbol of its function. An obligation keeps the
+  callees among them that its pruned query declares, and a failed one names
+  them, so the diagnostic says why a fact that the code seems to state is
+  missing.
+- **The semantics of a storage operation is a contract written in Truss.**
+  `standard.intrinsic_contracts` declares a function with the name and the
+  signature of the intrinsic and a `todo` body, as `standard.specification`
+  declares `Sequence`. `Intrinsic.has_contract` lists these operations.
+  `Callee.resolve_target` resolves a call of one to its declaration, so the
+  rules of a call prove its `requires` and assume its `ensures` and its
+  costs, and `Mir.Call_edges` gives the call an edge to the declaration. The
+  contract is trusted: no proof compares it with the generated code. The
+  declaration of an operation that may abort, which `Intrinsic.may_abort`
+  lists, is an abort site. So its contract is no axiom and holds only of a
+  call that returned, and it needs no `requires` that the capacity is
+  within `core.maximum_length`.
+
+  | Operations | Semantics |
+  |---|---|
+  | `storage_empty`, `storage_with_capacity`, `storage_set_capacity`, `storage_from_array`, `array_from_storage`, `storage_shorten`, `storage_push`, `storage_pop`, `storage_insert`, `storage_remove`, `storage_swap`, `find_byte` | A contract in `standard.intrinsic_contracts` |
+  | `storage_length`, `storage_capacity`, `storage_model`, `array_model` | Terms of the logic, which the contracts are written in |
+  | Scalar operations | Terms of the logic, in `Operations` |
+  | Every other buffer operation, and the runtime operations | `Intrinsics` |
 - **One module states the contract of a logic function as an axiom.**
   `Contract_axioms` builds the axiom for a call and for a function used as a
   value, with every premise its proof had: arguments in range that meet
   their invariants, the `requires`, and, for a callee in the recursion group
-  of the definition being proven, arguments below the entry measure. Its
-  state is one record, `context.axioms`, and CI rejects a use of it outside
-  `Contract_axioms`.
+  of the definition being proven, arguments below the entry measure.
 - **`Termination` holds the rules that show a body to end.** It compares a
   recursive call with the entry of the definition being proven: the call
   obliges the comparison, and the axiom of a callee in the recursion group
   takes it as a premise, so the two never differ. It also holds the measure
-  of a loop. Its state is one record, `context.termination`.
+  of a loop. It has no state: the definition's measures are a field of the
+  environment, and `Termination.enter_definition` gives the start frame the
+  entry of the definition, `definition_entry`, which every later frame
+  carries.
 - **`Cycles` reads the recursion group and the proof group, and rejects a
   proof that assumes a fact whose own proof assumes it back.** Every fact
   that a proof takes from another definition is an edge of the proof graph,
   which `Mir.Call_edges` lists: a callee's contract, a type's invariant, and
-  the laws of an `impl`. `Laws` assumes no law of an `impl` in the proof
-  group of the definition being proven.
-- **`Callbacks` holds the rules of a function passed as a value.** The
-  contract that a callee declares for a callback parameter, the promises a
-  caller proves of the function it passes, the relation that a function
-  value's `ensures` states, and the check of a callback that escapes are its
-  functions, and its state is one record, `context.callbacks`. `Lambdas`
-  reads a lambda's body and calls `Callbacks` for the relation's variables.
+  the laws of an `impl`. An `impl` that satisfies a bound brings the impls
+  behind every bound that it assumes in turn. One walk lists them for the
+  code that a call supplies and for the laws that a callee assumes,
+  `Call_edges.list_satisfied_bounds`, so a new way for one `impl` to rely
+  on another is written once, in `list_bounds_that_evidence_assumes`: the
+  bounds of its generics, and the bounds that its trait declares on the
+  associated types that it chooses. The walks differ in one place. A
+  derived method is a node with edges of its own, so its code needs only
+  the bounds of the type's parameters; a derived `impl`'s laws have no
+  proof of their own, so they rest on the laws of every field's type. `Laws` assumes no law of an `impl` in the proof
+  group of the definition being proven. A law that a callee's proof assumes
+  cannot be left out that way, so `Cycles.list_circular_proofs` reports it,
+  and every definition runs that one check, whatever its kind.
+- **`Callbacks` holds the rules of a function value.** A function value has
+  two terms in the logic: its application, where its type uses no capability
+  and has no `mut` input, and the relation that holds of the arguments and
+  the result of each of its calls, which `visit.ensures(...)` reads.
+  `Callbacks` knows the contract of two function values: a named function,
+  whose definition `Callee` resolves at the type arguments written, and a
+  function-typed parameter. It keys each contract by the value's term, so
+  the contract follows the value into a local and out of it, and nothing
+  reads the form of the expression that an argument was written as. The
+  contract of a parameter belongs to the frame that binds the parameter,
+  `frame.callbacks`: the first frame of the definition being proven, and
+  the frame that `Contracts.make_entry_frame` builds to read a clause of
+  another definition, where the key is the argument. So a clause that
+  applies its function parameter finds that parameter's `requires` wherever
+  the clause is read: at a call, in a callee's axiom, in a relation. Every
+  other function value promises nothing. Each use of a function value reads
+  that contract in one function:
+
+  | Use | Function | Rule |
+  |---|---|---|
+  | Named as a value | `read_named_function` | States its relation once per query, and its definition where the function does not abort |
+  | Passed for a parameter | `check_passed` | The parameter's `requires` imply its `requires`, and its `ensures` imply the parameter's |
+  | Called | `check_called`, `assume_returned` | The call proves its `requires` and assumes its `ensures` |
+  | Read where no function type states a `requires` | `check_read`, `check_passed` | Its `requires` hold for every argument |
+
+  The definition of a named function is its contract as an axiom, and the
+  relation holds only of a call that returned. So a function that may abort
+  has a relation and no definition: its application is a term that nothing
+  specifies, as its call in a specification is. `Callee.may_abort` decides
+  that for a call and for a function named as a value, and
+  `State.known_function` carries the answer with the contract. A lambda
+  follows the same rule. Its definition and the facts of its application
+  are those of its body where the body returns, so where the body may abort
+  `Lambdas.read_lambda` states only the relation of the body, which a call
+  that returned makes hold. The body was checked for the arguments of the
+  lambda's domain: valid inputs that meet the `requires` of the parameter
+  that the lambda is passed for. The definition is a term, so it holds of
+  every argument, and the fact that the application is a value of its
+  result type is stated under the domain: `fn(x) { x - 1 }` passed for a
+  parameter that requires `x > 0` is `-1` at zero, and is a `UInt64` above
+  it.
+
+  `Lambdas.make_passed_values` checks each argument of a call against its
+  parameter's contract: it runs a lambda's body against the contract, which
+  it reads through `Callbacks.read_requires` and `Callbacks.read_ensures`,
+  and gives every other value to `check_passed`.
+- **`Forks` holds the rules of a `concurrent` or `parallel` block, and a
+  branch is read alone.** The
+  branches run at the same time, so a fact that one learns is not a fact of
+  another: a `return` in one branch can run before the guard of another.
+  `Forks.read` reads each branch from the entry of the block under a
+  supposition of its own, and the branch's obligations and early exits come
+  from that read. It then reads the branches in sequence, without
+  obligations, for the frame at the end of the block, where every branch
+  has run. `Reader` gives it the reading of each branch. At an early exit of one branch, every other branch has not
+  started or has ended in one of its outcomes, so the exit frame takes the
+  values of the places that the branch mutates, and the cost that it spent,
+  from a disjunction over those outcomes.
 - **One function builds the frame that reads a callee's clause.**
   `Contracts.make_entry_frame` binds a clause's parameters to the arguments,
   and `Contracts.make_exit_frame` to the values at return, with the entry
   values as `old`. A call, a callback, a contract axiom and the clauses a
   method takes from its trait all read through them.
+- **A function takes the least state that it reads, and its type says
+  which.**
+
+  | Parameter | Holds | Taken by a function that |
+  |---|---|---|
+  | None | | Builds a term or reads a type, such as `Encoding.sort_of` |
+  | `State.environment` | The definition being proven and the database it is proven against: the lookups, the node, the condition and its bounds, the measures, the obligation policy, and the reader of a formula and of a body. It does not change during a proof | Reads the program away from a point of it, such as `Callee.may_abort` or `Cycles.is_in_proof_cycle` |
+  | `State.frame` | The logical context at a point of the program: the environment, the bindings, the path condition, the symbols of the definition's parameters at entry, and the query that its facts and obligations are added to | Reads the program at a point, adds a fact there or makes an obligation there, such as `Encoding.substitute_type`, `Facts.assume` or `Obligations.oblige` |
+  | `Query.t` | The query under construction, the holes of the proof, and the private state of each module | Declares a symbol or states a fact where no frame is at hand, such as `Contract_axioms.declare_function` |
+
+  A function that reads the environment and writes the query, and reads no
+  path, takes the two: `Conditions.decide`, `Models.rank`. One function,
+  `Translate.make_empty_frame`, gives a frame its environment and its
+  query, and every other frame is a copy of a frame, so the frames of a
+  proof share one of each.
+
+- **A formula enters a query in one of three ways.** A fact that is true
+  on one path and stated for every path makes the query prove false
+  claims on the other paths, so the function that takes a plain fact is the
+  one that guards it.
+
+  | Function | States | Under |
+  |---|---|---|
+  | `Facts.assume` | What reading a path showed: a branch taken, a call that returned, an obligation just made | The path condition of its frame |
+  | `Facts.define` | That a term equals a value | Nothing. A term has one definition: a second with another value is a compiler bug |
+  | `Facts.add_theorem` | A formula that holds on every path, with the reason in `~because` | Nothing |
+
+  | `Query.reason` | The formula holds because |
+  |---|---|
+  | `Defines term` | It is the one definition of a symbol at every argument |
+  | `Specifies term` | It constrains a term or a symbol that has no definition: the range of a new symbol, a bound on a cost |
+  | `Lemma` | It is a theorem of arithmetic, of the values of a type, or of a model function |
+  | `Proven_by path` | The proof of that definition establishes it for every argument: a contract, a law, the sign of a type's potential |
+  | `Hypothesis` | The definition being proven assumes it and each of its uses discharges it: a law of one of its bounds |
+  | `Generalizes_an_execution` | It is the facts of a supposed run, each under the premises of that run |
+
+  A definition is all that is true of its term. `Query.add_theorem` does
+  not add a `Specifies` fact of a term that has a definition, and a
+  definition of a term after a fact about it was stated is a compiler bug:
+  the two could contradict each other, and every obligation that reaches
+  the term would then prove.
 - **Each rule of the prover has one owner module, and each record of its
   state one owner.** `Reader`, `Calls`, `Loops` and `Lambdas` execute the
   MIR and call an owner at each statement, so a new rule edits its owner.
-  An owner's state is an abstract type or a record of `State.context` that
-  `for_prover_state.sh` lets only the owner use.
+  `State` has no mutable field. An owner's state is a type that the owner's
+  module defines and does not export. The module makes a key for the type
+  with `Private_state.make_key` and reads the state with
+  `Query.read_state`, which makes it on the first read. No other module can
+  name the type, so none reads or writes the state. A memo table of a
+  function of the environment is kept the same way in the environment's
+  `memos`: the visible types of `Encoding`, the callees of `Contracts`, the
+  type declarations of `Validity`.
+
+  What a run of a body gives is a result and not state. `Reader.read_body`
+  returns the returns and the lent parts of the body, and a changed part
+  carries the description of its root that a diagnostic shows.
+
+  Inside a body, a path that leaves the code being read is an `exit`: a
+  return, a `break`, a `continue`, an early exit of an iteration or of a
+  branch, a lent part. A jump leaves its exit with `leave`, and a
+  construct reads the code inside it with `collect_exits`, which gives it
+  the exits of that code as a list. The construct takes its own and passes
+  the rest on: a loop takes the breaks and the ends of its iterations
+  (`read_iteration`), a fork the exits of its branches, and a `provide`
+  block refreshes each exit that passes through it. An exit that reaches
+  the end of the body and is not a return or a lent part is a compiler bug.
+  `read_statement` gives each construct to a function of its own.
 
   | Module | Holds |
   |---|---|
@@ -189,28 +568,71 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `Fixes` | The fixes that a diagnostic offers |
   | `Obligations` | The obligations of a run, and which of them it makes |
   | `Joins` | The join of the paths that meet |
+  | `Forks` | The branches of a `concurrent` or `parallel` block: each alone, the end of the block, and what an early exit knows of the other branches |
   | `Cycles` | The recursion group and the proof group |
   | `Termination` | Measures, and the comparison of a recursive call |
   | `Contract_axioms` | The contract of a logic function as an axiom |
   | `Validity` | The invariant of a value, and each check of it |
   | `Callee` | The callee of a call: the definition that it runs, its contract, its substitutions and the key of its logic symbol |
-  | `Callbacks` | A function passed as a value |
+  | `Callbacks` | A function value: its terms, its contract, and each use of it |
   | `Lending` | The contract of a lending method: where each clause holds, and the part as the caller left it |
   | `Laws` | The laws of a trait |
 
+- **What holds for the length of a nested read is a field of the frame that
+  the read receives.** A reader that needs such a fact takes it from its
+  frame, and the frame that the caller keeps never had it, so nothing is
+  set and restored and a reader cannot see the setting of another read.
+
+  | Field of `State.frame` | Holds while |
+  |---|---|
+  | `is_ghost` | A specification, a proof block or an evaluated assertion is read |
+  | `panics`, `can_declare_panic` | The code being read may panic, and may be given `uses Panic` as a fix |
+  | `terminates` | The code being read must terminate: the definition's own flag, or a lambda's inside its body |
+  | `obligation_condition` | A clause that holds under a condition is read, so that an obligation made while reading it is one of that condition |
+  | `requires_being_read` | One `requires` clause of the definition is read, so that a fix is placed before it |
+  | `callees_whose_requires_are_read` | The `requires` of a callee are read, so that a call to the same callee inside them reads none |
+  | `instantiating` | The contract of a callee is read at an instantiation, so that a nested reading at a larger instantiation stops |
+  | `provided` | The body of a `provide` block is read |
+  | `is_reading_callback` | An operand is read as a function to call or to pass, where a function parameter does not escape |
+  | `validating` | The invariant of a type is read, so that a value of the same type inside it is not unfolded again |
+  | `callbacks` | The parameters of a definition or of a clause are bound |
+  | `spent`, `conditional_counters` | A body is read: the counters being counted are the keys of `spent`, so a frame says what it counts. `Counters.count` starts them for a definition and for a lambda, and `Counters.stop_counting` gives a specification a frame that counts nothing |
+
+  A read that returns a frame to its caller restores what it changed in one
+  place: `Validity.run_as_specification` gives the frame that it returns
+  the amounts and the panic flags of the frame that it was given, so a
+  frame that counts nothing cannot go on to run code.
+
 - **`Query` holds the query under construction.** Its declarations, facts,
   fresh names, scopes and posed obligations are fields of an abstract type,
-  `context.query`, so no other module writes them: a module marks the facts
-  with `Query.count_facts` and reads the ones added since, and a module that
+  `Query.t`, so no other module writes them: a module marks the query with
+  `Query.mark` and reads the facts added since, and a module that
   reads code under a binder takes the facts of that scope from
   `Query.run_in_scope`.
+- **A term is built without the query.** The sort of a type is
+  `Encoding.sort_of`, a function of the type. A symbol whose structure
+  fixes its signature, such as `Capacity` of a type or `Apply` of a list of
+  sorts, has it in `Signatures.find_signature`, and no reader declares it.
+  `Logic.prune` reads such a symbol as declared, and `Logic.declare_derived`
+  completes the pruned query of an obligation: a declaration for each such
+  symbol that a fact or the goal names, and a datatype, with the
+  constructors that `Encoding.list_constructors` gives, for each sort that
+  a declaration, a bound variable, a constructor or a field names. It
+  rejects a written declaration of a derived symbol, so each symbol has one
+  source of its signature. A symbol that names a definition or a fresh
+  value is declared by the module that makes it, except the length and the
+  sum of a sequence, which the prover itself builds: `Signatures` gives
+  their signatures, and `Contract_axioms.declare_function` checks a call of
+  them against it. The axioms of a derived symbol that are a function of
+  the symbol are in `Signatures.list_axioms`: `Logic.prune` adds them for
+  each derived symbol that the query names, so an axiom is in a query
+  exactly where its symbol is.
 - **`Validity` decides each check of an invariant.** Every moment that
   obliges one calls `Validity.check_valid`, which first asks its record of
   the values already shown valid, so a value is proven once. A write
   through a passed place returns the end of the write, and the call ends it
   after its postconditions: an element is checked there, and a step's
-  `self` is a value not known to be valid until then. Its state is one
-  record, `context.validity`.
+  `self` is a value not known to be valid until then.
 - **A call's callee is resolved once.** `Callee.resolve` turns the target
   that the MIR writes into the definition that runs, its contract, the
   substitution of each of its clauses, and the type arguments that key its
@@ -223,10 +645,11 @@ develop as well as make it easier to bootstrap the compiler in parts.
 - **`Lending` decides where each clause of a lending method holds.**
   `Lending.holds_where_lent` separates the clauses on the lent part from
   the clauses that hold when the lend ends, and the method's proof and
-  every caller read a clause in the state that it names. A method's proof
-  records each part it lends in `context.lending`, and `Translate` checks
-  the method's own clauses and its trait's at each lent part and at each
-  exit. `Calls.call_contract` gives a `mut` lend two moments: it assumes
+  every caller read a clause in the state that it names. The type of the
+  lent part is a field of the frame, `lent_part_type`. `Lending.lend_part`
+  returns each part that a method's proof lends, `Reader.read_body` returns
+  them with the body's returns, and `Translate` checks the method's own
+  clauses and its trait's at each lent part and at each exit. `Calls.call_contract` gives a `mut` lend two moments: it assumes
   the clauses on the lent part where the method lends, and returns the end
   of the lend, which takes the part as the caller left it, checks its
   invariant, and assumes the other clauses. `visited` and `final(result)`
@@ -291,7 +714,7 @@ unchecked.
 Code names each module by its path, such as `Resolve.Names` or
 `Emit_c.Ir_builder`, so a reader finds a definition without searching for the
 module a short name stands for. Code has no `open`: a name from another
-module is qualified, as in `Facts.find_visible_type`, and no `open` can
+module is qualified, as in `Encoding.find_visible_type`, and no `open` can
 shadow a name in scope. Code has no module alias either. Many modules share a name,
 such as the scanner's `Names` and `Resolve.Names`, so an alias's short name
 does not say which module it is. A library's main module exposes a

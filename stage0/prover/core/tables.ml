@@ -4,13 +4,14 @@ type stated =
   | Value_of of Logic.symbol
   | Contract_of of Logic.symbol
   | Limited_link of Logic.symbol
-  | Exclusive of Logic.symbol
   | Array_length of Logic.symbol
   | Ranked_model of Logic.symbol
   | Ranked_elements of Types.ty
   | Range_elements of Types.ty
-  | Non_negative_rank of Types.ty
   | Method_cost_bound of Logic.symbol
+  | Laws_of of Types.trait_reference * Types.ty
+  | Derived_equality of Logic.term
+  | Potential_of of Logic.term
 
 module Symbol_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Logic.symbol
@@ -26,18 +27,6 @@ end))
 
 module Path_table = Hashtbl.Make (Path)
 
-module Local_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Locals.local
-end))
-
 module Stated_table = Hashtbl.Make (Structural_key.Make (struct
   type t = stated
-end))
-
-module Model_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Types.ty * Types.ty
-end))
-
-module Axiom_clause_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Logic.symbol * Resolve.Names.key * Path.t * Core.origin
 end))

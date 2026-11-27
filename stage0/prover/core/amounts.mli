@@ -1,26 +1,27 @@
-val declare_bounded_amount : State.context -> State.frame -> Logic.term -> Logic.term
+type call_amount = {
+  call : Catalog.Prover.quoted;
+  callee : Path.t;
+  states_cost : bool;
+  counts_potential : bool;
+  counter : Costs.counter;
+  amount : Logic.term;
+}
 
-val make_callback_cost :
-  State.context -> State.frame -> Language.Metric.t -> Types.ty -> Logic.term -> Logic.term
+val list_call_amounts : Query.t -> call_amount list
+val declare_bounded_amount : State.frame -> Logic.term -> Logic.term
+val make_callback_cost : State.frame -> Language.Metric.t -> Types.ty -> Logic.term -> Logic.term
 
 val compute_construction_amount :
-  State.context -> State.frame -> Types.ty -> string option -> Costs.counter -> Logic.term
+  State.environment -> Types.ty -> string option -> Costs.counter -> Logic.term
 
-val compute_method_cost :
-  State.context -> State.frame -> Language.Metric.t -> Callee.t -> Logic.term
+val compute_method_cost : State.frame -> Language.Metric.t -> Callee.t -> Logic.term
 
 val spend_copy :
-  ?literal:Language.Literal.t ->
-  State.context ->
-  State.frame ->
-  declared:Types.ty ->
-  Logic.term ->
-  State.frame
+  ?literal:Language.Literal.t -> State.frame -> declared:Types.ty -> Logic.term -> State.frame
 
-val spend_wait_for_tasks : State.context -> State.frame -> State.frame
+val spend_wait_for_tasks : State.frame -> State.frame
 
 val spend_contract_call :
-  State.context ->
   before:State.frame ->
   after:State.frame ->
   Invocation.site ->
@@ -34,13 +35,12 @@ val spend_contract_call :
   final:Logic.term option ->
   is_recursive:bool ->
   bind_frame:(State.clauses -> State.frame) ->
+  read_requires:(State.clauses -> Logic.term) ->
   State.frame
 
-val spend_call_without_a_contract :
-  State.context -> State.frame -> Callee.t -> State.passed list -> State.frame
+val spend_call_without_a_contract : State.frame -> Callee.t -> State.passed list -> State.frame
 
 val spend_derived_equality :
-  State.context ->
   State.frame ->
   Callee.t ->
   State.passed list ->
@@ -49,11 +49,11 @@ val spend_derived_equality :
   State.frame
 
 val spend_indirect_call :
-  State.context ->
   before:State.frame ->
   after:State.frame ->
   location:Obligation.location ->
-  (Types.ty * Logic.term * Invocation.shape) option ->
+  Types.function_type ->
+  Logic.term ->
   State.passed list ->
   changed:(int * Logic.term) list ->
   result_type:Types.ty ->
@@ -61,7 +61,6 @@ val spend_indirect_call :
   State.frame
 
 val spend_intrinsic :
-  State.context ->
   State.frame ->
   Callee.t ->
   Intrinsic.operation ->

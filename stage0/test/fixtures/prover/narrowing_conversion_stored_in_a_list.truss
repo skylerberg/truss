@@ -1,0 +1,16 @@
+use standard.intrinsic
+
+fn stored(seed: List[UInt8], length: UInt64) -> List[UInt8] {
+  var mask: List[UInt8] = []
+  var counter: UInt32 = 0
+  while mask.length() < length && counter < 65536
+    decreases 65536 - counter
+  {
+    var input = seed.copy()
+    mut input.push(intrinsic.convert(counter >> 24))
+    mut input.push(intrinsic.convert(counter & 255))
+    mut mask.append(own input)
+    counter += 1
+  }
+  mask
+}

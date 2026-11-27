@@ -184,6 +184,7 @@ public fn Path.join(self, part: String) -> Path
 
 public fn Path.join_path(self, other: Path) -> Path
   ensures identical(result, join_paths(self.text, second: other.text))
+  ensures result.text.length() <= self.text.length() + other.text.length() + 1
   cost time O(self.text.length() + other.text.length())
 {
   join_paths(self.text, second: other.text)
@@ -1123,9 +1124,12 @@ impl FromTemplate for Glob {
 
   fn from_template(template: Template[Never]) -> Glob
   {
-    match Glob.parse(template.literals[0].text()) {
-      Ok(glob) => glob
-      Err(_) => Glob(components: [], absolute: false)
+    match template.literals.get(0) {
+      Some(literal) => match Glob.parse(literal.text()) {
+        Ok(glob) => glob
+        Err(_) => Glob(components: [], absolute: false)
+      }
+      None => Glob(components: [], absolute: false)
     }
   }
 }

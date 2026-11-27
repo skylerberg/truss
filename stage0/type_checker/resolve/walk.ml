@@ -405,10 +405,10 @@ and resolve_clause state scope (clause : Syntax.clause) =
         value
   | Decreases measures -> List.iter (resolve_expression state (enter_specification scope)) measures
   | Modifies parts -> List.iter (resolve_expression state scope) parts
-  | Cost cost -> resolve_cost state scope ~clause_words:[] cost
+  | Cost cost -> resolve_cost state scope ~clause_words:[] ~names_result:true cost
   | Clause_error -> ()
 
-and resolve_cost state scope ~clause_words (cost : Syntax.cost) =
+and resolve_cost state scope ~clause_words ~names_result (cost : Syntax.cost) =
   (match cost.resource with
   | Calls (Call_parameter name) -> resolve_local_value state (bind_words scope clause_words) name
   | Calls (Call_capability path) -> resolve_path_type state scope path
@@ -416,7 +416,9 @@ and resolve_cost state scope ~clause_words (cost : Syntax.cost) =
   | Metric _ -> ());
   let bound =
     {
-      (bind_words (enter_specification scope) (clause_words @ [ ("result", Meaning Result_value) ])) with
+      (bind_words (enter_specification scope)
+         (clause_words @ if names_result then [ ("result", Meaning Result_value) ] else []))
+      with
       cost_bound_functions;
     }
   in
@@ -875,7 +877,7 @@ and resolve_loop_clause state scope ~clause_words (written : Syntax.loop_clause)
   match written.kind with
   | Invariant value -> resolve_expression state specification value
   | Loop_decreases measures -> List.iter (resolve_expression state specification) measures
-  | Loop_cost cost -> resolve_cost state scope ~clause_words cost
+  | Loop_cost cost -> resolve_cost state scope ~clause_words ~names_result:false cost
 
 let find_shadowed_type state scope text : Catalog.Resolve.binding option =
   if String_map.mem text scope.types then Some Generic_parameter_here

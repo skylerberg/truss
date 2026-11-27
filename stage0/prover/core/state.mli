@@ -21,13 +21,52 @@ type contract = {
   result_kind : [ `Returns | `Lends ];
 }
 
-type known_callee = {
-  known_signature : Types.signature option Lazy.t;
-  known_clauses : (Interface.form_origin * clauses option) option Lazy.t;
+type known_function =
+  | Named of {
+      path : Path.t;
+      contract : contract;
+      substitution_of : clauses -> Types.substitution;
+      type_arguments : Types.argument list;
+      group_member : Path.t option;
+      may_abort : bool;
+    }
+  | Own of { name : string; callback : Mir.callback }
+
+type obligation_policy = {
+  panic_condition : Catalog.Prover.quoted list option;
+  keeps_termination : bool;
+  keeps_failures : bool;
 }
 
-type frame = {
+type impl_proof =
+  | Proves_laws of Types.trait_reference * Types.ty
+  | Proves_restated_clauses of Types.trait_reference * Types.ty
+
+type environment = {
+  lookups : Lookups.t;
+  current : Path.t;
+  node : Path.t;
+  home : Resolve.Names.key;
+  condition : Types.condition;
+  bounds : Interface.Impls.bounds;
+  disjoint : (Core.id list * Core.id list) list;
+  inherits_precondition : bool;
+  ranking : bool;
+  terminates : bool;
+  measures : Mir.formula list;
+  blocked_holders : string list;
+  proven_impl : impl_proof option;
+  policy : obligation_policy;
+  memos : Private_state.t;
+  read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;
+  run_body : frame -> lambdas:Mir.body array -> Mir.body -> body_exits;
+}
+
+and frame = {
+  environment : environment;
+  query : Query.t;
   source : source;
+  entry : (Logic.symbol * string option) list;
   locals : Logic.term Locals.t;
   types : Types.ty Locals.t;
   old_locals : Logic.term Locals.t;
@@ -44,14 +83,35 @@ type frame = {
   visited : Logic.term option;
   final_result : Logic.term option;
   spent : (Costs.counter * Logic.term) list;
+  conditional_counters : Costs.counter list;
   aliases : (Logic.term * Mir.place) list Locals.t;
   lends : (Logic.term * (frame -> Logic.term -> frame)) list Locals.t;
+  callbacks : (Logic.term * (Types.function_type * known_function)) list;
+  requires_being_read : Core.origin option;
+  callees_whose_requires_are_read : Path.t list;
+  provided : Mir.provided list list;
+  panics : bool;
+  can_declare_panic : bool;
+  instantiating : (Path.t * int) list;
+  obligation_condition : Types.condition;
+  is_reading_callback : bool;
+  validating : Types.ty list;
+  terminates : bool;
+  lent_part_type : Types.ty option;
+  definition_entry : definition_entry option;
 }
 
-type changed_part = { root : Locals.local; declared_root_type : Types.ty; fields : string list }
-type place_value = One of Logic.term | Run of Logic.term * Logic.term
-type noted_place = { origin : Core.origin; value : place_value }
-type function_exit = { frame : frame; returned : Logic.term option; return_origin : Core.origin }
+and definition_entry = { entry_frame : frame; entry_measures : Logic.term list }
+and function_exit = { frame : frame; returned : Logic.term option; return_origin : Core.origin }
+and lent_part = { lent_frame : frame; lent_origin : Core.origin }
+and body_exits = { returns : function_exit list; lends : lent_part list }
+
+type changed_part = {
+  root : Locals.local;
+  root_description : Catalog.Prover.value;
+  declared_root_type : Types.ty;
+  fields : string list;
+}
 
 type passed_place = {
   read : frame -> Logic.term;
@@ -61,7 +121,6 @@ type passed_place = {
 type passed = {
   position : int;
   mode : Language.Mode.t;
-  shape : Invocation.shape;
   origin : Core.origin option;
   passed_place : passed_place option;
   is_step_self : bool;
@@ -80,134 +139,3 @@ type call_argument =
       site : Invocation.site;
       lambda : lambda_code;
     }
-
-type stated = Tables.stated =
-  | In_range of Logic.symbol
-  | Field_in_range of Logic.term
-  | Value_of of Logic.symbol
-  | Contract_of of Logic.symbol
-  | Limited_link of Logic.symbol
-  | Exclusive of Logic.symbol
-  | Array_length of Logic.symbol
-  | Ranked_model of Logic.symbol
-  | Ranked_elements of Types.ty
-  | Range_elements of Types.ty
-  | Non_negative_rank of Types.ty
-  | Method_cost_bound of Logic.symbol
-
-type call_amount = {
-  call : Catalog.Prover.quoted;
-  callee : Path.t;
-  states_cost : bool;
-  counts_potential : bool;
-  counter : Costs.counter;
-  amount : Logic.term;
-}
-
-type buffer = {
-  kind : Language.Builtin_type.t;
-  element : Types.ty;
-  model_of : Logic.term -> Logic.term;
-}
-
-type cost_state = {
-  mutable counters : Costs.counter list;
-  mutable conditional_counters : Costs.counter list;
-  mutable bounded_counters : Costs.counter list;
-  mutable recursive_costs_assumed : int;
-  mutable lambdas_assuming_recursive_costs : Logic.term list;
-  mutable lambda_costs : ((Logic.term * Language.Metric.t) * (Logic.term * Obligation.t list)) list;
-  mutable lambda_captures : (Logic.term * Core.local list) list;
-  mutable call_targets : (Logic.term * Core.local) list;
-  mutable call_amounts : call_amount list;
-  mutable potentials : Logic.term list;
-  holds_potential : bool Tables.Type_table.t;
-  buffers : buffer option Tables.Type_table.t;
-}
-
-type lent_part = { lent_frame : frame; lent_origin : Core.origin }
-type lending_state = { mutable part_type : Types.ty option; mutable lent_parts : lent_part list }
-
-type open_axiom = {
-  parameters : Logic.symbol list;
-  mutable hypotheses : Logic.term list;
-  mutable at_calls : (frame -> (Logic.term -> Logic.term) -> unit) list;
-}
-
-type axiom_state = {
-  mutable axiomatizing : Logic.symbol list;
-  axiom_clauses : unit Tables.Axiom_clause_table.t;
-  mutable open_axioms : open_axiom list;
-  axioms_of : open_axiom Tables.Symbol_table.t;
-}
-
-type definition_entry = { entry_frame : frame; entry_measures : Logic.term list }
-
-type termination_state = {
-  mutable terminates : bool;
-  measures : Mir.formula list;
-  mutable definition_entry : definition_entry option;
-}
-
-type validity_state = {
-  mutable validating : Types.ty list;
-  type_clauses : (source * Mir.type_clauses option Lazy.t) option Tables.Path_table.t;
-  valid_values : (Types.ty * Logic.term) list Tables.Term_table.t;
-}
-
-type callback_state = {
-  mutable own : (Core.local * string * Mir.callback) list;
-  mutable is_reading : bool;
-}
-
-type obligation_policy = {
-  mutable panics : bool;
-  mutable can_declare_panic : bool;
-  panic_condition : Catalog.Prover.quoted list option;
-  keeps_termination : bool;
-  keeps_failures : bool;
-  mutable obligation_condition : Types.condition;
-}
-
-type context = {
-  lookups : Lookups.t;
-  current : Path.t;
-  node : Path.t;
-  visible_types : (Types.type_interface * Types.substitution) option Tables.Type_table.t;
-  callees : known_callee Tables.Path_table.t;
-  mutable parameter_names : (Logic.symbol * string) list;
-  local_names : string Tables.Local_table.t;
-  local_origins : Core.origin Tables.Local_table.t;
-  mutable returns : function_exit list;
-  mutable enclosing_provides : Mir.provided list list;
-  mutable instantiating : Path.t list;
-  mutable callees_whose_requires_are_read : Path.t list;
-  query : Query.t;
-  axioms : axiom_state;
-  termination : termination_state;
-  validity : validity_state;
-  callbacks : callback_state;
-  policy : obligation_policy;
-  disjoint : (Core.id list * Core.id list) list;
-  mutable indexes : (Core.id * noted_place) list;
-  lending : lending_state;
-  home : Resolve.Names.key;
-  mutable laws_assumed : (Types.trait_reference * Types.ty) list;
-  cost : cost_state;
-  mutable logs : (Logic.term * bool) list;
-  mutable powers : (Logic.term * Logic.term) list;
-  lambda_definitions : Logic.term Tables.Symbol_table.t;
-  models : (Logic.term -> Logic.term) option Tables.Model_table.t;
-  mutable equalities : Logic.term list;
-  mutable entry : Logic.symbol list;
-  inherits_precondition : bool;
-  mutable holes : (Resolve.Names.key * Obligation.location) list;
-  mutable unfinished : Logic.term list;
-  ranking : bool;
-  condition : Types.condition;
-  bounds : Interface.Impls.bounds;
-  mutable requires_clause_being_read : Core.origin option;
-  mutable skipped_conditions : Types.condition list;
-  run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;
-  read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;
-}

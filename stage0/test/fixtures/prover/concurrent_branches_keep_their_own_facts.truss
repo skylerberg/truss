@@ -1,0 +1,51 @@
+fn returned_before_the_guard(x: Int64) -> Int64
+  uses Tasks
+  ensures result >= 0
+{
+  concurrent {
+    {
+      if x < 0 {
+        return 0
+      }
+    }
+    {
+      return x
+    }
+  }
+}
+
+fn returned_beside_a_return(x: Int64) -> Int64
+  uses Tasks
+  ensures result >= 0
+{
+  concurrent {
+    {
+      return 0
+    }
+    {
+      return x
+    }
+  }
+}
+
+fn ended(x: Int64, y: Int64) -> Int64
+  uses Tasks
+  requires x < 1000 && y < 1000
+  ensures result >= 0
+{
+  var left: Int64 = 0
+  var right: Int64 = 0
+  concurrent {
+    {
+      if x >= 0 {
+        left = x
+      }
+    }
+    {
+      if y >= 0 {
+        right = y
+      }
+    }
+  }
+  left + right
+}

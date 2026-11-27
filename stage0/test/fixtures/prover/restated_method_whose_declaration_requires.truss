@@ -1,0 +1,38 @@
+trait Steps {
+  fn step(self, by: Int64) -> Int64
+    requires by > 0
+    ensures result > 0
+}
+
+trait LongSteps: Steps {
+  fn step(self, by: Int64) -> Int64
+    ensures result >= by
+}
+
+type Walker(x: Int64)
+
+impl Steps for Walker {
+  fn step(self, by: Int64) -> Int64
+    requires by > 0
+    ensures result == by
+  {
+    by
+  }
+}
+
+impl LongSteps for Walker {
+}
+
+type Crawler(x: Int64)
+
+impl Steps for Crawler {
+  fn step(self, by: Int64) -> Int64
+    requires by > 0
+    ensures result == 1
+  {
+    1
+  }
+}
+
+impl LongSteps for Crawler {
+}

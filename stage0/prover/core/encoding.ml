@@ -54,27 +54,36 @@ let make_constructor_symbol (ty : Types.ty) variant =
 
 let make_selector_symbol ty variant field = Logic.Symbol.Field { type_ = ty; variant; field }
 let is_standard_equal = Well_known.is Equal
+let sequence_path : Path.t = Well_known.make_path Sequence
 
-let find_visible_type (context : State.context) (ty : Types.ty) =
+let make_sequence_type element =
+  Types.Named { path = sequence_path; arguments = [ Types.Type element ] }
+
+let visible_types :
+    (Types.type_interface * Types.substitution) option Tables.Type_table.t Private_state.key =
+  Private_state.make_key (fun () -> Tables.Type_table.create 16)
+
+let find_visible_type (environment : State.environment) (ty : Types.ty) =
+  let visible_types = Private_state.read environment.memos visible_types in
   match ty with
   | Named { path; arguments } when Types.find_builtin ty = None -> (
-      match Tables.Type_table.find_opt context.visible_types ty with
+      match Tables.Type_table.find_opt visible_types ty with
       | Some visible -> visible
       | None ->
           let visible =
-            match Interface.Definition.find_interface context.lookups.interface path with
+            match Interface.Definition.find_interface environment.lookups.interface path with
             | Some (Interface.Environment.Type_interface interface)
               when (not interface.opaque)
-                   || Path.locate_package path = Path.locate_package context.current ->
+                   || Path.locate_package path = Path.locate_package environment.current ->
                 Some (interface, Types.make_substitution interface.type_generics arguments)
             | _ -> None
           in
-          Tables.Type_table.replace context.visible_types ty visible;
+          Tables.Type_table.replace visible_types ty visible;
           visible)
   | _ -> None
 
-let find_constructors context ty =
-  match find_visible_type context ty with
+let find_constructors (environment : State.environment) ty =
+  match find_visible_type environment ty with
   | Some (interface, substitution) -> (
       let list_fields (list : Types.field list) =
         List.sort compare
@@ -96,46 +105,40 @@ let find_constructors context ty =
       | Todo_type | Builtin_type _ -> None)
   | None -> None
 
-let rec declare_sort (context : State.context) (ty : Types.ty) : Logic.sort =
+let sort_of (ty : Types.ty) : Logic.sort =
   let ty = Types.erase_views ty in
   if is_numeric ty then Int
   else if is_bool ty then Bool
   else
     match (ty, find_float_format ty) with
     | _, Some (exponent, significand) -> Float (exponent, significand)
-    | _ when Types.equal ty Types.unit ->
-        if not (Query.has_datatype context.query ty) then
-          Query.declare_datatype context.query ty (fun () -> [ (Logic.Symbol.Unit, []) ]);
-        Type_sort ty
     | Function function_type, _ -> Function_sort (List.length function_type.inputs)
-    | _ -> begin
-        (if not (Query.has_datatype context.query ty) then
-           match find_constructors context ty with
-           | Some shape ->
-               Query.declare_datatype context.query ty (fun () ->
-                   List.map
-                     (fun (variant, fields) ->
-                       ( make_constructor_symbol ty variant,
-                         List.map
-                           (fun (field, field_type) ->
-                             (make_selector_symbol ty variant field, declare_sort context field_type))
-                           fields ))
-                     shape)
-           | None -> ());
-        Type_sort ty
-      end
+    | _ -> Type_sort ty
 
-let rec is_equality_identity context ?(seen = []) (ty : Types.ty) =
+let list_constructors (environment : State.environment) (ty : Types.ty) =
+  if Types.equal ty Types.unit then Some [ (Logic.Symbol.Unit, []) ]
+  else
+    Option.map
+      (List.map (fun (variant, fields) ->
+           ( make_constructor_symbol ty variant,
+             List.map
+               (fun (field, field_type) ->
+                 (make_selector_symbol ty variant field, sort_of field_type))
+               fields )))
+      (find_constructors environment ty)
+
+let rec is_equality_identity (environment : State.environment) ?(seen = []) (ty : Types.ty) =
   is_numeric ty || is_bool ty || Types.is_builtin Character ty || Types.equal ty Types.unit
   || List.exists (Types.equal ty) seen
   ||
-  match (find_visible_type context ty, find_constructors context ty) with
+  match (find_visible_type environment ty, find_constructors environment ty) with
   | Some (interface, _), Some shape ->
       List.exists is_standard_equal interface.derives
       && List.for_all
            (fun (_, fields) ->
              List.for_all
-               (fun (_, field_type) -> is_equality_identity context ~seen:(ty :: seen) field_type)
+               (fun (_, field_type) ->
+                 is_equality_identity environment ~seen:(ty :: seen) field_type)
                fields)
            shape
   | _ -> false
@@ -150,9 +153,9 @@ let make_in_range ty term =
              Logic.(less_equal (Integer low) term &&& less_equal term (Integer high)))
            ranges)
 
-let arrive context frame prefix ty =
-  let value = Facts.declare_fresh context frame prefix (declare_sort context ty) in
-  Facts.assume context frame (make_in_range ty value);
+let arrive (frame : State.frame) prefix ty =
+  let value = Facts.declare_fresh frame prefix (sort_of ty) in
+  Facts.assume frame (make_in_range ty value);
   value
 
 let list_definition_bounds (lookups : Lookups.t) ~(current : Path.t) ~(condition : Types.condition)
@@ -196,26 +199,27 @@ let list_definition_bounds (lookups : Lookups.t) ~(current : Path.t) ~(condition
          list_self_bounds parameter @ Types.list_bounds generics parameter))
     condition
 
-let substitute_declared_type (context : State.context) (frame : State.frame) ty =
-  (Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
+let substitute_declared_type (frame : State.frame) ty =
+  (Interface.Impls.normalize frame.environment.lookups.interface
+     ~list_bounds:frame.environment.bounds)
     (Types.substitute frame.substitution ty)
 
-let substitute_type context frame ty = Types.erase_views (substitute_declared_type context frame ty)
+let substitute_type (frame : State.frame) ty = Types.erase_views (substitute_declared_type frame ty)
 
-let find_local_type context frame local =
-  Option.map (substitute_type context frame) (Locals.find_opt local frame.types)
+let find_local_type (frame : State.frame) local =
+  Option.map (substitute_type frame) (Locals.find_opt local frame.types)
 
-let find_impl (context : State.context) (trait : Types.trait_reference) (ty : Types.ty) =
+let find_impl (environment : State.environment) (trait : Types.trait_reference) (ty : Types.ty) =
   match
-    Interface.Impls.resolve_evidence context.lookups.interface Types.no_substitution ~self_type:ty
-      ~trait Bound
+    Interface.Impls.resolve_evidence environment.lookups.interface Types.no_substitution
+      ~self_type:ty ~trait Bound
   with
   | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
       Some (impl, substitution)
   | Bound -> None
 
-let select_field context ty variant field term =
-  match (term, find_constructors context ty) with
+let select_field (environment : State.environment) ty variant field term =
+  match (term, find_constructors environment ty) with
   | Logic.Apply (name, arguments), Some shape when name = make_constructor_symbol ty variant -> (
       let fields = Option.value (List.assoc_opt variant shape) ~default:[] in
       match List.find_index (fun (named, _) -> named = field) fields with
@@ -223,48 +227,47 @@ let select_field context ty variant field term =
       | _ -> Logic.Apply (make_selector_symbol ty variant field, [ term ]))
   | _ -> Logic.Apply (make_selector_symbol ty variant field, [ term ])
 
-let replace_field context ty variant field whole new_value =
-  match Option.bind (find_constructors context ty) (List.assoc_opt variant) with
+let replace_field (environment : State.environment) ty variant field whole new_value =
+  match Option.bind (find_constructors environment ty) (List.assoc_opt variant) with
   | Some fields ->
       Logic.Apply
         ( make_constructor_symbol ty variant,
           List.map
             (fun (name, _) ->
-              if name = field then new_value else select_field context ty variant name whole)
+              if name = field then new_value else select_field environment ty variant name whole)
             fields )
   | None -> Facts.raise_unsupported Whole_definition (Fields_of ty)
 
-let find_record_field_type context ty field =
-  match find_constructors context ty with
+let find_record_field_type (environment : State.environment) ty field =
+  match find_constructors environment ty with
   | Some [ (None, fields) ] -> List.assoc_opt field fields
   | Some _ | None -> None
 
-let rec find_part context ty term = function
+let rec find_part (environment : State.environment) ty term = function
   | [] -> Some (ty, term)
   | field :: fields ->
-      Option.bind (find_record_field_type context ty field) (fun field_type ->
-          find_part context field_type (select_field context ty None field term) fields)
+      Option.bind (find_record_field_type environment ty field) (fun field_type ->
+          find_part environment field_type (select_field environment ty None field term) fields)
 
-let find_root context (frame : State.frame) : Locals.local -> (Types.ty * Logic.term) option =
-  function
+let find_root (frame : State.frame) : Locals.local -> (Types.ty * Logic.term) option = function
   | Core_local Self -> (
       match (frame.self_type, frame.self) with Some ty, Some term -> Some (ty, term) | _ -> None)
   | root -> (
-      match (find_local_type context frame root, Locals.find_opt root frame.locals) with
+      match (find_local_type frame root, Locals.find_opt root frame.locals) with
       | Some ty, Some term -> Some (ty, term)
       | _ -> None)
 
-let find_changed_part context frame (part : State.changed_part) =
-  Option.bind (find_root context frame part.root) (fun (ty, term) ->
-      find_part context ty term part.fields)
+let find_changed_part (frame : State.frame) (part : State.changed_part) =
+  Option.bind (find_root frame part.root) (fun (ty, term) ->
+      find_part frame.environment ty term part.fields)
 
-let rec replace_part context ty whole fields make_part =
+let rec replace_part (environment : State.environment) ty whole fields make_part =
   match fields with
   | [] -> Some (make_part ty whole)
   | field :: fields ->
-      Option.bind (find_record_field_type context ty field) (fun field_type ->
+      Option.bind (find_record_field_type environment ty field) (fun field_type ->
           Option.map
-            (replace_field context ty None field whole)
-            (replace_part context field_type
-               (select_field context ty None field whole)
+            (replace_field environment ty None field whole)
+            (replace_part environment field_type
+               (select_field environment ty None field whole)
                fields make_part))

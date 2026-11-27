@@ -1,0 +1,8 @@
+fn pick(
+  flag: Bool,
+  visit: (fn(index: UInt64) -> UInt64 requires index < 3),
+  other: fn(UInt64) -> UInt64,
+) -> UInt64 {
+  let chosen = if flag { visit } else { other }
+  chosen(5)
+}

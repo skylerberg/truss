@@ -1,0 +1,28 @@
+type Countdown(from: UInt64)
+
+impl Iterable for Countdown {
+  type Element = UInt64
+
+  fn count(self) -> UInt64 {
+    var steps: UInt64 = 0
+    while steps < self.from
+      invariant steps <= self.from
+      decreases self.from - steps
+    {
+      steps += 1
+    }
+    steps
+  }
+
+  fn element(self, position: UInt64) lends UInt64
+    requires position < self.count()
+  {
+    self.from
+  }
+}
+
+fn listed(countdown: Countdown) -> List[UInt64]
+  cost time O(1)
+{
+  countdown.map(fn(value) { value })
+}

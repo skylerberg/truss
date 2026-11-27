@@ -1,0 +1,45 @@
+trait Marked {
+}
+
+trait Scores {
+  fn score(self) -> Int64
+    cost allocations == 0
+}
+
+trait ZeroScores: Scores {
+  fn score(self) -> Int64
+    ensures result == 0 when Self: Marked
+}
+
+fn total[Item: ZeroScores](item: Item) -> Int64
+  ensures result == 0 when Item: Marked
+  cost allocations == 0
+{
+  item.score()
+}
+
+type Five(x: Int64)
+
+impl Scores for Five {
+  fn score(self) -> Int64
+    ensures result == 5
+    cost allocations == 0
+  {
+    5
+  }
+}
+
+impl ZeroScores for Five {
+}
+
+fn apply(measure: fn(Five) -> Int64, five: Five) -> Int64
+  ensures result == measure(five)
+{
+  measure(five)
+}
+
+fn through_a_value(five: Five) -> Int64
+  ensures result == 0
+{
+  apply(total, five)
+}

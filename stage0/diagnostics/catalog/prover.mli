@@ -1,6 +1,7 @@
 type quoted = { key : Path.key; origin : Core.origin }
 type location = Node of Core.origin | Whole_definition
 type call = { at : location; callee : Path.t option }
+type returning = This_method | Named_function of Path.t | This_lambda
 type counting = Upper_bound | Exact
 type moment = On_entry | After_iteration | Where_left
 type value = Named of string | Quoted of quoted | Temporary | Self_value | Compiler_local
@@ -24,13 +25,8 @@ type requirement =
   | Elements_mutated
   | Elements_read
   | Ends_with_zero
-  | Elements_at_both_indexes
-  | Length_within_storage
-  | Element_to_pop
   | Element_at_index
-  | Index_within_length
   | Range_within_storage
-  | Count_of_array
 
 type recursion_impl = Derives | Inherits
 
@@ -83,12 +79,12 @@ type promise =
       declared : Types.trait_reference;
     }
 
-type callback_reason = Used_as_unpromising_value | Passed_for_unpromising_parameter
+type function_value = Named_function of Path.t | Callback_parameter of string
+type function_use = Passed_for_parameter | Used_as_value of Types.ty
 
 type unpromised =
   | Nothing_promises
   | Type_may_not_promise of string
-  | Type_promises_nothing of string
   | Ensures_may_not_promise of Path.t
 
 type obligation =
@@ -117,7 +113,6 @@ type obligation =
   | Lambda_cost of { counting : counting; type_ : Types.ty }
   | Lambda_call_above_bound of { metric : Language.Metric.t }
   | Callback_precondition of { clause : quoted; call : call; name : string }
-  | Parameter_contract of { path : Path.t; clause : quoted }
   | Loop_cost_clause of { clause : quoted; moment : moment }
   | Iteration_above_inferred_bound
   | Unbounded_iteration_cost of unbounded
@@ -132,7 +127,8 @@ type obligation =
   | Float_conversion of { at : quoted; target : Types.ty }
   | Not_a_scalar_value of { at : quoted }
   | Unreachable_reached
-  | Cost_promise of promise
+  | May_not_return_under_no_allocation of returning
+  | Cost_promise of { promise : promise; unstated : (Path.t * Types.ty) list }
   | Impl_precondition of { clause : quoted }
   | Impl_panic_condition of { clause : quoted }
   | Postcondition of { clause : quoted; promiser : promiser option; moment : postcondition_moment }
@@ -146,10 +142,9 @@ type obligation =
     }
   | Negative_potential of { type_ : Types.ty }
   | May_alias of { first : quoted; second : quoted }
-  | Callback_requirement of { name : string; reason : callback_reason; clause : quoted }
+  | Function_requirement of { function_ : function_value; use : function_use; clause : quoted }
   | Callback_promise of { promise : quoted; unpromised : unpromised }
   | Duplicate_key of { key : quoted option }
-  | Value_contract of { path : Path.t; type_ : Types.ty; clause : quoted }
 
 type construct =
   | Potential_of_elements
@@ -163,7 +158,6 @@ type construct =
   | Negation_of of Types.ty
   | Shift_of of Types.ty
   | Range_of of Types.ty
-  | Unreadable_parameter_type
   | Unreadable_cursor of Types.ty
   | Field of string
   | Alternatives_binding_mut
@@ -222,6 +216,7 @@ type t =
       obligation : obligation;
       failure : failure;
       fixes : fix list;
+      withheld : Path.t list;
       cited : quoted option;
     }
   | Unreadable of { location : location; construct : construct; foreign : Path.t option }

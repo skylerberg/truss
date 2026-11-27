@@ -598,7 +598,7 @@ fn Tree.find[Key: Ordered](self, keys: List[Key], key: Key) -> UInt64
   ensures result == keys.length() ==> forall other: UInt64 =>
     self.holds(other) && other < keys.length() ==> !(keys.model()[other] == key)
   cost time O((1 + self.height()) * (1 + time(Key.compare)))
-  cost allocations <= (1 + self.height()) * allocations(Key.compare)
+  cost allocations == 0
 {
   match self {
     Leaf => keys.length()

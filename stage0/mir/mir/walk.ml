@@ -176,6 +176,18 @@ and visit_code ~on_locals ~on_value visit (code : Tree.t) =
   Array.iter (visit_body ~on_locals ~on_value visit) code.lambdas
 
 let iter_code visit code = visit_code ~on_locals:ignore ~on_value:ignore visit code
+
+let rec iter_run_block visit (block : Tree.block) =
+  List.iter
+    (fun (statement : Tree.statement) ->
+      visit statement;
+      List.iter (iter_run_block visit) (list_nested_blocks statement))
+    block.statements
+
+let iter_run_code visit (code : Tree.t) =
+  iter_run_block visit code.body.code;
+  Array.iter (fun (body : Tree.body) -> iter_run_block visit body.code) code.lambdas
+
 let iter_formula visit formula = visit_formula ~on_locals:ignore ~on_value:ignore visit formula
 
 let iter_places visit code =

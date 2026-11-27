@@ -41,6 +41,7 @@ internal fn Character.scalar_index(self) -> UInt32
   ensures self.code() < 55296 ==> result == self.code()
   ensures self.code() >= 55296 ==> result == self.code() - 2048
   cost time O(1)
+  cost allocations == 0
 {
   if self.code() < 55296 { self.code() } else { self.code() - 2048 }
 }
@@ -49,6 +50,7 @@ internal fn Character.at_scalar_index(index: UInt32) -> Character
   requires index < 1112064
   ensures result.scalar_index() == index
   cost time O(1)
+  cost allocations == 0
 {
   if index < 55296 { intrinsic.convert(index) } else { intrinsic.convert(index + 2048) }
 }

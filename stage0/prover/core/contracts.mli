@@ -25,27 +25,42 @@ val list_law_holes :
   string ->
   (Resolve.Names.key * Obligation.location) list
 
-val list_declared_clauses : State.contract -> State.clauses list
 val select_precondition_clauses : State.contract -> State.clauses
+
+type premise = The_precondition | Requires_of of State.clauses
+type promise = { made_by : State.clauses; proven_under : premise }
+
+val list_promises : State.contract -> promise list
+
+val find_restated_trait :
+  Lookups.t ->
+  self_type:Types.ty ->
+  Types.trait_reference ->
+  Types.restated_method ->
+  Types.trait_reference option
+
 val find_declared_clauses : Lookups.t -> Path.t -> State.clauses option
-val read_signature : State.context -> Path.t -> Types.signature option
-val find_callee_clauses : State.context -> Path.t -> State.clauses option
-val list_modified_parts : State.context -> Path.t -> int -> Types.modified list option
-val find_function_contract : State.context -> Path.t -> State.contract option
-val find_capability_contract : State.context -> Path.t -> string -> State.contract option
-val find_capability_clauses : State.context -> Path.t -> string -> State.clauses option
+val read_signature : State.environment -> Path.t -> Types.signature option
+val find_callee_clauses : State.environment -> Path.t -> State.clauses option
+val list_modified_parts : State.environment -> Path.t -> int -> Types.modified list option
+
+val find_inherited_clauses :
+  State.environment -> Path.t -> (State.clauses * Types.substitution) option
+
+val find_function_contract : State.environment -> Path.t -> State.contract option
+val find_capability_contract : State.environment -> Path.t -> string -> State.contract option
 
 val list_restated_clauses :
-  State.context ->
+  State.environment ->
   packages:Path.package list ->
   self_type:Types.ty ->
-  Path.t ->
+  Types.trait_reference ->
   string ->
   Path.receiver ->
   (Types.trait_reference * State.clauses) list
 
 val find_method_contract :
-  State.context ->
+  State.environment ->
   Types.trait_reference ->
   string ->
   Path.receiver ->

@@ -566,8 +566,11 @@ public type Interval =
   assumes that a `String` field holds UTF-8, and leaves it holding UTF-8.
   A method written in a trait, a capability, or an `impl` is never one: a caller that reaches it through the trait assumes that
   `self` meets its invariant when the call returns, and would otherwise
-  observe a broken value. A step states its precondition and postcondition
-  with `requires` and `ensures`:
+  observe a broken value. For the same reason a step is not a function
+  value: `apply(mut span, Span.narrow)` is an error, and
+  `apply(mut span, fn(narrowed) { mut narrowed.narrow() })` is accepted
+  where the lambda leaves `narrowed` meeting its invariant. A step states
+  its precondition and postcondition with `requires` and `ensures`:
 
   ```truss
   fn SortedList[Element: Ordered].sift_into_place(mut self, index: UInt64)
@@ -1413,11 +1416,21 @@ fn List[Element].push(mut self, item: own Element)
 - A caller with an amortized bound also counts the potential that its own
   code makes. A value it builds counts its type's potential. A write counts
   the change in the potential of the values that contain the written place.
+- A decrease in the potential of the values of a type lowers an amortized
+  bound's count only in a function that calls no callee whose amortized
+  bound covers a change in the potential of that type. In a function that
+  calls one, an increase of that type's potential by the function's own
+  code or by a callee with a plain bound still counts, and a decrease does
+  not: the callee's bound paid for the potential it saved in the callee's
+  units, each of which stands for fewer steps than one of the caller's.
 - A caller with a plain bound counts a callee's plain bound. Where the
-  callee states only an amortized bound, the caller counts that bound less
-  the change in potential. A function that pushes only onto a list it
-  creates empty therefore has a plain bound, since the list starts with no
-  potential to spend.
+  callee states only an amortized bound, the caller counts that bound, and
+  the potential that its calls spend where they spend more than they save.
+  Potential that a call saves offsets potential that a later call spends,
+  and pays for no step of the caller: one unit of a callee's bound stands
+  for many of the callee's steps, and one unit of potential for one. A
+  function that pushes only onto a list it creates empty therefore has a
+  plain bound, since the list starts with no potential to spend.
 - **A capability method's `O(...)` bound counts the change in the potential
   of its provider,** whether or not it is `amortized`. An `impl` of the
   capability is checked so, and a caller counts the bound as stated. A plain
@@ -1780,7 +1793,11 @@ impl IterableMut for List[Element] {
   method lends,** where `result` is the lent part, and the caller may rely
   on it. A parameter in it has its value where the method lends, so a
   caller knows a `mut` parameter there only by `old`.
-- **Every other clause holds when the lend ends.**
+- **Every other clause holds when the lend ends,** of the value that lent
+  the part, as the end of the lend leaves it. Another `mut` parameter in
+  such a clause has its value where the method lent. The method returned
+  before the lend began, so no clause of it covers a write that the caller
+  made to that parameter during the lend.
 - **`final(result)` is the part as the caller left it,** as `old(value)` is
   a value when the method was called. In a clause that mentions it,
   `result` is still the part as the method lent it.
@@ -2280,6 +2297,13 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   every empty range equals every other.
 - A range of characters holds the characters between its ends in the order
   of their code points.
+- **A range's `count()` is a `UInt64`.** It is the number of values in the
+  range, except for the one range that holds more than a `UInt64` counts:
+  the range of every value of a 64-bit type, such as
+  `UInt64.minimum..=UInt64.maximum`. Its `count()` is `UInt64.maximum` and
+  its `length()` is `None`. A view of that range by position, such as
+  `reversed()` or `step_by`, gives the right value at every position below
+  the count, and so omits the last value of its own order.
 - A range with no start or no end is allowed only directly in brackets, as in
   `items[2..]`.
 
@@ -2908,6 +2932,12 @@ trait Ordered: Equal {
   the trait's `Panic unless` must imply the method's. A call known to reach
   that `impl` is proven against the `impl`'s contract, and a call through a
   bound against the trait's.
+- **A trait's clauses hold of a call that meets the trait's `requires`.** A
+  method whose own `requires` allow more arguments is proven to keep the
+  trait's `ensures` and `cost` clauses for the arguments that the trait
+  allows, and its own clauses for every argument that it allows. A call
+  known to reach the `impl` with an argument that only the method allows
+  has the method's own clauses and not the trait's.
 - An `impl`'s method without a `time` clause has its trait's.
 - **Required traits:** a type implements the traits a trait requires before
   it implements the trait, and a bound includes them. A trait can add an
@@ -3249,6 +3279,11 @@ way.
   does not depend on it. A theorem that a law proof calls is therefore
   proven without the laws of that `impl`, and so is a method that the laws
   call.
+- A callee's contract is used whole, with the laws that its own proof
+  assumes. So where the proof of an `impl`'s laws depends on a definition,
+  and that definition calls a generic function at a type whose bound the
+  `impl` satisfies, the call is an error: the laws would be proven from
+  themselves.
 - The proof of an `impl`'s laws, and each of its law proofs, assumes the
   laws of the traits that its trait requires, and never the laws that the
   `impl` proves.
@@ -3292,6 +3327,34 @@ an invariant, a law, or a proof.
   capability parameter in the callee's `uses` stands for nothing at that
   call: `values.map(fn(value) { value + 1 })` is
   such a call, although `map` passes a capability parameter on.
+- A specification names the value that a call returns, so it learns a
+  callee's contract only where the callee returns. A function that may run
+  out of memory, because it or a function it calls allocates, gives a
+  specification neither its `ensures` nor the invariant of its result. A
+  scalar result is still within the range of its type. The same call in
+  code keeps its contract once it has returned.
+- A generic function that calls a method through one of its bounds runs
+  the code of an `impl` that its caller chooses, and a function that calls
+  a function value runs code that its caller passes. Either may allocate,
+  so the function is one that may run out of memory, unless the trait
+  states `cost allocations == 0` for the method and the function value's
+  type states the same.
+  `Equal`, `Ordered`, `Hash` and `Countable` state the clause for their
+  methods, so an `impl` of one of them allocates nothing in those methods.
+- A proof block, a loop's clauses, a theorem, and a function whose
+  signature has a specification-only type never run. Each is a
+  specification throughout: a call in one allocates nothing, so it does
+  not make the function around it one that may run out of memory, and a
+  theorem always gives its `ensures`.
+- A method called through a bound, and a function passed as a value, give
+  a specification their contract only where the trait or the function's
+  type states `cost allocations == 0`, since an `impl` or the function
+  passed may allocate.
+- A specification that needs the result of a function that may run out of
+  memory names the call that the code made, as
+  `ensures (result is Some(_)) == (self.find(separator) is Some(_))` does in
+  a function that calls `self.find(separator)`, or states the result
+  through a model.
 - Every specification is well defined: each call meets its callee's
   `requires` and the condition of a callee's `Panic unless`, and each index
   is in bounds. `&&`, `||`, `==>`, and `if` read

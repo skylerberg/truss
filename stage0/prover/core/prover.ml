@@ -14,13 +14,6 @@ type proof =
     }
   | Not_proven_here
 
-let find_inherited_clauses (lookups : Lookups.t) (path : Path.t) =
-  Option.bind (Interface.Impls.find_implemented_method lookups.interface path)
-    (fun (implemented : Interface.Impls.implemented_method) ->
-      Option.map
-        (fun clauses -> (clauses, implemented.implementation.substitution))
-        (Contracts.find_declared_clauses lookups implemented.declaration))
-
 let translate_impl (lookups : Lookups.t) (key : Resolve.Names.key) source =
   let interface = Interface.Definition.read_impl_interface lookups.interface key.path in
   match Contracts.list_impl_holes lookups key with
@@ -95,7 +88,11 @@ let translate_derived_default (lookups : Lookups.t) (key : Resolve.Names.key)
       ~impl:(Derived { type_ = key.path; trait = Well_known.make_path Default })
   in
   if derives_default && Option.is_some (Mir.read_code lookups.mir path) then
-    let outcome = Translate.translate_function lookups source ~path in
+    let outcome =
+      match Translate.find_circular_proof lookups source ~path with
+      | Some circular -> circular
+      | None -> Translate.translate_function lookups source ~path
+    in
     List.map
       (fun (obligation : Obligation.t) ->
         match Catalog.Prover_description.find_code obligation.obligation with
@@ -108,15 +105,17 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
   let declaration = lookups.interface.names.read_declaration key
   and source = Contracts.read_source_at_key lookups key in
   try
-    match declaration.kind with
-    | (Function | Method | Test) when Mir.find_code (lookups.mir.read_body_part key) = None ->
+    match
+      (declaration.kind, lazy (Translate.find_circular_proof lookups source ~path:key.path))
+    with
+    | (Function | Method | Test), _ when Mir.find_code (lookups.mir.read_body_part key) = None ->
         Not_proven_here
-    | Theorem -> Obligations (Translate.translate_theorem lookups source ~path:key.path)
-    | Function | Method | Test -> (
+    | (Trait | Capability), _ -> Not_proven_here
+    | _, (lazy (Some circular)) -> Obligations circular
+    | Theorem, _ -> Obligations (Translate.translate_function lookups source ~path:key.path)
+    | (Function | Method | Test), _ -> (
         let prove_with substitution =
-          Translate.translate_function
-            ?inherited:(find_inherited_clauses lookups key.path)
-            ~substitution lookups source ~path:key.path
+          Translate.translate_function ~substitution lookups source ~path:key.path
         in
         match list_integer_instances lookups key.path with
         | [] -> Obligations (prove_with Types.no_substitution)
@@ -134,39 +133,14 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                   })
                 instances
             in
-            Obligations
-              {
-                obligations =
-                  List.concat_map
-                    (fun (outcome : Obligation.outcome) -> outcome.obligations)
-                    outcomes;
-                holes =
-                  List.sort_uniq compare
-                    (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
-                evaluation = None;
-              })
-    | Constant | Member_constant ->
+            Obligations (Translate.merge_outcomes outcomes))
+    | (Constant | Member_constant), _ ->
         Obligations (Translate.translate_constant lookups source ~path:key.path)
-    | Impl -> (
-        match Translate.find_circular_laws lookups source ~path:key.path with
-        | Some outcome -> Obligations outcome
-        | None ->
-            let outcomes = translate_impl lookups key source in
-            Obligations
-              {
-                obligations =
-                  List.concat_map
-                    (fun (outcome : Obligation.outcome) -> outcome.obligations)
-                    outcomes;
-                holes =
-                  List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes;
-                evaluation = None;
-              })
-    | Law_proof -> (
-        match Translate.find_circular_laws lookups source ~path:key.path with
-        | Some outcome -> Obligations outcome
-        | None -> Not_proven_here)
-    | Type -> (
+    | Impl, _ ->
+        let outcomes = translate_impl lookups key source in
+        Obligations (Translate.merge_outcomes outcomes)
+    | Law_proof, _ -> Not_proven_here
+    | Type, _ -> (
         let has_defaults () =
           match Mir.read_defaults lookups.mir key.path with
           | Some { form = Field_defaults (_ :: _); _ } -> true
@@ -183,7 +157,6 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
         | Some { form = { potential; _ }; _ } when Option.is_some potential || has_defaults () ->
             Obligations (Translate.translate_type lookups source ~path:key.path)
         | Some _ | None -> Not_proven_here)
-    | Trait | Capability -> Not_proven_here
   with Facts.Unsupported { location; construct; foreign_definition } ->
     Unsupported { location; construct; foreign = foreign_definition }
 
@@ -389,6 +362,7 @@ let list_states posed ~answers ~refutations =
                       obligation = obligation.obligation;
                       failure;
                       fixes = obligation.fixes;
+                      withheld = obligation.withheld;
                       cited =
                         Option.map
                           (fun ((key : Resolve.Names.key), origin) : Catalog.Prover.quoted ->

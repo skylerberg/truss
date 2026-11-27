@@ -1,5 +1,5 @@
-let is_test (context : State.context) =
-  match context.current with Path.Test _ -> true | _ -> false
+let is_test (environment : State.environment) =
+  match environment.current with Path.Test _ -> true | _ -> false
 
 let bitwise_operations : Intrinsic.scalar list =
   [
@@ -97,9 +97,8 @@ let add_bitwise_definitions (query : Logic.query) =
   in
   { query with facts = query.facts @ List.filter_map find_defined (List.rev !bitwise_terms) }
 
-let assert_bit_vector (context : State.context) frame ~named ~origin
-    ~(read : State.frame -> Logic.term) =
-  Query.run_without_facts context.query (fun () ->
+let assert_bit_vector (frame : State.frame) ~named ~origin ~(read : State.frame -> Logic.term) =
+  Query.run_without_facts frame.query (fun () ->
       let isolated =
         {
           frame with
@@ -112,10 +111,8 @@ let assert_bit_vector (context : State.context) frame ~named ~origin
       let isolated =
         List.fold_left
           (fun (inside : State.frame) (local, ty) ->
-            let symbol =
-              Facts.declare_fresh context inside "asserted" (Encoding.declare_sort context ty)
-            in
-            Facts.assume context inside (Encoding.make_in_range ty symbol);
+            let symbol = Facts.declare_fresh inside "asserted" (Encoding.sort_of ty) in
+            Facts.assume inside (Encoding.make_in_range ty symbol);
             match local with
             | Core.Self -> { inside with self = Some symbol }
             | _ -> { inside with locals = Locals.add (Core_local local) symbol inside.locals })
@@ -123,26 +120,23 @@ let assert_bit_vector (context : State.context) frame ~named ~origin
       in
       let term = read isolated in
       let obligation =
-        Obligations.make_obligation context
+        Obligations.make_obligation
           { isolated with makes_obligations = true }
-          (Facts.locate context frame.source origin)
+          (Facts.locate frame origin)
           (Bit_vector_assertion_may_fail { clause = Facts.quote frame.source origin })
           term
       in
-      let cited =
-        if not (Facts.is_home context frame.source) then Some (frame.source.key, origin) else None
-      in
-      Query.add_obligation context.query
+      let cited = if not (Facts.is_home frame) then Some (frame.source.key, origin) else None in
+      Query.add_obligation frame.query
         { obligation with query = add_bitwise_definitions obligation.query; cited })
 
-let check_assertion context frame ~origin ~bit_vector term =
+let check_assertion (frame : State.frame) ~origin ~bit_vector term =
   (match bit_vector with
-  | Some (named, read) when not (is_test context) ->
-      assert_bit_vector context frame ~named ~origin ~read
+  | Some (named, read) when not (is_test frame.environment) ->
+      assert_bit_vector frame ~named ~origin ~read
   | _ -> ());
-  if is_test context || bit_vector <> None then Facts.assume context frame term
+  if is_test frame.environment || bit_vector <> None then Facts.assume frame term
   else
-    Obligations.oblige context frame
-      (Facts.locate context frame.source origin)
+    Obligations.oblige frame (Facts.locate frame origin)
       (Assertion_may_fail { clause = Facts.quote frame.source origin })
       term
