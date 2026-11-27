@@ -60,3 +60,40 @@ impl Steps for Holder[Item] {
 
 impl LongSteps for Holder[Item] {
 }
+
+trait FarSteps: Steps {
+  fn step(self, by: Int64) -> Int64
+    ensures result >= by
+}
+
+type Pouch[Item](item: Item)
+
+impl Steps for Pouch[Item] {
+  fn step(self, by: Int64) -> Int64
+    ensures result == by
+  {
+    by
+  }
+}
+
+impl FarSteps for Pouch[Item: Plain] {
+}
+
+type Sack[Item](item: Item)
+
+impl Steps for Sack[Item] {
+  fn step(self, by: Int64) -> Int64
+    ensures result == 1
+  {
+    1
+  }
+}
+
+impl FarSteps for Sack[Item: Plain] {
+}
+
+fn carried(pouch: Pouch[Int64]) -> Int64
+  ensures result >= 5
+{
+  pouch.step(5)
+}

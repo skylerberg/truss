@@ -24,6 +24,23 @@ type implemented_method = {
 
 val find_implemented_method : Lookups.t -> Path.t -> implemented_method option
 
+val find_trait_restated_by :
+  Lookups.t ->
+  self:Types.ty ->
+  Types.trait_reference ->
+  Types.restated_method ->
+  Types.trait_reference option
+
+val is_same_trait : Types.trait_reference -> Types.trait_reference -> bool
+
+type added_clauses = {
+  restating_method : Path.t;
+  substitution : Types.substitution;
+  holds_when : Types.condition;
+}
+
+val list_added_clauses : Lookups.t -> Path.t -> added_clauses list
+
 val match_type :
   variables:Types.parameter list ->
   Types.substitution ->

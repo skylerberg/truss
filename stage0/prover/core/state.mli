@@ -38,10 +38,6 @@ type obligation_policy = {
   keeps_failures : bool;
 }
 
-type impl_proof =
-  | Proves_laws of Types.trait_reference * Types.ty
-  | Proves_restated_clauses of Types.trait_reference * Types.ty
-
 type environment = {
   lookups : Lookups.t;
   current : Path.t;
@@ -55,7 +51,7 @@ type environment = {
   terminates : bool;
   measures : Mir.formula list;
   blocked_holders : string list;
-  proven_impl : impl_proof option;
+  proven_laws : (Types.trait_reference * Types.ty) option;
   policy : obligation_policy;
   memos : Private_state.t;
   read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;

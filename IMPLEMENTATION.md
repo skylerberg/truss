@@ -255,7 +255,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   |---|---|---|---|---|
   | The definition's own | The precondition | Assumed, since the call met the precondition | Spent | Under the precondition |
   | Its trait's, where the definition writes `requires` of its own | The trait's `requires` | Assumed under the trait's `requires` | Spent where the trait's `requires` hold of the arguments, and an unknown amount elsewhere | Under the trait's `requires` |
-  | A restating trait's | The precondition, which is all that the proof of the `impl` assumes | Assumed | Spent | Under the precondition |
+  | A restating trait's | The precondition, where the bounds of the restating trait's `impl` hold | Assumed | Spent | Under the precondition |
 
   A reader that takes a clause from the list and ignores its premise states
   the clause of arguments that no proof covers. A change that adds an
@@ -268,50 +268,33 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | A call, `Calls` | The `requires`, and the Panic condition where the caller may not panic, in `oblige_preconditions` | Each `ensures` under its premise, in the frame of the call, in `call_contract` |
   | The axiom of a logic function, `Contract_axioms` | Nothing | Each `ensures`, for every argument in the function's domain |
 
-  `Translate.implementation` is a contract that a body implements: the
-  frame at entry, where the parameters are bound and the precondition is
-  assumed, and the contract's cases. A case is a clause set with the
-  premise that its `ensures` and its costs are proven under.
-  `check_lent_part` and `check_return` oblige every case at an exit. Two
-  proofs build an implementation, and they differ in the body.
+  `Translate.enter_function` gives the proof of a function its cases. A
+  case is a clause set with the premise that its `ensures` and its costs
+  are proven under, and `check_lent_part` and `check_return` oblige every
+  case at an exit. The cases of a method of an `impl` are its own clauses,
+  its trait's, and the clauses that each restating trait adds to it. The
+  proof runs once for every condition that a clause of its cases leaves
+  undecided, so a clause with a `when` condition is proven where the
+  condition holds. A proof that reads no body, of a law, a type or a
+  constant, starts from `Translate.start_proof`.
 
-  | Proof | Cases | Body |
-  |---|---|---|
-  | A function, `translate_run` | Its own clauses and its trait's | Its code, which `Reader.read_body` reads |
-  | A restated method of an `impl`, `prove_restated_method` | The clauses that the trait adds | A call of the declared method, `Calls.call_contract` |
-
-  The second row is a refinement written as an implementation: the
-  contract of the `impl`'s method refines the restated contract where a
-  body that only executes the first implements the second. A restated
-  method has the signature of the method that it restates, so its proof
-  may panic where that signature says so, and proves the added clauses of
-  each call that returns. Each proof runs
-  once for every condition that a clause of its cases leaves undecided, so
-  a clause with a `when` condition is proven where the condition holds. A
-  proof that reads no body, of a law, a type or a constant, starts from
-  `Translate.start_proof`.
-
-  The clauses that restating traits add are a conservative extension of
-  the contracts of the methods: each is derived from those contracts and
-  from added clauses that were derived before it, so assuming them proves
-  nothing that the contracts do not. The order is the order in which traits
-  require each other, which has no cycle. `environment.proven_impl` names
-  the `impl` whose laws or restated clauses a proof proves, and in such a
-  proof a call has the clauses of a restating trait only where the proven
-  trait requires that trait, and never the proven trait's own
-  (`Contracts.list_restated_clauses`). A proof that assumed its own clauses
-  proved two clauses from each other, and a law's proof proved the law from
-  a clause whose proof could assume the law. The proof of restated clauses
-  assumes no law (`Laws.assume_laws`): the proof of a law may assume the
-  clauses of the traits that its trait requires, and through the proof of
-  another law the clauses of any trait, so a law can rest on the clause
-  that it would help to prove.
-
-  A use of an added clause depends on the contracts that the clause's own
-  formula names. `Mir.Call_edges.collect` visits, at a call of a trait's
-  method on a type whose head is known, the clauses that each restating
-  trait adds for that type, so the proof graph has the edge and
-  `Cycles` finds a proof that reaches itself through such a clause.
+  **A clause that a restating trait adds is a clause of the method.** This
+  is specification inheritance: a subtype adds a specification case to a
+  method, and the method's implementation meets every case. The body of
+  the method that the type's `impl` of the required trait writes proves
+  the added clauses, in the method's own proof and proof-graph node, so
+  no proof stands beside it with assumptions of its own.
+  `Interface.Impls.list_added_clauses` lists them for a method: the
+  restated methods of the traits that the type implements in the package
+  of the method's `impl`, each with the substitution of the restating
+  trait and, as a condition, the bounds of the restating trait's `impl`.
+  The type checker accepts an `impl` of a restating trait only in the
+  package that writes the `impl` of the required trait, so every added
+  clause that a use can find was a case of the method's proof.
+  `Mir.Call_edges.list_inherited_contract_formulas` counts the added
+  clauses with the trait's own, so a method's contract depends on the
+  definitions that an added clause names, and `Cycles` rejects two added
+  clauses that depend on each other as it rejects any circular contract.
 
   A use has only the clauses whose condition holds for its type arguments.
   `Callee.resolve` decides each clause's condition once, with
@@ -638,8 +621,8 @@ develop as well as make it easier to bootstrap the compiler in parts.
   substitution of each of its clauses, and the type arguments that key its
   logic symbol: a trait's own arguments, the type of `self`, and the
   method's. The reader resolves it before it reads the arguments, and the
-  contract call, the callback rules, the costs, the cursor loop and the
-  check of a restated contract all read that value. A capability's method
+  contract call, the callback rules, the costs and the cursor loop all
+  read that value. A capability's method
   is a definition like any other, so a callback that it takes has its
   contract.
 - **`Lending` decides where each clause of a lending method holds.**

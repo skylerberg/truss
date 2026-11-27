@@ -1057,29 +1057,28 @@ let () =
     (fun () -> expect_edges "doubled" ~expected:[ "app.main.limit"; "app.main.pass_limit" ]);
   Harness.test "a dependency records what reads the constant and through which omitted field"
     (fun () ->
-      let build_window = Support.make_top_path "app.main" "build_window" in
       let { Mir.form = code; _ } =
-        Option.get (Mir.read_code (Lazy.force lookups).mir build_window)
+        Option.get
+          (Mir.read_code (Lazy.force lookups).mir (Support.make_top_path "app.main" "build_window"))
       in
       match
         List.filter
           (fun (dependency : Mir.Call_edges.dependency) -> dependency.kind = Read)
-          (Mir.Call_edges.list_dependencies (Lazy.force lookups)
-             ~home:(Path.locate_package build_window)
-             Types.no_substitution code)
+          (Mir.Call_edges.list_dependencies (Lazy.force lookups) Types.no_substitution code)
       with
       | [ { path; omitted = Some (Field "size"); _ } ] ->
           expect_paths ~expected:[ "app.main.limit" ] [ path ]
       | dependencies -> Harness.fail "%d reads" (List.length dependencies));
   Harness.test "a dependency records what reads the constant and through which omitted argument"
     (fun () ->
-      let pick_size = Support.make_top_path "app.main" "pick_size" in
-      let { Mir.form = code; _ } = Option.get (Mir.read_code (Lazy.force lookups).mir pick_size) in
+      let { Mir.form = code; _ } =
+        Option.get
+          (Mir.read_code (Lazy.force lookups).mir (Support.make_top_path "app.main" "pick_size"))
+      in
       match
         List.filter
           (fun (dependency : Mir.Call_edges.dependency) -> dependency.kind = Read)
-          (Mir.Call_edges.list_dependencies (Lazy.force lookups)
-             ~home:(Path.locate_package pick_size) Types.no_substitution code)
+          (Mir.Call_edges.list_dependencies (Lazy.force lookups) Types.no_substitution code)
       with
       | [ { path; omitted = Some (Argument "size"); _ } ] ->
           expect_paths ~expected:[ "app.main.limit" ] [ path ]

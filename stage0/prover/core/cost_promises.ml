@@ -69,7 +69,7 @@ let check_promise_amounts (start : State.frame) promises ~output =
             Validity.check_defined at_return ~holds_when:promise.clause.holds_when amount)
     promises
 
-let check_promise ?restated ?cited (frame : State.frame) promise ~(at : State.frame) ~location =
+let check_promise ?cited (frame : State.frame) promise ~(at : State.frame) ~location =
   let spent = Counters.lookup_spent frame promise.counter in
   let amount =
     match promise.clause.bound with
@@ -98,16 +98,13 @@ let check_promise ?restated ?cited (frame : State.frame) promise ~(at : State.fr
        {
          unstated;
          promise =
-           (match restated with
-           | Some (for_type, name, trait, declared) ->
-               Restated_promise { counting; for_type; name; clause; trait; declared }
-           | None when promise.inherited ->
-               Inherited_promise
-                 {
-                   counting;
-                   promiser = Contracts.find_promiser frame.environment.lookups promise.written_in;
-                   clause;
-                 }
-           | None -> Own_promise { counting; clause });
+           (if promise.inherited then
+              Inherited_promise
+                {
+                  counting;
+                  promiser = Contracts.find_promiser frame.environment.lookups promise.written_in;
+                  clause;
+                }
+            else Own_promise { counting; clause });
        })
     goal

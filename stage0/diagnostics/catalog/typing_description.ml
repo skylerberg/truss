@@ -364,6 +364,15 @@ let describe : Typing.t -> Nodes.description = function
                the `impl` of `%s` for `%s`."
               (Path.show_name trait) (Path.show declared_by) name name (Path.show declared_by)
               (Types.show for_type)))
+  | Restated_apart_from_method { at = origin; trait; declared; name; for_type } ->
+      make Missing_required_impl (Build.at origin)
+        (say
+           (Printf.sprintf
+              "`%s` adds clauses to `%s.%s`, and the body of that method proves them, so `%s` is \
+               implemented for `%s` in the package that writes the `impl` of `%s` for it. This \
+               package writes none."
+              (Path.show_name trait) (Path.show declared.trait) name (Path.show_name trait)
+              (Types.show for_type) (Types.show_trait declared)))
   | Undeclared_method { at = origin; trait; name } ->
       make Extra_member (Build.at origin)
         (say

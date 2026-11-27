@@ -31,14 +31,6 @@ type premise = The_precondition | Requires_of of State.clauses
 type promise = { made_by : State.clauses; proven_under : premise }
 
 val list_promises : State.contract -> promise list
-
-val find_restated_trait :
-  Lookups.t ->
-  self_type:Types.ty ->
-  Types.trait_reference ->
-  Types.restated_method ->
-  Types.trait_reference option
-
 val find_declared_clauses : Lookups.t -> Path.t -> State.clauses option
 val read_signature : State.environment -> Path.t -> Types.signature option
 val find_callee_clauses : State.environment -> Path.t -> State.clauses option
@@ -47,6 +39,7 @@ val list_modified_parts : State.environment -> Path.t -> int -> Types.modified l
 val find_inherited_clauses :
   State.environment -> Path.t -> (State.clauses * Types.substitution) option
 
+val list_added_clauses : State.environment -> Path.t -> (State.clauses * Types.substitution) list
 val find_function_contract : State.environment -> Path.t -> State.contract option
 val find_capability_contract : State.environment -> Path.t -> string -> State.contract option
 

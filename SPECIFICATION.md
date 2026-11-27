@@ -2946,11 +2946,19 @@ trait Ordered: Equal {
 - **A trait can restate a method of a trait it requires, to promise more.**
   The restated method has the required trait's signature, adds `ensures`
   and `cost` clauses, and has no body. It is the same method: an `impl` of
-  the trait does not write it, and each `impl` proves the added clauses
-  from the contract of the method in its type's `impl` of the required
-  trait. A call through a bound of the trait, and a call on a type that
-  implements it, has the added clauses. `FiniteCursor` restates
+  the trait does not write it. The added clauses are clauses of the method
+  that the type's `impl` of the required trait writes, as the required
+  trait's own clauses are, and the body of that method is proven to keep
+  them. Where the `impl` of the restating trait has bounds of its own, the
+  added clauses hold, and are proven, for the instantiations that meet
+  those bounds. A call through a bound of the trait, and a call on a type
+  that implements it, has the added clauses. `FiniteCursor` restates
   `Cursor.next` (see [Cursors](#cursors)).
+- **A trait that restates a method is implemented for a type in the
+  package that writes the type's `impl` of the required trait.** The body
+  of the method proves the added clauses, so another package cannot add
+  them to a method that is already proven, and a derived `impl`, or one
+  that the compiler gives, has no body to prove them.
 - **A method with a body** is provided to every implementation. An `impl` can
   override it with a method that keeps the trait's contract for it, as it
   keeps the contract of every other method.

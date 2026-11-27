@@ -646,18 +646,20 @@ let () =
   Harness.test "a restated method is proven under the precondition of the method that it restates"
     (fun () ->
       expect_not_proven Fixtures.Prover.restated_method_whose_declaration_requires "prover.ensures"
-        ~says:"The contract of `Crawler`'s `step` may not imply `result >= by`");
-  Harness.test "a proof depends on the methods that a restated clause it assumes names" (fun () ->
-      expect_not_proven Fixtures.Prover.lemma_reaching_a_method_through_a_restated_clause
-        "prover.termination" ~says:"This call to `lemma` may not end");
-  Harness.test "the proof of an impl assumes no clause or law whose proof could assume its own"
+        ~says:"The trait's `result >= by` may not hold when the method returns here");
+  Harness.test "a method's contract depends on the methods that a restated clause of it names"
+    (fun () ->
+      expect_codes Fixtures.Prover.lemma_reaching_a_method_through_a_restated_clause
+        [ "prover.circular_proof"; "prover.circular_proof"; "prover.circular_proof" ]);
+  Harness.test
+    "restated clauses that name each other's methods are circular, and a body proves each"
     (fun () ->
       expect_codes Fixtures.Prover.restated_clauses_that_assume_each_other
         [
-          "prover.ensures";
-          "prover.ensures";
-          "prover.ensures";
-          "prover.law";
+          "prover.circular_proof";
+          "prover.circular_proof";
+          "prover.circular_proof";
+          "prover.circular_proof";
           "prover.ensures";
           "prover.ensures";
         ]);
@@ -666,11 +668,12 @@ let () =
       expect_not_proven Fixtures.Prover.restated_clause_outside_the_precondition "prover.ensures");
   Harness.test "a restated method may panic where the method that it restates may" (fun () ->
       expect_not_proven Fixtures.Prover.restated_method_with_a_panic_condition "prover.ensures"
-        ~says:"The contract of `Crawler`'s `step` may not imply `result >= by`");
-  Harness.test "a restated clause with a condition is proven where the impl's type meets it"
+        ~says:"The trait's `result >= by` may not hold when the method returns here");
+  Harness.test
+    "a restated clause is proven where its condition and the bounds of the restating impl hold"
     (fun () ->
       expect_codes Fixtures.Prover.restated_clauses_with_a_condition
-        [ "prover.cost"; "prover.ensures" ]);
+        [ "prover.cost"; "prover.ensures"; "prover.ensures" ]);
   Harness.test "a restated clause is proven of the receiver that the method changes" (fun () ->
       expect_not_proven Fixtures.Prover.restated_clause_that_the_changed_receiver_breaks
         "prover.ensures");
@@ -1301,11 +1304,17 @@ let () =
   Harness.test
     "a restated clause of a lending method is proven where it lends and when its lend ends"
     (fun () ->
-      let restated = Fixtures.Prover.restated_lending_clause_that_the_contract_does_not_give in
-      let given = "    ensures result == old(self.count)\n" in
-      expect_not_proven restated "prover.ensures" ~says:"`self.count() == final(result)`";
-      expect_proven
-        (Support.apply_edit restated (given, given ^ "    ensures self.count == final(result)\n")));
+      let restated = Fixtures.Prover.restated_clauses_of_a_lending_method in
+      expect_proven restated;
+      expect_not_proven
+        (Support.apply_edit restated
+           ("ensures result == old(self.count())", "ensures result > old(self.count())"))
+        "prover.ensures" ~says:"`result > old(self.count())` may not hold for the part lent here";
+      expect_not_proven
+        (Support.apply_edit restated
+           ("ensures self.count() == final(result)", "ensures self.count() > final(result)"))
+        "prover.ensures"
+        ~says:"`self.count() > final(result)` may not hold when the method ends here");
   Harness.test "a lending method that lends a part it does not promise" (fun () ->
       expect_not_proven Fixtures.Prover.couple_larger_lending_first "prover.ensures"
         ~fixed:
