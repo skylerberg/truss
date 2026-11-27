@@ -159,9 +159,6 @@ let find_type_declaration (environment : State.environment) (ty : Types.ty) =
           declaration)
   | _ -> None
 
-let find_type_source (environment : State.environment) ty =
-  Option.map fst (find_type_declaration environment ty)
-
 let find_type_clauses (environment : State.environment) ty =
   Option.bind (find_type_declaration environment ty) (fun (source, clauses) ->
       Option.map (fun clauses -> (source, clauses)) (Lazy.force clauses))

@@ -13,7 +13,6 @@ val check_defined : State.frame -> holds_when:Types.condition -> Mir.formula -> 
 val make_type_frame :
   State.frame -> State.source -> Types.ty -> self:Logic.term option -> State.frame
 
-val find_type_source : State.environment -> Types.ty -> State.source option
 val find_type_clauses : State.environment -> Types.ty -> (State.source * Mir.type_clauses) option
 val list_invariants : Mir.loop_clause list -> Mir.formula list
 val find_invariants : State.environment -> Types.ty -> (State.source * Mir.formula list) option
