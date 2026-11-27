@@ -1,5 +1,5 @@
 let make_environment ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_failures = true)
-    ?panic_condition ?blocked_holders ?proven_laws (lookups : Lookups.t) ~home ~current ~terminates
+    ?panic_condition ?blocked_holders ?proven_impl (lookups : Lookups.t) ~home ~current ~terminates
     ~measures ~inherits_precondition =
   let node = Option.value node ~default:current in
   {
@@ -15,7 +15,7 @@ let make_environment ?node ?(condition = []) ?(keeps_termination = true) ?(keeps
     terminates;
     measures;
     blocked_holders = Option.value blocked_holders ~default:[];
-    proven_laws;
+    proven_impl;
     policy = Obligations.make_policy ~keeps_termination ~keeps_failures ~panic_condition;
     memos = Private_state.create ();
     read_formula = Reader.read_formula;
@@ -84,11 +84,11 @@ let make_empty_frame (environment : State.environment) (query : Query.t) source 
     conditional_counters = [];
   }
 
-let start_proof ?blocked_holders ?proven_laws ?(condition = []) (lookups : Lookups.t)
+let start_proof ?blocked_holders ?proven_impl ?(condition = []) (lookups : Lookups.t)
     (source : State.source) ~current =
   make_empty_frame
     (make_environment lookups ~condition ~keeps_termination:(condition = [])
-       ~keeps_failures:(condition = []) ?blocked_holders ?proven_laws ~home:source.key ~current
+       ~keeps_failures:(condition = []) ?blocked_holders ?proven_impl ~home:source.key ~current
        ~terminates:false ~measures:[] ~inherits_precondition:false)
     (Query.create ()) source
 
@@ -605,7 +605,7 @@ let translate_function ?(substitution = Types.no_substitution) (lookups : Lookup
 
 let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~proofs ~at
     =
-  let start = start_proof lookups source ~current:impl ~proven_laws:(trait, for_type) in
+  let start = start_proof lookups source ~current:impl ~proven_impl:(trait, for_type) in
   let substitution = Contracts.make_trait_substitution lookups trait for_type in
   List.iter
     (fun (law_source, (law : Mir.law)) ->
@@ -728,7 +728,6 @@ let prove_restated_method (start : State.frame) ~at ~impl_interface ~trait ~for_
       | Function_value | Intrinsic _ | Definition { contract = None; _ } ->
           Facts.raise_bug "the method that `%s` restates has no contract" (Path.show restated_path)
       | Definition ({ contract = Some contract; _ } as definition) ->
-          let contract = { contract with restated_clauses = [] } in
           let clauses =
             Conditions.keep_holding start.environment start.query
               ~substitution:subtrait_substitution clauses
@@ -849,7 +848,10 @@ let translate_restated_clauses (lookups : Lookups.t) (source : State.source) ~im
   let impl_interface = Interface.Definition.read_impl_interface lookups.interface impl in
   let run condition =
     run_blocking @@ fun ?blocked_holders () ->
-    let start = start_proof lookups source ~current:impl ~condition ?blocked_holders in
+    let start =
+      start_proof lookups source ~current:impl ~condition ?blocked_holders
+        ~proven_impl:(trait, for_type)
+    in
     List.iter
       (fun (restated : Types.restated_method) ->
         let path =

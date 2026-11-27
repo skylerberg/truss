@@ -647,6 +647,10 @@ let () =
     (fun () ->
       expect_not_proven Fixtures.Prover.restated_method_whose_declaration_requires "prover.ensures"
         ~says:"The contract of `Crawler`'s `step` may not imply `result >= by`");
+  Harness.test "the proof of an impl does not assume the clauses that it or an unrelated trait adds"
+    (fun () ->
+      expect_codes Fixtures.Prover.restated_clauses_that_assume_each_other
+        [ "prover.ensures"; "prover.ensures"; "prover.ensures"; "prover.law"; "prover.ensures" ]);
   Harness.test "a restated clause is not assumed of arguments outside the method's precondition"
     (fun () ->
       expect_not_proven Fixtures.Prover.restated_clause_outside_the_precondition "prover.ensures");
