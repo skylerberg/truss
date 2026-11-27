@@ -1,0 +1,20 @@
+type Leaf(x: Int64)
+
+type Holder(leaf: Leaf)
+  derives Equal
+
+impl Equal for Leaf {
+  fn equal(self, other: Leaf) -> Bool
+    ensures !result
+  {
+    false
+  }
+}
+
+fn compare_held(first: Holder, second: Holder) -> Bool {
+  first == second
+}
+
+proof Equal.reflexive for Leaf {
+  let _ = compare_held(Holder(leaf: Leaf(x: value.x)), Holder(leaf: Leaf(x: value.x)))
+}
