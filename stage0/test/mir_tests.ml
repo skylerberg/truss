@@ -992,7 +992,26 @@ let () =
   Harness.test "a call resolved to a derived method is a call edge to that method" (fun () ->
       expect_edges
         (Support.make_top_path "app.main" "make")
-        ~expected:[ "derived standard.core.Default for app.main.Config.default" ])
+        ~expected:[ "derived standard.core.Default for app.main.Config.default" ]);
+  let expect_assumed path ~expected =
+    expect_paths ~expected (Mir.Call_edges.list_assumed_paths (Lazy.force lookups) path)
+  in
+  let meters_impl = "app.main.impl standard.core.Equal for app.main.Meters" in
+  Harness.test "a derived impl assumes the impl of each field's type, and not its own" (fun () ->
+      expect_assumed (make_derived_impl "Span" Equal) ~expected:[ meters_impl ];
+      expect_assumed (make_derived_impl "Tree" Equal) ~expected:[ meters_impl ];
+      expect_assumed (make_derived_impl "Pair" Equal) ~expected:[ meters_impl ];
+      expect_assumed
+        (make_derived_impl "Forest" Equal)
+        ~expected:[ "standard.list.impl standard.core.Equal for standard.list.List" ]);
+  Harness.test
+    "a derived impl and a comparison assume the derived impl of a field's type and not the impls \
+     of its fields" (fun () ->
+      expect_assumed (make_derived_impl "Outer" Equal)
+        ~expected:[ "derived standard.core.Equal for app.main.Span" ];
+      expect_assumed
+        (Support.make_top_path "app.main" "same_outer")
+        ~expected:[ "app.main.Outer"; "derived standard.core.Equal for app.main.Outer" ])
 
 let () =
   let lookups = lazy (make_call_edge_lookups Fixtures.Mir.code_reading_constants) in

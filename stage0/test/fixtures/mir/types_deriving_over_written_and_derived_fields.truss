@@ -44,3 +44,7 @@ type Config(limits: Limits)
 fn make() -> Config {
   Config.default()
 }
+
+fn same_outer(first: Outer, second: Outer) -> Bool {
+  first == second
+}

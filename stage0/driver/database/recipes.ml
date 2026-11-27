@@ -1064,6 +1064,7 @@ let is_first (row : Store.definition) = row.ordinal = 0
 let has_call_node (row : Store.definition) =
   (is_written row && is_first row)
   || row.origin = Declarations.inherited_method_origin
+  || row.origin = Declarations.derived_impl_origin
   || row.origin = Declarations.derived_method_origin
 
 let definition_stages =

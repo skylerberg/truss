@@ -400,10 +400,16 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `Call_edges.list_satisfied_bounds`, so a new way for one `impl` to rely
   on another is written once, in `list_bounds_that_evidence_assumes`: the
   bounds of its generics, and the bounds that its trait declares on the
-  associated types that it chooses. The walks differ in one place. A
-  derived method is a node with edges of its own, so its code needs only
-  the bounds of the type's parameters; a derived `impl`'s laws have no
-  proof of their own, so they rest on the laws of every field's type. `Laws` assumes no law of an `impl` in the proof
+  associated types that it chooses. The walk resolves a pair of a type
+  and a trait at most twice, once as a bound that the call names and once
+  as a bound that an `impl` assumes, and it never enters the fields of a
+  type that derives the trait. A derived method and a derived `impl` are nodes with edges of
+  their own instead. The method calls the methods of its fields' impls.
+  The `impl` assumes the laws of the `impl` for every field's type, since
+  a derived `impl`'s laws have no proof of their own. A definition that
+  assumes the laws of a derived `impl` assumes its fields' laws on that
+  impl's behalf, so `Cycles` reports a cycle through it at that
+  definition. `Laws` assumes no law of an `impl` in the proof
   group of the definition being proven. A law that a callee's proof assumes
   cannot be left out that way, so `Cycles.list_circular_proofs` reports it,
   and every definition runs that one check, whatever its kind.
