@@ -165,13 +165,22 @@ let bind_parameter_values (entry : State.frame) (clauses : State.clauses) ~subst
   in
   Option.fold ~none:inside ~some:(Lending.bind_final inside) at.final_result
 
-let check_clauses_against_the_trait (start : State.frame) (source : State.source)
-    ~(own : State.clauses) ~(inherited : (State.clauses * State.frame) option) ~trait_requires =
-  let environment = start.environment in
+let assume_precondition (start : State.frame) (source : State.source) ~(own : State.clauses)
+    ~(inherited : (State.clauses * State.frame) option) ~trait_requires =
   let declared_requires = Facts.list_clauses own.requires in
-  if environment.inherits_precondition then
-    if declared_requires = [] then Facts.assume start trait_requires
-    else
+  let assume_own () =
+    List.fold_left
+      (fun frame (requirement : Mir.formula) ->
+        let frame, term = read_requires frame requirement in
+        Facts.assume frame term;
+        frame)
+      start declared_requires
+  in
+  match (inherited, declared_requires) with
+  | Some _, [] when start.environment.inherits_precondition ->
+      Facts.assume start trait_requires;
+      start
+  | Some (trait_clauses, inside), restated :: _ when start.environment.inherits_precondition ->
       ignore
         (List.fold_left
            (fun frame (requirement : Mir.formula) ->
@@ -185,6 +194,19 @@ let check_clauses_against_the_trait (start : State.frame) (source : State.source
              frame)
            (Facts.restrict start trait_requires)
            declared_requires);
+      let assumed = assume_own () in
+      List.iter
+        (fun (requirement : Mir.formula) ->
+          Obligations.oblige assumed
+            (Facts.locate assumed restated.origin)
+            (Trait_precondition { clause = Facts.quote trait_clauses.callee requirement.origin })
+            (snd (Validity.read_specification inside requirement)))
+        (Facts.list_clauses trait_clauses.requires);
+      assumed
+  | (Some _ | None), _ -> assume_own ()
+
+let check_panic_condition_against_the_trait (start : State.frame) (source : State.source)
+    ~(own : State.clauses) ~(inherited : (State.clauses * State.frame) option) ~trait_requires =
   if own.panics_unless <> [] then
     match inherited with
     | Some (clauses, inside) when clauses.panics_unless <> [] ->
@@ -210,7 +232,6 @@ let check_clauses_against_the_trait (start : State.frame) (source : State.source
 
 type case = {
   clauses : State.clauses;
-  premise : Logic.term;
   costs : Cost_promises.promise list;
   bind_values : ?result:Logic.term option -> State.frame -> State.frame;
 }
@@ -294,7 +315,7 @@ let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_ho
   let keep_inherited (clauses, substitution) = (keep_clauses ~substitution clauses, substitution) in
   let inherited = Option.map keep_inherited (Contracts.find_inherited_clauses environment path) in
   let added = List.map keep_inherited (Contracts.list_added_clauses environment path) in
-  let own, promises =
+  let own, clause_sets =
     match Contracts.find_function_contract environment path with
     | Some resolved ->
         let own =
@@ -302,7 +323,7 @@ let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_ho
             { resolved.callee_clauses with callee = source }
         in
         ( own,
-          Contracts.list_promises
+          Contracts.list_clause_sets
             {
               resolved with
               callee_clauses = own;
@@ -405,33 +426,21 @@ let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_ho
   let counts_provider_potential = is_capability_implementation lookups path in
   let cases =
     List.map
-      (fun ({ made_by; proven_under } : Contracts.promise) ->
+      (fun (clauses : State.clauses) ->
         {
-          clauses = made_by;
-          premise =
-            (match proven_under with
-            | The_precondition -> Logic.Boolean true
-            | Requires_of _ -> trait_requires);
+          clauses;
           costs =
-            Cost_promises.list_promises environment query made_by.callee
-              (bind_values made_by entry).locals made_by.costs ~inherited:made_by.inherited
+            Cost_promises.list_promises environment query clauses.callee
+              (bind_values clauses entry).locals clauses.costs ~inherited:clauses.inherited
               ~counts_provider_potential;
-          bind_values = bind_values made_by;
+          bind_values = bind_values clauses;
         })
-      promises
+      clause_sets
   in
   let promised = List.concat_map (fun case -> case.costs) cases in
   let start = Cost_promises.enter_definition start promised ~body:(Some mir.body) in
-  check_clauses_against_the_trait start source ~own ~inherited ~trait_requires;
-  let declared_requires = Facts.list_clauses own.requires in
-  let start =
-    List.fold_left
-      (fun frame (requirement : Mir.formula) ->
-        let frame, term = read_requires frame requirement in
-        Facts.assume frame term;
-        frame)
-      start declared_requires
-  in
+  check_panic_condition_against_the_trait start source ~own ~inherited ~trait_requires;
+  let start = assume_precondition start source ~own ~inherited ~trait_requires in
   let start =
     if assumes_panic_condition then
       List.fold_left
@@ -452,7 +461,7 @@ let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_ho
 let check_ensures (lookups : Lookups.t) entered (frame : State.frame) location ~is_checked ~moment =
   List.iter
     (fun case ->
-      let inside = case.bind_values frame and under = Facts.restrict frame case.premise in
+      let inside = case.bind_values frame in
       List.iter
         (fun (ensured : Mir.formula) ->
           if is_checked ensured then
@@ -461,7 +470,7 @@ let check_ensures (lookups : Lookups.t) entered (frame : State.frame) location ~
             in
             Obligations.oblige ~holds_when:ensured.holds_when
               ~cited:(case.clauses.callee.key, ensured.origin)
-              under location
+              frame location
               (Postcondition
                  {
                    clause = Facts.quote case.clauses.callee ensured.origin;
@@ -526,8 +535,7 @@ let check_return lookups entered ({ frame; returned; return_origin } : State.fun
         (fun (promise : Cost_promises.promise) ->
           Cost_promises.check_promise
             ~cited:(promise.written_in.key, promise.clause.origin)
-            (Facts.restrict frame case.premise)
-            promise
+            frame promise
             ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
             ~location:exit_location)
         case.costs)

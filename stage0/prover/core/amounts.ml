@@ -141,23 +141,22 @@ let passes_lambda_assuming_recursive_costs (query : Query.t) (values : State.pas
     values
 
 let compute_callee_amount ?(method_cost : (Language.Metric.t -> Logic.term) option)
-    (query : Query.t) after ~is_recursive
-    ~clauses:(declared_clauses : (State.clauses * Logic.term Lazy.t) list)
+    (query : Query.t) after ~is_recursive ~clauses:(declared_clauses : State.clauses list)
     ~(bind_frame : State.clauses -> State.frame) ~uses ~(values : State.passed list)
     ~counts_provider_potential (counter : Costs.counter) =
   if is_recursive && counter.counting = Units then Counters.note_recursive_cost_assumed query;
   let is_recursive_call =
     is_recursive && counter.counting = Units && Cost_promises.is_bounded query counter
   in
-  let list_matching_costs ((clauses : State.clauses), premise) =
+  let list_matching_costs (clauses : State.clauses) =
     let frame = bind_frame clauses in
     List.filter_map
       (fun (cost : Mir.cost) ->
-        if Costs.is_same_resource cost ~locals:frame.locals counter then Some (premise, frame, cost)
+        if Costs.is_same_resource cost ~locals:frame.locals counter then Some (frame, cost)
         else None)
       clauses.costs
   in
-  let compute_amount (premise, (frame : State.frame), (cost : Mir.cost)) =
+  let compute_amount ((frame : State.frame), (cost : Mir.cost)) =
     let exact_target =
       match (cost.resource, counter.resource) with
       | Calls (Capability _), Calls (Capability_method _) -> false
@@ -167,17 +166,12 @@ let compute_callee_amount ?(method_cost : (Language.Metric.t -> Logic.term) opti
       cost.amortized
       || (counts_provider_potential && match cost.bound with Order_of _ -> true | _ -> false)
     in
-    let promised =
-      compute_promised_amount after counter cost.bound
-        ~evaluate:(fun amount -> snd (Validity.read_specification frame amount))
-        ~is_recursive_call ~exact_target
-        ~is_converted:(counts_potential <> counter.amortized)
-    in
     {
       Costs.amount =
-        (match Lazy.force premise with
-        | Logic.Boolean true -> promised
-        | premise -> Logic.ite premise promised (Counters.declare_unknown_amount after counter));
+        compute_promised_amount after counter cost.bound
+          ~evaluate:(fun amount -> snd (Validity.read_specification frame amount))
+          ~is_recursive_call ~exact_target
+          ~is_converted:(counts_potential <> counter.amortized);
       counted = (if counts_potential then Potential_change else No_potential);
     }
   in
@@ -190,7 +184,7 @@ let compute_callee_amount ?(method_cost : (Language.Metric.t -> Logic.term) opti
         | [] -> None
         | costs ->
             let amortized, plain =
-              List.partition (fun (_, _, (cost : Mir.cost)) -> cost.amortized) costs
+              List.partition (fun (_, (cost : Mir.cost)) -> cost.amortized) costs
             in
             Some (if amortized_first then amortized @ plain else plain @ amortized))
       declared_clauses
@@ -567,7 +561,7 @@ let find_method_cost_bound (frame : State.frame) (metric : Language.Metric.t) (m
                          (Impl { impl; substitution }))
                       (fun contract ->
                         List.find_map
-                          (fun ({ made_by = clauses; _ } : Contracts.promise) ->
+                          (fun (clauses : State.clauses) ->
                             find_static_bound frame metric clauses ~has_own_generics
                               ~substitution:
                                 (if clauses.inherited then
@@ -575,7 +569,7 @@ let find_method_cost_bound (frame : State.frame) (metric : Language.Metric.t) (m
                                      reference self_type
                                  else substitution)
                               ~self_type)
-                          (Contracts.list_promises contract))
+                          (Contracts.list_clause_sets contract))
                 in
                 match (stated_bound, impl) with
                 | Some bound, _ -> Some bound
@@ -711,8 +705,7 @@ let spend_wait_for_tasks (frame : State.frame) =
 
 let spend_contract_call ~(before : State.frame) ~(after : State.frame) (site : Invocation.site)
     (callee : Callee.t) (definition : Callee.definition) (contract : State.contract)
-    (values : State.passed list) ~changed ~result ~result_type ~final ~is_recursive ~bind_frame
-    ~read_requires =
+    (values : State.passed list) ~changed ~result ~result_type ~final ~is_recursive ~bind_frame =
   let compute_potential_change () =
     Logic.add
       (Potentials.compute_arguments_potential_change ~before ~after values ~changed)
@@ -726,16 +719,7 @@ let spend_contract_call ~(before : State.frame) ~(after : State.frame) (site : I
           | None -> Costs.zero)
       | `Returns -> Potentials.compute_potential after result_type result)
   in
-  let promised =
-    List.map
-      (fun ({ made_by; proven_under } : Contracts.promise) ->
-        ( made_by,
-          match proven_under with
-          | The_precondition -> Lazy.from_val (Logic.Boolean true)
-          | Requires_of clauses -> lazy (read_requires clauses) ))
-      (Contracts.list_promises contract)
-  in
-  let declared_clauses = List.map fst promised in
+  let declared_clauses = Contracts.list_clause_sets contract in
   let method_cost =
     lazy
       (if has_method_cost before.environment definition then
@@ -776,7 +760,7 @@ let spend_contract_call ~(before : State.frame) ~(after : State.frame) (site : I
       | Some _, Calls _ -> compute_step_amount after callee values counter
       | _ ->
           compute_callee_amount ?method_cost:(Lazy.force method_cost) before.query after
-            ~is_recursive ~clauses:promised ~bind_frame ~uses:callee.uses ~values
+            ~is_recursive ~clauses:declared_clauses ~bind_frame ~uses:callee.uses ~values
             ~counts_provider_potential counter)
 
 let spend_call_without_a_contract (frame : State.frame) callee values =

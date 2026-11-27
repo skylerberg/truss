@@ -26,11 +26,7 @@ val list_law_holes :
   (Resolve.Names.key * Obligation.location) list
 
 val select_precondition_clauses : State.contract -> State.clauses
-
-type premise = The_precondition | Requires_of of State.clauses
-type promise = { made_by : State.clauses; proven_under : premise }
-
-val list_promises : State.contract -> promise list
+val list_clause_sets : State.contract -> State.clauses list
 val find_declared_clauses : Lookups.t -> Path.t -> State.clauses option
 val read_signature : State.environment -> Path.t -> Types.signature option
 val find_callee_clauses : State.environment -> Path.t -> State.clauses option

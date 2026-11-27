@@ -240,38 +240,33 @@ develop as well as make it easier to bootstrap the compiler in parts.
 - **A contract is resolved once, and its three readers differ only in what
   they prove and what they assume.** The rules are those of modular
   verification with pre- and postconditions. A definition is proven against
-  its contract once, and every use relies on that proof alone, so a use may
-  assume a clause only under the premises that the proof assumed.
-  `Contracts.list_promises` is the one statement of those premises: it lists
-  each clause set with its `Contracts.premise`, which is `The_precondition`
-  or the `Requires_of` another clause set. A reader matches on the premise
-  to reach a clause, so it cannot take a clause set that needs a premise as
-  one that needs none. A contract is a list of specification cases in this sense,
-  as in JML's specification inheritance, and the precondition of the
-  contract is the `requires` that a call must meet: the definition's own,
-  or its trait's where it writes none.
+  its contract once, and every use relies on that proof alone.
 
-  | Clause set | Proven under | Its `ensures` at a call | Its `cost` at a call | In the axiom of a logic function |
-  |---|---|---|---|---|
-  | The definition's own | The precondition | Assumed, since the call met the precondition | Spent | Under the precondition |
-  | Its trait's, where the definition writes `requires` of its own | The trait's `requires` | Assumed under the trait's `requires` | Spent where the trait's `requires` hold of the arguments, and an unknown amount elsewhere | Under the trait's `requires` |
-  | A restating trait's | The precondition, where the bounds of the restating trait's `impl` hold | Assumed | Spent | Under the precondition |
-
-  A reader that takes a clause from the list and ignores its premise states
-  the clause of arguments that no proof covers. A change that adds an
-  assumption to one of the proofs changes the premise in `list_promises`
-  with it, since that is where every use reads the premise.
+  **A contract has one precondition.** It is the definition's own
+  `requires`, or its trait's where it writes none:
+  `Contracts.select_precondition_clauses`. A method of an `impl` that
+  restates its trait's `requires` in its own terms is proven to restate
+  them exactly: `Translate.assume_precondition` obliges that the trait's
+  imply the method's (`Impl_precondition`) and that the method's imply the
+  trait's (`Trait_precondition`). So every clause set of
+  `Contracts.list_clause_sets`, the definition's own, its trait's and
+  those that restating traits add, is proven under that one precondition,
+  and a call that met it assumes each clause with no premise of its own.
+  This prevents a clause that is assumed of arguments outside the
+  precondition it was proven under, which a method with a wider
+  precondition than its trait made possible. A contract is a list of
+  specification cases that share their precondition, as in JML's
+  specification inheritance.
 
   | Reader | Proves | Assumes |
   |---|---|---|
-  | The definition's check, `Translate` | Each `ensures` at every return, under its premise, in `check_return`, and the clauses on a lent part in `check_lent_part` | The `requires`, in `enter_function` |
-  | A call, `Calls` | The `requires`, and the Panic condition where the caller may not panic, in `oblige_preconditions` | Each `ensures` under its premise, in the frame of the call, in `call_contract` |
+  | The definition's check, `Translate` | Each `ensures` at every return, in `check_return`, and the clauses on a lent part in `check_lent_part` | The precondition, in `assume_precondition` |
+  | A call, `Calls` | The precondition, and the Panic condition where the caller may not panic, in `oblige_preconditions` | Each `ensures`, in the frame of the call, in `call_contract` |
   | The axiom of a logic function, `Contract_axioms` | Nothing | Each `ensures`, for every argument in the function's domain |
 
   `Translate.enter_function` gives the proof of a function its cases. A
-  case is a clause set with the premise that its `ensures` and its costs
-  are proven under, and `check_lent_part` and `check_return` oblige every
-  case at an exit. The cases of a method of an `impl` are its own clauses,
+  case is a clause set with its costs, and `check_lent_part` and
+  `check_return` oblige every case at an exit. The cases of a method of an `impl` are its own clauses,
   its trait's, and the clauses that each restating trait adds to it. The
   proof runs once for every condition that a clause of its cases leaves
   undecided, so a clause with a `when` condition is proven where the
@@ -304,7 +299,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
 
   A logic function is total in the logic and unspecified outside its domain.
   Its domain is a condition under which the definition returns: valid
-  arguments, the premise of the clause, the Panic condition, and, for a
+  arguments, the precondition, the Panic condition, and, for a
   callee in the recursion group of the definition being proven, arguments
   below the entry measure, which is the induction hypothesis. A call that
   returned gives its `ensures` without the Panic condition, since

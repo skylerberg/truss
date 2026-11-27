@@ -122,6 +122,7 @@ type obligation =
   | May_not_return_under_no_allocation of returning
   | Cost_promise of { promise : promise; unstated : (Path.t * Types.ty) list }
   | Impl_precondition of { clause : quoted }
+  | Trait_precondition of { clause : quoted }
   | Impl_panic_condition of { clause : quoted }
   | Postcondition of { clause : quoted; promiser : promiser option; moment : postcondition_moment }
   | Law_may_fail of { trait : Types.trait_reference; law : string; for_type : Types.ty }

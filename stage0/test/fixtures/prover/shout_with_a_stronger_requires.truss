@@ -6,6 +6,7 @@ impl FromTemplate for Shout {
   type Interpolation = String
 
   fn is_valid_template(literals: List[text.Literal]) -> Bool
+    ensures result
   {
     true
   }
