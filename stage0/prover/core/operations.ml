@@ -274,6 +274,237 @@ let make_power (frame : State.frame) base exponent =
   | _ -> ());
   Logic.Apply (Logic.Symbol.Integer_power, [ base; exponent ])
 
+let compute_exactly (operation : Intrinsic.scalar) left right =
+  match (operation : Intrinsic.scalar) with
+  | Wrapping_add | Add_overflows -> Logic.add left right
+  | Wrapping_subtract | Subtract_overflows -> Logic.subtract left right
+  | Wrapping_multiply | Multiply_overflows -> Logic.multiply left right
+  | _ ->
+      Facts.raise_bug "`%s` has no exact integer result"
+        (Intrinsic.show_operation (Scalar operation))
+
+let translate_shift (frame : State.frame) ~(site : Invocation.site) ~amount_origin
+    (operation : Intrinsic.scalar) ty left right =
+  let source = frame.source and location = Facts.locate frame site.origin in
+  (match find_width ty with
+  | Some bits ->
+      let at_amount, (amount, is_operand), fixes =
+        match amount_origin with
+        | Some amount ->
+            ( Facts.locate frame amount,
+              (Facts.quote source amount, true),
+              match Fixes.find_parameter_code frame right with
+              | Some amount ->
+                  Fixes.add_requires frame
+                    [ Clause (Fixes.make_comparison amount Less (Integer (Z.of_int bits))) ]
+              | None -> [] )
+        | None -> (location, (Facts.quote source site.origin, false), [])
+      in
+      Obligations.oblige ~fixes frame at_amount
+        (Shift_amount { amount; is_operand; bits })
+        Logic.(less right (int bits))
+  | None -> Facts.raise_unsupported location (Shift_of ty));
+  let shifted = declare_opaque_operation frame ty operation [ left; right ] in
+  (match (Encoding.find_bounds ty, find_width ty) with
+  | Some (low, high), Some bits when Z.equal low Z.zero && not (Logic.mentions frame.bound right) ->
+      let scale = make_power frame (Logic.int 2) right in
+      Facts.assume frame
+        Logic.(
+          less_equal (int 0) right
+          &&& less right (int bits)
+          ==> (less_equal (int 1) scale
+              &&& less_equal scale (Integer (Z.shift_left Z.one (bits - 1)))));
+      Facts.assume frame
+        (match operation with
+        | Shift_left ->
+            Logic.(
+              less_equal (multiply left scale) (Integer high)
+              ==> equal shifted (multiply left scale))
+        | _ -> Logic.equal shifted (Logic.truncated_divide left scale))
+  | _ -> ());
+  shifted
+
+let translate_bitwise (frame : State.frame) (operation : Intrinsic.scalar) ty left right =
+  let term = declare_opaque_operation frame ty operation [ left; right ] in
+  (match Encoding.find_bounds ty with
+  | Some (low, _) when Z.sign low < 0 && operation = Bit_and ->
+      let masked_by operand =
+        Logic.(less_equal (int 0) operand ==> (less_equal (int 0) term &&& less_equal term operand))
+      in
+      Facts.assume frame Logic.(masked_by left &&& masked_by right)
+  | Some (low, _) when Z.equal low Z.zero -> (
+      let at_most bound = Logic.less_equal term bound in
+      match operation with
+      | Bit_and -> Facts.assume frame Logic.(at_most left &&& at_most right)
+      | _ ->
+          let sum = Logic.add left right in
+          if operation = Bit_or then
+            Facts.assume frame Logic.(less_equal left term &&& less_equal right term);
+          Facts.assume frame (at_most sum);
+          let exponent = Logic.Symbol (Query.make_variable "exponent") in
+          let below value =
+            Logic.less value (Logic.Apply (Logic.Symbol.Integer_power, [ Logic.int 2; exponent ]))
+          in
+          Facts.assume frame
+            (Logic.forall
+               ( [ (Query.make_variable "exponent", Logic.Int) ],
+                 Logic.(less_equal (int 0) exponent &&& below left &&& below right ==> below term)
+               )))
+  | _ -> ());
+  term
+
+let translate_bit_count (frame : State.frame) (operation : Intrinsic.scalar) ty value ~fallback =
+  let low, _ = Option.get (Encoding.find_bounds ty) in
+  match find_width ty with
+  | Some bits ->
+      let count counted value =
+        let symbol = Logic.Symbol.Bit_count { count = counted; width = bits } in
+        Logic.Apply (symbol, [ value ])
+      in
+      let term = count operation value in
+      Facts.assume frame Logic.(less_equal (int 0) term &&& less_equal term (int bits));
+      (if Z.equal low Z.zero then
+         Contract_axioms.map_each_value frame value @@ fun frame value ->
+         let leading = count Leading_zeros value
+         and trailing = count Trailing_zeros value
+         and ones = count Count_ones value in
+         let power exponent = make_power frame (Logic.int 2) exponent in
+         let width = Logic.int bits in
+         let nonzero = Logic.not_ (Logic.equal value (Logic.int 0)) in
+         let below_highest = Logic.subtract width leading in
+         List.iter (Facts.assume frame)
+           Logic.
+             [
+               less_equal (int 0) leading
+               &&& less_equal leading width
+               &&& less_equal (int 0) trailing
+               &&& less_equal trailing width
+               &&& less_equal (int 0) ones
+               &&& less_equal ones width;
+               nonzero
+               ==> (less_equal (power (subtract (int (bits - 1)) leading)) value
+                   &&& less value (power below_highest));
+               equal (equal ones (int 0)) (equal value (int 0));
+               nonzero ==> less_equal ones below_highest;
+               nonzero
+               &&& equal (add value (int 1)) (power below_highest)
+               ==> equal ones below_highest;
+               nonzero ==> less_equal (add trailing leading) (int (bits - 1));
+               equal value (int 0) ==> (equal trailing width &&& equal leading width);
+             ]);
+      term
+  | None -> fallback ()
+
+let translate_conversion (frame : State.frame) ~(site : Invocation.site)
+    (operation : Intrinsic.scalar) types operands ~fallback =
+  match (operation, types) with
+  | Convert, [ source; target ]
+    when Encoding.find_float_format source <> None && Types.is_builtin Character target ->
+      Facts.raise_bug "a conversion from `%s` to `Character`, which the language does not have"
+        (Types.show source)
+  | Convert, [ source; target ]
+    when Encoding.find_float_format source <> None && Encoding.find_bounds target <> None -> (
+      match operands with
+      | [ value ] -> (
+          Obligations.oblige frame (Facts.locate frame site.origin)
+            (Float_conversion { at = Facts.quote frame.source site.origin; target })
+            (make_float_fits source target value);
+          match (find_width target, Encoding.find_bounds target) with
+          | Some width, Some (low, _) ->
+              let is_signed = Z.lt low Z.zero in
+              Logic.integer_of_bits ~is_signed ~width
+                (Logic.Operation
+                   ( (if is_signed then Fp_to_sbv { width; rounding_mode = Toward_zero }
+                      else Fp_to_ubv { width; rounding_mode = Toward_zero }),
+                     [ value ] ))
+          | _ -> fallback ())
+      | _ -> fallback ())
+  | Convert, [ source; target ]
+    when Encoding.find_bounds source <> None && Encoding.find_float_format target <> None -> (
+      match (operands, Encoding.find_float_format target) with
+      | [ value ], Some format -> make_float_of_integer format Nearest_ties_to_even value
+      | _ -> fallback ())
+  | Convert, [ source; target ]
+    when Encoding.find_float_format source <> None && Encoding.find_float_format target <> None -> (
+      match (operands, Encoding.find_float_format target) with
+      | [ value ], Some (exponent, significand) ->
+          Logic.Operation
+            (To_fp { exponent; significand; rounding_mode = Some Nearest_ties_to_even }, [ value ])
+      | _ -> fallback ())
+  | Convert, [ _; target ] when Types.is_builtin Character target -> (
+      match operands with
+      | [ value ] ->
+          Obligations.oblige frame (Facts.locate frame site.origin)
+            (Not_a_scalar_value { at = Facts.quote frame.source site.origin })
+            (Encoding.make_in_range target value);
+          value
+      | _ -> fallback ())
+  | _ -> fallback ()
+
+let translate_float_or_bit_operation (frame : State.frame) ~(site : Invocation.site)
+    (operation : Intrinsic.scalar) types operands ~fallback =
+  match (operation, types) with
+  | (Ieee_equal | Ieee_less), ty :: _ when Encoding.find_float_format ty <> None -> (
+      match operands with
+      | [ left; right ] ->
+          Logic.Operation ((if operation = Ieee_equal then Fp_eq else Fp_lt), [ left; right ])
+      | _ -> fallback ())
+  | (Square_root | Floor | Ceiling | Truncate | Round_to_even), ty :: _
+    when Encoding.find_float_format ty <> None -> (
+      match operands with
+      | [ value ] -> (
+          match operation with
+          | Square_root -> Logic.Operation (Fp_sqrt Nearest_ties_to_even, [ value ])
+          | Floor -> Logic.Operation (Fp_round_to_integral Toward_negative, [ value ])
+          | Ceiling -> Logic.Operation (Fp_round_to_integral Toward_positive, [ value ])
+          | Truncate -> Logic.Operation (Fp_round_to_integral Toward_zero, [ value ])
+          | _ -> Logic.Operation (Fp_round_to_integral Nearest_ties_to_even, [ value ]))
+      | _ -> fallback ())
+  | Fused_multiply_add, ty :: _ when Encoding.find_float_format ty <> None -> (
+      match operands with
+      | [ value; multiplier; addend ] ->
+          Logic.Operation (Fp_fma Nearest_ties_to_even, [ value; multiplier; addend ])
+      | _ -> fallback ())
+  | Is_nan, ty :: _ when Encoding.find_float_format ty <> None -> (
+      match operands with [ value ] -> is_nan value | _ -> fallback ())
+  | From_bits, [ bits; target ] when Encoding.find_bounds bits <> None -> (
+      match (operands, Encoding.find_float_format target, find_width bits) with
+      | [ value ], Some (exponent, significand), Some width ->
+          Logic.Operation
+            ( To_fp { exponent; significand; rounding_mode = None },
+              [ Logic.Operation (Int2bv { width }, [ value ]) ] )
+      | _ -> fallback ())
+  | To_bits, [ source; bits ] when Encoding.find_bounds bits <> None -> (
+      match (operands, Encoding.find_float_format source, find_width bits) with
+      | [ value ], Some (exponent, significand), Some width ->
+          let symbol =
+            Logic.Symbol.Opaque_operation
+              { operation = To_bits; type_ = bits; integer = Some (width, false) }
+          in
+          Query.declare frame.query
+            (Logic.Function (symbol, [ Encoding.sort_of source ], Encoding.sort_of bits));
+          let term = Logic.Apply (symbol, [ value ]) in
+          Facts.assume frame (Encoding.make_in_range bits term);
+          Facts.assume frame
+            Logic.(
+              not_ (is_nan value)
+              ==> equal
+                    (Operation
+                       ( To_fp { exponent; significand; rounding_mode = None },
+                         [ Operation (Int2bv { width }, [ term ]) ] ))
+                    value);
+          term
+      | _ -> fallback ())
+  | Multiply_high, ty :: _ when Encoding.find_bounds ty <> None -> (
+      match (operands, find_width ty) with
+      | [ left; right ], Some bits ->
+          Logic.Operation
+            (Div, [ Logic.multiply left right; Logic.Integer (Z.shift_left Z.one bits) ])
+      | _ -> fallback ())
+  | (Rotate_left | Rotate_right | Swap_bytes), ty :: _ when Encoding.find_bounds ty <> None ->
+      declare_opaque_operation frame ty operation operands
+  | _ -> translate_conversion frame ~site operation types operands ~fallback
+
 let translate_primitive_operation (frame : State.frame) ~(site : Invocation.site)
     (operation : Intrinsic.scalar) types operands ~(arguments : Core.origin option list) ~fallback =
   let source = frame.source in
@@ -286,15 +517,6 @@ let translate_primitive_operation (frame : State.frame) ~(site : Invocation.site
   let find_argument index = Option.join (List.nth_opt arguments index) in
   let is_float =
     match types with ty :: _ -> Encoding.find_float_format ty <> None | [] -> false
-  in
-  let exact operation left right =
-    match (operation : Intrinsic.scalar) with
-    | Wrapping_add | Add_overflows -> Logic.add left right
-    | Wrapping_subtract | Subtract_overflows -> Logic.subtract left right
-    | Wrapping_multiply | Multiply_overflows -> Logic.multiply left right
-    | _ ->
-        Facts.raise_bug "`%s` has no exact integer result"
-          (Intrinsic.show_operation (Scalar operation))
   in
   match (operation, types, operands) with
   | Add, _ :: _, [ left; right ] when is_float ->
@@ -322,75 +544,9 @@ let translate_primitive_operation (frame : State.frame) ~(site : Invocation.site
       negated
   | Complement, ty :: _, [ inner ] -> declare_opaque_operation frame ty Complement [ inner ]
   | (Shift_left | Shift_right), ty :: _, [ left; right ] ->
-      (match find_width ty with
-      | Some bits ->
-          let at_amount, (amount, is_operand), fixes =
-            match find_argument 1 with
-            | Some amount ->
-                ( Facts.locate frame amount,
-                  (Facts.quote source amount, true),
-                  match Fixes.find_parameter_code frame right with
-                  | Some amount ->
-                      Fixes.add_requires frame
-                        [ Clause (Fixes.make_comparison amount Less (Integer (Z.of_int bits))) ]
-                  | None -> [] )
-            | None -> (location, (Facts.quote source site.origin, false), [])
-          in
-          Obligations.oblige ~fixes frame at_amount
-            (Shift_amount { amount; is_operand; bits })
-            Logic.(less right (int bits))
-      | None -> Facts.raise_unsupported location (Shift_of ty));
-      let shifted = declare_opaque_operation frame ty operation [ left; right ] in
-      (match (Encoding.find_bounds ty, find_width ty) with
-      | Some (low, high), Some bits
-        when Z.equal low Z.zero && not (Logic.mentions frame.bound right) ->
-          let scale = make_power frame (Logic.int 2) right in
-          Facts.assume frame
-            Logic.(
-              less_equal (int 0) right
-              &&& less right (int bits)
-              ==> (less_equal (int 1) scale
-                  &&& less_equal scale (Integer (Z.shift_left Z.one (bits - 1)))));
-          Facts.assume frame
-            (match operation with
-            | Shift_left ->
-                Logic.(
-                  less_equal (multiply left scale) (Integer high)
-                  ==> equal shifted (multiply left scale))
-            | _ -> Logic.equal shifted (Logic.truncated_divide left scale))
-      | _ -> ());
-      shifted
+      translate_shift frame ~site ~amount_origin:(find_argument 1) operation ty left right
   | (Bit_and | Bit_or | Bit_xor), ty :: _, [ left; right ] ->
-      let term = declare_opaque_operation frame ty operation [ left; right ] in
-      (match Encoding.find_bounds ty with
-      | Some (low, _) when Z.sign low < 0 && operation = Bit_and ->
-          let masked_by operand =
-            Logic.(
-              less_equal (int 0) operand ==> (less_equal (int 0) term &&& less_equal term operand))
-          in
-          Facts.assume frame Logic.(masked_by left &&& masked_by right)
-      | Some (low, _) when Z.equal low Z.zero -> (
-          let at_most bound = Logic.less_equal term bound in
-          match operation with
-          | Bit_and -> Facts.assume frame Logic.(at_most left &&& at_most right)
-          | _ ->
-              let sum = Logic.add left right in
-              if operation = Bit_or then
-                Facts.assume frame Logic.(less_equal left term &&& less_equal right term);
-              Facts.assume frame (at_most sum);
-              let exponent = Logic.Symbol (Query.make_variable "exponent") in
-              let below value =
-                Logic.less value
-                  (Logic.Apply (Logic.Symbol.Integer_power, [ Logic.int 2; exponent ]))
-              in
-              Facts.assume frame
-                (Logic.forall
-                   ( [ (Query.make_variable "exponent", Logic.Int) ],
-                     Logic.(
-                       less_equal (int 0) exponent &&& below left &&& below right ==> below term) ))
-          )
-      | _ -> ());
-      term
+      translate_bitwise frame operation ty left right
   | (Wrapping_add | Wrapping_subtract | Wrapping_multiply), ty :: _, [ left; right ]
     when Encoding.find_bounds ty <> None ->
       let low, high = Option.get (Encoding.find_bounds ty) in
@@ -399,12 +555,12 @@ let translate_primitive_operation (frame : State.frame) ~(site : Invocation.site
         (Logic.Operation
            ( Mod,
              [
-               Logic.subtract (exact operation left right) (Logic.Integer low);
+               Logic.subtract (compute_exactly operation left right) (Logic.Integer low);
                Logic.Integer modulus;
              ] ))
   | (Add_overflows | Subtract_overflows | Multiply_overflows), ty :: _, [ left; right ]
     when Encoding.find_bounds ty <> None ->
-      Logic.not_ (Encoding.make_in_range ty (exact operation left right))
+      Logic.not_ (Encoding.make_in_range ty (compute_exactly operation left right))
   | Equal, _ :: _, [ left; right ] when is_float -> make_float_equal left right
   | Less, _ :: _, [ left; right ] when is_float -> make_float_less left right
   | Equal, ty :: _, [ left; right ] when Encoding.find_bounds ty <> None -> Logic.equal left right
@@ -424,149 +580,6 @@ let translate_primitive_operation (frame : State.frame) ~(site : Invocation.site
         value
         (declare_opaque_operation frame target Convert [ value ])
   | (Leading_zeros | Trailing_zeros | Count_ones), ty :: _, [ value ]
-    when Encoding.find_bounds ty <> None -> (
-      let low, _ = Option.get (Encoding.find_bounds ty) in
-      match find_width ty with
-      | Some bits ->
-          let count counted value =
-            let symbol = Logic.Symbol.Bit_count { count = counted; width = bits } in
-            Logic.Apply (symbol, [ value ])
-          in
-          let term = count operation value in
-          Facts.assume frame Logic.(less_equal (int 0) term &&& less_equal term (int bits));
-          (if Z.equal low Z.zero then
-             Contract_axioms.map_each_value frame value @@ fun frame value ->
-             let leading = count Leading_zeros value
-             and trailing = count Trailing_zeros value
-             and ones = count Count_ones value in
-             let power exponent = make_power frame (Logic.int 2) exponent in
-             let width = Logic.int bits in
-             let nonzero = Logic.not_ (Logic.equal value (Logic.int 0)) in
-             let below_highest = Logic.subtract width leading in
-             List.iter (Facts.assume frame)
-               Logic.
-                 [
-                   less_equal (int 0) leading
-                   &&& less_equal leading width
-                   &&& less_equal (int 0) trailing
-                   &&& less_equal trailing width
-                   &&& less_equal (int 0) ones
-                   &&& less_equal ones width;
-                   nonzero
-                   ==> (less_equal (power (subtract (int (bits - 1)) leading)) value
-                       &&& less value (power below_highest));
-                   equal (equal ones (int 0)) (equal value (int 0));
-                   nonzero ==> less_equal ones below_highest;
-                   nonzero
-                   &&& equal (add value (int 1)) (power below_highest)
-                   ==> equal ones below_highest;
-                   nonzero ==> less_equal (add trailing leading) (int (bits - 1));
-                   equal value (int 0) ==> (equal trailing width &&& equal leading width);
-                 ]);
-          term
-      | None -> fallback ())
-  | _ -> (
-      match (operation, types) with
-      | (Ieee_equal | Ieee_less), ty :: _ when Encoding.find_float_format ty <> None -> (
-          match operands with
-          | [ left; right ] ->
-              Logic.Operation ((if operation = Ieee_equal then Fp_eq else Fp_lt), [ left; right ])
-          | _ -> fallback ())
-      | (Square_root | Floor | Ceiling | Truncate | Round_to_even), ty :: _
-        when Encoding.find_float_format ty <> None -> (
-          match operands with
-          | [ value ] -> (
-              match operation with
-              | Square_root -> Logic.Operation (Fp_sqrt Nearest_ties_to_even, [ value ])
-              | Floor -> Logic.Operation (Fp_round_to_integral Toward_negative, [ value ])
-              | Ceiling -> Logic.Operation (Fp_round_to_integral Toward_positive, [ value ])
-              | Truncate -> Logic.Operation (Fp_round_to_integral Toward_zero, [ value ])
-              | _ -> Logic.Operation (Fp_round_to_integral Nearest_ties_to_even, [ value ]))
-          | _ -> fallback ())
-      | Fused_multiply_add, ty :: _ when Encoding.find_float_format ty <> None -> (
-          match operands with
-          | [ value; multiplier; addend ] ->
-              Logic.Operation (Fp_fma Nearest_ties_to_even, [ value; multiplier; addend ])
-          | _ -> fallback ())
-      | Is_nan, ty :: _ when Encoding.find_float_format ty <> None -> (
-          match operands with [ value ] -> is_nan value | _ -> fallback ())
-      | From_bits, [ bits; target ] when Encoding.find_bounds bits <> None -> (
-          match (operands, Encoding.find_float_format target, find_width bits) with
-          | [ value ], Some (exponent, significand), Some width ->
-              Logic.Operation
-                ( To_fp { exponent; significand; rounding_mode = None },
-                  [ Logic.Operation (Int2bv { width }, [ value ]) ] )
-          | _ -> fallback ())
-      | To_bits, [ source; bits ] when Encoding.find_bounds bits <> None -> (
-          match (operands, Encoding.find_float_format source, find_width bits) with
-          | [ value ], Some (exponent, significand), Some width ->
-              let symbol =
-                Logic.Symbol.Opaque_operation
-                  { operation = To_bits; type_ = bits; integer = Some (width, false) }
-              in
-              Query.declare frame.query
-                (Logic.Function (symbol, [ Encoding.sort_of source ], Encoding.sort_of bits));
-              let term = Logic.Apply (symbol, [ value ]) in
-              Facts.assume frame (Encoding.make_in_range bits term);
-              Facts.assume frame
-                Logic.(
-                  not_ (is_nan value)
-                  ==> equal
-                        (Operation
-                           ( To_fp { exponent; significand; rounding_mode = None },
-                             [ Operation (Int2bv { width }, [ term ]) ] ))
-                        value);
-              term
-          | _ -> fallback ())
-      | Multiply_high, ty :: _ when Encoding.find_bounds ty <> None -> (
-          match (operands, find_width ty) with
-          | [ left; right ], Some bits ->
-              Logic.Operation
-                (Div, [ Logic.multiply left right; Logic.Integer (Z.shift_left Z.one bits) ])
-          | _ -> fallback ())
-      | (Rotate_left | Rotate_right | Swap_bytes), ty :: _ when Encoding.find_bounds ty <> None ->
-          declare_opaque_operation frame ty operation operands
-      | Convert, [ source; target ]
-        when Encoding.find_float_format source <> None && Types.is_builtin Character target ->
-          Facts.raise_bug "a conversion from `%s` to `Character`, which the language does not have"
-            (Types.show source)
-      | Convert, [ source; target ]
-        when Encoding.find_float_format source <> None && Encoding.find_bounds target <> None -> (
-          match operands with
-          | [ value ] -> (
-              Obligations.oblige frame (Facts.locate frame site.origin)
-                (Float_conversion { at = Facts.quote frame.source site.origin; target })
-                (make_float_fits source target value);
-              match (find_width target, Encoding.find_bounds target) with
-              | Some width, Some (low, _) ->
-                  let is_signed = Z.lt low Z.zero in
-                  Logic.integer_of_bits ~is_signed ~width
-                    (Logic.Operation
-                       ( (if is_signed then Fp_to_sbv { width; rounding_mode = Toward_zero }
-                          else Fp_to_ubv { width; rounding_mode = Toward_zero }),
-                         [ value ] ))
-              | _ -> fallback ())
-          | _ -> fallback ())
-      | Convert, [ source; target ]
-        when Encoding.find_bounds source <> None && Encoding.find_float_format target <> None -> (
-          match (operands, Encoding.find_float_format target) with
-          | [ value ], Some format -> make_float_of_integer format Nearest_ties_to_even value
-          | _ -> fallback ())
-      | Convert, [ source; target ]
-        when Encoding.find_float_format source <> None && Encoding.find_float_format target <> None
-        -> (
-          match (operands, Encoding.find_float_format target) with
-          | [ value ], Some (exponent, significand) ->
-              Logic.Operation
-                ( To_fp { exponent; significand; rounding_mode = Some Nearest_ties_to_even },
-                  [ value ] )
-          | _ -> fallback ())
-      | Convert, [ _; target ] when Types.is_builtin Character target -> (
-          match operands with
-          | [ value ] ->
-              Obligations.oblige frame (Facts.locate frame site.origin)
-                (Not_a_scalar_value { at = Facts.quote frame.source site.origin })
-                (Encoding.make_in_range target value);
-              value
-          | _ -> fallback ())
-      | _ -> fallback ())
+    when Encoding.find_bounds ty <> None ->
+      translate_bit_count frame operation ty value ~fallback
+  | _ -> translate_float_or_bit_operation frame ~site operation types operands ~fallback
