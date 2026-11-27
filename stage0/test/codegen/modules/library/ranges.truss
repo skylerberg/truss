@@ -98,6 +98,24 @@ test "a range of a narrow type reaches its largest value without overflowing" {
   assert low == [-126, -127, -128]
 }
 
+test "the whole range of a type reversed starts at the largest value" {
+  let whole: Range[UInt64] = UInt64.minimum..=UInt64.maximum
+  var first: List[UInt64] = []
+  for value in whole.reversed() {
+    mut first.push(value)
+    if first.length() == 3 {
+      break
+    }
+  }
+  assert first == [UInt64.maximum, UInt64.maximum - 1, UInt64.maximum - 2]
+  let signed: Range[Int8] = Int8.minimum..=Int8.maximum
+  var last: List[Int8] = []
+  for value in signed.reversed() {
+    last = [value]
+  }
+  assert last == [Int8.minimum]
+}
+
 test "a range of characters gives each character" {
   var text = ""
   let letters: Range[Character] = Character"a"..=Character"e"

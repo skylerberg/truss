@@ -2297,6 +2297,13 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   every empty range equals every other.
 - A range of characters holds the characters between its ends in the order
   of their code points.
+- **A range's `count()` is a `UInt64`.** It is the number of values in the
+  range, except for the one range that holds more than a `UInt64` counts:
+  the range of every value of a 64-bit type, such as
+  `UInt64.minimum..=UInt64.maximum`. Its `count()` is `UInt64.maximum` and
+  its `length()` is `None`. A view of that range by position, such as
+  `reversed()` or `step_by`, gives the right value at every position below
+  the count, and so omits the last value of its own order.
 - A range with no start or no end is allowed only directly in brackets, as in
   `items[2..]`.
 

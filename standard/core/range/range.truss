@@ -85,7 +85,15 @@ impl Iterable for Reversed[Value: core.Countable] {
     requires position < self.count()
     ensures self.range.contains(result)
   {
-    self.range.element(self.range.count() - 1 - position)
+    if self.range.inclusive && position == 0 {
+      self.range.stop
+    } else {
+      let steps_back = if self.range.inclusive { position } else { position + 1 }
+      match self.range.stop.retreated(steps_back) {
+        Some(value) => value
+        None => unreachable
+      }
+    }
   }
 }
 
