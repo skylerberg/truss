@@ -335,8 +335,10 @@ let call_contract (frame : State.frame) (site : Invocation.site) (callee : Calle
   let spend ~(before : State.frame) ~(after : State.frame) ~changed ~result ~final =
     Amounts.spend_contract_call ~before ~after site callee definition contract values ~changed
       ~result ~result_type:declared_result_type ~final
-      ~is_recursive:(Option.is_some recursive_callee) ~bind_frame:(fun clauses ->
+      ~is_recursive:(Option.is_some recursive_callee)
+      ~bind_frame:(fun clauses ->
         { (read_entry_frame before clauses) with result = Some result; condition = after.condition })
+      ~read_premise:(compute_required before)
   in
   let havoc = havoc_mut frame values ~list_modified in
   let after = havoc.after and changed = List.rev havoc.written in

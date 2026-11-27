@@ -2925,6 +2925,12 @@ trait Ordered: Equal {
   the trait's `Panic unless` must imply the method's. A call known to reach
   that `impl` is proven against the `impl`'s contract, and a call through a
   bound against the trait's.
+- **A trait's clauses hold of a call that meets the trait's `requires`.** A
+  method whose own `requires` allow more arguments is proven to keep the
+  trait's `ensures` and `cost` clauses for the arguments that the trait
+  allows, and its own clauses for every argument that it allows. A call
+  known to reach the `impl` with an argument that only the method allows
+  has the method's own clauses and not the trait's.
 - An `impl`'s method without a `time` clause has its trait's.
 - **Required traits:** a type implements the traits a trait requires before
   it implements the trait, and a bound includes them. A trait can add an
