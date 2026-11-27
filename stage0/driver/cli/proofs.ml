@@ -1,14 +1,5 @@
 let make_solver () =
-  let cache = Workspace.open_cache () in
-  match
-    Solver.find
-      ~cache:
-        {
-          find = (fun key -> Cache.find_result cache ~kind:Solver_answer ~key);
-          add = (fun key value -> Cache.add_result cache ~kind:Solver_answer ~key value);
-        }
-      ()
-  with
+  match Solver.find () with
   | Ok solver -> solver
   | Error message -> Outcome.raise_cannot_run "%s" message
 
@@ -33,7 +24,10 @@ let check database snapshot packages scope =
     decided =
       lazy
         (evaluate database snapshot packages proofs;
-         Database.decide proofs (lazy (make_solver ())));
+         let solver = lazy (make_solver ()) in
+         Fun.protect
+           ~finally:(fun () -> if Lazy.is_val solver then Solver.stop (Lazy.force solver))
+           (fun () -> Database.decide proofs solver));
   }
 
 let list_diagnostics checked file =

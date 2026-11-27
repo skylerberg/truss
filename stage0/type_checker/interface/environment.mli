@@ -29,7 +29,7 @@ type 'bounds scope = {
 type elaborated_interface = {
   interface : interface;
   diagnostics : Catalog.diagnostic list;
-  named : (Syntax.id * Types.ty) list;
+  applications : (Syntax.id * Types.application) list;
   scope : known_bounds scope;
 }
 
@@ -53,7 +53,7 @@ type container =
 type header = {
   container : container;
   container_scope : declared_bounds scope;
-  container_named : (Syntax.id * Types.ty) list;
+  container_applications : (Syntax.id * Types.application) list;
 }
 
 type occurrence = In_place | Indirect | Function_input

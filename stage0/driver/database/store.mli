@@ -163,6 +163,11 @@ val list_file_verdicts : t -> file:int -> (string * placed * verdict) list
 val find_placed : t -> schema -> definition:int -> placed option
 val replace_verdicts : t -> definition:int -> verdict list -> bool
 
+type solver_run = { input_hash : string; output : string }
+
+val list_solver_runs : t -> definition:int -> solver_run list
+val replace_solver_runs : t -> definition:int -> solver_run list -> unit
+
 val list_differing_rows :
   t ->
   table:string ->
@@ -185,6 +190,7 @@ val count_differing_rows : t -> other:schema -> (string * int) list
 val keep_for_dependents : t -> markers:int -> unit
 val mark_stale : t -> stage:int -> id:int -> unit
 val unmark_stale : t -> stage:int -> id:int -> bool
+val is_stale : t -> stage:int -> id:int -> bool
 
 type unit_entity =
   | File_unit

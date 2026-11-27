@@ -15,18 +15,14 @@
   resolve
   inspect
   interface
-  package_checks
   manifest
   registry
   c_compiler
   process
-  emit_c
   unicode
   backend
-  lowering
   database
   solver
-  prover
   workspace
   cache
   project

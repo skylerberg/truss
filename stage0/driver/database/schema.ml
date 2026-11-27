@@ -84,7 +84,7 @@ let tables =
       [];
     fact_of_definition "header" (state ^ ", value BLOB");
     fact_of_definition "trait_header" (state ^ ", value BLOB");
-    fact_of_definition "interface" (state ^ ", value BLOB, named BLOB, scope BLOB");
+    fact_of_definition "interface" (state ^ ", value BLOB, applications BLOB, scope BLOB");
     fact_of_definition "signature_check" state;
     keyed_by_id "type_facts"
       ("path INTEGER PRIMARY KEY, " ^ state
@@ -109,6 +109,8 @@ let tables =
     keyed_by_id "proof_group"
       ("path INTEGER PRIMARY KEY, " ^ state ^ ", representative INTEGER, members BLOB")
       [ ("proof_group_representative", "representative") ];
+    keyed_by_id "aborts_outside_group" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value INTEGER") [];
+    keyed_by_id "may_abort" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value INTEGER") [];
     fact_of_definition "usage_check" state;
     fact_of_definition "ownership" (state ^ ", must_be_disjoint BLOB");
     fact_of_definition ~has_index_without_value:true "proof" (state ^ ", value BLOB");
@@ -120,6 +122,10 @@ let tables =
       "definition INTEGER NOT NULL, position INTEGER NOT NULL, code TEXT NOT NULL, site BLOB NOT \
        NULL, proven INTEGER NOT NULL, trusts_compiled_code INTEGER NOT NULL, failure BLOB, PRIMARY \
        KEY (definition, position)"
+      [];
+    keyed_by_columns "solver_run"
+      "definition INTEGER NOT NULL, position INTEGER NOT NULL, input_hash BLOB NOT NULL, output \
+       TEXT NOT NULL, PRIMARY KEY (definition, position)"
       [];
     keyed_by_id "grant"
       ("dependency INTEGER PRIMARY KEY, " ^ state ^ ", capabilities BLOB, unknown BLOB")
@@ -135,6 +141,9 @@ let tables =
       [];
     keyed_by_id "test_key" ("item INTEGER PRIMARY KEY, " ^ state ^ ", key BLOB") [];
     keyed_by_id "evaluation" ("item INTEGER PRIMARY KEY, " ^ state ^ ", value BLOB") [];
+    keyed_by_id "test_run"
+      ("item INTEGER PRIMARY KEY, " ^ state ^ ", compiler_fingerprint BLOB, microseconds INTEGER")
+      [];
     keyed_by_columns "unit"
       ("item INTEGER NOT NULL, profile INTEGER NOT NULL, " ^ state
      ^ ", text_hash BLOB, PRIMARY KEY (item, profile)")

@@ -3,7 +3,7 @@ type root = Project | Registry of string
 type files = {
   find_tree : root -> string list option;
   find_text : root -> string -> string option;
-  find_unavailable_reason : string -> string option;
+  find_unavailable_reason : string -> Project_catalog.Problem.unavailable option;
 }
 
 val lock_file : string

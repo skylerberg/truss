@@ -3,6 +3,7 @@ module Lookups = Lookups
 type resolution = Tables.resolution =
   | Local_value of Syntax.id
   | Global of { path : Path.t; instantiation : Types.instantiation }
+  | Trait_method_value of Tables.trait_method
   | Field_access of { type_ : Types.ty; field : string }
   | Variant_value of { type_ : Types.ty; variant : string }
   | Type_name of Types.ty
@@ -26,7 +27,9 @@ type checked = Body.checked = {
 }
 
 let check lookups (key : Resolve.Names.key) ~checks_body =
-  Compiler_bug.run_while_doing ~stage:"Infer" (Resolve.Names.show_key key) (fun () ->
+  Compiler_bug.run_while_doing ~stage:"Infer"
+    (fun () -> Resolve.Names.show_key key)
+    (fun () ->
       try
         Result.bind (Body.check lookups key ~checks_body) (fun (checked : checked) ->
             match Patterns.check lookups key checked.form with

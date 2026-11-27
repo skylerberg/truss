@@ -1,0 +1,13 @@
+fn is_even(n: UInt64) -> Bool {
+  n % 2 == 0
+}
+
+theorem unguarded()
+  ensures forall n: Integer => is_even(n) ==> true
+{
+}
+
+theorem guarded_after()
+  ensures forall n: Integer => is_even(n) && n >= 0 && n <= UInt64.maximum ==> true
+{
+}

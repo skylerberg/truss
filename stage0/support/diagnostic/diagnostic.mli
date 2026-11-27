@@ -58,6 +58,7 @@ module Code : sig
     | Repeated_clause
     | Cost_word
     | Loop_cost_bound
+    | Amortized_bound
     | Function_type_cost_bound
     | Function_type_names
     | Misplaced_callback_contract
@@ -85,10 +86,9 @@ module Code : sig
     | Power_operator
     | Short_declaration
     | Pipe_operator
-    | Lambda_annotation
+    | Lambda_result_type
     | Impl_parameters
     | Null_coalescing
-    | Specification_only
     | Misplaced_assert
     | Misplaced_proof
     | Misplaced_loop_exit
@@ -132,6 +132,7 @@ module Code : sig
     | Wrong_mode
     | Unknown_member
     | Ambiguous_method
+    | Ambiguous_associated
     | Private_field
     | Member_not_visible
     | Not_callable
@@ -148,7 +149,6 @@ module Code : sig
     | Cost_of_other_resource
     | Not_assignable
     | Wrong_try
-    | Lambda_needs_type
     | Not_a_record
     | Not_a_tuple_type
     | Unknown_variant
@@ -178,7 +178,7 @@ module Code : sig
     | Condition_names_parameter
     | Main_signature
     | No_real_implementation
-    | Duplicate_field
+    | Duplicate_member
     | Cannot_derive
     | Derives_inferred
     | Redeclared_method
@@ -204,6 +204,7 @@ module Code : sig
     | Not_a_field_path
     | Read_only_part
     | Repeated_part
+    | Repeated_derive
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
 

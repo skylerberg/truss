@@ -12,7 +12,12 @@ type ty =
   | Error of Diagnostic.reported
 
 and argument = Type of ty | Value of value
-and value = Known of Z.t | Value_parameter of parameter | Value_variable of int
+
+and value =
+  | Known of Z.t
+  | Value_parameter of parameter
+  | Value_variable of int
+  | Value_error of Diagnostic.reported
 
 and trait_reference = {
   trait : Path.t;
@@ -49,6 +54,18 @@ and resource =
   | Calls of { capability : Path.t; method_ : string option }
 
 and cost_bound = Order_of | No_more_than of Z.t | Exactly_cost of Z.t
+
+type associated_kind = Associated_type | Associated_capability_set
+
+type application =
+  | Type_application of ty
+  | Trait_application of trait_reference
+  | Associated_application of {
+      base : ty;
+      bounds : trait_reference list;
+      name : string;
+      kind : associated_kind;
+    }
 
 let make_condition (condition : condition) : condition = List.sort_uniq compare condition
 
@@ -94,6 +111,17 @@ let make_capability_set capabilities : capability_set =
     @ List.filter_map (fun (capability, unless) -> make_unless capability unless) conditional)
 
 let no_capabilities : capability_set = []
+
+let states_no_allocation costs =
+  List.exists
+    (fun (cost : cost) ->
+      cost.resource = Metric Allocations
+      && (not cost.amortized)
+      &&
+      match cost.bound with
+      | No_more_than limit | Exactly_cost limit -> Z.equal limit Z.zero
+      | Order_of -> false)
+    costs
 
 let union_capabilities (left : capability_set) (right : capability_set) =
   make_capability_set (left @ right)
@@ -283,6 +311,11 @@ let find_integer_range type_ =
       if signed then (Z.neg (Z.shift_left Z.one (bits - 1)), Z.pred (Z.shift_left Z.one (bits - 1)))
       else (Z.zero, Z.pred (Z.shift_left Z.one bits)))
     (find_integer_bits type_)
+
+let list_value_ranges type_ =
+  if is_builtin Character type_ then
+    [ (Z.zero, Z.of_int 0xD7FF); (Z.of_int 0xE000, Z.of_int 0x10FFFF) ]
+  else Option.to_list (find_integer_range type_)
 
 let list_fitting_integer_types number =
   List.filter
@@ -558,7 +591,7 @@ let costs_imply ~(provided : cost list) ~(required : cost list) =
       List.exists
         (fun (provided : cost) ->
           provided.resource = required.resource
-          && (required.amortized || not provided.amortized)
+          && provided.amortized = required.amortized
           && bound_implies provided.bound required.bound)
         provided)
     required
@@ -605,7 +638,7 @@ and show_argument = function
   | Type type_ -> show type_
   | Value (Known value) -> Z.to_string value
   | Value (Value_parameter { name; _ }) -> name
-  | Value (Value_variable _) -> "_"
+  | Value (Value_variable _ | Value_error _) -> "_"
 
 and show_capabilities capabilities =
   let names =
@@ -764,6 +797,17 @@ let read_parameter_at (signature : signature) position =
             position
             (List.length signature.parameters))
 
+let add_receiver (signature : signature) receiver =
+  match (signature.receiver, receiver) with
+  | None, Some _ ->
+      {
+        signature with
+        receiver;
+        modifies =
+          List.map (fun part -> { part with position = part.position + 1 }) signature.modifies;
+      }
+  | _ -> { signature with receiver }
+
 let list_modified_parts (signature : signature) position =
   match List.filter (fun modified -> modified.position = position) signature.modifies with
   | [] -> None
@@ -885,6 +929,7 @@ type type_interface = {
   opaque : bool;
   is_tuple : bool;
   derives : Path.t list;
+  declares_potential : bool;
 }
 
 let substitute_fields interface arguments fields =

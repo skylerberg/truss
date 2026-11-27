@@ -22,7 +22,7 @@ let rec find_offending_expression (state : State.state) ~bound (value : Syntax.e
   in
   let find_in_resolved () =
     match (state.tables.resolutions.(value.id), value.kind) with
-    | Some (Global _ | Variant_value _ | Type_name _), _ -> None
+    | Some (Global _ | Trait_method_value _ | Variant_value _ | Type_name _), _ -> None
     | Some (Local_value local), _ when List.mem local bound -> None
     | Some (Field_access _), Member (base, _) -> find_first [ base ]
     | _ -> Some value
@@ -41,7 +41,7 @@ let rec find_offending_expression (state : State.state) ~bound (value : Syntax.e
                | Syntax.Item { kind = Range { start; stop; _ }; _ } ->
                    Option.to_list start @ Option.to_list stop
                | Item index -> [ index ]
-               | Item_constraint _ -> [])
+               | Item_constraint _ | Item_type _ -> [])
              items)
   | Range { start; stop; _ } -> find_first (Option.to_list start @ Option.to_list stop)
   | Quantified { binder = Binder_in (pattern, collection); body; _ } -> (
@@ -80,7 +80,7 @@ let rec find_use_of_a_type_parameter (state : State.state) (value : Syntax.expre
         (function
           | Types.Type type_ -> mentions_type_parameter state type_
           | Value (Value_parameter _) -> true
-          | Value (Known _ | Value_variable _) -> false)
+          | Value (Known _ | Value_variable _ | Value_error _) -> false)
         instantiation.type_arguments
     in
     match Tables.find_call state.tables value.id with

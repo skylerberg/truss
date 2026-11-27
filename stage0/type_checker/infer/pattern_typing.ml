@@ -50,8 +50,8 @@ and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syn
                      {
                        at = Written bound.id;
                        name = bound.text;
-                       first = State.zonk state local.type_;
-                       here = State.zonk state type_;
+                       first = State.normalize_known state local.type_;
+                       here = State.normalize_known state type_;
                      })
           | None -> ())
       | _ -> ())
@@ -137,7 +137,8 @@ and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syn
       | _ ->
           check_unknown
             (State.make_error_type state
-               (No_variants { at = Written written.id; type_ = State.zonk state type_ })))
+               (No_variants { at = Written written.id; type_ = State.normalize_known state type_ }))
+      )
   | Record fields -> (
       match type_ with
       | Types.Named { path; arguments } -> (
@@ -394,15 +395,7 @@ and check_constant_pattern (state : State.state) id at path type_ =
         Failures.report_mismatch state at ~expected:type_ ~actual:constant_type
       else if not (is_structural state (State.resolve state constant_type)) then
         State.report state
-          (Not_structural
-             {
-               at;
-               type_ = State.zonk state constant_type;
-               constant =
-                 (match path with
-                 | Top { name; _ } | Member_constant { name; _ } | Method { name; _ } -> name
-                 | _ -> "the_constant");
-             })
+          (Not_structural { at; type_ = State.normalize_known state constant_type })
   | None -> ()
 
 and is_structural ?(seen = []) state (type_ : Types.ty) =

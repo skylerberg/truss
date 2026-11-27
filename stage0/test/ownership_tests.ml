@@ -14,6 +14,17 @@ let expect_accepted_after prefix name body =
   Harness.test name (fun () -> expect_fine (prefix ^ body))
 
 let () =
+  Harness.test "a value of a type that contains itself in place is passed to a call" (fun () ->
+      expect_fine
+        "public type Tree =\n\
+        \  | Leaf\n\
+        \  | Node(left: Tree)\n\n\
+         public fn is_leaf(tree: Tree) -> Bool {\n\
+        \  tree is Leaf\n\
+         }\n\n\
+         public fn is_empty(tree: Tree) -> Bool {\n\
+        \  is_leaf(tree)\n\
+         }\n");
   Harness.test "a body changes only the parts that its modifies clause names" (fun () ->
       let scanner =
         "public type Region(first: UInt64, stop: UInt64)\n\
@@ -84,6 +95,22 @@ let () =
          public type Quiet()\n\
          public trait Recorder {\n\
         \  fn record(self, log: mut Journal)\n\
+        \    modifies log.entries\n\
+         }\n\
+         impl Recorder for Quiet {\n\
+        \  fn record(self, log: mut Journal) {\n\
+        \    log.total = 1\n\
+        \  }\n\
+         }\n"
+        "ownership.undeclared_change" ~says:"`log.total` changes here");
+  Harness.test
+    "an impl of a capability's method without a modifies clause changes only the capability's parts"
+    (fun () ->
+      expect_one_diagnostic
+        "public type Journal(entries: List[UInt64], total: UInt64)\n\
+         public type Quiet()\n\
+         public capability Recorder {\n\
+        \  fn record(log: mut Journal)\n\
         \    modifies log.entries\n\
          }\n\
          impl Recorder for Quiet {\n\
@@ -690,6 +717,14 @@ let () =
       expect_fine (shout ^ Fixtures.Ownership.shout_of_a_copied_name);
       expect_fine (shout ^ Fixtures.Ownership.shout_of_an_own_name);
       expect_fine Fixtures.Ownership.plain_string_of_a_name);
+  Harness.test "a value of an associated type that `Plain` bounds is copied, not moved" (fun () ->
+      expect_fine
+        "trait Get {\n\
+        \  type Value: Plain\n\
+         }\n\n\
+         fn twice[Source: Get](value: Source.Value) -> List[Source.Value] {\n\
+        \  [value, value]\n\
+         }\n");
   Harness.test "a `Plain` place is copied, not moved" (fun () ->
       expect_fine Fixtures.Ownership.plain_place_passed_own);
   Harness.test "a place moved by an argument cannot be read by a later argument of the same call"
@@ -953,6 +988,24 @@ let () =
       expect_fine Fixtures.Ownership.window_of_a_plain_start);
   Harness.test "a diverging path of a lending method need not lend" (fun () ->
       expect_fine Fixtures.Ownership.grid_cell_that_may_diverge)
+
+let () =
+  Harness.test "a list is not mutated while a variant built from its element is live" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.list_mutated_while_a_variant_views_its_element
+        "ownership.mutated_while_viewed");
+  Harness.test "an element given where the binding declares an owner is not moved" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.element_given_where_an_owner_is_declared
+        "ownership.not_owned" ~fixed:("names[0]", "names[0].copy()"));
+  Harness.test "an element given to a type parameter that no view meets is not moved" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.element_given_to_a_parameter_that_is_stored
+        "ownership.not_owned" ~fixed:("names[0]", "names[0].copy()"));
+  Harness.test "an element given after an owned argument decided the type is not moved" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.element_given_after_an_owned_argument
+        "ownership.not_owned" ~fixed:("names[0]", "names[0].copy()"));
+  Harness.test "a temporary given after a place decided the type is viewed, and dropped too soon"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.temporary_given_after_a_borrowed_argument
+        "ownership.views_temporary")
 
 let () =
   Harness.test "a cursor cannot view a temporary that the statement drops" (fun () ->

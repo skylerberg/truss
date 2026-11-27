@@ -1,0 +1,7 @@
+fn f(count: UInt32, divisor: UInt32) -> UInt32
+  requires divisor != 0
+  decreases count, 100 / divisor
+{
+  if count == 0 { return 0 }
+  f(count - 1, divisor)
+}

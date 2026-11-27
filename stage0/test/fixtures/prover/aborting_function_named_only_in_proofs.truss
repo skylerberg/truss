@@ -1,0 +1,41 @@
+fn doubled(text: String) -> String
+  ensures result.length() == 2 * text.length()
+{
+  text.repeated(2)
+}
+
+theorem sorted_between(items: view List[Int64], first: UInt64, second: UInt64)
+  requires items.is_sorted()
+  requires first <= second
+  requires second < items.length()
+  ensures items[first] <= items[second]
+  decreases second - first
+{
+  let _ = doubled("ab")
+  if first < second {
+    sorted_between(items, first: first, second: second - 1)
+  }
+}
+
+fn first_is_at_most_last(items: view List[Int64]) -> Bool
+  requires items.is_sorted()
+  requires items.length() > 0
+  ensures result
+{
+  proof {
+    let _ = doubled("ab")
+    sorted_between(items, first: 0, second: items.length() - 1)
+  }
+  items[0] <= items[items.length() - 1]
+}
+
+fn named_in_a_specification(items: view List[Int64]) -> Bool
+  requires items.is_sorted()
+  requires items.length() > 0
+  ensures result
+{
+  proof {
+    assert first_is_at_most_last(items)
+  }
+  true
+}

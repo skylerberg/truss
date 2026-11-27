@@ -1,0 +1,17 @@
+fn count[T](items: List[T]) -> UInt64
+  ensures result == items.length()
+{
+  items.length()
+}
+
+fn apply(measure: (fn(items: List[UInt8]) -> UInt64 ensures result == items.length())) -> UInt64
+  ensures result == 0
+{
+  measure([])
+}
+
+fn run() -> UInt64
+  ensures result == 0
+{
+  apply(count[UInt8])
+}

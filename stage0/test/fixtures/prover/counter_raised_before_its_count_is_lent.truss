@@ -1,0 +1,17 @@
+type Counter(count: Int64)
+
+fn Counter.slot(mut self) lends mut Int64
+  requires self.count < 100
+  ensures result == self.count
+{
+  self.count = self.count + 1
+  mut self.count
+}
+
+fn read_slot(counter: mut Counter) -> Int64
+  requires counter.count == 3
+  ensures result == 3
+{
+  let seen = mut counter.slot()
+  seen
+}

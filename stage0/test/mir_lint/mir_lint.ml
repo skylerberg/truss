@@ -33,7 +33,7 @@ let rec list_rvalue_locals : Mir.rvalue -> Mir.local list = function
   | Lambda { captures; _ } ->
       List.concat_map (fun (capture : Mir.capture) -> list_place_locals capture.place) captures
   | Function_value _ | Value_parameter _ -> []
-  | Specification (Result | Yielded) -> []
+  | Specification (Result | Visited | Final_result) -> []
   | Specification (Entry local) -> [ local ]
   | Specification (Identical (first, second)) ->
       list_operand_locals first @ list_operand_locals second
@@ -100,7 +100,7 @@ and collect_effects : Mir.basic -> Mir.local list * Mir.local list * Mir.local l
   | Dead locals -> ([], [], locals)
   | Assert value | Echo value -> (list_operand_locals value, [], [])
   | Loan_start { borrowed; _ } -> (list_operand_locals borrowed, [], [])
-  | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _ -> ([], [], [])
+  | Loan_end _ | Ghost_assert _ | Proof _ | Evaluated_assert _ -> ([], [], [])
 
 let collect_graph_effects :
     Mir.Graph.statement_kind -> Mir.local list * Mir.local list * Mir.local list = function

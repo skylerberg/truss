@@ -1,14 +1,16 @@
 type local = Syntax.id
 
+type trait_method = {
+  trait : Types.trait_reference;
+  name : string;
+  receiver : Path.receiver;
+  self_type : Types.ty;
+  instantiation : Types.instantiation;
+}
+
 type callee =
   | Function of { path : Path.t; instantiation : Types.instantiation }
-  | Trait_method of {
-      trait : Types.trait_reference;
-      name : string;
-      receiver : Path.receiver;
-      self_type : Types.ty;
-      instantiation : Types.instantiation;
-    }
+  | Trait_method of trait_method
   | Capability_method of { capability : Path.t; name : string }
   | Constructor of { type_ : Path.t; variant : string option; type_arguments : Types.argument list }
   | Indirect
@@ -31,6 +33,7 @@ type call = {
 type resolution =
   | Local_value of local
   | Global of { path : Path.t; instantiation : Types.instantiation }
+  | Trait_method_value of trait_method
   | Field_access of { type_ : Types.ty; field : string }
   | Variant_value of { type_ : Types.ty; variant : string }
   | Type_name of Types.ty
@@ -40,6 +43,7 @@ type resolution =
 let show_resolution = function
   | Local_value local -> Printf.sprintf "local %d" local
   | Global { path; _ } -> Path.show path
+  | Trait_method_value { trait; name; _ } -> Path.show trait.trait ^ "." ^ name
   | Field_access { field; _ } -> "field " ^ field
   | Variant_value { variant; _ } -> "variant " ^ variant
   | Type_name type_ -> "type " ^ Types.show type_
@@ -88,7 +92,7 @@ type conversion =
 type specification_call =
   | Old
   | Identical
-  | Final of { part : Types.ty }
+  | Final
   | Specification_function of Core.specification_function
   | Method_cost of {
       metric : Language.Metric.t;
@@ -178,6 +182,14 @@ let map ~map_type ~map_argument ~map_capabilities (tables : t) : t =
           instantiation.capability_arguments;
     }
   in
+  let map_trait_method (method_ : trait_method) =
+    {
+      method_ with
+      trait = map_trait method_.trait;
+      self_type = map_type method_.self_type;
+      instantiation = map_instantiation method_.instantiation;
+    }
+  in
   let map_call (call : call) : call =
     {
       call with
@@ -185,14 +197,7 @@ let map ~map_type ~map_argument ~map_capabilities (tables : t) : t =
         (match call.callee with
         | Function { path; instantiation } ->
             Function { path; instantiation = map_instantiation instantiation }
-        | Trait_method method_ ->
-            Trait_method
-              {
-                method_ with
-                trait = map_trait method_.trait;
-                self_type = map_type method_.self_type;
-                instantiation = map_instantiation method_.instantiation;
-              }
+        | Trait_method method_ -> Trait_method (map_trait_method method_)
         | Constructor constructor ->
             Constructor
               { constructor with type_arguments = List.map map_argument constructor.type_arguments }
@@ -249,14 +254,13 @@ let map ~map_type ~map_argument ~map_capabilities (tables : t) : t =
                interpolation_type = map_type interpolation_type;
                conversions = List.map (Option.map map_call) conversions;
              })
-    | Specification_call (Final { part }) -> Specification_call (Final { part = map_type part })
     | Specification_call (Method_cost cost) ->
         Specification_call
           (Method_cost
              { cost with trait = map_trait cost.trait; self_type = map_type cost.self_type })
     | Loop loop -> Loop (map_loop loop)
     | ( Literal _ | Record_update _ | Lambda _ | Discarded
-      | Specification_call (Old | Identical | Specification_function _) ) as elaboration ->
+      | Specification_call (Old | Identical | Final | Specification_function _) ) as elaboration ->
         elaboration
   in
   let map_entries table transform = Array.map (Option.map transform) table in
@@ -268,6 +272,7 @@ let map ~map_type ~map_argument ~map_capabilities (tables : t) : t =
       map_entries tables.resolutions (function
         | Global { path; instantiation } ->
             Global { path; instantiation = map_instantiation instantiation }
+        | Trait_method_value method_ -> Trait_method_value (map_trait_method method_)
         | Field_access { type_; field } -> Field_access { type_ = map_type type_; field }
         | Variant_value { type_; variant } -> Variant_value { type_ = map_type type_; variant }
         | Type_name type_ -> Type_name (map_type type_)
@@ -302,13 +307,15 @@ let list_arguments_at (tables : t) id =
   let list_trait (trait : Types.trait_reference) =
     trait.trait_arguments @ of_types (List.map snd trait.associated)
   in
+  let list_trait_method ({ trait; self_type; instantiation; _ } : trait_method) =
+    (Types.Type self_type :: list_trait trait) @ instantiation.type_arguments
+  in
   let list_call (call : call) =
     Types.Type call.callee_result
     ::
     (match call.callee with
     | Function { instantiation; _ } -> instantiation.type_arguments
-    | Trait_method { trait; self_type; instantiation; _ } ->
-        (Types.Type self_type :: list_trait trait) @ instantiation.type_arguments
+    | Trait_method method_ -> list_trait_method method_
     | Constructor { type_arguments; _ } | Intrinsic { type_arguments; _ } -> type_arguments
     | Capability_method _ | Indirect -> [])
   in
@@ -332,6 +339,7 @@ let list_arguments_at (tables : t) id =
     @ List.map snd conversions.(id))
   @ (match resolutions.(id) with
     | Some (Global { instantiation; _ }) -> instantiation.type_arguments
+    | Some (Trait_method_value method_) -> list_trait_method method_
     | Some (Field_access { type_; _ } | Variant_value { type_; _ } | Type_name type_) ->
         [ Types.Type type_ ]
     | Some (Local_value _ | Value_parameter _ | Specification_value) | None -> [])
@@ -350,13 +358,12 @@ let list_arguments_at (tables : t) id =
   | Some (Template (Tagged { from_template; interpolation_type; conversions })) ->
       (Types.Type interpolation_type :: list_call from_template)
       @ List.concat_map (Option.fold ~none:[] ~some:list_call) conversions
-  | Some (Specification_call (Final { part })) -> [ Types.Type part ]
   | Some (Specification_call (Method_cost { trait; self_type; _ })) ->
       Types.Type self_type :: list_trait trait
   | Some (Loop loop) -> list_loop loop
   | Some
       ( Literal _ | Record_update _ | Lambda _ | Discarded
-      | Specification_call (Old | Identical | Specification_function _) )
+      | Specification_call (Old | Identical | Final | Specification_function _) )
   | None ->
       []
 

@@ -1,0 +1,19 @@
+trait Make {
+  fn fresh() -> Bool
+}
+
+trait Check {
+  fn fresh(self) -> Bool
+}
+
+impl Make for Int64 {
+  fn fresh() -> Bool { false }
+}
+
+impl Check for Int64 {
+  fn fresh(self) -> Bool { true }
+}
+
+fn f(value: Int64) -> Bool {
+  value.fresh()
+}

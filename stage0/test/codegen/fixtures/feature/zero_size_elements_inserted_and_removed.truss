@@ -1,0 +1,13 @@
+type Nothing()
+
+test "an element of zero size is inserted" {
+  var list: List[Nothing] = List.with_capacity(2)
+  mut list.insert_at(0, Nothing())
+  assert list.length() == 1
+}
+
+test "an element of zero size is removed" {
+  var list: List[Nothing] = [Nothing(), Nothing()]
+  let _ = mut list.remove_at(0)
+  assert list.length() == 1
+}

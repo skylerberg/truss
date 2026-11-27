@@ -84,7 +84,12 @@ let use_mutable_index (state : State.state) ~(report_with : mutation option)
               in
               State.report state
                 (Index_not_mutable
-                   { at = Written value.id; by; self_type = State.zonk state self_type; assigns }))
+                   {
+                     at = Written value.id;
+                     by;
+                     self_type = State.normalize_known state self_type;
+                     assigns;
+                   }))
             report_with)
   | _ -> ()
 
@@ -180,21 +185,19 @@ let find_lent_field_mode (state : State.state) (value : Syntax.expression) type_
   | Some Mut, With_mode (Mut, _) -> Some Mut
   | _ -> None
 
-let check_mode state env (value : Syntax.expression) (parameter : Types.parameter_info) type_ =
-  let name = parameter.name in
-  match (parameter.mode, classify_argument state value) with
+let check_mode state env (value : Syntax.expression) ~recipient (mode : Language.Mode.t) type_ =
+  match (mode, classify_argument state value) with
   | Read, (Place | Temporary | Lent _) -> ()
   | Read, With_mode (_, inner) ->
       State.report state
-        (Mode_on_read_argument { at = Written value.id; inner = Written inner.id; parameter = name })
+        (Mode_on_read_argument { at = Written value.id; inner = Written inner.id; recipient })
   | Mut, With_mode (Mut, inner) -> mutate state env ~by:Passed_mut inner
-  | Mut, Place ->
-      State.report state (Missing_mut_argument { at = Written value.id; parameter = name })
+  | Mut, Place -> State.report state (Missing_mut_argument { at = Written value.id; recipient })
   | Mut, Lent Mut -> mutate state env ~by:Passed_mut value
   | Mut, Lent (Read | Own) ->
-      State.report state (Lent_read_only_argument { at = Written value.id; parameter = name })
+      State.report state (Lent_read_only_argument { at = Written value.id; recipient })
   | Mut, (Temporary | With_mode (Own, _)) ->
-      State.report state (Temporary_passed_mut { at = Written value.id; parameter = name })
+      State.report state (Temporary_passed_mut { at = Written value.id; recipient })
   | Own, With_mode (Own, inner) ->
       State.check_when_final state (fun () ->
           let final_type = State.finalize_type state type_ in
@@ -208,9 +211,28 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
   | Own, Place when Hashtbl.find_opt state.yielded value.id = Some Mut ->
       note_place_without_keyword state env value ~needs:Mut
   | Own, Place -> note_place_without_keyword state env value ~needs:Own
-  | Own, With_mode (Mut, _) ->
-      State.report state (Mut_for_own { at = Written value.id; parameter = name })
+  | Own, With_mode (Mut, _) -> State.report state (Mut_for_own { at = Written value.id; recipient })
   | (Mut | Own), With_mode (Read, _) -> ()
+
+let infer_view_of_borrowed_place (state : State.state) env (value : Syntax.expression) ~actual
+    ~expected =
+  if State.runs env then
+    match (classify_argument state value, Hashtbl.find_opt state.yielded value.id) with
+    | (Place | Lent Read), (None | Some Read) -> (
+        match (Conversions.read_expected_head state expected, State.normalize state actual) with
+        | Types.Variable undecided, viewed when Types.is_viewable viewed ->
+            let view = Types.make_view viewed in
+            let is_met_by_the_view (goal : State.goal) =
+              match (State.normalize state goal.subject, goal.requirement) with
+              | Types.Variable subject, Implements bound when subject = undecided ->
+                  Option.is_some (State.find_evidence state view bound)
+              | Types.Variable subject, Within _ -> subject <> undecided
+              | _ -> true
+            in
+            if List.for_all is_met_by_the_view state.goals then
+              ignore (State.unify state expected view)
+        | _ -> ())
+    | _ -> ()
 
 let note_owned_value state env (value : Syntax.expression) =
   match classify_argument state value with

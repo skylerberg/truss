@@ -1,23 +1,22 @@
 type t
-type cache = { find : string -> string option; add : string -> string -> unit }
 
-val find : ?cache:cache -> unit -> (t, string) result
+val find : unit -> (t, string) result
+val stop : t -> unit
 
-type sexp = Atom of string | List of sexp list
 type unknown = Out_of_steps | Incomplete of string
-type answer = Proven | Counterexample of (Logic.symbol * sexp) list | Unknown of unknown
+type answer = Proven | Falsifiable | Unknown of unknown
 type request
 
-val make_request :
-  ?symbols:Logic.symbol list -> ?terms:(Logic.symbol * Logic.term) list -> Logic.query -> request
+val make_request : Logic.query -> request
+val make_refutation_request : Logic.query -> request
+val show_input : request -> string
 
-val show_input : request * Logic.query -> string
-val solve : t -> request * Logic.query -> answer
-val solve_all : t -> (request * Logic.query) list -> answer list
+type run = { input : string; output : string }
+type solved = { answer : answer; runs : run list }
+
+val solve_all : ?find_output:(string -> string option) -> t -> request list -> solved list
 
 module For_testing : sig
-  val hash_query : Logic.query -> string
   val count_queries_run : t -> int
-  val proven_entry : string
-  val make_incomplete_entry : string -> string
+  val make : run_z3:(string -> string) -> t
 end

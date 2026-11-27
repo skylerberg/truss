@@ -114,8 +114,7 @@ internal fn Map[Key: Hash + Ordered, Value].index_of(self, key: Key) -> UInt64
   ensures result < self.keys.length() ==> forall other: Key =>
     self.model().contains_key(other) && other == key ==> identical(other, self.keys.model()[result])
   cost time O(time(Key.hash) + time(Key.equal) + (1 + log(self.length())) * (1 + time(Key.compare)))
-  cost allocations <= allocations(Key.hash) + 16 * allocations(Key.equal)
-    + (2 * log(self.length()) + 2) * allocations(Key.compare)
+  cost allocations == 0
 {
   proof {
     overflow_within_log(self)
@@ -132,8 +131,7 @@ internal fn Map[Key: Hash + Ordered, Value].index_of(self, key: Key) -> UInt64
 public fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool
   ensures result == contains_equal_key(self.model(), key: key)
   cost time O(time(Key.hash) + time(Key.equal) + (1 + log(self.length())) * (1 + time(Key.compare)))
-  cost allocations <= allocations(Key.hash) + 16 * allocations(Key.equal)
-    + (2 * log(self.length()) + 2) * allocations(Key.compare)
+  cost allocations == 0
 {
   self.index_of(key) < self.keys.length()
 }
@@ -229,12 +227,15 @@ theorem model_after_push[Key: Hash + Ordered, Value](
   assert identical(after.keys.model()[before.keys.length()], key)
   assert identical(after.values.model()[before.keys.length()], value)
   assert forall other: Key => identical(other, key) ==> other == key
+  assert forall other: Key => identical(key, other) ==> other == key
   assert forall other: Key =>
     (exists i in 0..after.keys.length() => identical(after.keys.model()[i], other))
       == ((exists i in 0..before.keys.length() => identical(before.keys.model()[i], other)) || identical(key, other))
   assert after.model().contains_key(key) && identical(after.model().get(key), value)
   assert forall other: Key =>
     after.model().contains_key(other) && other == key ==> identical(other, key)
+  assert forall other: Key =>
+    after.model().contains_key(other) == (before.model().contains_key(other) || identical(key, other))
 }
 
 internal fn Map[Key: Hash + Ordered, Value].push_entry(mut self, key: own Key, value: own Value)
@@ -416,6 +417,9 @@ public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: 
     let _ = mut self.replace_value_at(position, value: own value)
     proof {
       assert forall other: Key =>
+        self.model().contains_key(other) && other == key ==>
+          identical(other, old(self.keys.model())[position])
+      assert forall other: Key =>
         !(other == key) && old(self.model()).contains_key(other) ==>
           identical(self.model().get(other), old(self.model()).get(other))
       assert self.keys.length() == old(self.keys.length()) && self.length() == self.keys.length()
@@ -492,8 +496,7 @@ public fn Map[Key: Hash + Ordered, Value].get(self, key: Key) lends Option[Value
     !(result is Some(value) && self.model().contains_key(other) && other == key
       && !identical(self.model().get(other), value))
   cost time O(time(Key.hash) + time(Key.equal) + (1 + log(self.length())) * (1 + time(Key.compare)))
-  cost allocations <= allocations(Key.hash) + 16 * allocations(Key.equal)
-    + (2 * log(self.length()) + 2) * allocations(Key.compare)
+  cost allocations == 0
 {
   let position = self.index_of(key)
   if position < self.keys.length() {
@@ -766,8 +769,7 @@ impl Index for Map[Key: Hash + Ordered, Value] {
 
   fn contains_key(self, key: Key) -> Bool
     ensures result == self.contains(key)
-    cost allocations <= allocations(Key.hash) + 16 * allocations(Key.equal)
-      + (2 * log(self.length()) + 2) * allocations(Key.compare)
+    cost allocations == 0
   {
     self.contains(key)
   }
@@ -777,8 +779,7 @@ impl Index for Map[Key: Hash + Ordered, Value] {
     ensures forall other: Key =>
       self.model().contains_key(other) && other == key ==> identical(self.model().get(other), result)
     cost time O(time(Key.hash) + time(Key.equal) + (1 + log(self.length())) * (1 + time(Key.compare)))
-    cost allocations <= allocations(Key.hash) + 16 * allocations(Key.equal)
-      + (2 * log(self.length()) + 2) * allocations(Key.compare)
+    cost allocations == 0
   {
     self.values[self.index_of(key)]
   }
@@ -788,8 +789,7 @@ impl IndexMut for Map[Key: Hash + Ordered, Value] {
   fn at(mut self, key: Key) lends mut Value
     requires self.contains(key)
     cost time O(time(Key.hash) + time(Key.equal) + (1 + log(self.length())) * (1 + time(Key.compare)))
-    cost allocations <= allocations(Key.hash) + 16 * allocations(Key.equal)
-      + (2 * log(self.length()) + 2) * allocations(Key.compare)
+    cost allocations == 0
   {
     let position = self.index_of(key)
     mut self.values[position]
@@ -1085,8 +1085,7 @@ internal fn Map[Key: Hash + Ordered, Value: Equal].entries_included_in(self, oth
   )
   cost time O(1 + self.length() * (time(Key.hash) + time(Key.equal) + time(Value.equal)
     + (1 + log(other.length())) * (1 + time(Key.compare))))
-  cost allocations <= self.length() * (allocations(Key.hash) + 16 * allocations(Key.equal)
-    + (2 * log(other.length()) + 2) * allocations(Key.compare) + allocations(Value.equal))
+  cost allocations == 0
 {
   proof {
     assert self.length() == self.keys.length() && other.length() == other.keys.length()
@@ -1099,8 +1098,7 @@ internal fn Map[Key: Hash + Ordered, Value: Equal].entries_included_in(self, oth
     decreases self.keys.length() - index
     cost time O(index * (time(Key.hash) + time(Key.equal) + time(Value.equal)
       + (1 + log(other.length())) * (1 + time(Key.compare))))
-    cost allocations <= index * (allocations(Key.hash) + 16 * allocations(Key.equal)
-      + (2 * log(other.length()) + 2) * allocations(Key.compare) + allocations(Value.equal))
+    cost allocations == 0
   {
     let position = other.index_of(self.keys[index])
     if position == other.keys.length() || !(self.values[index] == other.values[position]) {
@@ -1119,10 +1117,7 @@ impl Equal for Map[Key: Hash + Ordered, Value: Equal] {
       + (1 + log(other.length())) * (1 + time(Key.compare)))
       + other.length() * (time(Key.hash) + time(Key.equal) + time(Value.equal)
       + (1 + log(self.length())) * (1 + time(Key.compare))))
-    cost allocations <= self.length() * (allocations(Key.hash) + 16 * allocations(Key.equal)
-      + (2 * log(other.length()) + 2) * allocations(Key.compare) + allocations(Value.equal))
-      + other.length() * (allocations(Key.hash) + 16 * allocations(Key.equal)
-      + (2 * log(self.length()) + 2) * allocations(Key.compare) + allocations(Value.equal))
+    cost allocations == 0
   {
     self.keys.length() == other.keys.length() && self.entries_included_in(other) && other.entries_included_in(self)
   }
@@ -1168,6 +1163,28 @@ theorem entries_inclusion_is_transitive[Key: Hash + Ordered, Value: Equal](
   )
 }
 
+theorem equal_maps_include_each_other[Key: Hash + Ordered, Value: Equal](
+  first: Map[Key, Value],
+  second: Map[Key, Value],
+)
+  requires first == second
+  ensures first.keys.length() == second.keys.length()
+  ensures first.entries_included_in(second)
+  ensures second.entries_included_in(first)
+{
+}
+
+theorem maps_including_each_other_are_equal[Key: Hash + Ordered, Value: Equal](
+  first: Map[Key, Value],
+  second: Map[Key, Value],
+)
+  requires first.keys.length() == second.keys.length()
+  requires first.entries_included_in(second)
+  requires second.entries_included_in(first)
+  ensures first == second
+{
+}
+
 theorem equality_is_transitive[Key: Hash + Ordered, Value: Equal](
   first: Map[Key, Value],
   second: Map[Key, Value],
@@ -1177,11 +1194,11 @@ theorem equality_is_transitive[Key: Hash + Ordered, Value: Equal](
   requires second == third
   ensures first == third
 {
-  assert first.entries_included_in(second) && second.entries_included_in(first)
-  assert second.entries_included_in(third) && third.entries_included_in(second)
+  equal_maps_include_each_other(first, second: second)
+  equal_maps_include_each_other(second, second: third)
   entries_inclusion_is_transitive(first, second: second, third: third)
   entries_inclusion_is_transitive(first: third, second: second, third: first)
-  assert first.keys.length() == third.keys.length()
+  maps_including_each_other_are_equal(first, second: third)
 }
 
 proof Equal.reflexive for Map[Key: Hash + Ordered, Value: Equal] {

@@ -1,36 +1,31 @@
-val add_restated_clauses :
-  State.context ->
-  self_type:Types.ty ->
-  bind:(Types.trait_reference -> Path.t -> Types.substitution) ->
-  Path.t ->
-  string ->
-  Path.receiver ->
-  State.contract ->
-  State.contract
+type applied = {
+  frame : State.frame;
+  result : Logic.term;
+  end_lend : (State.frame -> Logic.term -> State.frame) option;
+}
 
 val call_contract :
-  State.context ->
   State.frame ->
   Invocation.site ->
-  Invocation.t ->
-  Path.t ->
+  Callee.t ->
+  Callee.definition ->
   State.contract ->
   State.passed list ->
   recursive_callee:Path.t option ->
-  lent_final:(Logic.term -> Logic.term) option ->
-  substitution_of:(State.clauses -> Types.substitution) ->
-  type_arguments:Types.argument list ->
-  State.frame * Logic.term
-
-val make_callback_cost :
-  State.context -> State.frame -> Language.Metric.t -> Types.ty -> Logic.term -> Logic.term
+  applied
 
 val apply_call :
-  ?leave_lent:(Logic.term -> Logic.term) ->
-  State.context ->
   State.frame ->
   Invocation.site ->
-  Invocation.t ->
-  through:(Types.ty * Logic.term * Invocation.shape) option ->
+  Callee.t ->
+  through:(Types.ty * Logic.term) option ->
   State.passed list ->
   (State.frame * Logic.term) option
+
+val apply_lend :
+  State.frame ->
+  Invocation.site ->
+  Callee.t ->
+  through:(Types.ty * Logic.term) option ->
+  State.passed list ->
+  applied option

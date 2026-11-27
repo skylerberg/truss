@@ -1,0 +1,28 @@
+fn f(count: UInt64) -> UInt64
+  ensures result == count
+{
+  var index: UInt64 = 0
+  var odd: UInt64 = 0
+  while index < count
+    invariant index <= count
+    invariant odd <= index
+  {
+    index += 1
+    if index % 2 == 0 { continue }
+    odd += 1
+  }
+  index
+}
+
+fn g(items: List[Int64]) -> UInt64
+  ensures result <= items.length()
+{
+  var positive: UInt64 = 0
+  for item in items
+    invariant positive <= visited.length()
+  {
+    if item <= 0 { continue }
+    positive += 1
+  }
+  positive
+}

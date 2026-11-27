@@ -1,0 +1,19 @@
+fn first(items: List[Int64]) -> Int64
+  requires items.length() != 0
+  ensures exists item in items => item == result
+{
+  items[0]
+}
+
+fn vacuous(items: List[Int64]) -> Bool
+  ensures result == (items.length() != 0 && items.length() == 0 ==> first(items) > 0)
+{
+  true
+}
+
+theorem contradiction()
+  ensures false
+{
+  let empty: List[Int64] = []
+  assert vacuous(empty)
+}

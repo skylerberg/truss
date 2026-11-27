@@ -1,6 +1,7 @@
 use standard.core
 use standard.intrinsic
 use standard.text.unicode_tables
+use standard.text.utf8
 
 public let Character.replacement: Character = Character"\u{FFFD}"
 
@@ -40,6 +41,7 @@ internal fn Character.scalar_index(self) -> UInt32
   ensures self.code() < 55296 ==> result == self.code()
   ensures self.code() >= 55296 ==> result == self.code() - 2048
   cost time O(1)
+  cost allocations == 0
 {
   if self.code() < 55296 { self.code() } else { self.code() - 2048 }
 }
@@ -48,6 +50,7 @@ internal fn Character.at_scalar_index(index: UInt32) -> Character
   requires index < 1112064
   ensures result.scalar_index() == index
   cost time O(1)
+  cost allocations == 0
 {
   if index < 55296 { intrinsic.convert(index) } else { intrinsic.convert(index + 2048) }
 }
@@ -56,6 +59,9 @@ internal fn Character.encode_onto(self, output: mut intrinsic.Storage[UInt8])
   requires intrinsic.storage_length(output) + self.utf8_length() <= intrinsic.storage_capacity(output)
   ensures intrinsic.storage_length(output) == old(intrinsic.storage_length(output)) + self.utf8_length()
   ensures intrinsic.storage_capacity(output) == old(intrinsic.storage_capacity(output))
+  ensures identical(intrinsic.storage_model(output)[..old(intrinsic.storage_length(output))], old(intrinsic.storage_model(output)))
+  ensures utf8.width(intrinsic.storage_model(output), at: old(intrinsic.storage_length(output))) == self.utf8_length()
+  ensures utf8.is_valid(old(intrinsic.storage_model(output))) ==> utf8.is_valid(intrinsic.storage_model(output))
   cost time O(1)
   cost allocations == 0
 {
@@ -74,6 +80,12 @@ internal fn Character.encode_onto(self, output: mut intrinsic.Storage[UInt8])
     intrinsic.storage_push(mut output, value: intrinsic.convert(128 + code / 4096 % 64))
     intrinsic.storage_push(mut output, value: intrinsic.convert(128 + code / 64 % 64))
     intrinsic.storage_push(mut output, value: intrinsic.convert(128 + code % 64))
+  }
+  proof {
+    assert identical(intrinsic.storage_model(output)[..old(intrinsic.storage_length(output))], old(intrinsic.storage_model(output)))
+    if utf8.is_valid(old(intrinsic.storage_model(output))) {
+      utf8.appending_a_valid_character_is_valid(intrinsic.storage_model(output), prefix: old(intrinsic.storage_length(output)))
+    }
   }
 }
 

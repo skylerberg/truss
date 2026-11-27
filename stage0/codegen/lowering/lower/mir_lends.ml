@@ -5,9 +5,7 @@ let lend_record (state : Lowering.state) : Lowered.operand =
       let record : Lowered.operand =
         Address
           {
-            place =
-              Lowered.make_local_place
-                (Emit_c.Ir_builder.allocate_local state.builder ~is_zeroed:true Lend);
+            place = Lowered.make_local_place (Emit_c.Ir_builder.allocate_local state.builder Lend);
             writable = true;
           }
       in
@@ -22,8 +20,7 @@ let obtain_lent_call state part : Lowering.lent_call =
       let call =
         {
           Lowering.mark =
-            Lowered.make_local_place
-              (Emit_c.Ir_builder.allocate_local state.builder ~is_zeroed:true Lend_mark);
+            Lowered.make_local_place (Emit_c.Ir_builder.allocate_local state.builder Lend_mark);
           record = lend_record state;
         }
       in
@@ -143,7 +140,7 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
           if holds_view then list_viewed_by call else raise Made
       | Basic
           ( Assign _ | Lend _ | Call _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
-          | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _ )
+          | Loan_end _ | Ghost_assert _ | Proof _ | Evaluated_assert _ )
       | Provide_start _ | Provide_end ->
           []
     in

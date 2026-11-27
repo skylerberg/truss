@@ -1,0 +1,28 @@
+type Counter(count: UInt64)
+
+type Cell(value: UInt8)
+
+type Store(slot: Cell)
+
+fn Store.slot(mut self, counter: mut Counter) lends mut Cell
+  requires counter.count < 100
+  ensures counter.count == old(counter.count) + 1
+{
+  counter.count += 1
+  mut self.slot
+}
+
+fn Cell.touch(mut self, counter: mut Counter)
+  requires counter.count < 100
+  ensures counter.count == old(counter.count) + 5
+{
+  counter.count += 5
+}
+
+fn run(store: mut Store, counter: mut Counter) -> UInt64
+  requires counter.count == 0
+  ensures result == 6
+{
+  mut store.slot(mut counter).touch(mut counter)
+  counter.count
+}

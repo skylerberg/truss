@@ -1,0 +1,16 @@
+fn twice(visit: fn() -> UInt64) -> UInt64
+  cost time O(time(visit))
+{
+  let _ = visit()
+  visit()
+}
+
+fn f(count: UInt64) -> UInt64
+  decreases count
+  cost time O(count)
+{
+  if count == 0 {
+    return 0
+  }
+  twice(fn() { f(count - 1) })
+}

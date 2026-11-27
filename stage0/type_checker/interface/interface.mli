@@ -8,13 +8,14 @@ module Elaborator : sig
   val list_known_bounds : t -> Properties.Bounds.t
   val find_self_type : t -> Types.ty option
   val list_diagnostics : t -> Catalog.diagnostic list
-  val list_named_types : t -> (Syntax.id * Types.ty) list
-  val show_path : Syntax.path -> string
+  val list_applications : t -> (Syntax.id * Types.application) list
   val split_part : Syntax.expression -> (string * Syntax.name list * bool) option
   val elaborate_type : t -> Syntax.type_expression -> Types.ty
+  val elaborate_mode : Syntax.mode option -> Language.Mode.t
   val elaborate_condition : t -> Syntax.condition -> Types.condition
   val add_condition : t -> Types.condition -> t
   val find_bounded_type : t -> Syntax.expression -> Types.ty option
+  val elaborate_associated_expression : t -> Syntax.expression -> Types.ty option
 
   type bound_method = Elaborator.bound_method = {
     self_type : Types.ty;

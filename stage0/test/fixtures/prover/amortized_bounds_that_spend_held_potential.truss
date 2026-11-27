@@ -1,0 +1,24 @@
+type Purse(coins: UInt64)
+  invariant coins <= 4611686018427387904
+  cost potential coins
+
+fn work(size: UInt64)
+  cost time O(size)
+{
+  for _ in 0..size {
+  }
+}
+
+fn burn(purse: mut Purse)
+  ensures purse.coins == 0
+  cost amortized time O(1)
+{
+  work(purse.coins)
+  purse.coins = 0
+}
+
+fn add(list: mut List[Int64], value: Int64)
+  cost amortized time O(1)
+{
+  mut list.push(value)
+}

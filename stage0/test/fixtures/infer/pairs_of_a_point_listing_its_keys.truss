@@ -1,0 +1,23 @@
+trait Base {
+  type Key
+}
+
+trait Sub: Base {
+  type Pair
+}
+
+type Point(x: Int64)
+
+impl Base for Point {
+  type Key = Int64
+}
+
+impl Sub for Point {
+  type Pair = List[Self.Key]
+}
+
+fn keys[Value: Sub[Pair = List[Bool]]](value: Value) {}
+
+fn f() {
+  keys(Point(x: 1))
+}

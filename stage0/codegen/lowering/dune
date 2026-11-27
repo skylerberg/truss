@@ -26,8 +26,8 @@
   builtin_records
   intrinsic
   types
-  syntax
   core
+  catalog
   core_walk
   mir
   convention))

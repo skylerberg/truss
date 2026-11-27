@@ -383,11 +383,12 @@ let () =
         "types.decided_in_specification");
   Harness.test "arithmetic in a specification may mix integer types" (fun () ->
       expect_fine Fixtures.Infer.requires_adds_a_uint8_and_an_int64);
-  Harness.test "a proof in a lambda's body does not decide the type of the lambda's parameter"
-    (fun () ->
-      expect_one_diagnostic Fixtures.Infer.proof_in_a_lambda_compares_its_parameter
-        "types.decided_in_specification"
-        ~says:"A specification cannot decide the type of `scaled`. Declare `scaled` with a type.");
+  Harness.test "a lambda's body does not decide the type of the lambda's parameter" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.lambda_body_compares_its_parameter "types.cannot_infer"
+        ~at:("scaled", 1)
+        ~says:
+          "The type of `scaled` cannot be inferred from where this lambda is used. Declare \
+           `scaled` with a type.");
   Harness.test "a method call in an invariant cannot give a float local in code its default type"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.invariant_calls_an_inherent_method_of_a_float_local
@@ -482,10 +483,9 @@ let () =
       expect_one_diagnostic
         Fixtures.Infer.invariant_adds_vectors_whose_argument_a_later_statement_decides
         "types.decided_in_specification" ~says:"A specification cannot decide the type of `first`.");
-  Harness.test "a proof in a lambda's body does not decide the length of the lambda's parameter"
-    (fun () ->
-      expect_one_diagnostic Fixtures.Infer.proof_in_a_lambda_compares_the_length_of_its_parameter
-        "types.decided_in_specification" ~says:"A specification cannot decide the type of `bytes`.");
+  Harness.test "a lambda's body does not decide the length of the lambda's parameter" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.lambda_body_compares_the_length_of_its_parameter
+        "types.cannot_infer" ~at:("bytes", 1) ~says:"Declare `bytes` with a type.");
   Harness.test "a method that two traits declare is the one whose impl's conditions hold" (fun () ->
       let text = Fixtures.Infer.method_declared_by_two_traits_with_conditional_impls in
       expect_fine text;
@@ -901,6 +901,11 @@ let () =
   Harness.test "+ on strings is an error with a fix to interpolation" (fun () ->
       expect_one_diagnostic Fixtures.Infer.string_plus_a_string "types.string_addition"
         ~fixed:("name + \"!\"", "\"${name}!\""));
+  Harness.test "+ on an empty string and a string is fixed to the interpolation of the string"
+    (fun () ->
+      expect_one_diagnostic
+        (Support.apply_edit Fixtures.Infer.string_plus_a_string ("name + \"!\"", "\"\" + name"))
+        "types.string_addition" ~fixed:("\"\" + name", "\"${name}\""));
   Harness.test "an operator chooses the impl by both operands" (fun () ->
       let text = Fixtures.Infer.additions_of_meters_and_integers in
       match locate_core_call text "length + extra" 1 with
@@ -1138,6 +1143,10 @@ let () =
   Harness.test "a mut parameter needs mut at the call, with a fix that adds it" (fun () ->
       expect_one_diagnostic Fixtures.Infer.bump_without_mut "types.missing_mode"
         ~fixed:("bump(count)", "bump(mut count)"));
+  Harness.test "a function value's mut input needs mut at the call" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.function_value_called_without_mut "types.missing_mode"
+        ~fixed:("bump(count)", "bump(mut count)")
+        ~says:"The function value may mutate its argument, so the call site passes it `mut`.");
   Harness.test "own on a place that copies implicitly is redundant" (fun () ->
       expect_one_diagnostic Fixtures.Infer.own_before_an_integer "types.redundant_mode"
         ~fixed:("own count", "count"));
@@ -1386,6 +1395,13 @@ let () =
     (fun () -> expect_fine Fixtures.Infer.lists_written_through_parameters_and_ranges);
   Harness.test "a view implements a trait whose inherited methods take `Self` by `own`" (fun () ->
       expect_fine Fixtures.Infer.views_in_ordered_positions);
+  Harness.test "a view is written as a type argument of a function and of a type" (fun () ->
+      expect_fine Fixtures.Infer.view_written_as_a_type_argument);
+  Harness.test "a view of a number is no type argument" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.view_of_a_number_written_as_a_type_argument
+        "types.not_viewable");
+  Harness.test "a `mut self` method that a trait provides rebinds a view receiver" (fun () ->
+      expect_fine Fixtures.Infer.view_receiver_of_a_provided_method_that_rebinds_self);
   Harness.test "a view satisfies no bound whose impl writes a method that takes `self` by `own`"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.view_given_to_a_bound_whose_impl_owns_self
@@ -1402,6 +1418,11 @@ let () =
   Harness.test "a view satisfies no bound whose trait has a `mut self` method" (fun () ->
       expect_one_diagnostic Fixtures.Infer.view_written_through_a_copy_in_generic_code
         "types.unsatisfied_bound" ~says:"a view implements a trait only where");
+  Harness.test "a place given where a type parameter is undecided makes the type argument a view"
+    (fun () -> expect_fine Fixtures.Infer.views_inferred_for_borrowed_arguments);
+  Harness.test "a value built from a place is no owner where one is returned" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.borrowed_argument_returned_as_an_owner "types.mismatch"
+        ~says:"holds a view where an owned value is expected");
   List.iter
     (fun (construct, text) ->
       Harness.test (construct ^ " cannot be passed `mut`") (fun () ->
@@ -1499,6 +1520,15 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.lending_method_as_a_value "types.not_a_value"
         ~says:"a function value cannot lend");
+  let step = Fixtures.Infer.step_of_an_update_as_a_value in
+  Harness.test "a step of an update is not a function value, because it may break the invariant"
+    (fun () ->
+      expect_one_diagnostic step "types.not_a_value" ~says:"is a step of an update";
+      expect_fine (Support.apply_edit step ("fn Span.narrow", "public fn Span.narrow"));
+      expect_fine
+        (Support.apply_edit step
+           ( "apply(mut span, Span.narrow)",
+             "apply(mut span, fn(narrowed) { mut narrowed.narrow() })" )));
   Harness.test "a variant is looked up under its type" (fun () ->
       expect_fine Fixtures.Infer.shape_variants_built);
   Harness.test "a constant under a type is read by name" (fun () ->
@@ -1622,13 +1652,33 @@ let () =
         "types.positional_after_labeled")
 
 let () =
-  Harness.test "a lambda with nothing to give its parameter types is an error" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.lambda_bound_without_a_type "types.lambda_needs_type"
-        ~says:
-          "Bind it with a typed `let`, such as `let double: fn(Int64) -> Int64 = fn(x) { x * 2 }`.");
-  Harness.test "a lambda passed as a type argument asks for the callee's type arguments" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.lambda_passed_as_a_type_argument
-        "types.lambda_needs_type" ~says:"Give `hold` its type arguments in brackets.");
+  Harness.test "a lambda parameter that nothing gives a type asks for an annotation" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.lambda_bound_without_a_type "types.cannot_infer"
+        ~at:("text", 1) ~says:"Declare `text` with a type.";
+      expect_one_diagnostic Fixtures.Infer.lambda_passed_as_a_type_argument "types.cannot_infer"
+        ~at:("x", 1) ~says:"Declare `x` with a type.");
+  Harness.test "an annotation decides a lambda parameter's type that the callee leaves open"
+    (fun () ->
+      expect_fine Fixtures.Infer.annotated_lambda_parameter_of_a_generic_callee;
+      expect_fine Fixtures.Infer.annotated_lambda_passed_as_a_type_argument);
+  Harness.test "a lambda that nothing passes as a function type is typed by its annotations"
+    (fun () ->
+      expect_type Fixtures.Infer.annotated_lambda_bound_without_a_type
+        "fn(value: Int64) { value.saturating_add(amount) }" "fn(Int64) -> Int64";
+      expect_type Fixtures.Infer.annotated_mut_lambda_bound_without_a_type
+        "fn(count: mut Int64) { count = count.saturating_add(1) }" "fn(mut Int64)");
+  Harness.test "an annotation of another type than the function type's is a mismatch" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.lambda_parameter_annotated_with_another_type
+        "types.mismatch" ~at:("UInt8", 1)
+        ~says:"This lambda's function type gives this parameter `Int64`, not `UInt8`.");
+  Harness.test "an annotation of another mode than the function type's is a wrong mode" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.lambda_parameter_annotated_without_mut "types.wrong_mode"
+        ~says:"This lambda's function type passes this parameter `mut`, not read-only."
+        ~fixed:("score: Int64", "score: mut Int64");
+      expect_one_diagnostic Fixtures.Infer.lambda_parameter_annotated_mut_where_passed_read_only
+        "types.wrong_mode"
+        ~says:"This lambda's function type passes this parameter read-only, not `mut`."
+        ~fixed:("item: mut Int64", "item: Int64"));
   Harness.test "a lambda takes its parameter types from the function type it is passed as"
     (fun () -> expect_type Fixtures.Infer.lambda_incrementing_items "item + 1" "Int64");
   Harness.test "concurrent code needs `Tasks`, in a block and in a loop" (fun () ->
@@ -1939,6 +1989,64 @@ let () =
         ~alternatives:[ ("Counter(count: 3).label()", "Second.label(Counter(count: 3))") ]);
   Harness.test "two bounds that give one overload of a name are ambiguous through the type"
     (fun () -> expect_one_diagnostic Fixtures.Infer.bounds_giving_one_make "types.ambiguous_method");
+  Harness.test "a method that two traits a bound requires declare is ambiguous" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.name_of_a_value_whose_trait_requires_two_namers
+        "types.ambiguous_method"
+        ~alternatives:[ ("value.name()", "Second.name(value)") ]
+        ~fixed:("value.name()", "First.name(value)"));
+  Harness.test "a method that two traits provide is ambiguous at the call" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.name_that_two_traits_provide "types.ambiguous_method"
+        ~alternatives:[ ("value.name()", "Second.name(value)") ]
+        ~fixed:("value.name()", "First.name(value)"));
+  Harness.test "a static method that two traits give a type is ambiguous" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.point_made_by_two_traits "types.ambiguous_method"
+        ~says:"`First`, `Second`");
+  Harness.test "a call with a dot skips a trait's method that takes no `self`" (fun () ->
+      expect_fine Fixtures.Infer.integer_fresh_by_two_traits);
+  Harness.test "a trait's method that takes no `self` is not called with a dot" (fun () ->
+      expect_one_diagnostic
+        "trait Make {\n\
+        \  fn make() -> Self\n\
+         }\n\n\
+         type Point(x: Int64)\n\n\
+         impl Make for Point {\n\
+        \  fn make() -> Point { todo }\n\
+         }\n\n\
+         fn f(point: Point) -> Point {\n\
+        \  point.make()\n\
+         }\n"
+        "types.wrong_receiver" ~says:"it has no `self`";
+      expect_one_diagnostic
+        "trait Make {\n\
+        \  fn make() -> Self\n\
+         }\n\n\
+         fn f[Value: Make](value: Value) -> Value {\n\
+        \  value.make()\n\
+         }\n"
+        "types.wrong_receiver" ~says:"it has no `self`");
+  Harness.test "a trait's static method written in full takes `Self` from the expected type"
+    (fun () ->
+      expect_fine
+        "trait Make {\n\
+        \  fn make() -> Self\n\
+         }\n\n\
+         type Point(x: Int64)\n\n\
+         impl Make for Point {\n\
+        \  fn make() -> Point { todo }\n\
+         }\n\n\
+         fn f() -> Point {\n\
+        \  Make.make()\n\
+         }\n");
+  Harness.test "a bound's trait argument that two impls could give is not inferred" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.conversion_of_an_int32_to_an_undecided_target
+        "types.cannot_infer" ~says:"`Target`");
+  Harness.test "an impl's method applies only where the impl's conditions hold" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.total_of_a_holder_whose_measure_needs_order
+        "types.no_impl" ~says:"Its impl needs `Value: Ordered`.");
+  Harness.test "a method that bounds its type's parameter applies only where the bound holds"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.sameness_of_holders_of_opaque_values
+        "types.unsatisfied_bound" ~says:"`Opaque: Equal`");
   Harness.test "two unrelated bounds that share a name are ambiguous however each takes self"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.unrelated_bounds_sharing_label "types.ambiguous_method"
@@ -2037,8 +2145,8 @@ let () =
   Harness.test "an integer range on a type that is not ordered is one error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.integer_range_arm_on_a_bool "types.mismatch");
   Harness.test "a range pattern whose bounds infer its type as Bool is an error" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.bool_range_lambda_parameter "types.mismatch"
-        ~says:"not `Bool`");
+      expect_one_diagnostic Fixtures.Infer.bool_range_let_else_of_an_undecided_value
+        "types.mismatch" ~says:"not `Bool`");
   Harness.test "a range pattern on Character is fine" (fun () ->
       expect_fine Fixtures.Infer.character_range_arm);
   Harness.test "a Character literal is a tagged string holding its scalar value" (fun () ->
@@ -2100,10 +2208,11 @@ let () =
       expect_one_diagnostic Fixtures.Infer.function_parameter_requiring_an_integer "types.mismatch");
   Harness.test "a trait method without a body has its clauses checked" (fun () ->
       expect_one_diagnostic Fixtures.Infer.trait_method_ensuring_a_sum_with_true "types.no_impl");
-  Harness.test "==> in a compiled body" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.implication_in_a_body "types.specification_only");
   Harness.test "a quantifier over a type in a compiled body" (fun () ->
       expect_one_diagnostic Fixtures.Infer.quantifier_over_int64_in_a_body
+        "types.specification_only");
+  Harness.test "a quantifier over a type in a test" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.quantifier_over_a_type_in_a_test
         "types.specification_only");
   Harness.test "a quantifier's range from an Integer to a UInt64 is a range of Integer" (fun () ->
       let text = Fixtures.Infer.range_in_a_specification_from_an_integer_to_a_uint64 in
@@ -2340,6 +2449,39 @@ let () =
       expect_one_diagnostic
         (shape ^ Fixtures.Infer.area_of_a_holder_of_integers)
         "types.unsatisfied_bound");
+  Harness.test "a trait's method is a value through a type, a bound, or the trait" (fun () ->
+      expect_fine Fixtures.Infer.sizes_of_points_named_as_values);
+  Harness.test "a method named as a value is the overload whose `self` the expected type takes"
+    (fun () -> expect_fine Fixtures.Infer.labels_of_a_point_by_receiver);
+  Harness.test "a method that two traits give a type is an ambiguous value" (fun () ->
+      expect_one_diagnostic
+        "trait First {\n\
+        \  fn name(self) -> Int64\n\
+         }\n\n\
+         trait Second {\n\
+        \  fn name(self) -> Int64\n\
+         }\n\n\
+         type Point(x: Int64)\n\n\
+         impl First for Point {\n\
+        \  fn name(self) -> Int64 { 1 }\n\
+         }\n\n\
+         impl Second for Point {\n\
+        \  fn name(self) -> Int64 { 2 }\n\
+         }\n\n\
+         fn f() {\n\
+        \  let _ = Point.name\n\
+         }\n"
+        "types.ambiguous_method" ~says:"`First`, `Second`");
+  Harness.test "a trait's method named as a value needs the type's impl" (fun () ->
+      expect_one_diagnostic
+        "trait Measure {\n\
+        \  fn size(self) -> Int64\n\
+         }\n\n\
+         type Point(x: Int64)\n\n\
+         fn f() {\n\
+        \  let _: fn(Point) -> Int64 = Measure.size\n\
+         }\n"
+        "types.no_impl" ~says:"`Point` does not implement `Measure`.");
   Harness.test "a method used as a value must meet its bounds" (fun () ->
       expect_one_diagnostic
         (shape ^ Fixtures.Infer.fits_of_a_point_as_a_value)
@@ -2432,7 +2574,83 @@ let () =
   Harness.test "an associated type a bound fixes must be the one the impl gives" (fun () ->
       expect_one_diagnostic
         (source ^ Fixtures.Infer.text_of_a_source_of_integers)
-        "types.unsatisfied_bound")
+        "types.unsatisfied_bound");
+  Harness.test "a constraint on a required trait's associated type must be the impl's choice"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.blue_car_given_a_black_sedan "types.unsatisfied_bound"
+        ~says:"its `Color` is `Black`");
+  Harness.test "an impl's associated type may name its required trait's through `Self`" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.pairs_of_a_point_listing_its_keys
+        "types.unsatisfied_bound" ~says:"its `Pair` is `List[Int64]`");
+  Harness.test "a constraint fixes only the associated type it names" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.pair_with_a_fixed_first_passed_for_a_fixed_second
+        "types.unsatisfied_bound" ~says:"its `Second` is `Value.Second`");
+  Harness.test "an associated type has only the methods of its declared bounds" (fun () ->
+      expect_one_diagnostic
+        "trait Get {\n\
+        \  type Value\n\
+        \  fn get(self) -> Self.Value\n\
+         }\n\n\
+         fn read[Source: Get](source: Source) -> Int64 {\n\
+        \  source.get().number()\n\
+         }\n"
+        "types.unknown_member" ~says:"`Source.Value` has no method `number`");
+  Harness.test "an associated type may be bounded by its own trait" (fun () ->
+      expect_fine
+        "trait Stream {\n\
+        \  type Rest: Stream\n\
+        \  fn rest(own self) -> Self.Rest\n\
+        \  fn size(self) -> Int64\n\
+         }\n\n\
+         fn third_size[Source: Stream](source: own Source) -> Int64 {\n\
+        \  (own source).rest().rest().size()\n\
+         }\n");
+  Harness.test "a provided method's body does not know its trait's associated type" (fun () ->
+      expect_one_diagnostic
+        "trait Make {\n  type Value\n  fn make() -> Self.Value {\n    1\n  }\n}\n" "types.mismatch"
+        ~says:"Expected `Self.Value`, found an integer.");
+  Harness.test "a mismatch shows the type that an associated type is at a known type" (fun () ->
+      expect_one_diagnostic
+        "trait Get {\n\
+        \  type Value\n\
+         }\n\n\
+         impl Get for Int64 {\n\
+        \  type Value = Bool\n\
+         }\n\n\
+         type Holder[Source: Get](source: Source, value: Source.Value)\n\n\
+         fn build() -> Holder[Int64] {\n\
+        \  Holder(source: 1, value: 2)\n\
+         }\n"
+        "types.mismatch" ~says:"Expected `Bool`, found an integer.");
+  Harness.test "an associated type is a type argument of a call" (fun () ->
+      expect_fine Fixtures.Infer.multiplication_by_the_row_of_a_matrix);
+  Harness.test "an associated type in a cost operand that two traits declare is ambiguous"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.cost_of_comparing_a_part_of_two_traits
+        "types.ambiguous_associated");
+  Harness.test "a value with a field of an associated type is built at a type and through a bound"
+    (fun () -> expect_fine Fixtures.Infer.holders_of_source_values);
+  Harness.test
+    "a literal takes the type that an associated type's bound names through another associated type"
+    (fun () ->
+      let text = Fixtures.Infer.literal_taken_by_the_sink_of_a_source in
+      expect_fine text;
+      expect_type text "1" "Int64");
+  Harness.test "an associated type is fixed in a bound, not among an expression's type arguments"
+    (fun () ->
+      expect_one_diagnostic
+        "trait Get {\n\
+        \  type Value\n\
+        \  fn get() -> Int64\n\
+         }\n\n\
+         impl Get for Int64 {\n\
+        \  type Value = Int64\n\
+        \  fn get() -> Int64 { 1 }\n\
+         }\n\n\
+         fn read() -> Int64 {\n\
+        \  Get[Value = Int64].get()\n\
+         }\n"
+        "types.arity" ~says:"not among type arguments.")
 
 let point = "type Point(x: Int64, y: Int64)\n\n"
 
@@ -2626,7 +2844,7 @@ let () =
         ~says:"Move this into a function"
         ~at:("if true { true } else { false }", 1));
   Harness.test "the condition of an assertion by evaluation is code, in a theorem too" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.assertion_by_evaluation_with_an_implication
+      expect_one_diagnostic Fixtures.Infer.assertion_by_evaluation_over_a_whole_type
         "types.specification_only")
 
 let () =

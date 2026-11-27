@@ -260,9 +260,71 @@ let build_literal : Tables.literal -> Core.kind = function
   | Integer_value number -> Integer number
   | Float_value number -> Float number
 
+type built_in_call = Copy_value | Scalar_operation of Intrinsic.scalar | Scalar_equal
+
+let classify_built_in_call (callee : Tables.callee) =
+  match callee with
+  | Trait_method { trait; _ } when Well_known.is Copyable trait.trait -> Some Copy_value
+  | Trait_method { trait; name; receiver; self_type; _ } -> (
+      match find_built_in_operation trait name receiver self_type with
+      | Some operation -> Some (Scalar_operation operation)
+      | None
+        when is_built_in_scalar self_type
+             && Well_known.is_method Equal_equal (Method { owner = trait.trait; name; receiver }) ->
+          Some Scalar_equal
+      | None -> None)
+  | Function _ | Capability_method _ | Constructor _ | Indirect | Intrinsic _ -> None
+
+let build_built_in_call built_in (arguments : Core.expression list) : Core.kind =
+  match (built_in, arguments) with
+  | Copy_value, [ receiver ] -> Copy (Operands.build Read receiver)
+  | Copy_value, _ -> raise_bug "`copy` does not have exactly one argument"
+  | Scalar_operation operation, _ -> Operator { operation; arguments }
+  | Scalar_equal, [ left; right ] -> Compare { comparison = Equal; left; right }
+  | Scalar_equal, _ -> raise_bug "`equal` does not have exactly two arguments"
+
+let build_trait_method_value form (value : Syntax.expression) (trait_method : Tables.trait_method) :
+    Core.kind =
+  match read_type form value with
+  | Types.Function { inputs; output; _ } ->
+      let origin = make_rewrite_origin value.id in
+      let parameters =
+        List.map (fun (mode, type_) -> (mode, type_, allocate_synthetic_local form)) inputs
+      in
+      let arguments =
+        List.map (fun (_, type_, local) -> make_local_use form ~origin type_ local) parameters
+      in
+      let callee : Tables.callee = Trait_method trait_method in
+      let call : Core.kind =
+        match classify_built_in_call callee with
+        | Some built_in -> build_built_in_call built_in arguments
+        | None ->
+            Call
+              (make_call form ~callee:(convert_callee form callee)
+                 ~arguments:
+                   (List.map2
+                      (fun (mode, _, _) argument -> Operands.build_argument mode argument)
+                      parameters arguments)
+                 ~lends:None)
+      in
+      Lambda
+        {
+          parameters =
+            List.map
+              (fun (mode, type_, local) ->
+                make_binding form ~origin ~is_var:false ~mode type_ local)
+              parameters;
+          captures = [];
+          body =
+            { statements = []; value = Some (make_synthetic_expression form ~origin output call) };
+          result = output;
+        }
+  | type_ -> raise_bug "a method named as a value of type `%s`" (Types.show type_)
+
 let build_function_value form (value : Syntax.expression) : Core.kind =
   match form.tables.resolutions.(value.id) with
   | Some (Global { path; instantiation }) -> Function_value { path; instantiation }
+  | Some (Trait_method_value trait_method) -> build_trait_method_value form value trait_method
   | _ -> raise_bug "%s is not recorded as a function" (show_node value.id)
 
 let build_variant_value form (value : Syntax.expression) type_path variant : Core.kind =
@@ -456,7 +518,8 @@ let is_executable form (condition : Core.expression) =
           if node.type_ = Types.Integer then executable := false;
           match node.kind with
           | Quantified { binder = Over_type _; _ }
-          | Result | Old _ | Yielded | Identical _ | Specification_function _ | Method_cost _
+          | Result | Old _ | Visited | Final_result | Identical _ | Specification_function _
+          | Method_cost _
           | Convert { conversion = To_integer | From_integer; _ } ->
               executable := false
           | _ -> ());
@@ -767,7 +830,11 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
       let captures =
         match elaboration with Some (Lambda { captures }) -> captures | _ -> raise_unexpected ()
       in
-      let parameters = List.map (build_pattern form) parameters in
+      let parameters =
+        List.map
+          (fun (parameter : Syntax.lambda_parameter) -> build_pattern form parameter.pattern)
+          parameters
+      in
       let result =
         match read_type form value with
         | Types.Function function_type -> function_type.output
@@ -868,7 +935,7 @@ and build_name form env (value : Syntax.expression) : Core.kind =
              origin = Written value.id;
            })
   | Some { target = Result_value; _ } -> Result
-  | Some { target = Visited; _ } -> Yielded
+  | Some { target = Visited; _ } -> Visited
   | Some _ | None -> raise_bug "%s is not a value and has no core node" (show_node value.id)
 
 and build_member form env (value : Syntax.expression) base (member : Syntax.name) : Core.kind =
@@ -886,7 +953,7 @@ and build_member form env (value : Syntax.expression) base (member : Syntax.name
       Use (build_constant_place form ~origin:(Written value.id) constant)
   | Some (Variant_value { type_ = Types.Named { path; _ }; variant }) ->
       build_variant_value form value path variant
-  | Some (Global _) -> build_function_value form value
+  | Some (Global _ | Trait_method_value _) -> build_function_value form value
   | _ -> raise_bug "%s is a member with no recorded resolution" (show_node value.id)
 
 and build_index form env (value : Syntax.expression) base items : Core.kind =
@@ -958,27 +1025,7 @@ and build_specification_call form env (value : Syntax.expression) (arguments : S
           let first = build_expression form env first.value in
           Identical (first, build_expression form env second.value)
       | _ -> raise_bug "`identical` does not have two arguments")
-  | Final { part } -> build_final form value ~part
-
-and build_final form (value : Syntax.expression) ~part : Core.kind =
-  let parts : Types.ty =
-    Named { path = Well_known.make_path Sequence; arguments = [ Types.Type part ] }
-  in
-  let make = make_synthetic_expression form ~origin:(make_rewrite_origin value.id) in
-  let build_read_argument = Operands.build_argument Read in
-  let first =
-    make part
-      (Call
-         (make_call form
-            ~callee:(make_method_target form Index_at ~self_type:parts)
-            ~arguments:
-              [
-                build_read_argument (make parts Yielded);
-                build_read_argument (make Types.Integer (Integer Z.zero));
-              ]
-            ~lends:(Some Read)))
-  in
-  Use (Lent first)
+  | Final -> Final_result
 
 and build_default_argument form ~construct (callee : Core.operand Core.target) ~position :
     Core.argument =
@@ -1046,25 +1093,9 @@ and build_argument_expressions form env (call : Tables.call) =
 and build_call_kind ?function_value form env (value : Syntax.expression) (recorded : Tables.call) :
     Core.kind =
   let lends = recorded.lends in
-  match recorded.callee with
-  | Trait_method { trait; _ } when Well_known.is Copyable trait.trait -> (
-      match recorded.arguments with
-      | [ receiver ] -> Copy (Operands.build Read (build_expression form env receiver.expression))
-      | _ -> raise_bug "`copy` does not have exactly one argument")
-  | Trait_method { trait; name; receiver; self_type; _ }
-    when Option.is_some (find_built_in_operation trait name receiver self_type) ->
-      Operator
-        {
-          operation = Option.get (find_built_in_operation trait name receiver self_type);
-          arguments = build_argument_expressions form env recorded;
-        }
-  | Trait_method { trait; name; receiver; self_type; _ }
-    when is_built_in_scalar self_type
-         && Well_known.is_method Equal_equal (Method { owner = trait.trait; name; receiver }) -> (
-      match build_argument_expressions form env recorded with
-      | [ left; right ] -> Compare { comparison = Equal; left; right }
-      | _ -> raise_bug "`equal` does not have exactly two arguments")
-  | Constructor { type_; variant; type_arguments } ->
+  match (classify_built_in_call recorded.callee, recorded.callee) with
+  | Some built_in, _ -> build_built_in_call built_in (build_argument_expressions form env recorded)
+  | None, Constructor { type_; variant; type_arguments } ->
       let declared = read_constructor_fields form type_ variant type_arguments in
       let written =
         List.map
@@ -1089,7 +1120,7 @@ and build_call_kind ?function_value form env (value : Syntax.expression) (record
           declared
       in
       Construct { variant; fields = written @ defaulted }
-  | Indirect | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> (
+  | None, (Indirect | Function _ | Trait_method _ | Capability_method _ | Intrinsic _) -> (
       let function_value = Option.map (build_expression form env) function_value in
       let call =
         Core.Call (build_call form env ~construct:value.id ~lends ?function_value recorded)

@@ -1,8 +1,0 @@
-fn lookup(key: UInt8) -> Option[UInt8] {
-  if key > 3 { Some(key) } else { None }
-}
-
-fn g(key: UInt8) -> Option[UInt8] {
-  let found = lookup(key)?
-  Some(found)
-}

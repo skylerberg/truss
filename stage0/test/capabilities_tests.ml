@@ -663,7 +663,7 @@ let () =
         "types.extra_member";
       expect_one_diagnostic
         (feed ^ Fixtures.Capabilities.impl_defining_uses_twice)
-        "types.extra_member");
+        "types.duplicate_member");
   Harness.test "a set cannot be defined from itself" (fun () ->
       expect_one_diagnostic
         (feed ^ Fixtures.Capabilities.set_defined_as_itself)
@@ -731,6 +731,9 @@ let () =
         "capabilities.not_available"
         ~says:(loop_needs_run_forever ^ ", or implement `FiniteCursor` for `Countdown`.")
         ~at:("for value", 1));
+  Harness.test "a loop whose condition compares floats has no measure" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.while_loop_comparing_floats
+        "capabilities.not_available" ~says:(loop_needs_run_forever ^ ".") ~at:("while", 1));
   Harness.test "a function that uses RunForever holds a loop without a measure" (fun () ->
       expect_fine Fixtures.Capabilities.while_loop_without_a_measure_using_run_forever);
   Harness.test "a call of a function that uses RunForever uses it" (fun () ->
@@ -748,6 +751,12 @@ let () =
         ~message:"This call uses `RunForever`, but a specification must terminate.")
 
 let () =
+  Harness.test "a lambda typed by its annotations uses what its body uses" (fun () ->
+      expect_not_available Fixtures.Capabilities.annotated_lambda_printing_called_without_console
+        ~message:
+          "This call uses `Console`, which is not available here. Declare it with `uses Console`, \
+           or `provide` an implementation.";
+      expect_fine Fixtures.Capabilities.annotated_lambda_printing_called_with_console);
   Harness.test "a lambda that loops without a measure uses RunForever" (fun () ->
       expect_one_diagnostic
         Fixtures.Capabilities.lambda_looping_without_a_measure_bound_as_using_no_capability

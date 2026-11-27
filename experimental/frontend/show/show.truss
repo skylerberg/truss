@@ -424,7 +424,7 @@ fn show_expression(value: syntax.Expression) -> String
     Lambda(parameters, body) => {
       var shown_parameters: List[String] = []
       for parameter in parameters {
-        mut shown_parameters.push(show_pattern(parameter))
+        mut shown_parameters.push(show_lambda_parameter(parameter))
       }
       make_form("fn", parts: [make_form("", parts: shown_parameters), show_block(body)])
     }
@@ -457,6 +457,7 @@ fn show_bracket_item(item: syntax.BracketItem) -> String
   match item {
     Item(value) => show_expression(value)
     ItemConstraint(name, value) => "${name.text} = ${show_type_expression(value)}"
+    ItemType(value) => show_type_expression(value)
   }
 }
 
@@ -595,6 +596,21 @@ fn show_range_end(range_end: syntax.RangeEnd) -> String
   match range_end.kind {
     EndLiteral(literal) => show_literal(literal)
     EndConstant(constant) => show_constant(constant)
+  }
+}
+
+fn show_lambda_parameter(parameter: syntax.LambdaParameter) -> String
+  uses RunForever
+{
+  match parameter.annotation {
+    None => show_pattern(parameter.pattern)
+    Some(annotation) => {
+      let shown_type = match annotation.mode {
+        Some(written) => "${show_mode(written)} ${show_type_expression(annotation.written)}"
+        None => show_type_expression(annotation.written)
+      }
+      make_form("${show_pattern(parameter.pattern)}:", parts: [own shown_type])
+    }
   }
 }
 

@@ -1,0 +1,7 @@
+fn store[Value: Storable](value: own Value) -> UInt64 {
+  1
+}
+
+fn stored(names: List[String]) -> UInt64 {
+  store(names[0])
+}

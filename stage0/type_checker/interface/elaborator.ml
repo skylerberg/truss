@@ -15,7 +15,7 @@ type t = {
   self_capabilities : (string * Types.capability_set) list;
   is_in_capability : bool;
   diagnostics : Catalog.diagnostic list ref;
-  named : (Syntax.id * Types.ty) list ref;
+  applications : (Syntax.id * Types.application) list ref;
 }
 
 let create_with lookups resolved (scope : _ Environment.scope) ~known_bounds =
@@ -40,7 +40,7 @@ let create_with lookups resolved (scope : _ Environment.scope) ~known_bounds =
     self_capabilities = scope.self_capabilities;
     is_in_capability = false;
     diagnostics = ref [];
-    named = ref [];
+    applications = ref [];
   }
 
 let create_declared lookups resolved (scope : Environment.declared_bounds Environment.scope) =
@@ -78,7 +78,7 @@ let add_condition context condition =
   { context with condition = Types.make_condition (context.condition @ condition) }
 
 let list_diagnostics context = !(context.diagnostics)
-let list_named_types context = !(context.named)
+let list_applications context = !(context.applications)
 
 let make_scope context : Environment.declared_bounds Environment.scope =
   {
@@ -126,6 +126,12 @@ let record_diagnostic diagnostics (diagnostic : Catalog.Typing.t) =
   diagnostics := reported :: !diagnostics;
   Catalog.make_reported reported
 
+let record_application context id application =
+  context.applications := (id, application) :: !(context.applications)
+
+let record_associated context (key : Syntax.name) ~base ~bounds kind =
+  record_application context key.id (Associated_application { base; bounds; name = key.text; kind })
+
 let report_error_type context diagnostic =
   Types.Error (record_diagnostic context.diagnostics diagnostic)
 
@@ -143,10 +149,6 @@ let resolve_parameter context (name : Syntax.name) =
       | None -> Ok parameter)
   | Some (Unknown report) -> Error report
   | _ -> raise_bug "`%s` is not resolved as a generic parameter" name.text
-
-let show_path (path : Syntax.path) =
-  String.concat "."
-    (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
 
 let find_literal_bound (bound : Syntax.bound) : Types.cost_bound option =
   match bound with
@@ -194,16 +196,12 @@ and elaborate_self_associated context (at : Core.origin) (key : Syntax.name) =
             (Self_outside_trait
                { at = Written key.id; name = key.text; associated = Associated_type })
       | Ok self, Some trait -> (
-          match List.assoc_opt key.text trait.associated with
-          | Some fixed -> fixed
-          | None -> (
-              match find_declaring_trait context trait.trait key.text with
-              | Some _ -> Types.Projection { base = self; trait; name = key.text }
-              | None ->
-                  report_error_type context
-                    (Undeclared_associated
-                       { at = Written key.id; trait; name = key.text; associated = Associated_type })
-              )))
+          match project_associated context ~base:self [ trait ] key with
+          | Some associated_type -> associated_type
+          | None ->
+              report_error_type context
+                (Undeclared_associated
+                   { at = Written key.id; trait; name = key.text; associated = Associated_type })))
 
 and find_declaring_trait ?(capability = false) context trait name =
   List.find_opt
@@ -213,20 +211,20 @@ and find_declaring_trait ?(capability = false) context trait name =
       | None -> false)
     (list_trait_closure context.lookups trait)
 
+and project_associated context ~base bounds (key : Syntax.name) =
+  record_associated context key ~base ~bounds Associated_type;
+  List.find_map
+    (fun (bound : Types.trait_reference) ->
+      match List.assoc_opt key.text bound.associated with
+      | Some fixed -> Some fixed
+      | None ->
+          Option.map
+            (fun _ -> Types.Projection { base; trait = bound; name = key.text })
+            (find_declaring_trait context bound.trait key.text))
+    bounds
+
 and elaborate_associated context base parameter (key : Syntax.name) =
-  let bounds = list_bounds context parameter in
-  let associated_type =
-    List.find_map
-      (fun (bound : Types.trait_reference) ->
-        match List.assoc_opt key.text bound.associated with
-        | Some fixed -> Some fixed
-        | None -> (
-            match find_declaring_trait context bound.trait key.text with
-            | Some _ -> Some (Types.Projection { base; trait = bound; name = key.text })
-            | None -> None))
-      bounds
-  in
-  match associated_type with
+  match project_associated context ~base (list_bounds context parameter) key with
   | Some associated_type -> associated_type
   | None ->
       report_error_type context
@@ -254,15 +252,15 @@ and elaborate_count_name context (name : Syntax.name) : Types.argument =
       match Constants.evaluate_count context.lookups path with
       | Count value -> Types.Value (Types.Known value)
       | Invalid_count error ->
-          Types.Type
-            (report_error_type context
-               (Count_error { at = Written name.id; written = name.text; error }))
-      | Unevaluated_count -> Types.Type (Types.Error Catalog.reported_elsewhere))
+          Types.Value
+            (Value_error
+               (record_diagnostic context.diagnostics (Count_error { at = Written name.id; error })))
+      | Unevaluated_count -> Types.Value (Value_error Catalog.reported_elsewhere))
   | Some (Unknown report) -> Types.Type (Types.Error report)
   | _ -> raise_bug "`%s` is not resolved as a type argument" name.text
 
-and check_arity context (path : Syntax.path_type) shown expected :
-    (unit, Catalog.reported) Stdlib.result =
+and check_arity context (path : Syntax.path_type) expected : (unit, Catalog.reported) Stdlib.result
+    =
   match expected with
   | None -> Ok ()
   | Some expected -> (
@@ -276,7 +274,7 @@ and check_arity context (path : Syntax.path_type) shown expected :
              (Arity
                 {
                   at = Written path.id;
-                  written = shown;
+                  written = Catalog.cover_path path.path;
                   expected = List.length expected;
                   given = argument_count;
                 }))
@@ -292,7 +290,12 @@ and check_arity context (path : Syntax.path_type) shown expected :
                    [
                      record_diagnostic context.diagnostics
                        (Argument_kind
-                          { at = Written path.id; written = shown; parameter = name; mismatch });
+                          {
+                            at = Written path.id;
+                            written = Catalog.cover_path path.path;
+                            parameter = name;
+                            mismatch;
+                          });
                    ]
                  in
                  match (kind, is_value) with
@@ -304,10 +307,10 @@ and check_arity context (path : Syntax.path_type) shown expected :
         match errors with [] -> Ok () | error :: _ -> Error error)
 
 and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
-  let shown = show_path path.path in
+  let written = Catalog.cover_path path.path in
   match find_target context path.path.last with
   | Some (Type_parameter _) when path.arguments <> [] ->
-      report_error_type context (Arguments_to_parameter { at = Written path.id; written = shown })
+      report_error_type context (Arguments_to_parameter { at = Written path.id; written })
   | Some (Type_parameter parameter) -> (
       match Parameter_table.find_opt context.broken_parameters parameter with
       | Some report -> Types.Error report
@@ -318,25 +321,31 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
       | Some Integer -> Types.Integer
       | Some _ | None -> (
           let arguments = elaborate_arguments context path in
-          match
-            check_arity context path shown
-              (Resolve.Names.find_generics context.lookups.names definition_path)
-          with
+          let arity =
+            if List.exists (function Syntax.Constraint _ -> true | _ -> false) path.arguments then
+              Error
+                (record_diagnostic context.diagnostics
+                   (Constraint_in_type_arguments { at = Written path.id }))
+            else
+              check_arity context path
+                (Resolve.Names.find_generics context.lookups.names definition_path)
+          in
+          match arity with
           | Error report -> Types.Error report
           | Ok () ->
               let type_ = Types.Named { path = definition_path; arguments } in
-              context.named := (path.id, type_) :: !(context.named);
+              record_application context path.id (Type_application type_);
               type_))
   | Some (Definition (Trait, _)) ->
-      report_error_type context (Trait_as_type { at = Written path.id; written = shown })
+      report_error_type context (Trait_as_type { at = Written path.id; written })
   | Some (Definition (Capability, _)) ->
-      report_error_type context (Capability_as_type { at = Written path.id; written = shown })
+      report_error_type context (Capability_as_type { at = Written path.id; written })
   | Some (Unknown report) -> Types.Error report
-  | _ -> raise_bug "`%s` is not resolved as a type" shown
+  | _ -> raise_bug "`%s` is not resolved as a type" (Syntax_print.show_path path.path)
 
 and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_type) :
     (Types.trait_reference, Catalog.reported) Stdlib.result =
-  let shown = show_path path.path in
+  let written = Catalog.cover_path path.path in
   let build_trait_reference trait : (Types.trait_reference, Catalog.reported) Stdlib.result =
     let associated =
       List.sort compare
@@ -347,11 +356,12 @@ and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_
            path.arguments)
     in
     let trait_arguments = elaborate_arguments context path in
-    match
-      check_arity context path shown (Resolve.Names.find_generics context.lookups.names trait)
-    with
+    match check_arity context path (Resolve.Names.find_generics context.lookups.names trait) with
     | Error report -> Error report
-    | Ok () -> Ok { trait; trait_arguments; associated }
+    | Ok () ->
+        let reference : Types.trait_reference = { trait; trait_arguments; associated } in
+        record_application context path.id (Trait_application reference);
+        Ok reference
   in
   match find_target context path.path.last with
   | Some (Definition (Trait, trait)) -> build_trait_reference trait
@@ -359,13 +369,13 @@ and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_
   | Some (Definition _) ->
       Error
         (record_diagnostic context.diagnostics
-           (Not_a_trait { at = Written path.id; written = shown; is_parameter = false }))
+           (Not_a_trait { at = Written path.id; written; is_parameter = false }))
   | Some (Type_parameter _) ->
       Error
         (record_diagnostic context.diagnostics
-           (Not_a_trait { at = Written path.id; written = shown; is_parameter = true }))
+           (Not_a_trait { at = Written path.id; written; is_parameter = true }))
   | Some (Unknown report) -> Error report
-  | _ -> raise_bug "`%s` is not resolved as a trait" shown
+  | _ -> raise_bug "`%s` is not resolved as a trait" (Syntax_print.show_path path.path)
 
 and elaborate_condition context (written : Syntax.condition) : Types.condition =
   Types.make_condition
@@ -407,19 +417,20 @@ and elaborate_trait_bounds context paths =
     List.find_map (function Error report -> Some report | Ok _ -> None) references )
 
 and elaborate_capability_path context (path : Syntax.path_type) : Types.capability list =
-  let shown = show_path path.path in
+  let written = Catalog.cover_path path.path in
   match find_target context path.path.last with
   | Some (Type_parameter _) ->
       report_error_capability context
-        (Not_a_capability { at = Written path.id; written = shown; is_type_parameter = true })
+        (Not_a_capability { at = Written path.id; written; is_type_parameter = true })
   | Some (Definition (Capability, path_)) -> [ Types.make_capability path_ ]
   | Some (Definition _) ->
       report_error_capability context
-        (Not_a_capability { at = Written path.id; written = shown; is_type_parameter = false })
+        (Not_a_capability { at = Written path.id; written; is_type_parameter = false })
   | Some (Unknown report) -> [ Types.Capability_error report ]
-  | _ -> raise_bug "`%s` is not resolved as a capability" shown
+  | _ -> raise_bug "`%s` is not resolved as a capability" (Syntax_print.show_path path.path)
 
 and find_capability_projection context base traits (key : Syntax.name) =
+  record_associated context key ~base ~bounds:traits Associated_capability_set;
   List.find_map
     (fun (bound : Types.trait_reference) ->
       Option.map
@@ -547,7 +558,7 @@ and elaborate_costs context clauses : (Types.cost list, Catalog.reported) Stdlib
   let report_error diagnostic = Error (record_diagnostic context.diagnostics diagnostic) in
   let elaborate_counted (path : Syntax.path_type) (method_ : Syntax.name option) :
       (Types.resource, Catalog.reported) Stdlib.result =
-    let shown = show_path path.path in
+    let written = Catalog.cover_path path.path in
     match find_target context path.path.last with
     | Some (Definition (Capability, capability)) -> (
         match method_ with
@@ -557,7 +568,7 @@ and elaborate_costs context clauses : (Types.cost list, Catalog.reported) Stdlib
                     (Path.make_capability_method capability method_.text)) ->
             report_error
               (Unknown_capability_method
-                 { at = Written method_.id; written = shown; method_ = method_.text })
+                 { at = Written method_.id; written; method_ = method_.text })
         | _ ->
             Ok
               (Calls
@@ -566,7 +577,7 @@ and elaborate_costs context clauses : (Types.cost list, Catalog.reported) Stdlib
                    method_ = Option.map (fun (method_ : Syntax.name) -> method_.text) method_;
                  }))
     | Some (Unknown report) -> Error report
-    | _ -> report_error (Calls_not_a_capability { at = Written path.id; written = shown })
+    | _ -> report_error (Calls_not_a_capability { at = Written path.id; written })
   in
   let costs =
     List.filter_map
@@ -750,6 +761,20 @@ let list_direct_bounds context (type_ : Types.ty) =
         (list_bound_closure context.lookups ~self:base trait)
   | _ -> []
 
+let elaborate_associated_expression context (written : Syntax.expression) =
+  match written.kind with
+  | Member ({ kind = Name base; _ }, key) -> (
+      match find_target context base with
+      | Some (Type_parameter _) -> (
+          match resolve_parameter context base with
+          | Ok parameter ->
+              Some (elaborate_associated context (Types.Parameter parameter) parameter key)
+          | Error report -> Some (Types.Error report))
+      | _ -> None)
+  | Member ({ kind = Self_type_value; _ }, key) ->
+      Some (elaborate_self_associated context (Written written.id) key)
+  | _ -> None
+
 let rec find_bounded_type context (written : Syntax.expression) =
   match written.kind with
   | Self_type_value -> (
@@ -762,22 +787,9 @@ let rec find_bounded_type context (written : Syntax.expression) =
       | Some _ | None -> None)
   | Member (base, associated) ->
       Option.bind (find_bounded_type context base) (fun base ->
-          let bounds = list_direct_bounds context base in
-          match
-            List.find_map
-              (fun (bound : Types.trait_reference) ->
-                List.assoc_opt associated.text bound.associated)
-              bounds
-          with
-          | Some ((Types.Parameter _ | Types.Projection _) as fixed) -> Some fixed
-          | Some _ -> None
-          | None ->
-              List.find_map
-                (fun (bound : Types.trait_reference) ->
-                  Option.map
-                    (fun _ -> Types.Projection { base; trait = bound; name = associated.text })
-                    (find_declaring_trait context bound.trait associated.text))
-                bounds)
+          match project_associated context ~base (list_direct_bounds context base) associated with
+          | Some ((Types.Parameter _ | Types.Projection _) as bounded) -> Some bounded
+          | Some _ | None -> None)
   | Parenthesized inner -> find_bounded_type context inner
   | _ -> None
 
@@ -1013,7 +1025,7 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
               (Head_arity
                  {
                    at = Written head.id;
-                   written = show_path head.path;
+                   written = Catalog.cover_path head.path;
                    expected = List.length expected;
                    given = List.length generics;
                  })
@@ -1022,7 +1034,12 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
             | Some Never -> Types.Never
             | Some Integer -> Types.Integer
             | _ ->
-                Types.Named { path = type_path; arguments = Types.list_generic_arguments generics })
+                let type_ =
+                  Types.Named
+                    { path = type_path; arguments = Types.list_generic_arguments generics }
+                in
+                record_application context head.id (Type_application type_);
+                type_)
       in
       (generics, type_)
   | Some (Definition (((Trait | Capability) as kind), _)) ->
@@ -1031,11 +1048,11 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
           (Head_not_a_type
              {
                at = Written head.id;
-               written = show_path head.path;
+               written = Catalog.cover_path head.path;
                kind = Resolve.Names.convert_named kind;
              }) )
   | Some (Unknown report) -> (generics, Types.Error report)
-  | _ -> raise_bug "the type head `%s` is not resolved" (show_path head.path)
+  | _ -> raise_bug "the type head `%s` is not resolved" (Syntax_print.show_path head.path)
 
 let elaborate_fields context (written : Syntax.field list) =
   List.filter_map
@@ -1131,17 +1148,51 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
       match elaborate_trait_reference ~capability:true context trait_ with
       | Error report -> (Error report, context)
       | Ok implements ->
+          let is_defined_by_this_impl ~capability base (trait : Types.trait_reference) name =
+            Types.equal base for_type
+            && Option.equal Path.equal
+                 (find_declaring_trait ~capability context trait.trait name)
+                 (Some implements.trait)
+          in
           let associated =
             List.sort compare
-              (List.filter_map
-                 (fun (line : Syntax.impl_member Syntax.node) ->
+              (List.fold_left
+                 (fun defined (line : Syntax.impl_member Syntax.node) ->
                    match line.kind with
+                   | Associated_definition (name, _) when List.mem_assoc name.text defined ->
+                       defined
                    | Associated_definition (name, written) ->
-                       Some
-                         ( name.text,
-                           elaborate_type { context with self_type = Some for_type } written )
-                   | Capability_definition _ | Impl_member_error -> None)
-                 members)
+                       let type_ =
+                         elaborate_type
+                           {
+                             context with
+                             self_type = Some for_type;
+                             self_trait = Some implements;
+                             self_associated = defined;
+                           }
+                           written
+                       in
+                       let is_self_defined =
+                         Types.exists
+                           (function
+                             | Types.Projection { base; trait; name } ->
+                                 is_defined_by_this_impl ~capability:false base trait name
+                             | _ -> false)
+                           type_
+                       in
+                       ( name.text,
+                         if is_self_defined then
+                           report_error_type context
+                             (Self_defined_associated
+                                {
+                                  at = Written name.id;
+                                  name = name.text;
+                                  associated = Associated_type;
+                                })
+                         else type_ )
+                       :: defined
+                   | Capability_definition _ | Impl_member_error -> defined)
+                 [] members)
           in
           let implements = { implements with associated } in
           let context =
@@ -1163,21 +1214,25 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
                            { context with self_capabilities = sets }
                            written)
                     in
-                    let is_defined_by_this_impl = function
-                      | Types.Capability_projection { base; trait; name } ->
-                          Types.equal base for_type
-                          && Option.equal Path.equal
-                               (find_declaring_trait ~capability:true context trait.trait name)
-                               (Some implements.trait)
-                      | _ -> false
+                    let is_self_defined =
+                      Types.exists_capability
+                        (function
+                          | Types.Capability_projection { base; trait; name } ->
+                              is_defined_by_this_impl ~capability:true base trait name
+                          | _ -> false)
+                        set
                     in
                     if List.mem_assoc name.text sets then sets
-                    else if Types.exists_capability is_defined_by_this_impl set then
+                    else if is_self_defined then
                       ( name.text,
                         Types.make_capability_set
                           (report_error_capability context
-                             (Self_defined_capability_set { at = Written name.id; name = name.text }))
-                      )
+                             (Self_defined_associated
+                                {
+                                  at = Written name.id;
+                                  name = name.text;
+                                  associated = Associated_capability_set;
+                                })) )
                       :: sets
                     else (name.text, set) :: sets
                 | Associated_definition _ | Impl_member_error -> sets)
@@ -1259,14 +1314,14 @@ let elaborate_header (lookups : Lookups.t) (key : Resolve.Names.key) =
           {
             Environment.container;
             container_scope = make_scope context;
-            container_named = List.rev !(context.named);
+            container_applications = List.rev !(context.applications);
           }
 
 let make_elaborated_interface context interface : Environment.elaborated_interface =
   {
     interface;
     diagnostics = List.rev !(context.diagnostics);
-    named = List.rev !(context.named);
+    applications = List.rev !(context.applications);
     scope = close_scope context.lookups (make_scope context);
   }
 
@@ -1376,7 +1431,7 @@ let make_container_interface lookups (key : Resolve.Names.key) (header : Environ
   {
     interface;
     diagnostics = [];
-    named = header.container_named;
+    applications = header.container_applications;
     scope = close_scope lookups header.container_scope;
   }
 
@@ -1401,7 +1456,9 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let resolved = lookups.read_resolved Interface key in
   let definition = lookups.names.read_definition key in
   let path = key.path in
-  Compiler_bug.run_while_doing ~stage:"Interface" (Resolve.Names.show_key key) (fun () ->
+  Compiler_bug.run_while_doing ~stage:"Interface"
+    (fun () -> Resolve.Names.show_key key)
+    (fun () ->
       let context = create_declared lookups resolved empty_scope in
       let make_error_interface () =
         make_elaborated_interface context (Error_interface Catalog.reported_elsewhere)
@@ -1476,6 +1533,13 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                      opaque = (lookups.names.read_declaration key).visibility = Public_opaque;
                      is_tuple;
                      derives;
+                     declares_potential =
+                       List.exists
+                         (fun (clause : Syntax.type_clause) ->
+                           match clause.kind with
+                           | Potential _ -> true
+                           | Type_invariant _ | Derives _ -> false)
+                         clauses;
                    })
           | Constant { name; type_; _ } ->
               let context =

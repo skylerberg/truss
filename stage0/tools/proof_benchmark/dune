@@ -1,3 +1,3 @@
 (executable
  (name proof_benchmark)
- (libraries project standard_library path solver prover database unix))
+ (libraries standard_library path solver database unix))

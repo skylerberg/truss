@@ -1,0 +1,272 @@
+trait Animal {
+  fn name(self) -> String
+  fn sound(self) -> String
+
+  fn greeting(self) -> String {
+    "${self.name()} says ${self.sound()}"
+  }
+
+  fn loud_greeting(self) -> String {
+    "${self.greeting()}!"
+  }
+}
+
+type Dog()
+type Cat()
+
+impl Animal for Dog {
+  fn name(self) -> String { "dog" }
+  fn sound(self) -> String { "woof" }
+}
+
+impl Animal for Cat {
+  fn name(self) -> String { "cat" }
+  fn sound(self) -> String { "meow" }
+  fn greeting(self) -> String { "the cat ignores you" }
+}
+
+fn greet[Value: Animal](value: Value) -> String {
+  value.loud_greeting()
+}
+
+test "a provided method calls its impl's methods, and an override replaces it for every caller" {
+  assert Dog().greeting() == "dog says woof"
+  assert greet(Dog()) == "dog says woof!"
+  assert Cat().greeting() == "the cat ignores you"
+  assert greet(Cat()) == "the cat ignores you!"
+}
+
+trait Describe {
+  fn describe(self) -> String
+}
+
+impl Describe for Int64 {
+  fn describe(self) -> String { "integer ${self}" }
+}
+
+impl Describe for Bool {
+  fn describe(self) -> String { "flag ${self}" }
+}
+
+type Boxed[Inner](inner: Inner)
+
+impl Describe for Boxed[Inner: Describe] {
+  fn describe(self) -> String { "boxed ${self.inner.describe()}" }
+}
+
+fn described[Value: Describe](value: Value) -> String {
+  value.describe()
+}
+
+test "a generic function runs each type argument's impl, and a generic impl its argument's" {
+  assert described(3) == "integer 3"
+  assert described(true) == "flag true"
+  assert described(Boxed(inner: Boxed(inner: false))) == "boxed boxed flag false"
+}
+
+trait Named {
+  fn name(self) -> String
+}
+
+trait Legged: Named {
+  fn legs(self) -> Int64
+}
+
+trait Winged: Named {
+  fn wings(self) -> Int64
+}
+
+trait Flier: Legged + Winged {}
+
+type Bird()
+
+impl Named for Bird {
+  fn name(self) -> String { "bird" }
+}
+
+impl Legged for Bird {
+  fn legs(self) -> Int64 { 2 }
+}
+
+impl Winged for Bird {
+  fn wings(self) -> Int64 { 1 }
+}
+
+impl Flier for Bird {}
+
+fn profile[Value: Flier](value: Value) -> String {
+  "${value.name()}: ${value.legs()} legs, ${value.wings()} wing"
+}
+
+test "a bound has the methods of every trait that its trait requires, through a diamond" {
+  assert profile(Bird()) == "bird: 2 legs, 1 wing"
+}
+
+trait Convert[Target] {
+  fn convert(self) -> Target
+}
+
+type Reading(value: Int64)
+
+impl Convert[Int64] for Reading {
+  fn convert(self) -> Int64 { self.value }
+}
+
+impl Convert[String] for Reading {
+  fn convert(self) -> String { "reading ${self.value}" }
+}
+
+fn converted[Target, Value: Convert[Target]](value: Value) -> Target {
+  value.convert()
+}
+
+test "a trait's argument chooses among a type's impls" {
+  let reading = Reading(value: 7)
+  assert converted[Int64, Reading](reading) == 7
+  assert converted[String, Reading](reading) == "reading 7"
+  assert Convert[Int64].convert(reading) == 7
+}
+
+trait Make {
+  fn make(seed: Int64) -> Self
+}
+
+trait Number: Make {}
+
+type Small(value: Int64)
+type Large(value: Int64)
+
+impl Make for Small {
+  fn make(seed: Int64) -> Small { Small(value: seed) }
+}
+
+impl Make for Large {
+  fn make(seed: Int64) -> Large { Large(value: 1000) }
+}
+
+impl Number for Small {}
+
+impl Number for Large {}
+
+fn one[Value: Number]() -> Value {
+  Value.make(1)
+}
+
+test "a static method runs the impl that a bound or the expected type chooses" {
+  assert one[Small]().value == 1
+  assert one[Large]().value == 1000
+  let made: Small = Make.make(5)
+  assert made.value == 5
+}
+
+trait Positioned {
+  fn position(self) -> Int64
+  fn place(mut self, position: Int64)
+}
+
+trait Movable: Positioned {
+  fn home(self) -> Int64
+
+  fn go_home(mut self) {
+    let home = self.home()
+    mut self.place(home)
+  }
+}
+
+type Marker(at: Int64)
+
+impl Positioned for Marker {
+  fn position(self) -> Int64 { self.at }
+  fn place(mut self, position: Int64) { self.at = position }
+}
+
+impl Movable for Marker {
+  fn home(self) -> Int64 { 4 }
+}
+
+test "a provided `mut self` method of a subtrait updates through its required trait" {
+  var marker = Marker(at: 1)
+  mut marker.go_home()
+  assert marker.position() == 4
+}
+
+trait Labeled[Label: Display] {
+  fn label(self) -> Label
+
+  fn caption(self) -> String {
+    "label: ${self.label()}"
+  }
+}
+
+type Parcel(weight: Int64)
+
+impl Labeled[Int64] for Parcel {
+  fn label(self) -> Int64 { self.weight }
+}
+
+test "a provided method uses the bound of its trait's parameter" {
+  assert Labeled[Int64].caption(Parcel(weight: 3)) == "label: 3"
+}
+
+type Couple[First, Second](first: First, second: Second)
+
+trait Pairing[First] {
+  fn pair[Second](self, first: own First, second: own Second) -> Couple[First, Second] {
+    Couple(first: own first, second: own second)
+  }
+}
+
+impl Pairing[Int64] for Bool {}
+
+fn paired[First, Second, Value: Pairing[First]](
+  value: Value,
+  first: own First,
+  second: own Second,
+) -> Couple[First, Second] {
+  value.pair(own first, own second)
+}
+
+test "a provided generic method runs through a bound that gives the trait's argument" {
+  let couple = paired(true, 1, "two")
+  assert couple.first == 1
+  assert couple.second == "two"
+}
+
+trait Bump {
+  fn bump(mut self)
+}
+
+impl Bump for Marker {
+  fn bump(mut self) { self.at = 9 }
+}
+
+fn apply[Value](function: fn(Value) -> Int64, value: Value) -> Int64 {
+  function(value)
+}
+
+fn positions[Value: Positioned](value: Value) -> Int64 {
+  apply(Value.position, value)
+}
+
+test "a trait's method named as a value runs the impl that the type or the bound chooses" {
+  let position = Marker.position
+  assert position(Marker(at: 3)) == 3
+  let named: fn(Marker) -> Int64 = Positioned.position
+  assert named(Marker(at: 4)) == 4
+  assert positions(Marker(at: 6)) == 6
+  let make = Small.make
+  assert make(2).value == 2
+  var marker = Marker(at: 1)
+  let bump = Marker.bump
+  bump(mut marker)
+  assert marker.position() == 9
+}
+
+test "a built-in operation named as a value runs the operation" uses Panic {
+  let add: (fn(Int64, Int64) -> Int64 uses Panic) = Int64.add
+  assert add(2, 3) == 5
+  let copy = String.copy
+  assert copy("text") == "text"
+  let equal: fn(Int64, Int64) -> Bool = Int64.equal
+  assert equal(1, 1)
+}

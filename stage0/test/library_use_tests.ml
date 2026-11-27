@@ -7,10 +7,16 @@ let check packages file =
   | errors -> errors
 
 let expect_proven text = Support.expect_no_diagnostics ~check [ ("app.main", text) ]
+let expect_not_proven text code = Support.expect_one_diagnostic ~check text code
 
 let () =
   Harness.test "a map that was inserted into holds the key" (fun () ->
       expect_proven Fixtures.Library_use.maps_built_by_insert);
+  Harness.test "another package cuts a string at its start and after an ASCII byte" (fun () ->
+      expect_proven Fixtures.Library_use.string_cut_after_an_ascii_byte);
+  Harness.test "bytes proven to be UTF-8 become a string without a check" (fun () ->
+      expect_proven Fixtures.Library_use.string_from_bytes_proven_valid;
+      expect_not_proven Fixtures.Library_use.string_from_bytes_not_proven_valid "prover.requires");
   Harness.test "a password is hashed with the default cost and with a cost that meets its limits"
     (fun () -> expect_proven Fixtures.Library_use.password_hashes_with_default_and_given_costs);
   Harness.test "a map literal has its keys and its length" (fun () ->

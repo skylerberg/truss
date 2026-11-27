@@ -1,17 +1,10 @@
 type quoted = { key : Path.key; origin : Core.origin }
 type location = Node of Core.origin | Whole_definition
 type call = { at : location; callee : Path.t option }
+type returning = This_method | Named_function of Path.t | This_lambda
 type counting = Upper_bound | Exact
 type moment = On_entry | After_iteration | Where_left
-
-type value =
-  | Named of string
-  | Quoted of quoted
-  | Temporary
-  | Self_value
-  | Compiler_local
-  | Lent_part
-
+type value = Named of string | Quoted of quoted | Temporary | Self_value | Compiler_local
 type changed_part = { root : value; fields : string list }
 
 type invariant_moment =
@@ -32,13 +25,8 @@ type requirement =
   | Elements_mutated
   | Elements_read
   | Ends_with_zero
-  | Elements_at_both_indexes
-  | Length_within_storage
-  | Element_to_pop
   | Element_at_index
-  | Index_within_length
   | Range_within_storage
-  | Count_of_array
 
 type recursion_impl = Derives | Inherits
 
@@ -58,6 +46,7 @@ type circular_proof =
   | Circular_contract of { cyclic : Path.t; dependency : dependency }
   | Circular_inherited_contract of { cyclic : Path.t; dependency : dependency }
   | Circular_instance of { type_ : Types.ty; dependency : Path.t; cyclic : Path.t }
+  | Circular_laws of { trait : Types.trait_reference; type_ : Types.ty }
 
 type unbounded =
   | Unstated_costs of {
@@ -67,9 +56,16 @@ type unbounded =
       counts_units : bool;
     }
   | Changing_cost of { is_amortized : bool; call : quoted; values : changed_part list }
+  | Uncounted_potential of {
+      metric : Language.Metric.t;
+      callee : Path.t;
+      call : quoted;
+      is_editable : bool;
+    }
   | Unbounded_iteration
 
 type promiser = Trait_promiser | Capability_promiser
+type postcondition_moment = At_return | Where_lent | At_lend_end
 
 type promise =
   | Own_promise of { counting : counting; clause : quoted }
@@ -83,12 +79,12 @@ type promise =
       declared : Types.trait_reference;
     }
 
-type callback_reason = Used_as_unpromising_value | Passed_for_unpromising_parameter
+type function_value = Named_function of Path.t | Callback_parameter of string
+type function_use = Passed_for_parameter | Used_as_value of Types.ty
 
 type unpromised =
   | Nothing_promises
   | Type_may_not_promise of string
-  | Type_promises_nothing of string
   | Ensures_may_not_promise of Path.t
 
 type obligation =
@@ -117,7 +113,6 @@ type obligation =
   | Lambda_cost of { counting : counting; type_ : Types.ty }
   | Lambda_call_above_bound of { metric : Language.Metric.t }
   | Callback_precondition of { clause : quoted; call : call; name : string }
-  | Parameter_contract of { path : Path.t; clause : quoted }
   | Loop_cost_clause of { clause : quoted; moment : moment }
   | Iteration_above_inferred_bound
   | Unbounded_iteration_cost of unbounded
@@ -132,13 +127,11 @@ type obligation =
   | Float_conversion of { at : quoted; target : Types.ty }
   | Not_a_scalar_value of { at : quoted }
   | Unreachable_reached
-  | Lent_part_ensures of { clause : quoted }
-  | Cost_promise of promise
+  | May_not_return_under_no_allocation of returning
+  | Cost_promise of { promise : promise; unstated : (Path.t * Types.ty) list }
   | Impl_precondition of { clause : quoted }
   | Impl_panic_condition of { clause : quoted }
-  | Ensures_at_method_end of { clause : quoted }
-  | Ensures_at_return of { clause : quoted }
-  | Promiser_ensures of { promiser : promiser; clause : quoted }
+  | Postcondition of { clause : quoted; promiser : promiser option; moment : postcondition_moment }
   | Law_may_fail of { trait : Types.trait_reference; law : string; for_type : Types.ty }
   | Restated_contract of {
       for_type : Types.ty;
@@ -149,10 +142,9 @@ type obligation =
     }
   | Negative_potential of { type_ : Types.ty }
   | May_alias of { first : quoted; second : quoted }
-  | Callback_requirement of { name : string; reason : callback_reason; clause : quoted }
+  | Function_requirement of { function_ : function_value; use : function_use; clause : quoted }
   | Callback_promise of { promise : quoted; unpromised : unpromised }
   | Duplicate_key of { key : quoted option }
-  | Value_contract of { path : Path.t; type_ : Types.ty; clause : quoted }
 
 type construct =
   | Potential_of_elements
@@ -162,11 +154,10 @@ type construct =
   | Elements_of of Types.ty
   | Sequence_elements
   | Function_value_costs
-  | Intrinsic_at_parameter of { operation : string; parameter : Types.ty }
+  | Intrinsic_at_parameter of { operation : Intrinsic.operation; parameter : Types.ty }
   | Negation_of of Types.ty
   | Shift_of of Types.ty
   | Range_of of Types.ty
-  | Unreadable_parameter_type
   | Unreadable_cursor of Types.ty
   | Field of string
   | Alternatives_binding_mut
@@ -183,46 +174,36 @@ type construct =
   | String_pattern_on of Types.ty
   | Specification_function
 
-type failed_run = Constant_run of { path : Path.t; report : string } | Assertion_run of string
-
-type path_note =
-  | Arm_taken of Core.origin list
-  | Condition_holds of { condition : Core.origin; holds : bool }
-  | Else_runs of Core.origin
-  | Returns_early of Core.origin
+type failed_run =
+  | Constant_run of { path : Path.t; stop : Codegen.stop }
+  | Assertion_run of Codegen.stop
 
 type unknown = Out_of_steps | Incomplete of string
 
 type failure =
   | Refuted
-  | Counterexample of {
-      values : (string * string) list;
-      path : path_note list;
-      failed_runs : failed_run list;
-    }
+  | Falsifiable of { failed_runs : failed_run list }
   | Undecided of { unknown : unknown; has_untriggered_fact : bool; failed_runs : failed_run list }
 
 type required =
-  | Code of string
+  | Clause of Code.t
   | Substituted_clause of {
       clause : quoted;
-      replacements : (Core.origin * string) list;
-      type_names : (string * string) list;
+      replacements : (Core.origin * Code.t) list;
+      type_names : (string * Types.ty) list;
     }
 
-type panic_place =
-  | After_uses of Core.origin
-  | Before_clause of Core.origin
-  | Before_body of Core.origin
+type clause_place = Before_clause of Core.origin | Before_body of Core.origin
 
 type fix =
   | Add_requires of {
-      body : Core.origin;
+      place : clause_place;
       required : required list;
-      premise : string option;
+      premise : Code.t option;
       condition : Types.condition;
     }
-  | Add_panic of panic_place
+  | Add_panic of clause_place
+  | Add_panic_to_uses of Core.origin
 
 type citation = Cited_here | Cited_at of { path : string; line : int }
 type instance = (string * Language.Builtin_type.t) list
@@ -235,7 +216,8 @@ type t =
       obligation : obligation;
       failure : failure;
       fixes : fix list;
+      withheld : Path.t list;
       cited : quoted option;
     }
-  | Unreadable of { location : location; construct : construct; foreign : string option }
-  | Unevaluated of { path : Path.t; report : string }
+  | Unreadable of { location : location; construct : construct; foreign : Path.t option }
+  | Unevaluated of { path : Path.t; stop : Codegen.stop }

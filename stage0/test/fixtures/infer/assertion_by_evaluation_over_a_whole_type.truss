@@ -1,0 +1,7 @@
+fn is_small(value: UInt8) -> Bool {
+  value < 10
+}
+
+theorem small_things() {
+  assert (forall value: UInt8 => is_small(value)) by evaluation
+}

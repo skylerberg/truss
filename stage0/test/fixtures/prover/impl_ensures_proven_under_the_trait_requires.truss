@@ -1,0 +1,23 @@
+trait Tagged {
+  fn tag(self, x: Int64) -> Int64
+    requires x > 0
+}
+
+type Eager()
+
+impl Tagged for Eager {
+  fn tag(self, x: Int64) -> Int64
+    ensures x > 0 ==> result == x
+    ensures x <= 0 ==> result == 1
+    ensures x <= 0 ==> result == 2
+  {
+    x
+  }
+}
+
+fn named(x: Int64) -> Int64
+  requires x > 0
+  ensures result == Eager().tag(x)
+{
+  x
+}

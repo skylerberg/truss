@@ -342,23 +342,10 @@ let list_edges store schema ~(source : endpoint) =
         markers = Sql.read_integer row 3;
       })
 
-let encode_text value =
-  let buffer = Buffer.create (String.length value + 2) in
-  Buffer.add_char buffer '"';
-  String.iter
-    (fun character ->
-      match character with
-      | '"' -> Buffer.add_string buffer "\\\""
-      | '\\' -> Buffer.add_string buffer "\\\\"
-      | character when Char.code character < 0x20 ->
-          Buffer.add_string buffer (Printf.sprintf "\\u%04x" (Char.code character))
-      | character -> Buffer.add_char buffer character)
-    value;
-  Buffer.add_char buffer '"';
-  Buffer.contents buffer
-
 let encode_integers values = "[" ^ String.concat "," (List.map string_of_int values) ^ "]"
-let encode_texts values = "[" ^ String.concat "," (List.map encode_text values) ^ "]"
+
+let encode_texts values =
+  "[" ^ String.concat "," (List.map Diagnostic.encode_json_string values) ^ "]"
 
 type edge_change = { changed : endpoint; before : int; after : int }
 
@@ -386,7 +373,9 @@ let replace_edges store ~(source : endpoint) edges =
     ^ String.concat ","
         (List.map
            (fun { changed = target; after; _ } ->
-             Printf.sprintf "[%d,%d,%s,%d]" target.kind target.id (encode_text target.name) after)
+             Printf.sprintf "[%d,%d,%s,%d]" target.kind target.id
+               (Diagnostic.encode_json_string target.name)
+               after)
            changes)
     ^ "]"
   in
@@ -914,6 +903,26 @@ let replace_verdicts store ~definition verdicts =
   end;
   is_changed
 
+type solver_run = { input_hash : string; output : string }
+
+let list_solver_runs store ~definition =
+  Sql.list_rows store.sql
+    "SELECT input_hash, output FROM main.solver_run WHERE definition = ?1 ORDER BY position"
+    [ Integer definition ] (fun row ->
+      { input_hash = Sql.read_blob row 0; output = Sql.read_text row 1 })
+
+let replace_solver_runs store ~definition runs =
+  if list_solver_runs store ~definition <> runs then begin
+    Sql.run store.sql "DELETE FROM main.solver_run WHERE definition = ?1" [ Integer definition ];
+    List.iteri
+      (fun position (run : solver_run) ->
+        Sql.run store.sql
+          "INSERT INTO main.solver_run (definition, position, input_hash, output) VALUES (?1, ?2, \
+           ?3, ?4)"
+          [ Integer definition; Integer position; Blob run.input_hash; Text run.output ])
+      runs
+  end
+
 let list_differing_rows store ~table ~columns ~before ~after =
   let select ~of_ ~minus =
     Printf.sprintf "SELECT %s FROM (SELECT * FROM %s.\"%s\"%s)"
@@ -947,7 +956,8 @@ let mark_readers_of_targets store ~(targets : endpoint list) ~markers =
           ^ String.concat ","
               (List.map
                  (fun (target : endpoint) ->
-                   Printf.sprintf "[%d,%d,%s]" target.kind target.id (encode_text target.name))
+                   Printf.sprintf "[%d,%d,%s]" target.kind target.id
+                     (Diagnostic.encode_json_string target.name))
                  targets)
           ^ "]");
         Integer markers;
@@ -1001,6 +1011,10 @@ let unmark_stale store ~stage ~id =
   Sql.run store.sql "DELETE FROM main.stale WHERE stage = ?1 AND id = ?2"
     [ Integer stage; Integer id ];
   Sql.count_changes store.sql > 0
+
+let is_stale store ~stage ~id =
+  Sql.has_row store.sql "SELECT 1 FROM main.stale WHERE stage = ?1 AND id = ?2"
+    [ Integer stage; Integer id ]
 
 type unit_entity =
   | File_unit
@@ -1135,9 +1149,31 @@ type selection =
   | Of_container of int
   | Of_path of int
 
-let definition_columns =
-  "id, key, package, module, path, ordinal, name, owner, member, kind, visibility, is_generic, \
-   origin, supplied_from, container, file, position, base, stop, text_hash"
+let definition_column_names =
+  [
+    "id";
+    "key";
+    "package";
+    "module";
+    "path";
+    "ordinal";
+    "name";
+    "owner";
+    "member";
+    "kind";
+    "visibility";
+    "is_generic";
+    "origin";
+    "supplied_from";
+    "container";
+    "file";
+    "position";
+    "base";
+    "stop";
+    "text_hash";
+  ]
+
+let definition_columns = String.concat ", " definition_column_names
 
 let read_optional_integer row index =
   if Sql.is_null row index then None else Some (Sql.read_integer row index)
@@ -1189,10 +1225,7 @@ let list_definitions store schema selection =
     arguments read_definition
 
 let qualified_definition_columns =
-  String.concat ", "
-    (List.map
-       (fun column -> "d." ^ String.trim column)
-       (String.split_on_char ',' definition_columns))
+  String.concat ", " (List.map (fun column -> "d." ^ column) definition_column_names)
 
 let find_source_definition store ~(target : endpoint) ~source_kind ~markers ~from_ =
   Sql.find_row store.sql

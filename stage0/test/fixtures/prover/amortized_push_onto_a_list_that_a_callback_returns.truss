@@ -1,0 +1,7 @@
+fn f(produce: (fn() -> List[Int64] cost time O(1))) -> List[Int64]
+  cost amortized time O(1)
+{
+  var row = produce()
+  mut row.push(1)
+  row
+}

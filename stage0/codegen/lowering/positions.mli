@@ -1,5 +1,5 @@
 type t
-type location = { file : Path.file; line : int; column : int }
+type location = Catalog.Codegen.location = { file : Path.file; line : int; column : int }
 
 val create :
   Resolve.Names.lookups -> source:Resolve.Names.source -> read_source:(Path.file -> Source.t) -> t

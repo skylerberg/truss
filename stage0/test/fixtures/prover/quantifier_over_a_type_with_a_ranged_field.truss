@@ -1,0 +1,11 @@
+type Wrapper(count: UInt8)
+
+fn small()
+  ensures forall w: Wrapper => w.count <= 255
+{
+}
+
+fn big()
+  ensures exists w: Wrapper => w.count > 255
+{
+}

@@ -2,6 +2,7 @@ use standard.core
 use standard.intrinsic
 use standard.text.grapheme_breaks
 use standard.text.unicode_tables
+use standard.text.utf8
 
 public fn String.is_empty(self) -> Bool
   ensures result == (self.length() == 0)
@@ -21,167 +22,134 @@ public fn String.bytes(self) -> view List[UInt8]
 
 internal type Decoded(character: Character, length: UInt64)
 
-internal fn sequence_length(first: UInt8) -> UInt64
-  ensures result <= 4
-  ensures result == (if first < 128 {
-      1
-    } else if first < 194 {
-      0
-    } else if first < 224 {
-      2
-    } else if first < 240 {
-      3
-    } else if first < 245 {
-      4
-    } else {
-      0
-    })
-  cost time O(1)
-  cost allocations == 0
-{
-  if first < 128 {
-    1
-  } else if first < 194 {
-    0
-  } else if first < 224 {
-    2
-  } else if first < 240 {
-    3
-  } else if first < 245 {
-    4
-  } else {
-    0
-  }
-}
-
-internal fn String.continuation(self, index: UInt64) -> UInt32
-  requires index < self.length()
-  ensures result <= 64
-  cost time O(1)
-  cost allocations == 0
-{
-  let byte = self.byte(index)
-  if byte >= 128 && byte <= 191 { intrinsic.convert(byte - 128) } else { 64 }
-}
-
 internal fn String.decode(self, offset: UInt64) -> Decoded
   requires offset < self.length()
+  requires self.is_boundary(offset)
+  ensures result.length == utf8.width(self.model(), at: offset)
   ensures 1 <= result.length
   ensures result.length <= self.length() - offset
+  ensures self.is_boundary(offset + result.length)
   ensures result.length < 4 ==> result.character.code() < 65536
+  ensures result.character.utf8_length() == result.length
   cost time O(1)
   cost allocations == 0
 {
-  let invalid = Decoded(character: Character.replacement, length: 1)
-  let first = self.byte(offset)
-  let length = sequence_length(first)
-  if length == 0 || length > self.length() - offset {
-    return invalid
+  proof {
+    utf8.boundary_is_valid_from(self.model(), position: offset)
+    utf8.character_ends_at_a_boundary(self.model(), at: offset)
   }
-  if length == 1 {
+  let first = self.byte(offset)
+  if first < 128 {
     return Decoded(character: intrinsic.convert(first), length: 1)
   }
-  let second = self.continuation(offset + 1)
-  if second == 64 {
-    return invalid
-  }
-  if length == 2 {
+  let second: UInt32 = intrinsic.convert(self.byte(offset + 1) - 128)
+  if first < 224 {
     let lead: UInt32 = intrinsic.convert(first - 192)
     return Decoded(character: intrinsic.convert(lead * 64 + second), length: 2)
   }
-  let third = self.continuation(offset + 2)
-  if third == 64 {
-    return invalid
-  }
-  if length == 3 {
+  let third: UInt32 = intrinsic.convert(self.byte(offset + 2) - 128)
+  if first < 240 {
     let lead: UInt32 = intrinsic.convert(first - 224)
-    let code = lead * 4096 + second * 64 + third
-    if code < 2048 || (code >= 55296 && code <= 57343) {
-      return invalid
-    }
-    return Decoded(character: intrinsic.convert(code), length: 3)
+    return Decoded(character: intrinsic.convert(lead * 4096 + second * 64 + third), length: 3)
   }
-  let fourth = self.continuation(offset + 3)
-  if fourth == 64 {
-    return invalid
-  }
+  let fourth: UInt32 = intrinsic.convert(self.byte(offset + 3) - 128)
   let lead: UInt32 = intrinsic.convert(first - 240)
-  let code = lead * 262144 + second * 4096 + third * 64 + fourth
-  if code < 65536 || code > 1114111 {
-    invalid
-  } else {
-    Decoded(character: intrinsic.convert(code), length: 4)
-  }
+  Decoded(character: intrinsic.convert(lead * 262144 + second * 4096 + third * 64 + fourth), length: 4)
 }
 
 internal fn String.previous_start(self, offset: UInt64) -> UInt64
   requires 0 < offset
   requires offset <= self.length()
+  requires self.is_boundary(offset)
   ensures result < offset
   ensures offset - result <= 4
+  ensures self.is_boundary(result)
   cost time O(1)
   cost allocations == 0
 {
+  proof {
+    utf8.previous_character_starts_within_four_bytes(self.model(), position: offset)
+  }
   var start = offset - 1
-  var steps: UInt64 = 0
-  while start > 0 && steps < 3 && self.continuation(start) != 64
+  while start > 0 && offset - start < 4 && utf8.is_continuation(self.byte(start))
     invariant start < offset
-    invariant offset - start == steps + 1
-    invariant steps <= 3
-    decreases start
+    invariant offset - start <= 4
+    invariant forall i in start + 1..offset => utf8.is_continuation(self.model()[i])
+    decreases start + 4 - offset
   {
     start -= 1
-    steps += 1
   }
-  if start + self.decode(start).length == offset { start } else { offset - 1 }
+  start
 }
 
 internal fn String.part(self, from: UInt64, to: UInt64) -> view String
   requires from <= to
   requires to <= self.length()
+  requires self.is_boundary(from)
+  requires self.is_boundary(to)
+  ensures identical(result.model(), self.model()[from..to])
   ensures result.length() == to - from
   ensures forall index in 0..result.length() => result.model()[index] == self.model()[from + index]
   cost time O(1)
+  cost allocations == 0
 {
-  self[from..to]
+  let bytes = intrinsic.storage_range(self.storage, start: from, stop: to)
+  proof {
+    utf8.slice_is_valid(self.model(), from: from, to: to)
+    assert identical(intrinsic.storage_model(bytes), self.model()[from..to])
+  }
+  intrinsic.storage_as(bytes)
 }
 
 internal fn String.matches_at(self, pattern: String, offset: UInt64) -> Bool
   requires offset <= self.length()
   requires pattern.length() <= self.length() - offset
+  ensures result == (forall i in 0..pattern.length() => self.model()[offset + i] == pattern.model()[i])
   cost time O(pattern.length())
 {
-  intrinsic.compare_bytes(self.part(offset, to: offset + pattern.length()).storage, right: pattern.storage) == 0
+  let candidate = intrinsic.storage_range(self.storage, start: offset, stop: offset + pattern.length())
+  proof {
+    assert (forall i in 0..pattern.length() => self.model()[offset + i] == pattern.model()[i])
+      ==> identical(intrinsic.storage_model(candidate), pattern.model())
+  }
+  intrinsic.compare_bytes(candidate, right: pattern.storage) == 0
 }
 
 internal fn String.copy_onto(self, output: mut intrinsic.Storage[UInt8])
   requires intrinsic.storage_length(output) + self.length() <= intrinsic.storage_capacity(output)
+  ensures identical(intrinsic.storage_model(output), old(intrinsic.storage_model(output)).concatenate(self.model()))
   ensures intrinsic.storage_length(output) == old(intrinsic.storage_length(output)) + self.length()
   ensures intrinsic.storage_capacity(output) == old(intrinsic.storage_capacity(output))
-  ensures forall i in 0..old(intrinsic.storage_length(output)) =>
-    intrinsic.storage_model(output)[i] == old(intrinsic.storage_model(output))[i]
-  ensures forall i in 0..self.length() =>
-    intrinsic.storage_model(output)[old(intrinsic.storage_length(output)) + i] == self.model()[i]
+  ensures utf8.is_valid(old(intrinsic.storage_model(output))) ==> utf8.is_valid(intrinsic.storage_model(output))
   cost time O(self.length())
   cost allocations == 0
 {
-  let start = intrinsic.storage_length(output)
   for index in 0..self.length()
-    invariant intrinsic.storage_length(output) == start + index
+    invariant intrinsic.storage_length(output) == old(intrinsic.storage_length(output)) + index
+    invariant forall i in 0..old(intrinsic.storage_length(output)) =>
+      identical(intrinsic.storage_model(output)[i], old(intrinsic.storage_model(output))[i])
+    invariant forall i in 0..index =>
+      identical(intrinsic.storage_model(output)[old(intrinsic.storage_length(output)) + i], self.model()[i])
     invariant intrinsic.storage_capacity(output) == old(intrinsic.storage_capacity(output))
-    invariant forall i in 0..start =>
-      intrinsic.storage_model(output)[i] == old(intrinsic.storage_model(output))[i]
-    invariant forall i in 0..index => intrinsic.storage_model(output)[start + i] == self.model()[i]
     cost allocations == 0
   {
-    intrinsic.storage_push(mut output, value: self.byte(index))
+    intrinsic.storage_push(mut output, value: intrinsic.storage_at(self.storage, index: index))
+  }
+  proof {
+    assert identical(intrinsic.storage_model(output), old(intrinsic.storage_model(output)).concatenate(self.model()))
+    if utf8.is_valid(old(intrinsic.storage_model(output))) {
+      utf8.concatenation_is_valid(old(intrinsic.storage_model(output)), second: self.model())
+    }
   }
 }
 
 public fn String.is_ascii(self) -> Bool
+  ensures result == (forall i in 0..self.length() => self.model()[i] <= 127)
   cost time O(self.length())
 {
-  for index in 0..self.length() {
+  for index in 0..self.length()
+    invariant forall i in 0..index => self.model()[i] <= 127
+  {
     if self.byte(index) >= 128 {
       return false
     }
@@ -190,15 +158,24 @@ public fn String.is_ascii(self) -> Bool
 }
 
 public fn String.is_boundary(self, offset: UInt64) -> Bool
-  ensures result == (offset == self.length() || (offset < self.length() && (self.byte(offset) & 0xC0) != 0x80))
+  ensures result == (offset <= self.length() && utf8.is_boundary(self.model(), at: offset))
+  ensures offset == 0 ==> result
+  ensures 0 < offset && offset <= self.length() && self.model()[offset - 1] <= 127 ==> result
   cost time O(1)
   cost allocations == 0
 {
-  offset == self.length() || (offset < self.length() && (self.byte(offset) & 0xC0) != 0x80)
+  proof {
+    utf8.start_is_a_boundary(self.model())
+    if 0 < offset && offset <= self.length() && self.model()[offset - 1] <= 127 {
+      utf8.after_an_ascii_byte_is_a_boundary(self.model(), at: offset - 1)
+    }
+  }
+  offset == self.length() || (offset < self.length() && !utf8.is_continuation(self.byte(offset)))
 }
 
 public type Characters(text: view String, offset: UInt64)
   invariant offset <= text.length()
+  invariant text.is_boundary(offset)
 
 impl FiniteCursor for Characters {
   fn remaining(self) -> UInt64
@@ -240,6 +217,7 @@ public fn String.characters(self) -> Characters
 
 public type CharactersWithOffsets(text: view String, offset: UInt64)
   invariant offset <= text.length()
+  invariant text.is_boundary(offset)
 
 impl FiniteCursor for CharactersWithOffsets {
   fn remaining(self) -> UInt64
@@ -289,6 +267,7 @@ public fn String.character_count(self) -> UInt64
   var offset: UInt64 = 0
   while offset < self.length()
     invariant offset <= self.length()
+    invariant self.is_boundary(offset)
     invariant count <= offset
     decreases self.length() - offset
     cost time O(offset)
@@ -317,6 +296,19 @@ public fn String.last_character(self) -> Option[Character]
   }
 }
 
+public fn String.character_at(self, offset: UInt64) -> Character
+  uses Panic unless offset < self.length() && self.is_boundary(offset)
+  ensures result.utf8_length() <= self.length() - offset
+  ensures self.is_boundary(offset + result.utf8_length())
+  cost time O(1)
+  cost allocations == 0
+{
+  if offset >= self.length() || !self.is_boundary(offset) {
+    Panic.crash("offset out of bounds")
+  }
+  self.decode(offset).character
+}
+
 public fn String.graphemes(self) -> List[view String]
   ensures result.length() <= self.length()
   cost time O(self.length())
@@ -329,6 +321,8 @@ public fn String.graphemes(self) -> List[view String]
     invariant start <= offset
     invariant offset <= self.length()
     invariant parts.length() <= start
+    invariant self.is_boundary(start)
+    invariant self.is_boundary(offset)
     decreases self.length() - offset
     cost time O(offset)
   {
@@ -358,6 +352,7 @@ public fn String.lines(self) -> List[view String]
     invariant start <= index
     invariant index <= self.length()
     invariant parts.length() <= index
+    invariant self.is_boundary(start)
     decreases self.length() - index
     cost time O(index)
   {
@@ -409,9 +404,25 @@ public fn String.split_at(self, offset: UInt64) -> core.Pair[view String, view S
   core.Pair(first: self.part(0, to: offset), second: self.part(offset, to: self.length()))
 }
 
+fn is_failure_table(pattern: Sequence[UInt8], table: Sequence[UInt64]) -> Bool
+  ensures result == (table.length() == pattern.length()
+    && (forall i in 0..table.length() => table[i] <= i
+      && (forall k in 0..table[i] => pattern[k] == pattern[i + 1 - table[i] + k])))
+{
+  table.length() == pattern.length()
+    && (forall i in 0..table.length() => table[i] <= i
+      && (forall k in 0..table[i] => pattern[k] == pattern[i + 1 - table[i] + k]))
+}
+
+fn matches_before(text: Sequence[UInt8], pattern: Sequence[UInt8], index: Integer, matched: Integer) -> Bool
+  requires 0 <= matched && matched <= index && index <= text.length() && matched <= pattern.length()
+  ensures result == (forall k in 0..matched => text[index - matched + k] == pattern[k])
+{
+  forall k in 0..matched => text[index - matched + k] == pattern[k]
+}
+
 internal fn failure_table(pattern: String) -> List[UInt64]
-  ensures result.length() == pattern.length()
-  ensures forall i in 0..result.length() => result.model()[i] <= i
+  ensures is_failure_table(pattern.model(), table: result.model())
   cost time O(pattern.length())
 {
   var table: intrinsic.Storage[UInt64] = intrinsic.storage_with_capacity(pattern.length())
@@ -428,12 +439,17 @@ internal fn failure_table(pattern: String) -> List[UInt64]
     invariant intrinsic.storage_length(table) == index
     invariant intrinsic.storage_capacity(table) == pattern.length()
     invariant forall i in 0..index => intrinsic.storage_model(table)[i] <= i
+      && (forall k in 0..intrinsic.storage_model(table)[i] =>
+        pattern.model()[k] == pattern.model()[i + 1 - intrinsic.storage_model(table)[i] + k])
+    invariant matches_before(pattern.model(), pattern: pattern.model(), index: index, matched: matched)
     decreases pattern.length() - index
     cost time O(2 * index - matched)
   {
     let before = matched
     while matched > 0 && pattern.byte(index) != pattern.byte(matched)
       invariant matched <= before
+      invariant matched < index
+      invariant matches_before(pattern.model(), pattern: pattern.model(), index: index, matched: matched)
       decreases matched
       cost time O(before - matched)
     {
@@ -448,22 +464,40 @@ internal fn failure_table(pattern: String) -> List[UInt64]
   List(storage: own table)
 }
 
+internal fn String.shorter_match(self, pattern: String, table: List[UInt64], matched: UInt64, index: UInt64) -> UInt64
+  requires 0 < matched
+  requires matched <= pattern.length()
+  requires matched <= index
+  requires index <= self.length()
+  requires is_failure_table(pattern.model(), table: table.model())
+  requires matches_before(self.model(), pattern: pattern.model(), index: index, matched: matched)
+  ensures result < matched
+  ensures matches_before(self.model(), pattern: pattern.model(), index: index, matched: result)
+  cost time O(1)
+  cost allocations == 0
+{
+  table[matched - 1]
+}
+
 internal fn String.advance(self, pattern: String, table: List[UInt64], matched: UInt64, index: UInt64) -> UInt64
   requires index < self.length()
   requires matched < pattern.length()
-  requires table.length() == pattern.length()
-  requires forall i in 0..table.length() => table.model()[i] <= i
+  requires matched <= index
+  requires is_failure_table(pattern.model(), table: table.model())
+  requires matches_before(self.model(), pattern: pattern.model(), index: index, matched: matched)
   ensures result <= matched + 1
   ensures result <= pattern.length()
+  ensures matches_before(self.model(), pattern: pattern.model(), index: index + 1, matched: result)
   cost time O(matched + 1 - result)
 {
   var current = matched
   while current > 0 && self.byte(index) != pattern.byte(current)
     invariant current <= matched
+    invariant matches_before(self.model(), pattern: pattern.model(), index: index, matched: current)
     decreases current
     cost time O(matched - current)
   {
-    current = table[current - 1]
+    current = self.shorter_match(pattern, table: table, matched: current, index: index)
   }
   if self.byte(index) == pattern.byte(current) { current + 1 } else { current }
 }
@@ -511,10 +545,10 @@ internal fn String.count_byte(self, byte: UInt8) -> UInt64
 
 internal fn String.find_first(self, pattern: String, table: List[UInt64]) -> Option[UInt64]
   requires pattern.length() > 0
-  requires table.length() == pattern.length()
-  requires forall i in 0..table.length() => table.model()[i] <= i
+  requires is_failure_table(pattern.model(), table: table.model())
   ensures !(result is Some(offset)
-    && !(offset + pattern.length() <= self.length() && self.is_boundary(offset)))
+    && !(offset + pattern.length() <= self.length()
+      && (forall i in 0..pattern.length() => self.model()[offset + i] == pattern.model()[i])))
   cost time O(self.length())
 {
   let first_byte = pattern.byte(0)
@@ -526,7 +560,9 @@ internal fn String.find_first(self, pattern: String, table: List[UInt64]) -> Opt
     invariant index <= self.length()
     invariant matched < pattern.length()
     invariant matched <= index
-    invariant has_match ==> first + pattern.length() <= self.length() && self.is_boundary(first)
+    invariant matches_before(self.model(), pattern: pattern.model(), index: index, matched: matched)
+    invariant has_match ==> first + pattern.length() <= self.length()
+      && (forall i in 0..pattern.length() => self.model()[first + i] == pattern.model()[i])
     decreases self.length() - index
     cost time O(2 * index - matched)
   {
@@ -539,12 +575,9 @@ internal fn String.find_first(self, pattern: String, table: List[UInt64]) -> Opt
     matched = self.advance(pattern, table: table, matched: matched, index: index)
     index += 1
     if matched == pattern.length() {
-      let offset = index - matched
-      if self.is_boundary(offset) {
-        has_match = true
-        first = offset
-      }
-      matched = table[matched - 1]
+      has_match = true
+      first = index - matched
+      matched = self.shorter_match(pattern, table: table, matched: matched, index: index)
     }
   }
   if has_match { Some(first) } else { None }
@@ -559,11 +592,14 @@ public fn String.contains(self, pattern: String) -> Bool
 
 public fn String.find(self, pattern: String) -> Option[UInt64]
   ensures !(result is Some(offset)
-    && !(offset + pattern.length() <= self.length() && self.is_boundary(offset)))
+    && !(offset + pattern.length() <= self.length()
+      && self.is_boundary(offset)
+      && self.is_boundary(offset + pattern.length())
+      && (forall i in 0..pattern.length() => self.model()[offset + i] == pattern.model()[i])))
   cost time O(self.length() + pattern.length())
 {
   if pattern.is_empty() {
-    return if self.is_boundary(0) { Some(0) } else { None }
+    return Some(0)
   }
   if pattern.length() == 1 {
     let byte = pattern.byte(0)
@@ -574,12 +610,21 @@ public fn String.find(self, pattern: String) -> Option[UInt64]
     return if offset < self.length() { Some(offset) } else { None }
   }
   let table = failure_table(pattern)
-  self.find_first(pattern, table: table)
+  let first = self.find_first(pattern, table: table)
+  proof {
+    if first is Some(offset) {
+      utf8.match_lies_between_boundaries(self.model(), part: pattern.model(), at: offset)
+    }
+  }
+  first
 }
 
 public fn String.find_last(self, pattern: String) -> Option[UInt64]
   ensures !(result is Some(offset)
-    && !(offset + pattern.length() <= self.length() && self.is_boundary(offset)))
+    && !(offset + pattern.length() <= self.length()
+      && self.is_boundary(offset)
+      && self.is_boundary(offset + pattern.length())
+      && (forall i in 0..pattern.length() => self.model()[offset + i] == pattern.model()[i])))
   cost time O(self.length() + pattern.length())
 {
   if pattern.is_empty() {
@@ -595,7 +640,9 @@ public fn String.find_last(self, pattern: String) -> Option[UInt64]
     invariant index <= self.length()
     invariant matched < pattern.length()
     invariant matched <= index
-    invariant has_match ==> last + pattern.length() <= self.length() && self.is_boundary(last)
+    invariant matches_before(self.model(), pattern: pattern.model(), index: index, matched: matched)
+    invariant has_match ==> last + pattern.length() <= self.length()
+      && (forall i in 0..pattern.length() => self.model()[last + i] == pattern.model()[i])
     decreases self.length() - index
     cost time O(2 * index - matched)
   {
@@ -608,12 +655,14 @@ public fn String.find_last(self, pattern: String) -> Option[UInt64]
     matched = self.advance(pattern, table: table, matched: matched, index: index)
     index += 1
     if matched == pattern.length() {
-      let offset = index - matched
-      if self.is_boundary(offset) {
-        has_match = true
-        last = offset
-      }
-      matched = table[matched - 1]
+      has_match = true
+      last = index - matched
+      matched = self.shorter_match(pattern, table: table, matched: matched, index: index)
+    }
+  }
+  proof {
+    if has_match {
+      utf8.match_lies_between_boundaries(self.model(), part: pattern.model(), at: last)
     }
   }
   if has_match { Some(last) } else { None }
@@ -633,11 +682,12 @@ public fn String.find_character(
   var offset: UInt64 = 0
   while offset < self.length()
     invariant offset <= self.length()
+    invariant self.is_boundary(offset)
     decreases self.length() - offset
     cost time O(offset * time(predicate))
   {
     let decoded = self.decode(offset)
-    if predicate(decoded.character) && self.is_boundary(offset) {
+    if predicate(decoded.character) {
       return Some(offset)
     }
     offset += decoded.length
@@ -667,6 +717,7 @@ public fn String.occurrences(self, pattern: String) -> UInt64
     invariant matched < pattern.length()
     invariant matched <= index
     invariant count <= index
+    invariant matches_before(self.model(), pattern: pattern.model(), index: index, matched: matched)
     decreases self.length() - index
     cost time O(2 * index - matched)
   {
@@ -679,12 +730,8 @@ public fn String.occurrences(self, pattern: String) -> UInt64
     matched = self.advance(pattern, table: table, matched: matched, index: index)
     index += 1
     if matched == pattern.length() {
-      if self.is_boundary(index - matched) {
-        count += 1
-        matched = 0
-      } else {
-        matched = table[matched - 1]
-      }
+      count += 1
+      matched = 0
     }
   }
   count
@@ -710,23 +757,41 @@ public fn String.strip_prefix(self, prefix: String) -> Option[view String]
   ensures (result is Some(_)) == self.starts_with(prefix)
   cost time O(prefix.length())
 {
-  if self.starts_with(prefix) { Some(self.part(prefix.length(), to: self.length())) } else { None }
+  if !self.starts_with(prefix) {
+    return None
+  }
+  proof {
+    if prefix.length() > 0 {
+      utf8.match_lies_between_boundaries(self.model(), part: prefix.model(), at: 0)
+    }
+  }
+  Some(self.part(prefix.length(), to: self.length()))
 }
 
 public fn String.strip_suffix(self, suffix: String) -> Option[view String]
   ensures (result is Some(_)) == self.ends_with(suffix)
   cost time O(suffix.length())
 {
-  if self.ends_with(suffix) { Some(self.part(0, to: self.length() - suffix.length())) } else { None }
+  if !self.ends_with(suffix) {
+    return None
+  }
+  proof {
+    if suffix.length() > 0 {
+      utf8.match_lies_between_boundaries(self.model(), part: suffix.model(), at: self.length() - suffix.length())
+    }
+  }
+  Some(self.part(0, to: self.length() - suffix.length()))
 }
 
 internal fn String.leading_whitespace(self) -> UInt64
   ensures result <= self.length()
+  ensures self.is_boundary(result)
   cost time O(self.length())
 {
   var start: UInt64 = 0
   while start < self.length()
     invariant start <= self.length()
+    invariant self.is_boundary(start)
     decreases self.length() - start
     cost time O(start)
   {
@@ -741,11 +806,13 @@ internal fn String.leading_whitespace(self) -> UInt64
 
 internal fn String.trailing_whitespace_start(self) -> UInt64
   ensures result <= self.length()
+  ensures self.is_boundary(result)
   cost time O(self.length())
 {
   var end = self.length()
   while end > 0
     invariant end <= self.length()
+    invariant self.is_boundary(end)
     decreases end
     cost time O(self.length() - end)
   {
@@ -782,11 +849,13 @@ public fn String.trim_end(self) -> view String
 internal fn String.leading_matching(self, predicate: (fn(Character) -> Bool uses generic Granted)) -> UInt64
   uses generic Granted
   ensures result <= self.length()
+  ensures self.is_boundary(result)
   cost time O(self.length() * time(predicate))
 {
   var start: UInt64 = 0
   while start < self.length()
     invariant start <= self.length()
+    invariant self.is_boundary(start)
     decreases self.length() - start
     cost time O(start * time(predicate))
   {
@@ -808,12 +877,14 @@ internal fn String.trailing_matching_start(
   requires from <= self.length()
   ensures from <= result
   ensures result <= self.length()
+  ensures self.is_boundary(result)
   cost time O(self.length() * time(predicate))
 {
   var end = self.length()
   while end > from
     invariant from <= end
     invariant end <= self.length()
+    invariant self.is_boundary(end)
     decreases end
     cost time O((self.length() - end) * time(predicate))
   {
@@ -854,6 +925,8 @@ public fn String.split(self, separator: String) -> List[view String]
     invariant matched < separator.length()
     invariant start + matched <= index
     invariant parts.length() <= index
+    invariant self.is_boundary(start)
+    invariant matches_before(self.model(), pattern: separator.model(), index: index, matched: matched)
     decreases self.length() - index
     cost time O(2 * index - matched)
   {
@@ -867,13 +940,12 @@ public fn String.split(self, separator: String) -> List[view String]
     index += 1
     if matched == separator.length() {
       let offset = index - matched
-      if self.is_boundary(offset) {
-        mut parts.push(self.part(start, to: offset))
-        start = index
-        matched = 0
-      } else {
-        matched = table[matched - 1]
+      proof {
+        utf8.match_lies_between_boundaries(self.model(), part: separator.model(), at: offset)
       }
+      mut parts.push(self.part(start, to: offset))
+      start = index
+      matched = 0
     }
   }
   mut parts.push(self.part(start, to: self.length()))
@@ -906,6 +978,8 @@ public fn String.split_at_most(self, separator: String, parts: UInt64) -> List[v
     invariant pieces.length() == count
     invariant count < parts
     invariant count <= index
+    invariant self.is_boundary(start)
+    invariant matches_before(self.model(), pattern: separator.model(), index: index, matched: matched)
     decreases self.length() - index
     cost time O(2 * index - matched)
   {
@@ -919,14 +993,13 @@ public fn String.split_at_most(self, separator: String, parts: UInt64) -> List[v
     index += 1
     if matched == separator.length() {
       let offset = index - matched
-      if self.is_boundary(offset) {
-        mut pieces.push(self.part(start, to: offset))
-        count += 1
-        start = index
-        matched = 0
-      } else {
-        matched = table[matched - 1]
+      proof {
+        utf8.match_lies_between_boundaries(self.model(), part: separator.model(), at: offset)
       }
+      mut pieces.push(self.part(start, to: offset))
+      count += 1
+      start = index
+      matched = 0
     }
   }
   mut pieces.push(self.part(start, to: self.length()))
@@ -945,6 +1018,8 @@ public fn String.split_matching(self, predicate: (fn(Character) -> Bool uses gen
     invariant start <= offset
     invariant offset <= self.length()
     invariant parts.length() <= offset
+    invariant self.is_boundary(start)
+    invariant self.is_boundary(offset)
     decreases self.length() - offset
     cost time O(offset * time(predicate))
   {
@@ -971,6 +1046,8 @@ public fn String.split_whitespace(self) -> List[view String]
     invariant start <= offset
     invariant offset <= self.length()
     invariant parts.length() <= offset
+    invariant self.is_boundary(start)
+    invariant self.is_boundary(offset)
     decreases self.length() - offset
     cost time O(offset)
   {
@@ -993,7 +1070,7 @@ public fn String.split_whitespace(self) -> List[view String]
 }
 
 public fn String.split_once(self, separator: String) -> Option[core.Pair[view String, view String]]
-  ensures (result is Some(_)) == self.contains(separator)
+  ensures (result is Some(_)) == (self.find(separator) is Some(_))
   cost time O(self.length() + separator.length())
 {
   match self.find(separator) {
@@ -1022,6 +1099,23 @@ public fn String.split_once_last(self, separator: String) -> Option[core.Pair[vi
   }
 }
 
+fn copy_replaced(output: mut intrinsic.Storage[UInt8], text: String, from: UInt64, to: UInt64, replacement: String)
+  requires from <= to
+  requires to <= text.length()
+  requires text.is_boundary(from)
+  requires text.is_boundary(to)
+  requires intrinsic.storage_length(output) + (to - from) + replacement.length() <= intrinsic.storage_capacity(output)
+  requires utf8.is_valid(intrinsic.storage_model(output))
+  ensures intrinsic.storage_length(output) == old(intrinsic.storage_length(output)) + (to - from) + replacement.length()
+  ensures intrinsic.storage_capacity(output) == old(intrinsic.storage_capacity(output))
+  ensures utf8.is_valid(intrinsic.storage_model(output))
+  cost time O(to - from + replacement.length())
+  cost allocations == 0
+{
+  text.part(from, to: to).copy_onto(mut output)
+  replacement.copy_onto(mut output)
+}
+
 public fn String.replace(self, pattern: String, replacement: String) -> String
   uses Panic unless pattern.length() > 0
   cost time O(self.length() + result.length())
@@ -1039,11 +1133,20 @@ public fn String.replace(self, pattern: String, replacement: String) -> String
   if replacement.length() > UInt64.maximum / 4 / count || self.length() > UInt64.maximum / 4 {
     intrinsic.crash("a string cannot hold that many bytes")
   }
-  var budget = count * replacement.length()
+  self.replace_matches(pattern, replacement: replacement, budget: count * replacement.length())
+}
+
+fn String.replace_matches(self, pattern: String, replacement: String, budget: UInt64) -> String
+  requires 0 < pattern.length()
+  requires pattern.length() <= self.length()
+  requires self.length() + budget <= UInt64.maximum
+  cost time O(self.length() + result.length())
+{
   let capacity = self.length() + budget
   var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(capacity)
   let table = failure_table(pattern)
   let first_byte = pattern.byte(0)
+  var remaining = budget
   var copied: UInt64 = 0
   var matched: UInt64 = 0
   var index: UInt64 = 0
@@ -1051,8 +1154,11 @@ public fn String.replace(self, pattern: String, replacement: String) -> String
     invariant index <= self.length()
     invariant matched < pattern.length()
     invariant copied + matched <= index
-    invariant intrinsic.storage_length(output) + (self.length() - copied) + budget <= capacity
+    invariant intrinsic.storage_length(output) + (self.length() - copied) + remaining <= capacity
     invariant intrinsic.storage_capacity(output) == capacity
+    invariant utf8.is_valid(intrinsic.storage_model(output))
+    invariant self.is_boundary(copied)
+    invariant matches_before(self.model(), pattern: pattern.model(), index: index, matched: matched)
     decreases self.length() - index
     cost time O(2 * index - matched + intrinsic.storage_length(output))
   {
@@ -1065,14 +1171,16 @@ public fn String.replace(self, pattern: String, replacement: String) -> String
     matched = self.advance(pattern, table: table, matched: matched, index: index)
     index += 1
     if matched == pattern.length() {
-      if self.is_boundary(index - matched) && budget >= replacement.length() {
-        self.part(copied, to: index - matched).copy_onto(mut output)
-        replacement.copy_onto(mut output)
-        budget -= replacement.length()
+      if remaining >= replacement.length() {
+        proof {
+          utf8.match_lies_between_boundaries(self.model(), part: pattern.model(), at: index - matched)
+        }
+        copy_replaced(mut output, text: self, from: copied, to: index - matched, replacement: replacement)
+        remaining -= replacement.length()
         copied = index
         matched = 0
       } else {
-        matched = table[matched - 1]
+        matched = self.shorter_match(pattern, table: table, matched: matched, index: index)
       }
     }
   }
@@ -1114,11 +1222,16 @@ public fn String.repeated(self, times: UInt64) -> String
   }
   let total = self.length() * times
   var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(total)
-  for index in 0..total
-    invariant intrinsic.storage_length(output) == index
+  for copy in 0..times
+    invariant intrinsic.storage_length(output) == copy * self.length()
     invariant intrinsic.storage_capacity(output) == total
+    invariant utf8.is_valid(intrinsic.storage_model(output))
+    cost time O(copy * self.length())
   {
-    intrinsic.storage_push(mut output, value: self.byte(index % self.length()))
+    proof {
+      assert (copy + 1) * self.length() <= total
+    }
+    self.copy_onto(mut output)
   }
   String(storage: own output)
 }
@@ -1131,18 +1244,15 @@ public fn String.reversed(self) -> String
   var end = self.length()
   while end > 0
     invariant end <= self.length()
+    invariant self.is_boundary(end)
     invariant intrinsic.storage_length(output) == self.length() - end
     invariant intrinsic.storage_capacity(output) == self.length()
+    invariant utf8.is_valid(intrinsic.storage_model(output))
     decreases end
     cost time O(self.length() - end)
   {
     let start = self.previous_start(end)
-    for index in start..end
-      invariant intrinsic.storage_length(output) == self.length() - end + (index - start)
-      invariant intrinsic.storage_capacity(output) == self.length()
-    {
-      intrinsic.storage_push(mut output, value: self.byte(index))
-    }
+    self.part(start, to: end).copy_onto(mut output)
     end = start
   }
   String(storage: own output)
@@ -1175,6 +1285,7 @@ public fn String.to_uppercase(self) -> String
   var offset: UInt64 = 0
   while offset < self.length()
     invariant offset <= self.length()
+    invariant self.is_boundary(offset)
     decreases self.length() - offset
   {
     let decoded = self.decode(offset)
@@ -1253,6 +1364,7 @@ public fn String.to_lowercase(self) -> String
   var offset: UInt64 = 0
   while offset < self.length()
     invariant offset <= self.length()
+    invariant self.is_boundary(offset)
     decreases self.length() - offset
   {
     let decoded = self.decode(offset)
@@ -1280,8 +1392,12 @@ public fn String.to_ascii_uppercase(self) -> String
   for index in 0..self.length()
     invariant intrinsic.storage_length(output) == index
     invariant intrinsic.storage_capacity(output) == self.length()
+    invariant forall i in 0..index => intrinsic.storage_model(output)[i] == ascii_uppercase(self.model()[i])
   {
     intrinsic.storage_push(mut output, value: ascii_uppercase(self.byte(index)))
+  }
+  proof {
+    utf8.ascii_mapping_is_valid(self.model(), mapped: intrinsic.storage_model(output))
   }
   String(storage: own output)
 }
@@ -1294,19 +1410,27 @@ public fn String.to_ascii_lowercase(self) -> String
   for index in 0..self.length()
     invariant intrinsic.storage_length(output) == index
     invariant intrinsic.storage_capacity(output) == self.length()
+    invariant forall i in 0..index => intrinsic.storage_model(output)[i] == ascii_lowercase(self.model()[i])
   {
     intrinsic.storage_push(mut output, value: ascii_lowercase(self.byte(index)))
+  }
+  proof {
+    utf8.ascii_mapping_is_valid(self.model(), mapped: intrinsic.storage_model(output))
   }
   String(storage: own output)
 }
 
 internal fn ascii_lowercase(byte: UInt8) -> UInt8
+  ensures byte >= 65 && byte <= 90 ==> result == byte + 32
+  ensures !(byte >= 65 && byte <= 90) ==> result == byte
   cost time O(1)
 {
   if byte >= 65 && byte <= 90 { byte + 32 } else { byte }
 }
 
 internal fn ascii_uppercase(byte: UInt8) -> UInt8
+  ensures byte >= 97 && byte <= 122 ==> result == byte - 32
+  ensures !(byte >= 97 && byte <= 122) ==> result == byte
   cost time O(1)
 {
   if byte >= 97 && byte <= 122 { byte - 32 } else { byte }
@@ -1356,6 +1480,7 @@ internal fn String.padded(self, width: UInt64, fill: Character, at_start: Bool) 
   while room >= unit
     invariant intrinsic.storage_length(output) + room + after <= capacity
     invariant intrinsic.storage_capacity(output) == capacity
+    invariant utf8.is_valid(intrinsic.storage_model(output))
     decreases room
     cost time O(intrinsic.storage_length(output))
   {
@@ -1403,6 +1528,7 @@ public fn String.to_utf16(self) -> List[UInt16]
     invariant offset <= self.length()
     invariant intrinsic.storage_length(units) <= offset
     invariant intrinsic.storage_capacity(units) == self.length()
+    invariant self.is_boundary(offset)
     decreases self.length() - offset
     cost time O(offset)
   {

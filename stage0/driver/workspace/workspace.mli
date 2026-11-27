@@ -24,7 +24,7 @@ val plan_lock :
   snapshot ->
   set:(Path.package * Registry.Version.t option) list ->
   all:bool ->
-  (lock_plan, string) result
+  (lock_plan, Project_catalog.Problem.t list) result
 
 val find_project_root : string -> string option
 val serve : key:string -> handle:(report_progress:(string -> unit) -> 'request -> 'response) -> unit
@@ -48,7 +48,6 @@ module For_testing : sig
   val load_standard_package_database : unit -> string
   val copy_standard_package_database : into:string -> unit
   val build_cold_database : snapshot -> Database.t
-  val collect_cache : unit -> unit
   val save : unit -> unit
   val listen : key:string -> (Unix.file_descr, string) result
 

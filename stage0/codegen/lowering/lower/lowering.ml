@@ -122,12 +122,11 @@ let is_zero_size state = Memory_layout.has_zero_size state.context.env
 let make_site state (span : Source.Definition_span.t) : Lowered.site =
   { definition = state.frame.code.definition; offset = span.start }
 
-type unsupported = { construct : string; at : Lowered.site option }
+type unsupported = { construct : Catalog.Codegen.construct; at : Lowered.site option }
 
 exception Unsupported of unsupported
 
-let raise_unsupported ?at format =
-  Printf.ksprintf (fun construct -> raise (Unsupported { construct; at })) format
+let raise_unsupported ?at construct = raise (Unsupported { construct; at })
 
 let require_written state =
   match state.frame.code.written with

@@ -29,7 +29,7 @@ let check_body state (env : State.env) (written : Syntax.block) =
             if not (State.unify state output Types.unit) then
               State.report state
                 (Body_ends_without_value
-                   { body = Written written.id; output = State.zonk state output })
+                   { body = Written written.id; output = State.normalize_known state output })
         | _ -> ())
     | [ (last : Syntax.statement) ] ->
         Solver.run_in_statement state env (Written last.id) (fun () ->
@@ -48,7 +48,7 @@ let check_body state (env : State.env) (written : Syntax.block) =
                 then
                   State.report state
                     (Last_statement_without_value
-                       { statement = Written last.id; output = State.zonk state output })
+                       { statement = Written last.id; output = State.normalize_known state output })
             | _ -> Statements.check_statement state env last ~last:false)
     | (first : Syntax.statement) :: rest ->
         Solver.run_in_statement state env (Written first.id) (fun () ->
@@ -446,9 +446,9 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
   state.diagnostics <- List.rev (Interface.Elaborator.list_diagnostics context) @ state.diagnostics;
   state.diagnostics <-
     List.rev
-      (Interface.Check.list_bound_diagnostics lookups.interface ~package:state.package
+      (Interface.Check.list_application_diagnostics lookups.interface ~package:state.package
          ~list_bounds:(State.lookup_bounds state)
-         (Interface.Elaborator.list_named_types context))
+         (Interface.Elaborator.list_applications context))
     @ state.diagnostics;
   let finalize () =
     Tables.map ~map_type:(State.finalize_type state) ~map_argument:(State.finalize_argument state)

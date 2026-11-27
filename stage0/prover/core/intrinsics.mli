@@ -1,9 +1,9 @@
-val declare_buffer_slack : State.context -> Types.ty -> Logic.term -> Logic.term
-val replace_elements : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term
-val find_sequence_element : State.context -> State.frame -> Types.ty -> Types.ty
+val keeps_potential : Intrinsic.operation -> bool
+val make_buffer_slack : Types.ty -> Logic.term -> Logic.term
+val replace_elements : State.frame -> Types.ty -> Logic.term -> Logic.term
+val find_sequence_element : State.frame -> Types.ty -> Types.ty
 
 val read_sequence_element :
-  State.context ->
   State.frame ->
   Types.ty ->
   Logic.term ->
@@ -13,10 +13,9 @@ val read_sequence_element :
   Logic.term
 
 val write_sequence_element :
-  State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term -> Logic.term
+  State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term -> Logic.term
 
 val write_sequence_range :
-  State.context ->
   State.frame ->
   Types.ty ->
   Logic.term ->
@@ -27,7 +26,6 @@ val write_sequence_range :
   Logic.term
 
 val apply_range :
-  State.context ->
   State.frame ->
   node:Core.id ->
   Invocation.site ->
@@ -37,18 +35,14 @@ val apply_range :
   high:Logic.term option ->
   State.frame * Logic.term * Logic.term * Logic.term
 
-val make_buffer_capacity : State.context -> Types.ty -> Logic.term -> Logic.term
-
-val make_buffer_model :
-  State.context -> Language.Builtin_type.t -> Types.ty -> Logic.term -> Logic.term
-
+val make_buffer_capacity : Types.ty -> Logic.term -> Logic.term
+val make_buffer_model : Language.Builtin_type.t -> Types.ty -> Logic.term -> Logic.term
 val measure_type : Types.ty -> Types.function_type
-val make_sequence_sum : State.context -> Types.ty -> Logic.term -> Logic.term -> Logic.term
-val make_empty_parts : State.context -> State.frame -> Types.ty -> Logic.term
-val append_part : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
+val make_sequence_sum : Types.ty -> Logic.term -> Logic.term -> Logic.term
+val make_empty_sequence : State.frame -> Types.ty -> Logic.term
+val append_element : State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
 
 val translate_intrinsic :
-  State.context ->
   State.frame ->
   site:Invocation.site ->
   Intrinsic.operation ->

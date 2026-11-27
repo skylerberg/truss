@@ -5,10 +5,10 @@ exception Bug of t
 let raise_bug ~stage format =
   Printf.ksprintf (fun message -> raise (Bug { stage; message; doing = [] })) format
 
-let run_while_doing ~stage doing work =
-  let raise_broken message = raise (Bug { stage; message; doing = [ doing ] }) in
+let run_while_doing ~stage describe_doing work =
+  let raise_broken message = raise (Bug { stage; message; doing = [ describe_doing () ] }) in
   try work () with
-  | Bug bug -> raise (Bug { bug with doing = bug.doing @ [ doing ] })
+  | Bug bug -> raise (Bug { bug with doing = bug.doing @ [ describe_doing () ] })
   | Invalid_argument message -> raise_broken ("Invalid_argument: " ^ message)
   | Failure message -> raise_broken ("Failure: " ^ message)
   | Not_found -> raise_broken "Not_found"

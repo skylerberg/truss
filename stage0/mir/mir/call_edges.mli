@@ -27,7 +27,9 @@ type dependency = {
   default : Path.t option;
 }
 
-val list_dependencies : lookups -> Types.substitution -> Tree.t -> dependency list
+val list_dependencies :
+  lookups -> home:Path.package -> Types.substitution -> Tree.t -> dependency list
+
 val list_contract_dependencies : lookups -> Path.t -> dependency list
 val list_inherited_contract_dependencies : lookups -> Path.t -> dependency list
 val list_invariant_dependencies : lookups -> Path.t -> dependency list
@@ -37,6 +39,36 @@ type type_use = { type_ : Types.ty; origin : Core.origin option }
 type instance_use = { used : type_use; dependencies : Path.t list }
 
 val list_instance_uses : lookups -> Path.t -> instance_use list
+
+val list_law_proofs :
+  lookups ->
+  Path.package ->
+  Types.trait_reference ->
+  Types.ty ->
+  (string * Resolve.Names.key * Types.substitution) list
+
+type assumed_laws = {
+  impl : Path.t;
+  trait : Types.trait_reference;
+  type_ : Types.ty;
+  origin : Core.origin option;
+  is_assumed_by_the_callee : bool;
+}
+
+val list_assumed_laws : lookups -> Path.t -> assumed_laws list
 val list_assumed_paths : lookups -> Path.t -> Path.t list
 val resolve_node : lookups -> Path.t -> Types.substitution -> Path.t
 val list_path_edges : lookups -> Path.t -> Path.t list
+val is_specification_only : lookups -> Path.t -> bool
+val has_abort_site : lookups -> Path.t -> bool
+
+val body_may_abort :
+  lookups ->
+  Types.substitution ->
+  lambdas:Tree.body array ->
+  Tree.body ->
+  may_abort:(Path.t -> bool) ->
+  bool
+
+val list_callees_that_run : lookups -> Path.t -> Path.t list
+val list_instance_field_types : Interface.Lookups.t -> Types.ty -> Types.ty list

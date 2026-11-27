@@ -12,22 +12,6 @@ let ignore_all =
 let locate_origin : Core.origin -> Syntax.id = function
   | Written node | Desugared { construct = node; _ } -> node
 
-let describe_call (origin : Core.origin) ?callee ~quote () =
-  let call =
-    match callee with Some callee -> Printf.sprintf "call to `%s`" callee | None -> "call"
-  in
-  match origin with
-  | Written _ -> "this " ^ call
-  | Desugared { desugaring; _ } ->
-      let maker =
-        match desugaring with
-        | For_loop -> "this `for` loop"
-        | Quantifier -> "this quantifier"
-        | Derived -> Printf.sprintf "the derived `%s`" (quote ())
-        | Rewrite | Try -> Printf.sprintf "`%s`" (quote ())
-      in
-      Printf.sprintf "the %s that %s makes" call maker
-
 let compute_place_type : Core.place -> Types.ty = function
   | Local { type_; _ }
   | Constant { type_; _ }
@@ -81,7 +65,8 @@ let walk_loop_clause visit (written : Core.loop_clause Core.conditional) =
 let walk_expression_children visit (node : Core.expression) =
   match node.kind with
   | Integer _ | Float _ | Boolean _ | Literal _ | Function_value _ | Value_parameter _ | Break
-  | Continue | Todo | Unreachable | Result | Current_target | Yielded | Method_cost _ ->
+  | Continue | Todo | Unreachable | Result | Current_target | Visited | Final_result | Method_cost _
+    ->
       ()
   | Use core_place -> walk_place visit core_place
   | Copy value -> walk_operand visit value
@@ -305,10 +290,14 @@ let find_measure_condition (clauses : Core.loop_clause Core.conditional list) =
       | Core.Invariant _ | Core.Cost _ -> None)
     clauses
 
+let has_integer_distance (type_ : Types.ty) =
+  type_ = Types.Integer || Types.is_integer_type type_ || Types.is_builtin Character type_
+
 let rec has_implicit_measure (condition : Core.expression) =
   match condition.kind with
   | Compare { comparison = Less | Less_equal | Greater | Greater_equal; left; right } ->
-      is_functional (fun visit -> walk_expression visit left)
+      has_integer_distance left.type_ && has_integer_distance right.type_
+      && is_functional (fun visit -> walk_expression visit left)
       && is_functional (fun visit -> walk_expression visit right)
   | Connective { connective = And; left; _ } -> has_implicit_measure left
   | _ -> false

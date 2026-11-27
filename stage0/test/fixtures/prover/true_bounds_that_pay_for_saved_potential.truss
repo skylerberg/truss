@@ -1,0 +1,65 @@
+type Purse(coins: UInt64)
+  invariant coins <= 4611686018427387904
+  cost potential coins
+
+fn deposit(purse: mut Purse)
+  requires purse.coins <= 4611686018427386904
+  ensures purse.coins == old(purse.coins) + 1000
+  cost amortized time O(1)
+{
+  purse.coins = purse.coins + 1000
+}
+
+fn work(size: UInt64)
+  cost time O(size)
+{
+  for _ in 0..size {
+  }
+}
+
+fn kept_in_a_mut_parameter(purse: mut Purse, count: UInt64)
+  requires purse.coins == 0
+  requires count <= 4503599627370496
+  cost amortized time O(count)
+{
+  for index in 0..count
+    invariant purse.coins == index * 1000
+  {
+    deposit(mut purse)
+  }
+}
+
+fn returned(count: UInt64) -> Purse
+  requires count <= 4503599627370496
+  cost amortized time O(count)
+{
+  var purse = Purse(coins: 0)
+  for index in 0..count
+    invariant purse.coins == index * 1000
+  {
+    deposit(mut purse)
+  }
+  purse
+}
+
+fn spend(purse: mut Purse)
+  ensures purse.coins == 0
+  cost amortized time O(1)
+{
+  work(purse.coins)
+  purse.coins = 0
+}
+
+fn spent_by_a_later_call(count: UInt64) -> UInt64
+  requires count <= 4503599627370496
+  cost time O(count)
+{
+  var purse = Purse(coins: 0)
+  for index in 0..count
+    invariant purse.coins == index * 1000
+  {
+    deposit(mut purse)
+  }
+  spend(mut purse)
+  0
+}

@@ -1,64 +1,12 @@
 let version = "5.3.3"
 let steps = 1_000_000
-let cardinality_bounds = [ 2; 3; 4 ]
-let entry_format_version = 3
+let refutation_steps = steps / 10
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Solver" format
 
-type cache = { find : string -> string option; add : string -> string -> unit }
-
-type t = {
-  program : string;
-  cache : cache option;
-  entries : (string, string) Hashtbl.t;
-  lock : Mutex.t;
-  mutable queries_run : int;
-}
-
-let find ?cache () =
-  let program =
-    match Sys.getenv_opt "TRUSS_Z3" with Some program when program <> "" -> program | _ -> "z3"
-  in
-  match Process.run program [ "--version" ] with
-  | exception Unix.Unix_error _ ->
-      Error
-        (Printf.sprintf
-           "The prover needs Z3 %s, and `%s` could not be run. Install it, or set TRUSS_Z3 to its \
-            path."
-           version program)
-  | 0, output, _ ->
-      let expected = "Z3 version " ^ version in
-      if String.starts_with ~prefix:expected output then
-        Ok { program; cache; entries = Hashtbl.create 256; lock = Mutex.create (); queries_run = 0 }
-      else
-        Error
-          (Printf.sprintf
-             "The prover is pinned to Z3 %s, since another version can answer differently, but \
-              `%s` is %s."
-             version program (String.trim output))
-  | _, _, errors -> Error (Printf.sprintf "`%s --version` failed: %s" program (String.trim errors))
-
-let header =
-  Printf.sprintf
-    "(set-option :produce-models true)\n\
-     (set-option :smt.random_seed 0)\n\
-     (set-option :sat.random_seed 0)\n\
-     (set-option :rlimit %d)\n"
-    steps
-
-let compute_key text =
-  "smt1-blake3-"
-  ^ Blake3.hash_to_hex
-      (Printf.sprintf
-         "z3 %s\nentry format %d\ncardinality bounds %s\nretried without quantified facts\n%s%s"
-         version entry_format_version
-         (String.concat ", " (List.map string_of_int cardinality_bounds))
-         header text)
-
-let hash_query query = compute_key (Logic.show_query query)
-
+type t = { answer_query : string -> string; stop : unit -> unit; queries_run : int Atomic.t }
 type sexp = Atom of string | List of sexp list
 type unknown = Out_of_steps | Incomplete of string
-type answer = Proven | Counterexample of (Logic.symbol * sexp) list | Unknown of unknown
+type answer = Proven | Falsifiable | Unknown of unknown
 
 let find_string_literal_end text position =
   let length = String.length text in
@@ -128,121 +76,104 @@ let parse_sexps text =
   in
   parse_all 0 []
 
-let rec encode_sexp = function
-  | Atom atom -> Cbor.Text atom
-  | List items -> Cbor.Array (List.map encode_sexp items)
+let make_header ~steps =
+  Printf.sprintf
+    "(set-option :smt.random_seed 0)\n(set-option :sat.random_seed 0)\n(set-option :rlimit %d)\n"
+    steps
 
-let rec decode_sexp = function
-  | Cbor.Text atom -> Some (Atom atom)
-  | items -> Option.map (fun items -> List items) (Cbor.find_list decode_sexp items)
+let info_request = "(get-info :reason-unknown)\n(get-info :rlimit)\n"
+let end_of_answer = "truss.end-of-answer"
+let echo_end_of_answer = Printf.sprintf "(echo \"%s\")\n" end_of_answer
 
-type request = {
-  text_key : string;
-  values_key : string;
-  requested : (Logic.symbol * string) list;
-  value_arguments : string list;
-}
+type pool = { program : string; lock : Mutex.t; mutable idle : Process.coprocess list }
 
-type status =
-  | Unsatisfiable
-  | Satisfiable of { cardinality_bound : int option }
-  | Undecided of unknown
+let start_z3 program = Process.start program [ "-in"; "-smt2" ]
 
-let run_locked solver work = Mutex.protect solver.lock work
+let take_idle pool =
+  Mutex.protect pool.lock (fun () ->
+      match pool.idle with
+      | [] -> None
+      | z3 :: idle ->
+          pool.idle <- idle;
+          Some z3)
 
-let make_request ?(symbols = []) ?(terms = []) query =
-  let rendering = Logic.render query in
-  let named = Logic.list_symbols rendering in
-  let requested_symbols =
-    List.filter_map
-      (fun symbol ->
-        List.assoc_opt symbol named
-        |> Option.map (fun canonical -> ((symbol, canonical), canonical)))
-      symbols
+let answer_from pool input =
+  let z3 = match take_idle pool with Some z3 -> z3 | None -> start_z3 pool.program in
+  match Process.converse z3 (input ^ echo_end_of_answer ^ "(reset)\n") ~until:end_of_answer with
+  | Ok output ->
+      Mutex.protect pool.lock (fun () -> pool.idle <- z3 :: pool.idle);
+      output
+  | Error output ->
+      Process.stop z3;
+      raise_bug "Z3 stopped without answering a query, after writing `%s`" (String.trim output)
+  | exception error ->
+      Process.stop z3;
+      raise error
+
+let stop_idle pool =
+  let idle =
+    Mutex.protect pool.lock (fun () ->
+        let idle = pool.idle in
+        pool.idle <- [];
+        idle)
   in
-  let requested_terms =
-    List.filter_map
-      (fun (name, term) ->
-        Logic.render_term rendering term |> Option.map (fun text -> (name, text)))
-      terms
-    |> List.mapi (fun index (name, text) -> ((name, Printf.sprintf "#%d" index), text))
+  List.iter Process.stop idle
+
+let read_version output =
+  match parse_sexps output with
+  | [ List [ Atom ":version"; Atom literal ] ] when String.starts_with ~prefix:"\"" literal -> (
+      match String.split_on_char ' ' (read_string_literal literal) with
+      | number :: _ -> Some number
+      | [] -> None)
+  | _ -> None
+
+let find () =
+  let program =
+    match Sys.getenv_opt "TRUSS_Z3" with Some program when program <> "" -> program | _ -> "z3"
   in
-  let requested = List.map fst (requested_symbols @ requested_terms)
-  and value_arguments = List.map snd (requested_symbols @ requested_terms) in
-  let text_key = compute_key (Logic.rendered_text rendering) in
-  {
-    text_key;
-    values_key =
-      Cbor.encode
-        (Cbor.Array
-           [
-             Cbor.Text text_key;
-             Cbor.Array (List.map (fun argument -> Cbor.Text argument) value_arguments);
-           ]);
-    requested;
-    value_arguments;
-  }
+  let report_not_run () =
+    Error
+      (Printf.sprintf
+         "The prover needs Z3 %s, and `%s` could not be run. Install it, or set TRUSS_Z3 to its \
+          path."
+         version program)
+  in
+  match start_z3 program with
+  | exception Unix.Unix_error _ -> report_not_run ()
+  | z3 -> (
+      match
+        Process.converse z3 ("(get-info :version)\n" ^ echo_end_of_answer) ~until:end_of_answer
+      with
+      | Ok output when read_version output = Some version ->
+          let pool = { program; lock = Mutex.create (); idle = [ z3 ] } in
+          Ok
+            {
+              answer_query = answer_from pool;
+              stop = (fun () -> stop_idle pool);
+              queries_run = Atomic.make 0;
+            }
+      | Ok output ->
+          Process.stop z3;
+          Error
+            (Printf.sprintf
+               "The prover is pinned to Z3 %s, since another version can answer differently, but \
+                `%s` answers `(get-info :version)` with `%s`."
+               version program (String.trim output))
+      | Error _ ->
+          Process.stop z3;
+          report_not_run ())
 
-let encode_status status =
-  Cbor.encode
-    (match status with
-    | Unsatisfiable -> Cbor.Text "proven"
-    | Undecided Out_of_steps -> Cbor.Text "out of steps"
-    | Undecided (Incomplete reason) -> Cbor.Array [ Cbor.Text "incomplete"; Cbor.Text reason ]
-    | Satisfiable { cardinality_bound = None } -> Cbor.Text "model"
-    | Satisfiable { cardinality_bound = Some bound } ->
-        Cbor.Array [ Cbor.Text "model"; Cbor.int bound ])
+let stop solver = solver.stop ()
 
-let decode_status entry =
-  match Cbor.decode entry with
-  | Some (Cbor.Text "proven") -> Some Unsatisfiable
-  | Some (Cbor.Text "out of steps") -> Some (Undecided Out_of_steps)
-  | Some (Cbor.Array [ Cbor.Text "incomplete"; Cbor.Text reason ]) ->
-      Some (Undecided (Incomplete reason))
-  | Some (Cbor.Text "model") -> Some (Satisfiable { cardinality_bound = None })
-  | Some (Cbor.Array [ Cbor.Text "model"; bound ]) ->
-      Option.map (fun bound -> Satisfiable { cardinality_bound = Some bound }) (Cbor.find_int bound)
-  | Some _ | None -> None
+type request = { query : Logic.query; text : string; is_refutation : bool }
 
-let encode_values values =
-  Cbor.encode
-    (Cbor.Array
-       (List.map
-          (fun (canonical, value) -> Cbor.Array [ Cbor.Text canonical; encode_sexp value ])
-          values))
+let make_request query = { query; text = Logic.show_query query; is_refutation = false }
+let make_refutation_request query = { query; text = Logic.show_query query; is_refutation = true }
+let count_steps request = if request.is_refutation then refutation_steps else steps
+let make_input ~steps text = make_header ~steps ^ text ^ info_request
+let show_input request = make_input ~steps:(count_steps request) request.text
 
-let decode_values entry =
-  Option.bind (Cbor.decode entry)
-    (Cbor.find_list (function
-      | Cbor.Array [ Cbor.Text canonical; value ] ->
-          Option.map (fun value -> (canonical, value)) (decode_sexp value)
-      | _ -> None))
-
-let find_entry solver key =
-  run_locked solver (fun () ->
-      match Hashtbl.find_opt solver.entries key with
-      | Some entry -> Some entry
-      | None -> (
-          match Option.bind solver.cache (fun cache -> cache.find key) with
-          | Some entry ->
-              Hashtbl.replace solver.entries key entry;
-              Some entry
-          | None -> None))
-
-let add_entry solver key entry =
-  run_locked solver (fun () ->
-      Hashtbl.replace solver.entries key entry;
-      Option.iter (fun cache -> cache.add key entry) solver.cache)
-
-let make_input request text =
-  header ^ text
-  ^ (if request.requested = [] then ""
-     else Printf.sprintf "(get-value (%s))\n" (String.concat " " request.value_arguments))
-  ^ "(get-info :reason-unknown)\n(get-info :rlimit)\n"
-
-let show_input (request, query) = make_input request (Logic.show_query query)
-
-let read_unknown answers =
+let read_unknown ~steps answers =
   let find_info keyword =
     List.find_map
       (function List [ Atom name; Atom value ] when name = keyword -> Some value | _ -> None)
@@ -256,104 +187,51 @@ let read_unknown answers =
       | None -> raise_bug "Z3 counted `%s` steps" steps_used)
   | _ -> raise_bug "Z3 answered unknown without its reason and its count of steps"
 
-let run_check solver request ?cardinality_bound text =
-  let input = make_input request text in
-  run_locked solver (fun () -> solver.queries_run <- solver.queries_run + 1);
-  let status, output, errors = Process.run ~input solver.program [ "-in"; "-smt2" ] in
-  match parse_sexps output with
-  | Atom "unsat" :: _ -> (Unsatisfiable, [])
-  | Atom "sat" :: rest ->
-      ( Satisfiable { cardinality_bound },
-        match rest with
-        | List pairs :: _ ->
-            List.take (List.length request.requested)
-              (List.mapi
-                 (fun index pair ->
-                   match (pair, List.nth_opt request.requested index) with
-                   | List [ _; value ], Some (_, canonical) -> Some (canonical, value)
-                   | _ -> None)
-                 pairs)
-            |> List.filter_map Fun.id
-        | _ -> [] )
-  | Atom "unknown" :: answers -> (Undecided (read_unknown answers), [])
-  | _ ->
-      raise_bug
-        "Z3 exited with status %d without answering a query, writing `%s` to stdout and `%s` to \
-         stderr"
-        status (String.trim output) (String.trim errors)
+let read_answer ~steps output =
+  let answers = parse_sexps output in
+  if List.exists (function List (Atom "error" :: _) -> true | _ -> false) answers then
+    raise_bug "Z3 answered a query with `%s`" (String.trim output);
+  match answers with
+  | Atom "unsat" :: _ -> Proven
+  | Atom "sat" :: _ -> Falsifiable
+  | Atom "unknown" :: answers -> Unknown (read_unknown ~steps answers)
+  | _ -> raise_bug "Z3's output `%s` is no answer" (String.trim output)
 
-let run_bounded_check solver request query cardinality_bound =
-  run_check solver request ~cardinality_bound (Logic.show_query ~cardinality_bound query)
+type run = { input : string; output : string }
+type solved = { answer : answer; runs : run list }
 
-let is_proven_from_ground_facts solver request (query : Logic.query) =
-  List.exists Logic.has_quantifier query.facts
-  &&
-  match
-    run_check solver
-      { request with requested = []; value_arguments = [] }
-      (Logic.show_query (Logic.remove_quantified_facts query))
-  with
-  | Unsatisfiable, _ -> true
-  | (Satisfiable _ | Undecided _), _ -> false
-
-let search_model solver request query text =
-  match run_check solver request text with
-  | Undecided _, _ when is_proven_from_ground_facts solver request query -> (Unsatisfiable, [])
-  | (Undecided _, _) as undecided when Logic.has_uninterpreted_sort query ->
-      let rec search_from = function
-        | [] -> undecided
-        | cardinality_bound :: larger_bounds -> (
-            match run_bounded_check solver request query cardinality_bound with
-            | Unsatisfiable, _ -> search_from larger_bounds
-            | (Satisfiable _, _) as model -> model
-            | Undecided _, _ -> undecided)
-      in
-      search_from cardinality_bounds
-  | outcome -> outcome
-
-let solve solver (request, query) =
-  let render_checked () =
-    let text = Logic.show_query query in
-    if compute_key text <> request.text_key then
-      raise_bug "the query is not the one its request was made from";
-    text
+let solve solver ~find_output request =
+  let runs = ref [] and steps = count_steps request in
+  let check text =
+    let input = make_input ~steps text in
+    let output =
+      match find_output input with
+      | Some output -> output
+      | None ->
+          Atomic.incr solver.queries_run;
+          solver.answer_query input
+    in
+    runs := { input; output } :: !runs;
+    read_answer ~steps output
   in
-  let status, values =
-    match Option.bind (find_entry solver request.text_key) decode_status with
-    | Some (Satisfiable { cardinality_bound } as status) when request.requested <> [] -> (
-        match Option.bind (find_entry solver request.values_key) decode_values with
-        | Some values -> (status, values)
-        | None -> (
-            let text = render_checked () in
-            match
-              match cardinality_bound with
-              | Some cardinality_bound -> run_bounded_check solver request query cardinality_bound
-              | None -> run_check solver request text
-            with
-            | Satisfiable _, values ->
-                add_entry solver request.values_key (encode_values values);
-                (status, values)
-            | (Unsatisfiable | Undecided _), _ ->
-                raise_bug "a query that had a model has none when it is solved again"))
-    | Some status -> (status, [])
-    | None ->
-        let ((status, values) as outcome) = search_model solver request query (render_checked ()) in
-        add_entry solver request.text_key (encode_status status);
-        (match status with
-        | Satisfiable _ when request.requested <> [] ->
-            add_entry solver request.values_key (encode_values values)
-        | Satisfiable _ | Unsatisfiable | Undecided _ -> ());
-        outcome
+  let is_proven_from_ground_facts () =
+    List.exists Logic.has_quantifier request.query.facts
+    && check (Logic.show_query (Logic.remove_quantified_facts request.query)) = Proven
   in
-  match status with
-  | Unsatisfiable -> Proven
-  | Undecided unknown -> Unknown unknown
-  | Satisfiable _ ->
-      Counterexample
-        (List.filter_map
-           (fun (symbol, canonical) ->
-             Option.map (fun value -> (symbol, value)) (List.assoc_opt canonical values))
-           request.requested)
+  let is_proven_one_conjunct_at_a_time () =
+    match Logic.list_conjunct_queries request.query with
+    | [] -> false
+    | conjuncts ->
+        List.for_all (fun conjunct -> check (Logic.show_query conjunct) = Proven) conjuncts
+  in
+  let answer =
+    match check request.text with
+    | Unknown _ as undecided when request.is_refutation -> undecided
+    | Unknown _ when is_proven_from_ground_facts () -> Proven
+    | Unknown Out_of_steps when is_proven_one_conjunct_at_a_time () -> Proven
+    | answer -> answer
+  in
+  { answer; runs = List.rev !runs }
 
 let run_workers count work =
   let next = Atomic.make 0 in
@@ -369,24 +247,27 @@ let run_workers count work =
   run_worker ();
   List.iter Domain.join domains
 
-let solve_all solver requests =
-  let solve_distinct key_of =
-    let distinct = Hashtbl.create 64 in
-    List.iter
-      (fun ((request, _) as asked) ->
-        if not (Hashtbl.mem distinct (key_of request)) then
-          Hashtbl.replace distinct (key_of request) asked)
-      requests;
-    let distinct = Array.of_seq (Hashtbl.to_seq_values distinct) in
-    run_workers (Array.length distinct) (fun index -> ignore (solve solver distinct.(index)))
-  in
-  solve_distinct (fun request -> request.text_key);
-  solve_distinct (fun request -> request.values_key);
-  List.map (solve solver) requests
+let solve_all ?(find_output = fun _ -> None) solver requests =
+  let asked = List.map (fun request -> (show_input request, request)) requests in
+  let distinct = Hashtbl.create 64 in
+  List.iter
+    (fun (input, request) ->
+      if not (Hashtbl.mem distinct input) then Hashtbl.replace distinct input request)
+    asked;
+  let distinct = Array.of_seq (Hashtbl.to_seq distinct) in
+  let outcomes = Array.make (Array.length distinct) None in
+  run_workers (Array.length distinct) (fun index ->
+      outcomes.(index) <- Some (solve solver ~find_output (snd distinct.(index))));
+  let by_input = Hashtbl.create (Array.length distinct) in
+  Array.iteri
+    (fun index (input, _) ->
+      match outcomes.(index) with
+      | Some outcome -> Hashtbl.replace by_input input outcome
+      | None -> raise_bug "a distinct request was not solved")
+    distinct;
+  List.map (fun (input, _) -> Hashtbl.find by_input input) asked
 
 module For_testing = struct
-  let hash_query = hash_query
-  let count_queries_run solver = run_locked solver (fun () -> solver.queries_run)
-  let proven_entry = encode_status Unsatisfiable
-  let make_incomplete_entry reason = encode_status (Undecided (Incomplete reason))
+  let count_queries_run solver = Atomic.get solver.queries_run
+  let make ~run_z3 = { answer_query = run_z3; stop = ignore; queries_run = Atomic.make 0 }
 end

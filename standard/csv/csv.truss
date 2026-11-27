@@ -1,5 +1,6 @@
 use standard.intrinsic
 use standard.streams
+use standard.text.utf8
 
 public type Options(delimiter: Character = Character",", quote: Character = Character"\"", trim_fields: Bool = false)
   derives Equal
@@ -48,11 +49,18 @@ fn is_blank(character: Character) -> Bool
 
 fn append_field(row: mut List[String], field: own String, trimmed_length: UInt64, trim_fields: Bool)
   requires trimmed_length <= field.length()
+  requires field.is_boundary(trimmed_length)
   cost amortized time O(1)
 {
+  proof {
+    utf8.slice_is_valid(field.model(), from: 0, to: trimmed_length)
+  }
   var trimmed = own field
   if trim_fields {
     intrinsic.storage_shorten(mut trimmed.storage, length: trimmed_length)
+    proof {
+      assert identical(intrinsic.storage_model(trimmed.storage), old(field.model())[0..trimmed_length])
+    }
   }
   mut row.push(own trimmed)
 }
@@ -71,10 +79,12 @@ type ParserState(
   quote_column: UInt64,
 )
   invariant trimmed_length <= field.length()
+  invariant field.is_boundary(trimmed_length)
 
 fn advance(state: mut ParserState, text: String, index: UInt64, options: Options) -> Result[UInt64, ParseError]
   requires index < text.length()
-  ensures !(result is Ok(next) && (next <= index || next > text.length()))
+  requires text.is_boundary(index)
+  ensures !(result is Ok(next) && (next <= index || next > text.length() || !text.is_boundary(next)))
 {
   let decoded = text.decode(index)
   let character = decoded.character
@@ -170,6 +180,7 @@ public fn parse(text: String, options: Options = Options()) -> Result[List[List[
   var index: UInt64 = 0
   while index < text.length()
     invariant index <= text.length()
+    invariant text.is_boundary(index)
     invariant state.trimmed_length <= state.field.length()
     decreases text.length() - index
   {
@@ -202,6 +213,7 @@ fn needs_quotes(field: String, options: Options) -> Bool
   var index: UInt64 = 0
   while index < field.length()
     invariant index <= field.length()
+    invariant field.is_boundary(index)
     decreases field.length() - index
   {
     let decoded = field.decode(index)
@@ -225,6 +237,7 @@ fn push_field(text: mut String, field: String, options: Options, alone: Bool)
   var index: UInt64 = 0
   while index < field.length()
     invariant index <= field.length()
+    invariant field.is_boundary(index)
     decreases field.length() - index
   {
     let decoded = field.decode(index)
@@ -334,6 +347,7 @@ fn quotes_in(text: String, quote: Character) -> UInt64
   var index: UInt64 = 0
   while index < text.length()
     invariant index <= text.length()
+    invariant text.is_boundary(index)
     invariant count <= index
     decreases text.length() - index
   {

@@ -16,8 +16,6 @@ have proven a program correct. Each chapter builds on the ones before it,
 so read them in order the first time. The appendices at the end are for
 looking things up.
 
-[DESIGN.md](DESIGN.md) gives the reason for each rule.
-
 ### What makes Truss different
 
 Four decisions shape the language, and you will meet each of them early.
@@ -97,13 +95,12 @@ runs Truss code. It needs two other programs on your `PATH`:
 Truss builds programs for Linux and macOS, on x86-64 and ARM64. A program
 built on x86-64 needs a CPU of the x86-64-v3 level, which Intel's CPUs have
 had since Haswell (2013) and AMD's since Excavator (2015). A project's
-manifest can name another level ([Projects](#projects)).
-[README.md](README.md) says how to build `truss` from this repository. Check
-that the toolchain runs:
+manifest can name another level ([Projects](#projects)). Check that the
+toolchain runs:
 
 ```text
 $ truss --version
-stage0 (Truss 0.1, code generation 29, Unicode 18.0.0)
+stage0 (Truss 0.1, Unicode 18.0.0)
 ```
 
 ### Hello, world
@@ -700,7 +697,7 @@ fn add(left: UInt8, right: UInt8) -> UInt8 {
 ```
 
 ```text
-main.truss:2:3: error[prover.overflow]: `left + right` may overflow `UInt8`. For example, when `left` is 255, `right` is 1. It can also be checked first with an `if`, or done with the checked operation.
+main.truss:2:3: error[prover.overflow]: `left + right` may overflow `UInt8`. It can also be checked first with an `if`, or done with the checked operation.
   |   left + right
   |   ^^^^^^^^^^^^
   fix: Add `requires left + right <= UInt8.maximum`
@@ -709,8 +706,8 @@ main.truss:2:3: error[prover.overflow]: `left + right` may overflow `UInt8`. For
 1 error
 ```
 
-The prover found inputs for which the addition overflows, and the message
-lists the ways to fix it. Each makes a different promise:
+Nothing in scope bounds `left` or `right`, so the prover cannot rule out an
+overflow, and the message lists the ways to fix it. Each makes a different promise:
 
 ```truss
 fn add_small(left: UInt8, right: UInt8) -> UInt8
@@ -2049,8 +2046,7 @@ Every release under one name is compatible with the ones before it, which its
 author promises: a public definition stays at its path, a `requires` gets no
 stronger, an `ensures` no weaker, and a cost no greater. An incompatible
 change is a new package, named with `_v2` after the old name, so both
-versions can be used in one build. [PACKAGES.md](PACKAGES.md) defines packages, versions, and the
-registry in full.
+versions can be used in one build.
 
 ## 7. Collections
 
@@ -2628,7 +2624,7 @@ too, and only the first approach meets it: you must show the point cannot be
 reached.
 
 ```text
-main.truss:2:24: error[prover.unreachable]: This `unreachable` may be reached. For example, when `flag` is false. On that path, `flag` is false.
+main.truss:2:24: error[prover.unreachable]: This `unreachable` may be reached.
   |   if flag { 1 } else { unreachable }
   |                        ^^^^^^^^^^^
 
@@ -3208,6 +3204,8 @@ test "lambdas" {
   var scores = [10, 20, 30]
   mut scores.update_each(fn(score) { score = score / 2 })
   assert scores == [5, 10, 15]
+  let halve = fn(score: Int64) { score / 2 }
+  assert halve(10) == 5
 }
 ```
 
@@ -3215,16 +3213,23 @@ test "lambdas" {
   result.
 - **A lambda's types come from where it is used.** `apply_twice` declares
   `step: fn(Int64) -> Int64`, so `value` is an `Int64`. The types flow from
-  outside in, never from the lambda's body, so a lambda with nothing to give
-  it types is an error:
+  outside in, never from the lambda's body, so a parameter that nothing
+  gives a type is an error:
 
   ```text
-  main.truss:2:15: error[types.lambda_needs_type]: A lambda's parameter types come from where it is used, and nothing here gives them. Bind it with a typed `let`, such as `let double: fn(Int64) -> Int64 = fn(x) { x * 2 }`.
+  main.truss:2:18: error[types.cannot_infer]: The type of `value` cannot be inferred from where this lambda is used. Declare `value` with a type.
     |   let twice = fn(value) { value * 2 }
-    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |                  ^^^^^
 
   1 error
   ```
+
+- **A parameter can declare its type,** as a function's parameter does.
+  `halve` is passed nowhere, so its annotation gives it the type
+  `fn(Int64) -> Int64`. Where a lambda is passed, its annotation must state
+  the type and the mode that the function type gives, as `score: mut Int64`
+  would for `update_each`. A lambda declares no result type: its result is
+  its body's value.
 
 - **A lambda reads the variables around it,** as the lambda in `above` reads
   `threshold`, but it cannot change them:
@@ -3958,14 +3963,15 @@ one holds.
 
 The prover is Z3, an SMT solver. You never call it directly. `truss check`
 turns each promise into a question for Z3, and reports each one Z3 cannot
-answer as an error, often with a counterexample: values for which the promise
-fails.
+prove as an error at the code that must keep it.
 
 ### Preconditions and postconditions
 
 A `requires` clause is a *precondition*: every caller proves it. An
 `ensures` clause is a *postcondition*: the function's body proves it, and
-every caller may rely on it. `result` names the returned value.
+every caller may rely on it. `result` names the returned value. A
+postcondition that may not hold is reported at the return that breaks it,
+with a note at the clause.
 
 ```truss
 fn double(value: Int64) -> Int64
@@ -3993,16 +3999,13 @@ inside `double` when it checks `quadruple`. Without `ensures result == value
 `double` again:
 
 ```text
-main.truss:10:3: error[prover.requires]: `value >= -1000 && value <= 1000` may not hold for this call to `double`. For example, when `value` is 0.
+main.truss:10:3: error[prover.requires]: `value >= -1000 && value <= 1000` may not hold for this call to `double`.
   |   double(double(value))
   |   ^^^^^^^^^^^^^^^^^^^^^
   note: main.truss:2:12: This is the clause that must hold.
 
 1 error
 ```
-
-The counterexample shows how little the caller knows: even when `value` is
-0, nothing bounds what `double(0)` returns.
 
 This rule is what makes Truss scale. Each function is proven once, against
 the signatures it calls, and an edit to a body never invalidates the proofs
@@ -4140,8 +4143,8 @@ specification can say more than code can:
   terminates. A function whose `uses` is a capability parameter, such as
   `map`, can be called in one with a pure lambda.
 - A quantifier over a range is also an expression in code, which runs as a
-  loop that stops when it knows the answer. A quantifier over a type, and
-  `==>`, appear only in specifications.
+  loop that stops when it knows the answer. A quantifier over a type appears
+  only in specifications.
 
 ```truss
 fn contains_zero(numbers: List[Int64]) -> Bool
@@ -4166,16 +4169,15 @@ In [Chapter 3](#integer-overflow), an accumulating sum would not compile.
 This is why:
 
 ```text
-main.truss:6:5: error[prover.overflow]: `total += value` may overflow `UInt64`. For example, when `limit` is 2, `total` is 18446744073709551615, `value` is 1. It can also be checked first with an `if`, or done with the checked operation.
+main.truss:6:5: error[prover.overflow]: `total += value` may overflow `UInt64`. It can also be checked first with an `if`, or done with the checked operation.
   |     total += value
   |     ^^^^^^^^^^^^^^
 
 1 error
 ```
 
-The counterexample has `total` at the largest `UInt64` after one iteration,
-because nothing said otherwise. A loop invariant says how large `total` can
-be:
+After the first iteration, `total` may be any `UInt64`, because nothing said
+otherwise. A loop invariant says how large `total` can be:
 
 ```truss
 fn sum_below(limit: UInt64) -> UInt64
@@ -4273,7 +4275,7 @@ A recursion without a measure is an error. A function `countdown` that
 calls itself on `count / 2`, which is not a part of `count`, states none:
 
 ```text
-main.truss:2:30: error[prover.termination]: This recursive call may not end: give the function a `decreases` clause for the prover to show that the recursion ends. For example, when `count` is 1. On that path, `count == 0` is false.
+main.truss:2:30: error[prover.termination]: This recursive call may not end: give the function a `decreases` clause for the prover to show that the recursion ends.
   |   if count == 0 { 0 } else { countdown(count / 2) }
   |                              ^^^^^^^^^^^^^^^^^^^^
 
@@ -4317,7 +4319,7 @@ test "a loop measured by its comparison" {
 Without `power >= 1` in the invariant:
 
 ```text
-main.truss:5:3: error[prover.termination]: This loop's measure may not decrease. For example, when `limit` is 0, `power` is 0.
+main.truss:5:3: error[prover.termination]: This loop's measure may not decrease.
   |   while power <= limit
   |   ^^^^^^^^^^^^^^^^^^^^
 
@@ -4407,9 +4409,11 @@ test "a zero undoes the entry before it" {
   the iterations, and the values the loop does not mutate bound one
   iteration. Here the loop runs `entries.length()` times, and each
   iteration costs `O(1)`.
-- `recorded_entries` states `cost amortized` because `push` states only
-  `cost amortized time O(1)`. A function whose `cost` is `amortized` counts
-  each call at the callee's amortized cost.
+- `recorded_entries` states `cost amortized`, so the prover counts each
+  call at the callee's amortized cost and never reads the potential of
+  `recorded`. A function with a plain `cost` can call `push` too. The
+  prover then counts the potential that `push` may spend, which is none for
+  a list the function creates empty.
 
 A loop needs a `cost` clause where that count fails: where it is too large,
 or where one iteration's cost depends on a value the loop mutates. A loop
@@ -4604,10 +4608,10 @@ test "a fact proven by evaluation" {
 
 | The error says | Try |
 |---|---|
-| A counterexample, such as "when `count` is 255" | The promise really fails for those values: add a `requires`, an `if`, or a checked operation |
-| "This fails every time the code reaches it" | The code fails whenever it runs, so no `proof` block can help: change the code |
-| "a value the prover knows nothing more about" | A callee's result or a loop variable is unconstrained: add an `ensures` to the callee, or an `invariant` to the loop |
-| "The solver ran out of steps, so it may hold but needs help" | Break the step into smaller ones: an `assert` in a `proof` block, or a theorem |
+| "may not hold" or "may overflow", and nothing about the solver | The facts in scope allow the failure: add a `requires`, an `if`, or a checked operation. If the code reads a callee's result or a variable that a loop changes, add an `ensures` to the callee or an `invariant` to the loop |
+| "This fails every time the code reaches it" | The facts on this path refute it, so no `proof` block about the step can help: change the code, or prove that the path is not taken |
+| "The solver reached its step limit before it decided whether this holds" | Break the step into smaller ones: an `assert` in a `proof` block, or a theorem |
+| An `ensures` "may not hold when the function returns here" | The path that ends at that return breaks the clause; the note points at the clause |
 | A `requires` of a callee "may not hold" | Find which fact the caller lacks; the note points at the clause |
 | A `forall` "may not hold", though a theorem proves its body for one value | Call the theorem in the quantifier's body, then state the body, as `doubles_are_even` does |
 
@@ -5039,10 +5043,11 @@ test "a lent part" {
 - `lends mut Item` lends the part `mut`, and the body writes `mut` on the
   place it lends.
 - No code of the method runs after it lends.
-- A clause of a lending method that mentions `result` holds where the
-  method lends, and every other clause holds when the lend ends. The
-  `ensures` here promises that the shelf keeps its length while the caller
-  changes the item, so the test can still index it afterward.
+- A clause of a lending method that mentions `result` and not
+  `final(result)` holds where the method lends, and every other clause
+  holds when the lend ends. The `ensures` here promises that the shelf
+  keeps its length while the caller changes the item, so the test can still
+  index it afterward.
 - In an `ensures`, `final(result)` is the part as the caller left it.
 - A lending method is not a value: a function type cannot lend, since its
   caller could keep the part too long.
@@ -5160,7 +5165,7 @@ From the tightest binding to the loosest:
 | `..`, `..=` | Ranges, excluding and including the end |
 | `==`, `!=`, `<`, `<=`, `>`, `>=`, `is` | Comparison and pattern test |
 | `&&`, `\|\|` | Logical and and or, which evaluate the right side only when needed and do not mix |
-| `==>` | Implication, in specifications |
+| `==>` | Implication |
 
 - **Precedence is a partial order.** Bitwise operators `&`, `|`, `^`, `<<`,
   and `>>` combine only with themselves, `&&` and `||` do not mix, and
@@ -5211,6 +5216,15 @@ From the tightest binding to the loosest:
   `truss` executable was rebuilt while the old process ran. It exits within
   a minute, or at once with `truss stop`. `--no-server`, or
   `TRUSS_NO_SERVER=1`, runs a command in its own process.
+- **A project's checked state is `.truss/database.sqlite`** in its root.
+  It holds the proofs and the passing tests, so a new checkout of the
+  project, such as a git worktree, proves and tests everything once. Copy
+  the database from another checkout, here `../main`, to start from its
+  state. Use SQLite's backup, since a background process may have the file
+  open:
+  `mkdir -p .truss && sqlite3 ../main/.truss/database.sqlite ".backup .truss/database.sqlite"`.
+  The first command then checks only the files that differ between the two
+  checkouts. A database made by another build of `truss` is ignored.
 - **`TRUSS_CC`** names the C compiler, and **`TRUSS_Z3`** the Z3 executable.
 - **An x86-64 program is built for the x86-64-v3 level** unless the
   project's manifest names another ([Projects](#projects)). Before `main`

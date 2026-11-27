@@ -1,0 +1,14 @@
+fn clear(bag: mut Bag)
+  ensures bag.holds(0)
+{
+  bag.items = []
+}
+
+type Bag(items: List[Int64])
+  invariant forall i in 0..items.length() => items[i] >= 0
+
+fn Bag.holds(self, count: UInt64) -> Bool
+  ensures result == (self.items.length() == count)
+{
+  self.items.length() == count
+}

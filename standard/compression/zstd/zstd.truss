@@ -744,6 +744,27 @@ fn decode_sequences(block: List[UInt8], literals: List[UInt8], state: mut FrameS
   Ok(Unit)
 }
 
+fn finish_frame(input: List[UInt8], index: UInt64, output: List[UInt8], start: UInt64, content_size: Option[UInt64], has_checksum: Bool) -> Result[UInt64, Error] {
+  if start > output.length() {
+    return malformed("a frame that shrank its output")
+  }
+  let decoded: UInt64 = output.length() - start
+  if content_size is Some(expected_size) && expected_size != decoded {
+    return malformed("a frame whose content is not its stated size")
+  }
+  if !has_checksum {
+    return Ok(index)
+  }
+  if index > input.length() || input.length() - index < 4 {
+    return malformed("a frame without its checksum")
+  }
+  let expected = u32_at(input, at: index)
+  if (checksum.xxh64(output[start..]) & 0xFFFFFFFF) != expected {
+    return Err(Error.ChecksumMismatch)
+  }
+  Ok(index + 4)
+}
+
 fn decode_frame(input: List[UInt8], at: UInt64, output: mut List[UInt8], limit: UInt64) -> Result[UInt64, Error] {
   if at >= input.length() || input.length() - at < 6 {
     return malformed("a frame without its header")
@@ -823,24 +844,7 @@ fn decode_frame(input: List[UInt8], at: UInt64, output: mut List[UInt8], limit: 
       return malformed("a block of the reserved type")
     }
     if is_last {
-      if start > output.length() {
-        return malformed("a frame that shrank its output")
-      }
-      let decoded: UInt64 = output.length() - start
-      if content_size is Some(expected_size) && expected_size != decoded {
-        return malformed("a frame whose content is not its stated size")
-      }
-      if has_checksum {
-        if index > input.length() || input.length() - index < 4 {
-          return malformed("a frame without its checksum")
-        }
-        let expected = u32_at(input, at: index)
-        if start <= output.length() && (checksum.xxh64(output[start..]) & 0xFFFFFFFF) != expected {
-          return Err(Error.ChecksumMismatch)
-        }
-        index += 4
-      }
-      return Ok(index)
+      return finish_frame(input, index: index, output: output, start: start, content_size: content_size, has_checksum: has_checksum)
     }
   }
   malformed("a frame without a last block")

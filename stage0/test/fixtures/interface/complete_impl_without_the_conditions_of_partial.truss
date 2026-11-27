@@ -1,0 +1,9 @@
+trait Partial {}
+
+trait Complete: Partial {}
+
+type Wrapper[Item](item: Item)
+
+impl Partial for Wrapper[Item: Equal] {}
+
+impl Complete for Wrapper[Item] {}

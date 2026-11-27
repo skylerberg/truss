@@ -1,0 +1,14 @@
+public type Span(low: UInt8, high: UInt8)
+  invariant low <= high
+
+fn lower(value: mut UInt8)
+  ensures value == 0
+{
+  value = 0
+}
+
+public fn lower_first(spans: mut List[Span])
+  requires spans.length() > 0
+{
+  lower(mut spans[0].low)
+}

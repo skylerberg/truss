@@ -1,6 +1,7 @@
 (executable
  (name proof_fuzz)
  (libraries
+  catalog
   zarith
   path
   source
@@ -13,12 +14,9 @@
   resolve
   types
   interface
-  syntax
-  core
   core_walk
   mir
   solver
-  prover
   c_compiler
   x86_64_level
   backend

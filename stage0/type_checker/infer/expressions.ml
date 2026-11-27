@@ -99,7 +99,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Member (base, member) -> (
       match State.find_head state value with
       | Some resolution -> Name_lookup.check_name state env value resolution
-      | None -> check_member_value state env value base member)
+      | None -> check_member_value state env ?expected value base member)
   | Bracket (base, items) -> check_bracket state env ?expected value base items
   | Call (callee, arguments) -> Methods.check_call state env ?expected value callee arguments
   | Try inner -> Operators.try_ state env value inner
@@ -157,19 +157,25 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
         | None, None -> Types.Error Catalog.reported_elsewhere
       in
       Types.Named { path = Well_known.make_path Range; arguments = [ Types.Type element ] }
-  | Quantified { binder; body; _ } ->
-      (match binder with
-      | Binder_in (written, collection) ->
-          let element = Values.check_collection_element state env ~quantifier:value collection in
-          Pattern_typing.check_pattern state env written element ~mode:Language.Mode.Read
-      | Binder_type (bound, written) ->
-          if not env.specification then
-            State.report state (Quantifier_over_type_in_code { at = Written value.id });
-          State.declare state bound
-            (Interface.Elaborator.elaborate_type (State.read_context state) written)
-            ~binding:Let ~mode:Language.Mode.Read);
+  | Quantified { quantifier; binder; body } ->
+      let type_ =
+        match binder with
+        | Binder_in (written, collection) ->
+            let element = Values.check_collection_element state env ~quantifier:value collection in
+            Pattern_typing.check_pattern state env written element ~mode:Language.Mode.Read;
+            Types.bool
+        | Binder_type (bound, written) ->
+            State.declare state bound
+              (Interface.Elaborator.elaborate_type (State.read_context state) written)
+              ~binding:Let ~mode:Language.Mode.Read;
+            if env.specification then Types.bool
+            else
+              Types.Error
+                (State.report_specification_only state
+                   (Quantifier_over_type_in_code { at = Written value.id; quantifier }))
+      in
       check state { env with in_quantifier = true } body Types.bool;
-      Types.bool
+      type_
   | Echo inner ->
       let type_ = check_expression state env ?expected inner in
       type_
@@ -202,11 +208,13 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Block body -> Values.check_block state env ?expected body
   | Expression_error -> Types.Error Catalog.reported_elsewhere
 
-and check_member_value state env (value : Syntax.expression) (base : Syntax.expression)
+and check_member_value state env ?expected (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) =
   match Instantiation.find_static state base with
-  | Some (Static_type type_) -> Name_lookup.check_static_member state value type_ member
-  | Some (Static_trait _ | Static_capability _) ->
+  | Some (Static_type type_) -> Name_lookup.check_static_member state ?expected value type_ member
+  | Some (Static_trait (trait, trait_arguments)) ->
+      Name_lookup.check_trait_value_in_full state ?expected value trait ~trait_arguments member
+  | Some (Static_capability _) ->
       State.make_error_type state
         (Static_method_as_value { at = Written value.id; name = member.text })
   | None -> (

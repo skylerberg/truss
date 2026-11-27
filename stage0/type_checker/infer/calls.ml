@@ -57,10 +57,10 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
         List.mapi
           (fun index (argument : Syntax.argument) ->
             let mode, input = List.nth function_type.inputs index in
-            let parameter : Types.parameter_info =
-              { name = "the function value"; mode; type_ = input; has_default = false }
+            let mode =
+              check_passed state env argument.value ~recipient:Catalog.Inference.Function_value
+                ~mode input
             in
-            let mode = check_argument state env argument.value parameter in
             { Tables.expression = argument.value; core_argument_index = index; mode })
           arguments
       in
@@ -84,7 +84,11 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
         (State.make_error_type state
            (Not_callable { at = Written callee.id; callee = State.make_shown state callee_type }))
 
-and check_argument state env (value : Syntax.expression) (parameter : Types.parameter_info) =
+and check_argument state env value (parameter : Types.parameter_info) =
+  check_passed state env value ~recipient:(Catalog.Inference.Named_parameter parameter.name)
+    ~mode:parameter.mode parameter.type_
+
+and check_passed state env (value : Syntax.expression) ~recipient ~(mode : Language.Mode.t) type_ =
   let inner =
     match value.kind with
     | Mode (mode, inner)
@@ -121,25 +125,22 @@ and check_argument state env (value : Syntax.expression) (parameter : Types.para
     | _ -> false
   in
   let expected =
-    match (parameter.mode, inner.kind) with
+    match (mode, inner.kind) with
     | Read, (If _ | Match _ | Block _)
-      when Types.is_viewable (Conversions.read_expected_head state parameter.type_) ->
-        Types.make_view parameter.type_
-    | Read, _ when is_construction inner -> view_parts parameter.type_
-    | _ -> parameter.type_
+      when Types.is_viewable (Conversions.read_expected_head state type_) ->
+        Types.make_view type_
+    | Read, _ when is_construction inner -> view_parts type_
+    | _ -> type_
   in
   let actual = Hooks.check_expression state env ~expected inner in
   if inner != value then begin
     State.record state value actual
   end;
-  let parameter =
-    match Modes.find_lent_field_mode state value actual with
-    | Some mode -> { parameter with mode }
-    | None -> parameter
-  in
-  Conversions.coerce state env ~argument:parameter.mode value ~actual ~expected:parameter.type_;
-  Modes.check_mode state env value parameter actual;
-  parameter.mode
+  let mode = Option.value (Modes.find_lent_field_mode state value actual) ~default:mode in
+  if mode = Own then Modes.infer_view_of_borrowed_place state env value ~actual ~expected:type_;
+  Conversions.coerce state env ~argument:mode value ~actual ~expected:type_;
+  Modes.check_mode state env value ~recipient mode actual;
+  mode
 
 and match_arguments state site (value : Syntax.expression) (parameters : Types.parameter_info list)
     (arguments : Syntax.argument list) =
@@ -288,7 +289,12 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
     Error
       (State.make_error_type state
          (Unknown_variant
-            { at = Written value.id; type_ = State.zonk state type_; variant; candidates = [] }))
+            {
+              at = Written value.id;
+              type_ = State.normalize_known state type_;
+              variant;
+              candidates = [];
+            }))
   in
   let fields =
     match variant with
@@ -361,12 +367,15 @@ and find_record_fields state at type_ =
   | type_ -> Error (report_not_a_record state at type_)
 
 and report_not_a_record state at type_ =
-  State.make_error_type state (Not_a_record_construction { at; type_ = State.zonk state type_ })
+  State.make_error_type state
+    (Not_a_record_construction { at; type_ = State.normalize_known state type_ })
 
 and find_opaque_error state at type_path type_ =
   if Members.are_fields_visible state.lookups ~package:state.package type_path then None
   else
-    Some (State.make_error_type state (Opaque_construction { at; type_ = State.zonk state type_ }))
+    Some
+      (State.make_error_type state
+         (Opaque_construction { at; type_ = State.normalize_known state type_ }))
 
 and make_field_parameters ~keeps_unlisted (fields : Types.field list) =
   List.map

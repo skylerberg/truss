@@ -1,0 +1,7 @@
+fn doubled(text: String) -> UInt64
+  requires text.length() <= 1000
+  ensures result == 2 * text.length()
+{
+  let long = text.repeated(2)
+  long.length()
+}

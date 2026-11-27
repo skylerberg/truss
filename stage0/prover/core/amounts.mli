@@ -1,78 +1,71 @@
-val run_code : State.context -> State.frame -> Mir.t -> type_:Types.ty -> State.frame * Logic.term
-val mentions_result : Mir.formula -> bool
-val mentions_history : Mir.formula -> bool
-val assume_typed : State.context -> State.frame -> Logic.term -> unit
-val compare_lexicographically : Logic.term list -> Logic.term list -> Logic.term
-val is_same_resource : Mir.cost -> locals:Logic.term Locals.t -> Costs.counter -> bool
-val declare_bounded_amount : State.context -> State.frame -> Logic.term -> Logic.term
+type call_amount = {
+  call : Catalog.Prover.quoted;
+  callee : Path.t;
+  states_cost : bool;
+  counts_potential : bool;
+  counter : Costs.counter;
+  amount : Logic.term;
+}
 
-val make_may_be_target :
-  State.context -> State.frame -> Logic.term -> Types.ty -> Logic.term -> Logic.term
+val list_call_amounts : Query.t -> call_amount list
+val declare_bounded_amount : State.frame -> Logic.term -> Logic.term
+val make_callback_cost : State.frame -> Language.Metric.t -> Types.ty -> Logic.term -> Logic.term
 
-val lambda_captures_target : State.context -> Logic.term -> Logic.term -> bool
-val make_conditional_amount : Logic.term -> Logic.term -> Logic.term
+val compute_construction_amount :
+  State.environment -> Types.ty -> string option -> Costs.counter -> Logic.term
 
-val compute_amount_within :
-  State.context -> State.frame -> Costs.counter -> Logic.term -> Logic.term
+val compute_method_cost : State.frame -> Language.Metric.t -> Callee.t -> Logic.term
 
-val compute_callee_amount :
-  ?method_cost:(Language.Metric.t -> Logic.term) ->
-  State.context ->
-  State.frame ->
-  is_recursive:bool ->
-  clauses:State.clauses list ->
-  bind_frame:(State.clauses -> State.frame) ->
-  uses:Types.capability_set ->
-  values:State.passed list ->
-  change:(unit -> Logic.term) option ->
-  Costs.counter ->
-  Logic.term
+val spend_copy :
+  ?literal:Language.Literal.t -> State.frame -> declared:Types.ty -> Logic.term -> State.frame
 
-val compute_capability_amount :
-  State.context ->
-  State.frame ->
-  uses:Types.capability_set ->
-  Path.t ->
-  Costs.counter ->
-  direct:(unit -> Logic.term) ->
-  Logic.term
+val spend_wait_for_tasks : State.frame -> State.frame
 
-val compute_step_amount :
-  ?result:Logic.term ->
-  State.context ->
-  State.frame ->
-  Invocation.t ->
+val spend_contract_call :
+  before:State.frame ->
+  after:State.frame ->
+  Invocation.site ->
+  Callee.t ->
+  Callee.definition ->
+  State.contract ->
   State.passed list ->
-  Costs.counter ->
-  Logic.term
+  changed:(int * Logic.term) list ->
+  result:Logic.term ->
+  result_type:Types.ty ->
+  final:Logic.term option ->
+  is_recursive:bool ->
+  bind_frame:(State.clauses -> State.frame) ->
+  read_requires:(State.clauses -> Logic.term) ->
+  State.frame
 
-val has_potential : State.context -> ?seen:Types.ty list -> Types.ty -> bool
+val spend_call_without_a_contract : State.frame -> Callee.t -> State.passed list -> State.frame
 
-val compute_potential :
-  State.context -> State.frame -> ?seen:Types.ty list -> Types.ty -> Logic.term -> Logic.term
-
-val compute_elements_potential : State.context -> Types.ty -> Logic.term -> Logic.term
-
-val assume_element_potential_change :
-  State.context ->
+val spend_derived_equality :
   State.frame ->
-  Types.ty ->
-  before:Logic.term ->
-  after:Logic.term ->
-  replaced:Logic.term ->
-  written:Logic.term ->
-  unit
+  Callee.t ->
+  State.passed list ->
+  result_type:Types.ty ->
+  result:Logic.term ->
+  State.frame
 
-val find_buffer : State.context -> Types.ty -> State.buffer option
+val spend_indirect_call :
+  before:State.frame ->
+  after:State.frame ->
+  location:Obligation.location ->
+  Types.function_type ->
+  Logic.term ->
+  State.passed list ->
+  changed:(int * Logic.term) list ->
+  result_type:Types.ty ->
+  result:Logic.term ->
+  State.frame
 
-val declare_method_cost :
-  State.context ->
+val spend_intrinsic :
   State.frame ->
-  Language.Metric.t ->
-  Path.t ->
-  trait_arguments:Types.argument list ->
-  Types.ty ->
-  Logic.term
-
-val compute_method_cost :
-  State.context -> State.frame -> Language.Metric.t -> Invocation.callee -> Logic.term
+  Callee.t ->
+  Intrinsic.operation ->
+  State.passed list ->
+  changed:Logic.term list ->
+  result_type:Types.ty ->
+  result:Logic.term ->
+  State.frame

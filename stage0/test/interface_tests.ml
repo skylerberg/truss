@@ -3,6 +3,7 @@ let check packages =
 
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
 let expect_no_diagnostics = Support.expect_no_diagnostics ~check
+let expect_codes = Support.expect_codes ~check
 let app name : Path.t = Top { module_ = Support.parse_module "app.main"; name }
 let make_interface packages = Database.make_interface_lookups (Support.make_database packages)
 let make_standard_path = Path.make_standard_path
@@ -110,7 +111,7 @@ let () =
 
 let () =
   Harness.test "two fields with one name are an error" (fun () ->
-      expect_one_diagnostic "type Point(x: Int64, x: Int64)\n" "types.duplicate_field");
+      expect_one_diagnostic "type Point(x: Int64, x: Int64)\n" "types.duplicate_member");
   Harness.test "deriving needs every field to implement the trait" (fun () ->
       expect_one_diagnostic Fixtures.Interface.equal_derived_over_an_opaque_field
         "types.cannot_derive");
@@ -132,6 +133,25 @@ let () =
         [ ("app.main", Fixtures.Interface.serialize_derived_over_a_defaulted_list) ]);
   Harness.test "deriving Ordered needs Equal derived too" (fun () ->
       expect_one_diagnostic "type Point(x: Int64)\n  derives Ordered\n" "types.cannot_derive");
+  Harness.test "a type derives each trait once" (fun () ->
+      expect_one_diagnostic "type Point(x: Int64) derives Equal, Equal\n" "types.repeated_derive"
+        ~says:"The type already derives `Equal`." ~fixed:(", Equal\n", "\n"));
+  Harness.test "deriving needs a field of an associated type to implement the trait" (fun () ->
+      expect_one_diagnostic
+        "trait Get {\n\
+        \  type Value\n\
+         }\n\n\
+         type Holder[Source: Get](value: Source.Value) derives Equal\n"
+        "types.cannot_derive" ~says:"A field of type `Source.Value` does not implement `Equal`");
+  Harness.test "a type whose parameter has a bound derives a trait" (fun () ->
+      expect_no_diagnostics
+        [
+          ("app.main", "trait Shown {}\n\ntype Holder[Value: Shown](value: Value) derives Equal\n");
+        ]);
+  Harness.test "a deriving type whose field's type is unknown reports only the unknown name"
+    (fun () ->
+      expect_one_diagnostic "type Holder(first: Missing, second: Int64) derives Equal\n"
+        "resolve.unknown_name");
   Harness.test "a generic type derives under conditions on its parameters" (fun () ->
       expect_no_diagnostics [ ("app.main", "type Box[Value](value: Value)\n  derives Equal\n") ]);
   Harness.test
@@ -171,6 +191,13 @@ let () =
         ~says:
           "must state the callback contract that `Chooses` declares for `pick`: `ensures result < \
            limit`");
+  Harness.test "an impl's callback contract names the definitions its trait's names" (fun () ->
+      expect_one_diagnostic
+        ~others:
+          [ ("app.choosing", Fixtures.Interface.trait_whose_callback_ensures_its_own_predicate) ]
+        Fixtures.Interface.impl_restating_a_callback_contract_with_another_predicate
+        "types.signature_mismatch"
+        ~says:"must state the callback contract that `Chooses` declares for `pick`");
   Harness.test "an impl cannot give a method its trait does not declare" (fun () ->
       expect_one_diagnostic Fixtures.Interface.equal_impl_with_an_extra_method "types.extra_member");
   Harness.test "an impl must give every associated type" (fun () ->
@@ -1047,6 +1074,124 @@ let () =
       expect_no_diagnostics [ ("app.main", Fixtures.Interface.keyed_trait_with_a_bounded_key) ]);
   Harness.test "Self in a required trait is substituted by the bounded type" (fun () ->
       expect_no_diagnostics [ ("app.main", Fixtures.Interface.trait_requiring_add_of_self) ]);
+  Harness.test "an impl's trait argument must meet the bound of the trait's parameter" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.getter_impls_of_shown_and_unshown_values
+        "types.unsatisfied_bound" ~says:"`Getter[Int64]` needs `Int64: Shown`"
+        ~at:("Getter[Int64]", 1));
+  Harness.test "a bound's trait argument must meet the bound of the trait's parameter" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.readers_bounded_by_getters "types.unsatisfied_bound"
+        ~says:"`Getter[Int64]` needs `Int64: Shown`");
+  Harness.test "the head of an impl or of a method must meet its type's bounds" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.measure_impl_for_a_holder_without_its_bound
+        "types.unsatisfied_bound" ~says:"`Holder[Value]` needs `Value: Shown`";
+      expect_one_diagnostic
+        "trait Shown {}\n\n\
+         type Holder[Value: Shown](value: Value)\n\n\
+         fn Holder[Value].size(self) -> Int64 { todo }\n"
+        "types.unsatisfied_bound" ~says:"`Holder[Value]` needs `Value: Shown`");
+  Harness.test "a trait declares each associated type, capability set, and law once" (fun () ->
+      expect_codes Fixtures.Interface.measure_declaring_each_member_twice
+        [ "types.duplicate_member"; "types.duplicate_member"; "types.duplicate_member" ]);
+  Harness.test "an impl defines each associated type once" (fun () ->
+      expect_one_diagnostic
+        "trait Measure {\n\
+        \  type Unit\n\
+         }\n\n\
+         impl Measure for Int64 {\n\
+        \  type Unit = Int64\n\
+        \  type Unit = Bool\n\
+         }\n"
+        "types.duplicate_member" ~says:"This `impl` already defines `Unit`.");
+  Harness.test "an impl's associated type may name one that the impl defines before it" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.getters_defining_a_list_of_their_first
+        "types.unknown_associated_type"
+        ~says:
+          "`Second` is defined from itself, or from an associated type that this `impl` defines \
+           after it."
+        ~at:("Second", 3);
+      expect_one_diagnostic
+        "trait Get {\n  type Value\n}\n\nimpl Get for Int64 {\n  type Value = Self.Value\n}\n"
+        "types.unknown_associated_type" ~says:"`Value` is defined from itself");
+  Harness.test "an impl gives no associated type that its trait does not declare" (fun () ->
+      expect_one_diagnostic "trait Measure {}\n\nimpl Measure for Int64 {\n  type Unit = Int64\n}\n"
+        "types.extra_member" ~says:"`Measure` declares no associated type `Unit`.");
+  Harness.test "an associated type that two traits of a parameter's bounds declare is ambiguous"
+    (fun () ->
+      expect_codes Fixtures.Interface.parts_of_two_traits
+        [ "types.ambiguous_associated"; "types.ambiguous_associated" ]);
+  Harness.test "an associated type of two instances of one trait is ambiguous" (fun () ->
+      expect_one_diagnostic "fn take[Value: Add[Int64] + Add[UInt64]](output: Value.Output) {}\n"
+        "types.ambiguous_associated" ~says:"`Add[Int64]`, `Add[UInt64]`");
+  Harness.test "an associated type of `Self` that two required traits declare is ambiguous"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Interface.part_of_self_in_a_trait_of_two_parts
+        "types.ambiguous_associated"
+        ~says:"More than one trait gives `Self` an associated type `Part`: `First`, `Second`.");
+  Harness.test "an associated capability set that two bounds declare is ambiguous" (fun () ->
+      expect_one_diagnostic
+        "trait Logged {\n\
+        \  capability Uses\n\
+         }\n\n\
+         fn drain[Source: Cursor + Logged](source: mut Source)\n\
+        \  uses Source.Uses\n\
+         {}\n"
+        "types.ambiguous_associated" ~says:"an associated capability set `Uses`");
+  Harness.test "a required trait's argument may be the trait's associated type" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.holders_requiring_a_getter_of_their_item
+        "types.missing_required_impl"
+        ~says:"`Holder` requires `Getter[Int64]`, which `Flag` does not implement.");
+  Harness.test "a required trait's constraint may name the trait's associated type" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.keyed_cursors_of_numbers_and_flags
+        "types.missing_required_impl"
+        ~says:"`Keyed` requires `Cursor[Element = Int64]`, which `Flags` does not implement.");
+  Harness.test "an associated type's bound may take another associated type as an argument"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Interface.sources_with_sinks_taking_their_items
+        "types.unsatisfied_bound"
+        ~says:"`Source` declares `type Sink: Taker[Bool]`, and `Box` is not one.");
+  Harness.test "an associated type's bound may fix the bound's associated type" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.sources_with_items_ending_in_their_item
+        "types.unsatisfied_bound"
+        ~says:"`Source` declares `type Items: Ends[Element = Int64]`, and `Flags` is not one.");
+  Harness.test "an impl's associated type may be its parameter's, where that meets the bound"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Interface.wholes_of_bounded_and_unbounded_pieces
+        "types.unsatisfied_bound"
+        ~says:"`Whole` declares `type Piece: Base`, and `Inner.Piece` is not one.");
+  Harness.test "a generic impl needs its required trait's impl under its own conditions" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.complete_impl_without_the_conditions_of_partial
+        "types.missing_required_impl"
+        ~says:"`Complete` requires `Partial`, which `Wrapper[Item]` does not implement.");
+  Harness.test "a definition may name a type whose bound needs the definition" (fun () ->
+      List.iter
+        (fun text -> expect_no_diagnostics [ ("app.main", text) ])
+        [
+          Fixtures.Interface.chromosome_bounding_its_parameter_by_itself;
+          Fixtures.Interface.chromosome_requiring_a_getter_of_its_holder;
+          Fixtures.Interface.receipt_of_a_complete_task;
+        ]);
+  Harness.test "an impl's method takes `self` exactly where its trait's method does" (fun () ->
+      expect_codes
+        "trait Make {\n\
+        \  fn make() -> Self\n\
+         }\n\n\
+         type Point(x: Int64)\n\n\
+         impl Make for Point {\n\
+        \  fn make(self) -> Point { todo }\n\
+         }\n"
+        [ "types.missing_member"; "types.extra_member" ]);
+  Harness.test "a type is not a bound or the trait of an impl" (fun () ->
+      expect_one_diagnostic "fn f[Value: Int64](value: Value) {}\n" "types.not_a_trait"
+        ~says:"`Int64` is not a trait.";
+      expect_one_diagnostic "type Point(x: Int64)\n\nimpl Int64 for Point {}\n" "types.not_a_trait"
+        ~says:"`Int64` is not a trait.");
+  Harness.test "an impl's head names every generic parameter of its type" (fun () ->
+      expect_one_diagnostic
+        "trait Measure {}\n\ntype Holder[Value](value: Value)\n\nimpl Measure for Holder {}\n"
+        "types.arity" ~says:"`Holder` takes 1 generic parameter, and this head names 0.");
+  Harness.test "a type takes no constraint among its arguments" (fun () ->
+      expect_one_diagnostic "fn read(items: List[Element = Int64]) {}\n" "types.arity"
+        ~says:"not among type arguments.");
   Harness.test "a trait whose header did not parse satisfies every bound that names it" (fun () ->
       let packages = Support.setup [ ("app.main", Fixtures.Interface.bound_on_a_broken_trait) ] in
       match

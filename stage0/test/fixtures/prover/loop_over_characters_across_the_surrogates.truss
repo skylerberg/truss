@@ -1,0 +1,11 @@
+fn count_across() -> UInt64
+  ensures result == 2
+{
+  var count: UInt64 = 0
+  for _ in Character"\u{D7FF}"..=Character"\u{E000}"
+    invariant count == visited.length()
+  {
+    count = count + 1
+  }
+  count
+}

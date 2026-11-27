@@ -23,3 +23,8 @@ let () =
     "a missing field of a variant or a record takes its default when deserialized" (fun () ->
       Codegen_support.expect_output Fixtures.Feature.defaulted_fields_deserialize
         "test 0 passed\ntest 1 passed\ntest 2 passed\ntest 3 passed\ntest 4 passed\n")
+
+let () =
+  Codegen_support.test "a list inserts and removes an element of zero size" (fun () ->
+      Codegen_support.expect_output Fixtures.Feature.zero_size_elements_inserted_and_removed
+        "test 0 passed\ntest 1 passed\n")

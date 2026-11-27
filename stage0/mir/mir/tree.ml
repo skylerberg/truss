@@ -97,12 +97,6 @@ type rvalue =
   | Value_parameter of Types.parameter
   | Specification of specification
 
-and path_note = Catalog.Prover.path_note =
-  | Arm_taken of Core.origin list
-  | Condition_holds of { condition : Core.origin; holds : bool }
-  | Else_runs of Core.origin
-  | Returns_early of Core.origin
-
 and choice =
   | Conditional of { condition : block; then_ : block; else_ : block }
   | Cases of case list
@@ -111,7 +105,8 @@ and choice =
 and specification =
   | Result
   | Entry of local
-  | Yielded
+  | Visited
+  | Final_result
   | Identical of operand * operand
   | Applied of {
       function_ : Core.specification_function;
@@ -199,7 +194,6 @@ and basic =
     }
   | Loan_end of int list
   | Ghost_assert of { condition : formula; by_bit_vector : bool }
-  | Path_note of path_note
   | Proof of t
   | Evaluated_assert of t
 

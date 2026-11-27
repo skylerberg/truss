@@ -1,0 +1,18 @@
+fn each(items: List[Int64], visit: fn(Int64))
+  cost allocations <= items.length() * allocations(visit)
+{
+  for item in items {
+    visit(item)
+  }
+}
+
+fn twice(items: List[Int64])
+  cost allocations == 0
+{
+  each(items, visit: fn(item) {
+    let _ = item
+  })
+  each(items, visit: fn(item) {
+    let _ = item
+  })
+}

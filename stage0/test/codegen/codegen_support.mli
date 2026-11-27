@@ -3,6 +3,7 @@ val fail : ('a, unit, string, 'b) format4 -> 'a
 val expect_string : expected:String.t -> String.t -> unit
 val expect_int : expected:int -> int -> unit
 val render_records : Backend.Test_report.record list -> string
+val describe_failure : Catalog.Codegen.failure -> string
 val definition : string -> Path.t
 val named : ?arguments:Ground.argument list -> string -> Ground.ty
 val int32 : Ground.ty
@@ -86,11 +87,7 @@ val make_database : Project.package list -> Database.t
 val make_example_package : (Path.file * string) list -> Project.package list
 
 val make_backend :
-  ?results:Backend.results ->
-  ?evaluation_cpu_time_limit_ms:int ->
-  ?profile:Backend.profile ->
-  Database.t ->
-  Backend.t
+  ?evaluation_cpu_time_limit_ms:int -> ?profile:Backend.profile -> Database.t -> Backend.t
 
 val extend_standard_library : (Path.file * string) list -> Database.t
 
@@ -98,18 +95,13 @@ val load_standard_probe :
   ?roots:Lowered.Item.t list -> Path.file -> string -> Database.t * Backend.t
 
 val load_files :
-  ?results:Backend.results ->
   ?roots:Lowered.Item.t list ->
   ?profile:Backend.profile ->
   (Path.file * string) list ->
   Database.t * Backend.t
 
 val load :
-  ?results:Backend.results ->
-  ?roots:Lowered.Item.t list ->
-  ?profile:Backend.profile ->
-  string ->
-  Database.t * Backend.t
+  ?roots:Lowered.Item.t list -> ?profile:Backend.profile -> string -> Database.t * Backend.t
 
 val list_tests_in : Database.t -> Path.module_ -> Path.t list
 val list_tests : Database.t -> Path.t list

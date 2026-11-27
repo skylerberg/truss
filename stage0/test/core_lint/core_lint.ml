@@ -445,6 +445,7 @@ let check_form (interface : Interface.Lookups.t) (source_lookups : Resolve.Names
     | Types.Value (Value_parameter named) -> check_parameter subject named
     | Types.Value (Known _) -> ()
     | Types.Value (Value_variable _) -> report "%s contains a value inference variable" subject
+    | Types.Value (Value_error _) -> report "%s contains a value with an error" subject
   and check_trait subject (reference : Types.trait_reference) =
     List.iter (check_argument subject) reference.trait_arguments;
     List.iter (fun (_, inner) -> check_type subject inner) reference.associated
@@ -803,7 +804,10 @@ let index_written_nodes (definition : Syntax.definition) =
     (match value.kind with
     | Match { arms; _ } ->
         List.iter (fun (arm : Syntax.arm) -> List.iter visit_pattern arm.patterns) arms
-    | Lambda { parameters; _ } -> List.iter visit_pattern parameters
+    | Lambda { parameters; _ } ->
+        List.iter
+          (fun (parameter : Syntax.lambda_parameter) -> visit_pattern parameter.pattern)
+          parameters
     | Is { pattern; _ } | Quantified { binder = Binder_in (pattern, _); _ } -> visit_pattern pattern
     | _ -> ());
     Syntax_walk.visit_expression_parts ~on_expression:visit_expression ~on_statement:visit_statement

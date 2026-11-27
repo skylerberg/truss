@@ -1,11 +1,8 @@
+val merge_outcomes : Obligation.outcome list -> Obligation.outcome
+val find_circular_proof : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome option
+
 val translate_function :
-  ?proof:bool ->
-  ?inherited:State.clauses * Types.substitution ->
-  ?substitution:Types.substitution ->
-  Lookups.t ->
-  State.source ->
-  path:Path.t ->
-  Obligation.outcome
+  ?substitution:Types.substitution -> Lookups.t -> State.source -> path:Path.t -> Obligation.outcome
 
 val translate_laws :
   Lookups.t ->
@@ -29,4 +26,3 @@ val translate_restated_clauses :
 val translate_type : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome
 val translate_constant : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome
 val translate_defaults : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome
-val translate_theorem : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome

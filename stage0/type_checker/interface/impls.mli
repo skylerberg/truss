@@ -5,6 +5,7 @@ val list_impls_of_trait_for_type :
   Lookups.t -> trait:Path.t -> type_:Path.t -> Path.package -> Path.t list
 
 val list_impls_of_trait : Lookups.t -> trait:Path.t -> Path.package -> Path.t list
+val derived_generics : Types.generic list -> Types.trait_reference -> Types.generic list
 val derive_interface : Lookups.t -> type_:Path.t -> trait:Path.t -> Types.impl_interface option
 
 type implementation = {
@@ -45,6 +46,9 @@ val list_no_bounds : bounds
 val list_required_bounds :
   Types.generic list -> Types.substitution -> (Types.ty * Types.trait_reference) list
 
+val list_associated_type_bounds :
+  Lookups.t -> Types.impl_interface -> Types.substitution -> (Types.ty * Types.trait_reference) list
+
 type method_code =
   | Method_of_impl of { impl : Path.t; substitution : Types.substitution }
   | Declaration_for_view
@@ -58,7 +62,12 @@ type obligation =
   | Requires of Types.trait_reference
 
 val list_obligations :
-  Types.trait_interface -> Types.impl_interface -> self:Types.ty -> obligation list
+  Lookups.t ->
+  list_bounds:bounds ->
+  Types.trait_interface ->
+  Types.impl_interface ->
+  self:Types.ty ->
+  obligation list
 
 val find_evidence :
   Lookups.t ->

@@ -306,9 +306,39 @@ let show_operation = function
 let make_operation_path operation =
   Path.Top { module_ = Well_known.intrinsic_module; name = show_operation operation }
 
+let has_contract = function
+  | Buffer
+      ( Storage_empty | Storage_with_capacity | Storage_set_capacity | Storage_shorten
+      | Storage_push | Storage_pop | Storage_insert | Storage_remove | Storage_swap
+      | Storage_from_array | Array_from_storage | Find_byte ) ->
+      true
+  | Buffer
+      ( Compare_bytes | Storage_length | Storage_capacity | Storage_lengthen | Storage_range
+      | Storage_as | Storage_address | Storage_model | Array_model )
+  | Scalar _ | Lend _ | Runtime _ ->
+      false
+
+let may_abort = function
+  | Runtime Crash | Buffer (Storage_with_capacity | Storage_set_capacity | Storage_from_array) ->
+      true
+  | Scalar _ | Lend _ | Buffer _ | Runtime _ -> false
+
+let make_contract_path operation =
+  Path.Top { module_ = Well_known.intrinsic_contracts; name = show_operation operation }
+
 let operations_by_path =
   Path.Map.of_seq
     (List.to_seq
        (List.map (fun operation -> (make_operation_path operation, operation)) operations))
 
 let find_operation path = Path.Map.find_opt path operations_by_path
+
+let contract_operations_by_path =
+  Path.Map.of_seq
+    (List.to_seq
+       (List.filter_map
+          (fun operation ->
+            if has_contract operation then Some (make_contract_path operation, operation) else None)
+          operations))
+
+let find_contract_operation path = Path.Map.find_opt path contract_operations_by_path

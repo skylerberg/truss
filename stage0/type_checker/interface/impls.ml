@@ -27,6 +27,14 @@ let list_impls_of_trait_for_type lookups ~trait ~type_ package =
 let list_impls_of_trait (lookups : Lookups.t) ~trait package =
   List.sort_uniq Path.compare (lookups.names.list_impls_of_trait package trait)
 
+let derived_generics (generics : Types.generic list) (trait_reference : Types.trait_reference) =
+  List.map
+    (fun (generic : Types.generic) ->
+      match generic.kind with
+      | Type_generic bounds -> { generic with kind = Type_generic (bounds @ [ trait_reference ]) }
+      | Value_generic -> generic)
+    generics
+
 let derive_interface lookups ~type_ ~trait =
   match
     (Definition.find_type_interface lookups type_, Definition.find_trait_interface lookups trait)
@@ -35,15 +43,7 @@ let derive_interface lookups ~type_ ~trait =
       let trait_reference : Types.trait_reference =
         { trait; trait_arguments = []; associated = [] }
       in
-      let impl_generics =
-        List.map
-          (fun (generic : Types.generic) ->
-            match generic.kind with
-            | Type_generic bounds ->
-                { generic with kind = Type_generic (bounds @ [ trait_reference ]) }
-            | Value_generic -> generic)
-          type_interface.type_generics
-      in
+      let impl_generics = derived_generics type_interface.type_generics trait_reference in
       let for_type =
         Types.Named
           { path = type_; arguments = Types.list_generic_arguments type_interface.type_generics }
@@ -113,7 +113,7 @@ let find_implemented_method lookups (path : Path.t) =
       None
 
 let is_open_value = function
-  | Types.Value_variable _ -> true
+  | Types.Value_variable _ | Value_error _ -> true
   | Types.Known _ | Value_parameter _ -> false
 
 let rec match_type ~variables (substitution : Types.substitution) pattern type_ =
@@ -148,9 +148,8 @@ and match_arguments ~variables substitution patterns arguments =
                 match Types.find_argument parameter substitution with
                 | Some (Types.Value bound) -> if bound = value then Some substitution else None
                 | _ -> Some (Types.bind_argument parameter (Types.Value value) substitution))
-            | Types.Value left, Types.Value right -> (
-                if left = right then Some substitution
-                else match right with Types.Value_variable _ -> Some substitution | _ -> None)
+            | Types.Value left, Types.Value right ->
+                if left = right || is_open_value right then Some substitution else None
             | _ -> None))
       (Some substitution) patterns arguments
 
@@ -169,6 +168,27 @@ let list_required_bounds (generics : Types.generic list) (substitution : Types.s
             generic_bounds
       | _ -> [])
     generics
+
+let list_associated_type_bounds lookups (impl : Types.impl_interface)
+    (substitution : Types.substitution) =
+  match Definition.find_trait_interface lookups impl.implements.trait with
+  | None -> []
+  | Some trait ->
+      let implements = Types.substitute_trait substitution impl.implements in
+      let of_trait =
+        Types.make_trait_substitution trait.trait_generics
+          ~self:(Types.substitute substitution impl.for_type)
+          implements
+      in
+      List.concat_map
+        (fun (associated : Types.associated_type) ->
+          match List.assoc_opt associated.associated_name implements.associated with
+          | Some chosen ->
+              List.map
+                (fun bound -> (chosen, Types.substitute_trait of_trait bound))
+                associated.associated_bounds
+          | None -> [])
+        trait.associated_types
 
 let list_impl_bounds lookups (impl : Types.impl_interface) ~(list_bounds : bounds) : bounds =
   Properties.Bounds.override list_bounds
@@ -293,28 +313,6 @@ type obligation =
   | Bounds_associated_type of { name : string; chosen : Types.ty; bound : Types.trait_reference }
   | Requires of Types.trait_reference
 
-let list_obligations (trait : Types.trait_interface) (impl : Types.impl_interface) ~self =
-  let substitution = Types.make_trait_substitution trait.trait_generics ~self impl.implements in
-  List.map (fun declared -> Provides declared) trait.methods
-  @ List.concat_map
-      (fun (associated : Types.associated_type) ->
-        match List.assoc_opt associated.associated_name impl.implements.associated with
-        | None -> []
-        | Some chosen ->
-            List.map
-              (fun bound ->
-                Bounds_associated_type
-                  {
-                    name = associated.associated_name;
-                    chosen;
-                    bound = Types.substitute_trait substitution bound;
-                  })
-              associated.associated_bounds)
-      trait.associated_types
-  @ List.map
-      (fun required -> Requires (Types.substitute_trait substitution required))
-      trait.requires
-
 let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_conditions = true)
     (type_ : Types.ty) (wanted : Types.trait_reference) : solution option =
   let broken_trait =
@@ -384,6 +382,28 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
                 else None)
               (list_matching_impls lookups type_ wanted))
 
+and list_obligations lookups ~list_bounds (trait : Types.trait_interface)
+    (impl : Types.impl_interface) ~self =
+  let substitution = Types.make_trait_substitution trait.trait_generics ~self impl.implements in
+  let instantiate bound =
+    Types.map_trait
+      (normalize_in_impl lookups ~list_bounds impl)
+      (Types.substitute_trait substitution bound)
+  in
+  List.map (fun declared -> Provides declared) trait.methods
+  @ List.concat_map
+      (fun (associated : Types.associated_type) ->
+        match List.assoc_opt associated.associated_name impl.implements.associated with
+        | None -> []
+        | Some chosen ->
+            List.map
+              (fun bound ->
+                Bounds_associated_type
+                  { name = associated.associated_name; chosen; bound = instantiate bound })
+              associated.associated_bounds)
+      trait.associated_types
+  @ List.map (fun required -> Requires (instantiate required)) trait.requires
+
 and derives_impl_for_view lookups ~list_bounds ~depth ~checks_conditions ~(view : Types.ty)
     (impl : Path.t) impl_substitution =
   match Definition.find_impl_interface lookups impl with
@@ -404,7 +424,8 @@ and derives_impl_for_view lookups ~list_bounds ~depth ~checks_conditions ~(view 
                   || forwards_to_viewed_method lookups trait viewed_impl declared
               | Bounds_associated_type { chosen; bound; _ } -> implements chosen bound
               | Requires required -> implements view required)
-            (list_obligations trait viewed_impl ~self:(Types.make_view viewed_impl.for_type))
+            (list_obligations lookups ~list_bounds trait viewed_impl
+               ~self:(Types.make_view viewed_impl.for_type))
       | Some _ | None -> false)
 
 and forwards_to_viewed_method lookups (trait : Types.trait_interface)
@@ -461,9 +482,7 @@ and list_matching_bounds lookups ~list_bounds (type_ : Types.ty) (wanted : Types
            match (wanted, actual) with
            | Types.Type wanted, Types.Type actual ->
                Types.is_open_type wanted || Types.is_open_type actual
-               || Types.equal
-                    (normalize lookups ~list_bounds wanted)
-                    (normalize lookups ~list_bounds actual)
+               || Types.equal (normalize lookups ~list_bounds wanted) actual
            | Types.Value wanted, Types.Value actual ->
                is_open_value wanted || is_open_value actual || wanted = actual
            | _ -> false)
@@ -471,11 +490,22 @@ and list_matching_bounds lookups ~list_bounds (type_ : Types.ty) (wanted : Types
   in
   List.filter
     (fun (bound : Types.trait_reference) ->
-      Path.equal bound.trait wanted.trait
-      && arguments_match bound.trait_arguments
+      arguments_match bound.trait_arguments
       && has_matching_associated_types lookups ~list_bounds wanted ~base:(Some type_)
            bound.associated)
-    (Properties.list_known_bounds lookups ~list_bounds type_)
+    (List.filter_map
+       (fun (bound : Types.trait_reference) ->
+         if Path.equal bound.trait wanted.trait then
+           Some
+             {
+               bound with
+               trait_arguments =
+                 List.map
+                   (Types.map_argument (normalize lookups ~list_bounds))
+                   bound.trait_arguments;
+             }
+         else None)
+       (Properties.list_known_bounds lookups ~list_bounds type_))
 
 and has_matching_associated_types lookups ~list_bounds (wanted : Types.trait_reference) ~base fixed
     =
@@ -734,9 +764,9 @@ and make_expected_signature lookups ?written (implemented : implemented_method) 
   match written with
   | Some written ->
       {
-        expected with
-        receiver =
-          (if implementation.trait.is_capability then written.receiver else expected.receiver);
+        (if implementation.trait.is_capability then Types.add_receiver expected written.receiver
+         else expected)
+        with
         parameters =
           List.map
             (fun (parameter : Types.parameter_info) -> { parameter with has_default = false })

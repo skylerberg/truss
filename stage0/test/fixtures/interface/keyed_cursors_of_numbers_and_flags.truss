@@ -1,0 +1,25 @@
+trait Keyed: Cursor[Element = Self.Key] {
+  type Key
+}
+
+type Numbers(count: Int64)
+
+impl Cursor for Numbers {
+  type Element = Int64
+  fn next(mut self) -> Option[Int64] { todo }
+}
+
+impl Keyed for Numbers {
+  type Key = Int64
+}
+
+type Flags(count: Int64)
+
+impl Cursor for Flags {
+  type Element = Bool
+  fn next(mut self) -> Option[Bool] { todo }
+}
+
+impl Keyed for Flags {
+  type Key = Int64
+}

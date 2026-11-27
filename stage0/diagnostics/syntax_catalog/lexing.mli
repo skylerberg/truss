@@ -110,6 +110,7 @@ type action =
   | Replace_semicolon
   | Remove_semicolon
   | Delete_characters of { is_plural : bool }
+  | Delete_comment
   | Replace_with_escapes of int list
   | Write_interpolation
   | Write_ordinary_string

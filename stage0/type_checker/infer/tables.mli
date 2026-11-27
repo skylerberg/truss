@@ -1,14 +1,16 @@
 type local = Syntax.id
 
+type trait_method = {
+  trait : Types.trait_reference;
+  name : string;
+  receiver : Path.receiver;
+  self_type : Types.ty;
+  instantiation : Types.instantiation;
+}
+
 type callee =
   | Function of { path : Path.t; instantiation : Types.instantiation }
-  | Trait_method of {
-      trait : Types.trait_reference;
-      name : string;
-      receiver : Path.receiver;
-      self_type : Types.ty;
-      instantiation : Types.instantiation;
-    }
+  | Trait_method of trait_method
   | Capability_method of { capability : Path.t; name : string }
   | Constructor of { type_ : Path.t; variant : string option; type_arguments : Types.argument list }
   | Indirect
@@ -31,6 +33,7 @@ type call = {
 type resolution =
   | Local_value of local
   | Global of { path : Path.t; instantiation : Types.instantiation }
+  | Trait_method_value of trait_method
   | Field_access of { type_ : Types.ty; field : string }
   | Variant_value of { type_ : Types.ty; variant : string }
   | Type_name of Types.ty
@@ -81,7 +84,7 @@ type conversion =
 type specification_call =
   | Old
   | Identical
-  | Final of { part : Types.ty }
+  | Final
   | Specification_function of Core.specification_function
   | Method_cost of {
       metric : Language.Metric.t;

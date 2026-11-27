@@ -115,7 +115,8 @@ and kind =
   | Old of expression
   | Current_target
   | Quantified of { quantifier : Language.Quantifier.t; binder : binder; body : expression }
-  | Yielded
+  | Visited
+  | Final_result
   | Identical of expression * expression
   | Specification_function of { function_ : specification_function; arguments : expression list }
   | Method_cost of { metric : Language.Metric.t; method_ : operand target }

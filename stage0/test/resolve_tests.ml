@@ -163,6 +163,27 @@ let () =
         ~says:"a type of this module" "resolve.shadowed_name");
   Harness.test "a generic parameter cannot shadow a prelude type" (fun () ->
       expect_one_diagnostic "fn f[Option](value: Option) {}\n" "resolve.shadowed_name");
+  Harness.test "a trait cannot take the name of a prelude trait" (fun () ->
+      expect_one_diagnostic "trait Equal {}\n" "resolve.shadowed_name");
+  Harness.test "a trait declares each method once in each mode" (fun () ->
+      expect_one_diagnostic
+        "trait Measure {\n  fn size(self) -> Int64\n  fn size(self) -> Int64\n}\n"
+        "resolve.duplicate_definition");
+  Harness.test "an impl writes each method once" (fun () ->
+      expect_one_diagnostic
+        "trait Measure {\n\
+        \  fn size(self) -> Int64\n\
+         }\n\n\
+         type Point(x: Int64)\n\n\
+         impl Measure for Point {\n\
+        \  fn size(self) -> Int64 { 1 }\n\
+        \  fn size(self) -> Int64 { 2 }\n\
+         }\n"
+        "resolve.duplicate_definition");
+  Harness.test "an associated type is named through a generic parameter, not through a trait"
+    (fun () ->
+      expect_one_diagnostic "trait Get {\n  type Value\n}\n\nfn read(value: Get.Value) {}\n"
+        "resolve.not_a_generic_parameter");
   Harness.test "locals in sibling blocks may share a name" (fun () ->
       expect_no_diagnostics [ ("app.main", Fixtures.Resolve.lets_of_one_name_in_sibling_blocks) ])
 
@@ -367,6 +388,9 @@ let () =
   Harness.test "a quantifier's binding named result shadows the return value in ensures" (fun () ->
       expect_binding_reference Fixtures.Resolve.ensures_binding_result_in_a_quantifier
         ~use:("result", 2) ~binding:("result", 1));
+  Harness.test "a loop's cost clause does not name the return value" (fun () ->
+      expect_one_diagnostic Fixtures.Resolve.loop_cost_naming_result "resolve.unknown_name"
+        ~at:("result", 1));
   Harness.test "a function type's requires in an ensures does not name the return value" (fun () ->
       expect_one_diagnostic Fixtures.Resolve.function_type_requires_naming_result_in_an_ensures
         "resolve.unknown_name" ~at:("result", 1));

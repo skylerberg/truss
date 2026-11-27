@@ -1,0 +1,16 @@
+fn never() -> UInt64
+  ensures result == 5
+  ensures result == 6
+{
+  let long = "ab".repeated(9223372036854775807)
+  long.length()
+}
+
+fn exploit(other: UInt64) -> UInt64
+  ensures result == other
+{
+  proof {
+    assert never() == 5 && other == 7
+  }
+  7
+}

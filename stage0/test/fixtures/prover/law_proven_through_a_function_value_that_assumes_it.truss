@@ -1,0 +1,34 @@
+trait Size {
+  fn size(self) -> Int64
+    cost allocations == 0
+
+  law at_least_one(value: Self) {
+    value.size() >= 1
+  }
+}
+
+type Leaf(x: Int64)
+
+impl Size for Leaf {
+  fn size(self) -> Int64 {
+    0
+  }
+}
+
+fn measure[Item: Size](item: Item) -> Int64
+  ensures result >= 1
+  ensures result == item.size()
+  cost allocations == 0
+{
+  item.size()
+}
+
+fn apply(read: (fn(item: Leaf) -> Int64 ensures result >= 1 ensures result == item.size() cost allocations == 0), item: Leaf) -> Int64
+  ensures item.size() >= 1
+{
+  read(item)
+}
+
+proof Size.at_least_one for Leaf {
+  let _ = apply(measure[Leaf], item: value)
+}

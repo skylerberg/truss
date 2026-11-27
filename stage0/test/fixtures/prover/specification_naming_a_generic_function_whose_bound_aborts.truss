@@ -1,0 +1,43 @@
+trait Render {
+  fn count(self) -> UInt64
+
+  fn text(self) -> String
+    ensures result.length() == self.count()
+}
+
+type Big(size: UInt64)
+
+impl Render for Big {
+  fn count(self) -> UInt64
+    ensures result == self.size
+  {
+    self.size
+  }
+
+  fn text(self) -> String
+    ensures result.length() == self.count()
+  {
+    "a".repeated(self.size)
+  }
+}
+
+fn rendered_length[Item: Render](item: Item) -> UInt64
+  ensures result <= 9223372036854775807
+  ensures result == item.count()
+{
+  item.text().length()
+}
+
+fn at_an_impl(big: Big) -> UInt64 {
+  proof {
+    assert rendered_length(big) == big.size
+  }
+  big.size
+}
+
+fn at_a_bound[Item: Render](item: Item) -> UInt64 {
+  proof {
+    assert rendered_length(item) == item.count()
+  }
+  item.count()
+}

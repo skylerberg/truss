@@ -1,0 +1,38 @@
+trait Render {
+  fn count(self) -> UInt64
+
+  fn text(self) -> String
+    ensures result.length() == self.count()
+}
+
+type Big(size: UInt64)
+
+impl Render for Big {
+  fn count(self) -> UInt64
+    ensures result == self.size
+  {
+    self.size
+  }
+
+  fn text(self) -> String
+    ensures result.length() == self.count()
+  {
+    "a".repeated(self.size)
+  }
+}
+
+fn bounded[Item: Render](item: Item) -> UInt64
+  ensures result <= 9223372036854775807
+  ensures result == item.count()
+{
+  proof {
+    assert item.text().length() == item.count()
+  }
+  item.count()
+}
+
+fn exploit() -> UInt64
+  ensures result <= 9223372036854775807
+{
+  bounded(Big(size: 18446744073709551615))
+}

@@ -57,17 +57,6 @@ let list_terminators (body : Mir.Graph.body) =
     (Array.to_list body.blocks)
 
 let () =
-  Harness.test "a `?` notes its early return and none of its arms" (fun () ->
-      let mir = lower_graph Fixtures.Mir.try_returning_early in
-      let notes =
-        List.filter_map
-          (fun (statement : Mir.Graph.statement) ->
-            match statement.kind with Basic (Path_note note) -> Some note | _ -> None)
-          (list_statements mir.body)
-      in
-      match notes with
-      | [ Returns_early (Desugared { desugaring = Try; _ }) ] -> ()
-      | notes -> Harness.fail "%d path notes" (List.length notes));
   Harness.test "an assignment evaluates its value, then its target" (fun () ->
       let mir = lower_graph Fixtures.Mir.indexed_assignments_with_calls_on_both_sides in
       let order =
@@ -396,7 +385,8 @@ let () =
               walk_successors basic.statements
           in
           walk [] failed);
-  Harness.test "a functional body's one jump is its return, and its graph branches" (fun () ->
+  Harness.test "a body's final `if` returns its value in each branch, and its graph branches"
+    (fun () ->
       let built, graph = lower_tree_and_graph Fixtures.Mir.if_else_on_two_comparisons in
       let chosen = ref 0 and jumps = ref [] in
       Mir.iter_code
@@ -406,9 +396,9 @@ let () =
           | Jump jump -> jumps := jump :: !jumps
           | _ -> ())
         built;
-      if !chosen = 0 then Harness.fail "the body holds no value that chooses between blocks";
+      if !chosen = 0 then Harness.fail "the body holds no choice between blocks";
       (match !jumps with
-      | [ Return (Some _) ] -> ()
+      | [ Return (Some _); Return (Some _) ] -> ()
       | jumps -> Harness.fail "the body holds %d jumps" (List.length jumps));
       if
         not
@@ -701,15 +691,7 @@ let () =
           (match list_choices chosen.clause with
           | [ Conditional { then_; else_; _ } ] ->
               if not (computes_a_comparison then_ && computes_a_comparison else_) then
-                Harness.fail "a case of the `if` is not computed in its block";
-              let starts_with_note (block : Mir.block) holds =
-                match block.statements with
-                | { kind = Basic (Path_note (Condition_holds { holds = noted; _ })); _ } :: _ ->
-                    noted = holds
-                | _ -> false
-              in
-              if not (starts_with_note then_ true && starts_with_note else_ false) then
-                Harness.fail "the cases of a written `if` do not start with its path notes"
+                Harness.fail "a case of the `if` is not computed in its block"
           | values -> Harness.fail "the clause with an `if` holds %d values" (List.length values));
           if quantified.clause.lambdas <> [||] then
             Harness.fail "the quantifier's body is a body of its own";
@@ -901,7 +883,14 @@ let () =
       let body, moves =
         analyse_moves
           (moves_program
-         ^ "fn g(moved: Bool) {\n  let kept = text()\n  if moved {\n    take(own kept)\n  }\n}\n")
+         ^ "fn g(moved: Bool) {\n\
+           \  let kept = text()\n\
+           \  if moved {\n\
+           \    take(own kept)\n\
+           \  }\n\
+           \  let last = text()\n\
+           \  take(own last)\n\
+            }\n")
       in
       let path : Moves.path = { local = locate_named body "kept"; projections = [] } in
       Harness.expect_string ~expected:"maybe"
@@ -1030,28 +1019,29 @@ let () =
     (fun () -> expect_edges "doubled" ~expected:[ "app.main.limit"; "app.main.pass_limit" ]);
   Harness.test "a dependency records what reads the constant and through which field default"
     (fun () ->
+      let build_window = Support.make_top_path "app.main" "build_window" in
       let { Mir.form = code; _ } =
-        Option.get
-          (Mir.read_code (Lazy.force lookups).mir (Support.make_top_path "app.main" "build_window"))
+        Option.get (Mir.read_code (Lazy.force lookups).mir build_window)
       in
       match
         List.filter
           (fun (dependency : Mir.Call_edges.dependency) -> dependency.kind = Read)
-          (Mir.Call_edges.list_dependencies (Lazy.force lookups) Types.no_substitution code)
+          (Mir.Call_edges.list_dependencies (Lazy.force lookups)
+             ~home:(Path.locate_package build_window)
+             Types.no_substitution code)
       with
       | [ { path; default = Some (Default { name = "size"; _ }); _ } ] ->
           expect_paths ~expected:[ "app.main.limit" ] [ path ]
       | dependencies -> Harness.fail "%d reads" (List.length dependencies));
   Harness.test "a dependency records what reads the constant and through which parameter default"
     (fun () ->
-      let { Mir.form = code; _ } =
-        Option.get
-          (Mir.read_code (Lazy.force lookups).mir (Support.make_top_path "app.main" "pick_size"))
-      in
+      let pick_size = Support.make_top_path "app.main" "pick_size" in
+      let { Mir.form = code; _ } = Option.get (Mir.read_code (Lazy.force lookups).mir pick_size) in
       match
         List.filter
           (fun (dependency : Mir.Call_edges.dependency) -> dependency.kind = Read)
-          (Mir.Call_edges.list_dependencies (Lazy.force lookups) Types.no_substitution code)
+          (Mir.Call_edges.list_dependencies (Lazy.force lookups)
+             ~home:(Path.locate_package pick_size) Types.no_substitution code)
       with
       | [ { path; default = Some (Default { name = "size"; _ }); _ } ] ->
           expect_paths ~expected:[ "app.main.limit" ] [ path ]

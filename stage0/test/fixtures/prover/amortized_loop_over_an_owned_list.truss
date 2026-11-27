@@ -1,0 +1,11 @@
+fn largest_owned(values: own List[Int64]) -> Int64
+  cost amortized time O(values.length())
+{
+  var largest: Int64 = 0
+  for value in own values {
+    if value > largest {
+      largest = value
+    }
+  }
+  largest
+}

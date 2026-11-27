@@ -13,6 +13,8 @@ let read_message text =
   | actual -> failwith (Printf.sprintf "%d diagnostics" (List.length actual))
 
 let () =
+  Harness.test "two ranges of characters around the surrogates cover every character" (fun () ->
+      expect_fine Fixtures.Patterns.character_ranges_around_the_surrogates);
   Harness.test "a missing case is named" (fun () ->
       let text = priority ^ Fixtures.Patterns.option_match_missing_urgent in
       let actual = read_message text in

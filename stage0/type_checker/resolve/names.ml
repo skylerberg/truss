@@ -208,8 +208,8 @@ module Scope = struct
     | Found_module of { module_ : Path.module_; imported : Path.module_ option }
     | Restricted_module
     | Ambiguous_module of Path.module_ * Path.module_
-    | No_module of string
-    | No_package of string
+    | No_module
+    | No_package
 
   let lookup_module lookups ~visible_packages ~(from : Path.module_) ~imports first rest =
     let imported = List.assoc_opt first imports in
@@ -230,9 +230,8 @@ module Scope = struct
     | _ when exists package ->
         if is_restricted_module ~from package then Restricted_module
         else Found_module { module_ = package; imported = None }
-    | None when not (List.mem package.package visible_packages) ->
-        No_package (String.concat "." (first :: rest))
-    | _ -> No_module (String.concat "." (first :: rest))
+    | None when not (List.mem package.package visible_packages) -> No_package
+    | _ -> No_module
 
   let make_top_path module_ name : Path.t = Top { module_; name }
 

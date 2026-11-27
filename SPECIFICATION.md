@@ -510,6 +510,13 @@ bound             = path_type { "+" path_type } ;
 - A generic function cannot call itself, or a function in a cycle with it,
   with a type argument built from its own type parameters, and a generic
   type cannot contain itself with other arguments.
+- **A type's or a trait's arguments meet the bounds of its parameters**
+  wherever it is written, the head of an `impl` or of a method included.
+  Where `type Sorted[Element: Ordered]`, the head
+  `impl Display for Sorted[Element]` is an error, and is written
+  `impl Display for Sorted[Element: Ordered]`. Where
+  `trait Getter[Value: Display]`, `impl Getter[Point] for Box` needs
+  `Point: Display`.
 
 ### Invariants
 
@@ -542,8 +549,12 @@ public type Interval =
   holder ends: a `var` at the end of its scope, and a `mut` parameter or
   `mut self` when the function returns. A `with` is checked after all of
   its updates. An element of a `List` or an `Array` meets it
-  when a write to a part of the element ends, as in `spans[0].low = 1` or
-  `bump(mut spans[0].low)`, since the next read of the element assumes it.
+  when a write to the element or to a part of it ends, as in
+  `spans[0].low = 1` or `bump(mut spans[0].low)`, since the next read of
+  the element assumes it. A write that a call makes ends when the call
+  returns, so the call's `ensures` are known: the element meets its
+  invariant after `bump` where `bump` ensures enough, and after a step on
+  the element, `mut spans[0].widen()`, where the step restores it.
 - An invariant clause that calls a definition private to its type's
   module is known only in that module. Another module assumes the clause of
   every value of the type and proves it only of a value it was given or a
@@ -551,11 +562,15 @@ public type Interval =
   the clause must hold.
 - A private method that takes `mut self` is a step of an update: the
   invariant of its `self` is neither assumed when it is called nor required
-  when it returns. A method written in a trait, a capability, or an `impl`
-  is never one: a caller that reaches it through the trait assumes that
+  when it returns. The invariants of its fields' types are both: a step
+  assumes that a `String` field holds UTF-8, and leaves it holding UTF-8.
+  A method written in a trait, a capability, or an `impl` is never one: a caller that reaches it through the trait assumes that
   `self` meets its invariant when the call returns, and would otherwise
-  observe a broken value. A step states its precondition and postcondition
-  with `requires` and `ensures`:
+  observe a broken value. For the same reason a step is not a function
+  value: `apply(mut span, Span.narrow)` is an error, and
+  `apply(mut span, fn(narrowed) { mut narrowed.narrow() })` is accepted
+  where the lambda leaves `narrowed` meeting its invariant. A step states
+  its precondition and postcondition with `requires` and `ensures`:
 
   ```truss
   fn SortedList[Element: Ordered].sift_into_place(mut self, index: UInt64)
@@ -632,7 +647,9 @@ fn Option[Value].take(mut self) -> Option[Value] {
 
 - **`Plain` types copy implicitly.** A type made only of fixed-size data with
   nothing on the heap, such as the integers, floats, `Bool`, `Character`,
-  and records, sum types, and `Array`s built only from those, is `Plain`.
+  and records, sum types, and `Array`s built only from those, is `Plain`. A
+  type that declares a `cost potential` is not (see
+  [Amortized costs](#amortized-costs)).
 - **A name bound to a `Plain` value is a copy.** A `let`, or a pattern of a
   `match` or an `is`, that binds a `Plain` value without `mut` copies it, so
   the place it was bound from can be assigned while the name is live. A
@@ -690,6 +707,26 @@ var longest: view String = words[0]
   annotated binding, an assignment, and a returned value. An `Array` converts
   to the `List` of its elements where a read-only or `mut` `List` or a
   view of one is expected.
+- **A place given where a type parameter is undecided is viewed.** In
+  `let found = Some(names[0])`, nothing but the argument decides the type
+  parameter of `Option`. The argument is a place of a `String`, written
+  without `own`, so the type argument is `view String` and `found` is an
+  `Option[view String]`.
+  - The rule covers an `own` parameter of a generic function, a field of a
+    constructed value, an element of a list literal, and a key or a value of
+    a map literal.
+  - The place is of a `List` or a `String`. It may be a constant or a part
+    that a method lends read-only.
+  - `Some(own name)` moves `name`, and `Some(names[0].copy())` copies the
+    element. Each is an `Option[String]`.
+  - A place is viewed only where a view meets every bound of the type
+    parameter. Given to a `Value: Storable`, the place is an owned value
+    that cannot be moved.
+  - Arguments decide a type parameter in the order written. After
+    `pick("fig".copy(), second: names[0])` has decided `String`, the element
+    is an owned value that cannot be moved. A declared type, as in
+    `let found: Option[String] = Some(names[0])`, decides before any
+    argument.
 - **A view converts to no owned value.** `copy()` makes a `List` or a
   `String` that owns copies of the viewed elements, and a view where an
   owned value is needed is an error with that fix.
@@ -898,6 +935,7 @@ let connection = connect(host, secure: false)?
 ```truss
 let value = parse[Int64](text)?
 let builder = List[String].with_capacity(64)
+let words = List[view String].with_capacity(64)
 ```
 
 Type arguments that cannot be inferred are written in brackets after the
@@ -907,6 +945,7 @@ function's name.
   type, or a trait, and is an index otherwise. After a `.`, it holds type
   arguments when the name is a method of the receiver.
 - The written arguments give the generic parameters in brackets, in order.
+- A type argument that is a view is written `view T`, as in a declared type.
 - A capability parameter takes no type argument, since it is written at its
   uses and not in brackets: `for_each[String](names, visit: greet)` gives
   `Item` alone.
@@ -1370,12 +1409,48 @@ fn List[Element].push(mut self, item: own Element)
   parts' potentials, and belongs to that value alone; `copy()` pays for the
   new one. A view holds no potential: the potential of the elements that it
   views belongs to their owner, so a `List[view String]` holds only its own.
+- **Potential is owned like the value that holds it.** `own` transfers it.
+  `mut` lends it, and the borrower's bound covers the change. Read-only
+  access, a view's included, changes none.
+- A type that declares a `cost potential`, or holds a value that does, is not
+  `Plain`, since an implicit copy would duplicate its potential. A type
+  parameter bounded by `Plain` holds no potential.
 - `cost amortized time O(f)` promises that the actual cost, plus the change
   in the potential of the values the function mutates or returns, is within
-  `O(f)`. `amortized` works with every resource that takes an `O(...)` bound.
+  `O(f)`. `amortized` takes only an `O(...)` bound, on `time`, `allocations`,
+  or `allocated_bytes`. Potential pays for no calls, and an exact count with
+  `<=` or `==` cannot borrow from it.
 - A function may state a plain and an amortized bound on one resource. A
-  caller with an amortized bound counts the amortized one, and any other
-  caller the plain one.
+  caller counts each call by the bound of its own kind.
+- A caller with an amortized bound counts a callee's amortized bound as
+  stated, and never reads the potential that the callee changes. It counts
+  a callee that states only a plain bound at that bound plus the change in
+  the potential of the values the call mutates, consumes, or returns.
+- A caller with an amortized bound also counts the potential that its own
+  code makes. A value it builds counts its type's potential. A write counts
+  the change in the potential of the values that contain the written place.
+- A decrease in the potential of the values of a type lowers an amortized
+  bound's count only in a function that calls no callee whose amortized
+  bound covers a change in the potential of that type. In a function that
+  calls one, an increase of that type's potential by the function's own
+  code or by a callee with a plain bound still counts, and a decrease does
+  not: the callee's bound paid for the potential it saved in the callee's
+  units, each of which stands for fewer steps than one of the caller's.
+- A caller with a plain bound counts a callee's plain bound. Where the
+  callee states only an amortized bound, the caller counts that bound, and
+  the potential that its calls spend where they spend more than they save.
+  Potential that a call saves offsets potential that a later call spends,
+  and pays for no step of the caller: one unit of a callee's bound stands
+  for many of the callee's steps, and one unit of potential for one. A
+  function that pushes only onto a list it creates empty therefore has a
+  plain bound, since the list starts with no potential to spend.
+- **A capability method's `O(...)` bound counts the change in the potential
+  of its provider,** whether or not it is `amortized`. An `impl` of the
+  capability is checked so, and a caller counts the bound as stated. A plain
+  bound of a function that uses a capability is therefore relative to the
+  potential its provider holds, and the function with the `provide` block
+  counts, in its plain bounds, the potential that the provider held when the
+  block began.
 
 ### Function types
 
@@ -1400,6 +1475,9 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log))
 - **A function type takes only functions whose capabilities its `uses`
   names,** so one without `RunForever` takes only functions that terminate
   (see [Termination](#termination)).
+- A function type's bound is met only by a bound of the same kind: a plain
+  bound does not stand for an amortized one, nor an amortized bound for a
+  plain one.
 - Clauses after a definition's result type belong to the definition.
 - A function type's `requires` and `ensures` are a callback's contract (see
   [Callback contracts](#callback-contracts)).
@@ -1587,6 +1665,14 @@ fn List[Element].zip[Other](self, other: List[Other]) -> Zipped[Element, Other]
 - A method is a function declared as `fn Type.name`. One whose first
   parameter is `self` can be called with a dot, and every method can be
   called through its type's name: `List.length(names)` is `names.length()`.
+- **A method named as a value is the function that calls it,** with `self`
+  as its first input: `Point.size` is `fn(Point) -> Int64`. A trait's
+  method is named through a type that implements the trait, as
+  `Point.size`, through a type parameter that a bound gives the trait, as
+  `Value.size`, or through the trait, as `Measure.size`, whose `Self` the
+  expected type decides. Of overloads by receiver mode, the value is the one
+  whose `self` has the mode of the expected type's first input, and
+  otherwise the first of no `self`, `self`, `mut self`, and `own self`.
 - `self` has the type named before the dot, and is written `self`,
   `mut self`, or `own self`.
 - The type's generic parameters go before the dot, with any bounds the
@@ -1716,11 +1802,20 @@ impl IterableMut for List[Element] {
 }
 ```
 
-- **A clause that mentions `result` holds where the method lends,** where
-  `result` is the lent part, and the caller may rely on it.
-- **Every other clause holds when the lend ends.**
+- **A clause that mentions `result` and not `final(result)` holds where the
+  method lends,** where `result` is the lent part, and the caller may rely
+  on it. A parameter in it has its value where the method lends, so a
+  caller knows a `mut` parameter there only by `old`.
+- **Every other clause holds when the lend ends,** of the value that lent
+  the part, as the end of the lend leaves it. Another `mut` parameter in
+  such a clause has its value where the method lent. The method returned
+  before the lend began, so no clause of it covers a write that the caller
+  made to that parameter during the lend.
 - **`final(result)` is the part as the caller left it,** as `old(value)` is
-  a value when the method was called.
+  a value when the method was called. In a clause that mentions it,
+  `result` is still the part as the method lent it.
+- **The caller leaves a part lent `mut` meeting its invariant,** and the
+  method relies on that when the lend ends.
 
 ### Cursors
 
@@ -2005,18 +2100,30 @@ fn production(config: own Config) -> Config {
 ### Lambdas
 
 ```ebnf
-lambda = "fn" "(" list(pattern) ")" block ;
+lambda           = "fn" "(" list(lambda_parameter) ")" block ;
+lambda_parameter = pattern [ ":" [ mode ] type ] ;
 ```
 
 ```truss
 let passing = scores.filter(fn(score) { score >= threshold })
 mut scores.update_each(fn(score) { score = score / 2 })
+let halve = fn(score: UInt8) { score / 2 }
 ```
 
-- A lambda's parameter types, modes, and result type come from the function
-  type it is passed as. Types are inferred from the outside in, never from
-  the lambda's body. Where nothing gives a lambda a function type, the `let`
-  has a type or the call has type arguments.
+- A lambda's parameter modes and types come from the function type it is
+  passed as. An annotation states them as a function's parameter does, so
+  `score: UInt8` is read-only and `score: mut UInt8` is `mut`. An
+  annotation must state the mode and the type that the function type gives:
+  it never converts the argument.
+- A lambda that nothing passes as a function type takes its parameter modes
+  and types from its annotations: `halve` has the type
+  `fn(UInt8) -> UInt8`.
+- Types are inferred from the outside in, never from the lambda's body.
+  Each parameter's type is decided before the body is checked, by the
+  function type or by the annotation, and a parameter whose type neither
+  decides is an error.
+- A lambda declares no result type. Its result type is the type of its
+  body's value, converted to the function type's result.
 - A lambda captures local variables by view and cannot mutate them. A
   lambda that captures a variable is a view; one that captures none can be
   returned, stored, and moved.
@@ -2112,19 +2219,23 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   a loop over a cursor of type `Items: Cursor` uses
   `RunForever unless Items: FiniteCursor`.
 - In a function without `RunForever`, a `while` loop that states no measure,
-  and whose condition compares two sides that mutate nothing with `<`, `<=`,
-  `>`, or `>=`, has the distance between them as its measure. So does one
-  whose condition is a chain of `&&` that begins with such a comparison, as
-  in `while at < text.length() && text.byte(at) == 32`.
+  and whose condition compares two integers or two characters that mutate
+  nothing with `<`, `<=`, `>`, or `>=`, has the distance between them as its
+  measure. So does one whose condition is a chain of `&&` that begins with
+  such a comparison, as in
+  `while at < text.length() && text.byte(at) == 32`. A comparison of floats
+  gives no measure: the distance between two floats is no integer, and adding
+  to a large float can leave it unchanged.
 - **A loop without a measure uses `RunForever`** (see
   [Termination](#termination)). A `for` loop over a range or over a
   collection's elements always terminates.
 - In the clauses of a loop over a range, the loop variable is the index of
   the next iteration: in `for i in start..end`, `i` is `start` on entry and
   `end` where the loop ends, and `end + 1` after `start..=end`.
-- In the clauses of any other `for` loop, `visited` is the `Sequence` of the
-  values of the iterations before. The clauses cannot name the element. A
-  local named `visited` shadows the word.
+- In the clauses of every `for` loop, `visited` is the `Sequence` of the
+  values of the iterations before, which over a range are their indexes.
+  The clauses of a loop over anything but a range cannot name the element.
+  A local named `visited` shadows the word.
 - In a loop that reads a collection, `visited[i]` is the collection's
   element at position `i`: `items[i]` of a `List` or an `Array`, and
   otherwise the value of the collection's `element` at
@@ -2201,6 +2312,13 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   every empty range equals every other.
 - A range of characters holds the characters between its ends in the order
   of their code points.
+- **A range's `count()` is a `UInt64`.** It is the number of values in the
+  range, except for the one range that holds more than a `UInt64` counts:
+  the range of every value of a 64-bit type, such as
+  `UInt64.minimum..=UInt64.maximum`. Its `count()` is `UInt64.maximum` and
+  its `length()` is `None`. A view of that range by position, such as
+  `reversed()` or `step_by`, gives the right value at every position below
+  the count, and so omits the last value of its own order.
 - A range with no start or no end is allowed only directly in brackets, as in
   `items[2..]`.
 
@@ -2329,7 +2447,7 @@ postfix    = primary { "." LOWER_NAME
 brackets   = bracket_item { "," bracket_item } [ "," ]
            | [ additive ] ".." [ additive ]
            | [ additive ] "..=" additive ;
-bracket_item = expression | UPPER_NAME "=" type ;
+bracket_item = expression | UPPER_NAME "=" type | "view" type ;
 
 primary    = INTEGER | FLOAT | STRING | TAGGED_STRING
            | "true" | "false" | "todo" | "unreachable" | "break" | "continue"
@@ -2696,6 +2814,23 @@ other than `Panic` and `RunForever`. An implementation provided without
   a constant without a name by the same rules.
 - A string literal without `${...}` where a `view String` is expected is a
   view of the constant's bytes, which outlives every function.
+- A `String` holds well-formed UTF-8, and so does a view of one: each
+  character is the shortest encoding of a Unicode scalar value, so no
+  overlong form, no surrogate, and no value above U+10FFFF appears.
+  `standard.text.utf8` defines the property as `utf8.is_valid`. The
+  invariant of `String` states it over the bytes that the string stores. It
+  is proven in the standard package, and other packages read its
+  consequences from contracts: `is_boundary` holds at offset 0, at the end,
+  and after a byte below 128, and the searches return boundaries.
+- An offset into text counts bytes. A boundary is the end of the text or an
+  offset whose byte starts a character, and a view of part of a string
+  starts and ends at boundaries. `substring`, `split_at`, `insert`,
+  `remove_range`, and `truncate` panic at an offset that is not a boundary.
+- Bytes become text through `String.from_utf8`, which fails with the offset
+  of the first ill-formed sequence; through `String.from_utf8_lossy`, which
+  replaces each maximal subpart of an ill-formed sequence with U+FFFD; or
+  through `String.from_valid_utf8`, which requires `utf8.is_valid` of the
+  bytes and checks nothing at run time.
 - There is no concatenation operator: `+` on strings is an error, and
   adjacent literals do not join.
 - A value in `${...}` has a type that implements `Display`.
@@ -2790,6 +2925,8 @@ trait Ordered: Equal {
 
 - A `law` holds for every implementation and every set of values that meets
   its `requires`.
+- A trait declares each associated type, capability set, and law once, and
+  an `impl` defines each associated type and capability set once.
 - A trait's contracts bind every `impl` and are proven for each.
 - **An `impl`'s method has its trait's signature.** It restates that
   signature: the generic parameters with their bounds; the parameters with
@@ -2810,6 +2947,12 @@ trait Ordered: Equal {
   the trait's `Panic unless` must imply the method's. A call known to reach
   that `impl` is proven against the `impl`'s contract, and a call through a
   bound against the trait's.
+- **A trait's clauses hold of a call that meets the trait's `requires`.** A
+  method whose own `requires` allow more arguments is proven to keep the
+  trait's `ensures` and `cost` clauses for the arguments that the trait
+  allows, and its own clauses for every argument that it allows. A call
+  known to reach the `impl` with an argument that only the method allows
+  has the method's own clauses and not the trait's.
 - An `impl`'s method without a `time` clause has its trait's.
 - **Required traits:** a type implements the traits a trait requires before
   it implements the trait, and a bound includes them. A trait can add an
@@ -2879,10 +3022,24 @@ trait IntoCursor {
 
 - A trait's associated type is chosen by each `impl`, with
   `type Key = ...`, which appears only in an `impl`.
+- **An `impl`'s associated type may name one that the `impl` defines
+  before it,** as in `type Items = List[Self.Item]`, and an associated type
+  of a trait that the trait requires. It cannot name itself or one that the
+  `impl` defines after it. An associated capability set follows the same
+  rule.
 - **A bound on an associated type holds for every `impl`.** The type that an
   `impl` chooses for `type Cursor: Cursor` implements `Cursor`, so code
   bounded by `Source: IntoCursor` calls `Cursor`'s methods on
   `Source.Cursor`.
+- **An associated type's name picks one trait.** `Value.Part` and
+  `Self.Part` name the `Part` of the one trait among the bounds, and the
+  traits they require, that declares `Part`. Two traits that declare it,
+  or two instances of one trait such as `Add[Int64]` and `Add[UInt64]`,
+  make the name ambiguous, unless every one of them fixes it to one type,
+  as `FixedWidthInteger` fixes the `Output` of each operator trait it
+  requires to `Self`. A type parameter fixed by one bound names one of
+  them: `[Part, Value: First[Part = Part] + Second]`. The same holds for
+  an associated capability set.
 
 ### Associated capability sets
 
@@ -2951,6 +3108,7 @@ type Priority =
 
 - Every field has the trait, and a derived trait's required traits are
   derived too: `Ordered` and `Hash` need a derived `Equal`.
+- A type derives each trait once.
 - A generic type has a derived trait only where its parameters do.
 - A derived implementation satisfies the trait's laws; a hand-written one
   proves them.
@@ -3113,10 +3271,11 @@ theorem sorted_up_to(items: List[Int64], last: UInt64)
 
 ### Circular proofs
 
-A proof assumes the contract of each function that its definition calls and
-the invariant of each value that the definition uses. A proof that assumes a
-fact whose own proof assumes it back proves nothing: a false postcondition
-can be proven that way.
+A proof assumes the contract of each function that its definition calls, the
+invariant of each value that the definition uses, and the laws of each
+`impl` whose method it calls. A proof that assumes a fact whose own proof
+assumes it back proves nothing: a false postcondition can be proven that
+way.
 
 - The proof of a definition depends on these definitions, and on the
   definitions that their proofs depend on:
@@ -3128,6 +3287,21 @@ can be proven that way.
   | A value of a type of its own package: a parameter, a result, a local, or, for a type, a field | The type |
   | A value of a generic type | Each function that the invariant or the `potential` of the type calls at those type arguments, and the same for the types of its fields. Where a field's type is a generic type that holds the field, with other type arguments, every method of the `impl`s that those type arguments supply to its bounds |
   | An invariant or a `potential`, for a type | Each function that the clause calls and each constant it reads |
+  | A call of a trait's method that an `impl` resolves, in its body, in its contract, or in the laws that it proves | The `impl`, and the `impl` of each trait that the trait requires, for the laws that they prove |
+  | Laws to prove, for an `impl` | Its law proofs |
+
+- A proof assumes the laws of an `impl` only where the proof of those laws
+  does not depend on it. A theorem that a law proof calls is therefore
+  proven without the laws of that `impl`, and so is a method that the laws
+  call.
+- A callee's contract is used whole, with the laws that its own proof
+  assumes. So where the proof of an `impl`'s laws depends on a definition,
+  and that definition calls a generic function at a type whose bound the
+  `impl` satisfies, the call is an error: the laws would be proven from
+  themselves.
+- The proof of an `impl`'s laws, and each of its law proofs, assumes the
+  laws of the traits that its trait requires, and never the laws that the
+  `impl` proves.
 
 - A cycle of these dependencies is an error unless calls alone form it. A
   cycle of calls is a recursion, which a measure shows to end (see
@@ -3140,10 +3314,17 @@ can be proven that way.
   | A contract calls into the cycle, and no invariant does | The call in the contract |
   | A contract that a method takes from its trait calls into the cycle, and the method does not restate that call | The method |
   | The invariant of a generic type, or of the type of one of its fields, calls into the cycle at one instantiation only | The value of that type |
+  | A law proof, or a law that an `impl` proves, calls a method whose laws are proven from that `impl`'s own | The call in the law proof, or the `impl` where the law makes the call |
 
   `fn clamp(n: UInt64) -> UInt64 requires clamp(n) >= 0` is an error at the
   call in its `requires`. A recursive function's `ensures` may call the
-  function, since its body's calls already form that cycle.
+  function, since its body's calls already form that cycle. That call is a
+  recursive call, so its measure is below the function's own on entry:
+  `ensures result == f(n) + 1` in a function `f(n)` that `decreases n` is an
+  error at the call.
+  `proof Equal.reflexive for Bad { let _ = value.compare(value) }` is an
+  error at the call: the call assumes the laws of `Ordered` for `Bad`, and
+  their proof assumes the laws of `Equal` for `Bad`.
 
 - A fact that relates two functions is not a clause of one where the
   contract of the other calls back. `Set.count` cannot ensure that every
@@ -3161,6 +3342,34 @@ an invariant, a law, or a proof.
   capability parameter in the callee's `uses` stands for nothing at that
   call: `values.map(fn(value) { value + 1 })` is
   such a call, although `map` passes a capability parameter on.
+- A specification names the value that a call returns, so it learns a
+  callee's contract only where the callee returns. A function that may run
+  out of memory, because it or a function it calls allocates, gives a
+  specification neither its `ensures` nor the invariant of its result. A
+  scalar result is still within the range of its type. The same call in
+  code keeps its contract once it has returned.
+- A generic function that calls a method through one of its bounds runs
+  the code of an `impl` that its caller chooses, and a function that calls
+  a function value runs code that its caller passes. Either may allocate,
+  so the function is one that may run out of memory, unless the trait
+  states `cost allocations == 0` for the method and the function value's
+  type states the same.
+  `Equal`, `Ordered`, `Hash` and `Countable` state the clause for their
+  methods, so an `impl` of one of them allocates nothing in those methods.
+- A proof block, a loop's clauses, a theorem, and a function whose
+  signature has a specification-only type never run. Each is a
+  specification throughout: a call in one allocates nothing, so it does
+  not make the function around it one that may run out of memory, and a
+  theorem always gives its `ensures`.
+- A method called through a bound, and a function passed as a value, give
+  a specification their contract only where the trait or the function's
+  type states `cost allocations == 0`, since an `impl` or the function
+  passed may allocate.
+- A specification that needs the result of a function that may run out of
+  memory names the call that the code made, as
+  `ensures (result is Some(_)) == (self.find(separator) is Some(_))` does in
+  a function that calls `self.find(separator)`, or states the result
+  through a model.
 - Every specification is well defined: each call meets its callee's
   `requires` and the condition of a callee's `Panic unless`, and each index
   is in bounds. `&&`, `||`, `==>`, and `if` read
@@ -3186,8 +3395,8 @@ an invariant, a law, or a proof.
   places of a `List` or an `Array`, and the values that any
   other collection's `element` lends. A pattern that does not match a value
   leaves that value out.
-- A quantifier over a type and `==>` appear only in specifications and in
-  functions for specifications only.
+- A quantifier over a type appears only in specifications and in functions
+  for specifications only.
 - A quantifier's body runs to the end of the expression.
 - Integer arithmetic in a specification is exact. It is done on `Integer`, a
   prelude type that exists only in specifications, of which every built-in
@@ -3357,6 +3566,10 @@ and the prelude changes only with a language version.
 - `opaque` appears only before `public type`. Outside its package, an opaque
   type's fields cannot be read, built, updated, or matched on. Visibility is
   set for a type as a whole.
+- Outside its package, an opaque type's invariant is neither assumed nor
+  proven. No code there can build a value of the type, so every value it
+  holds meets the invariant, and what it may rely on is stated by the
+  contracts of the type's public functions.
 - A public signature cannot mention a private or `internal` type, and
   neither can a public type's fields unless the type is opaque.
 - The `requires` and `cost` of a public function, of a method of a public

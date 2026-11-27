@@ -1,0 +1,11 @@
+trait Shown {
+  fn show(self) -> Int64
+}
+
+trait Getter[Value: Shown] {
+  fn get(self) -> Value
+}
+
+fn read_shown[Value: Shown, Source: Getter[Value]](source: Source) -> Value { todo }
+
+fn read_integer[Source: Getter[Int64]](source: Source) -> Int64 { todo }

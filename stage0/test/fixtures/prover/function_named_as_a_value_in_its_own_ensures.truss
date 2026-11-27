@@ -1,0 +1,11 @@
+fn apply(function: fn(UInt8) -> UInt64, n: UInt8) -> UInt64
+  ensures result == function(n)
+{
+  function(n)
+}
+
+fn f(n: UInt8) -> UInt64
+  ensures result == apply(f, n)
+{
+  100
+}

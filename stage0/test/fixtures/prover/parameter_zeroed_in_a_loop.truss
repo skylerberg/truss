@@ -1,0 +1,8 @@
+type Positive(n: Int64)
+  invariant n > 0
+
+fn f(item: mut Positive, count: UInt64) {
+  for _ in 0..count {
+    item.n = 0
+  }
+}

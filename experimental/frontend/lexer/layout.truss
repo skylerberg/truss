@@ -40,38 +40,38 @@ fn spell_closer(bracket: token.Bracket) -> view String {
   token.spell_punctuation(token.Punctuation.Close(bracket))
 }
 
-fn is_layout_name_byte(byte: UInt8) -> Bool {
-  is_ascii_name_byte(byte)
-}
-
 fn find_word_end(text: String, offset: UInt64) -> UInt64
-  uses Panic
+  requires text.is_boundary(offset)
+  ensures offset <= result && text.is_boundary(result)
 {
   var stop = offset
-  while stop < text.length() && is_layout_name_byte(text.byte(stop)) {
+  while stop < text.length() && is_ascii_name_byte(text.byte(stop))
+    invariant offset <= stop && text.is_boundary(stop)
+  {
     stop += 1
   }
   stop
 }
 
-fn is_tuple_type_at(source: source.Source, offset: UInt64) -> Bool
-  uses Panic
-{
+fn is_tuple_type_at(source: source.Source, offset: UInt64) -> Bool {
   let text = source.text
+  if !text.is_boundary(offset) {
+    return false
+  }
   let stop = find_word_end(text, offset)
   if text.substring(offset, to: stop) != "tuple" {
     return false
   }
   var next = stop
-  while next < text.length() && is_space(text.byte(next)) {
+  while next < text.length() && is_space(text.byte(next))
+    invariant stop <= next && text.is_boundary(next)
+  {
     next += 1
   }
   next > stop && text.substring(next, to: find_word_end(text, offset: next)) == "type"
 }
 
-fn starts_definition(source: source.Source, offset: UInt64) -> Bool
-  uses Panic
-{
+fn starts_definition(source: source.Source, offset: UInt64) -> Bool {
   if !source.starts_line(offset) {
     return false
   }
@@ -86,21 +86,19 @@ fn starts_definition(source: source.Source, offset: UInt64) -> Bool
   }
 }
 
-fn layout_indentation(source: source.Source, offset: UInt64) -> view String
-  uses Panic
-{
+fn layout_indentation(source: source.Source, offset: UInt64) -> view String {
   let text = source.text
   let start = source.compute_line_start(offset)
   var stop = start
-  while stop < text.length() && is_space(text.byte(stop)) {
+  while stop < text.length() && is_space(text.byte(stop))
+    invariant start <= stop && text.is_boundary(stop)
+  {
     stop += 1
   }
   text.substring(start, to: stop)
 }
 
-fn token_starts_definition(source: source.Source, first_line_break: Option[source.Span], kind: token.Kind, offset: UInt64) -> Bool
-  uses Panic
-{
+fn token_starts_definition(source: source.Source, first_line_break: Option[source.Span], kind: token.Kind, offset: UInt64) -> Bool {
   first_line_break.is_some() && layout_indentation(source, offset).is_empty() && match kind {
     Keyword(keyword) => token.is_definition_keyword(keyword)
     Lower(_) => is_tuple_type_at(source, offset)
@@ -413,9 +411,11 @@ fn finish_run(
   )
 }
 
-type CodeFrame(run: Run, mode: LayoutMode, pending: List[Pending])
+type CodeLayout(run: Run, mode: LayoutMode, pending: List[Pending])
 
-fn make_code_frame(mode: LayoutMode) -> CodeFrame {
+fn make_code_layout(mode: LayoutMode) -> CodeLayout
+  ensures (result.mode is InterpolationMode(..)) == (mode is InterpolationMode(..))
+{
   let run = Run(
     output: [],
     closers: [],
@@ -427,7 +427,7 @@ fn make_code_frame(mode: LayoutMode) -> CodeFrame {
     open_at_end: false,
     unterminated_strings: [],
   )
-  CodeFrame(own run, mode, pending: [])
+  CodeLayout(own run, mode, pending: [])
 }
 
 fn lay_out(scanner: mut Scanner, run: mut Run, mode: LayoutMode, input: LayoutInput) -> Bool
@@ -486,18 +486,17 @@ fn lay_out(scanner: mut Scanner, run: mut Run, mode: LayoutMode, input: LayoutIn
   }
 }
 
-fn accept_item(scanner: mut Scanner, frame: mut CodeFrame, item: Item) -> Bool
+fn accept_item(scanner: mut Scanner, layout: mut CodeLayout, item: Item) -> Bool
   uses Panic
-  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank
-  ensures frame.pending.length() == old(frame.pending.length())
+  modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank
+  ensures layout.pending.length() == old(layout.pending.length())
   ensures item is End ==> result
-  ensures item is LineEnd ==> result || old(scanner.position) < scanner.position
-  ensures old(scanner.position) <= scanner.position
+  ensures item is LineEnd(..) && old(layout.mode) is InterpolationMode(..) ==> result
+  ensures (layout.mode is InterpolationMode(..)) == (old(layout.mode) is InterpolationMode(..))
 {
-  let input = match mut frame.mode {
+  let input = match mut layout.mode {
     FileMode(_) => match item {
-      LineEnd => {
-        let line_break = consume_line_break(mut scanner)
+      LineEnd(line_break) => {
         note_line_break(mut scanner, line_break)
         return false
       }
@@ -515,28 +514,26 @@ fn accept_item(scanner: mut Scanner, frame: mut CodeFrame, item: Item) -> Bool
         unterminated_string: scanned.ending == Ending.Unterminated,
       )
     }
-    InterpolationMode(state) => read_interpolation_item(mut scanner, mut state, item)
+    InterpolationMode(state) => read_interpolation_item(mut state, open_curly: layout.run.open_curly, item: item, position: scanner.position)
   }
-  lay_out(mut scanner, run: mut frame.run, mode: frame.mode, input: input)
+  lay_out(mut scanner, run: mut layout.run, mode: layout.mode, input: input)
 }
 
-type CodeStep = CodeFinished | StringOpened(string: StringFrame, request: InterpolationRequest)
-
-fn deliver(scanner: mut Scanner, frame: mut CodeFrame, item: Item) -> Bool
+fn deliver(scanner: mut Scanner, layout: mut CodeLayout, item: Item) -> Bool
   uses Panic
-  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
-    scanner.previous, scanner.held, scanner.tables
-  ensures old(scanner.position) <= scanner.position
-  ensures old(frame.pending.length()) == 0 ==>
-    frame.pending.length() == 0 && scanner.held.length() == old(scanner.held.length())
-  ensures !(item is Lexed(_)) && 0 < old(frame.pending.length()) ==>
-    3 * frame.pending.length() + scanner.held.length() < 3 * old(frame.pending.length()) + old(scanner.held.length())
-  ensures old(frame.pending.length()) == 0 && item is End ==> result
-  ensures old(frame.pending.length()) == 0 && item is LineEnd ==> result || old(scanner.position) < scanner.position
+  modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank, scanner.previous,
+    scanner.held, scanner.tables
+  ensures old(layout.pending.length()) == 0 ==>
+    layout.pending.length() == 0 && scanner.held.length() == old(scanner.held.length())
+  ensures !(item is Lexed(_)) && 0 < old(layout.pending.length()) ==>
+    3 * layout.pending.length() + scanner.held.length() < 3 * old(layout.pending.length()) + old(scanner.held.length())
+  ensures old(layout.pending.length()) == 0 && item is End ==> result
+  ensures old(layout.pending.length()) == 0 && item is LineEnd(..) && old(layout.mode) is InterpolationMode(..) ==> result
+  ensures (layout.mode is InterpolationMode(..)) == (old(layout.mode) is InterpolationMode(..))
 {
   var settled = item
-  if !frame.pending.is_empty() {
-    let Some(resolved) = settle(mut scanner, pending: mut frame.pending, arrived: item) else {
+  if !layout.pending.is_empty() {
+    let Some(resolved) = settle(mut scanner, pending: mut layout.pending, arrived: item) else {
       return false
     }
     settled = resolved
@@ -544,47 +541,46 @@ fn deliver(scanner: mut Scanner, frame: mut CodeFrame, item: Item) -> Bool
   if settled is Lexed(scanned) {
     scanner.previous = Some(scanned)
   }
-  accept_item(mut scanner, mut frame, item: settled)
+  accept_item(mut scanner, mut layout, item: settled)
 }
 
-fn step_code(scanner: mut Scanner, frame: mut CodeFrame, arriving: Option[Item]) -> CodeStep
+fn lay_out_code(scanner: mut Scanner, layout: mut CodeLayout, nesting: UInt64)
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
-    scanner.unterminated_at_end, scanner.name_indices, scanner.name_checks, scanner.previous, scanner.held,
+    scanner.unterminated_at_end, scanner.interned_names, scanner.previous, scanner.held,
     scanner.semicolons, scanner.tables
   ensures old(scanner.position) <= scanner.position
-  ensures result is StringOpened(..) ==> old(scanner.position) < scanner.position && old(scanner.position) < scanner.length
+  ensures (layout.mode is InterpolationMode(..)) == (old(layout.mode) is InterpolationMode(..))
+  decreases scanner.count_remaining(scanner.position), 0
 {
-  let inline = frame.mode is InterpolationMode(_)
-  let nesting = match frame.mode {
-    FileMode(_) => 0
-    InterpolationMode(state) => state.nesting + 1
-  }
-  if arriving is Some(arrived) && deliver(mut scanner, mut frame, item: arrived) {
-    return CodeStep.CodeFinished
-  }
   while true
     invariant old(scanner.position) <= scanner.position
-    decreases scanner.count_remaining(scanner.position), 3 * frame.pending.length() + scanner.held.length()
+    invariant (layout.mode is InterpolationMode(..)) == (old(layout.mode) is InterpolationMode(..))
+    decreases scanner.count_remaining(scanner.position), 3 * layout.pending.length() + scanner.held.length()
   {
-    if frame.pending.is_empty() {
-      if frame.mode is InterpolationMode(state) && state.is_finished {
-        let _ = lay_out(mut scanner, run: mut frame.run, mode: frame.mode, input: finish_input(scanner.position, ending: state.ending))
-        return CodeStep.CodeFinished
+    if layout.pending.is_empty() {
+      if layout.mode is InterpolationMode(state) && state.is_finished {
+        let _ = lay_out(mut scanner, run: mut layout.run, mode: layout.mode, input: finish_input(scanner.position, ending: state.ending))
+        return
       }
       if mut scanner.held.pop() is Some(held) {
-        if deliver(mut scanner, mut frame, item: held) {
-          return CodeStep.CodeFinished
+        if deliver(mut scanner, mut layout, item: held) {
+          return
         }
         continue
       }
     }
-    match scan_item(mut scanner, inline, nesting) {
-      Ready(item) => if deliver(mut scanner, mut frame, item) {
-        return CodeStep.CodeFinished
+    match scan_item(mut scanner, inline: layout.mode is InterpolationMode(_), nesting: nesting) {
+      Ready(item) => if deliver(mut scanner, mut layout, item) {
+        return
       }
-      Awaiting(pending) => mut frame.pending.push(own pending)
-      Opened(string, request) => return CodeStep.StringOpened(own string, request)
+      Awaiting(pending) => mut layout.pending.push(own pending)
+      Opened(string, request) => {
+        let item = complete_string(mut scanner, string: own string, request: request)
+        if deliver(mut scanner, mut layout, item) {
+          return
+        }
+      }
     }
   }
 }
@@ -592,54 +588,13 @@ fn step_code(scanner: mut Scanner, frame: mut CodeFrame, arriving: Option[Item])
 fn lex_file(scanner: mut Scanner, recovery: Bool) -> TokenRange
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
-    scanner.unterminated_at_end, scanner.name_indices, scanner.name_checks, scanner.previous, scanner.held,
+    scanner.unterminated_at_end, scanner.interned_names, scanner.previous, scanner.held,
     scanner.semicolons, scanner.tables
   ensures old(scanner.position) <= scanner.position
 {
-  var codes: List[CodeFrame] = [make_code_frame(mode: LayoutMode.FileMode(recovery))]
-  var strings: List[StringFrame] = []
-  var arriving: Option[Item] = None
-  var interpolated: Option[InterpolationResult] = None
-  while true
-    invariant old(scanner.position) <= scanner.position
-    decreases scanner.count_remaining(scanner.position), codes.length() + strings.length()
-  {
-    if codes.length() > strings.length() {
-      let step = step_code(mut scanner, frame: mut codes[codes.length() - 1], arriving: arriving)
-      arriving = None
-      match own step {
-        CodeFinished => {
-          let Some(finished) = mut codes.pop() else {
-            Panic.crash("a code frame is active")
-          }
-          let first = scanner.tables.tokens.length()
-          mut scanner.tables.tokens.append(own finished.run.output)
-          let range = TokenRange(first, stop: scanner.tables.tokens.length(), open_at_end: finished.run.open_at_end)
-          match finished.mode {
-            FileMode(_) => return range
-            InterpolationMode(state) => interpolated = Some(finish_interpolation(mut scanner, state, range))
-          }
-        }
-        StringOpened(string, request) => {
-          mut strings.push(own string)
-          mut codes.push(begin_interpolation(mut scanner, request))
-        }
-      }
-    } else {
-      if strings.is_empty() {
-        Panic.crash("a string frame is active")
-      }
-      let progress = continue_string(mut scanner, frame: mut strings[strings.length() - 1], interpolated: interpolated)
-      interpolated = None
-      match progress {
-        Interpolates(request) => mut codes.push(begin_interpolation(mut scanner, request))
-        Ended(ending, stop) => {
-          let Some(ended) = mut strings.pop() else {
-            Panic.crash("a string frame is active")
-          }
-          arriving = Some(finish_string(mut scanner, frame: own ended, ending: ending, stop: stop))
-        }
-      }
-    }
-  }
+  var layout = make_code_layout(mode: LayoutMode.FileMode(recovery))
+  lay_out_code(mut scanner, mut layout, nesting: 0)
+  let first = scanner.tables.tokens.length()
+  mut scanner.tables.tokens.append(own layout.run.output)
+  TokenRange(first, stop: scanner.tables.tokens.length(), open_at_end: layout.run.open_at_end)
 }

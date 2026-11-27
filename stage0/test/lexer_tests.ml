@@ -448,14 +448,16 @@ let () =
       | _ -> Harness.fail "expected a note at the line where the string seems to end")
 
 let () =
-  Harness.test "a comment at the end of a line has no fix" (fun () ->
-      expect_error "let a = 1 // one" ~code:Comment ~at:"//");
-  Harness.test "a comment on its own line has no fix" (fun () ->
-      expect_error "a\n// note\nb" ~code:Comment ~at:"//";
-      expect_error "a\n# note\nb" ~code:Comment ~at:"#");
-  Harness.test "a block comment between tokens has no fix" (fun () ->
-      expect_error "a /* x */ + b" ~code:Comment ~at:"/*";
-      expect_error "a /* x /* y */ */ b" ~code:Comment ~at:"/*");
+  Harness.test "a comment at the end of a line is deleted with the spaces before it" (fun () ->
+      expect_error "let a = 1 // one" ~code:Comment ~at:"//" ~fixed:("let a = 1 // one", "let a = 1"));
+  Harness.test "a comment on its own line is deleted with its line" (fun () ->
+      expect_error "a\n// note\nb" ~code:Comment ~at:"//" ~fixed:("a\n// note\nb", "a\nb");
+      expect_error "a\n# note\nb" ~code:Comment ~at:"#" ~fixed:("a\n# note\nb", "a\nb"));
+  Harness.test "a block comment between tokens is replaced by a space" (fun () ->
+      expect_error "a /* x */ + b" ~code:Comment ~at:"/*" ~fixed:("a /* x */ + b", "a + b");
+      expect_error "a /* x /* y */ */ b" ~code:Comment ~at:"/*" ~fixed:("a /* x /* y */ */ b", "a b"));
+  Harness.test "a block comment across lines between tokens is replaced by a line break" (fun () ->
+      expect_error "a /* x\n */ b" ~code:Comment ~at:"/*" ~fixed:("a /* x\n */ b", "a\nb"));
   Harness.test "an unterminated block comment has no fix" (fun () ->
       expect_error "a /* never closed\nb" ~code:Comment ~at:"/*");
   Harness.test "a block comment across lines separates statements" (fun () ->

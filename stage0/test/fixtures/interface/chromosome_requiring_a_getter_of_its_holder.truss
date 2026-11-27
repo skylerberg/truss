@@ -1,0 +1,13 @@
+trait Chromosome: Get[Holder[Int32]] {}
+
+trait Get[Value] {
+  fn get(self) -> Value
+}
+
+type Holder[Item: Chromosome](item: Item)
+
+impl Chromosome for Int32 {}
+
+impl Get[Holder[Int32]] for Int32 {
+  fn get(self) -> Holder[Int32] { todo }
+}

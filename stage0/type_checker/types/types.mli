@@ -12,7 +12,12 @@ type ty =
   | Error of Diagnostic.reported
 
 and argument = Type of ty | Value of value
-and value = Known of Z.t | Value_parameter of parameter | Value_variable of int
+
+and value =
+  | Known of Z.t
+  | Value_parameter of parameter
+  | Value_variable of int
+  | Value_error of Diagnostic.reported
 
 and trait_reference = {
   trait : Path.t;
@@ -50,6 +55,18 @@ and resource =
 
 and cost_bound = Order_of | No_more_than of Z.t | Exactly_cost of Z.t
 
+type associated_kind = Associated_type | Associated_capability_set
+
+type application =
+  | Type_application of ty
+  | Trait_application of trait_reference
+  | Associated_application of {
+      base : ty;
+      bounds : trait_reference list;
+      name : string;
+      kind : associated_kind;
+    }
+
 val unit : ty
 val bool : ty
 val make_builtin : ?arguments:argument list -> Language.Builtin_type.t -> ty
@@ -69,6 +86,7 @@ val erase_argument_views : argument -> argument
 val erase_trait_views : trait_reference -> trait_reference
 val find_integer_bits : ty -> (int * bool) option
 val find_integer_range : ty -> (Z.t * Z.t) option
+val list_value_ranges : ty -> (Z.t * Z.t) list
 val is_integer_type : ty -> bool
 val signed_integer_types : Language.Builtin_type.t list
 val unsigned_integer_types : Language.Builtin_type.t list
@@ -84,6 +102,7 @@ val sealed_traits : Well_known.t list
 val is_float_type : ty -> bool
 val make_capability_set : capability list -> capability_set
 val no_capabilities : capability_set
+val states_no_allocation : cost list -> bool
 val union_capabilities : capability_set -> capability_set -> capability_set
 val make_capability : Path.t -> capability
 val make_condition : condition -> condition
@@ -210,6 +229,7 @@ type signature = {
 val is_field_path_prefix : string list -> string list -> bool
 val find_parameter_position : signature -> string -> int option
 val read_parameter_at : signature -> int -> parameter_info
+val add_receiver : signature -> (Language.Mode.t * ty) option -> signature
 val list_modified_parts : signature -> int -> modified list option
 val is_part_within : container:modified -> modified -> bool
 val show_modified_part : root:string -> modified -> string
@@ -247,6 +267,7 @@ type type_interface = {
   opaque : bool;
   is_tuple : bool;
   derives : Path.t list;
+  declares_potential : bool;
 }
 
 val instantiate_fields : type_interface -> argument list -> field list option

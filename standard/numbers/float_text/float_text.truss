@@ -1,6 +1,7 @@
 use standard.core
 use standard.growth
 use standard.intrinsic
+use standard.text.utf8
 use standard.writing
 
 let power_of_ten_high: Array[UInt64, 696] = [
@@ -261,10 +262,21 @@ type ScaledDecimal(significand: UInt64, exponent: Int64)
 type Digits =
   | Short(digits: Array[UInt8, 20], count: UInt64)
   | Long(digits: intrinsic.Storage[UInt8])
+  invariant match self {
+    Short(digits, count: _) => are_digits(digits.model())
+    Long(digits) => are_digits(intrinsic.storage_model(digits))
+  }
 
 type DecimalDigits(digits: Digits, point: Int64)
 
 type ExactDigits(digits: intrinsic.Storage[UInt8], point: Int64)
+  invariant are_digits(intrinsic.storage_model(digits))
+
+fn are_digits(bytes: Sequence[UInt8]) -> Bool
+  ensures result == (forall i in 0..bytes.length() => is_digit(bytes[i]))
+{
+  forall i in 0..bytes.length() => is_digit(bytes[i])
+}
 
 type Decoded =
   | NotANumber
@@ -557,7 +569,9 @@ fn length_of(digits: Digits) -> UInt64
   length
 }
 
-fn digit_at(digits: Digits, position: Int64) -> UInt8 {
+fn digit_at(digits: Digits, position: Int64) -> UInt8
+  ensures is_digit(result)
+{
   if position < 0 {
     return 48
   }
@@ -566,13 +580,6 @@ fn digit_at(digits: Digits, position: Int64) -> UInt8 {
     Short(digits: buffer, count) => if index < count && index < 20 { buffer[index] } else { 48 }
     Long(digits: storage) => if index < intrinsic.storage_length(storage) { intrinsic.storage_at(storage, index: index) } else { 48 }
   }
-}
-
-fn push_digit(digits: mut intrinsic.Storage[UInt8], value: UInt8) {
-  if intrinsic.storage_length(digits) >= intrinsic.storage_capacity(digits) {
-    growth.reserve(mut digits, additional: 1)
-  }
-  intrinsic.storage_push(mut digits, value: value)
 }
 
 fn digits_of(number: ScaledDecimal) -> DecimalDigits
@@ -585,7 +592,9 @@ fn digits_of(number: ScaledDecimal) -> DecimalDigits
   let count = digit_count(number.significand)
   var digits: Array[UInt8, 20] = Array.filled(48)
   var rest = number.significand
-  for offset in 0..count {
+  for offset in 0..count
+    invariant are_digits(digits.model())
+  {
     let digit: UInt8 = intrinsic.convert(rest % 10)
     digits[count - 1 - offset] = digit + 48
     rest = rest / 10
@@ -601,8 +610,12 @@ fn digits_of(number: ScaledDecimal) -> DecimalDigits
   DecimalDigits(digits: Digits.Short(digits: digits, count: kept), point: written + number.exponent)
 }
 
-fn trim_trailing_zeros(digits: mut intrinsic.Storage[UInt8]) {
-  for _ in 0..intrinsic.storage_length(digits) {
+fn trim_trailing_zeros(digits: mut intrinsic.Storage[UInt8])
+  ensures are_digits(old(intrinsic.storage_model(digits))) ==> are_digits(intrinsic.storage_model(digits))
+{
+  for _ in 0..intrinsic.storage_length(digits)
+    invariant are_digits(old(intrinsic.storage_model(digits))) ==> are_digits(intrinsic.storage_model(digits))
+  {
     let length = intrinsic.storage_length(digits)
     if length == 0 || intrinsic.storage_at(digits, index: length - 1) != 48 {
       return
@@ -611,18 +624,11 @@ fn trim_trailing_zeros(digits: mut intrinsic.Storage[UInt8]) {
   }
 }
 
-fn push_limb(limbs: mut intrinsic.Storage[UInt64], value: UInt64) {
-  if intrinsic.storage_length(limbs) >= intrinsic.storage_capacity(limbs) {
-    growth.reserve(mut limbs, additional: 1)
-  }
-  intrinsic.storage_push(mut limbs, value: value)
-}
-
 fn limbs_of(value: UInt64) -> intrinsic.Storage[UInt64] {
   var limbs: intrinsic.Storage[UInt64] = intrinsic.storage_with_capacity(0)
-  push_limb(mut limbs, value: value % limb_base)
-  push_limb(mut limbs, value: (value / limb_base) % limb_base)
-  push_limb(mut limbs, value: value / limb_base / limb_base)
+  growth.push(mut limbs, value: value % limb_base)
+  growth.push(mut limbs, value: (value / limb_base) % limb_base)
+  growth.push(mut limbs, value: value / limb_base / limb_base)
   limbs
 }
 
@@ -632,14 +638,14 @@ fn multiplied(limbs: intrinsic.Storage[UInt64], factor: UInt64) -> intrinsic.Sto
   for index in 0..intrinsic.storage_length(limbs) {
     let part = intrinsic.wrapping_multiply(intrinsic.storage_at(limbs, index: index), right: factor)
     let total = intrinsic.wrapping_add(part, right: carry)
-    push_limb(mut product, value: total % limb_base)
+    growth.push(mut product, value: total % limb_base)
     carry = total / limb_base
   }
   for _ in 0..3 {
     if carry == 0 {
       break
     }
-    push_limb(mut product, value: carry % limb_base)
+    growth.push(mut product, value: carry % limb_base)
     carry = carry / limb_base
   }
   product
@@ -664,10 +670,10 @@ fn multiplied_by_power(limbs: own intrinsic.Storage[UInt64], base: UInt64, count
 fn multiplied_by_power_of_ten(limbs: own intrinsic.Storage[UInt64], count: UInt64) -> intrinsic.Storage[UInt64] {
   var shifted: intrinsic.Storage[UInt64] = intrinsic.storage_with_capacity(0)
   for _ in 0..count / 9 {
-    push_limb(mut shifted, value: 0)
+    growth.push(mut shifted, value: 0)
   }
   for index in 0..intrinsic.storage_length(limbs) {
-    push_limb(mut shifted, value: intrinsic.storage_at(limbs, index: index))
+    growth.push(mut shifted, value: intrinsic.storage_at(limbs, index: index))
   }
   multiplied_by_power(own shifted, base: 10, count: count % 9)
 }
@@ -704,15 +710,21 @@ fn compare_limbs(left: intrinsic.Storage[UInt64], right: intrinsic.Storage[UInt6
   0
 }
 
-fn decimal_of_limbs(limbs: intrinsic.Storage[UInt64]) -> intrinsic.Storage[UInt8] {
+fn decimal_of_limbs(limbs: intrinsic.Storage[UInt64]) -> intrinsic.Storage[UInt8]
+  ensures are_digits(intrinsic.storage_model(result))
+{
   var digits: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(0)
   let count = significant_limbs(limbs)
-  for offset in 0..count {
+  for offset in 0..count
+    invariant are_digits(intrinsic.storage_model(digits))
+  {
     let limb = intrinsic.storage_at(limbs, index: count - 1 - offset)
-    for place in 0..9 {
+    for place in 0..9
+      invariant are_digits(intrinsic.storage_model(digits))
+    {
       let digit: UInt8 = intrinsic.convert((limb / small_powers_of_ten[8 - place]) % 10)
       if offset > 0 || intrinsic.storage_length(digits) > 0 || digit != 0 {
-        push_digit(mut digits, value: digit + 48)
+        growth.push(mut digits, value: digit + 48)
       }
     }
   }
@@ -764,7 +776,9 @@ fn rounded(number: own ExactDigits, keep: Int64) -> DecimalDigits
     trim_trailing_zeros(mut digits)
     return DecimalDigits(digits: Digits.Long(digits: own digits), point: point)
   }
-  for _ in 0..kept {
+  for _ in 0..kept
+    invariant are_digits(intrinsic.storage_model(digits))
+  {
     let last = intrinsic.storage_length(digits)
     if last == 0 || intrinsic.storage_at(digits, index: last - 1) != 57 {
       break
@@ -773,7 +787,7 @@ fn rounded(number: own ExactDigits, keep: Int64) -> DecimalDigits
   }
   let last = intrinsic.storage_length(digits)
   if last == 0 {
-    push_digit(mut digits, value: 49)
+    growth.push(mut digits, value: 49)
     return DecimalDigits(digits: Digits.Long(digits: own digits), point: point + 1)
   }
   let digit = intrinsic.storage_at(digits, index: last - 1)
@@ -781,34 +795,45 @@ fn rounded(number: own ExactDigits, keep: Int64) -> DecimalDigits
     intrinsic.crash("a digit that is not a decimal digit in float conversion")
   }
   let _ = intrinsic.storage_pop(mut digits)
-  push_digit(mut digits, value: digit + 1)
+  growth.push(mut digits, value: digit + 1)
   DecimalDigits(digits: Digits.Long(digits: own digits), point: point)
 }
 
-fn write_zeros(output: mut intrinsic.Storage[UInt8], count: Int64) {
+fn write_zeros(output: mut intrinsic.Storage[UInt8], count: Int64)
+  ensures utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+{
   if count > 0 {
     let zeros: UInt64 = intrinsic.convert(count)
     growth.reserve(mut output, additional: zeros)
-    for _ in 0..zeros {
-      writing.byte(mut output, value: 48)
+    for _ in 0..zeros
+      invariant utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+    {
+      growth.push(mut output, value: 48)
     }
   }
 }
 
 fn write_digits(output: mut intrinsic.Storage[UInt8], digits: Digits, from: Int64, to: Int64)
   requires -100000 <= from && to <= 100000
+  ensures utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
 {
-  for position in from..to {
-    writing.byte(mut output, value: digit_at(digits, position: position))
+  for position in from..to
+    invariant utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+  {
+    growth.push(mut output, value: digit_at(digits, position: position))
   }
 }
 
-fn write_exponent(output: mut intrinsic.Storage[UInt8], exponent: Int64) {
-  writing.byte(mut output, value: 101)
+fn write_exponent(output: mut intrinsic.Storage[UInt8], exponent: Int64)
+  ensures utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+{
+  growth.push(mut output, value: 101)
   writing.signed(mut output, value: exponent)
 }
 
-fn write_named(output: mut intrinsic.Storage[UInt8], decoded: Decoded) -> Bool {
+fn write_named(output: mut intrinsic.Storage[UInt8], decoded: Decoded) -> Bool
+  ensures utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+{
   match decoded {
     NotANumber => {
       writing.append(mut output, bytes: "NaN".storage)
@@ -824,10 +849,11 @@ fn write_named(output: mut intrinsic.Storage[UInt8], decoded: Decoded) -> Bool {
 
 fn write_shortest_layout(output: mut intrinsic.Storage[UInt8], is_negative: Bool, number: DecimalDigits)
   requires -2000 <= number.point && number.point <= 2001
+  ensures utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
 {
   growth.reserve(mut output, additional: 32)
   if is_negative {
-    writing.byte(mut output, value: 45)
+    growth.push(mut output, value: 45)
   }
   let digits = number.digits
   let length = length_of(digits)
@@ -841,7 +867,7 @@ fn write_shortest_layout(output: mut intrinsic.Storage[UInt8], is_negative: Bool
   if exponent < -6 || exponent >= 21 {
     write_digits(mut output, digits: digits, from: 0, to: 1)
     if count > 1 {
-      writing.byte(mut output, value: 46)
+      growth.push(mut output, value: 46)
       write_digits(mut output, digits: digits, from: 1, to: count)
     }
     write_exponent(mut output, exponent: exponent)
@@ -855,12 +881,14 @@ fn write_shortest_layout(output: mut intrinsic.Storage[UInt8], is_negative: Bool
     writing.append(mut output, bytes: ".0".storage)
   } else {
     write_digits(mut output, digits: digits, from: 0, to: point)
-    writing.byte(mut output, value: 46)
+    growth.push(mut output, value: 46)
     write_digits(mut output, digits: digits, from: point, to: count)
   }
 }
 
-fn write_shortest_of(output: mut intrinsic.Storage[UInt8], bits: UInt64, precision: Precision) {
+fn write_shortest_of(output: mut intrinsic.Storage[UInt8], bits: UInt64, precision: Precision)
+  ensures utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+{
   let decoded = decode(bits, precision: precision)
   if write_named(mut output, decoded: decoded) {
     return
@@ -871,11 +899,15 @@ fn write_shortest_of(output: mut intrinsic.Storage[UInt8], bits: UInt64, precisi
   }
 }
 
-internal fn write_shortest_float64(output: mut intrinsic.Storage[UInt8], value: Float64) {
+internal fn write_shortest_float64(output: mut intrinsic.Storage[UInt8], value: Float64)
+  ensures utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+{
   write_shortest_of(mut output, bits: intrinsic.to_bits(value), precision: Precision.Double)
 }
 
-internal fn write_shortest_float32(output: mut intrinsic.Storage[UInt8], value: Float32) {
+internal fn write_shortest_float32(output: mut intrinsic.Storage[UInt8], value: Float32)
+  ensures utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+{
   let bits: UInt32 = intrinsic.to_bits(value)
   write_shortest_of(mut output, bits: intrinsic.convert(bits), precision: Precision.Single)
 }
@@ -929,58 +961,95 @@ fn scientific_digits(mantissa: UInt64, exponent: Int64, decimals: UInt64) -> Dec
   rounded(exact_digits(mantissa, exponent: exponent), keep: bounded_decimals(decimals) + 1)
 }
 
-internal fn write_fixed(output: mut intrinsic.Storage[UInt8], value: Float64, decimals: UInt64) {
+fn write_fixed_layout(output: mut intrinsic.Storage[UInt8], is_negative: Bool, number: DecimalDigits, count: Int64)
+  requires -2000 <= number.point && number.point <= 2001
+  requires 0 <= count && count <= 4611686018427387903
+  ensures utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+{
+  let digits = number.digits
+  let is_zero = length_of(digits) == 0
+  let integer_digits: Int64 = if number.point > 1 && !is_zero { number.point } else { 1 }
+  growth.reserve(mut output, additional: intrinsic.convert(count + integer_digits + 2))
+  if is_negative {
+    growth.push(mut output, value: 45)
+  }
+  proof {
+    assert utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+  }
+  if number.point <= 0 || is_zero {
+    growth.push(mut output, value: 48)
+  } else {
+    write_digits(mut output, digits: digits, from: 0, to: number.point)
+  }
+  proof {
+    assert utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+  }
+  if count > 0 {
+    growth.push(mut output, value: 46)
+    proof {
+      assert utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+    }
+    let start = if is_zero { 0 } else { number.point }
+    for offset in 0..count
+      invariant utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+    {
+      growth.push(mut output, value: digit_at(digits, position: start + offset))
+    }
+  }
+}
+
+internal fn write_fixed(output: mut intrinsic.Storage[UInt8], value: Float64, decimals: UInt64)
+  ensures utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+{
   let decoded = decode(intrinsic.to_bits(value), precision: Precision.Double)
   if write_named(mut output, decoded: decoded) {
     return
   }
   if decoded is Finite(is_negative, mantissa, exponent) {
     let number = if mantissa == 0 { no_digits() } else { fixed_digits(mantissa, exponent: exponent, decimals: decimals) }
-    let digits = number.digits
-    let is_zero = length_of(digits) == 0
-    let count = decimal_count(decimals)
-    let integer_digits: Int64 = if number.point > 1 && !is_zero { number.point } else { 1 }
-    growth.reserve(mut output, additional: intrinsic.convert(count + integer_digits + 2))
-    if is_negative {
-      writing.byte(mut output, value: 45)
-    }
-    if number.point <= 0 || is_zero {
-      writing.byte(mut output, value: 48)
-    } else {
-      write_digits(mut output, digits: digits, from: 0, to: number.point)
-    }
-    if count > 0 {
-      writing.byte(mut output, value: 46)
-      let start = if is_zero { 0 } else { number.point }
-      for offset in 0..count {
-        writing.byte(mut output, value: digit_at(digits, position: start + offset))
-      }
-    }
+    write_fixed_layout(mut output, is_negative: is_negative, number: number, count: decimal_count(decimals))
   }
 }
 
-internal fn write_scientific(output: mut intrinsic.Storage[UInt8], value: Float64, decimals: UInt64) {
+fn write_scientific_layout(output: mut intrinsic.Storage[UInt8], is_negative: Bool, number: DecimalDigits, count: Int64)
+  requires -2000 <= number.point && number.point <= 2001
+  requires 0 <= count && count <= 4611686018427387903
+  ensures utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+{
+  let digits = number.digits
+  let is_zero = length_of(digits) == 0
+  growth.reserve(mut output, additional: intrinsic.convert(count + 12))
+  if is_negative {
+    growth.push(mut output, value: 45)
+  }
+  growth.push(mut output, value: digit_at(digits, position: 0))
+  proof {
+    assert utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+  }
+  if count > 0 {
+    growth.push(mut output, value: 46)
+    for offset in 0..count
+      invariant utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+    {
+      growth.push(mut output, value: digit_at(digits, position: 1 + offset))
+    }
+  }
+  proof {
+    assert utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+  }
+  write_exponent(mut output, exponent: if is_zero { 0 } else { number.point - 1 })
+}
+
+internal fn write_scientific(output: mut intrinsic.Storage[UInt8], value: Float64, decimals: UInt64)
+  ensures utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
+{
   let decoded = decode(intrinsic.to_bits(value), precision: Precision.Double)
   if write_named(mut output, decoded: decoded) {
     return
   }
   if decoded is Finite(is_negative, mantissa, exponent) {
     let number = if mantissa == 0 { no_digits() } else { scientific_digits(mantissa, exponent: exponent, decimals: decimals) }
-    let digits = number.digits
-    let is_zero = length_of(digits) == 0
-    let count = decimal_count(decimals)
-    growth.reserve(mut output, additional: intrinsic.convert(count + 12))
-    if is_negative {
-      writing.byte(mut output, value: 45)
-    }
-    writing.byte(mut output, value: digit_at(digits, position: 0))
-    if count > 0 {
-      writing.byte(mut output, value: 46)
-      for offset in 0..count {
-        writing.byte(mut output, value: digit_at(digits, position: 1 + offset))
-      }
-    }
-    write_exponent(mut output, exponent: if is_zero { 0 } else { number.point - 1 })
+    write_scientific_layout(mut output, is_negative: is_negative, number: number, count: decimal_count(decimals))
   }
 }
 
@@ -1179,6 +1248,7 @@ fn all_digits(text: intrinsic.Storage[UInt8]) -> ExactDigits
   var exponent_start = intrinsic.storage_length(text)
   for index in 0..intrinsic.storage_length(text)
     invariant fraction <= index
+    invariant are_digits(intrinsic.storage_model(digits))
   {
     let byte = intrinsic.storage_at(text, index: index)
     if byte == 101 || byte == 69 {
@@ -1192,7 +1262,7 @@ fn all_digits(text: intrinsic.Storage[UInt8]) -> ExactDigits
         fraction += 1
       }
       if intrinsic.storage_length(digits) > 0 || byte != 48 {
-        push_digit(mut digits, value: byte)
+        growth.push(mut digits, value: byte)
       }
     }
   }
@@ -1213,7 +1283,7 @@ fn limbs_of_digits(digits: intrinsic.Storage[UInt8]) -> intrinsic.Storage[UInt64
       let byte: UInt64 = intrinsic.convert(intrinsic.storage_at(digits, index: index))
       limb = intrinsic.wrapping_add(intrinsic.wrapping_multiply(limb, right: 10), right: intrinsic.wrapping_subtract(byte, right: 48))
     }
-    push_limb(mut limbs, value: limb)
+    growth.push(mut limbs, value: limb)
     end = start
   }
   limbs

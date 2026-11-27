@@ -46,18 +46,18 @@ let header : Interface.Environment.header Tracker.fact =
 
 let elaborated : Interface.Environment.elaborated_interface Tracker.fact =
   Tracker.make_fact ~stage:Elaborate ~table:"interface" ~id_column:"definition" ~fixed:[]
-    ~groups:[ (Interface, [ "value" ]); (Elaboration, [ "named"; "scope" ]) ]
+    ~groups:[ (Interface, [ "value" ]); (Elaboration, [ "applications"; "scope" ]) ]
     ~encode:(fun (elaborated : Interface.Environment.elaborated_interface) ->
       [
         Tracker.marshal elaborated.interface;
-        Tracker.marshal elaborated.named;
+        Tracker.marshal elaborated.applications;
         Tracker.marshal elaborated.scope;
       ])
     ~decode:(fun cells ->
       {
         interface = Tracker.unmarshal cells.(0);
         diagnostics = [];
-        named = Tracker.unmarshal cells.(1);
+        applications = Tracker.unmarshal cells.(1);
         scope = Tracker.unmarshal cells.(2);
       })
 
@@ -212,6 +212,15 @@ let make_group ~table target : Path.t list Tracker.fact =
 let recursion_group = make_group ~table:"recursion_group" Recursion_group
 let proof_group = make_group ~table:"proof_group" Proof_group
 
+let make_abort_fact ~table target : bool Tracker.fact =
+  Tracker.make_fact ~stage:Find_aborts ~table ~id_column:"path" ~fixed:[]
+    ~groups:[ (target, [ "value" ]) ]
+    ~encode:(fun value -> [ Integer (Bool.to_int value) ])
+    ~decode:(fun cells -> decode_boolean cells.(0))
+
+let aborts_outside_group = make_abort_fact ~table:"aborts_outside_group" Aborts_outside_group
+let may_abort = make_abort_fact ~table:"may_abort" May_abort
+
 let proof : Prover.proof Tracker.fact =
   make_marshaled ~stage:Prove ~table:"proof" ~id_column:"definition" Proof
 
@@ -242,6 +251,16 @@ let test_key : (string, Lowering.unbuildable) result Tracker.fact =
 
 let evaluation : Lowering.evaluation Tracker.fact =
   make_marshaled ~stage:Evaluate ~table:"evaluation" ~id_column:"item" Evaluation
+
+let test_run : Lowering.test_pass Tracker.fact =
+  Tracker.make_fact ~stage:Run_test ~table:"test_run" ~id_column:"item" ~fixed:[]
+    ~groups:[ (Test_run, [ "compiler_fingerprint"; "microseconds" ]) ]
+    ~encode:(fun (pass : Lowering.test_pass) ->
+      [ Blob pass.compiler_fingerprint; Integer pass.microseconds ])
+    ~decode:(function
+      | [| Blob compiler_fingerprint; Integer microseconds |] ->
+          { compiler_fingerprint; microseconds }
+      | _ -> Compiler_bug.raise_bug ~stage:"Database" "a row of test_run holds no test pass")
 
 let rank_profile : Profile.t -> int = function Development -> 0 | Release -> 1
 

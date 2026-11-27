@@ -1,0 +1,11 @@
+trait Convert[Target] {
+  fn convert(self) -> Target
+}
+
+fn both[T: Convert[Int64] + Convert[Bool]](value: T) -> Bool
+  ensures result
+{
+  let number: Int64 = Convert[Int64].convert(value)
+  let flag: Bool = Convert[Bool].convert(value)
+  number == 0 || flag
+}

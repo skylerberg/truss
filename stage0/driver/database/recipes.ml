@@ -380,9 +380,9 @@ let run_check_ownership database (row : Store.definition) =
   let key = Declarations.decode_key row.key in
   run_fact database Check_ownership Facts.ownership row ~id:row.id (fun recorder ->
       let result = Ownership.check (Lookups.make_ownership database recorder) key in
-      match result.diagnostics with
-      | [] -> (Value result.must_be_disjoint, [])
-      | descriptions -> (Failed, descriptions))
+      let is_error diagnostic = (Catalog.describe diagnostic).severity = Error in
+      if List.exists is_error result.diagnostics then (Failed, result.diagnostics)
+      else (Value result.must_be_disjoint, result.diagnostics))
 
 let run_generate_mir (database : Tracker.t) (row : Store.definition) =
   let path = (Declarations.decode_key row.key).path in
@@ -554,7 +554,7 @@ let find_growing_cycles database rows =
 let item_kind = Kind.rank_target (Entity Item)
 
 let item_stages : Kind.stage list =
-  [ Lower; Key_tests; Evaluate; Render Development; Render Release ]
+  [ Lower; Key_tests; Evaluate; Run_test; Render Development; Render Release ]
 
 let item_graph : Store.item_graph =
   {
@@ -565,6 +565,8 @@ let item_graph : Store.item_graph =
     claims = Kind.encode_markers [ Claims ];
     claim_kinds = [ Kind.rank_stage Claim_roots; Kind.rank_stage Prove ];
   }
+
+let evaluation_graph = { item_graph with claim_kinds = [ Kind.rank_stage Prove ] }
 
 let ensure_item (database : Tracker.t) (item : Lowered.Item.t) =
   let id = Ids.of_item item in
@@ -714,7 +716,25 @@ type answered_unit = {
   notes : note list;
   answers : Solver.answer list;
   refutations : Solver.answer list;
+  solver_runs : Store.solver_run list;
 }
+
+let hash_solver_input = Blake3.derive_key ~context:"truss 2026-11-25 solver input"
+
+let list_distinct_solver_runs (solved : Solver.solved list) =
+  let listed = Hashtbl.create 16 in
+  List.concat_map
+    (fun (solved : Solver.solved) ->
+      List.filter_map
+        (fun (run : Solver.run) : Store.solver_run option ->
+          let input_hash = hash_solver_input run.input in
+          if Hashtbl.mem listed input_hash then None
+          else begin
+            Hashtbl.replace listed input_hash ();
+            Some { input_hash; output = run.output }
+          end)
+        solved.runs)
+    solved
 
 let split_by_counts counts values =
   let remaining = ref values in
@@ -747,40 +767,61 @@ let solve_units (database : Tracker.t) solver (rows : Store.definition list) =
         | Ok (None, _) | Error _ -> [])
       posed
   in
+  let outputs = Hashtbl.create 64 in
+  List.iter
+    (fun (row : Store.definition) ->
+      List.iter
+        (fun (run : Store.solver_run) -> Hashtbl.replace outputs run.input_hash run.output)
+        (Store.list_solver_runs database.store ~definition:row.id))
+    rows;
+  let find_output input = Hashtbl.find_opt outputs (hash_solver_input input) in
   let solve_each requests =
-    split_by_counts (List.map List.length requests) (Solver.solve_all solver (List.concat requests))
+    split_by_counts (List.map List.length requests)
+      (Solver.solve_all ~find_output solver (List.concat requests))
   in
-  let answers = solve_each (list_of_posed Prover.list_requests) in
-  let refutations =
+  let list_answers = List.map (fun (solved : Solver.solved) -> solved.answer) in
+  let solved_requests = solve_each (list_of_posed Prover.list_requests) in
+  let solved_refutations =
     solve_each
       (List.map2
-         (fun (_, unit) answers ->
+         (fun (_, unit) solved ->
            match unit with
-           | Ok (Some { posed; _ }, _) -> Prover.list_refutation_requests posed answers
+           | Ok (Some { posed; _ }, _) ->
+               Prover.list_refutation_requests posed (list_answers solved)
            | Ok (None, _) | Error _ -> [])
-         posed answers)
+         posed solved_requests)
   in
   let answered = Hashtbl.create (List.length rows) in
   List.iter2
-    (fun (id, unit) (answers, refutations) ->
+    (fun (id, unit) (requests, refutations) ->
       Hashtbl.replace answered id
-        (Result.map (fun (unit, notes) -> { unit; notes; answers; refutations }) unit))
+        (Result.map
+           (fun (unit, notes) ->
+             {
+               unit;
+               notes;
+               answers = list_answers requests;
+               refutations = list_answers refutations;
+               solver_runs = list_distinct_solver_runs (requests @ refutations);
+             })
+           unit))
     posed
-    (List.combine answers refutations);
+    (List.combine solved_requests solved_refutations);
   answered
 
 let run_decide (database : Tracker.t) answered (row : Store.definition) =
-  let states, has_unfinished_run =
+  let states, has_unfinished_run, solver_runs =
     Tracker.record database Decide row.id (fun recorder ->
         match Hashtbl.find answered row.id with
         | Error raised -> raise raised
-        | Ok { unit; notes; answers; refutations } -> (
+        | Ok { unit; notes; answers; refutations; solver_runs } -> (
             List.iter (fun (marker, target, id, name) -> recorder.note marker target id name) notes;
             match unit with
             | Some { posed; has_unfinished_run } ->
-                (Prover.list_states posed ~answers ~refutations, has_unfinished_run)
-            | None -> ([], false)))
+                (Prover.list_states posed ~answers ~refutations, has_unfinished_run, solver_runs)
+            | None -> ([], false, [])))
   in
+  Store.replace_solver_runs database.store ~definition:row.id solver_runs;
   Tracker.report Decide row.id
     ~is_changed:
       (Store.replace_verdicts database.store ~definition:row.id
@@ -837,6 +878,31 @@ let find_call_edges (database : Tracker.t) (recorder : Tracker.recorder) path =
   | Some (Value callees) -> Some callees
   | Some (Failed | Blocked) -> Some []
   | None -> None
+
+let run_find_aborts database (row : Store.definition) =
+  let path = (Declarations.decode_key row.key).path in
+  run_fact database Find_aborts Facts.aborts_outside_group row ~id:row.path (fun recorder ->
+      let lookups = Lookups.make_call_edges database recorder in
+      ignore
+        (Tracker.find_value database recorder Facts.call_node.whole (Path.locate_package path)
+           ~id:row.path);
+      let has_aborting_callee () =
+        let members =
+          Option.value ~default:[]
+            (Tracker.find_value database recorder Facts.recursion_group.whole
+               (Path.locate_package path) ~id:row.path)
+        in
+        List.exists
+          (fun callee ->
+            (not (List.exists (Path.equal callee) members))
+            && (not (Path.equal callee path))
+            && Lookups.may_abort database recorder callee)
+          (Mir.Call_edges.list_callees_that_run lookups path)
+      in
+      ( Value
+          ((not (Mir.Call_edges.is_specification_only lookups path))
+          && (Mir.Call_edges.has_abort_site lookups path || has_aborting_callee ())),
+        [] ))
 
 let write_lowered (database : Tracker.t) ~id outcome =
   if snd (Tracker.write_observed database Facts.lowered ~id (Some outcome)) then
@@ -965,6 +1031,16 @@ let record_evaluation (database : Tracker.t) item (result : Lowering.evaluation)
   ignore (Tracker.write database Facts.evaluation ~id (Some (Value result)));
   ignore (Store.unmark_stale database.store ~stage:(Kind.rank_stage Evaluate) ~id)
 
+let record_test_run (database : Tracker.t) item (pass : Lowering.test_pass option) =
+  let id = Ids.of_item item in
+  match pass with
+  | None -> Tracker.forget database Run_test id
+  | Some pass ->
+      Tracker.record database Run_test id (fun recorder ->
+          recorder.note Reads (Fact Test_key) id "");
+      ignore (Tracker.write database Facts.test_run ~id (Some (Value pass)));
+      ignore (Store.unmark_stale database.store ~stage:(Kind.rank_stage Run_test) ~id)
+
 let run_render profile (database : Tracker.t) id =
   let item = read_item database id in
   let outcome =
@@ -1070,6 +1146,7 @@ let definition_stages =
       run =
         (fun database row -> group_recursion database ~is_node:(fun ~package:_ _ -> false) [ row ]);
     };
+    { stage = Find_aborts; unit_id = Of_path; applies = has_call_node; run = run_find_aborts };
     { stage = Check_usage; unit_id = Of_definition; applies = is_written; run = run_check_usage };
     {
       stage = Check_ownership;
@@ -1147,7 +1224,8 @@ let rec forget_definition (database : Tracker.t) (row : Store.definition) =
   if is_proven_definition row then begin
     Tracker.forget database Decide row.id;
     Store.replace_holes database.store ~definition:row.id [];
-    ignore (Store.replace_verdicts database.store ~definition:row.id [])
+    ignore (Store.replace_verdicts database.store ~definition:row.id []);
+    Store.replace_solver_runs database.store ~definition:row.id []
   end;
   collect_items database claimed;
   if is_impl row then begin
@@ -1375,16 +1453,16 @@ let list_definition_facts () =
 
 let locate_entity (stage : Kind.stage) : Store.unit_entity =
   match stage with
-  | Lower | Key_tests | Evaluate | Render _ -> Item_unit
+  | Lower | Key_tests | Evaluate | Run_test | Render _ -> Item_unit
   | Parse | Check_imports -> File_unit
   | Declare -> Module_unit
   | Resolve_grant | Check_dependency -> Dependency_unit
   | Supply | Decide -> Definition_unit
   | Claim_roots | Resolve | Read_trait_header | Evaluate_constant | Elaborate_header | Elaborate
   | Derive_interface | Compute_type_facts | Check_signature | Check_contract | Check_body
-  | Build_body_mir | Build_contract_mir | Generate_mir | List_calls | Group_recursion | Check_usage
-  | Check_ownership | Check_sealed | Check_impl | Check_type | Check_instantiation | Check_test
-  | Check_unexported | Prove -> (
+  | Build_body_mir | Build_contract_mir | Generate_mir | List_calls | Group_recursion | Find_aborts
+  | Check_usage | Check_ownership | Check_sealed | Check_impl | Check_type | Check_instantiation
+  | Check_test | Check_unexported | Prove -> (
       match (find_recipe stage).unit_id with
       | Of_definition -> Definition_unit
       | Of_path -> Path_unit)
@@ -1528,7 +1606,59 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
   | Evaluate ->
       Compiler_bug.raise_bug ~stage:"Database"
         "an evaluation is recorded by the command that runs it"
+  | Run_test ->
+      Compiler_bug.raise_bug ~stage:"Database" "a test run is recorded by the command that runs it"
   | Decide -> Compiler_bug.raise_bug ~stage:"Database" "Decide is drained with a solver"
+  | Find_aborts ->
+      let recipe = find_recipe stage in
+      let visiting = Hashtbl.create 64 in
+      let read_untracked (fact : Path.t list Tracker.fact) path =
+        match
+          Tracker.find database Tracker.untracked fact.whole (Path.locate_package path)
+            ~id:(Ids.of_path path)
+        with
+        | Some (Value paths) -> paths
+        | Some (Failed | Blocked) | None -> []
+      in
+      let rec run_after_callees id =
+        if Store.is_stale database.store ~stage:rank ~id && not (Hashtbl.mem visiting id) then begin
+          let path =
+            (Declarations.decode_key (read_first_definition database recipe id).key).path
+          in
+          let members =
+            match read_untracked Facts.recursion_group path with
+            | [] -> [ path ]
+            | members -> members
+          in
+          let member_ids = List.map Ids.of_path members in
+          List.iter (fun member -> Hashtbl.replace visiting member ()) member_ids;
+          List.iter
+            (fun member ->
+              List.iter
+                (fun callee -> run_after_callees (Ids.of_path callee))
+                (read_untracked Facts.call_node member))
+            members;
+          List.iter (Hashtbl.remove visiting) member_ids;
+          run_units database ?on_bug stage member_ids (fun database id ->
+              recipe.run database (read_first_definition database recipe id));
+          let aborts_outside member =
+            match
+              Tracker.find database Tracker.untracked Facts.aborts_outside_group.whole
+                (Path.locate_package member) ~id:(Ids.of_path member)
+            with
+            | Some (Value aborts) -> aborts
+            | Some (Failed | Blocked) -> true
+            | None -> false
+          in
+          let may_abort : bool Tracker.outcome = Value (List.exists aborts_outside members) in
+          List.iter
+            (fun member ->
+              ignore
+                (Tracker.write database Facts.may_abort ~id:(Ids.of_path member) (Some may_abort)))
+            members
+        end
+      in
+      List.iter run_after_callees stale
   | Resolve | Read_trait_header | Evaluate_constant | Elaborate_header | Elaborate
   | Derive_interface | Check_signature | Check_body | Build_body_mir | Build_contract_mir
   | Generate_mir | List_calls | Check_usage | Check_ownership | Check_sealed | Check_impl
@@ -1537,7 +1667,7 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
       run_each (fun database id -> recipe.run database (read_first_definition database recipe id)));
   stale <> []
 
-let drain_test_keys (database : Tracker.t) ?on_bug packages =
+let drain_test_keys (database : Tracker.t) ?on_bug ~graph packages =
   let rank = Kind.rank_stage Key_tests in
   let candidates = Hashtbl.create 64 in
   let lower_rank = Kind.rank_stage Lower in
@@ -1581,8 +1711,7 @@ let drain_test_keys (database : Tracker.t) ?on_bug packages =
       end
     in
     List.iter reach
-      (Store.list_claimed_among database.store item_graph ~items:(list_sorted_ids candidates)
-         ~packages);
+      (Store.list_claimed_among database.store graph ~items:(list_sorted_ids candidates) ~packages);
     List.iter
       (fun component ->
         let was_stale =
@@ -1597,7 +1726,7 @@ let drain_test_keys (database : Tracker.t) ?on_bug packages =
          (list_sorted_ids reached))
   end
 
-let drain_claimed_items (database : Tracker.t) ?on_bug packages =
+let drain_items_claimed_in (database : Tracker.t) ?on_bug ~graph packages =
   let rec lower_each = function
     | [] -> ()
     | id :: pending ->
@@ -1610,7 +1739,7 @@ let drain_claimed_items (database : Tracker.t) ?on_bug packages =
     match
       List.filter
         (fun item ->
-          Store.is_item_claimed database.store item_graph ~item ~over:(Settled_edges { packages }))
+          Store.is_item_claimed database.store graph ~item ~over:(Settled_edges { packages }))
         (list_stale_units database Lower ~scope:Everything)
     with
     | [] -> ()
@@ -1619,7 +1748,13 @@ let drain_claimed_items (database : Tracker.t) ?on_bug packages =
         lower_claimed ()
   in
   lower_claimed ();
-  drain_test_keys database ?on_bug packages
+  drain_test_keys database ?on_bug ~graph packages
+
+let drain_claimed_items database ?on_bug packages =
+  drain_items_claimed_in database ?on_bug ~graph:item_graph packages
+
+let drain_evaluated_items database ?on_bug packages =
+  drain_items_claimed_in database ?on_bug ~graph:evaluation_graph packages
 
 let render_units (database : Tracker.t) ?on_bug profile items =
   run_units database ?on_bug (Render profile) items (run_render profile)

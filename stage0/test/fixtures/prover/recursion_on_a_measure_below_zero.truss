@@ -1,0 +1,6 @@
+fn f(steps: Int64) -> Int64
+  decreases steps
+{
+  if steps == 0 || steps == Int64.minimum { return 0 }
+  f(steps - 1)
+}

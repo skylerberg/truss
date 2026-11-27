@@ -72,8 +72,6 @@ let list_tests store (package : Path.package) name =
           ~package:(Path.show_package package) ~member:name ~kind:(rank kinds Test)
           ~origin:written_origin))
 
-let name_law_proofs ~package ~law ~type_ = Printf.sprintf "%s %s %d" package law type_
-
 let read_column store ~(note : Kind.lookup -> int -> string -> unit) lookup
     (key : Resolve.Names.key) find =
   let id = Ids.of_key key in
@@ -264,9 +262,10 @@ let make_lookups store ~(note : Kind.lookup -> int -> string -> unit) ~is_packag
         List.map snd (list_impl_entries package (Impls_of_trait (Ids.of_path trait))));
     list_law_proofs =
       (fun package (name : Resolve.Names.law_proof_name) ->
-        note Law_proofs (Ids.of_path name.trait)
-          (name_law_proofs ~package:(Path.show_package package) ~law:name.law
-             ~type_:(Ids.of_path name.type_head));
+        note Law_proofs
+          (Ids.of_law_proofs ~package:(Path.show_package package) ~trait:(Ids.of_path name.trait)
+             ~law:name.law ~type_:(Ids.of_path name.type_head))
+          "";
         List.filter_map
           (fun definition ->
             Option.map decode_key (Store.find_definition_key store (locate package) ~id:definition))
@@ -349,7 +348,7 @@ let list_replaced_lookups store ~before ~after : (Kind.lookup * int * string) li
     | _ -> fail "impl")
   @ list_differing "law_proof" [ "package"; "trait"; "law"; "type" ] (function
     | [| Text package; Integer trait; Text law; Integer type_ |] ->
-        [ (Kind.Law_proofs, trait, name_law_proofs ~package ~law ~type_) ]
+        [ (Kind.Law_proofs, Ids.of_law_proofs ~package ~trait ~law ~type_, "") ]
     | _ -> fail "law_proof")
   @ list_differing "dependency" [ "package" ] (function
     | [| Text package |] -> [ (Kind.Dependencies, Store.identify package, "") ]
@@ -627,7 +626,9 @@ let write_module store (module_ : Path.module_) ~(files : (Path.file * string) l
   end;
   List.iter
     (fun (row : Store.law_proof) ->
-      add Law_proofs row.trait (name_law_proofs ~package:package_name ~law:row.law ~type_:row.type_))
+      add Law_proofs
+        (Ids.of_law_proofs ~package:package_name ~trait:row.trait ~law:row.law ~type_:row.type_)
+        "")
     (Store.replace_module_law_proofs store ~package:package_name ~module_:module_id
        (List.map
           (fun ((name : Resolve.Names.law_proof_name), key) : Store.law_proof ->

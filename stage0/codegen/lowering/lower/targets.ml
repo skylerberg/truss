@@ -53,7 +53,7 @@ let pass state (mode : Language.Mode.t) ty place =
   convert_operand state mode ty place (Convention.classify_parameter state.context.env mode ty)
 
 let raise_lending_capability_method capability name =
-  Lowering.raise_unsupported "`%s.%s`, a capability method that lends" (Path.show capability) name
+  Lowering.raise_unsupported (Lending_capability_method { capability; method_ = name })
 
 let lookup_capability_method (context : Definitions.context) capability name =
   let methods = (Definitions.read_trait_interface context capability).methods in

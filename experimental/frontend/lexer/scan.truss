@@ -18,172 +18,156 @@ fn store_number(scanner: mut Scanner, value: own NumberValue) -> token.Kind
   }
 }
 
-fn punctuation(kind: token.Punctuation) -> Option[token.Kind] {
-  Some(token.Kind.Punctuation(kind))
-}
+type Punctuated(kind: token.Punctuation, length: UInt64)
 
-fn lex_punctuation(scanner: mut Scanner, current: UInt8) -> Option[token.Kind]
-  uses Panic
-  modifies scanner.position
-  ensures result is Some(_) ==> old(scanner.position) < scanner.position
-  ensures old(scanner.position) <= scanner.position
+fn find_punctuation_starting(current: UInt8, next: UInt8, after: UInt8) -> Option[Punctuated]
+  ensures !(result is Some(punctuated) && (punctuated.length < 1 || 3 < punctuated.length))
+  ensures !(result is Some(punctuated) && 2 <= punctuated.length && (next == 0 || !is_ascii(next)))
+  ensures !(result is Some(punctuated) && punctuated.length == 3 && (after == 0 || !is_ascii(after)))
 {
-  let start = scanner.position
-  let next = if start + 1 < scanner.length { scanner.lookup(start + 1) } else { 0 }
-  let after = if start + 2 < scanner.length { scanner.lookup(start + 2) } else { 0 }
-  var length: UInt64 = 1
-  let kind: token.Punctuation = if current == 40 {
-    token.Punctuation.Open(token.Bracket.Paren)
+  if current == 40 {
+    Some(Punctuated(kind: token.Punctuation.Open(token.Bracket.Paren), length: 1))
   } else if current == 41 {
-    token.Punctuation.Close(token.Bracket.Paren)
+    Some(Punctuated(kind: token.Punctuation.Close(token.Bracket.Paren), length: 1))
   } else if current == 91 {
-    token.Punctuation.Open(token.Bracket.Square)
+    Some(Punctuated(kind: token.Punctuation.Open(token.Bracket.Square), length: 1))
   } else if current == 93 {
-    token.Punctuation.Close(token.Bracket.Square)
+    Some(Punctuated(kind: token.Punctuation.Close(token.Bracket.Square), length: 1))
   } else if current == 123 {
-    token.Punctuation.Open(token.Bracket.Curly)
+    Some(Punctuated(kind: token.Punctuation.Open(token.Bracket.Curly), length: 1))
   } else if current == 125 {
-    token.Punctuation.Close(token.Bracket.Curly)
+    Some(Punctuated(kind: token.Punctuation.Close(token.Bracket.Curly), length: 1))
   } else if current == 44 {
-    token.Punctuation.Comma
+    Some(Punctuated(kind: token.Punctuation.Comma, length: 1))
   } else if current == 63 {
-    token.Punctuation.Question
+    Some(Punctuated(kind: token.Punctuation.Question, length: 1))
   } else if current == 126 {
-    token.Punctuation.Tilde
+    Some(Punctuated(kind: token.Punctuation.Tilde, length: 1))
   } else if current == 58 {
-    token.Punctuation.Colon
+    Some(Punctuated(kind: token.Punctuation.Colon, length: 1))
   } else if current == 46 {
     if next == 46 {
       if after == 61 {
-        length = 3
-        token.Punctuation.DotDotEqual
+        Some(Punctuated(kind: token.Punctuation.DotDotEqual, length: 3))
       } else {
-        length = 2
-        token.Punctuation.DotDot
+        Some(Punctuated(kind: token.Punctuation.DotDot, length: 2))
       }
     } else {
-      token.Punctuation.Dot
+      Some(Punctuated(kind: token.Punctuation.Dot, length: 1))
     }
   } else if current == 45 {
     if next == 62 {
-      length = 2
-      token.Punctuation.Arrow
+      Some(Punctuated(kind: token.Punctuation.Arrow, length: 2))
     } else if next == 61 {
-      length = 2
-      token.Punctuation.MinusEqual
+      Some(Punctuated(kind: token.Punctuation.MinusEqual, length: 2))
     } else {
-      token.Punctuation.Minus
+      Some(Punctuated(kind: token.Punctuation.Minus, length: 1))
     }
   } else if current == 43 {
     if next == 61 {
-      length = 2
-      token.Punctuation.PlusEqual
+      Some(Punctuated(kind: token.Punctuation.PlusEqual, length: 2))
     } else {
-      token.Punctuation.Plus
+      Some(Punctuated(kind: token.Punctuation.Plus, length: 1))
     }
   } else if current == 42 {
     if next == 61 {
-      length = 2
-      token.Punctuation.StarEqual
+      Some(Punctuated(kind: token.Punctuation.StarEqual, length: 2))
     } else {
-      token.Punctuation.Star
+      Some(Punctuated(kind: token.Punctuation.Star, length: 1))
     }
   } else if current == 47 {
     if next == 61 {
-      length = 2
-      token.Punctuation.SlashEqual
+      Some(Punctuated(kind: token.Punctuation.SlashEqual, length: 2))
     } else {
-      token.Punctuation.Slash
+      Some(Punctuated(kind: token.Punctuation.Slash, length: 1))
     }
   } else if current == 37 {
     if next == 61 {
-      length = 2
-      token.Punctuation.PercentEqual
+      Some(Punctuated(kind: token.Punctuation.PercentEqual, length: 2))
     } else {
-      token.Punctuation.Percent
+      Some(Punctuated(kind: token.Punctuation.Percent, length: 1))
     }
   } else if current == 94 {
     if next == 61 {
-      length = 2
-      token.Punctuation.CaretEqual
+      Some(Punctuated(kind: token.Punctuation.CaretEqual, length: 2))
     } else {
-      token.Punctuation.Caret
+      Some(Punctuated(kind: token.Punctuation.Caret, length: 1))
     }
   } else if current == 38 {
     if next == 38 {
-      length = 2
-      token.Punctuation.AndAnd
+      Some(Punctuated(kind: token.Punctuation.AndAnd, length: 2))
     } else if next == 61 {
-      length = 2
-      token.Punctuation.AmpersandEqual
+      Some(Punctuated(kind: token.Punctuation.AmpersandEqual, length: 2))
     } else {
-      token.Punctuation.Ampersand
+      Some(Punctuated(kind: token.Punctuation.Ampersand, length: 1))
     }
   } else if current == 124 {
     if next == 124 {
-      length = 2
-      token.Punctuation.OrOr
+      Some(Punctuated(kind: token.Punctuation.OrOr, length: 2))
     } else if next == 61 {
-      length = 2
-      token.Punctuation.BarEqual
+      Some(Punctuated(kind: token.Punctuation.BarEqual, length: 2))
     } else {
-      token.Punctuation.Bar
+      Some(Punctuated(kind: token.Punctuation.Bar, length: 1))
     }
   } else if current == 61 {
     if next == 61 && after == 62 {
-      length = 3
-      token.Punctuation.Implies
+      Some(Punctuated(kind: token.Punctuation.Implies, length: 3))
     } else if next == 61 {
-      length = 2
-      token.Punctuation.EqualEqual
+      Some(Punctuated(kind: token.Punctuation.EqualEqual, length: 2))
     } else if next == 62 {
-      length = 2
-      token.Punctuation.FatArrow
+      Some(Punctuated(kind: token.Punctuation.FatArrow, length: 2))
     } else {
-      token.Punctuation.Equal
+      Some(Punctuated(kind: token.Punctuation.Equal, length: 1))
     }
   } else if current == 33 {
     if next == 61 {
-      length = 2
-      token.Punctuation.NotEqual
+      Some(Punctuated(kind: token.Punctuation.NotEqual, length: 2))
     } else {
-      token.Punctuation.Bang
+      Some(Punctuated(kind: token.Punctuation.Bang, length: 1))
     }
   } else if current == 60 {
     if next == 60 {
       if after == 61 {
-        length = 3
-        token.Punctuation.ShiftLeftEqual
+        Some(Punctuated(kind: token.Punctuation.ShiftLeftEqual, length: 3))
       } else {
-        length = 2
-        token.Punctuation.ShiftLeft
+        Some(Punctuated(kind: token.Punctuation.ShiftLeft, length: 2))
       }
     } else if next == 61 {
-      length = 2
-      token.Punctuation.LessEqual
+      Some(Punctuated(kind: token.Punctuation.LessEqual, length: 2))
     } else {
-      token.Punctuation.Less
+      Some(Punctuated(kind: token.Punctuation.Less, length: 1))
     }
   } else if current == 62 {
     if next == 62 {
       if after == 61 {
-        length = 3
-        token.Punctuation.ShiftRightEqual
+        Some(Punctuated(kind: token.Punctuation.ShiftRightEqual, length: 3))
       } else {
-        length = 2
-        token.Punctuation.ShiftRight
+        Some(Punctuated(kind: token.Punctuation.ShiftRight, length: 2))
       }
     } else if next == 61 {
-      length = 2
-      token.Punctuation.GreaterEqual
+      Some(Punctuated(kind: token.Punctuation.GreaterEqual, length: 2))
     } else {
-      token.Punctuation.Greater
+      Some(Punctuated(kind: token.Punctuation.Greater, length: 1))
     }
   } else {
+    None
+  }
+}
+
+fn lex_punctuation(scanner: mut Scanner, current: UInt8) -> Option[token.Kind]
+  modifies scanner.position
+  requires scanner.position < scanner.length && current == scanner.source.text.byte(scanner.position) && is_ascii(current)
+  ensures result is Some(_) ==> old(scanner.position) < scanner.position
+  ensures result is None ==> scanner.position == old(scanner.position)
+{
+  let start = scanner.position
+  let next = if start + 1 < scanner.length { scanner.lookup(start + 1) } else { 0 }
+  let after = if start + 2 < scanner.length { scanner.lookup(start + 2) } else { 0 }
+  let Some(punctuated) = find_punctuation_starting(current, next, after) else {
     return None
   }
-  scanner.position = start + length
-  punctuation(kind)
+  scanner.position = start + punctuated.length
+  Some(token.Kind.Punctuation(punctuated.kind))
 }
 
 fn ends_operand(kind: token.Kind) -> Bool {
@@ -231,17 +215,36 @@ fn is_word(kind: token.Kind) -> Bool {
 }
 
 type Pending =
-  | AfterInteger(integer: Scanned, float_value: NumberValue, start: UInt64, stop: UInt64)
-  | AfterPoint(integer: Scanned, dot: Scanned, merged: Scanned, start: UInt64)
-  | AfterEllipsis(raw: Scanned, start: UInt64, was_after_operand: Bool)
+  | AfterInteger(integer: Scanned, float_value: NumberValue, completed: String)
+  | AfterPoint(integer: Scanned, dot: Scanned, merged: Scanned, completed: String)
+  | AfterEllipsis(raw: Scanned, was_after_operand: Bool)
+  invariant match self {
+    AfterPoint(integer, dot, ..) => integer.stop == dot.start
+    _ => true
+  }
 
-type ItemScan = Ready(item: Item) | indirect Awaiting(pending: Pending) | indirect Opened(string: StringFrame, request: InterpolationRequest)
+type ItemScan = Ready(item: Item) | indirect Awaiting(pending: Pending) | indirect Opened(string: OpenString, request: InterpolationRequest)
+
+fn ItemScan.fits(self, text: String, position: UInt64) -> Bool
+  ensures result == match self {
+    Opened(string, request) => string.builder.text_start <= position
+      && StringProgress.Interpolates(request).fits(text, position, text_start: string.builder.text_start)
+    _ => true
+  }
+{
+  match self {
+    Opened(string, request) => string.builder.text_start <= position
+      && StringProgress.Interpolates(request).fits(text, position, text_start: string.builder.text_start)
+    _ => true
+  }
+}
 
 type Resolution = Resolved(item: Item) | Rescan(pending: Pending)
 
 fn make_scanned(scanner: mut Scanner, inline: Bool, start: UInt64, kind: token.Kind, ending: Ending = Ending.Closed) -> Scanned
-  uses Panic
   modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank, scanner.semicolons
+  requires start < scanner.position
+  ensures result.start == start && result.stop == scanner.position
 {
   report_semicolons(mut scanner, line_break: kind != token.Kind.Punctuation(token.Punctuation.Close(token.Bracket.Curly)))
   let first_line_break = if inline { None } else { scanner.first_line_break }
@@ -282,15 +285,15 @@ fn restore_trivia(scanner: mut Scanner, skipped: Scanned)
 }
 
 fn lexed(scanner: mut Scanner, inline: Bool, start: UInt64, kind: token.Kind, ending: Ending = Ending.Closed) -> Item
-  uses Panic
   modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank, scanner.semicolons
+  requires start < scanner.position
 {
   Item.Lexed(make_scanned(mut scanner, inline, start, kind, ending))
 }
 
 fn make_forbidden(scanner: mut Scanner)
-  uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.line_is_blank
+  requires scanner.position < scanner.length
   ensures old(scanner.position) < scanner.position
 {
   report_forbidden_run(mut scanner, context: Context.Code)
@@ -300,12 +303,12 @@ fn make_forbidden(scanner: mut Scanner)
 fn scan_item(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> ItemScan
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
-    scanner.unterminated_at_end, scanner.name_indices, scanner.name_checks, scanner.previous, scanner.semicolons,
+    scanner.unterminated_at_end, scanner.interned_names, scanner.previous, scanner.semicolons,
     scanner.tables
-  ensures result is Ready(End) || result is Ready(LineEnd)
+  ensures result is Ready(End) || (inline && result is Ready(LineEnd(..)))
     || (old(scanner.position) < scanner.position && old(scanner.position) < scanner.length)
-  ensures result is Ready(LineEnd) ==> old(scanner.position) < scanner.length
   ensures old(scanner.position) <= scanner.position
+  ensures result.fits(scanner.source.text, position: scanner.position)
 {
   while true
     invariant old(scanner.position) <= scanner.position
@@ -323,7 +326,12 @@ fn scan_item(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> ItemScan
     }
     if is_line_break(current) {
       report_semicolons(mut scanner, line_break: false)
-      return ItemScan.Ready(Item.LineEnd)
+      let line_break = if inline {
+        source.make_span(start, stop: start + scanner.measure_line_break(start))
+      } else {
+        consume_line_break(mut scanner)
+      }
+      return ItemScan.Ready(Item.LineEnd(line_break))
     }
     let scanned = scan_token(mut scanner, inline, nesting, start, current)
     match own scanned {
@@ -336,10 +344,11 @@ fn scan_item(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> ItemScan
 fn scan_token(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt64, current: UInt8) -> Option[ItemScan]
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
-    scanner.unterminated_at_end, scanner.name_indices, scanner.name_checks, scanner.previous, scanner.semicolons,
+    scanner.unterminated_at_end, scanner.interned_names, scanner.previous, scanner.semicolons,
     scanner.tables
   requires start == scanner.position && start < scanner.length && current == scanner.source.text.byte(start)
   ensures old(scanner.position) < scanner.position
+  ensures !(result is Some(scan) && !scan.fits(scanner.source.text, position: scanner.position))
 {
   if is_ascii_letter(current) || current == 95 {
     return Some(lex_name(mut scanner, inline, nesting))
@@ -348,34 +357,53 @@ fn scan_token(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt64
     return Some(lex_number(mut scanner, inline))
   }
   if !is_ascii(current) {
-    let decoded = scanner.decode(start)
-    if !decoded.is_valid {
-      report_invalid_run(mut scanner)
-      return None
-    }
-    if is_forbidden(decoded.code) {
-      make_forbidden(mut scanner)
-      return None
-    }
-    if is_xid_start(decoded.code) {
-      return Some(lex_name(mut scanner, inline, nesting))
-    }
-    match scan_confusable(mut scanner, code: decoded.code, length: decoded.length) {
-      Some(confusable) => match confusable {
-        LexedConfusable(kind) => return Some(ItemScan.Ready(lexed(mut scanner, inline, start, kind)))
-        Spaced => return None
-      }
-      None => {
-        let shown = scanner.show_character(start)
-        reject(mut scanner, length: decoded.length, message: "${shown} is not used in Truss.")
-        return None
-      }
-    }
+    return scan_non_ascii(mut scanner, inline, nesting, start)
   }
   if current < 32 || current == 127 {
     make_forbidden(mut scanner)
     return None
   }
+  scan_symbol(mut scanner, inline, nesting, start, current)
+}
+
+fn scan_non_ascii(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt64) -> Option[ItemScan]
+  uses Panic
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.unterminated_at_end, scanner.interned_names, scanner.semicolons, scanner.tables
+  requires start == scanner.position && start < scanner.length
+  ensures old(scanner.position) < scanner.position
+  ensures !(result is Some(scan) && !scan.fits(scanner.source.text, position: scanner.position))
+{
+  let character = scanner.character_at(start)
+  if is_forbidden(character.code()) {
+    make_forbidden(mut scanner)
+    return None
+  }
+  if is_xid_start(character.code()) {
+    return Some(lex_name(mut scanner, inline, nesting))
+  }
+  match scan_confusable(mut scanner) {
+    Some(confusable) => match confusable {
+      LexedConfusable(kind) => Some(ItemScan.Ready(lexed(mut scanner, inline, start, kind)))
+      Spaced => None
+    }
+    None => {
+      let shown = scanner.show_character(start)
+      reject(mut scanner, length: character.utf8_length(), message: "${shown} is not used in Truss.")
+      None
+    }
+  }
+}
+
+fn scan_symbol(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt64, current: UInt8) -> Option[ItemScan]
+  uses Panic
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.unterminated_at_end, scanner.previous, scanner.semicolons, scanner.tables
+  requires start == scanner.position && start < scanner.length && current == scanner.source.text.byte(start)
+  requires is_ascii(current) && 32 <= current && current != 127
+  ensures old(scanner.position) < scanner.position
+  ensures !(result is Some(scan) && !scan.fits(scanner.source.text, position: scanner.position))
+{
   if scan_comment(mut scanner, inline) {
     return None
   }
@@ -413,6 +441,17 @@ fn scan_token(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt64
     )
     return None
   }
+  scan_punctuation(mut scanner, inline, start, current)
+}
+
+fn scan_punctuation(scanner: mut Scanner, inline: Bool, start: UInt64, current: UInt8) -> Option[ItemScan]
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.semicolons, scanner.tables
+  requires start == scanner.position && start < scanner.length && current == scanner.source.text.byte(start)
+  requires is_ascii(current)
+  ensures old(scanner.position) < scanner.position
+  ensures !(result is Some(scan) && !(scan is Ready(_)))
+{
   if current == 46 && scanner.is_digit_at(start + 1) && !follows_operand(scanner) {
     if lex_leading_dot(mut scanner) is Some(value) {
       let kind = store_number(mut scanner, own value)
@@ -420,23 +459,23 @@ fn scan_token(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt64
     }
   }
   match lex_punctuation(mut scanner, current) {
-    Some(kind) => return Some(ItemScan.Ready(lexed(mut scanner, inline, start, kind)))
+    Some(kind) => Some(ItemScan.Ready(lexed(mut scanner, inline, start, kind)))
     None => {
       reject(mut scanner, length: 1, message: "`${scanner.text(start, stop: start + 1)}` is not used in Truss.")
+      None
     }
   }
-  None
 }
 
 fn lex_number(scanner: mut Scanner, inline: Bool) -> ItemScan
-  uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
     scanner.previous, scanner.semicolons, scanner.tables
   requires scanner.position < scanner.length && is_digit(scanner.source.text.byte(scanner.position))
   ensures old(scanner.position) < scanner.position
+  ensures result.fits(scanner.source.text, position: scanner.position)
 {
   let start = scanner.position
-  let stop = number_scan_end(scanner.source.text, start)
+  let stop = scan_number_end(scanner.source.text, start)
   scanner.position = stop
   let checked = check_number(scanner.text(start, stop))
   if checked.problem is Some(problem) {
@@ -457,15 +496,17 @@ fn lex_number(scanner: mut Scanner, inline: Bool) -> ItemScan
   let trailing = lex_trailing_point(scanner, start, stop, checked)
   let integer_kind = store_number(mut scanner, value: own checked.value)
   let integer = make_scanned(mut scanner, inline, start, kind: integer_kind)
-  let Some(float_value) = own trailing else {
+  let Some(point) = own trailing else {
     return ItemScan.Ready(Item.Lexed(integer))
   }
   scanner.previous = Some(integer)
-  ItemScan.Awaiting(Pending.AfterInteger(integer, own float_value, start, stop))
+  ItemScan.Awaiting(Pending.AfterInteger(integer, float_value: own point.value, completed: own point.completed))
 }
 
-fn lex_trailing_point(scanner: Scanner, start: UInt64, stop: UInt64, checked: CheckedNumber) -> Option[NumberValue]
-  uses Panic
+type TrailingPoint(value: NumberValue, completed: String)
+
+fn lex_trailing_point(scanner: Scanner, start: UInt64, stop: UInt64, checked: CheckedNumber) -> Option[TrailingPoint]
+  requires start <= stop && scanner.is_boundary(start) && scanner.is_boundary(stop)
 {
   let is_integer = match checked.value {
     IntegerValue(_) => true
@@ -474,40 +515,40 @@ fn lex_trailing_point(scanner: Scanner, start: UInt64, stop: UInt64, checked: Ch
   if !is_integer || checked.problem.is_some() || !scanner.is_at(stop, byte: 46) || is_radix(scanner.text(start, stop)) {
     return None
   }
-  let pointed = check_number("${scanner.text(start, stop: stop + 1)}0")
+  let completed = "${scanner.text(start, stop: stop + 1)}0"
+  let pointed = check_number(completed)
   if pointed.problem.is_some() {
     return None
   }
   match own pointed.value {
-    FloatValue(decimal) => Some(NumberValue.FloatValue(own decimal))
+    FloatValue(decimal) => Some(TrailingPoint(value: NumberValue.FloatValue(own decimal), own completed))
     IntegerValue(_) => None
   }
 }
 
-fn report_trailing_point(scanner: mut Scanner, start: UInt64, point: UInt64)
-  uses Panic
+fn report_trailing_point(scanner: mut Scanner, integer: Scanned, dot: Scanned, completed: String)
   modifies scanner.diagnostics
+  requires integer.stop == dot.start
 {
-  let written = scanner.text(start, stop: point + 1)
-  let fixes = scanner.list_code_fixes(source.make_span(start, stop: point + 1), codes: ["${written}0"])
+  let fixes = scanner.list_code_fixes(source.make_span(integer.start, stop: dot.start + 1), codes: [completed.copy()])
   report(
     mut scanner,
     code: "lexer.number_missing_digits",
-    span: source.make_span(point, stop: point + 1),
-    message: "A float has a digit after its `.`: `${written}0`.",
+    span: source.make_span(dot.start, stop: dot.start + 1),
+    message: "A float has a digit after its `.`: `${completed}`.",
     fixes: own fixes,
   )
 }
 
 fn lex_leading_dot(scanner: mut Scanner) -> Option[NumberValue]
-  uses Panic
   modifies scanner.diagnostics, scanner.position
+  requires scanner.is_at(scanner.position, byte: 46) && scanner.is_digit_at(scanner.position + 1)
   ensures result is None ==> scanner.position == old(scanner.position)
   ensures result is Some(_) ==> old(scanner.position) < scanner.position
   ensures old(scanner.position) <= scanner.position
 {
   let start = scanner.position
-  let stop = number_scan_end(scanner.source.text, start: start + 1)
+  let stop = scan_number_end(scanner.source.text, start: start + 1)
   let fixed = "0${scanner.text(start, stop)}"
   let checked = check_number(fixed)
   let is_float = match checked.value {
@@ -539,27 +580,27 @@ fn lex_leading_dot(scanner: mut Scanner) -> Option[NumberValue]
 }
 
 fn lex_ellipsis(scanner: mut Scanner, inline: Bool, start: UInt64) -> ItemScan
-  uses Panic
   modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank, scanner.previous,
     scanner.semicolons
+  requires start < scanner.position
+  ensures result.fits(scanner.source.text, position: scanner.position)
 {
   let was_after_operand = follows_operand(scanner)
   let raw = make_scanned(mut scanner, inline, start, kind: token.Kind.Punctuation(token.Punctuation.DotDotEqual))
   scanner.previous = None
-  ItemScan.Awaiting(Pending.AfterEllipsis(raw, start, was_after_operand))
+  ItemScan.Awaiting(Pending.AfterEllipsis(raw, was_after_operand))
 }
 
 fn resolve(scanner: mut Scanner, pending: own Pending, following: Item) -> Resolution
-  uses Panic
   modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.previous, scanner.held,
     scanner.tables
   ensures scanner.held.length() <= old(scanner.held.length()) + 2
   ensures result is Rescan(_) ==> following is Lexed(_) && scanner.held.length() == old(scanner.held.length())
 {
   match own pending {
-    AfterInteger(integer, float_value, start, stop) => {
+    AfterInteger(integer, float_value, completed) => {
       let is_point = match following {
-        Lexed(next) => next.kind == token.Kind.Punctuation(token.Punctuation.Dot) && next.start == stop
+        Lexed(next) => next.kind == token.Kind.Punctuation(token.Punctuation.Dot) && next.start == integer.stop
         _ => false
       }
       if !is_point {
@@ -572,9 +613,9 @@ fn resolve(scanner: mut Scanner, pending: own Pending, following: Item) -> Resol
       let float_kind = store_number(mut scanner, value: own float_value)
       let merged = integer with (kind: float_kind, stop: dot.stop)
       scanner.previous = Some(merged)
-      Resolution.Rescan(Pending.AfterPoint(integer, dot, merged, start))
+      Resolution.Rescan(Pending.AfterPoint(integer, dot, merged, own completed))
     }
-    AfterPoint(integer, dot, merged, start) => {
+    AfterPoint(integer, dot, merged, completed) => {
       let is_word_after = match following {
         Lexed(word) => is_word(word.kind)
         _ => false
@@ -583,23 +624,28 @@ fn resolve(scanner: mut Scanner, pending: own Pending, following: Item) -> Resol
         hold(mut scanner, first: Item.Lexed(dot), second: Some(following))
         return Resolution.Resolved(Item.Lexed(integer))
       }
-      report_trailing_point(mut scanner, start, point: dot.start)
+      report_trailing_point(mut scanner, integer, dot, completed)
       hold(mut scanner, first: following)
       Resolution.Resolved(Item.Lexed(merged))
     }
-    AfterEllipsis(raw, start, was_after_operand) => {
+    AfterEllipsis(raw, was_after_operand) => {
       let operand_follows = match following {
         Lexed(next) => begins_operand(next.kind)
-        LineEnd | End => false
+        LineEnd(_) | End => false
       }
-      match report_ellipsis(mut scanner, start, follows_operand: was_after_operand, operand_follows: operand_follows) {
+      match report_ellipsis(
+        mut scanner,
+        span: source.make_span(raw.start, stop: raw.stop),
+        follows_operand: was_after_operand,
+        operand_follows: operand_follows,
+      ) {
         Some(kind) => {
           hold(mut scanner, first: following)
           Resolution.Resolved(Item.Lexed(raw with (kind)))
         }
         None => match following {
           Lexed(next) => Resolution.Resolved(Item.Lexed(attach_trivia(skipped: raw, next: next)))
-          LineEnd | End => {
+          LineEnd(_) | End => {
             restore_trivia(mut scanner, skipped: raw)
             Resolution.Resolved(following)
           }
@@ -610,7 +656,6 @@ fn resolve(scanner: mut Scanner, pending: own Pending, following: Item) -> Resol
 }
 
 fn settle(scanner: mut Scanner, pending: mut List[Pending], arrived: Item) -> Option[Item]
-  uses Panic
   modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.previous, scanner.held,
     scanner.tables
   ensures !(arrived is Lexed(_)) && 0 < old(pending.length()) ==>
@@ -635,37 +680,36 @@ fn settle(scanner: mut Scanner, pending: mut List[Pending], arrived: Item) -> Op
   Some(item)
 }
 
-fn opens_literal_at(scanner: Scanner, stop: UInt64) -> Bool
-  uses Panic
-{
+fn opens_literal_at(scanner: Scanner, stop: UInt64) -> Bool {
   scanner.is_at(stop, byte: 34) || scanner.is_at(stop, byte: 39) || (scanner.is_at(stop, byte: 36) && opens_raw_string(scanner, index: stop))
 }
 
-fn intern_name(scanner: mut Scanner, start: UInt64, stop: UInt64) -> UInt64
-  uses Panic
-  modifies scanner.name_indices, scanner.name_checks, scanner.tables
+fn intern_name(scanner: mut Scanner, start: UInt64, stop: UInt64) -> InternedName
+  modifies scanner.interned_names, scanner.tables
+  requires start <= stop && scanner.is_boundary(start) && scanner.is_boundary(stop)
 {
-  if scanner.name_indices.get(scanner.text(start, stop)) is Some(interned_index) {
-    return interned_index
+  if scanner.interned_names.get(scanner.text(start, stop)) is Some(interned) {
+    return interned.copy()
   }
-  let index = scanner.tables.names.length()
+  let interned = InternedName(index: scanner.tables.names.length(), check: check_name(scanner.text(start, stop)))
   mut scanner.tables.names.push(scanner.text(start, stop).copy())
-  mut scanner.name_indices.insert(scanner.text(start, stop).copy(), value: index)
-  mut scanner.name_checks.push(check_name(scanner.text(start, stop)))
-  index
+  mut scanner.interned_names.insert(scanner.text(start, stop).copy(), value: interned.copy())
+  interned
 }
 
 fn lex_name(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> ItemScan
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
-    scanner.unterminated_at_end, scanner.name_indices, scanner.name_checks, scanner.semicolons, scanner.tables
+    scanner.unterminated_at_end, scanner.interned_names, scanner.semicolons, scanner.tables
+  requires scanner.position < scanner.length
   ensures old(scanner.position) < scanner.position
+  ensures result.fits(scanner.source.text, position: scanner.position)
 {
   let start = scanner.position
   let first = scanner.lookup(start)
-  var position = if is_ascii(first) { start + 1 } else { start + scanner.decode(start).length }
+  var position = if is_ascii(first) { start + 1 } else { start + scanner.character_at(start).utf8_length() }
   while !scanner.is_at_end(position)
-    invariant start < position
+    invariant start < position && scanner.is_boundary(position)
     decreases scanner.count_remaining(position)
   {
     let current = scanner.lookup(position)
@@ -676,9 +720,9 @@ fn lex_name(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> ItemScan
       }
       break
     }
-    let decoded = scanner.decode(position)
-    if decoded.is_valid && is_xid_continue(decoded.code) {
-      position += decoded.length
+    let character = scanner.character_at(position)
+    if is_xid_continue(character.code()) {
+      position += character.utf8_length()
     } else {
       break
     }
@@ -692,8 +736,8 @@ fn lex_name(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> ItemScan
     match token.find_word(spelling) {
       Some(word) => word
       None => {
-        let index = intern_name(mut scanner, start, stop)
-        let checked = scanner.name_checks.get(index).expect("a name check").copy()
+        let interned = intern_name(mut scanner, start, stop)
+        let checked = interned.check
         if checked.problem is Some(problem) {
           var fixes: List[source.Fix] = []
           if checked.fix is Some(fixed) {
@@ -706,7 +750,7 @@ fn lex_name(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> ItemScan
           }
           report(mut scanner, code: problem.code, span: source.make_span(start, stop), message: problem.message, fixes: own fixes)
         }
-        if checked.is_upper { token.Kind.Upper(index) } else { token.Kind.Lower(index) }
+        if checked.is_upper { token.Kind.Upper(interned.index) } else { token.Kind.Lower(interned.index) }
       }
     }
   }

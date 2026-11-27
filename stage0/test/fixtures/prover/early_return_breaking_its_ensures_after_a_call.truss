@@ -1,0 +1,19 @@
+type Positive(value: Int64)
+  invariant value > 0
+
+fn read(positive: Positive) -> Int64
+  ensures result == positive.value
+  ensures result > 0
+{
+  positive.value
+}
+
+fn choose(number: Int64) -> Int64
+  ensures result == 7
+{
+  if number > 0 {
+    let positive = Positive(value: number)
+    return read(positive) - read(positive) + 8
+  }
+  7
+}

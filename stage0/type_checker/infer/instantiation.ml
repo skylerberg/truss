@@ -134,16 +134,22 @@ and check_written_arguments state items : (Types.argument list, Types.ty) result
   let arguments =
     List.filter_map
       (function
-        | Syntax.Item item -> Some (check_type_argument state item) | Item_constraint _ -> None)
+        | Syntax.Item item -> Some (check_type_argument state item)
+        | Item_type written ->
+            Some
+              (Types.Type (Interface.Elaborator.elaborate_type (State.read_context state) written))
+        | Item_constraint _ -> None)
       items
   in
   let errors =
     List.filter_map
       (function
-        | Syntax.Item _ -> None
+        | Syntax.Item _ | Item_type _ -> None
         | Item_constraint ((name : Syntax.name), _) ->
             Some
-              (State.make_error_type state (Associated_in_type_arguments { at = Written name.id })))
+              (Types.Error
+                 (State.record_diagnostic state
+                    (Catalog.Typing (Constraint_in_type_arguments { at = Written name.id })))))
       items
   in
   match errors with [] -> Ok arguments | error :: _ -> Error error
@@ -152,22 +158,28 @@ and check_type_argument state (value : Syntax.expression) : Types.argument =
   match (value.kind, State.find_head state value) with
   | Integer value, _ -> Types.Value (Known value)
   | _, Some { target = Value_parameter parameter; _ } -> Types.Value (Value_parameter parameter)
-  | _, Some { target = Definition (Constant, path); name; _ } -> (
+  | _, Some { target = Definition (Constant, path); _ } -> (
       match Interface.Constants.evaluate_count state.lookups.interface path with
       | Count value -> Types.Value (Known value)
       | Invalid_count error ->
-          Types.Type
-            (Types.Error
+          Types.Value
+            (Value_error
                (State.record_diagnostic state
-                  (Catalog.Typing
-                     (Count_error { at = Written value.id; written = name.text; error }))))
-      | Unevaluated_count -> Types.Type (Types.Error Catalog.reported_elsewhere))
+                  (Catalog.Typing (Count_error { at = Written value.id; error }))))
+      | Unevaluated_count -> Types.Value (Value_error Catalog.reported_elsewhere))
   | _ -> (
+      let report_not_a_type () =
+        Types.Type (make_error_type_at state value (Not_a_type_argument { at = Written value.id }))
+      in
       match find_static state value with
       | Some (Static_type type_) -> Types.Type type_
-      | Some (Static_trait _ | Static_capability _) | None ->
-          Types.Type
-            (make_error_type_at state value (Not_a_type_argument { at = Written value.id })))
+      | Some (Static_trait _ | Static_capability _) -> report_not_a_type ()
+      | None -> (
+          match
+            Interface.Elaborator.elaborate_associated_expression (State.read_context state) value
+          with
+          | Some type_ -> Types.Type type_
+          | None -> report_not_a_type ()))
 
 type instance = {
   declared : Types.signature;

@@ -1,0 +1,21 @@
+trait Vehicle {
+  type Color
+}
+
+trait Car: Vehicle {}
+
+type Black()
+type Blue()
+type Sedan(count: Int64)
+
+impl Vehicle for Sedan {
+  type Color = Black
+}
+
+impl Car for Sedan {}
+
+fn blue_car[Value: Car[Color = Blue]](car: Value) {}
+
+fn f() {
+  blue_car(Sedan(count: 1))
+}

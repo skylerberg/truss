@@ -17,4 +17,22 @@ let () =
       if status <> 3 then Harness.fail "status %d" status);
   Harness.test "a process that has run a program can still fork" (fun () ->
       ignore (Process.run ~input:"" ~on_output:ignore "/bin/sh" [ "-c"; "echo" ]);
-      match Unix.fork () with 0 -> Unix._exit 0 | child -> ignore (Unix.waitpid [] child))
+      match Unix.fork () with 0 -> Unix._exit 0 | child -> ignore (Unix.waitpid [] child));
+  Harness.test "a coprocess answers each text up to the line that ends its answer" (fun () ->
+      let echo = Process.start "/bin/cat" [] in
+      let first = Process.converse echo "one\nend\n" ~until:"end" in
+      let second = Process.converse echo "two\nwithout end\nend\n" ~until:"end" in
+      Process.stop echo;
+      if (first, second) <> (Ok "one\n", Ok "two\nwithout end\n") then
+        Harness.fail "the coprocess did not answer both texts");
+  Harness.test "a coprocess that exits before its answer ends gives what it wrote" (fun () ->
+      let quitter = Process.start "/bin/sh" [ "-c"; "echo partial" ] in
+      let answer = Process.converse quitter "ignored\n" ~until:"end" in
+      Process.stop quitter;
+      if answer <> Error "partial\n" then Harness.fail "expected the partial output");
+  Harness.test "a coprocess that writes before it has read its whole input does not deadlock"
+    (fun () ->
+      let echo = Process.start "/bin/cat" [] in
+      let answer = Process.converse echo (mebibyte ^ "\nend\n") ~until:"end" in
+      Process.stop echo;
+      if answer <> Ok (mebibyte ^ "\n") then Harness.fail "the megabyte did not come back")

@@ -1,0 +1,4 @@
+fn bump_with(bump: fn(mut Int64)) {
+  var count = 0
+  bump(count)
+}

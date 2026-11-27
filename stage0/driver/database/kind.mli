@@ -20,6 +20,7 @@ type stage =
   | Generate_mir
   | List_calls
   | Group_recursion
+  | Find_aborts
   | Check_usage
   | Check_ownership
   | Check_sealed
@@ -33,6 +34,7 @@ type stage =
   | Lower
   | Key_tests
   | Evaluate
+  | Run_test
   | Render of Profile.t
   | Decide
 
@@ -62,6 +64,8 @@ type fact =
   | Callees
   | Recursion_group
   | Proof_group
+  | Aborts_outside_group
+  | May_abort
   | Usage_check
   | Ownership
   | Dependency_use
@@ -69,6 +73,7 @@ type fact =
   | Lowered
   | Test_key
   | Evaluation
+  | Test_run
   | Unit of Profile.t
 
 type lookup =

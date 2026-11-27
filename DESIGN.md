@@ -279,6 +279,8 @@ call a helper while the list is unsorted.
 | An invariant cannot call a function on a part of the same type either, such as `rest[0].head()`. | Some such invariants are sound by induction on the value, and some are not: where `head` reaches a function that builds a larger value around its argument, a false postcondition of `head` proved. Telling the two apart needs every way back to the invariant to be on a part, which [Termination](#termination) asks of a recursive call and the prover compares only for calls. Until it compares the same for an invariant, the condition is stated over the part's fields, with a pattern. |
 | An invariant clause that calls a definition private to its type's module is opaque in other modules. | The clause can only be proven where its definition is visible, so other modules gain nothing from the definition, and each obligation that holds a value of the type would carry it: `Map`'s index invariant added about 1 MB of axioms to every obligation of `Set`, `json`, and `toml`, and some ran out of steps. A module that builds the value from its fields cannot prove the clause, so no module can make a value that breaks it. |
 | A type with an invariant can still expose its fields. | An invariant protects facts about the contents of a value. `opaque` does a different job: it controls where a value is constructed and hides the representation ([Visibility](#visibility)). |
+| A step of an update suspends only its own type's invariant. | The step exists to pass through states that break that invariant. The invariants of its fields' types are not its to break, so it assumes them and meets them when it returns. Without them, a step would prove at each call that passes a field a fact that no step changes, such as a `String` field holding UTF-8. |
+| Other packages neither assume nor prove an opaque type's invariant. | They cannot build a value of the type, so they cannot break the invariant, and assuming it would put its clauses on every value in each of their obligations. The UTF-8 invariant of `String` made a failing obligation with a `String` in scope come back unknown, and pushed a map literal of 100 string keys past the step limit. What other packages rely on is stated by the contracts of the type's public functions, as `is_boundary` states that offset 0 and the offset after a byte below 128 are boundaries. |
 
 ## Values and ownership
 
@@ -381,6 +383,7 @@ rule excludes `Plain` arguments, such as indexes, so that case is rare.
 | A view is read-only, and elements are written through a range of a mutable place, as in `sort(mut items[1..])`. | Write access then always names the place it writes, so the ownership check compares the written place with every other argument and view, and the prover writes the callee's changes back to that place. Write access held in a variable would let `var target = items[1..5]` overwrite elements that `items[0..4]`, passed beside it, still views. |
 | A range is passed `mut` only to a parameter that its function declares `modifies items[..]`. | A range has no capacity of its own, so a `push` through it would write over the elements that follow it. The clause states that the callee keeps the length, which the body check enforces and the caller's proof uses, so one function serves a whole list and a range of one. |
 | A read-only argument is compared with its parameter's type without `view`, so a `List[view String]` passes to a `List[String]` parameter and a `view String` looks up a `Map[String, Int64]`. | A view has the layout of the type that it views, and a callee cannot mutate, move, drop, or store a read-only parameter, so it cannot tell a view from an owned value. Without the rule a lookup would allocate a `String`, and a function over a list of texts would be written twice. |
+| A place of a `List` or a `String` given where a type parameter is undecided makes the type argument a view, as in `let found = Some(names[0])`. | A `let` bound to the place alone is a view with no annotation, and the place cannot be moved, so the only other reading is an error that asks for a copy. A view costs nothing and the ownership check tracks it; where an owner is wanted, the declared type or `copy()` says so. |
 | A parameter declared `T` is lent for the call, and one declared `view T` may be stored. | Most functions only read their arguments, so the plain type is the short spelling and promises the caller that nothing stays borrowed. A function that keeps a view says so in its signature, where the caller's ownership check reads it: the argument then stays borrowed while the stored view is live. |
 | A view implements a trait through an `impl` that the compiler derives: it forwards each method that the viewed type's `impl` writes, and inherits the rest with the view as `Self`. The derived `impl` must be acceptable as any `impl` is. | Stated as a condition of its own, the rule is a second list of what an `impl` must meet, and an entry that the list lacks is a hole: it once lacked the traits that a trait requires. Stated as an `impl`, it has no list. A forwarded method is compiled for an owner, so the call's own typing keeps a view from an `own` or `mut` parameter, where the method would drop or write elements that the view borrows. An inherited method knows `Self` only through the trait and the traits that it requires, so compiled for `Self = view T` it copies and drops views and writes no element. `Ordered` is the case that matters: its `impl` writes `compare`, and `max`, `min`, and `clamp` are inherited, so a view is a key of a `Map` and an element that `sort` orders. |
 
@@ -482,7 +485,7 @@ State that is updated from one call to the next goes in a `for` loop or a
 method such as `fold`, and behavior with state is a record that implements
 a trait.
 
-A lambda has no annotations, so what it knows of its arguments comes from
+A lambda states no contract, so what it knows of its arguments comes from
 the callee. A parameter's function type states that fact in a `requires`,
 as in `make: (fn(index: UInt64) -> Element requires index < count)`, and a
 lambda passed for `make` may rely on `index < count`. The callee's contract
@@ -493,8 +496,10 @@ caller reads from the lambda's body
 | Rule | Reason |
 |---|---|
 | Only a lambda that captures nothing can be stored. A function-typed parameter is non-escaping unless it is `own`. | A lambda that captures is a view, and a view cannot escape. |
-| A lambda's parameter types and result type come from its expected function type, never from its body. | *Local reasoning.* Rust checks a closure's body before it knows the parameter types, and "type annotations needed" is one of its commonest errors. |
-| A lambda's parameter modes come from the expected type too. | A mode keyword at a call site shows the mutation of an existing place. A lambda's parameter is a new binding, so a keyword there would show nothing. |
+| A lambda's parameter types are decided before its body is checked: by its expected function type, or by an annotation. | *Local reasoning.* Rust checks a closure's body before it knows the parameter types, and "type annotations needed" is one of its commonest errors. |
+| A lambda's parameter may have an annotation, which states the mode and the type that the expected function type gives. | Type inference stops at the statement ([Functions](#functions)), and every other binding can state a type that its statement does not decide. Without the annotation, a stored lambda needs a typed `let` that restates its parameters by position, and a generic callee needs every type argument in brackets. An annotation that converted the argument would be the only annotation that converts. |
+| An annotation writes the mode as a function's parameter does. A parameter without an annotation writes none. | `score: Score` is read-only in a signature and in a lambda alike. A bare mode keyword would show nothing: at a call site it shows the mutation of an existing place, and a lambda's parameter is a new binding. |
+| A lambda declares no result type. | The body's value has a type, and the expected function type's result is checked against it. A written result type would restate one of the two. |
 | `return` exits the lambda. | Kotlin's non-local `return` from an inline lambda is a known source of confusion. |
 | A lambda has one form, `fn(x) { ... }`, passed inside the call's parentheses. | *One spelling.* A block's value is its last expression, so `x => x * 2` would be a second form, and a trailing lambda a second way to pass an argument. |
 | A lambda names its parameters. | An implicit parameter such as `it` or `$0` is not a descriptive name ([Names](#names)). |
@@ -707,6 +712,22 @@ potential. Mutable value semantics guarantees that no value is shared, so
 amortized bounds compose. A value's potential includes the potential of its
 parts, so a push onto a list inside a list is paid for by the inner list.
 
+**A caller with an amortized bound counts an amortized callee at its
+bound.** The callee's bound already counts the change in the potential of
+the values it changes, so the caller's proof never reads the potential of a
+type that the caller does not define. The caller pays only for the
+potential that its own code makes: the values it builds, the fields it
+writes, and the results and changes of a callee that states only a plain
+bound. A caller with a plain bound counts the potential that an amortized
+callee may spend, which is none for a list that the caller creates empty.
+
+**Potential is credit that a value owns.** That reading is what lets a
+caller skip its callees' potential, and it holds only where the potential
+follows ownership: `own` transfers it, `mut` lends it, and read-only access
+touches none. So a view holds none, a `Plain` type holds none, since an
+implicit copy would duplicate it, and a capability's provider, which no
+caller can read, is lent to every call of the capability's methods.
+
 **There are no expected-time bounds.** A hash map is O(1) only on average,
 on the assumption that hashes behave randomly. No proof can promise that
 against input chosen by an attacker, and proving expected bounds needs
@@ -719,6 +740,10 @@ worst case instead.
 | `O(f)` bounds the cost for every input, not only for large inputs. | The textbook definition is a limit, which a prover handles poorly, and it gives wrong answers for bounds in several variables. |
 | A bound can mention `result`. | An output-sensitive bound, such as the bound of a function that returns its matches, cannot be stated otherwise. |
 | The `time` of a generic function counts the methods of its bounds. | `O(self.length())` would be false for `contains` on a list of strings, where one comparison is not one step. `String` could not keep a promise of `O(1)` on `Equal.equal`, and a second trait for constant-time comparison would give every generic method two overloads. |
+| A type that declares a `cost potential` is not `Plain`. | An implicit copy would give two values one potential, and an amortized callee could spend it twice. |
+| A capability method's bound counts the change in its provider's potential, plain or `amortized`. | No caller can read a provider, which a `provide` block outside it supplies. The `impl` is where the provider's potential changes, so the `impl` is where the change is checked, and a collecting provider can still state a bound. |
+| `amortized` takes only an `O(...)` bound on `time`, `allocations`, or `allocated_bytes`. | Potential is credit in time or memory. Counted against calls it would let a push's credit pay for calls, and an exact `<=` or `==` count has no slack to borrow. |
+| A caller with an amortized bound counts an amortized callee at the callee's bound, not at its actual cost less the potential it makes. | Counting actual cost made every caller cancel each callee's potential against its own, through the capacity of `List`'s storage. In a loop the cancellation was syntactic, so a loop that pushed on one path and not the other failed to prove. |
 | A function that calls a callback bounds its allocations with `allocations(visit)`, and its allocated bytes with `allocated_bytes(visit)`. | `Option.map` allocates what its callback allocates. Without the term it states no allocation bound, and a function with `cost allocations <= 0` then calls no combinator, even with a lambda that allocates nothing. The alternative is an allocation clause on the type of every callback, which rejects each function that states none. |
 
 ### Function types
@@ -1174,6 +1199,12 @@ Rules: [Strings](SPECIFICATION.md#strings).
 |---|---|
 | Strings have no concatenation operator. | `+` stays numeric, and each allocation is written as an interpolation or a call (*nothing hidden*). |
 | Adjacent literals do not join. | A missing comma in `["a" "b", "c"]` would silently merge two elements. |
+| A `String` holds well-formed UTF-8. | A check of text then reads the characters that every later reader decodes. Without it, an overlong encoding of `/` passes a check for `/` and decodes to `/` afterwards, and a slice can split a character. |
+| The invariant of `String` is stated over the bytes it stores: `utf8.is_valid(intrinsic.storage_model(storage))`. | `String.model` takes a `String`, so its proof assumes the invariant, and an invariant that called it would be proven from itself ([Circular proofs](SPECIFICATION.md#circular-proofs)). A view of a `String` is a `String`, so the one invariant holds of both. |
+| Viewing storage as a `String` proves the invariant where the view is built. | `String.part` views a range of a string's bytes as a `String`, and no constructor builds that value. Checked only where it is passed or returned, a view stored in a record would never be checked. |
+| The model of text is its bytes, and an offset counts bytes. | A slice at an offset costs O(1), and a proof about stored bytes needs no translation. An offset that counts characters costs a scan for each access. |
+| Bytes become text only through validation, at run time or in a proof. | `from_utf8` and `from_utf8_lossy` check each byte. `from_valid_utf8` requires `utf8.is_valid` of the bytes, so the prover checks them, and the conversion costs nothing at run time. |
+| A lossy conversion replaces each maximal subpart of an ill-formed sequence with one U+FFFD. | Unicode recommends this practice, and the WHATWG decoder follows it, so the same bytes give the same text in a browser and in Truss. Bytes from the operating system, such as a file name, convert the same way. |
 
 ### Tagged templates
 
@@ -1297,6 +1328,7 @@ Rules: [Method lookup](SPECIFICATION.md#method-lookup).
 | Two candidates for one name are an error, never a silent choice. | In Rust a type's own method wins over a trait's, so adding a method can silently change an existing call. In Truss an upgrade can break a call only with an error that names both candidates. A release that only adds names is still compatible, because otherwise no type could ever gain a method. |
 | An `Array` has the methods of the `List` of its elements. | `self` is a parameter, and an `Array` converts to the range of all its elements. Without the rule, every method of a `List` needs a forwarding method on `Array`, whose contract is stated and proven a second time. |
 | An `Array`'s own method hides the `List` method of the same name and mode. | The array can do better where its length is a constant. Both are written in one package, so no other package can change which one a call reaches. |
+| A trait's method named as a value is the lambda that calls it. | Dispatch, capabilities, contracts, and costs are then the call's, so no stage after type checking has a second kind of function value. |
 
 ### Dispatch
 
@@ -1437,7 +1469,7 @@ Rules: [Writing specifications](SPECIFICATION.md#writing-specifications).
 |---|---|
 | A function called in a specification is pure: it uses no capability, not even `Panic` or `RunForever`, except `Panic unless` a condition that the specification proves. | A function that might not return, or might end the program, has no value to reason about, and a definition that is not well founded would make the logic unsound. |
 | A specification is read left to right. | `index < items.length() && items[index] > 0` is well defined. |
-| `==>` exists, and only in specifications. | "If this holds, then that holds" is the commonest form of a specification, and `!a \|\| b` hides it. `==>` binds more loosely than `&&` and `\|\|`, as in Dafny. Code already has `if`. |
+| `==>` exists. | "If this holds, then that holds" is the commonest form of a specification, and `!a \|\| b` hides it. `==>` binds more loosely than `&&` and `\|\|`, as in Dafny. |
 | Integer arithmetic in a specification is exact. | A specification cannot have an overflow bug, and `decreases high - low` can be negative, which is the case that the prover must rule out. |
 | An `Integer` converts implicitly where a built-in integer is expected. | The obligation that the value fits is proven either way. |
 | A function for specifications has no keyword. | Its signature already mentions a type that exists only in specifications. |
@@ -1457,6 +1489,7 @@ then ensures `identical(self.model(), old(self.model()).append(item))`.
 | The equality of the mathematical types is identity. | The prover substitutes through a model where the collection's own `Equal` is hand-written. |
 | An opaque type has a model. | Other packages reason about the type through its model, without its fields. |
 | `standard.specification` trusts only the structure of its types. Its `todo` bodies are its axioms: `Sequence`'s constructors `empty` and `append`, with `length` and indexing, and the operations of `FiniteSet` and `FiniteMap`. Every other function there has a body, so its `ensures` are proven. | An axiom is trusted, not proven, and a false one would let every program be proven. Proving each fact that follows from others keeps the axioms few enough to check by reading. A proven `ensures` reaches each call as an axiom's does, so callers lose nothing. |
+| `standard.intrinsic_contracts` states the contract of each storage operation that the compiler generates code for, such as `storage_push`. Its `todo` bodies are axioms too. | The prover needs the semantics of an operation with no Truss body. A contract in Truss is read by the rules of every other call and can be checked by reading it beside the library code that relies on it. The same facts written in the prover were axioms as well, in a second language. |
 | `identical(a, b)` is identity, and is separate from `==`. | A generic contract must say that an element is a given value, whatever its type. `==` cannot say that: it is the type's `Equal`, which `List[Element]` does not require, and which is an equivalence and not identity for a set stored as an unsorted list. `==` therefore keeps one meaning everywhere. |
 
 ### What proofs do not model

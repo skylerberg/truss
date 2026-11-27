@@ -216,12 +216,13 @@ let run_mutant ~samples text =
                 (fun (_, arguments) ran ->
                   incr runs;
                   match ran with
-                  | Backend.Stopped report ->
+                  | Backend.Stopped stop ->
                       incr failures;
                       Printf.printf "PROVEN BUT FAILS: %s (%s)\n%s\n%s\n\n"
                         (Path.show candidate.path)
                         (String.concat ", " (List.map Z.to_string arguments))
-                        report text
+                        (Catalog.Codegen_description.describe_stop ~show_file:Path.show_file stop)
+                        text
                   | _ -> ())
                 admitted
                 (evaluate (name_samples "result" admitted)))

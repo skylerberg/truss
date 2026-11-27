@@ -1,0 +1,20 @@
+capability Tick {
+  fn tick()
+    cost time O(1)
+}
+
+impl Tick for Meter {
+  fn tick(mut self)
+    cost time O(1)
+  {
+  }
+}
+
+fn ticks_once()
+  cost amortized time O(1)
+{
+  var meter = Meter(credit: 0)
+  provide mut meter {
+    Tick.tick()
+  }
+}

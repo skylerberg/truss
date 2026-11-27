@@ -8,4 +8,5 @@ let of_path (path : Path.t) = Store.identify (encode path)
 let of_dependency (package : Path.package) (dependency : Path.package) =
   Store.identify (encode (package, dependency))
 
+let of_law_proofs ~package ~trait ~law ~type_ = Store.identify (encode (package, trait, law, type_))
 let of_item (item : Lowered.Item.t) = Store.identify (encode item)

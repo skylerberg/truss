@@ -688,6 +688,10 @@ let () =
         "(call (. ([] List String) with_capacity) 64)";
       expect_expression "total[Iterable[Element = Int64]]"
         "([] total ([] Iterable Element = Int64))");
+  Harness.test "a view in brackets is a type argument" (fun () ->
+      expect_expression "greatest[view String](first)" "(call ([] greatest view String) first)";
+      expect_expression "List[List[view String]].with_capacity(2)"
+        "(call (. ([] List ([] List view String)) with_capacity) 2)");
   Harness.test "a collection cannot mix list elements and map entries" (fun () ->
       Parse_support.expect_body_error "let x = [1, \"a\": 2]" ~code:Unexpected_token ~at:"\"a\"";
       Parse_support.expect_body_error "let x = [\"a\": 1, 2]" ~code:Unexpected_token ~at:"2]");
@@ -703,6 +707,9 @@ let () =
   Harness.test "a lambda" (fun () ->
       expect_expression "fn(sum, (value, ..)) { sum + value }"
         "(fn (sum (record value ..)) (block (+ sum value)))");
+  Harness.test "a lambda's parameters with annotations" (fun () ->
+      expect_expression "fn(sum: Int64, Point(x, ..): mut Point) { sum + x }"
+        "(fn ((sum: Int64) ((Point x ..): mut Point)) (block (+ sum x)))");
   Harness.test "if, else if, and else" (fun () ->
       expect_expression "if a { 1 } else if b { 2 } else { 3 }"
         "(if a (block 1) (if b (block 2) (block 3)))");

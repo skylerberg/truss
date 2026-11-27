@@ -1,48 +1,90 @@
-let list_bound_diagnostics lookups ~package ~list_bounds named =
+let list_bound_diagnostics lookups ~package ~list_bounds ~at ~definition generics arguments =
   List.concat_map
-    (fun (id, (type_ : Types.ty)) ->
-      match type_ with
-      | Named { path; arguments } -> (
-          match
-            Option.map
-              (fun (interface : Types.type_interface) ->
-                Impls.list_required_bounds interface.type_generics
-                  (Types.make_substitution interface.type_generics arguments))
-              (Definition.find_type_interface lookups path)
-          with
-          | Some required ->
-              List.concat_map
-                (fun (argument, bound) ->
-                  match Impls.find_evidence lookups ~list_bounds argument bound with
-                  | None ->
-                      [ Catalog.Typing (Bound_unmet { at = Written id; type_; argument; bound }) ]
-                  | Some evidence ->
-                      List.map
-                        (fun ((interface : Types.impl_interface), package, capability) ->
-                          Catalog.Capabilities
-                            (Not_granted
-                               {
-                                 at = Written id;
-                                 granted =
-                                   Implemented_method
-                                     {
-                                       implements = interface.implements;
-                                       for_type = interface.for_type;
-                                     };
-                                 package;
-                                 capability;
-                               }))
-                        (Grants.list_missing_in_impls lookups ~package
-                           (Grants.list_evidence_uses lookups ~list_bounds evidence)))
-                required
-          | None -> [])
-      | _ -> [])
-    named
+    (fun (argument, bound) ->
+      match Impls.find_evidence lookups ~list_bounds argument bound with
+      | None -> [ Catalog.Typing (Bound_unmet { at; definition; arguments; argument; bound }) ]
+      | Some evidence ->
+          List.map
+            (fun ((interface : Types.impl_interface), package, capability) ->
+              Catalog.Capabilities
+                (Not_granted
+                   {
+                     at;
+                     granted =
+                       Implemented_method
+                         { implements = interface.implements; for_type = interface.for_type };
+                     package;
+                     capability;
+                   }))
+            (Grants.list_missing_in_impls lookups ~package
+               (Grants.list_evidence_uses lookups ~list_bounds evidence)))
+    (Impls.list_required_bounds generics (Types.make_substitution generics arguments))
+
+let list_ambiguous_declarations lookups ~base bounds name (kind : Types.associated_kind) =
+  let declares (reference : Types.trait_reference) =
+    match (Definition.find_trait_interface lookups reference.trait, kind) with
+    | Some interface, Associated_type ->
+        List.exists
+          (fun (associated : Types.associated_type) -> associated.associated_name = name)
+          interface.associated_types
+    | Some interface, Associated_capability_set -> List.mem name interface.associated_capabilities
+    | None, _ -> false
+  in
+  let declaring =
+    List.filter declares (List.concat_map (Properties.list_bound_closure lookups ~self:base) bounds)
+  in
+  let instances =
+    List.fold_left
+      (fun instances (reference : Types.trait_reference) ->
+        let instance = { reference with associated = [] } in
+        if List.mem instance instances then instances else instances @ [ instance ])
+      [] declaring
+  in
+  let find_fixed instance =
+    List.find_map
+      (fun (reference : Types.trait_reference) ->
+        if { reference with associated = [] } = instance then
+          List.assoc_opt name reference.associated
+        else None)
+      declaring
+  in
+  let is_fixed_to_one_type =
+    match List.map find_fixed instances with
+    | Some first :: rest -> List.for_all (Option.fold ~none:false ~some:(Types.equal first)) rest
+    | None :: _ | [] -> false
+  in
+  match instances with [] | [ _ ] -> [] | _ when is_fixed_to_one_type -> [] | _ -> instances
+
+let list_application_diagnostics lookups ~package ~list_bounds applications =
+  List.concat_map
+    (fun (id, (application : Types.application)) ->
+      let at : Core.origin = Written id in
+      let list_bound_diagnostics = list_bound_diagnostics lookups ~package ~list_bounds ~at in
+      match application with
+      | Type_application (Named { path; arguments }) ->
+          Option.fold ~none:[]
+            ~some:(fun (interface : Types.type_interface) ->
+              list_bound_diagnostics ~definition:path interface.type_generics arguments)
+            (Definition.find_type_interface lookups path)
+      | Type_application _ -> []
+      | Trait_application { trait; trait_arguments; _ } ->
+          Option.fold ~none:[]
+            ~some:(fun (interface : Types.trait_interface) ->
+              list_bound_diagnostics ~definition:trait interface.trait_generics trait_arguments)
+            (Definition.find_trait_interface lookups trait)
+      | Associated_application { base; bounds; name; kind } -> (
+          match list_ambiguous_declarations lookups ~base bounds name kind with
+          | _ :: _ :: _ as traits ->
+              [
+                Catalog.Typing (Ambiguous_associated { at; base; name; associated = kind; traits });
+              ]
+          | [] | [ _ ] -> []))
+    applications
 
 let check_bounds (state : Checking.state) =
   state.diagnostics :=
-    list_bound_diagnostics state.lookups ~package:state.key.module_.package
-      ~list_bounds:(Checking.list_bounds state) state.elaborated.named
+    list_application_diagnostics state.lookups ~package:state.key.module_.package
+      ~list_bounds:(Checking.list_bounds state) state.elaborated.applications
     @ !(state.diagnostics)
 
 let rec list_mentioned_paths = function
@@ -125,7 +167,7 @@ let check_real_implementations (state : Checking.state) (resolved : Resolve.reso
                     (No_real_implementation
                        {
                          at = Written capability.id;
-                         written = Elaborator.show_path written.path;
+                         written = Catalog.cover_path written.path;
                          recipient;
                        })
               | None -> ())
@@ -186,6 +228,18 @@ let check_duplicates state member_kind (names : Syntax.name list) =
          name.text :: seen)
        [] names)
 
+let list_trait_member_names (members : Syntax.trait_member Syntax.node list) =
+  let select select =
+    List.filter_map (fun (member : _ Syntax.node) -> select member.kind) members
+  in
+  [
+    ( Catalog.Typing.Associated_type_member,
+      select (function Syntax.Associated_type (name, _) -> Some name | _ -> None) );
+    ( Capability_set_member,
+      select (function Syntax.Associated_capability name -> Some name | _ -> None) );
+    (Law_member, select (function Syntax.Law law -> Some law.name | _ -> None));
+  ]
+
 let list_field_names (fields : Syntax.field list) =
   List.filter_map
     (fun (field : Syntax.field) ->
@@ -196,19 +250,33 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
     resolved =
   let field_types = Types.list_field_types interface in
   let list_derived_bounds trait =
-    Properties.Bounds.append (Checking.list_bounds state)
-      (Properties.Bounds.close state.lookups (fun parameter ->
-           if
-             List.exists
-               (fun (generic : Types.generic) -> generic.generic = parameter)
-               interface.type_generics
-           then [ { Types.trait; trait_arguments = []; associated = [] } ]
-           else []))
+    Properties.Bounds.close state.Checking.lookups
+      (Types.list_bounds
+         (Impls.derived_generics interface.type_generics
+            { Types.trait; trait_arguments = []; associated = [] }))
   in
-  List.iter
-    (fun ((clause : Syntax.type_clause), (written : Syntax.path_type), trait) ->
-      let shown = Elaborator.show_path written.path in
-      if
+  let entries = Definition.list_derives_entries resolved clauses in
+  List.iteri
+    (fun index ((clause : Syntax.type_clause), (written : Syntax.path_type), trait) ->
+      let shown = Catalog.cover_path written.path in
+      let entry : Core.origin Catalog.range = { covering = [ Written written.id ] } in
+      let siblings () =
+        find_siblings ~clause
+          (match clause.kind with
+          | Derives traits -> List.map (fun (trait : Syntax.path_type) -> trait.id) traits
+          | Type_invariant _ | Potential _ -> [])
+          written.id
+      in
+      let is_repeated =
+        List.exists
+          (fun (_, _, earlier) -> Path.equal earlier trait)
+          (List.filteri (fun earlier _ -> earlier < index) entries)
+      in
+      if is_repeated then
+        Checking.report state
+          (Repeated_derive
+             { at = Written written.id; written = shown; entry; siblings = siblings () })
+      else if
         not
           (Resolve.Names.is_derivable trait || Well_known.is Copyable trait
          || Well_known.is Plain trait)
@@ -217,18 +285,7 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
         begin if not interface.opaque then
           Checking.report state
             (Derives_inferred
-               {
-                 at = Written written.id;
-                 written = shown;
-                 entry = { covering = [ Written written.id ] };
-                 siblings =
-                   find_siblings ~clause
-                     (match clause.kind with
-                     | Derives traits ->
-                         List.map (fun (trait : Syntax.path_type) -> trait.id) traits
-                     | Type_invariant _ | Potential _ -> [])
-                     written.id;
-               })
+               { at = Written written.id; written = shown; entry; siblings = siblings () })
         else
           let self : Types.ty =
             Named
@@ -242,7 +299,9 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
             if Well_known.is Plain trait then Impls.is_plain state.lookups ~list_bounds self
             else Impls.is_copyable state.lookups ~list_bounds self
           in
-          if not holds then
+          if Well_known.is Plain trait && interface.declares_potential then
+            Checking.report state (Potential_not_plain { at = Written written.id })
+          else if not holds then
             Checking.report state (Field_not_derivable { at = Written written.id; written = shown })
         end
       else begin
@@ -275,7 +334,7 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
                 (Field_lacks_impl { at = Written written.id; type_; written = shown }))
           needed
       end)
-    (Definition.list_derives_entries resolved clauses)
+    entries
 
 let check_trait_cycle (state : Checking.state) (requires : Syntax.path_type list) =
   let is_required_by required =
@@ -353,7 +412,7 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
   with
   | None -> ()
   | Some restated ->
-      let declared_by = Path.show restated.declared_by in
+      let declared_by = restated.declared_by in
       let original =
         Definition.read_method_signature state.lookups ~owner:restated.declared_by
           { method_name = name.text; method_receiver = receiver; provided = false }
@@ -399,7 +458,7 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
           | None ->
               Compiler_bug.raise_bug ~stage:"Interface"
                 "`%s` restates a method of `%s`, which it does not require" (Path.show trait_path)
-                declared_by
+                (Path.show declared_by)
         in
         let expected =
           name_signature_declaring_traits state.lookups
@@ -418,13 +477,7 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
         then
           Checking.report state
             (Restated_signature
-               {
-                 at = Written name.id;
-                 name = name.text;
-                 declared_by;
-                 signature = Impl_checks.show_signature expected;
-                 uses = Types.list_capabilities expected.uses;
-               })
+               { at = Written name.id; name = name.text; declared_by; signature = expected })
 
 let check_defaults_without_body (state : Checking.state) (signature : Syntax.signature) =
   let name = Resolve.Names.extract_signature_name signature in
@@ -573,10 +626,10 @@ let check (state : Checking.state) =
             check_restated state signature ~has_body written ~trait_path:container.path trait;
             check_private_in_public state ~visibility (list_signature_paths written)
               (Written name.id)
-        | { kind = Impl { trait_; _ }; _ }, Impl_interface impl ->
+        | { kind = Impl _; _ }, Impl_interface impl ->
             Impl_checks.check_impl_method state name
               (Resolve.Names.classify_receiver signature.parameters)
-              written impl trait_
+              written impl
         | _ -> ())
     | Some _, _, _ -> ()
     | None, Function { signature; _ }, Function_interface elaborated ->
@@ -613,14 +666,14 @@ let check (state : Checking.state) =
           | Some _ -> ())
     | None, Type_definition { name; body; clauses; _ }, Type_interface interface ->
         (match body with
-        | Fields fields -> check_duplicates state "field" (list_field_names fields)
+        | Fields fields -> check_duplicates state Field_member (list_field_names fields)
         | Variants variants ->
-            check_duplicates state "variant"
+            check_duplicates state Variant_member
               (List.map (fun (variant : Syntax.variant) -> variant.name) variants);
             List.iter
               (fun (variant : Syntax.variant) ->
                 Option.iter
-                  (fun fields -> check_duplicates state "field" (list_field_names fields))
+                  (fun fields -> check_duplicates state Field_member (list_field_names fields))
                   variant.fields)
               variants
         | Type_todo -> ());
@@ -629,8 +682,11 @@ let check (state : Checking.state) =
           check_private_in_public state ~visibility
             (List.concat_map list_mentioned_paths (Types.list_field_types interface))
             (Written name.id)
-    | None, Trait { name; requires; _ }, Trait_interface trait ->
+    | None, Trait { name; requires; members; _ }, Trait_interface trait ->
         check_trait_cycle state requires;
+        List.iter
+          (fun (member_kind, names) -> check_duplicates state member_kind names)
+          (list_trait_member_names members);
         check_private_in_public state ~visibility
           (List.concat_map list_trait_paths trait.requires)
           (Written name.id)

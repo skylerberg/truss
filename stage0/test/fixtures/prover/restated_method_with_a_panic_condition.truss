@@ -1,0 +1,38 @@
+trait Steps {
+  fn step(self, by: UInt64) -> UInt64
+    uses Panic unless by < 1000
+}
+
+trait LongSteps: Steps {
+  fn step(self, by: UInt64) -> UInt64
+    uses Panic unless by < 1000
+    ensures result >= by
+}
+
+type Walker(x: Int64)
+
+impl Steps for Walker {
+  fn step(self, by: UInt64) -> UInt64
+    uses Panic unless by < 1000
+    ensures result == by * 1000
+  {
+    by * 1000
+  }
+}
+
+impl LongSteps for Walker {
+}
+
+type Crawler(x: Int64)
+
+impl Steps for Crawler {
+  fn step(self, by: UInt64) -> UInt64
+    uses Panic unless by < 1000
+    ensures result <= 1
+  {
+    if by * 1000 > 0 { 1 } else { 0 }
+  }
+}
+
+impl LongSteps for Crawler {
+}

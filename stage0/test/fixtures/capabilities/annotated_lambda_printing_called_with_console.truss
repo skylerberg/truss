@@ -1,0 +1,6 @@
+fn greet(name: String)
+  uses Console
+{
+  let log = fn(text: String) { Console.print_line(text) }
+  log(name)
+}

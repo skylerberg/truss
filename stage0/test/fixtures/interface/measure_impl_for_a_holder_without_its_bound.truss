@@ -1,0 +1,13 @@
+trait Shown {
+  fn show(self) -> Int64
+}
+
+type Holder[Value: Shown](value: Value)
+
+trait Measure {
+  fn size(self) -> Int64
+}
+
+impl Measure for Holder[Value] {
+  fn size(self) -> Int64 { todo }
+}

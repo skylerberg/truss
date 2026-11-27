@@ -49,9 +49,8 @@ module Symbol : sig
     | Handle_descriptor
     | Compare_bytes_order
     | Cost_most
-    | Cost_log
-    | Cost_power
-    | Reached of int
+    | Integer_log
+    | Integer_power
 end
 
 type rounding_mode = Nearest_ties_to_even | Toward_positive | Toward_negative | Toward_zero
@@ -138,6 +137,11 @@ val negate : term -> term
 val add : term -> term -> term
 val subtract : term -> term -> term
 val multiply : term -> term -> term
+val larger : term -> term -> term
+val at_least_zero : term -> term
+val linearize : term -> (term * Z.t) list * Z.t
+val combine_linear : (term * Z.t) list * Z.t -> term
+val normalize_linear : term -> term
 val less : term -> term -> term
 val less_equal : term -> term -> term
 val greater : term -> term -> term
@@ -148,7 +152,9 @@ val truncated_divide : term -> term -> term
 val truncated_remainder : term -> term -> term
 val integer_of_bits : is_signed:bool -> width:int -> term -> term
 val mentions : symbol list -> term -> bool
+val decreases_lexicographically : term list -> term list -> term
 val is_refuted : term -> bool
+val is_valid : term -> bool
 val list_free_constants : term -> symbol list
 val has_quantifier : term -> bool
 val remove_quantified_facts : query -> query
@@ -156,15 +162,20 @@ val forall : ?trigger:term list -> (symbol * sort) list * term -> term
 val substitute : (symbol * term) list -> term -> term
 val replace : from:term -> into:term -> term -> term
 val has_untriggered_fact : ?is_counted:(term -> bool) -> query -> bool
-val prune : query -> query
-val show_query : ?cardinality_bound:int -> query -> string
-val has_uninterpreted_sort : query -> bool
+val hash_term : term -> int
 
-type rendering
+val prune :
+  find_signature:(symbol -> (sort list * sort) option) ->
+  list_axioms:(symbol -> term list) ->
+  query ->
+  query
 
-val render : query -> rendering
-val rendered_text : rendering -> string
-val render_term : rendering -> term -> string option
-val list_symbols : rendering -> (symbol * string) list
-val list_members : query -> (string * (symbol * symbol list)) list
-val show_symbol : symbol -> string
+val declare_derived :
+  find_signature:(symbol -> (sort list * sort) option) ->
+  list_constructors:(Types.ty -> (symbol * (symbol * sort) list) list option) ->
+  query ->
+  query
+
+val list_conjunct_queries : query -> query list
+val show_term : term -> string
+val show_query : query -> string

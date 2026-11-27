@@ -1,4 +1,4 @@
-type Point(x: Float64, y: Float64)
+type Point(x: Float32, y: Float32)
   derives Equal
 
 fn f(a: Point, b: Point) -> Bool

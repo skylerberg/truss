@@ -1,8 +1,10 @@
 internal type Span(start: UInt64, stop: UInt64)
   derives Equal, Hash, Ordered
+  invariant start <= stop
 
 internal fn make_span(start: UInt64, stop: UInt64) -> Span
-  uses Panic
+  uses Panic unless start <= stop
+  ensures result.start == start && result.stop == stop
 {
   if stop < start {
     Panic.crash("a span ends before it starts")
@@ -10,7 +12,9 @@ internal fn make_span(start: UInt64, stop: UInt64) -> Span
   Span(start, stop)
 }
 
-internal fn make_zero_width(position: UInt64) -> Span {
+internal fn make_zero_width(position: UInt64) -> Span
+  ensures result.start == position && result.stop == position
+{
   Span(start: position, stop: position)
 }
 
@@ -27,36 +31,46 @@ internal fn of_file(base: UInt64, span: Span) -> Span
 }
 
 internal type Source(path: String, text: String, line_starts: List[UInt64])
+  invariant 0 < line_starts.length()
+  invariant forall i in 0..line_starts.length() => line_starts[i] <= text.length() && text.is_boundary(line_starts[i])
 
-internal fn Source.create(path: String, text: own String) -> Source
-  uses Panic
+fn skip_byte_order_mark(text: String) -> UInt64
+  ensures result <= text.length() && text.is_boundary(result)
 {
-  var line_starts: List[UInt64] = []
-  let length = text.length()
-  if length >= 3 && text.byte(0) == 239 && text.byte(1) == 187 && text.byte(2) == 191 {
-    mut line_starts.push(3)
-  } else {
-    mut line_starts.push(0)
+  if text.is_empty() {
+    return 0
   }
-  for index in 0..length {
+  let first = text.character_at(0)
+  if first.code() == 65279 { first.utf8_length() } else { 0 }
+}
+
+internal fn Source.create(path: String, text: own String) -> Source {
+  let length = text.length()
+  var line_starts: List[UInt64] = [skip_byte_order_mark(text)]
+  for index in 0..length
+    invariant 0 < line_starts.length()
+    invariant forall i in 0..line_starts.length() => line_starts[i] <= length && text.is_boundary(line_starts[i])
+  {
     let byte = text.byte(index)
-    if byte == 10 {
-      mut line_starts.push(index + 1)
-    } else if byte == 13 && (index + 1 >= length || text.byte(index + 1) != 10) {
+    if byte == 10 || (byte == 13 && (index + 1 >= length || text.byte(index + 1) != 10)) {
       mut line_starts.push(index + 1)
     }
   }
   Source(path: path.copy(), own text, own line_starts)
 }
 
-internal fn Source.compute_line_index(self, offset: UInt64) -> UInt64
-  uses Panic
+fn Source.compute_line_index(self, offset: UInt64) -> UInt64
+  ensures result < self.line_starts.length()
+  ensures self.line_starts[0] <= offset ==> self.line_starts[result] <= offset
 {
   var low: UInt64 = 0
   var high = self.line_starts.length() - 1
-  while low < high {
-    let middle = (low + high + 1) / 2
-    if self.line_starts.get(middle).expect("a line start") <= offset {
+  while low < high
+    invariant low <= high && high < self.line_starts.length()
+    invariant self.line_starts[0] <= offset ==> self.line_starts[low] <= offset
+  {
+    let middle = low + (high - low + 1) / 2
+    if self.line_starts[middle] <= offset {
       low = middle
     } else {
       high = middle - 1
@@ -66,13 +80,14 @@ internal fn Source.compute_line_index(self, offset: UInt64) -> UInt64
 }
 
 internal fn Source.compute_line_start(self, offset: UInt64) -> UInt64
-  uses Panic
+  ensures result <= self.text.length() && self.text.is_boundary(result)
+  ensures self.line_starts[0] <= offset ==> result <= offset
 {
-  self.line_starts.get(self.compute_line_index(offset)).expect("a line start")
+  self.line_starts[self.compute_line_index(offset)]
 }
 
 internal fn Source.starts_line(self, offset: UInt64) -> Bool
-  uses Panic
+  ensures result == (offset == self.compute_line_start(offset))
 {
   offset == self.compute_line_start(offset)
 }

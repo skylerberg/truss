@@ -12,8 +12,10 @@ let classify_receiver_mode (arguments : Syntax.argument list) : Language.Mode.t 
 let make_method_owner state type_ : Catalog.Inference.method_owner =
   Type_owner
     {
-      type_ = State.zonk state type_;
-      list = Option.map (State.zonk state) (Types.find_list_of_array (State.normalize state type_));
+      type_ = State.normalize_known state type_;
+      list =
+        Option.map (State.normalize_known state)
+          (Types.find_list_of_array (State.normalize state type_));
     }
 
 let rec check_name (state : State.state) (env : State.env) (value : Syntax.expression)
@@ -154,7 +156,8 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
           | Some written ->
               if not (Members.are_fields_visible state.lookups ~package:state.package path) then begin
                 State.make_error_type state
-                  (Opaque_field_read { at = Written member.id; type_ = State.zonk state base_type })
+                  (Opaque_field_read
+                     { at = Written member.id; type_ = State.normalize_known state base_type })
               end
               else begin
                 state.tables.resolutions.(value.id) <-
@@ -180,66 +183,125 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
 
 and check_function_value state (value : Syntax.expression) (instance : Instantiation.instance) =
   match Types.make_function_type instance.signature with
+  | Some _ when instance.signature.is_update_step ->
+      State.make_error_type state (Step_as_value { at = Written value.id })
   | Some function_type -> instance.flatten (Types.Function function_type)
   | None -> State.make_error_type state (Lending_function_value { at = Written value.id })
 
-and check_static_member state (value : Syntax.expression) type_ (member : Syntax.name) =
+and check_static_member state ?expected (value : Syntax.expression) type_ (member : Syntax.name) =
+  let report_no_member list =
+    State.make_error_type state
+      (No_member
+         {
+           at = Written member.id;
+           type_ = State.normalize_known state type_;
+           name = member.text;
+           list;
+         })
+  in
   match type_ with
-  | Types.Named { path; arguments } -> (
-      if member.case = Upper then check_variant_value state value path member.text ~arguments
-      else
-        match
-          Resolve.Names.choose_visible
-            (List.map
-               (Resolve.Names.choose_member (Members.list_member_lookups state path member.text))
-               (Member_constant { owner = path; name = member.text }
-               :: Members.list_methods path member.text))
-        with
-        | Visible (Member_constant _ as constant) ->
-            state.tables.resolutions.(value.id) <-
-              Some (Global { path = constant; instantiation = Types.no_instantiation });
-            Interface.Definition.read_constant_type state.lookups.interface constant
-        | Visible method_path -> (
-            match
-              Instantiation.find_function_signature state.signatures state.lookups method_path
-            with
-            | Some signature ->
-                let instance =
-                  Instantiation.instantiate state ~written:value.id ~declared_on:method_path
-                    signature
-                in
-                (match instance.signature.receiver with
-                | Some (_, receiver) -> ignore (State.unify state receiver type_)
-                | None -> ());
-                state.tables.resolutions.(value.id) <-
-                  Some (Global { path = method_path; instantiation = instance.instantiation });
-                check_function_value state value instance
-            | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path))
-        | Hidden hidden -> Members.make_hidden_error state (Written member.id) hidden
-        | Absent ->
-            State.make_error_type state
-              (No_member
-                 {
-                   at = Written member.id;
-                   type_ = State.zonk state type_;
-                   name = member.text;
-                   list =
-                     (match Types.find_list_of_array type_ with
-                     | Some (Types.Named { path = Top { name; _ } as list; _ })
-                       when Members.has_visible_method state list member.text ->
-                         Some name
-                     | _ -> None);
-                 }))
+  | Types.Named { path; arguments } when member.case = Upper ->
+      check_variant_value state value path member.text ~arguments
+  | Types.Named _ | Types.Parameter _ | Types.Projection _ -> (
+      let constant =
+        match type_ with
+        | Types.Named { path; _ } ->
+            Resolve.Names.choose_member
+              (Members.list_member_lookups state path member.text)
+              (Member_constant { owner = path; name = member.text })
+        | _ -> Absent
+      in
+      match (constant, resolve_member_overloads state type_ member.text) with
+      | Visible constant, _ ->
+          state.tables.resolutions.(value.id) <-
+            Some (Global { path = constant; instantiation = Types.no_instantiation });
+          Interface.Definition.read_constant_type state.lookups.interface constant
+      | _, Error traits ->
+          State.make_error_type state
+            (Ambiguous_static_method
+               {
+                 at = Written member.id;
+                 type_ = State.normalize_known state type_;
+                 name = member.text;
+                 traits;
+               })
+      | _, Ok (Resolve.Names.Visible overloads) -> (
+          match choose_value_overload state ?expected overloads with
+          | Type_overload method_path -> (
+              match
+                Instantiation.find_function_signature state.signatures state.lookups method_path
+              with
+              | Some signature ->
+                  let instance =
+                    Instantiation.instantiate state ~written:value.id ~declared_on:method_path
+                      signature
+                  in
+                  (match instance.signature.receiver with
+                  | Some (_, receiver) -> ignore (State.unify state receiver type_)
+                  | None -> ());
+                  state.tables.resolutions.(value.id) <-
+                    Some (Global { path = method_path; instantiation = instance.instantiation });
+                  check_function_value state value instance
+              | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path))
+          | Trait_overload (trait, method_) ->
+              check_trait_method_value state value ~self_type:type_ trait method_
+          | List_overload (Top { name; _ }) -> report_no_member (Some name)
+          | List_overload _ -> report_no_member None)
+      | Hidden hidden, _ | _, Ok (Hidden hidden) ->
+          Members.make_hidden_error state (Written member.id) hidden
+      | Absent, Ok Absent -> report_no_member None)
   | Types.Error _ | Types.Hole -> type_
-  | _ ->
+  | _ -> report_no_member None
+
+and check_trait_value_in_full state ?expected (value : Syntax.expression) trait ~trait_arguments
+    (member : Syntax.name) =
+  let fresh = Instantiation.make_fresh_trait_reference state trait in
+  let reference =
+    match trait_arguments with
+    | Some trait_arguments -> { fresh with trait_arguments }
+    | None -> fresh
+  in
+  match
+    List.filter_map
+      (function
+        | Path.Method { receiver; _ } ->
+            Option.map
+              (fun method_ -> (receiver, Trait_overload (reference, method_)))
+              (Interface.Definition.find_trait_method state.lookups.interface trait
+                 ~name:member.text ~receiver)
+        | _ -> None)
+      (Members.list_methods trait member.text)
+  with
+  | [] ->
       State.make_error_type state
-        (No_member
-           {
-             at = Written member.id;
-             type_ = State.zonk state type_;
-             name = member.text;
-             list = None;
-           })
+        (No_method
+           { at = Written member.id; owner = Path_owner trait; name = member.text; candidates = [] })
+  | overloads -> (
+      match choose_value_overload state ?expected overloads with
+      | Trait_overload (trait, method_) ->
+          check_trait_method_value state value
+            ~self_type:(Unify.make_fresh_type state.unifier)
+            trait method_
+      | Type_overload _ | List_overload _ -> State.raise_bug "a trait has a method of a type")
+
+and choose_value_overload state ?expected overloads =
+  let wanted =
+    match Option.map (State.zonk state) expected with
+    | Some (Types.Function { inputs = (mode, _) :: _; _ }) ->
+        List.assoc_opt (Path.Instance mode) overloads
+    | _ -> None
+  in
+  match (wanted, overloads) with
+  | Some overload, _ | None, (_, overload) :: _ -> overload
+  | None, [] -> State.raise_bug "a method has no overload"
+
+and check_trait_method_value state (value : Syntax.expression) ~self_type trait method_ =
+  let instance, trait_method =
+    instantiate_trait_method state ~written:value.id ~self_type trait method_
+  in
+  Solver.require state (Method_call (Written value.id)) self_type trait;
+  state.tables.resolutions.(value.id) <- Some (Trait_method_value trait_method);
+  check_function_value state value instance
 
 and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) instance items :
     (unit, Types.ty) result =
@@ -299,9 +361,6 @@ and reject_specification_call state (env : State.env) (value : Syntax.expression
     (signature : Types.signature) =
   if (not signature.specification_only) || env.specification then None
   else
-    let name =
-      match path with Top { name; _ } | Method { name; _ } -> name | path -> Path.show path
-    in
     let specification_type =
       List.find_map Types.find_specification_only_type
         (Types.extract_result_type signature.output
@@ -314,7 +373,7 @@ and reject_specification_call state (env : State.env) (value : Syntax.expression
             (Specification_call_in_code
                {
                  at = Written value.id;
-                 name;
+                 callee = path;
                  call =
                    (match
                       ( Interface.Definition.find_interface state.lookups.interface path,
@@ -342,13 +401,13 @@ and lookup_trait_static_methods (state : State.state) path name =
              })
           name))
 
-and list_implemented_trait_lookups (state : State.state) self_type name =
+and list_implemented_trait_lookups ?checks_conditions (state : State.state) self_type name =
   List.filter_map
     (fun (lookup : Path.t Resolve.Names.lookup) ->
       match lookup with
       | Visible trait | Hidden (trait, _) ->
           let reference = Instantiation.make_fresh_trait_reference state trait in
-          if Option.is_some (State.find_evidence state self_type reference) then
+          if Option.is_some (State.find_evidence ?checks_conditions state self_type reference) then
             Some (Resolve.Names.map_visible (fun _ -> reference) lookup)
           else None
       | Absent -> None)
@@ -375,6 +434,70 @@ and choose_trait_method name receiver (candidate : Types.trait_reference Resolve
   | Hidden (trait, visibility), Some _ ->
       Hidden (Method { owner = trait; name; receiver }, visibility)
   | (Visible _ | Hidden _), None | Absent, _ -> Absent
+
+and find_method_of_an_unmet_impl state receiver_type name receiver =
+  match
+    Resolve.Names.collect_visible
+      (List.map
+         (fun candidate ->
+           choose_trait_method name receiver candidate (list_candidate_methods state name candidate))
+         (list_implemented_trait_lookups ~checks_conditions:false state receiver_type name))
+  with
+  | Visible [ found ] -> Some found
+  | Visible _ | Hidden _ | Absent -> None
+
+and has_method_without_self state receiver_type name =
+  match list_static_overloads state receiver_type name with
+  | Ok (Resolve.Names.Visible _) | Error _ -> true
+  | Ok (Hidden _ | Absent) -> false
+
+and list_static_overloads state self_type name =
+  let of_trait_methods = function
+    | [] -> Ok Resolve.Names.Absent
+    | [ (trait, method_) ] ->
+        Ok (Resolve.Names.Visible [ (Path.Static, Trait_overload (trait, method_)) ])
+    | several -> Error (List.map fst several)
+  in
+  match self_type with
+  | Types.Named { path; _ } -> (
+      match
+        (Members.lookup_method state path name Static, lookup_trait_static_methods state path name)
+      with
+      | Visible method_path, _ -> Ok (Visible [ (Path.Static, Type_overload method_path) ])
+      | _, Visible found -> of_trait_methods found
+      | Hidden hidden, _ | _, Hidden hidden -> Ok (Hidden hidden)
+      | Absent, Absent -> Ok Absent)
+  | Types.Parameter _ | Types.Projection _ ->
+      of_trait_methods
+        (List.fold_left
+           (fun methods (bound : Types.trait_reference) ->
+             match
+               Interface.Definition.find_trait_method state.lookups.interface bound.trait ~name
+                 ~receiver:Static
+             with
+             | Some method_
+               when not
+                      (List.exists
+                         (fun ((other : Types.trait_reference), _) ->
+                           Path.equal other.trait bound.trait)
+                         methods) ->
+                 methods @ [ (bound, method_) ]
+             | _ -> methods)
+           []
+           (Interface.Properties.list_known_bounds state.lookups.interface
+              ~list_bounds:(State.lookup_bounds state) self_type))
+  | _ -> Ok Absent
+
+and resolve_member_overloads state self_type name =
+  match (list_static_overloads state self_type name, resolve_overloads state self_type name) with
+  | Error traits, _ -> Error traits
+  | Ok (Resolve.Names.Visible static), Ok (Resolve.Names.Visible instance) ->
+      Ok (Resolve.Names.Visible (static @ instance))
+  | Ok (Visible static), (Ok (Hidden _ | Absent) | Error _) -> Ok (Visible static)
+  | Ok (Hidden _ | Absent), Error traits -> Error traits
+  | Ok (Hidden _ | Absent), Ok (Visible instance) -> Ok (Visible instance)
+  | Ok (Hidden hidden), Ok (Hidden _ | Absent) | Ok Absent, Ok (Hidden hidden) -> Ok (Hidden hidden)
+  | Ok Absent, Ok Absent -> Ok Absent
 
 and list_trait_candidates (state : State.state) receiver_type name =
   let list_bound_candidates bounds =
@@ -517,11 +640,10 @@ and instantiate_trait_method state ~written ~self_type (trait : Types.trait_refe
       (Members.read_method_signature state.signatures state.lookups trait.trait method_)
   in
   ( instance,
-    Tables.Trait_method
-      {
-        trait;
-        name = method_.method_name;
-        receiver = method_.method_receiver;
-        self_type;
-        instantiation = instance.instantiation;
-      } )
+    {
+      Tables.trait;
+      name = method_.method_name;
+      receiver = method_.method_receiver;
+      self_type;
+      instantiation = instance.instantiation;
+    } )

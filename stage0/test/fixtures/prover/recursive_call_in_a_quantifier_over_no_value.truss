@@ -1,0 +1,6 @@
+fn f(n: Int64) -> Int64
+  ensures result == 1 && result == 2
+{
+  let ok = forall i in 0..0 => i == 0 && f(n) == 0
+  if ok { 0 } else { 0 }
+}

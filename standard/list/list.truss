@@ -284,6 +284,7 @@ impl Cursor for ListCursor[Element] {
     ensures forall i in 0..self.model().length() =>
       identical(self.model()[i], old(self.model())[i + 1])
     cost time O(1)
+    cost amortized time O(1)
     cost allocations == 0
   {
     mut self.reversed.pop()
@@ -441,10 +442,10 @@ public fn List[Element].generate(
 
 public fn List[Element].collect[Source: Cursor[Element = Element]](source: own Source) -> List[Element]
   uses Source.Uses, RunForever unless Source: FiniteCursor
+  ensures result.length() <= old(source.remaining()) when Source: FiniteCursor
+  cost amortized time O((source.remaining() + 1) * time(Source.next)) when Source: FiniteCursor
 {
-  var items: List[Element] = []
-  mut items.extend(own source)
-  items
+  Cursor.to_list(own source)
 }
 
 public fn List[Element].capacity(self) -> UInt64
@@ -589,6 +590,7 @@ public fn List[Element].split_off(mut self, at: UInt64) -> List[Element]
     invariant intrinsic.storage_capacity(self.storage) == old(intrinsic.storage_capacity(self.storage))
     invariant forall measure: fn(Element) -> Integer =>
       self.model().sum(measure) + intrinsic.storage_model(tail).sum(measure) == old(self.model()).sum(measure)
+    cost time O(index)
   {
     intrinsic.storage_push(mut tail, value: intrinsic.storage_pop(mut self.storage))
   }
@@ -616,8 +618,13 @@ public fn List[Element].append(mut self, other: own List[Element])
       identical(self.model()[old(self.model()).length() + i], other.model()[i])
     invariant intrinsic.storage_capacity(self.storage) == capacity
     invariant capacity >= old(self.model()).length() + count
+    cost time O(index)
   {
     intrinsic.storage_push(mut self.storage, value: intrinsic.storage_pop(mut rest.storage))
+  }
+  proof {
+    assert forall i in 0..self.model().length() =>
+      identical(self.model()[i], old(self.model()).concatenate(other.model())[i])
   }
 }
 
@@ -639,10 +646,18 @@ public fn List[Element: Copyable].append_items(mut self, items: List[Element])
 
 public fn List[Element].extend[Source: Cursor[Element = Element]](mut self, items: own Source)
   uses Source.Uses, RunForever unless Source: FiniteCursor
+  ensures old(self.length()) <= self.length()
+  ensures self.length() <= old(self.length()) + old(items.remaining()) when Source: FiniteCursor
+  cost amortized time O((items.remaining() + 1) * time(Source.next)) when Source: FiniteCursor
 {
   var cursor = own items
   while mut cursor.next() is Some(item)
+    invariant old(self.length()) <= self.length()
+    invariant cursor.remaining() <= old(items.remaining()) when Source: FiniteCursor
+    invariant self.length() + cursor.remaining() <= old(self.length()) + old(items.remaining())
+      when Source: FiniteCursor
     decreases cursor.remaining() when Source: FiniteCursor
+    cost time O((old(items.remaining()) - cursor.remaining()) * time(Source.next)) when Source: FiniteCursor
   {
     mut self.push(own item)
   }

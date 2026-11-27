@@ -14,8 +14,8 @@ let list_states backend database =
   decide backend database;
   Database.list_proof_states database Codegen_support.example_file
 
-let prove_with_running ?results text =
-  let database, backend = Codegen_support.load ?results text in
+let prove_with_running text =
+  let database, backend = Codegen_support.load text in
   list_diagnostics backend database
 
 let show_messages diagnostics =
@@ -30,11 +30,6 @@ let expect_failure_saying expected = function
   | actual -> Codegen_support.fail "%d diagnostics: %s" (List.length actual) (show_messages actual)
 
 let expect_proven = function [] -> () | actual -> Codegen_support.fail "%s" (show_messages actual)
-
-let make_results () : Backend.results =
-  let stored = Hashtbl.create 4 in
-  { find = Hashtbl.find_opt stored; add = Hashtbl.replace stored }
-
 let shout = Fixtures.Evaluate.shout
 
 let () =
@@ -66,19 +61,19 @@ let () =
 let () =
   Codegen_support.test "a template's check is done again when the code it runs has changed"
     (fun () ->
-      let results = make_results () in
       let use = Fixtures.Evaluate.shout_of_capitals in
       let accepts_all =
         String.replace_first ~sub:"          quiet = false" ~by:"          quiet = true" shout
       in
+      let database, backend = Codegen_support.load (shout ^ use) in
       expect_failure_saying "fails every time the code reaches it"
-        (prove_with_running ~results (shout ^ use));
-      expect_proven (prove_with_running ~results (accepts_all ^ use)))
+        (list_diagnostics backend database);
+      Database.update database [ (Codegen_support.example_file, Some (accepts_all ^ use)) ];
+      expect_proven (list_diagnostics (Codegen_support.make_backend database) database))
 
 let () =
   Codegen_support.test "a release build reads the value that a development build evaluated"
     (fun () ->
-      let results = make_results () in
       let database, _ = Codegen_support.load Fixtures.Lowering.constant_computed_by_a_long_loop in
       let spun =
         Lowered.Item.make_constant (Top { module_ = Codegen_support.example; name = "spun" })
@@ -86,7 +81,7 @@ let () =
       let compile ?evaluation_cpu_time_limit_ms profile =
         ignore
           (Backend.For_testing.compile_fragment
-             (Codegen_support.make_backend ~results ?evaluation_cpu_time_limit_ms ~profile database)
+             (Codegen_support.make_backend ?evaluation_cpu_time_limit_ms ~profile database)
              spun)
       in
       compile Development;
@@ -111,11 +106,10 @@ let () =
   Codegen_support.test
     "a constant whose evaluation uses too much CPU time is an error of its own check, and is \
      evaluated again on the next check" (fun () ->
-      let results = make_results () in
       let database, _ = Codegen_support.load Fixtures.Lowering.constant_computed_by_a_long_loop in
       (match
          list_diagnostics
-           (Codegen_support.make_backend ~results ~evaluation_cpu_time_limit_ms:5 database)
+           (Codegen_support.make_backend ~evaluation_cpu_time_limit_ms:5 database)
            database
        with
       | [ diagnostic ] ->
@@ -127,7 +121,7 @@ let () =
             diagnostic.message
       | actual ->
           Codegen_support.fail "%d diagnostics: %s" (List.length actual) (show_messages actual));
-      expect_proven (list_diagnostics (Codegen_support.make_backend ~results database) database))
+      expect_proven (list_diagnostics (Codegen_support.make_backend database) database))
 
 let () =
   Codegen_support.test

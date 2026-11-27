@@ -49,9 +49,8 @@ module Symbol = struct
     | Handle_descriptor
     | Compare_bytes_order
     | Cost_most
-    | Cost_log
-    | Cost_power
-    | Reached of int
+    | Integer_log
+    | Integer_power
 end
 
 type rounding_mode = Nearest_ties_to_even | Toward_positive | Toward_negative | Toward_zero
@@ -133,9 +132,22 @@ module Symbol_table = Hashtbl.Make (Structural_key.Make (struct
   type t = symbol
 end))
 
-module Term_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = term
-end))
+let rec hash_term term =
+  let combine hash part = (hash * 31) + part in
+  let hash_terms seed terms =
+    List.fold_left (fun hash term -> combine hash (hash_term term)) seed terms
+  in
+  match term with
+  | Symbol symbol -> combine 1 (Hashtbl.hash symbol)
+  | Integer value -> combine 2 (Z.hash value)
+  | Boolean value -> combine 3 (Hashtbl.hash value)
+  | Bits (width, value) -> combine (combine 4 width) (Z.hash value)
+  | Apply (symbol, arguments) -> hash_terms (combine 5 (Hashtbl.hash symbol)) arguments
+  | Is (symbol, argument) -> combine (combine 6 (Hashtbl.hash symbol)) (hash_term argument)
+  | Operation (operator, arguments) -> hash_terms (combine 7 (Hashtbl.hash operator)) arguments
+  | Forall (variables, triggers, body) ->
+      hash_terms (combine 8 (Hashtbl.hash variables)) (body :: triggers)
+  | Exists (variables, body) -> combine (combine 9 (Hashtbl.hash variables)) (hash_term body)
 
 let show_bits width value =
   "#b" ^ String.init width (fun index -> if Z.testbit value (width - 1 - index) then '1' else '0')
@@ -275,9 +287,8 @@ let rec show_symbol : symbol -> string = function
   | Handle_descriptor -> "handle.descriptor"
   | Compare_bytes_order -> "compare_bytes.order"
   | Cost_most -> "cost.most"
-  | Cost_log -> "cost.log"
-  | Cost_power -> "cost.power"
-  | Reached index -> Printf.sprintf "reached.%d" index
+  | Integer_log -> "integer.log"
+  | Integer_power -> "integer.power"
 
 and show_term term =
   let rec show = function
@@ -357,9 +368,27 @@ let ite condition then_ else_ =
   | _ -> if then_ = else_ then then_ else Operation (Ite, [ condition; then_; else_ ])
 
 let negate value = Operation (Negate, [ value ])
-let add left right = Operation (Add, [ left; right ])
-let subtract left right = Operation (Subtract, [ left; right ])
-let multiply left right = Operation (Multiply, [ left; right ])
+
+let add left right =
+  match (left, right) with
+  | Integer x, Integer y -> Integer (Z.add x y)
+  | (Integer x, other | other, Integer x) when Z.equal x Z.zero -> other
+  | _ -> Operation (Add, [ left; right ])
+
+let subtract left right =
+  match (left, right) with
+  | Integer x, Integer y -> Integer (Z.sub x y)
+  | other, Integer x when Z.equal x Z.zero -> other
+  | _ when left = right -> Integer Z.zero
+  | _ -> Operation (Subtract, [ left; right ])
+
+let multiply left right =
+  match (left, right) with
+  | Integer x, Integer y -> Integer (Z.mul x y)
+  | (Integer x, other | other, Integer x) when Z.equal x Z.one -> other
+  | (Integer x, _ | _, Integer x) when Z.equal x Z.zero -> Integer Z.zero
+  | _ -> Operation (Multiply, [ left; right ])
+
 let less left right = Operation (Less, [ left; right ])
 let less_equal left right = Operation (Less_equal, [ left; right ])
 let greater left right = Operation (Greater, [ left; right ])
@@ -387,46 +416,141 @@ let integer_of_bits ~is_signed ~width bits =
       unsigned
   else unsigned
 
-let find_constant_difference left right =
-  let rec collect coefficient term ((constant, atoms) as sums) =
+let larger left right =
+  match (left, right) with
+  | Integer x, Integer y -> Integer (Z.max x y)
+  | _ when left = right -> left
+  | _ -> ite (greater_equal left right) left right
+
+let at_least_zero term = larger term (Integer Z.zero)
+
+let combine_linear (sums, constant) =
+  let scale (atom, coefficient) = multiply (Integer coefficient) atom in
+  let positive = List.filter (fun (_, coefficient) -> Z.sign coefficient > 0) sums in
+  let negative =
+    List.filter_map
+      (fun (atom, coefficient) ->
+        if Z.sign coefficient < 0 then Some (atom, Z.neg coefficient) else None)
+      sums
+  in
+  let total =
+    List.fold_left (fun total entry -> add total (scale entry)) (Integer Z.zero) positive
+  in
+  let total =
+    if Z.sign constant >= 0 then add total (Integer constant)
+    else subtract total (Integer (Z.neg constant))
+  in
+  List.fold_left (fun total entry -> subtract total (scale entry)) total negative
+
+let rec linearize term =
+  let rec add_scaled coefficient term (sums, constant) =
     match term with
-    | Integer value -> (Z.add constant (Z.mul coefficient value), atoms)
-    | Operation (Add, parts) ->
-        List.fold_left (fun sums part -> collect coefficient part sums) sums parts
-    | Operation (Subtract, [ minuend; subtrahend ]) ->
-        collect (Z.neg coefficient) subtrahend (collect coefficient minuend sums)
-    | Operation (Negate, [ inner ]) -> collect (Z.neg coefficient) inner sums
+    | Integer value -> (sums, Z.add constant (Z.mul coefficient value))
+    | Operation (Add, arguments) ->
+        List.fold_left
+          (fun sums_and_constant argument -> add_scaled coefficient argument sums_and_constant)
+          (sums, constant) arguments
+    | Operation (Negate, [ inner ]) -> add_scaled (Z.neg coefficient) inner (sums, constant)
+    | Operation (Subtract, first :: rest) ->
+        List.fold_left
+          (fun sums_and_constant argument ->
+            add_scaled (Z.neg coefficient) argument sums_and_constant)
+          (add_scaled coefficient first (sums, constant))
+          rest
     | Operation (Multiply, [ Integer factor; inner ])
     | Operation (Multiply, [ inner; Integer factor ]) ->
-        collect (Z.mul coefficient factor) inner sums
-    | atom ->
-        let existing = Option.value (List.assoc_opt atom atoms) ~default:Z.zero in
-        (constant, (atom, Z.add existing coefficient) :: List.remove_assoc atom atoms)
+        add_scaled (Z.mul coefficient factor) inner (sums, constant)
+    | other -> (
+        match normalize_node other with
+        | Operation (Add, _) as sum -> add_scaled coefficient sum (sums, constant)
+        | other -> add_atom coefficient other (sums, constant))
+  and add_atom coefficient other (sums, constant) =
+    let rec add_to = function
+      | [] -> [ (other, coefficient) ]
+      | (atom, atom_coefficient) :: rest when atom = other ->
+          (atom, Z.add atom_coefficient coefficient) :: rest
+      | entry :: rest -> entry :: add_to rest
+    in
+    (add_to sums, constant)
+  and normalize_node = function
+    | Apply (Symbol.Cost_most, [ left; right ]) -> (
+        let left = normalize_linear left and right = normalize_linear right in
+        let rec list_summands coefficient = function
+          | Operation (Add, parts) -> List.concat_map (list_summands coefficient) parts
+          | Operation (Negate, [ inner ]) -> list_summands (Z.neg coefficient) inner
+          | Operation (Subtract, first :: rest) ->
+              list_summands coefficient first
+              @ List.concat_map (list_summands (Z.neg coefficient)) rest
+          | Operation (Multiply, [ Integer factor; inner ]) ->
+              list_summands (Z.mul coefficient factor) inner
+          | Integer _ -> []
+          | other -> [ (other, coefficient) ]
+        in
+        match
+          List.filter
+            (fun part -> List.mem part (list_summands Z.one right))
+            (list_summands Z.one left)
+        with
+        | [] -> Apply (Symbol.Cost_most, [ left; right ])
+        | common ->
+            let shared =
+              List.fold_left
+                (fun total (atom, coefficient) -> add total (multiply (Integer coefficient) atom))
+                (Integer Z.zero) common
+            in
+            add shared
+              (Apply
+                 ( Symbol.Cost_most,
+                   [
+                     normalize_linear (subtract left shared);
+                     normalize_linear (subtract right shared);
+                   ] )))
+    | Apply (name, arguments) -> Apply (name, List.map normalize_linear arguments)
+    | Is (constructor, argument) -> Is (constructor, normalize_linear argument)
+    | Operation (operator, arguments) -> Operation (operator, List.map normalize_linear arguments)
+    | other -> other
   in
-  let constant, atoms = collect Z.minus_one right (collect Z.one left (Z.zero, [])) in
-  if List.for_all (fun (_, coefficient) -> Z.equal coefficient Z.zero) atoms then Some constant
-  else None
+  let sums, constant = add_scaled Z.one term ([], Z.zero) in
+  (List.filter (fun (_, coefficient) -> not (Z.equal coefficient Z.zero)) sums, constant)
 
-let has_difference_sign left right ~fails =
-  match find_constant_difference left right with
-  | Some difference -> fails (Z.sign difference)
-  | None -> false
+and normalize_linear term = combine_linear (linearize term)
+
+let rec decreases_lexicographically before after =
+  match (before, after) with
+  | [ right ], [ left ] -> less_equal (Integer Z.zero) right &&& less left right
+  | right :: before, left :: after ->
+      less_equal (Integer Z.zero) right
+      &&& (less left right ||| (equal left right &&& decreases_lexicographically before after))
+  | _ -> Boolean true
+
+let find_constant_difference left right =
+  match linearize (subtract left right) with [], difference -> Some difference | _ :: _, _ -> None
+
+let decide_comparison_of_constant_difference = function
+  | Operation (operator, [ left; right ]) -> (
+      let holds_at_sign =
+        match operator with
+        | Less -> Some (fun sign -> sign < 0)
+        | Less_equal -> Some (fun sign -> sign <= 0)
+        | Greater -> Some (fun sign -> sign > 0)
+        | Greater_equal -> Some (fun sign -> sign >= 0)
+        | Equal -> Some (fun sign -> sign = 0)
+        | _ -> None
+      in
+      match (holds_at_sign, find_constant_difference left right) with
+      | Some holds_at_sign, Some difference -> Some (holds_at_sign (Z.sign difference))
+      | _ -> None)
+  | _ -> None
 
 let rec is_refuted = function
   | Boolean value -> not value
-  | Operation (Less, [ left; right ]) ->
-      has_difference_sign left right ~fails:(fun sign -> sign >= 0)
-  | Operation (Less_equal, [ left; right ]) ->
-      has_difference_sign left right ~fails:(fun sign -> sign > 0)
-  | Operation (Greater, [ left; right ]) ->
-      has_difference_sign left right ~fails:(fun sign -> sign <= 0)
-  | Operation (Greater_equal, [ left; right ]) ->
-      has_difference_sign left right ~fails:(fun sign -> sign < 0)
-  | Operation (Equal, [ left; right ]) ->
-      has_difference_sign left right ~fails:(fun sign -> sign <> 0)
   | Operation (And, parts) -> List.exists is_refuted parts
   | Operation (Or, parts) -> List.for_all is_refuted parts
-  | _ -> false
+  | term -> decide_comparison_of_constant_difference term = Some false
+
+let is_valid = function
+  | Boolean value -> value
+  | term -> decide_comparison_of_constant_difference term = Some true
 
 let rec mentions symbols = function
   | Symbol name -> List.mem name symbols
@@ -491,12 +615,19 @@ let rec substitute substitution term =
 and remove_bound bound substitution =
   List.filter (fun (name, _) -> not (List.mem_assoc name bound)) substitution
 
+let rec is_matchable = function
+  | Operation ((Not | And | Or | Implies | Ite), _) | Forall _ | Exists _ -> false
+  | Apply (_, arguments) | Operation (_, arguments) -> List.for_all is_matchable arguments
+  | Is (_, argument) -> is_matchable argument
+  | Symbol _ | Integer _ | Boolean _ | Bits _ -> true
+
 let list_triggers ~is_triggering variables body =
   let names = List.map fst variables in
   let rec is_trigger_term = function
     | Symbol _ | Integer _ | Boolean _ | Bits _ -> true
     | Apply (name, arguments) when is_triggering name -> List.for_all is_trigger_term arguments
-    | (Apply _ | Operation _ | Is _ | Forall _ | Exists _) as term -> not (mentions names term)
+    | (Apply _ | Operation _ | Is _ | Forall _ | Exists _) as term ->
+        (not (mentions names term)) && is_matchable term
   in
   let is_candidate = function
     | Apply (name, _ :: _) as term ->
@@ -618,20 +749,14 @@ let make_triggering_test declarations =
   List.iter
     (function
       | Function (name, _, _) -> Symbol_table.replace functions name ()
-      | Datatype (_, constructors) ->
-          List.iter
-            (fun (constructor, fields) ->
-              Symbol_table.replace functions constructor ();
-              List.iter (fun (selector, _) -> Symbol_table.replace functions selector ()) fields)
-            constructors
-      | Constant _ | Definition _ -> ())
+      | Constant _ | Definition _ | Datatype _ -> ())
     declarations;
   List.iter
     (function
       | Definition { symbol; _ } -> Symbol_table.remove functions symbol
       | Constant _ | Function _ | Datatype _ -> ())
     declarations;
-  Symbol_table.mem functions
+  function Symbol.Constructor _ | Field _ | Unit -> true | name -> Symbol_table.mem functions name
 
 let has_untriggered_fact ?(is_counted = fun _ -> true) query =
   let is_triggering = make_triggering_test query.declarations in
@@ -643,15 +768,14 @@ let has_untriggered_fact ?(is_counted = fun _ -> true) query =
   in
   List.exists is_untriggered query.facts
 
-let list_declared_symbols declared term =
+let list_declared_symbols ~is_declared term =
   let symbols = ref [] in
   let rec walk bound = function
     | Symbol name ->
-        if (not (List.mem name bound)) && Symbol_table.mem declared name then
-          symbols := name :: !symbols
+        if (not (List.mem name bound)) && is_declared name then symbols := name :: !symbols
     | Integer _ | Boolean _ | Bits _ -> ()
     | Apply (name, arguments) ->
-        if Symbol_table.mem declared name then symbols := name :: !symbols;
+        if is_declared name then symbols := name :: !symbols;
         List.iter (walk bound) arguments
     | Operation (_, arguments) -> List.iter (walk bound) arguments
     | Is (_, argument) -> walk bound argument
@@ -661,7 +785,7 @@ let list_declared_symbols declared term =
   walk [] term;
   !symbols
 
-let prune query =
+let prune ~find_signature ~list_axioms query =
   let declared = Symbol_table.create 64 in
   let bodies = Symbol_table.create 8 in
   List.iter
@@ -672,6 +796,21 @@ let prune query =
           Symbol_table.replace bodies symbol body
       | Datatype _ -> ())
     query.declarations;
+  let without_axioms = ref [] in
+  let is_declared name =
+    Symbol_table.mem declared name
+    || Option.is_some (find_signature name)
+       && begin
+         Symbol_table.replace declared name ();
+         without_axioms := name :: !without_axioms;
+         true
+       end
+  in
+  List.iter
+    (function
+      | Definition { body; _ } -> ignore (list_declared_symbols ~is_declared body)
+      | Constant _ | Function _ | Datatype _ -> ())
+    query.declarations;
   let reached = Symbol_table.create 64 in
   let rec reach symbols =
     List.iter
@@ -679,13 +818,17 @@ let prune query =
         if not (Symbol_table.mem reached symbol) then begin
           Symbol_table.replace reached symbol ();
           Option.iter
-            (fun body -> reach (list_declared_symbols declared body))
+            (fun body -> reach (list_declared_symbols ~is_declared body))
             (Symbol_table.find_opt bodies symbol)
         end)
       symbols
   in
-  reach (list_declared_symbols declared query.goal);
-  let is_triggering = make_triggering_test query.declarations in
+  reach (list_declared_symbols ~is_declared query.goal);
+  let is_declared_function = make_triggering_test query.declarations in
+  let is_triggering name =
+    is_declared_function name
+    || match find_signature name with Some (_ :: _, _) -> true | Some ([], _) | None -> false
+  in
   let rec needs fact symbols =
     match fact with
     | Operation (Implies, [ _; (Forall _ as inner) ]) -> needs inner symbols
@@ -693,29 +836,48 @@ let prune query =
         match choose_triggers ~is_triggering variables trigger body with
         | [] -> fun () -> List.exists (Symbol_table.mem reached) symbols
         | triggers ->
-            let triggers = List.map (List.concat_map (list_declared_symbols declared)) triggers in
+            let triggers =
+              List.map (List.concat_map (list_declared_symbols ~is_declared)) triggers
+            in
             fun () ->
               List.exists (fun trigger -> List.for_all (Symbol_table.mem reached) trigger) triggers)
     | _ -> fun () -> List.exists (Symbol_table.mem reached) symbols
   in
   let distinct =
-    let seen = Term_table.create 64 in
+    let alike_by_start = Hashtbl.create 64 in
     List.filter
       (fun fact ->
-        let is_new = not (Term_table.mem seen fact) in
-        Term_table.replace seen fact ();
+        let start_hash = Hashtbl.hash_param 64 256 fact in
+        let whole_hash = lazy (hash_term fact) in
+        let is_new =
+          not
+            (List.exists
+               (fun (other_hash, other) ->
+                 Lazy.force other_hash = Lazy.force whole_hash && other = fact)
+               (Hashtbl.find_all alike_by_start start_hash))
+        in
+        if is_new then Hashtbl.add alike_by_start start_hash (whole_hash, fact);
         is_new)
       query.facts
   in
-  let query = { query with facts = distinct } in
-  let facts =
-    Array.of_list
-      (List.map
-         (fun fact ->
-           let symbols = list_declared_symbols declared fact in
-           (symbols, needs fact symbols))
-         query.facts)
+  let describe fact =
+    let symbols = list_declared_symbols ~is_declared fact in
+    (symbols, needs fact symbols)
   in
+  let stated = List.map describe distinct in
+  let take_axioms_of_new_symbols () =
+    let symbols = List.rev !without_axioms in
+    without_axioms := [];
+    List.concat_map list_axioms symbols
+  in
+  let rec describe_axioms described axioms =
+    match take_axioms_of_new_symbols () with
+    | [] -> (List.rev described, axioms)
+    | added -> describe_axioms (List.rev_append (List.map describe added) described) (axioms @ added)
+  in
+  let described_axioms, axioms = describe_axioms [] [] in
+  let query = { query with facts = axioms @ distinct } in
+  let facts = Array.of_list (described_axioms @ stated) in
   let is_needed = Array.make (Array.length facts) false in
   let changed = ref true in
   while !changed do
@@ -731,6 +893,85 @@ let prune query =
   done;
   { query with facts = List.filteri (fun index _ -> is_needed.(index)) query.facts }
 
+let declare_derived ~find_signature ~list_constructors query =
+  let declared = Symbol_table.create 64 in
+  List.iter
+    (function
+      | Constant (name, _) | Function (name, _, _) | Definition { symbol = name; _ } ->
+          if Option.is_some (find_signature name) then
+            invalid_arg
+              ("Logic.declare_derived: a declaration of " ^ show_symbol name
+             ^ ", whose signature is derived");
+          Symbol_table.replace declared name ()
+      | Datatype (ty, _) ->
+          invalid_arg
+            ("Logic.declare_derived: a declaration of the datatype of " ^ Types.show ty
+           ^ ", which is derived"))
+    query.declarations;
+  let reached = Sort_table.create 16 in
+  let derived = ref [] in
+  let rec reach_sort = function
+    | Int | Bool | Float _ | Function_sort _ -> ()
+    | Type_sort ty as sort ->
+        if not (Sort_table.mem reached sort) then begin
+          Sort_table.replace reached sort ();
+          Option.iter
+            (fun constructors ->
+              derived := Datatype (ty, constructors) :: !derived;
+              List.iter
+                (fun (_, fields) -> List.iter (fun (_, sort) -> reach_sort sort) fields)
+                constructors)
+            (list_constructors ty)
+        end
+  in
+  let reach_symbol : symbol -> unit = function
+    | Constructor { type_; _ } | Field { type_; _ } -> reach_sort (Type_sort type_)
+    | Unit -> reach_sort (Type_sort Types.unit)
+    | name ->
+        if not (Symbol_table.mem declared name) then
+          Option.iter
+            (fun (inputs, output) ->
+              Symbol_table.replace declared name ();
+              List.iter reach_sort inputs;
+              reach_sort output;
+              derived :=
+                (match inputs with
+                | [] -> Constant (name, output)
+                | _ -> Function (name, inputs, output))
+                :: !derived)
+            (find_signature name)
+  in
+  let reach_variables = List.iter (fun (_, sort) -> reach_sort sort) in
+  let rec reach_term = function
+    | Symbol name -> reach_symbol name
+    | Integer _ | Boolean _ | Bits _ -> ()
+    | Apply (name, arguments) ->
+        reach_symbol name;
+        List.iter reach_term arguments
+    | Operation (_, arguments) -> List.iter reach_term arguments
+    | Is (name, argument) ->
+        reach_symbol name;
+        reach_term argument
+    | Forall (variables, _, body) | Exists (variables, body) ->
+        reach_variables variables;
+        reach_term body
+  in
+  List.iter
+    (function
+      | Constant (_, sort) -> reach_sort sort
+      | Function (_, inputs, output) ->
+          List.iter reach_sort inputs;
+          reach_sort output
+      | Definition { parameters; result; body; _ } ->
+          reach_variables parameters;
+          reach_sort result;
+          reach_term body
+      | Datatype _ -> ())
+    query.declarations;
+  List.iter reach_term query.facts;
+  reach_term query.goal;
+  { query with declarations = query.declarations @ List.rev !derived }
+
 type numbering = {
   declared : declaration Symbol_table.t;
   datatypes : (symbol * (symbol * sort) list) list Sort_table.t;
@@ -742,6 +983,21 @@ type numbering = {
   sort_names : string Sort_table.t;
   sort_order : sort Dynarray.t;
 }
+
+let list_conjunct_queries query =
+  let rec list_conjuncts = function
+    | Operation (And, parts) -> List.concat_map list_conjuncts parts
+    | Operation (Implies, [ premise; conclusion ]) ->
+        List.map (fun part -> Operation (Implies, [ premise; part ])) (list_conjuncts conclusion)
+    | goal -> [ goal ]
+  in
+  match list_conjuncts query.goal with
+  | [] | [ _ ] -> []
+  | goals ->
+      List.map
+        (fun goal ->
+          prune ~find_signature:(fun _ -> None) ~list_axioms:(fun _ -> []) { query with goal })
+        goals
 
 let rec render_sort_name numbering = function
   | Int -> "Int"
@@ -910,16 +1166,7 @@ let number_symbols query =
     sort_order = Dynarray.create ();
   }
 
-type rendering = { text : string; numbering : numbering }
-
-let render_cardinality_bound sort_name element_count =
-  let elements = List.init element_count (Printf.sprintf "%s_e%d" sort_name) in
-  String.concat ""
-    (List.map (fun element -> Printf.sprintf "(declare-fun %s () %s)\n" element sort_name) elements)
-  ^ Printf.sprintf "(assert (forall ((b0 %s)) (or%s)))\n" sort_name
-      (String.concat "" (List.map (Printf.sprintf " (= b0 %s)") elements))
-
-let render_with ~cardinality_bound query =
+let show_query query =
   let numbering = number_symbols query in
   let render_assertion term =
     let buffer = Buffer.create 128 in
@@ -962,14 +1209,6 @@ let render_with ~cardinality_bound query =
       sort_order
   in
   let sorts = List.map (Printf.sprintf "(declare-sort %s 0)\n") uninterpreted_sorts in
-  let cardinality_bounds =
-    match cardinality_bound with
-    | None -> []
-    | Some element_count ->
-        List.map
-          (fun sort_name -> render_cardinality_bound sort_name element_count)
-          uninterpreted_sorts
-  in
   let datatypes = List.filter (Sort_table.mem numbering.datatypes) sort_order in
   let datatype_block =
     match datatypes with
@@ -1003,56 +1242,4 @@ let render_with ~cardinality_bound query =
             (String.concat " " (List.map render_body datatypes));
         ]
   in
-  {
-    text =
-      String.concat "" (sorts @ datatype_block @ cardinality_bounds @ declarations @ assertions)
-      ^ "(check-sat)\n";
-    numbering;
-  }
-
-let render query = render_with ~cardinality_bound:None query
-let rendered_text rendering = rendering.text
-let show_query ?cardinality_bound query = (render_with ~cardinality_bound query).text
-
-let has_uninterpreted_sort query =
-  let { numbering; _ } = render query in
-  Dynarray.exists (fun sort -> not (Sort_table.mem numbering.datatypes sort)) numbering.sort_order
-
-let render_term { numbering; _ } term =
-  let rec is_named = function
-    | Symbol name -> Symbol_table.mem numbering.symbol_names name
-    | Integer _ | Boolean _ | Bits _ -> true
-    | Apply (name, arguments) ->
-        (Symbol_table.mem numbering.member_of name || Symbol_table.mem numbering.symbol_names name)
-        && List.for_all is_named arguments
-    | Operation (_, arguments) -> List.for_all is_named arguments
-    | Is (constructor, argument) ->
-        Symbol_table.mem numbering.member_of constructor && is_named argument
-    | Forall _ | Exists _ -> false
-  in
-  if is_named term then begin
-    let buffer = Buffer.create 64 in
-    print numbering [] buffer term;
-    Some (Buffer.contents buffer)
-  end
-  else None
-
-let list_symbols { numbering; _ } =
-  List.map
-    (fun name -> (name, Symbol_table.find numbering.symbol_names name))
-    (Dynarray.to_list numbering.symbol_order)
-
-let list_members query =
-  let { numbering; _ } = render query in
-  Sort_table.fold
-    (fun datatype constructors entries ->
-      match Sort_table.find_opt numbering.sort_names datatype with
-      | Some sort ->
-          List.mapi
-            (fun index (constructor, fields) ->
-              (Printf.sprintf "%s_c%d" sort index, (constructor, List.map fst fields)))
-            constructors
-          @ entries
-      | None -> entries)
-    numbering.datatypes []
-  |> List.sort compare
+  String.concat "" (sorts @ datatype_block @ declarations @ assertions) ^ "(check-sat)\n"

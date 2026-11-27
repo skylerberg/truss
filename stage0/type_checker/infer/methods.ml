@@ -48,7 +48,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
           ignore (Hooks.check_expression state env argument.value);
           let part = State.normalize state part in
           state.tables.resolutions.(value.id) <- Some Specification_value;
-          State.elaborate state value.id (Specification_call (Final { part }));
+          State.elaborate state value.id (Specification_call Final);
           part
       | _ ->
           Calls.check_arguments_alone state env arguments
@@ -182,7 +182,8 @@ and check_callee_cost state env (value : Syntax.expression) (metric : Language.M
       | Some (Unknown _), _ ->
           check_specification_function state env value (Callback_cost metric) arguments
       | Some (Local _), Some other ->
-          report_not_a_callee (Local_of_type { name = last.text; type_ = State.zonk state other })
+          report_not_a_callee
+            (Local_of_type { name = last.text; type_ = State.normalize_known state other })
       | _ -> report_not_a_callee (Name_is_neither last.text))
   | _ -> report_not_a_callee Operand_is_neither
 
@@ -199,11 +200,16 @@ and check_method_cost state (value : Syntax.expression) (metric : Language.Metri
   | None, [] ->
       State.make_error_type state
         (No_bound_method
-           { at = Written member.id; type_ = State.zonk state type_; name = member.text })
+           { at = Written member.id; type_ = State.normalize_known state type_; name = member.text })
   | None, _ ->
       State.make_error_type state
         (Ambiguous_cost_method
-           { at = Written member.id; type_ = State.zonk state type_; name = member.text; metric })
+           {
+             at = Written member.id;
+             type_ = State.normalize_known state type_;
+             name = member.text;
+             metric;
+           })
 
 and report_unknown_static_method state ?expected (value : Syntax.expression) type_
     (member : Syntax.name) (arguments : Syntax.argument list) =
@@ -230,7 +236,7 @@ and report_unknown_static_method state ?expected (value : Syntax.expression) typ
           (New_on_literal_type
              {
                at = Written member.id;
-               type_ = State.zonk state type_;
+               type_ = State.normalize_known state type_;
                literal;
                call = (if is_expected then Some (Written value.id) else None);
              })
@@ -253,142 +259,105 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
     Calls.check_arguments_alone state env arguments
       (State.make_error_type state
          (Ambiguous_static_method
-            { at = Written member.id; type_ = State.zonk state type_; name = member.text; traits }))
+            {
+              at = Written member.id;
+              type_ = State.normalize_known state type_;
+              name = member.text;
+              traits;
+            }))
   in
   let wanted_mode = Name_lookup.classify_receiver_mode arguments in
   let wanted = Path.Instance wanted_mode in
   match type_ with
   | Types.Named { path; arguments = type_arguments } when member.case = Upper ->
       Calls.construct state env ?expected ~type_arguments value path (Some member.text) arguments
-  | Types.Named { path; _ } -> (
-      let static_method = Members.lookup_method state path member.text Static in
-      match static_method with
-      | Visible method_path -> (
+  | Types.Named _ | Types.Parameter _ -> (
+      match Name_lookup.resolve_member_overloads state type_ member.text with
+      | Error traits -> report_ambiguous traits
+      | Ok (Hidden hidden) ->
+          Calls.check_arguments_alone state env arguments
+            (Members.make_hidden_error state (Written member.id) hidden)
+      | Ok Absent -> (
+          match type_ with
+          | Types.Parameter parameter ->
+              State.make_error_type state
+                (No_method
+                   {
+                     at = Written member.id;
+                     owner = Named_owner parameter.name;
+                     name = member.text;
+                     candidates = [];
+                   })
+          | _ ->
+              Calls.check_arguments_alone state env arguments
+                (report_unknown_static_method state ?expected value type_ member arguments))
+      | Ok (Visible overloads) -> (
           match
-            Instantiation.find_function_signature state.signatures state.lookups method_path
+            (List.assoc_opt Path.Static overloads, arguments, List.assoc_opt wanted overloads)
           with
-          | Some signature -> (
-              let instance =
-                Instantiation.instantiate state ~written:value.id ~declared_on:method_path signature
-              in
-              let head =
-                List.take
-                  (List.length
-                     (match type_ with Types.Named { arguments; _ } -> arguments | _ -> []))
-                  instance.instantiation.type_arguments
-              in
-              ignore
-                (Unify.unify_arguments state.unifier head
-                   (match type_ with Types.Named { arguments; _ } -> arguments | _ -> []));
-              (match (expected, instance.signature.output) with
-              | Some expected, Returns output -> State.unify_as_hint state output expected
-              | _ -> ());
+          | Some (Type_overload method_path | List_overload method_path), _, _ -> (
               match
-                Calls.check_arguments state env Argument_matching.Call value
-                  instance.signature.parameters ~declared:instance.declared.parameters
-                  ~flatten:instance.flatten arguments ~has_receiver:false
+                Instantiation.find_function_signature state.signatures state.lookups method_path
               with
-              | Error error -> error
-              | Ok (checked, left_out) ->
-                  Name_lookup.finish_call state env value method_path
-                    (Tables.Function { path = method_path; instantiation = instance.instantiation })
-                    instance checked left_out)
-          | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path))
-      | Hidden _ | Absent -> (
-          match Name_lookup.lookup_trait_static_methods state path member.text with
-          | Visible [ (trait, method_) ] ->
+              | Some signature -> (
+                  let instance =
+                    Instantiation.instantiate state ~written:value.id ~declared_on:method_path
+                      signature
+                  in
+                  let type_arguments =
+                    match type_ with Types.Named { arguments; _ } -> arguments | _ -> []
+                  in
+                  ignore
+                    (Unify.unify_arguments state.unifier
+                       (List.take (List.length type_arguments) instance.instantiation.type_arguments)
+                       type_arguments);
+                  (match (expected, instance.signature.output) with
+                  | Some expected, Returns output -> State.unify_as_hint state output expected
+                  | _ -> ());
+                  match
+                    Calls.check_arguments state env Argument_matching.Call value
+                      instance.signature.parameters ~declared:instance.declared.parameters
+                      ~flatten:instance.flatten arguments ~has_receiver:false
+                  with
+                  | Error error -> error
+                  | Ok (checked, left_out) ->
+                      Name_lookup.finish_call state env value method_path
+                        (Tables.Function
+                           { path = method_path; instantiation = instance.instantiation })
+                        instance checked left_out)
+              | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path))
+          | Some (Trait_overload (trait, method_)), _, _
+          | None, _ :: _, Some (Trait_overload (trait, method_)) ->
               check_trait_method_through_type state env ?expected value type_ trait method_
                 arguments
-          | Visible several -> report_ambiguous (List.map fst several)
-          | (Hidden _ | Absent) as trait_static_method -> (
-              match Name_lookup.resolve_overloads state type_ member.text with
-              | Error traits -> report_ambiguous traits
-              | Ok ((Hidden _ | Absent) as overloads) -> (
-                  match (static_method, trait_static_method, overloads) with
-                  | Hidden hidden, _, _ | _, Hidden hidden, _ | _, _, Hidden hidden ->
-                      Calls.check_arguments_alone state env arguments
-                        (Members.make_hidden_error state (Written member.id) hidden)
-                  | _ ->
-                      Calls.check_arguments_alone state env arguments
-                        (report_unknown_static_method state ?expected value type_ member arguments))
-              | Ok (Visible overloads) -> (
-                  match (arguments, List.assoc_opt wanted overloads) with
-                  | ([] | { Syntax.label = Some _; _ } :: _), _ ->
-                      report_missing_receiver state env value arguments
-                  | receiver :: rest, Some (Type_overload method_path | List_overload method_path)
-                    ->
-                      let inner =
-                        match receiver.value.kind with
-                        | Mode (mode, inner) ->
-                            State.note_mode_keyword state receiver.value mode inner;
-                            inner
-                        | _ -> receiver.value
-                      in
-                      let receiver_type = Hooks.check_expression state env inner in
-                      let receiver_head = Conversions.read_actual_head state inner receiver_type in
-                      if inner != receiver.value then begin
-                        State.record state receiver.value receiver_type
-                      end;
-                      let receiver_as_self =
-                        match Types.find_list_of_array receiver_head with
-                        | Some list when Types.is_well_known List type_ -> list
-                        | _ -> receiver_type
-                      in
-                      if not (State.unify ~modulo_views:true state receiver_as_self type_) then
-                        Failures.report_mismatch state (Written inner.id) ~expected:type_
-                          ~actual:receiver_type;
-                      Modes.check_mode state env receiver.value
-                        { name = "self"; mode = wanted_mode; type_; has_default = false }
-                        receiver_type;
-                      check_method_with_receiver state env ?expected value ~receiver:receiver.value
-                        ~receiver_type method_path rest
-                  | _ :: _, Some (Trait_overload (trait, method_)) ->
-                      check_trait_method_through_type state env ?expected value type_ trait method_
-                        arguments
-                  | _ :: _, None -> report_unmatched_receiver_mode state env arguments member))))
-  | Types.Parameter parameter -> (
-      let without_self =
-        List.fold_left
-          (fun methods (bound : Types.trait_reference) ->
-            match
-              Interface.Definition.find_trait_method state.lookups.interface bound.trait
-                ~name:member.text ~receiver:Static
-            with
-            | Some method_
-              when not
-                     (List.exists
-                        (fun ((other : Types.trait_reference), _) ->
-                          Path.equal other.trait bound.trait)
-                        methods) ->
-                methods @ [ (bound, method_) ]
-            | _ -> methods)
-          []
-          (Interface.Properties.list_known_bounds state.lookups.interface
-             ~list_bounds:(State.lookup_bounds state) (Types.Parameter parameter))
-      in
-      match (without_self, Name_lookup.resolve_overloads state type_ member.text) with
-      | [ (trait, method_) ], _ ->
-          check_trait_method_through_type state env ?expected value type_ trait method_ arguments
-      | (_ :: _ :: _ as several), _ -> report_ambiguous (List.map fst several)
-      | [], Error traits -> report_ambiguous traits
-      | [], Ok (Visible overloads) -> (
-          match List.assoc_opt wanted overloads with
-          | Some (Trait_overload (trait, method_)) ->
-              check_trait_method_through_type state env ?expected value type_ trait method_
-                arguments
-          | Some (Type_overload _ | List_overload _) ->
-              State.raise_bug "a generic parameter has a method of its own"
-          | None -> report_unmatched_receiver_mode state env arguments member)
-      | [], Ok (Hidden _) -> State.raise_bug "a generic parameter has a method of its own"
-      | [], Ok Absent ->
-          State.make_error_type state
-            (No_method
-               {
-                 at = Written member.id;
-                 owner = Named_owner parameter.name;
-                 name = member.text;
-                 candidates = [];
-               }))
+          | None, ([] | { Syntax.label = Some _; _ } :: _), _ ->
+              report_missing_receiver state env value arguments
+          | None, receiver :: rest, Some (Type_overload method_path | List_overload method_path) ->
+              let inner =
+                match receiver.value.kind with
+                | Mode (mode, inner) ->
+                    State.note_mode_keyword state receiver.value mode inner;
+                    inner
+                | _ -> receiver.value
+              in
+              let receiver_type = Hooks.check_expression state env inner in
+              let receiver_head = Conversions.read_actual_head state inner receiver_type in
+              if inner != receiver.value then begin
+                State.record state receiver.value receiver_type
+              end;
+              let receiver_as_self =
+                match Types.find_list_of_array receiver_head with
+                | Some list when Types.is_well_known List type_ -> list
+                | _ -> receiver_type
+              in
+              if not (State.unify ~modulo_views:true state receiver_as_self type_) then
+                Failures.report_mismatch state (Written inner.id) ~expected:type_
+                  ~actual:receiver_type;
+              Modes.check_mode state env receiver.value
+                ~recipient:(Catalog.Inference.Named_parameter "self") wanted_mode receiver_type;
+              check_method_with_receiver state env ?expected value ~receiver:receiver.value
+                ~receiver_type method_path rest
+          | None, _ :: _, None -> report_unmatched_receiver_mode state env arguments member))
   | Types.Error _ | Types.Hole -> Calls.check_arguments_alone state env arguments type_
   | _ ->
       Calls.check_arguments_alone state env arguments
@@ -396,7 +365,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
            (No_method
               {
                 at = Written member.id;
-                owner = Type_owner { type_ = State.zonk state type_; list = None };
+                owner = Type_owner { type_ = State.normalize_known state type_; list = None };
                 name = member.text;
                 candidates = [];
               }))
@@ -425,9 +394,10 @@ and check_trait_method_through_type state env ?expected:_ ?trait_arguments
 and check_trait_method_call state env (value : Syntax.expression) self_type
     (trait : Types.trait_reference) (method_ : Types.trait_method) arguments ~trait_arguments =
   let reference = { trait with trait_arguments } in
-  let instance, callee =
+  let instance, trait_method =
     Name_lookup.instantiate_trait_method state ~written:value.id ~self_type reference method_
   in
+  let callee = Tables.Trait_method trait_method in
   let receiver_and_arguments =
     match (instance.signature.receiver, arguments) with
     | None, _ -> Ok ([], arguments)
@@ -655,24 +625,32 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
       | Ok (Hidden hidden) ->
           Calls.check_arguments_alone state env arguments
             (Members.make_hidden_error state (Written member.id) hidden)
-      | Ok Absent ->
-          let candidates =
-            match receiver_type with
-            | Types.Named { path; arguments } -> (
-                match Members.find_fields state.lookups path arguments with
-                | Some fields -> List.map (fun (field : Types.field) -> field.field_name) fields
-                | None -> [])
-            | _ -> []
-          in
-          Calls.check_arguments_alone state env arguments
-            (State.make_error_type state
-               (No_method
-                  {
-                    at = Written member.id;
-                    owner = Name_lookup.make_method_owner state receiver_type;
-                    name = member.text;
-                    candidates;
-                  }))
+      | Ok Absent -> (
+          match Name_lookup.find_method_of_an_unmet_impl state receiver_type member.text wanted with
+          | Some (trait, method_) ->
+              check_trait_method_with_receiver state env value ~receiver:base ~receiver_type trait
+                method_ ~type_arguments arguments
+          | None when Name_lookup.has_method_without_self state receiver_type member.text ->
+              Calls.check_arguments_alone state env arguments
+                (report_wrong_receiver [ (Path.Static, ()) ])
+          | None ->
+              let candidates =
+                match receiver_type with
+                | Types.Named { path; arguments } -> (
+                    match Members.find_fields state.lookups path arguments with
+                    | Some fields -> List.map (fun (field : Types.field) -> field.field_name) fields
+                    | None -> [])
+                | _ -> []
+              in
+              Calls.check_arguments_alone state env arguments
+                (State.make_error_type state
+                   (No_method
+                      {
+                        at = Written member.id;
+                        owner = Name_lookup.make_method_owner state receiver_type;
+                        name = member.text;
+                        candidates;
+                      })))
       | Ok (Visible overloads) -> (
           match
             choose_temporary
@@ -729,7 +707,7 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
                {
                  at = Written member.id;
                  call = Written value.id;
-                 type_ = State.zonk state receiver_type;
+                 type_ = State.normalize_known state receiver_type;
                  name = member.text;
                  receiver = Written base.id;
                  arguments =
@@ -797,10 +775,11 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
 and check_trait_method_with_receiver state env (value : Syntax.expression)
     ~(receiver : Syntax.expression) ~receiver_type (trait : Types.trait_reference)
     (method_ : Types.trait_method) ~type_arguments arguments =
-  let instance, callee =
+  let instance, trait_method =
     Name_lookup.instantiate_trait_method state ~written:value.id ~self_type:receiver_type trait
       method_
   in
+  let callee = Tables.Trait_method trait_method in
   match Name_lookup.check_explicit_type_arguments state value instance type_arguments with
   | Error error -> Calls.check_arguments_alone state env arguments error
   | Ok () -> (

@@ -2,7 +2,6 @@
  (name usage)
  (modules_without_implementation lookups)
  (libraries
-  language
   compiler_bug
   catalog
   core
@@ -13,4 +12,5 @@
   infer
   interface
   types
+  well_known
   zarith))

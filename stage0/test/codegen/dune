@@ -4,14 +4,13 @@
  (modules codegen_support fixtures)
  (libraries
   harness
+  catalog
   core_lint
-  compiler_bug
   zarith
   path
   ground
   memory_layout
   lowered
-  convention
   emit_c
   c_compiler
   x86_64_level
@@ -21,7 +20,6 @@
   cache
   project
   interface
-  infer
   libc
   storage
   monomorphic
