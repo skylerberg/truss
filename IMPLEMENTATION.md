@@ -269,6 +269,12 @@ develop as well as make it easier to bootstrap the compiler in parts.
   proof that reads no body, of a law, a type or a constant, starts from
   `Translate.start_proof`.
 
+  A use has only the clauses whose condition holds for its type arguments.
+  `Callee.resolve` decides each clause's condition once, with
+  `Conditions.keep_holding`, so the contract of a resolved callee holds no
+  other clause, and a call, a function value and the axiom of a logic
+  function read the same clauses.
+
   A logic function is total in the logic and unspecified outside its domain.
   Its domain is a condition under which the definition returns: valid
   arguments, the premise of the clause, the Panic condition, and, for a

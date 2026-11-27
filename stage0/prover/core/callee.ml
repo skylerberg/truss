@@ -183,9 +183,32 @@ let rec resolve_target (frame : State.frame) (written : _ Core.target) =
         (Function { path; instantiation = { type_arguments; capability_arguments = [] } })
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
 
+let keep_holding_clauses (frame : State.frame) (definition : definition) =
+  let keep clauses =
+    Conditions.keep_holding frame.environment frame.query
+      ~substitution:(definition.substitution_of clauses)
+      clauses
+  in
+  {
+    definition with
+    contract =
+      Option.map
+        (fun (contract : State.contract) ->
+          {
+            contract with
+            callee_clauses = keep contract.callee_clauses;
+            trait_clauses = Option.map keep contract.trait_clauses;
+            restated_clauses = List.map keep contract.restated_clauses;
+          })
+        definition.contract;
+  }
+
 let resolve (frame : State.frame) written ~lends ~uses =
   {
-    target = resolve_target frame written;
+    target =
+      (match resolve_target frame written with
+      | Definition definition -> Definition (keep_holding_clauses frame definition)
+      | (Function_value | Intrinsic _) as target -> target);
     group_member = Cycles.find_group_member frame written;
     lends;
     uses;
