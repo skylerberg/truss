@@ -1,0 +1,17 @@
+type Bad(value: Int64)
+
+impl Equal for Bad {
+  fn equal(self, other: Bad) -> Bool
+    ensures result == (self.compare(other) == Ordering.Equal)
+  {
+    self.compare(other) == Ordering.Equal
+  }
+}
+
+impl Ordered for Bad {
+  fn compare(self, other: Bad) -> Ordering
+    ensures result == Ordering.Less
+  {
+    Ordering.Less
+  }
+}

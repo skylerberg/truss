@@ -53,6 +53,7 @@ type environment = {
   termination : Mir.Size_change.verdict Lazy.t;
   blocked_holders : string list;
   proven_laws : (Types.trait_reference * Types.ty) option;
+  inductive_heads : Path.t list;
   policy : obligation_policy;
   memos : Private_state.t;
   read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;
@@ -98,7 +99,12 @@ and frame = {
   definition_entry : definition_entry option;
 }
 
-and definition_entry = { entry_measures : Logic.term list; entry_ranks : ranked_value list }
+and definition_entry = {
+  entry_measures : Logic.term list;
+  entry_ranks : ranked_value list;
+  induction_bound : Logic.term option;
+}
+
 and ranked_value = { position : int; type_ : Types.ty; value : Logic.term }
 and function_exit = { frame : frame; returned : Logic.term option; return_origin : Core.origin }
 and lent_part = { lent_frame : frame; lent_origin : Core.origin }

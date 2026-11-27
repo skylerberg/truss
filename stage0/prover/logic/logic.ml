@@ -756,7 +756,10 @@ let make_triggering_test declarations =
       | Definition { symbol; _ } -> Symbol_table.remove functions symbol
       | Constant _ | Function _ | Datatype _ -> ())
     declarations;
-  function Symbol.Constructor _ | Field _ | Unit -> true | name -> Symbol_table.mem functions name
+  function
+  | Symbol.Constructor _ | Field _ | Unit -> true
+  | Rank _ -> false
+  | name -> Symbol_table.mem functions name
 
 let has_untriggered_fact ?(is_counted = fun _ -> true) query =
   let is_triggering = make_triggering_test query.declarations in

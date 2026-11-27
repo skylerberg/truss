@@ -21,6 +21,10 @@ type resolution = {
 }
 
 val list_dictionary_methods : dictionary -> Path.t list
+
+val list_impls_of_bounds :
+  Interface.Lookups.t -> (Types.ty * Types.trait_reference) list -> Path.t list * assumption list
+
 val resolve_callee : Interface.Lookups.t -> Types.substitution -> 'operand Core.target -> resolution
 val find_instance : lookups -> Path.t -> Types.substitution
 val find_code : lookups -> Path.t -> Tree.t option

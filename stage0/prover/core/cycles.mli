@@ -1,6 +1,7 @@
 val is_in_recursion_group : State.environment -> Path.t -> bool
 val find_group_member : State.frame -> 'operand Core.target -> Path.t option
 val is_in_proof_cycle : State.environment -> Path.t -> bool
+val list_inductive_heads : Lookups.t -> Path.t -> Path.t list
 val is_evaluated_constant : State.environment -> Path.t -> Mir.t -> bool
 val reject_constant_cycle : State.frame -> is_constant:bool -> Mir.t -> unit
 

@@ -1,8 +1,7 @@
 let is_datatype ty =
   match Types.strip_view ty with Named _ as ty -> Types.find_builtin ty = None | _ -> false
 
-let list_entry_ranks (entry : State.frame) (parameters : Mir.parameter list) :
-    State.ranked_value list =
+let list_entry_values (entry : State.frame) (parameters : Mir.parameter list) =
   List.concat
     (List.mapi
        (fun position (parameter : Mir.parameter) ->
@@ -20,13 +19,113 @@ let list_entry_ranks (entry : State.frame) (parameters : Mir.parameter list) :
                | Some value, Some type_ -> Some (value, type_)
                | _ -> None)
          in
-         match found with
-         | Some (value, type_) when is_datatype type_ -> [ { State.position; type_; value } ]
-         | Some _ | None -> [])
+         match found with Some (value, type_) -> [ { State.position; type_; value } ] | None -> [])
        parameters)
+
+let holds_inductive_type (environment : State.environment) ty =
+  environment.inductive_heads <> []
+  &&
+  match
+    Mir.Size_change.classify_holding environment.lookups.interface
+      ~heads:environment.inductive_heads ty
+  with
+  | Whole | Within -> true
+  | Absent | Consumed | Out_of_reach _ -> false
+
+let find_induction_bound (frame : State.frame) (values : State.ranked_value list) =
+  match
+    List.filter_map
+      (fun (value : State.ranked_value) ->
+        if holds_inductive_type frame.environment value.type_ then
+          Some
+            (Models.rank frame.environment frame.query (Types.erase_views value.type_) value.value)
+        else None)
+      values
+  with
+  | [] -> None
+  | first :: rest -> Some (List.fold_left Logic.larger first rest)
+
+let read_induction_bound (frame : State.frame) =
+  Option.bind frame.definition_entry (fun (entry : State.definition_entry) -> entry.induction_bound)
+
+let is_in_proof_group (environment : State.environment) path =
+  List.exists (Path.equal path) (environment.lookups.list_proof_group environment.node)
+
+let makes_inductive_values (environment : State.environment) ~generics ~substitution
+    (assumptions : Mir.Call_edges.assumption list) =
+  let lookups : Mir.Call_edges.lookups =
+    { interface = environment.lookups.interface; mir = environment.lookups.mir }
+  in
+  let holds = holds_inductive_type environment in
+  List.exists
+    (fun (generic : Types.generic) ->
+      match Types.find_argument generic.generic substitution with
+      | Some (Type argument) when holds argument ->
+          Option.is_some (Mir.Size_change.find_value_maker lookups generics generic.generic)
+      | Some _ | None -> false)
+    generics
+  || List.exists
+       (fun (assumption : Mir.Call_edges.assumption) ->
+         holds (fst assumption.assumed)
+         &&
+         match
+           ( assumption.parameter,
+             Interface.Definition.find_impl_interface environment.lookups.interface
+               assumption.assumer )
+         with
+         | Some parameter, Some impl ->
+             Option.is_some (Mir.Size_change.find_value_maker lookups impl.impl_generics parameter)
+         | None, _ | _, None -> true)
+       assumptions
+
+let rank_against_bound (frame : State.frame) ty value ~is_strict ~bound =
+  let rank = Models.rank frame.environment frame.query (Types.erase_views ty) value in
+  if is_strict then Logic.less rank bound else Logic.less_equal rank bound
+
+let find_law_induction_premise (frame : State.frame) (clauses : State.clauses) ~substitution ~inputs
+    =
+  let environment = frame.environment in
+  if environment.inductive_heads = [] then Some (Logic.Boolean true)
+  else
+    let interface = environment.lookups.interface in
+    let generics =
+      match Interface.Impls.read_signature interface clauses.callee.definition with
+      | Some signature -> signature.generics
+      | None -> []
+    in
+    let impls, assumptions =
+      Mir.Call_edges.list_impls_of_bounds interface
+        (Interface.Impls.list_required_bounds generics substitution)
+    in
+    let assumes_group_laws = List.exists (Cycles.is_in_proof_cycle environment) impls in
+    if not (assumes_group_laws || is_in_proof_group environment clauses.callee.definition) then
+      Some (Logic.Boolean true)
+    else if
+      assumes_group_laws && makes_inductive_values environment ~generics ~substitution assumptions
+    then None
+    else
+      Option.bind (read_induction_bound frame) (fun bound ->
+          let compared =
+            List.map2
+              (fun (parameter : Mir.parameter) input ->
+                let ty = Types.substitute_erased substitution parameter.type_ in
+                match
+                  ( Mir.Size_change.classify_holding interface ~heads:environment.inductive_heads ty,
+                    assumes_group_laws )
+                with
+                | Whole, true -> Some (rank_against_bound frame ty input ~is_strict:true ~bound)
+                | (Whole | Within), _ ->
+                    Some (rank_against_bound frame ty input ~is_strict:false ~bound)
+                | Out_of_reach _, true -> None
+                | (Absent | Consumed), _ | Out_of_reach _, false -> Some (Logic.Boolean true))
+              clauses.parameters inputs
+          in
+          if List.mem None compared then None
+          else Some (Logic.conjunction (List.filter_map Fun.id compared)))
 
 let enter_definition (start : State.frame) ~parameters =
   let at_entry = { start with makes_obligations = false } in
+  let values = list_entry_values start parameters in
   {
     start with
     definition_entry =
@@ -36,7 +135,9 @@ let enter_definition (start : State.frame) ~parameters =
             List.map
               (fun measure -> snd (Validity.read_specification at_entry measure))
               start.environment.measures;
-          entry_ranks = list_entry_ranks start parameters;
+          entry_ranks =
+            List.filter (fun (value : State.ranked_value) -> is_datatype value.type_) values;
+          induction_bound = find_induction_bound start values;
         };
   }
 

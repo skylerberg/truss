@@ -1,0 +1,41 @@
+type Value =
+  | Null
+  | Number(value: Int64)
+  | Array(items: List[Value])
+  | Object(members: Map[String, Value])
+
+impl Equal for Value {
+  fn equal(self, other: Value) -> Bool
+    ensures result == match self {
+      Null => other is Null
+      Number(value) => match other {
+        Number(value: other_value) => value == other_value
+        _ => false
+      }
+      Array(items) => match other {
+        Array(items: other_items) => items == other_items
+        _ => false
+      }
+      Object(members) => match other {
+        Object(members: other_members) => members == other_members
+        _ => false
+      }
+    }
+  {
+    match self {
+      Null => other is Null
+      Number(value) => match other {
+        Number(value: other_value) => value == other_value
+        _ => false
+      }
+      Array(items) => match other {
+        Array(items: other_items) => items == other_items
+        _ => false
+      }
+      Object(members) => match other {
+        Object(members: other_members) => members == other_members
+        _ => false
+      }
+    }
+  }
+}
