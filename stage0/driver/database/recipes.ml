@@ -600,11 +600,13 @@ let item_graph : Store.item_graph =
     evaluate_kind = Kind.rank_stage Evaluate;
     item_kind;
     references = Kind.encode_markers [ References ];
-    claims = Kind.encode_markers [ Claims ];
-    claim_kinds = [ Kind.rank_stage Claim_roots; Kind.rank_stage Prove ];
+    roots = Kind.encode_markers [ Roots ];
+    rooting_stages =
+      [ (Kind.rank_stage Declare, Module_unit); (Kind.rank_stage Prove, Definition_unit) ];
   }
 
-let evaluation_graph = { item_graph with claim_kinds = [ Kind.rank_stage Prove ] }
+let evaluation_graph =
+  { item_graph with rooting_stages = [ (Kind.rank_stage Prove, Definition_unit) ] }
 
 let ensure_item (database : Tracker.t) (item : Lowered.Item.t) =
   let id = Ids.of_item item in
@@ -628,7 +630,7 @@ let rec collect_items (database : Tracker.t) candidates =
     (fun id ->
       if
         Option.is_some (Store.find_item_key database.store ~id)
-        && not (Store.is_item_claimed database.store item_graph ~item:id ~over:Every_edge)
+        && not (Store.is_item_live database.store item_graph ~item:id ~over:Every_edge)
       then begin
         let referenced = list_item_targets database Lower id in
         List.iter (fun stage -> Tracker.forget database stage id) item_stages;
@@ -674,7 +676,7 @@ let run_prove (database : Tracker.t) (row : Store.definition) =
                 List.map make_evaluation_root (Prover.list_evaluations proof)
               else []
             in
-            List.iter (fun root -> recorder.note Claims (Entity Item) (Ids.of_item root) "") roots;
+            List.iter (fun root -> recorder.note Roots (Entity Item) (Ids.of_item root) "") roots;
             ( Tracker.Value proof,
               roots,
               match proof with
@@ -875,33 +877,6 @@ let run_decide (database : Tracker.t) answered (row : Store.definition) =
               })
             states));
   if has_unfinished_run then Tracker.mark_stale database Decide row.id
-
-let is_root (row : Store.definition) =
-  row.origin = Declarations.written_origin
-  && row.ordinal = 0
-  &&
-  match Declarations.decode_kind row.kind with
-  | Test -> true
-  | Function ->
-      let key = Declarations.decode_key row.key in
-      key.module_.modules = [] && Path.is_entry_point key.path
-  | Type | Trait | Capability | Constant | Theorem | Method | Member_constant | Impl | Law_proof ->
-      false
-
-let run_claim_roots (database : Tracker.t) (row : Store.definition) =
-  let path = (Declarations.decode_key row.key).path in
-  let roots =
-    if Result.is_error Libc.host then []
-    else
-      match path with
-      | Test _ -> [ Lowering.test_runner; Lowering.make_root path ]
-      | _ -> [ Lowering.make_root path ]
-  in
-  let (), changes =
-    Tracker.record_observed database Claim_roots row.id (fun recorder ->
-        List.iter (fun root -> recorder.note Claims (Entity Item) (Ids.of_item root) "") roots)
-  in
-  follow_item_edges database ~items:roots changes
 
 let read_item (database : Tracker.t) id : Lowered.Item.t =
   match Store.find_item_key database.store ~id with
@@ -1104,7 +1079,6 @@ let has_call_node (row : Store.definition) =
 
 let definition_stages =
   [
-    { stage = Claim_roots; unit_id = Of_definition; applies = is_root; run = run_claim_roots };
     { stage = Resolve; unit_id = Of_definition; applies = is_written; run = run_resolve };
     {
       stage = Read_trait_header;
@@ -1251,9 +1225,7 @@ let list_synthesized_methods (database : Tracker.t) (impl : Store.definition) =
     (Store.list_definitions database.store Main (Of_container impl.id))
 
 let rec forget_definition (database : Tracker.t) (row : Store.definition) =
-  let claimed =
-    list_item_targets database Claim_roots row.id @ list_item_targets database Prove row.id
-  in
+  let evaluations = list_item_targets database Prove row.id in
   List.iter
     (fun recipe ->
       if recipe.applies row then Tracker.forget database recipe.stage (identify_unit recipe row))
@@ -1264,7 +1236,7 @@ let rec forget_definition (database : Tracker.t) (row : Store.definition) =
     ignore (Store.replace_verdicts database.store ~definition:row.id []);
     Store.replace_solver_runs database.store ~definition:row.id []
   end;
-  collect_items database claimed;
+  collect_items database evaluations;
   if is_impl row then begin
     List.iter
       (fun (synthesized : Store.definition) ->
@@ -1332,6 +1304,21 @@ let run_synthesize (database : Tracker.t) (impl : Store.definition) =
       if not (has_row synthesized_before row) then create_units database row)
     synthesized
 
+let list_roots (declarations : Resolve.Namespace.module_declarations) =
+  if Result.is_error Libc.host then []
+  else
+    let list_paths is_root =
+      List.filter_map
+        (fun ({ declaration; _ } : Resolve.Namespace.declared_definition) ->
+          if is_root declaration then Some declaration.key.path else None)
+        declarations.definitions
+    in
+    Lowering.list_roots
+      ~tests:(list_paths (fun declaration -> declaration.kind = Test))
+      ~mains:
+        (list_paths (fun declaration ->
+             declaration.kind = Function && Path.is_entry_point declaration.key.path))
+
 let run_declare (database : Tracker.t) id =
   let module_ : Path.module_ =
     match Store.find_module_key database.store Main ~id with
@@ -1343,16 +1330,22 @@ let run_declare (database : Tracker.t) id =
       (fun (file : Store.file) -> (Declarations.decode_file file.key, file.text))
       (Store.list_files database.store Main (Of_module id))
   in
-  let declarations =
-    Tracker.record database Declare id (fun recorder ->
+  let (declarations, roots), changes =
+    Tracker.record_observed database Declare id (fun recorder ->
         recorder.note Reads (Lookup Files) id "";
         List.iter
           (fun ((file : Path.file), _) -> recorder.note Reads (Lookup Source) (Ids.of_file file) "")
           files;
-        Resolve.Namespace.declare
-          (Lookups.make_names database recorder)
-          (List.map (fun (file, text) -> (file, fst (parse file text), text)) files))
+        let declarations =
+          Resolve.Namespace.declare
+            (Lookups.make_names database recorder)
+            (List.map (fun (file, text) -> (file, fst (parse file text), text)) files)
+        in
+        let roots = list_roots declarations in
+        List.iter (fun root -> recorder.note Roots (Entity Item) (Ids.of_item root) "") roots;
+        (declarations, roots))
   in
+  follow_item_edges database ~items:roots changes;
   let written = Declarations.write_module database.store module_ ~files declarations in
   let is_added id = List.exists (fun (row : Store.definition) -> row.id = id) written.added in
   List.iter
@@ -1495,7 +1488,7 @@ let locate_entity (stage : Kind.stage) : Store.unit_entity =
   | Declare -> Module_unit
   | Resolve_grant | Check_dependency -> Dependency_unit
   | Synthesize | Decide -> Definition_unit
-  | Claim_roots | Resolve | Read_trait_header | Evaluate_constant | Elaborate_header | Elaborate
+  | Resolve | Read_trait_header | Evaluate_constant | Elaborate_header | Elaborate
   | Derive_interface | Compute_type_facts | Check_signature | Check_contract | Check_body
   | Build_body_mir | Build_contract_mir | Generate_mir | List_calls | Group_recursion | Find_aborts
   | Check_usage | Check_ownership | Check_sealed | Check_impl | Check_type | Check_instantiation
@@ -1637,7 +1630,7 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
             else find_growing_cycles database rows)
   | Lower | Key_tests ->
       Compiler_bug.raise_bug ~stage:"Database"
-        "an item is lowered and keyed from the claims that reach it"
+        "an item is lowered and keyed from the roots that reach it"
   | Render _ ->
       Compiler_bug.raise_bug ~stage:"Database" "a unit is rendered when its item is linked"
   | Evaluate ->
@@ -1699,7 +1692,7 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
   | Resolve | Read_trait_header | Evaluate_constant | Elaborate_header | Elaborate
   | Derive_interface | Check_signature | Check_body | Build_body_mir | Build_contract_mir
   | Generate_mir | List_calls | Check_usage | Check_ownership | Check_sealed | Check_impl
-  | Check_type | Check_test | Prove | Claim_roots ->
+  | Check_type | Check_test | Prove ->
       let recipe = find_recipe stage in
       run_each (fun database id -> recipe.run database (read_first_definition database recipe id)));
   stale <> []
@@ -1748,7 +1741,7 @@ let drain_test_keys (database : Tracker.t) ?on_bug ~graph packages =
       end
     in
     List.iter reach
-      (Store.list_claimed_among database.store graph ~items:(list_sorted_ids candidates) ~packages);
+      (Store.list_roots_among database.store graph ~items:(list_sorted_ids candidates) ~packages);
     List.iter
       (fun component ->
         let was_stale =
@@ -1763,7 +1756,7 @@ let drain_test_keys (database : Tracker.t) ?on_bug ~graph packages =
          (list_sorted_ids reached))
   end
 
-let drain_items_claimed_in (database : Tracker.t) ?on_bug ~graph packages =
+let drain_items_live_in (database : Tracker.t) ?on_bug ~graph packages =
   let rec lower_each = function
     | [] -> ()
     | id :: pending ->
@@ -1772,26 +1765,26 @@ let drain_items_claimed_in (database : Tracker.t) ?on_bug ~graph packages =
             referenced := List.map Ids.of_item (run_lower database id));
         lower_each (!referenced @ pending)
   in
-  let rec lower_claimed () =
+  let rec lower_live () =
     match
       List.filter
         (fun item ->
-          Store.is_item_claimed database.store graph ~item ~over:(Settled_edges { packages }))
+          Store.is_item_live database.store graph ~item ~over:(Settled_edges { packages }))
         (list_stale_units database Lower ~scope:Everything)
     with
     | [] -> ()
-    | claimed ->
-        lower_each claimed;
-        lower_claimed ()
+    | live ->
+        lower_each live;
+        lower_live ()
   in
-  lower_claimed ();
+  lower_live ();
   drain_test_keys database ?on_bug ~graph packages
 
-let drain_claimed_items database ?on_bug packages =
-  drain_items_claimed_in database ?on_bug ~graph:item_graph packages
+let drain_live_items database ?on_bug packages =
+  drain_items_live_in database ?on_bug ~graph:item_graph packages
 
 let drain_evaluated_items database ?on_bug packages =
-  drain_items_claimed_in database ?on_bug ~graph:evaluation_graph packages
+  drain_items_live_in database ?on_bug ~graph:evaluation_graph packages
 
 let render_units (database : Tracker.t) ?on_bug profile items =
   run_units database ?on_bug (Render profile) items (run_render profile)

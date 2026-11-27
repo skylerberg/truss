@@ -99,13 +99,21 @@ val find_item_key : t -> id:int -> string option
 val list_item_keys : t -> string list
 val remove_item : t -> id:int -> unit
 
+type unit_entity =
+  | File_unit
+  | Module_unit
+  | Definition_unit
+  | Path_unit
+  | Dependency_unit
+  | Item_unit
+
 type item_graph = {
   lower_kind : int;
   evaluate_kind : int;
   item_kind : int;
   references : int;
-  claims : int;
-  claim_kinds : int list;
+  roots : int;
+  rooting_stages : (int * unit_entity) list;
 }
 
 val mark_items_stale : t -> stage:int -> unit
@@ -121,13 +129,10 @@ type linked = {
 
 val list_linked : t -> item_graph -> profile:int -> unit_kind:int -> roots:int list -> linked list
 
-type claim_edges = Every_edge | Settled_edges of { packages : string list option }
+type followed_edges = Every_edge | Settled_edges of { packages : string list option }
 
-val is_item_claimed : t -> item_graph -> item:int -> over:claim_edges -> bool
-
-val list_claimed_among :
-  t -> item_graph -> items:int list -> packages:string list option -> int list
-
+val is_item_live : t -> item_graph -> item:int -> over:followed_edges -> bool
+val list_roots_among : t -> item_graph -> items:int list -> packages:string list option -> int list
 val merge : string list -> into:string -> unit
 
 type placed = { file : string; base : int; stop : int; spans : string }
@@ -191,15 +196,6 @@ val keep_for_dependents : t -> markers:int -> unit
 val mark_stale : t -> stage:int -> id:int -> unit
 val unmark_stale : t -> stage:int -> id:int -> bool
 val is_stale : t -> stage:int -> id:int -> bool
-
-type unit_entity =
-  | File_unit
-  | Module_unit
-  | Definition_unit
-  | Path_unit
-  | Dependency_unit
-  | Item_unit
-
 val list_stale : t -> stage:int -> entity:unit_entity -> scope:scope -> int list
 
 type entry = {

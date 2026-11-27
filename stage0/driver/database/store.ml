@@ -605,13 +605,29 @@ let list_item_keys store =
 
 let remove_item store ~id = Sql.run store.sql "DELETE FROM main.item WHERE id = ?1" [ Integer id ]
 
+type unit_entity =
+  | File_unit
+  | Module_unit
+  | Definition_unit
+  | Path_unit
+  | Dependency_unit
+  | Item_unit
+
+let locate_entity_table = function
+  | File_unit -> ("file", "id")
+  | Module_unit -> ("module", "id")
+  | Definition_unit -> ("definition", "id")
+  | Path_unit -> ("definition", "path")
+  | Dependency_unit -> ("dependency", "id")
+  | Item_unit -> ("item", "id")
+
 type item_graph = {
   lower_kind : int;
   evaluate_kind : int;
   item_kind : int;
   references : int;
-  claims : int;
-  claim_kinds : int list;
+  roots : int;
+  rooting_stages : (int * unit_entity) list;
 }
 
 let mark_items_stale store ~stage =
@@ -658,40 +674,47 @@ let list_linked store graph ~profile ~unit_kind ~roots =
         is_unit_stale = Sql.read_integer row 6 = 1;
       })
 
-type claim_edges = Every_edge | Settled_edges of { packages : string list option }
+type followed_edges = Every_edge | Settled_edges of { packages : string list option }
 
 let require_settled ~stage ~unit =
   Printf.sprintf " AND NOT EXISTS (SELECT 1 FROM main.stale s WHERE s.stage = %s AND s.id = %s)"
     stage unit
 
-let select_claim_kinds graph =
-  Printf.sprintf " AND c.source_kind IN (%s)"
-    (String.concat ", " (List.map string_of_int graph.claim_kinds))
+let select_rooting_stages graph =
+  Printf.sprintf " AND r.source_kind IN (%s)"
+    (String.concat ", " (List.map (fun (stage, _) -> string_of_int stage) graph.rooting_stages))
 
-let select_settled_claims ~packages ~parameter =
-  let condition = require_settled ~stage:"c.source_kind" ~unit:"c.source" in
+let select_settled_roots graph ~packages ~parameter =
+  let condition = require_settled ~stage:"r.source_kind" ~unit:"r.source" in
   match packages with
-  | None -> ("", condition, [])
+  | None -> (condition, [])
   | Some packages ->
-      ( " CROSS JOIN main.definition d ON d.id = c.source",
-        Printf.sprintf "%s AND +d.package IN (SELECT value FROM json_each(?%d))" condition parameter,
+      let select_in_packages (stage, entity) =
+        let table, id_column = locate_entity_table entity in
+        Printf.sprintf
+          "r.source_kind = %d AND EXISTS (SELECT 1 FROM main.\"%s\" u WHERE u.\"%s\" = r.source \
+           AND +u.package IN (SELECT value FROM json_each(?%d)))"
+          stage table id_column parameter
+      in
+      ( Printf.sprintf "%s AND (%s)" condition
+          (String.concat " OR " (List.map select_in_packages graph.rooting_stages)),
         [ Text (encode_texts packages) ] )
 
-let is_item_claimed store graph ~item ~over =
-  let reference_condition, claimant, claim_condition, packages =
+let is_item_live store graph ~item ~over =
+  let reference_condition, root_condition, packages =
     match over with
-    | Every_edge -> ("", "", "", [])
+    | Every_edge -> ("", "", [])
     | Settled_edges { packages } ->
-        let claimant, claim_condition, packages = select_settled_claims ~packages ~parameter:4 in
-        (require_settled ~stage:"?3" ~unit:"e.source", claimant, claim_condition, packages)
+        let root_condition, packages = select_settled_roots graph ~packages ~parameter:4 in
+        (require_settled ~stage:"?3" ~unit:"e.source", root_condition, packages)
   in
-  let has_claim node =
+  let has_root node =
     Sql.has_row store.sql
       (Printf.sprintf
-         "SELECT 1 FROM main.edge c%s WHERE c.target_kind = ?1 AND c.target = ?2 AND c.name = ''%s \
-          AND (c.markers & ?3) != 0%s LIMIT 1"
-         claimant (select_claim_kinds graph) claim_condition)
-      ([ Integer graph.item_kind; Integer node; Integer graph.claims ] @ packages)
+         "SELECT 1 FROM main.edge r WHERE r.target_kind = ?1 AND r.target = ?2 AND r.name = ''%s \
+          AND (r.markers & ?3) != 0%s LIMIT 1"
+         (select_rooting_stages graph) root_condition)
+      ([ Integer graph.item_kind; Integer node; Integer graph.roots ] @ packages)
   in
   let find_referrer node ~from =
     Sql.find_row store.sql
@@ -719,20 +742,20 @@ let is_item_claimed store graph ~item ~over =
             if Hashtbl.mem visited referrer then search pending
             else begin
               Hashtbl.replace visited referrer ();
-              has_claim referrer || search ((referrer, min_int) :: pending)
+              has_root referrer || search ((referrer, min_int) :: pending)
             end)
   in
   Hashtbl.replace visited item ();
-  has_claim item || search [ (item, min_int) ]
+  has_root item || search [ (item, min_int) ]
 
-let list_claimed_among store graph ~items ~packages =
-  let claimant, claim_condition, packages = select_settled_claims ~packages ~parameter:4 in
+let list_roots_among store graph ~items ~packages =
+  let root_condition, packages = select_settled_roots graph ~packages ~parameter:4 in
   Sql.list_rows store.sql
     (Printf.sprintf
-       "SELECT DISTINCT c.target FROM json_each(?1) i CROSS JOIN main.edge c ON c.target_kind = ?2 \
-        AND c.target = i.value AND c.name = ''%s%s WHERE (c.markers & ?3) != 0%s"
-       (select_claim_kinds graph) claimant claim_condition)
-    ([ Text (encode_integers items); Integer graph.item_kind; Integer graph.claims ] @ packages)
+       "SELECT DISTINCT r.target FROM json_each(?1) i CROSS JOIN main.edge r ON r.target_kind = ?2 \
+        AND r.target = i.value AND r.name = ''%s WHERE (r.markers & ?3) != 0%s"
+       (select_rooting_stages graph) root_condition)
+    ([ Text (encode_integers items); Integer graph.item_kind; Integer graph.roots ] @ packages)
     (fun row -> Sql.read_integer row 0)
 
 let merge paths ~into =
@@ -1016,24 +1039,8 @@ let is_stale store ~stage ~id =
   Sql.has_row store.sql "SELECT 1 FROM main.stale WHERE stage = ?1 AND id = ?2"
     [ Integer stage; Integer id ]
 
-type unit_entity =
-  | File_unit
-  | Module_unit
-  | Definition_unit
-  | Path_unit
-  | Dependency_unit
-  | Item_unit
-
 let list_stale store ~stage ~entity ~scope =
-  let table, id_column =
-    match entity with
-    | File_unit -> ("file", "id")
-    | Module_unit -> ("module", "id")
-    | Definition_unit -> ("definition", "id")
-    | Path_unit -> ("definition", "path")
-    | Dependency_unit -> ("dependency", "id")
-    | Item_unit -> ("item", "id")
-  in
+  let table, id_column = locate_entity_table entity in
   let list_joined ~from_ column members =
     Sql.list_rows store.sql
       (Printf.sprintf

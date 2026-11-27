@@ -2,7 +2,6 @@ type stage =
   | Parse
   | Declare
   | Synthesize
-  | Claim_roots
   | Resolve
   | Resolve_grant
   | Check_imports
@@ -116,7 +115,7 @@ val list_read_targets : fact -> fact list
 val lookups_of_definition : lookup list
 val facts_of_definition : fact list
 
-type marker = Reads | References | Calls | Assumes | Instantiates | Grows | Claims
+type marker = Reads | References | Calls | Assumes | Instantiates | Grows | Roots
 
 val encode_markers : marker list -> int
 val has_marker : int -> marker -> bool

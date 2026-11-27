@@ -307,10 +307,10 @@ let find_checker (stage : Kind.stage) : checker option =
   | Check_ownership -> Some Ownership
   | Check_sealed | Check_impl | Check_type | Check_instantiation | Check_test -> Some Package_checks
   | Check_unexported -> Some Unexported
-  | Declare | Synthesize | Claim_roots | Resolve_grant | Read_trait_header | Evaluate_constant
-  | Derive_interface | Compute_type_facts | Build_body_mir | Build_contract_mir | Generate_mir
-  | List_calls | Group_recursion | Find_aborts | Check_dependency | Prove | Lower | Key_tests
-  | Evaluate | Run_test | Render _ | Decide ->
+  | Declare | Synthesize | Resolve_grant | Read_trait_header | Evaluate_constant | Derive_interface
+  | Compute_type_facts | Build_body_mir | Build_contract_mir | Generate_mir | List_calls
+  | Group_recursion | Find_aborts | Check_dependency | Prove | Lower | Key_tests | Evaluate
+  | Run_test | Render _ | Decide ->
       None
 
 let has_unchecked_body (database : t) (package : Path.package) =
@@ -437,14 +437,13 @@ let list_dependency_diagnostics (database : t) package =
 
 let last_stage_before_lowering : Kind.stage = List_calls
 
-let drain_claimed_items (database : t) ?on_bug packages =
+let drain_live_items (database : t) ?on_bug packages =
   run_past_bugs database ?on_bug (fun ~on_bug ->
-      Recipes.drain_claimed_items database ~on_bug
-        (Option.map (List.map Path.show_package) packages))
+      Recipes.drain_live_items database ~on_bug (Option.map (List.map Path.show_package) packages))
 
 let drain_lowering (database : t) ?on_bug packages =
   drain_packages database ?on_bug ~through:last_stage_before_lowering packages;
-  drain_claimed_items database ?on_bug (Some (Lookups.sort_in_dependency_order database packages))
+  drain_live_items database ?on_bug (Some (Lookups.sort_in_dependency_order database packages))
 
 let make_interface_lookups database =
   Lookups.make_interface database Tracker.untracked ~is_checked:true
@@ -1224,7 +1223,7 @@ module For_testing = struct
   let block_proof (database : t) (key : Resolve.Names.key) =
     ignore (Tracker.write database Facts.proof ~id:(Ids.of_key key) (Some Blocked))
 
-  let lower_roots ?on_bug (database : t) = drain_claimed_items database ?on_bug None
+  let lower_roots ?on_bug (database : t) = drain_live_items database ?on_bug None
 
   let propagate ?on_bug (database : t) =
     drain database ?on_bug ~through:Prove ~scope:Everything ();
@@ -1272,12 +1271,12 @@ module For_testing = struct
 
   let add_root (database : t) item =
     let root = Tracker.locate (Entity Item) (Ids.of_item item) "" in
-    let source = Tracker.locate_unit Claim_roots 0 in
-    let claimed = Store.list_edges database.store Main ~source in
-    if not (List.exists (fun (edge : Store.edge) -> edge.target = root) claimed) then begin
+    let source = Tracker.locate_unit Declare 0 in
+    let edges = Store.list_edges database.store Main ~source in
+    if not (List.exists (fun (edge : Store.edge) -> edge.target = root) edges) then begin
       ignore
         (Store.replace_edges database.store ~source
-           ({ Store.target = root; markers = Kind.encode_markers [ Claims ] } :: claimed));
+           ({ Store.target = root; markers = Kind.encode_markers [ Roots ] } :: edges));
       Recipes.ensure_item database item
     end
 

@@ -1456,6 +1456,59 @@ let () =
         ]
       in
       ignore (list_propagated ~before:(make_program "rest") ~after:(make_program "chain")));
+  Harness.test "removing a test collects the items that only it reached" (fun () ->
+      let make_program tests =
+        [
+          ( "app.main",
+            "fn shared() -> Int64 { 1 }\n\
+             fn only() -> Int64 { shared() + 1 }\n\
+             test \"kept\" {\n\
+            \  assert shared() == 1\n\
+             }\n" ^ tests );
+        ]
+      in
+      let before = make_program "test \"removed\" {\n  assert only() == 2\n}\n" in
+      let observed = propagate (build before) ~before ~after:(make_program "") in
+      let is_collected item =
+        List.mem (Database.For_testing.identify_item item) observed.collected
+      in
+      List.iter
+        (fun item ->
+          if not (is_collected item) then
+            Harness.fail "%s is not collected" (Lowered.Item.to_string item))
+        [
+          Lowering.make_root
+            (Path.Test { module_ = Support.parse_module "app.main"; name = "removed" });
+          make_code_item "only";
+        ];
+      List.iter
+        (fun item ->
+          if is_collected item then Harness.fail "%s is collected" (Lowered.Item.to_string item))
+        [ make_code_item "shared"; Lowering.test_runner ]);
+  Harness.test "lowering a package lowers its own tests and not another package's" (fun () ->
+      let database =
+        Support.make_database
+          (Support.setup
+             [
+               ("app.main", "test \"in app\" {\n  assert 1 + 1 == 2\n}\n");
+               ("other.main", "test \"in other\" {\n  assert 2 + 2 == 4\n}\n");
+             ])
+      in
+      let (_ : (Lowering.lowered_lookups, string) result), observed =
+        Database.For_testing.observe (fun () -> Database.find_lowered_lookups database [ app ])
+      in
+      let is_lowered module_ name =
+        List.mem
+          {
+            Database.For_testing.stage = Lower;
+            id =
+              Database.For_testing.identify_item
+                (Lowering.make_root (Path.Test { module_ = Support.parse_module module_; name }));
+          }
+          observed.recomputed
+      in
+      if not (is_lowered "app.main" "in app") then Harness.fail "the test of app is not lowered";
+      if is_lowered "other.main" "in other" then Harness.fail "the test of other is lowered");
   Harness.test "removing a type collects the items at that type without computing them" (fun () ->
       let make_program shape =
         [

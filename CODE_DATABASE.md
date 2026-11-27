@@ -206,7 +206,7 @@ unit is computed.
 | `calls` | The unit's MIR calls the target. | Group recursion, lowering's check of calls, `graph` |
 | `assumes` | The unit's proof assumes a fact that the target states, without a call in its body: its contract calls the target, the contract that its trait declares for it calls the target, its invariant or potential calls the target, a value it uses has the target's type, the invariant or potential of a generic type it uses, or of the type of one of that type's fields, calls the target at the type arguments used, it calls a method that the target `impl` gives a trait that states laws, or that the target gives a trait which that trait requires, it calls a method that the target, a derived `impl`, gives, it is an `impl` and the target is one of its law proofs, or it is a derived `impl` and the target is the `impl` of a field's type. | Group recursion |
 | `instantiates`, `grows` | The unit is a generic function, and its typed form calls a generic function of its package with type arguments; `grows` when an argument holds the caller's own parameter inside a larger type. | The check for instantiation cycles |
-| `claims` | The unit makes the target item a root of lowering: a test, a `main`, an evaluation that a proof needs. | Lower |
+| `roots` | The target item is a root of lowering: Declare roots the items that run each test of its module and a package's `main`, and Prove roots each evaluation that its proof needs. An item that a root reaches is live. | Lower |
 
 | Target | Names | Example |
 |---|---|---|
@@ -231,9 +231,8 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Stage | Unit | Pass | Input | Rows written |
 |---|---|---|---|---|
 | Parse | File | `Parser.parse_source` | The file's text | `entry`, parse diagnostics |
-| Declare | Module | The declaring half of `Resolve.Namespace` | The parsed files of the module; lookups of entries, modules, and dependencies | `definition`, `syntax`, `import`, `impl`, with a row for each derived impl |
+| Declare | Module | The declaring half of `Resolve.Namespace` | The parsed files of the module; lookups of entries, modules, and dependencies | `definition`, `syntax`, `import`, `impl`, with a row for each derived impl; `roots` edges to the items that run its tests and its package's `main` |
 | Synthesize | Impl | The trait's methods that the impl does not write | Name lookups | A `definition` row for each method the impl inherits or derives |
-| Claim roots | Test, or a package's `main` | `Lowering.make_root` | The definition's path | `claims` edges to the items that run it |
 | Resolve | Definition | `Resolve.resolve`, which walks the definition once | The definition's tree; name lookups | A `resolved` row for each section, `references` edges |
 | Resolve grants | Dependency | `Interface.Grants.resolve_grant` | The capabilities the manifest grants; name lookups | `grant` |
 | Check imports | File | `Resolve.list_file_diagnostics` | The file's text; the imports that a `references` edge names; whether a `resolved` row of the file holds no value | Diagnostics |
@@ -247,7 +246,7 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Infer | Definition | `Infer.check_contract`, `Infer.check_body` | The tree, resolved names, and interface; lookups of interfaces and contracts | `contract`, `body`, `body_fact`, `references` edges |
 | Build MIR | Definition | `Mir.make_body_part`, `Mir.make_contract_part` | The body's and contract's forms | `body_mir`, `contract_mir` |
 | Generate MIR | Derived method | `Infer.derive_form` | Interfaces and contracts | `generated_mir` |
-| List calls | Definition, with the synthesized methods and derived impls | `Mir.Call_edges.list_path_edges`, `Mir.Call_edges.list_assumed_paths`, `Mir.Size_change.list_sites` | MIR and interfaces | `call_node` (callees and size-change graphs), `calls` and `assumes` edges |
+| List calls | Definition, with the synthesized methods and derived impls | `Mir.Call_edges.list_path_edges`, `Mir.Call_edges.list_assumed_paths`, `Mir.Size_change.summarize` | MIR and interfaces | `call_node` (callees and size-change graphs), `calls` and `assumes` edges |
 | Group recursion | The definitions whose `calls` or `assumes` edges or size-change graphs changed, and their groups | Strongly connected components, once over the `calls` edges and once over both; for each recursion group, `Mir.Size_change.decide` over its members' graphs | The definitions that both reach and are reached by a changed one, the edges among them, and the size-change graphs of the members of each recursion group | `recursion_group`, `proof_group`, `termination` |
 | Find aborts | Path, a definition's callees before it | Whether the code of the definition that runs holds a call of `intrinsic.crash` or of an intrinsic that allocates, or calls a definition outside its recursion group that may abort, and the trait methods that it or such a callee calls through a bound. A storage of capacity zero is no allocation. A specification-only definition does neither. Once the members of a group are computed, whether any of them does, written for each member. | The definition's MIR and signature, its `recursion_group`, and its callees' `may_abort` | `aborts_outside_group`, `may_abort` |
 | Check bodies | Definition | `Usage.check`, `Ownership.check` | The body's tables and `uses_run_forever`, the definition's `recursion_group`, its MIR, and its ownership modes | `usage_check`, `ownership` |
@@ -256,7 +255,7 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Check a test | Test | `Package_checks.run` with `Test` | The tests of its package that have its name | Diagnostics |
 | Check unexported | Function, method, constant, or member constant, with the other stale units of the drain | `Package_checks.classify_uses`, then `Package_checks.run` with `Unexported` | The `references` edges into the definition, one user at a time, and the declaration of each user | Diagnostics |
 | Check a dependency | Dependency | `Package_checks.run` with `Dependency` | Whether a body of the package references the dependency | `dependency_use` |
-| Prove | Definition | `Prover.prove` | MIR, contracts, `ownership`, `recursion_group`, `proof_group`, `termination`, the `may_abort` of its callees and of the `impl` methods and functions passed to them | `proof`, `hole`, `claims` edges to the items of its evaluations |
+| Prove | Definition | `Prover.prove` | MIR, contracts, `ownership`, `recursion_group`, `proof_group`, `termination`, the `may_abort` of its callees and of the `impl` methods and functions passed to them | `proof`, `hole`, `roots` edges to the items of its evaluations |
 | Decide | Definition | `Prover.pose`, the solver, `Prover.list_states` | The proof, the results of running its evaluations, and the outputs of the unit's own runs of Z3 | `verdict`, `solver_run` |
 | Lower | Item | `Lowering.lower`, `Lowering.check_calls` | MIR and interfaces; the callees of the item's definition and of each callee | `lowered`, `references` edges to the items its code names |
 | Key tests | Item, with the items of its reference cycle | `Lowering.derive_test_keys` | `lowered`, and the test keys of the items it references | `test_key` |
@@ -270,13 +269,13 @@ order, and the types of one package by the strongly connected components of
 their fields' types, so that a type's facts are computed after the facts of
 the types it holds.
 
-An `item` row exists while a claimed item reaches it. A unit that gains a
-`claims` or `references` edge to an item inserts the item's row and marks
-its Lower and Key tests units stale. A unit that loses such an edge asks
-whether any claimed item still reaches the target. A depth-first search
-follows the `references` edges into the target backward, one referrer at a
-time, and stops at the first claimed item. If none reaches the target, the
-item's rows are deleted and the items it referenced are asked the same.
+An `item` row exists while the item is live. A unit that gains a `roots`
+or `references` edge to an item inserts the item's row and marks its Lower
+and Key tests units stale. A unit that loses such an edge asks whether the
+target is still live. A depth-first search follows the `references` edges
+into the target backward, one referrer at a time, and stops at the first
+root. If it reaches none, the item's rows are deleted and the items it
+referenced are asked the same.
 
 An unexported function or constant is used while a definition that need not
 be used reaches it over the `references` edges of bodies. A body that gains or
@@ -308,8 +307,8 @@ listing asks an index of the bodies that hold no value.
 A command says how far to drain: `check` drains through Decide, and `test`
 and `build` through Key tests, for the packages they name and the packages
 those depend on. Saving a file drains through the checks of packages. Lower
-and Key tests drain the items that the claims of those packages reach, and
-for `check` the items that the claims of its proofs reach, which are the
+and Key tests drain the items that the roots of those packages reach, and
+for `check` the items that the roots of its proofs reach, which are the
 evaluations, and
 Prove and Decide the definitions of the packages a command names, or of the
 files an editor has open. A build drains Render of its profile for the items
@@ -318,14 +317,15 @@ that its roots reach.
 A drain selects its units from the `stale` rows, so a stage with no stale row
 costs one seek. A drain for packages joins the stale rows of a stage with
 their entities and keeps the entities of those packages. Lower asks, for each
-stale item, whether a claim reaches it: the same depth-first search follows
+stale item, whether a root reaches it: the same depth-first search follows
 the `references` edges into the item backward, through settled units only,
-and stops at the first settled claim of the command's packages. Lower then
+and stops at the first settled root of the command's packages. A settled
+root is one whose `roots` edge a settled unit wrote. Lower then
 continues from each unit it lowers to the stale items that the unit
 references, and asks again about the stale items that remain until none is
 reached. Key tests starts from its stale items and the items whose code
-references them. One statement lists the settled claims of the command's packages
-among those items, and the drain keys the items that those claims reach
+references them. One statement lists the settled roots of the command's packages
+among those items, and the drain keys the items that those roots reach
 through settled units. An item that they do not reach stays stale. Render
 takes its stale units from the query that lists the linked items. A drain for
 an editor's files is the exception: it joins from the definitions of those
@@ -357,7 +357,7 @@ runs the evaluation again.
 
 A Decide unit is marked stale by a changed test key, and a test key changes
 only when Key tests runs. So before a `check` lists its stale Decide units,
-it drains Lower and Key tests for the items that a proof's claim reaches.
+it drains Lower and Key tests for the items that a proof's roots reach.
 Without that, an edit to a function that a computed constant calls left
 every proof that reads the constant standing.
 
@@ -426,14 +426,14 @@ every proof that reads the constant standing.
 | When a dependency's file is replaced, a differing row of `definition`, `entry`, `impl`, or another table of names marks the readers of every lookup that the row backs, under the row's own name: the entry `name` of its module, the members `member` of its owner. A differing fact row marks the readers of each of its facts. | The old file and the new one are attached together, so the rows that differ are one query for each table. Marking by row and name leaves a reader of one function untouched when another function of the same module changes. A lookup that reads only some columns of a differing row is recomputed once and found unchanged, which costs one unit and can never leave a stale read. |
 | A statement that joins names its driving table first and joins with `CROSS JOIN`, which SQLite never reorders. | The store's statements have no statistics to plan from, and the planner's choice differs between versions of SQLite. A newer planner made the edge table the outer loop of a recursive step, so each step read every edge, and CI's jobs took ten times as long as the same work on a machine with an older SQLite. |
 | A membership test on the rows of a join is written `+column IN (…)`, and a bare `column IN (…)` is written only where the list is to drive the index. | SQLite uses a list on a column that continues an index as part of the seek, once for each value of the list. The statement that lists the call edges among the definitions of a recursion scope tested each edge's target against the scope this way, so it sought the edge index once for each pair of definitions: 16 s of a 30 s build of the standard library, from one statement that returns 20 thousand rows. The unary plus keeps the test out of the seek. |
-| A drain selects its units from the `stale` rows, and from the entities in its scope only for the files an editor has open. | A command with no change must cost the same at every project size. Selecting from the scope read every definition of the named files once for each stage, and walked every claimed item once for each level of the deepest chain of references. On 10,400 functions a command with no change took 438 ms, and an edit to one body took 729 ms, of which 17 ms was the edit's own work. A stale item that no settled claim reaches stays stale, and each command asks about it again. |
+| A drain selects its units from the `stale` rows, and from the entities in its scope only for the files an editor has open. | A command with no change must cost the same at every project size. Selecting from the scope read every definition of the named files once for each stage, and walked every root once for each level of the deepest chain of references. On 10,400 functions a command with no change took 438 ms, and an edit to one body took 729 ms, of which 17 ms was the edit's own work. A stale item that no settled root reaches stays stale, and each command asks about it again. |
 | The search for a proof that holds no value reads an index of those proofs alone. | A proof that is blocked while no package it depends on has a diagnostic is a compiler bug. Every command that proves searches for one, so that `check` never reports a package proven with a proof missing. The search joined every definition of the command's scope with its proof: 8 ms of a `check` with no change on 10,400 functions, and the one statement of that command that grew with the project. The index `proof_without_value` holds the proofs whose state is failed or blocked, so the search reads one row for each such proof. A definition whose Prove unit has not run is stale, and the drain before the search ends only when no stale unit of the scope is left. |
 | The checks of duplicate test names, instantiation cycles, unused definitions, and unused dependencies have one unit for each test, generic function, unexported definition, and dependency. | Each check was one unit for its package. That unit read every declaration and every `references` edge of the package, and it ran again whenever a definition was added, a body began or stopped using a definition, or a body began or stopped checking. Adding one function to a package of 10,400 took 495 ms, of which 468 ms was these four units. A test now reads the tests of its name. A dependency asks whether one `references` edge names it. The other two checks take their stale units as one set. |
 | A stage whose units share a search takes its stale units as one set. | Check unexported and Check an instantiation each answer a question about a graph. One unit for each definition, searching alone, repeats the search of the others: forty generic functions whose calls grow in a chain ran 48,296 steps where ten ran 3,345. One pass over the stale units reads the edges of each definition once, so a bulk edit and a build from nothing cost in proportion to their size, as one edit does. |
 | A Check unexported unit records no read of its search, and a definition that is used holds no row of the stage. An edge that changes into a definition, a change to its visibility or container, and a user whose answer changes make the unit stale. | Whether a definition is used depends on every definition that reaches it. Recorded as reads, n unused functions that call each other store n² edges, and each is searched again when any of them changes. With the two events, a pass over the stale units visits each definition once: a search that finds no user that need not be used classifies every definition it visited, and a later search stops at a definition already classified. |
 | A diagnostic of an unused definition or dependency is hidden, and not removed, while a body of its package holds no value. | A unit that read whether its package has such a body ran again, for every unused definition of the package, each time any body began or stopped checking. The row of the diagnostic is a function of the edges alone, and the listing asks the index `body_without_value`, which holds a row only for a body that is failed or blocked. |
 | A Key tests unit records no read. Its dependencies are its item's `lowered` code and the keys of the items that the code references, and the `references` edges of Lower already hold those. | A write of an item's `lowered` code marks the item's key stale, and a key that changes marks the keys of the items whose code references the item. The stage recorded the same reads as edges, once for each member of a reference cycle, so a cycle of n items stored n² edges. In a 15,000-line program whose parser is one such cycle, they were 72,202 of 582,376 edges. |
-| A search for a claim that reaches an item goes depth first, and reads one referrer of an item at a time. | A breadth-first query read every referrer of an item before any referrer of those. For a function that every module calls, that is every caller, although a test claims the first caller's own caller. Removing a module of 26 functions took 4.6 s on 10,400 functions, of which 4.1 s was 83 such searches. Depth first, a search reaches a claimed item after as many steps as the chain to it is long. A search that finds no claim still visits every item that reaches its target. |
+| A search for a root that reaches an item goes depth first, and reads one referrer of an item at a time. | A breadth-first query read every referrer of an item before any referrer of those. For a function that every module calls, that is every caller, although the first caller's own caller is a root. Removing a module of 26 functions took 4.6 s on 10,400 functions, of which 4.1 s was 83 such searches. Depth first, a search reaches a root after as many steps as the chain to it is long. A search that finds no root still visits every item that reaches its target. |
 | A unit that reads an interface with its signature check records one edge, to the definition's checked interface. A write of the interface's value, and a write of the signature check, each mark the readers of that target. | The read recorded one edge to the interface and another to the signature check. These pairs were a third of the edges of a 15,000-line program: with one target its 853,105 edges are 582,376. The stages up to Check signatures read an interface before it is checked, and keep the interface as their target, so a signature check that fails does not mark them. |
 | A lookup's statement has an index on every column that it filters by. | A statement that filters a package's definitions by member name with an index on the package alone reads the whole package each time it runs. The count of statements does not show it. |
 | A fact holds everything that its reader needs to use it. `type_facts` holds the type's generic parameters beside the conditions written over them. | A reader that must fetch a second fact to interpret the first makes every question cost both reads. Deciding whether a type is plain read the type's facts and then its whole interface for the parameters' names, at every operand of every body. |
