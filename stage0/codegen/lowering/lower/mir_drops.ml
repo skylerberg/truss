@@ -229,32 +229,10 @@ let return_from_frame (state : Lowering.state) =
       Emit_c.Ir_builder.finish state.builder (Lowering.return_result state));
   Emit_c.Ir_builder.start state.builder (Emit_c.Ir_builder.allocate_block state.builder)
 
-let list_default_temporaries (default : Lowering.mir_frame) =
-  List.filter
-    (fun temporary ->
-      (not (List.mem temporary default.returned))
-      && Moves.owns default.moves temporary
-      && Moves.find_status default.moves default.move_state { local = temporary; projections = [] }
-         <> None)
-    (List.init (Array.length default.body.locals) Fun.id)
-
-let end_default_temporaries (state : Lowering.state) local =
-  Option.iter
-    (fun ({ default_frame; is_applied } : Lowering.applied_default) ->
-      Emit_c.Ir_builder.emit_when state.builder (Holds (Copy is_applied)) (fun () ->
-          let caller = state.frame in
-          state.frame <- default_frame;
-          List.iter (drop_local state)
-            (list_default_temporaries (Mir_places.require_mir_frame state));
-          state.frame <- caller;
-          Emit_c.Ir_builder.emit state.builder (Assign (is_applied, Use (Constant (Bool false))))))
-    (Hashtbl.find_opt (Mir_places.require_mir_frame state).applied_defaults local)
-
 let end_local state local =
   let frame = Mir_places.require_mir_frame state in
   if List.mem local frame.called_parts && not (Hashtbl.mem frame.placed_parts local) then
     Mir_lends.emit_mark state
       (if frame.after_lend.(frame.block) then Lend_transfer else Lend_release)
       (Mir_lends.obtain_lent_call state local)
-  else drop_local state local;
-  end_default_temporaries state local
+  else drop_local state local

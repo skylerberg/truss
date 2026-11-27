@@ -31,5 +31,5 @@ type t = {
 type outcome = {
   obligations : t list;
   holes : (Resolve.Names.key * location) list;
-  evaluation : evaluation option;
+  evaluated_constants : Path.t list;
 }

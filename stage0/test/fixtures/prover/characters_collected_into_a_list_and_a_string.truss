@@ -1,0 +1,13 @@
+fn letters(text: String) -> List[Character]
+  ensures result.length() <= text.length()
+  cost amortized time O(text.length())
+{
+  List.collect(text.characters())
+}
+
+fn copied(text: String) -> String
+  ensures result.length() <= 4 * text.length()
+  cost amortized time O(text.length())
+{
+  String.collect(text.characters())
+}

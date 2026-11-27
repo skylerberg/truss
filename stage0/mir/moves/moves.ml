@@ -63,13 +63,13 @@ let list_rvalue_uses ~is_moving ~origin (rvalue : Mir.rvalue) =
   match rvalue with
   | Operand operand -> list_by_value_uses [ operand ]
   | Operation { operands; _ } | Array operands -> list_by_value_uses operands
-  | Construct { fields; _ } -> list_by_value_uses (List.filter_map snd fields)
+  | Construct { fields; _ } -> list_by_value_uses (List.map snd fields)
   | Compare { left; right; _ } -> list_read_uses [ left; right ]
   | Not operand | Convert { value = operand; _ } | Copy operand -> list_read_uses [ operand ]
   | Is_variant { place; _ } -> [ read ~origin place ]
   | Lambda { captures; _ } ->
       List.map (fun (capture : Mir.capture) -> read ~origin capture.place) captures
-  | Function_value _ | Value_parameter _ | Parameter_default _ | Specification _ -> []
+  | Function_value _ | Value_parameter _ | Specification _ -> []
 
 let list_call_uses ~is_moving (call : Mir.call) =
   (match call.callee.target with
@@ -108,9 +108,7 @@ let rec list_yielded_uses ~is_moving ~owns : Mir.yielded -> use list = function
       [ { place; origin; moves = is_moving type_; operand = Some operand; passed = None } ]
   | Part operand -> list_operand_uses ~is_moving ~by_value:true operand
   | Built { fields; _ } ->
-      List.concat_map
-        (fun (_, field) -> Option.fold ~none:[] ~some:(list_yielded_uses ~is_moving ~owns) field)
-        fields
+      List.concat_map (fun (_, field) -> list_yielded_uses ~is_moving ~owns field) fields
 
 let list_terminator_uses ~is_moving ~owns (basic : Mir.Graph.basic_block) =
   let origin = basic.terminator_origin in

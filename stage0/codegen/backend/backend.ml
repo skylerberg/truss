@@ -1,4 +1,5 @@
 type profile = Profile.t = Development | Release
+type lowered_lookups = Lowering.lowered_lookups
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Backend" format
 
@@ -10,7 +11,7 @@ type 'value ran = 'value Lowering.ran =
   | Stopped of Catalog.Codegen.stop
 
 type t = {
-  lookups : Lowering.lowered_lookups;
+  lookups : lowered_lookups;
   positions : Lowering.Positions.t;
   c_compiler : C_compiler.t;
   profile : profile;
@@ -21,7 +22,7 @@ type t = {
   attempted : unit Item_table.t;
 }
 
-let make_positions (lookups : Lowering.lowered_lookups) =
+let make_positions (lookups : lowered_lookups) =
   Lowering.Positions.create lookups.interface.names ~source:lookups.source
     ~read_source:lookups.read_source
 
@@ -32,7 +33,7 @@ exception Cannot_build of Catalog.Codegen.failure
 let raise_cannot_build failure = raise (Cannot_build failure)
 
 let make_evaluated : Lowered.Item.t -> Catalog.Codegen.evaluated = function
-  | Constant path -> Constant path
+  | Constant { path; _ } -> Constant path
   | Assertion { definition; condition } -> Assertion { definition; condition }
   | item -> raise_bug "%s is not evaluated" (Lowered.Item.to_string item)
 
@@ -41,7 +42,7 @@ let stop_evaluation evaluated stop =
 
 type location = Lowering.Positions.location = { file : Path.file; line : int; column : int }
 
-let locate_todo_type (lookups : Lowering.lowered_lookups) positions (path : Path.t) =
+let locate_todo_type (lookups : lowered_lookups) positions (path : Path.t) =
   let names = lookups.interface.names in
   match
     Option.map
@@ -78,7 +79,7 @@ let raise_unbuildable backend : Lowering.unbuildable -> 'never = function
   | Unsupported unsupported -> raise_unsupported backend unsupported
   | Todo_types todo_types -> raise_cannot_build (Todo_types (locate_todo_types backend todo_types))
 
-let list_todo_types (lookups : Lowering.lowered_lookups) root =
+let list_todo_types (lookups : lowered_lookups) root =
   match lookups.read_test_key root with
   | Error (Todo_types todo_types) -> todo_types
   | Ok _ | Error (Unsupported _) -> []
@@ -243,7 +244,7 @@ and run_evaluators backend evaluators =
   let rec note_dependencies dependents evaluator =
     if List.exists (Lowered.Item.equal evaluator) dependents then
       match evaluator with
-      | Evaluator (Constant path) ->
+      | Evaluator (Constant { path; _ }) ->
           record_run backend evaluator (Unfinished (Depends_on_itself path))
       | _ ->
           raise_bug "%s is evaluated by code that reads its result"
@@ -346,7 +347,7 @@ let make_incomplete_record backend failure =
     cached = false;
   }
 
-let rec read_executed_fragment (lookups : Lowering.lowered_lookups) item =
+let rec read_executed_fragment (lookups : lowered_lookups) item =
   match lookups.find_lowered item with
   | Some (Ok (Compiled fragment | Folded (_, fragment))) -> Some fragment
   | Some (Ok (Evaluate (evaluator, _))) -> read_executed_fragment lookups evaluator
@@ -461,15 +462,13 @@ let list_reached_definitions lookups root =
     (List.filter_map
        (fun (_, way) ->
          match List.rev way with
-         | ( Lowered.Item.Code { path; _ }
-           | Constant path
-           | Generated (Program_main path | Test_main path) )
+         | ((Lowered.Item.Code _ | Constant _ | Generated (Program_main _ | Test_main _)) as item)
            :: _ ->
-             Some path
+             Lowered.Item.find_definition item
          | _ -> None)
        (trace_root lookups root))
 
-let list_unshippable (lookups : Lowering.lowered_lookups) ~main =
+let list_unshippable (lookups : lowered_lookups) ~main =
   let reached = trace_root lookups main in
   let positions = make_positions lookups in
   begin
@@ -477,8 +476,11 @@ let list_unshippable (lookups : Lowering.lowered_lookups) ~main =
       List.fold_left
         (fun acc (item : Lowered.Item.t) ->
           match item with
-          | Code { path; _ } | Constant path -> (
-              match acc with last :: _ when Path.equal last path -> acc | _ -> path :: acc)
+          | (Code _ | Constant _) as code -> (
+              match (Lowered.Item.find_definition code, acc) with
+              | Some path, last :: _ when Path.equal last path -> acc
+              | Some path, _ -> path :: acc
+              | None, _ -> acc)
           | _ -> acc)
         [ main ] keys
       |> List.rev
@@ -582,7 +584,7 @@ let create ?(show_file = Path.show_file) ?(evaluation_cpu_time_limit_ms = 10_000
 
 module For_testing = struct
   let is_folded backend path =
-    match read_lowered backend (Lowered.Item.Constant path) with
+    match read_lowered backend (Lowered.Item.make_constant path) with
     | Folded _ -> true
     | Evaluate _ -> false
     | Compiled _ -> raise_bug "%s is not a constant" (Path.show path)

@@ -1,0 +1,18 @@
+fn last(count: UInt64) -> UInt64
+  requires count > 0
+  cost time O(1)
+{
+  (0..count).element(count - 1)
+}
+
+fn reversed_count(count: UInt64) -> UInt64
+  cost time O(1)
+{
+  (0..count).reversed().count()
+}
+
+fn stepped_count(count: UInt64) -> UInt64
+  cost time O(1)
+{
+  (0..count).step_by(2).count()
+}

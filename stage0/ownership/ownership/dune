@@ -4,9 +4,7 @@
  (libraries
   language
   structural_key
-  source
   path
-  well_known
   types
   syntax
   syntax_walk

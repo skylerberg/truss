@@ -5,6 +5,7 @@
   structural_key
   path
   ground
+  types
   memory_layout
   libc
   zarith))

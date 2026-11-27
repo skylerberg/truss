@@ -75,8 +75,10 @@ let rec compute_place_type (frame : State.frame) run (place : Mir.place) =
   | [] -> (
       match place.Mir.root with
       | Local local -> Encoding.substitute_type frame run.infos.(local).type_
-      | Constant path ->
-          Interface.Definition.read_constant_type frame.environment.lookups.interface path
+      | Constant { path; substitution } ->
+          Encoding.substitute_type frame
+            (Types.substitute substitution
+               (Interface.Definition.read_constant_type frame.environment.lookups.interface path))
       | Literal { type_; _ } -> Encoding.substitute_type frame type_)
   | _ -> (
       let base =
@@ -137,7 +139,7 @@ let describe_local : Mir.local_kind -> string = function
 
 let read_root (frame : State.frame) run (root : Mir.root) =
   match root with
-  | Constant path -> Values.evaluate_constant frame path
+  | Constant { path; substitution } -> Values.evaluate_constant frame path substitution
   | Literal { value; type_ } ->
       Values.make_literal_value frame (Encoding.substitute_type frame type_) value
   | Local local -> (
@@ -505,11 +507,8 @@ let rec read_yielded_value (frame : State.frame) run ~origin (part : Mir.yielded
       let frame, values =
         List.fold_left
           (fun (frame, values) (name, field) ->
-            match field with
-            | Some field ->
-                let frame, term = read_yielded_value frame run ~origin field in
-                (frame, values @ [ (name, Some term) ])
-            | None -> (frame, values @ [ (name, None) ]))
+            let frame, term = read_yielded_value frame run ~origin field in
+            (frame, values @ [ (name, term) ]))
           (frame, []) fields
       in
       Values.apply_construct frame { origin; type_ } variant values
@@ -523,8 +522,8 @@ let rec write_back_part (environment : State.environment) run ty (part : Mir.yie
           let shaped = Option.value (List.assoc_opt variant shape) ~default:[] in
           List.fold_left
             (fun frame (name, field) ->
-              match (field, List.assoc_opt name shaped) with
-              | Some field, Some field_type when lends_places field ->
+              match List.assoc_opt name shaped with
+              | Some field_type when lends_places field ->
                   let field_type = Encoding.substitute_type frame field_type in
                   let selected = Values.project_field frame ty variant name field_type after in
                   let value =
@@ -606,23 +605,6 @@ let rec read_rvalue (frame : State.frame) run (value : Mir.rvalue) ~(site : Invo
         ty;
       (frame, translate_operand value)
   | Value_parameter parameter -> (frame, Models.make_value_term frame (Value_parameter parameter))
-  | Parameter_default { definition; position; substitution } ->
-      let default =
-        Mir.read_parameter_default frame.environment.lookups.mir ~definition ~position
-      in
-      let declared, term =
-        Lambdas.run_code
-          {
-            frame with
-            source = Contracts.read_source_at_key frame.environment.lookups default.source;
-            locals = Locals.empty;
-            types = Locals.empty;
-            makes_obligations = false;
-            substitution = Types.substitute_substitution frame.substitution substitution;
-          }
-          default.form ~type_:ty
-      in
-      ({ frame with spent = declared.spent }, term)
   | Convert { conversion = To_integer | To_view; value; _ } -> (frame, translate_operand value)
   | Convert { conversion = From_integer; value; _ } ->
       (frame, Operations.convert_from_integer frame site (translate_operand value))
@@ -642,7 +624,7 @@ let rec read_rvalue (frame : State.frame) run (value : Mir.rvalue) ~(site : Invo
             Encoding.arrive frame "result" ty) )
   | Construct { variant; fields; type_ } ->
       Values.apply_construct frame { site with type_ } variant
-        (List.map (fun (name, field) -> (name, Option.map translate_operand field)) fields)
+        (List.map (fun (name, field) -> (name, translate_operand field)) fields)
   | Array elements -> Values.apply_list_literal frame site (List.map translate_operand elements)
   | Lambda { body; _ } ->
       Lambdas.translate_lambda frame ~site

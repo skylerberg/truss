@@ -1,0 +1,3 @@
+fn gather[Item](items: List[Item] = [], extra: Option[Item] = None) -> UInt64 {
+  items.length()
+}

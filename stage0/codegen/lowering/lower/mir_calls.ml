@@ -120,23 +120,3 @@ let lower_intrinsic state ?reported (operation : Intrinsic.operation) ~type_argu
       Intrinsics.lower ~value_arguments ?reported state.context.env state.builder
         state.context.types operation ~type_arguments arguments ~destination ~site
         ~trace:(Lowering.find_panic_trace state)
-
-let read_field_default (state : Lowering.state) (ty : Ground.ty) ~variant ~field :
-    Mir.Graph.t Mir.field_default Mir.sourced =
-  let path =
-    match ty with
-    | Named { path; _ } -> path
-    | _ -> Definitions.raise_bug "defaults of %s" (Ground.to_string ty)
-  in
-  match Mir.read_default_graphs state.context.lookups.mir path with
-  | Some { source; form = Field_defaults defaults } -> (
-      match
-        List.find_opt
-          (fun (default : Mir.Graph.t Mir.field_default) ->
-            default.variant = variant && default.field = field)
-          defaults
-      with
-      | Some default -> { source; form = default }
-      | None -> Definitions.raise_bug "%s has no default for %s" (Path.show path) field)
-  | Some { form = Parameter_defaults _; _ } | None ->
-      Definitions.raise_bug "%s is not a type" (Path.show path)

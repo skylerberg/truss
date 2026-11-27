@@ -150,7 +150,7 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
                   let actual = Expressions.check_expression state env ~expected:info.type_ value in
                   Conversions.coerce state env ~argument:info.mode value ~actual
                     ~expected:info.type_);
-              Constant.check state Default value
+              Constant.check_value state value
           | Some { has_default = true; _ }, None ->
               State.raise_bug "`%s` has no default, and its signature has one" name.text
           | (Some _ | None), _ -> ())
@@ -267,7 +267,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       Solver.run_in_statement state constant_expression (Written value.id)
                         (fun () ->
                           Expressions.check state constant_expression value elaborated.field_type);
-                      Constant.check state Default value
+                      Constant.check_value state value
                   | None -> ())
               | _ -> ())
             fields
@@ -314,8 +314,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                   check_body state { env with output = Some (Returns Types.bool) } law.body
             | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
           members
-    | Constant { type_; value; _ }, Constant_interface constant ->
-        Constant.check_type state type_ constant.constant_type;
+    | Constant { value; _ }, Constant_interface constant ->
         if not (is_broken Body) then begin
           let env =
             {
@@ -326,7 +325,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
           in
           Solver.run_in_statement state env (Written value.id) (fun () ->
               Expressions.check state env value constant.constant_type);
-          Constant.check state Value value
+          Constant.check_value state value
         end
     | Test { body = written; _ }, _ ->
         if not (is_broken Body) then

@@ -28,6 +28,10 @@ let rec mangle_path : Path.t -> string = function
   | Method { owner; name; receiver = method_receiver } ->
       mangle_path owner ^ "_" ^ name ^ mangle_receiver method_receiver
   | Member_constant { owner; name } -> mangle_path owner ^ render_marker "Member" ^ name
+  | Default { owner; variant; name } ->
+      mangle_path owner
+      ^ (match variant with Some variant -> render_marker "Variant" ^ variant | None -> "")
+      ^ render_marker "Default" ^ name
   | Impl { module_; trait; for_type } ->
       mangle_module_path module_ ^ render_marker "Impl" ^ mangle_reference trait
       ^ render_marker "For" ^ mangle_path for_type ^ render_marker "End"
@@ -114,7 +118,9 @@ let rec mangle : Lowered.Item.t -> string = function
       ^ mangle_arguments instantiation.type_arguments
       ^ mangle_capability_arguments instantiation.capability_arguments
       ^ if assumes_condition then render_marker "Assuming" else ""
-  | Constant path -> render_marker "Constant" ^ mangle_path path
+  | Constant { path; arguments } ->
+      render_marker "Constant" ^ mangle_path path
+      ^ mangle_arguments (List.map (fun (_, argument) -> argument) arguments)
   | Drop ty -> render_marker "Drop" ^ mangle_ty ty
   | Copy ty -> render_marker "Copy" ^ mangle_ty ty
   | Debug ty -> render_marker "Debug" ^ mangle_ty ty

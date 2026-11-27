@@ -185,7 +185,7 @@ let make_lookups store ~(note : Kind.lookup -> int -> string -> unit) ~is_packag
             List.find_opt
               (fun (key : Resolve.Names.key) -> Path.equal key.path path)
               (list_members owner name)
-        | Derived _ | Unresolved _ -> None);
+        | Default _ | Derived _ | Unresolved _ -> None);
     read_declaration =
       (fun key ->
         look_up Declaration key (fun schema id ->
@@ -374,7 +374,7 @@ let encode_definition ~text (declared : Resolve.Namespace.declared_definition) :
     | Method { owner; name; _ } | Member_constant { owner; name } ->
         (Some (Ids.of_path owner), Some name)
     | Test { name; _ } -> (None, Some name)
-    | Top _ | Impl _ | Derived _ | Law_proof _ | Unresolved _ -> (None, None)
+    | Top _ | Default _ | Impl _ | Derived _ | Law_proof _ | Unresolved _ -> (None, None)
   in
   let item = declared.item in
   ( {
@@ -411,7 +411,7 @@ let encode_supplied ~origin ~(kind : Resolve.Names.kind) (key : Resolve.Names.ke
     match key.path with
     | Method { owner; name; _ } | Member_constant { owner; name } ->
         (Some (Ids.of_path owner), Some name)
-    | Top _ | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> (None, None)
+    | Top _ | Default _ | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> (None, None)
   in
   {
     id = Ids.of_key key;

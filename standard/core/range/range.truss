@@ -21,6 +21,8 @@ impl Iterable for Range[Value: core.Countable] {
       Some(steps) => if self.inclusive { steps.saturating_add(1) } else { steps }
       None => 0
     })
+    cost time O(1)
+    cost allocations == 0
   {
     match self.start.steps_to(self.stop) {
       Some(steps) => if self.inclusive { steps.saturating_add(1) } else { steps }
@@ -31,6 +33,8 @@ impl Iterable for Range[Value: core.Countable] {
   fn element(self, position: UInt64) lends Value
     requires position < self.count()
     ensures self.contains(result)
+    cost time O(1)
+    cost allocations == 0
   {
     match self.start.steps_to(self.stop) {
       Some(steps) => {
@@ -77,6 +81,8 @@ impl Iterable for Reversed[Value: core.Countable] {
 
   fn count(self) -> UInt64
     ensures result == self.range.count()
+    cost time O(1)
+    cost allocations == 0
   {
     self.range.count()
   }
@@ -84,6 +90,8 @@ impl Iterable for Reversed[Value: core.Countable] {
   fn element(self, position: UInt64) lends Value
     requires position < self.count()
     ensures self.range.contains(result)
+    cost time O(1)
+    cost allocations == 0
   {
     if self.range.inclusive && position == 0 {
       self.range.stop
@@ -116,6 +124,8 @@ impl Iterable for Stepped[Value: core.Countable] {
   fn count(self) -> UInt64
     ensures self.range.count() == 0 ==> result == 0
     ensures self.range.count() > 0 ==> result == (self.range.count() - 1) / self.step + 1
+    cost time O(1)
+    cost allocations == 0
   {
     let whole = self.range.count()
     if whole == 0 { 0 } else { (whole - 1) / self.step + 1 }
@@ -124,6 +134,8 @@ impl Iterable for Stepped[Value: core.Countable] {
   fn element(self, position: UInt64) lends Value
     requires position < self.count()
     ensures self.range.contains(result)
+    cost time O(1)
+    cost allocations == 0
   {
     self.range.element(position * self.step)
   }

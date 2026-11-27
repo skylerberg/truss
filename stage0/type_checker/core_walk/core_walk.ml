@@ -64,17 +64,16 @@ let walk_loop_clause visit (written : Core.loop_clause Core.conditional) =
 
 let walk_expression_children visit (node : Core.expression) =
   match node.kind with
-  | Integer _ | Float _ | Boolean _ | Literal _ | Function_value _ | Value_parameter _
-  | Parameter_default _ | Break | Continue | Todo | Unreachable | Result | Current_target | Visited
-  | Final_result | Method_cost _ ->
+  | Integer _ | Float _ | Boolean _ | Literal _ | Function_value _ | Value_parameter _ | Break
+  | Continue | Todo | Unreachable | Result | Current_target | Visited | Final_result | Method_cost _
+    ->
       ()
   | Use core_place -> walk_place visit core_place
   | Copy value -> walk_operand visit value
   | Lambda { parameters; body; _ } ->
       List.iter visit.pattern parameters;
       walk_block visit body
-  | Construct { fields; _ } ->
-      List.iter (fun (_, value) -> Option.iter (walk_operand visit) value) fields
+  | Construct { fields; _ } -> List.iter (fun (_, value) -> walk_operand visit value) fields
   | Collection_literal { elements; _ } -> List.iter visit.expression elements
   | Map_literal { entries } ->
       List.iter

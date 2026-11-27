@@ -223,7 +223,21 @@ type Pending =
     _ => true
   }
 
-type ItemScan = Ready(item: Item) | indirect Awaiting(pending: Pending) | indirect Opened(string: StringFrame, request: InterpolationRequest)
+type ItemScan = Ready(item: Item) | indirect Awaiting(pending: Pending) | indirect Opened(string: OpenString, request: InterpolationRequest)
+
+fn ItemScan.fits(self, text: String, position: UInt64) -> Bool
+  ensures result == match self {
+    Opened(string, request) => string.builder.text_start <= position
+      && StringProgress.Interpolates(request).fits(text, position, text_start: string.builder.text_start)
+    _ => true
+  }
+{
+  match self {
+    Opened(string, request) => string.builder.text_start <= position
+      && StringProgress.Interpolates(request).fits(text, position, text_start: string.builder.text_start)
+    _ => true
+  }
+}
 
 type Resolution = Resolved(item: Item) | Rescan(pending: Pending)
 
@@ -294,6 +308,7 @@ fn scan_item(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> ItemScan
   ensures result is Ready(End) || (inline && result is Ready(LineEnd(..)))
     || (old(scanner.position) < scanner.position && old(scanner.position) < scanner.length)
   ensures old(scanner.position) <= scanner.position
+  ensures result.fits(scanner.source.text, position: scanner.position)
 {
   while true
     invariant old(scanner.position) <= scanner.position
@@ -333,6 +348,7 @@ fn scan_token(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt64
     scanner.tables
   requires start == scanner.position && start < scanner.length && current == scanner.source.text.byte(start)
   ensures old(scanner.position) < scanner.position
+  ensures !(result is Some(scan) && !scan.fits(scanner.source.text, position: scanner.position))
 {
   if is_ascii_letter(current) || current == 95 {
     return Some(lex_name(mut scanner, inline, nesting))
@@ -356,6 +372,7 @@ fn scan_non_ascii(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UI
     scanner.unterminated_at_end, scanner.interned_names, scanner.semicolons, scanner.tables
   requires start == scanner.position && start < scanner.length
   ensures old(scanner.position) < scanner.position
+  ensures !(result is Some(scan) && !scan.fits(scanner.source.text, position: scanner.position))
 {
   let character = scanner.character_at(start)
   if is_forbidden(character.code()) {
@@ -385,6 +402,7 @@ fn scan_symbol(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt6
   requires start == scanner.position && start < scanner.length && current == scanner.source.text.byte(start)
   requires is_ascii(current) && 32 <= current && current != 127
   ensures old(scanner.position) < scanner.position
+  ensures !(result is Some(scan) && !scan.fits(scanner.source.text, position: scanner.position))
 {
   if scan_comment(mut scanner, inline) {
     return None
@@ -423,6 +441,17 @@ fn scan_symbol(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt6
     )
     return None
   }
+  scan_punctuation(mut scanner, inline, start, current)
+}
+
+fn scan_punctuation(scanner: mut Scanner, inline: Bool, start: UInt64, current: UInt8) -> Option[ItemScan]
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.semicolons, scanner.tables
+  requires start == scanner.position && start < scanner.length && current == scanner.source.text.byte(start)
+  requires is_ascii(current)
+  ensures old(scanner.position) < scanner.position
+  ensures !(result is Some(scan) && !(scan is Ready(_)))
+{
   if current == 46 && scanner.is_digit_at(start + 1) && !follows_operand(scanner) {
     if lex_leading_dot(mut scanner) is Some(value) {
       let kind = store_number(mut scanner, own value)
@@ -430,12 +459,12 @@ fn scan_symbol(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt6
     }
   }
   match lex_punctuation(mut scanner, current) {
-    Some(kind) => return Some(ItemScan.Ready(lexed(mut scanner, inline, start, kind)))
+    Some(kind) => Some(ItemScan.Ready(lexed(mut scanner, inline, start, kind)))
     None => {
       reject(mut scanner, length: 1, message: "`${scanner.text(start, stop: start + 1)}` is not used in Truss.")
+      None
     }
   }
-  None
 }
 
 fn lex_number(scanner: mut Scanner, inline: Bool) -> ItemScan
@@ -443,6 +472,7 @@ fn lex_number(scanner: mut Scanner, inline: Bool) -> ItemScan
     scanner.previous, scanner.semicolons, scanner.tables
   requires scanner.position < scanner.length && is_digit(scanner.source.text.byte(scanner.position))
   ensures old(scanner.position) < scanner.position
+  ensures result.fits(scanner.source.text, position: scanner.position)
 {
   let start = scanner.position
   let stop = scan_number_end(scanner.source.text, start)
@@ -553,6 +583,7 @@ fn lex_ellipsis(scanner: mut Scanner, inline: Bool, start: UInt64) -> ItemScan
   modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank, scanner.previous,
     scanner.semicolons
   requires start < scanner.position
+  ensures result.fits(scanner.source.text, position: scanner.position)
 {
   let was_after_operand = follows_operand(scanner)
   let raw = make_scanned(mut scanner, inline, start, kind: token.Kind.Punctuation(token.Punctuation.DotDotEqual))
@@ -672,6 +703,7 @@ fn lex_name(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> ItemScan
     scanner.unterminated_at_end, scanner.interned_names, scanner.semicolons, scanner.tables
   requires scanner.position < scanner.length
   ensures old(scanner.position) < scanner.position
+  ensures result.fits(scanner.source.text, position: scanner.position)
 {
   let start = scanner.position
   let first = scanner.lookup(start)

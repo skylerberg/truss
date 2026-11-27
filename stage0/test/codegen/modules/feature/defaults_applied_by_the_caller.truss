@@ -82,6 +82,16 @@ fn call(count: fn() -> UInt64) -> UInt64 {
 
 type Shelf(books: List[String])
 
+fn letters_of(text: String) -> UInt64 {
+  text.length()
+}
+
+fn count_of(value: UInt64 = letters_of("abc")) -> UInt64 {
+  value
+}
+
+type Reply(code: UInt64 = letters_of("four"))
+
 fn Shelf.book(self, position: UInt64 = 0) lends String {
   self.books[position]
 }
@@ -97,7 +107,7 @@ test "a default of a trait's method is applied on a known type and through a bou
   assert scale_through_a_bound(Box(mass: 5)) == 10
 }
 
-test "a default that owns a list is dropped by the caller that applies it" {
+test "a default that owns a list is a constant that the call views" {
   let box = Box(mass: 1)
   assert box.labels() == 10
 }
@@ -120,7 +130,7 @@ test "a view parameter's default views data that outlives the call" {
   assert greet("you") == 5
 }
 
-test "a view parameter's default views strings that last for the call" {
+test "a view parameter's default views a constant's strings" {
   assert count_letters() == 5
   var total: UInt64 = 0
   for _ in 0..3 {
@@ -130,7 +140,7 @@ test "a view parameter's default views strings that last for the call" {
   assert mark_first() == 6
 }
 
-test "a default's temporaries end on each path that leaves the statement, and only where it was applied" {
+test "a default is read on each path that leaves the statement" {
   assert doubled_count() == Some(10)
   assert count_if(true) == 5
   assert count_if(false) == 0
@@ -138,7 +148,7 @@ test "a default's temporaries end on each path that leaves the statement, and on
   assert call(fn() { count_letters() }) == 5
 }
 
-test "an own parameter's default is moved into the callee" {
+test "an own parameter's default is copied into the callee" {
   let kept = keep()
   assert kept.length() == 2
 }
@@ -153,4 +163,10 @@ test "a lending method called with its argument omitted lends the default's part
   assert shelf.book(1).length() == 6
   mut shelf.rename().push("!")
   assert shelf.books[0] == "first!"
+}
+
+test "a default that calls a function gives the function's result" {
+  assert count_of() == 3
+  assert count_of(7) == 7
+  assert Reply().code == 4
 }

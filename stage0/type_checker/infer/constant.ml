@@ -1,8 +1,6 @@
 let read_final_type (state : State.state) (value : Syntax.expression) =
   Option.map (State.finalize_type state) state.tables.types.(value.id)
 
-type site = Value | Default | Evaluated_condition
-
 let rec list_bound_locals (pattern : Syntax.pattern) : Syntax.id list =
   let list_field (field : Syntax.pattern_field) =
     match field.kind with
@@ -16,16 +14,9 @@ let rec list_bound_locals (pattern : Syntax.pattern) : Syntax.id list =
   | Tuple patterns | Alternatives patterns -> List.concat_map list_bound_locals patterns
   | Wildcard | Qualified_constant _ | Literal _ | Pattern_range _ | Pattern_error -> []
 
-let rec find_offending_expression (state : State.state) ~may_call ~bound (value : Syntax.expression)
-    : Syntax.expression option =
-  let find_first = List.find_map (find_offending_expression state ~may_call ~bound) in
-  let is_built_in (operand : Syntax.expression) =
-    match read_final_type state operand with
-    | Some type_ ->
-        Types.is_integer_type type_ || Types.is_float_type type_ || Types.is_builtin Bool type_
-        || Types.is_error type_
-    | None -> true
-  in
+let rec find_offending_expression (state : State.state) ~bound (value : Syntax.expression) :
+    Syntax.expression option =
+  let find_first = List.find_map (find_offending_expression state ~bound) in
   let is_rejected (expression : Syntax.expression) =
     match read_final_type state expression with Some type_ -> Types.is_error type_ | None -> false
   in
@@ -39,16 +30,10 @@ let rec find_offending_expression (state : State.state) ~may_call ~bound (value 
   match value.kind with
   | _ when is_rejected value -> None
   | Integer _ | Float _ | True | False | Todo | Expression_error -> None
-  | String { rest = []; _ } -> None
-  | String { rest; _ } when may_call -> find_first (List.map fst rest)
-  | String { rest = (interpolated, _) :: _; _ } -> Some interpolated
-  | Parenthesized inner -> find_first [ inner ]
-  | Prefix (_, inner) -> if may_call || is_built_in inner then find_first [ inner ] else Some value
-  | Binary { left; right; _ } ->
-      if may_call || (is_built_in left && is_built_in right) then find_first [ left; right ]
-      else Some value
-  | Bracket (base, items) when may_call && state.resolved.brackets.(value.id) <> Some Type_arguments
-    ->
+  | String { rest; _ } -> find_first (List.map fst rest)
+  | Parenthesized inner | Prefix (_, inner) -> find_first [ inner ]
+  | Binary { left; right; _ } -> find_first [ left; right ]
+  | Bracket (base, items) when state.resolved.brackets.(value.id) <> Some Type_arguments ->
       find_first
         (base
         :: List.concat_map
@@ -58,13 +43,12 @@ let rec find_offending_expression (state : State.state) ~may_call ~bound (value 
                | Item index -> [ index ]
                | Item_constraint _ | Item_type _ -> [])
              items)
-  | Range { start; stop; _ } when may_call -> find_first (Option.to_list start @ Option.to_list stop)
-  | Quantified { binder = Binder_in (pattern, collection); body; _ } when may_call -> (
+  | Range { start; stop; _ } -> find_first (Option.to_list start @ Option.to_list stop)
+  | Quantified { binder = Binder_in (pattern, collection); body; _ } -> (
       match find_first [ collection ] with
       | Some _ as offending -> offending
-      | None ->
-          find_offending_expression state ~may_call ~bound:(list_bound_locals pattern @ bound) body)
-  | Quantified { binder = Binder_type _; _ } when may_call -> None
+      | None -> find_offending_expression state ~bound:(list_bound_locals pattern @ bound) body)
+  | Quantified { binder = Binder_type _; _ } -> None
   | Name _ | Member _ | Bracket _ -> find_in_resolved ()
   | Call (_, arguments) -> (
       match Tables.find_call state.tables value.id with
@@ -72,7 +56,7 @@ let rec find_offending_expression (state : State.state) ~may_call ~bound (value 
           find_first (List.map (fun (argument : Syntax.argument) -> argument.value) arguments)
       | Some
           { callee = Function _ | Trait_method _ | Capability_method _ | Intrinsic _; arguments; _ }
-        when may_call ->
+        ->
           find_first (List.map (fun (argument : Tables.argument) -> argument.expression) arguments)
       | _ -> Some value)
   | List items -> find_first items
@@ -112,49 +96,42 @@ let rec find_use_of_a_type_parameter (state : State.state) (value : Syntax.expre
   match !found with Some _ as part -> part | None -> if uses_one then Some value else None
 
 let rec check_arithmetic (state : State.state) (value : Syntax.expression) =
-  let evaluate part =
-    Interface.Constants.evaluate_expression state.lookups.interface ~visiting:[] state.resolved part
-  in
   (match (value.kind, read_final_type state value) with
   | Prefix (Negate, { kind = Integer _; _ }), _ -> ()
   | (Prefix _ | Binary _), Some type_ -> (
+      let evaluate part =
+        Interface.Constants.evaluate_expression state.lookups.interface state.resolved
+          ~integer:
+            (Option.map
+               (fun (bits, is_signed) : Interface.Constants.integer -> { bits; is_signed })
+               (Types.find_integer_bits type_))
+          part
+      in
       match (Types.find_integer_range type_, evaluate value, value.kind) with
-      | Some (low, high), Some constant, _ when Z.lt constant low || Z.gt constant high ->
+      | Some (low, high), Known (Integer constant), _ when Z.lt constant low || Z.gt constant high
+        ->
           State.report state
             (Constant_out_of_range { at = Written value.id; constant; type_; low; high })
-      | Some _, None, Binary { operator = Operation (Arithmetic (Divide | Remainder)); right; _ }
-        when evaluate right = Some Z.zero ->
+      | ( Some _,
+          Unevaluated,
+          Binary { operator = Operation (Arithmetic (Divide | Remainder)); right; _ } )
+        when evaluate right = Known (Integer Z.zero) ->
           State.report state (Division_by_zero { at = Written right.id })
       | _ -> ())
   | _ -> ());
   Syntax_walk.visit_expression_parts ~on_expression:(check_arithmetic state) ~on_statement:ignore
     value
 
-let check state (site : site) (value : Syntax.expression) =
-  State.check_when_final state @@ fun () ->
-  (match find_offending_expression state ~may_call:(site <> Default) ~bound:[] value with
-  | Some part -> (
-      let at : Core.origin = Written part.id in
-      match site with
-      | Default -> State.report state (Default_not_constant { at })
-      | Value -> State.report state (Not_constant { at })
-      | Evaluated_condition -> State.report state (Condition_not_constant { at }))
-  | None ->
-      if site = Evaluated_condition then
-        Option.iter
-          (fun (part : Syntax.expression) ->
-            State.report state (Condition_names_parameter { at = Written part.id }))
-          (find_use_of_a_type_parameter state value));
-  check_arithmetic state value
-
-let rec find_part_that_is_not_data (state : State.state) ~visited (type_ : Types.ty) =
+let rec find_part_that_is_not_data (state : State.state) ~visited ~allows_parameters
+    (type_ : Types.ty) =
   match State.normalize state type_ with
   | Function _ -> Some Catalog.Inference.Function_type
   | Named { path; arguments } as named -> (
       let find_in_arguments () =
         List.find_map
           (function
-            | Types.Type argument -> find_part_that_is_not_data state ~visited argument
+            | Types.Type argument ->
+                find_part_that_is_not_data state ~visited ~allows_parameters argument
             | Value _ -> None)
           arguments
       in
@@ -168,12 +145,82 @@ let rec find_part_that_is_not_data (state : State.state) ~visited (type_ : Types
           let substitution = Types.make_substitution interface.type_generics arguments in
           List.find_map
             (fun field ->
-              find_part_that_is_not_data state ~visited:(named :: visited)
+              find_part_that_is_not_data state ~visited:(named :: visited) ~allows_parameters
                 (Types.substitute substitution field))
             (Types.list_field_types interface))
-  | Parameter _ | Projection _ | Never | Integer | Variable _ | Hole | Error _ -> None
+  | Parameter _ | Projection _ ->
+      if allows_parameters then None else Some Catalog.Inference.Type_parameter
+  | Never | Integer | Variable _ | Hole | Error _ -> None
 
-let check_type (state : State.state) (written : Syntax.type_expression) type_ =
-  Option.iter
-    (fun part -> State.report state (Constant_not_data { at = Written written.id; part }))
-    (find_part_that_is_not_data state ~visited:[] type_)
+let rec find_stored_part_that_is_not_data (state : State.state) (value : Syntax.expression) =
+  let find_first = List.find_map (find_stored_part_that_is_not_data state) in
+  let find_in_type () =
+    Option.bind (read_final_type state value) (fun type_ ->
+        Option.map
+          (fun part -> (value, part))
+          (find_part_that_is_not_data state ~visited:[] ~allows_parameters:false type_))
+  in
+  let find_in_collection items =
+    match Option.map (State.normalize state) (read_final_type state value) with
+    | Some (Named { path; _ }) when Option.is_none (Well_known.find_builtin_type path) -> (
+        let interface = Interface.Definition.read_type_interface state.lookups.interface path in
+        match
+          List.find_map
+            (find_part_that_is_not_data state ~visited:[] ~allows_parameters:true)
+            (Types.list_field_types interface)
+        with
+        | Some part -> Some (value, part)
+        | None -> find_first items)
+    | _ -> find_first items
+  in
+  let is_template (written : Syntax.expression) =
+    match state.tables.elaborations.(written.id) with Some (Template _) -> true | _ -> false
+  in
+  let rec is_constant_read (read : Syntax.expression) =
+    match (read.kind, state.tables.resolutions.(read.id)) with
+    | Parenthesized inner, _ -> is_constant_read inner
+    | Bracket (base, _), _ when state.resolved.brackets.(read.id) = Some Type_arguments ->
+        is_constant_read base
+    | (Name _ | Member _), Some (Variant_value _) -> true
+    | (Name _ | Member _), Some (Global _) -> (
+        match Option.map (State.normalize state) (read_final_type state read) with
+        | Some (Function _) -> false
+        | _ -> true)
+    | Member (base, _), Some (Field_access _) -> is_constant_read base
+    | _ -> false
+  in
+  match value.kind with
+  | Parenthesized inner -> find_first [ inner ]
+  | Integer _ | Float _ | True | False -> None
+  | String { rest = []; _ } when not (is_template value) -> None
+  | Call (_, arguments)
+    when match Tables.find_call state.tables value.id with
+         | Some { callee = Constructor _; _ } -> true
+         | _ -> false ->
+      find_first (List.map (fun (argument : Syntax.argument) -> argument.value) arguments)
+  | _ when is_constant_read value -> None
+  | List items -> find_in_collection items
+  | Map entries -> find_in_collection (List.concat_map (fun (key, item) -> [ key; item ]) entries)
+  | _ -> find_in_type ()
+
+let check_value state (value : Syntax.expression) =
+  State.check_when_final state @@ fun () ->
+  (match find_offending_expression state ~bound:[] value with
+  | Some part -> State.report state (Not_constant { at = Written part.id })
+  | None ->
+      Option.iter
+        (fun ((part : Syntax.expression), not_data) ->
+          State.report state (Constant_not_data { at = Written part.id; part = not_data }))
+        (find_stored_part_that_is_not_data state value));
+  check_arithmetic state value
+
+let check_condition state (value : Syntax.expression) =
+  State.check_when_final state @@ fun () ->
+  (match find_offending_expression state ~bound:[] value with
+  | Some part -> State.report state (Not_constant { at = Written part.id })
+  | None ->
+      Option.iter
+        (fun (part : Syntax.expression) ->
+          State.report state (Condition_names_parameter { at = Written part.id }))
+        (find_use_of_a_type_parameter state value));
+  check_arithmetic state value

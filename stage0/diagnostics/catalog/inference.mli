@@ -73,7 +73,7 @@ type not_callee =
   | Local_of_type of { name : string; type_ : Types.ty }
   | Name_is_neither of string
 
-type not_data = Function_type | Handle | Shared_state
+type not_data = Function_type | Handle | Shared_state | Type_parameter
 type empty_literal = Empty_list | Empty_map
 type integer_operator = Bitwise | Shift | Complement
 type joined_piece = Fragment of Core.origin | Interpolated of Core.origin
@@ -171,9 +171,7 @@ type t =
       high : Z.t;
     }
   | Division_by_zero of { at : Core.origin }
-  | Default_not_constant of { at : Core.origin }
   | Not_constant of { at : Core.origin }
-  | Condition_not_constant of { at : Core.origin }
   | Condition_names_parameter of { at : Core.origin }
   | Constant_not_data of { at : Core.origin; part : not_data }
   | Hidden_in_public_clause of { at : Core.origin; name : string; hidden : Path.t }

@@ -1,11 +1,10 @@
 (library
  (name interface)
- (modules_without_implementation environment lookups)
+ (modules_without_implementation constant_value environment lookups)
  (libraries
   syntax_print
   language
   structural_key
-  source
   compiler_bug
   path
   grant

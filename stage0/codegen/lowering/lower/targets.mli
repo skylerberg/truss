@@ -86,7 +86,8 @@ val read_list_parts : Monomorphic.context -> Ground.ty -> string * Ground.ty * G
 val lower_borrowed_sequence :
   Lowering.state -> Ground.ty -> buffer:Lowered.operand -> length:Lowered.operand -> Lowered.place
 
-val lower_static_constant : Lowering.state -> Path.t -> Lowered.place
+val make_constant_item : Lowering.state -> Path.t -> Types.substitution -> Lowered.Item.t
+val lower_static_constant : Lowering.state -> Path.t -> Types.substitution -> Lowered.place
 
 val pull_loop :
   Lowering.state ->

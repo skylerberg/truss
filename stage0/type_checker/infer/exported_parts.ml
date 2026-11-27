@@ -13,6 +13,7 @@ let rec is_visible_to_other_packages (lookups : Lookups.t) (path : Path.t) =
   | Top { module_; name } -> module_ = Well_known.intrinsic_module || is_public lookups module_ name
   | Method { owner; _ } | Member_constant { owner; _ } ->
       is_visible_to_other_packages lookups owner && is_declared_public lookups path
+  | Default { owner; _ } -> is_visible_to_other_packages lookups owner
   | Impl _ -> is_declared_public lookups path
   | Derived _ | Test _ | Law_proof _ -> true
   | Unresolved _ -> false

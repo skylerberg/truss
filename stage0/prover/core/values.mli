@@ -17,13 +17,13 @@ val make_literal_value : State.frame -> Types.ty -> Language.Literal.t -> Logic.
 val project_field :
   State.frame -> Types.ty -> string option -> string -> Types.ty -> Logic.term -> Logic.term
 
-val evaluate_constant : State.frame -> Path.t -> Logic.term
+val evaluate_constant : State.frame -> Path.t -> Types.substitution -> Logic.term
 
 val apply_construct :
   State.frame ->
   Invocation.site ->
   string option ->
-  (string * Logic.term option) list ->
+  (string * Logic.term) list ->
   State.frame * Logic.term
 
 val make_text_match :

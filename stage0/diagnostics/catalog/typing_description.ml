@@ -173,16 +173,22 @@ let describe : Typing.t -> Nodes.description = function
   | Arguments_to_parameter { at = origin; written } ->
       make Arity (Build.at origin)
         (tick written @ say " is a generic parameter, which takes no arguments.")
-  | Count_error { at = origin; error } ->
-      make Arity (Build.at origin)
-        (match error with
-        | Not_uint64 ->
-            tick_node origin @ say " in a type argument must be a constant of type `UInt64`."
-        | Uncomputable ->
-            say "The value of " @ tick_node origin
-            @ say
-                " cannot be computed: a constant used in a type cannot refer to itself, and is \
-                 made of literals, arithmetic, and other such constants.")
+  | Count_error { at = origin; error = Not_uint64 } ->
+      make Mismatch (Build.at origin)
+        (tick_node origin @ say " in a type argument must be a constant of type `UInt64`.")
+  | Count_error { at = origin; error = Computed_from_itself } ->
+      make Cyclic_count (Build.at origin)
+        (tick_node origin
+        @ say
+            " is computed from a constant whose value depends on itself, so its value is not known."
+        )
+  | Count_error { at = origin; error = Computed_by_call } ->
+      make Count_calls_function (Build.at origin)
+        (say "The value of " @ tick_node origin
+        @ say
+            " calls a function. A type is decided before any code is checked, so a constant that a \
+             type names calls no function. Write the count as literals, operators, and other such \
+             constants.")
   | Trait_as_type { at = origin; written } ->
       make Not_a_type (Build.at origin)
         (tick written

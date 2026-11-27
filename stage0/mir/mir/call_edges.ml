@@ -1,7 +1,4 @@
-type entered =
-  [ `Field_default of Path.t * string option * string
-  | `Parameter_default of Path.t * int
-  | `Invariant of Path.t * Z.t ]
+type entered = [ `Default of Path.t | `Invariant of Path.t * Z.t ]
 
 module Entered_table = Hashtbl.Make (Structural_key.Make (struct
   type t = entered
@@ -300,8 +297,7 @@ let list_statement_edges interface instance (statement : Tree.statement) =
           {
             value =
               ( Operand _ | Operation _ | Compare _ | Not _ | Construct _ | Array _ | Is_variant _
-              | Convert _ | Copy _ | Lambda _ | Value_parameter _ | Parameter_default _
-              | Specification _ );
+              | Convert _ | Copy _ | Lambda _ | Value_parameter _ | Specification _ );
             _;
           }
       | Call _ | Lend _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _
@@ -312,13 +308,12 @@ let list_statement_edges interface instance (statement : Tree.statement) =
       []
 
 type dependency_kind = Read | Direct_call | Supplied of supplier
-type omitted = Field of string | Argument of string
 
 type dependency = {
   path : Path.t;
   kind : dependency_kind;
   origin : Core.origin;
-  omitted : omitted option;
+  default : Path.t option;
 }
 
 type assumed_laws = {
@@ -400,21 +395,29 @@ let collect (lookups : lookups) instance visit_roots =
       true)
   in
   let add ~through origin kind path =
-    let origin, omitted =
-      match through with Some (origin, omitted) -> (origin, Some omitted) | None -> (origin, None)
+    let origin, default =
+      match through with Some (origin, default) -> (origin, Some default) | None -> (origin, None)
     in
-    dependencies := { path; kind; origin; omitted } :: !dependencies
+    dependencies := { path; kind; origin; default } :: !dependencies
   in
-  let add_constant ~through origin (place : Tree.place) =
+  let rec add_constant ~through ~instance origin (place : Tree.place) =
     match place.root with
-    | Constant path -> add ~through origin Read path
+    | Constant { path = Default _ as path; substitution } ->
+        if enters (`Default path) then
+          Option.iter
+            (fun (default : Tree.t Parts.sourced) ->
+              visit_code
+                ~through:(Some (Option.value through ~default:(origin, path)))
+                ~instance:(Types.substitute_substitution instance substitution)
+                default.form)
+            (Parts.read_initializer lookups.mir path)
+    | Constant { path; _ } -> add ~through origin Read path
     | Local _ | Literal _ -> ()
-  in
-  let rec visit_code ~through ~instance (code : Tree.t) =
-    Walk.iter_places (add_constant ~through) code;
+  and visit_code ~through ~instance (code : Tree.t) =
+    Walk.iter_places (add_constant ~through ~instance) code;
     Walk.iter_code (visit_statement ~through ~instance) code
   and visit_formula ~through ~instance (formula : Tree.formula) =
-    Walk.iter_formula_places (add_constant ~through) formula;
+    Walk.iter_formula_places (add_constant ~through ~instance) formula;
     Walk.iter_formula (visit_statement ~through ~instance) formula
   and visit_statement ~through ~instance (statement : Tree.statement) =
     List.iter
@@ -430,63 +433,13 @@ let collect (lookups : lookups) instance visit_roots =
       (list_laws_assumed_at lookups.interface instance statement);
     match statement.kind with
     | Basic (Call { call; _ } | Lend { call; _ }) -> add_invariant_check ~through ~instance call
-    | Basic (Assign { value = Parameter_default { definition; position; substitution }; _ }) ->
-        if enters (`Parameter_default (definition, position)) then
-          visit_code
-            ~through:
-              (Some
-                 (Option.value through
-                    ~default:(statement.origin, Argument (read_parameter_name definition position))))
-            ~instance:(Types.substitute_substitution instance substitution)
-            (Parts.read_parameter_default lookups.mir ~definition ~position).form
-    | Basic (Assign { value = Construct { variant; fields; type_ }; _ }) -> (
-        match find_head type_ with
-        | Some head ->
-            List.iter
-              (fun (field, value) ->
-                if Option.is_none value then
-                  visit_field_default
-                    ~through:(Some (Option.value through ~default:(statement.origin, Field field)))
-                    ~instance head variant field)
-              fields
-        | None -> ())
     | Basic
-        ( Assign
-            {
-              value =
-                ( Operand _ | Operation _ | Compare _ | Not _ | Array _ | Is_variant _ | Convert _
-                | Copy _ | Function_value _ | Lambda _ | Value_parameter _ | Specification _ );
-              _;
-            }
-        | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Proof _
-        | Evaluated_assert _ )
+        ( Assign _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _
+        | Ghost_assert _ | Proof _ | Evaluated_assert _ )
     | For _
     | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)
     | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Provide _ | Resume _ | Yield _ ->
         ()
-  and visit_field_default ~through ~instance type_ variant field =
-    match Parts.read_defaults lookups.mir type_ with
-    | Some { form = Field_defaults defaults; _ } ->
-        List.iter
-          (fun (default : Tree.t Tree.field_default) ->
-            if
-              default.variant = variant && default.field = field
-              && enters (`Field_default (type_, variant, field))
-            then visit_code ~through ~instance default.value)
-          defaults
-    | Some { form = Parameter_defaults _; _ } | None -> ()
-  and read_parameter_name definition position =
-    match Parts.read_contract lookups.mir definition with
-    | Some { form = contract; _ } -> (
-        match
-          Option.bind (List.nth_opt contract.parameters position)
-            (fun (parameter : Tree.parameter) -> Core_walk.find_local_name parameter.local)
-        with
-        | Some name -> name
-        | None ->
-            Compiler_bug.raise_bug ~stage:"MIR" "the parameter at position %d of `%s` has no name"
-              position (Path.show definition))
-    | None -> Compiler_bug.raise_bug ~stage:"MIR" "`%s` has no contract" (Path.show definition)
   and add_invariant_check ~through ~instance (call : Tree.call) =
     match (call.callee.target, call.arguments) with
     | ( Intrinsic { operation = Runtime Holds_invariant; type_arguments = [ Type checked ] },

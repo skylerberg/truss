@@ -250,12 +250,12 @@ and elaborate_count_name context (name : Syntax.name) : Types.argument =
   | Some (Value_parameter parameter) -> Types.Value (Types.Value_parameter parameter)
   | Some (Definition (Constant, path)) -> (
       match Constants.evaluate_count context.lookups path with
-      | Ok value -> Types.Value (Types.Known value)
-      | Error error ->
+      | Count value -> Types.Value (Types.Known value)
+      | Invalid_count error ->
           Types.Value
             (Value_error
                (record_diagnostic context.diagnostics (Count_error { at = Written name.id; error })))
-      )
+      | Unevaluated_count -> Types.Value (Value_error Catalog.reported_elsewhere))
   | Some (Unknown report) -> Types.Type (Types.Error report)
   | _ -> raise_bug "`%s` is not resolved as a type argument" name.text
 

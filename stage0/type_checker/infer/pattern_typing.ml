@@ -498,21 +498,10 @@ and find_character_tag state (literal : Syntax.string_literal) =
 
 and check_character_value (state : State.state) (literal : Syntax.string_literal)
     (builtin : Language.Builtin_type.t) =
-  let text = literal.first.value in
-  let scalars =
-    let rec count index scalars =
-      if index >= String.length text then List.rev scalars
-      else
-        let decoded = String.get_utf_8_uchar text index in
-        count (index + Uchar.utf_decode_length decoded) (Uchar.utf_decode_uchar decoded :: scalars)
-    in
-    count 0 []
-  in
   let value =
-    match (literal.rest, scalars, builtin) with
-    | [], [ scalar ], Character -> Some (Uchar.to_int scalar)
-    | [], [ scalar ], UInt8 when Uchar.to_int scalar < 128 -> Some (Uchar.to_int scalar)
-    | _ -> None
+    match literal.rest with
+    | [] -> Language.Builtin_type.find_scalar_literal builtin literal.first.value
+    | _ :: _ -> None
   in
   match value with
   | Some value -> Some (Z.of_int value)

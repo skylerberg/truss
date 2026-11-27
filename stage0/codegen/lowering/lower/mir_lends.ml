@@ -125,13 +125,12 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
               Option.to_list (find_operand_place operand)
           | Construct { fields; _ } when holds_view ->
               List.filter_map
-                (fun (_, field) ->
-                  match (field : Mir.operand option) with
-                  | Some (Borrow { place; _ }) -> Some (place, false)
-                  | Some operand ->
+                (fun (_, (field : Mir.operand)) ->
+                  match field with
+                  | Borrow { place; _ } -> Some (place, false)
+                  | operand ->
                       Option.bind (find_operand_place operand) (fun (place, holds_view) ->
-                          if holds_view then Some (place, true) else None)
-                  | None -> None)
+                          if holds_view then Some (place, true) else None))
                 fields
           | _ -> raise Made)
       | Basic (Lend { part; call }) when part = local ->

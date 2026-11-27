@@ -16,3 +16,4 @@ val translate_laws :
 
 val translate_type : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome
 val translate_constant : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome
+val translate_defaults : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome

@@ -26,7 +26,7 @@ let make_outcome (query : Query.t) =
   {
     Obligation.obligations = Query.list_obligations query;
     holes = Query.list_holes query;
-    evaluation = None;
+    evaluated_constants = [];
   }
 
 let merge_outcomes (outcomes : Obligation.outcome list) : Obligation.outcome =
@@ -36,7 +36,8 @@ let merge_outcomes (outcomes : Obligation.outcome list) : Obligation.outcome =
     holes =
       List.sort_uniq compare
         (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
-    evaluation = None;
+    evaluated_constants =
+      List.concat_map (fun (outcome : Obligation.outcome) -> outcome.evaluated_constants) outcomes;
   }
 
 let note_entry (frame : State.frame) term ~name =
@@ -668,63 +669,98 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
     (Laws.list_laws start.environment trait.trait);
   make_outcome start.query
 
+let is_generic_owner (lookups : Lookups.t) (owner : Path.t) =
+  match Interface.Definition.find_interface lookups.interface owner with
+  | Some (Type_interface type_interface) -> type_interface.type_generics <> []
+  | _ -> (
+      (match owner with
+        | Method { owner = container; _ } -> (
+            match Interface.Definition.find_interface lookups.interface container with
+            | Some (Trait_interface _) -> true
+            | _ -> false)
+        | _ -> false)
+      ||
+      match Interface.Impls.read_signature lookups.interface owner with
+      | Some signature -> signature.generics <> [] || signature.capability_parameters <> []
+      | None -> true)
+
+let prove_defaults (frame : State.frame) owner =
+  let lookups = frame.environment.lookups in
+  let is_generic = is_generic_owner lookups owner in
+  List.filter_map
+    (fun (default : Mir.code Mir.default) ->
+      let path = Path.Default { owner; variant = default.variant; name = default.name } in
+      ignore
+        (Lambdas.run_code frame default.value.tree
+           ~type_:
+             (Encoding.substitute_type frame
+                (Interface.Definition.read_constant_type lookups.interface path)));
+      if (not is_generic) && Cycles.is_evaluated_constant frame.environment path default.value.tree
+      then Some path
+      else None)
+    (match Mir.read_defaults lookups.mir owner with
+    | Some { form = defaults; _ } -> defaults
+    | None -> [])
+
+let translate_defaults (lookups : Lookups.t) (source : State.source) ~path =
+  let start = start_proof lookups source ~current:path in
+  Option.iter
+    (fun ({ form = code; _ } : Mir.t Mir.sourced) ->
+      Cycles.reject_constant_cycle start ~is_constant:false code)
+    (Mir.read_code lookups.mir path);
+  let evaluated_constants = prove_defaults start path in
+  { (make_outcome start.query) with evaluated_constants }
+
 let translate_type (lookups : Lookups.t) (source : State.source) ~path =
   let start = start_proof lookups source ~current:path in
-  (match Mir.read_type_clauses lookups.mir path with
-  | Some { form = { invariants; potential }; _ } -> (
-      let ty =
-        match Interface.Definition.find_interface lookups.interface path with
-        | Some (Interface.Environment.Type_interface interface) ->
-            Types.Named { path; arguments = Types.list_generic_arguments interface.type_generics }
-        | _ -> Facts.raise_bug "%s is not a type" (Path.show path)
-      in
-      let start = { start with self_type = Some ty } in
-      (match Mir.read_defaults lookups.mir path with
-      | Some { form = Field_defaults defaults; _ } ->
-          List.iter
-            (fun (default : Mir.t Mir.field_default) ->
-              ignore
-                (Lambdas.run_code start default.value
-                   ~type_:(Encoding.substitute_type start default.type_)))
-            defaults
-      | Some { form = Parameter_defaults _; _ } | None -> ());
-      match Cycles.list_circular_clauses start ~type_:ty with
-      | _ :: _ as circular -> List.iter (Cycles.reject_circular_proof start) circular
-      | [] ->
-          let value_ = Encoding.arrive start "value" ty in
-          Facts.assume start
-            (Validity.make_validity start ~assuming:true ~includes_invariants:false ty value_);
-          let at_value = { start with self = Some value_; old_self = Some value_ } in
-          List.iter
-            (fun (invariant : Mir.requirement) ->
-              let after, holds = Validity.read_specification at_value invariant.clause in
-              Facts.assume after holds)
-            invariants;
-          Option.iter
-            (fun (written : Mir.formula) ->
-              let _, potential_term = Validity.read_specification at_value written in
-              Obligations.oblige at_value
-                (Facts.locate at_value written.origin)
-                (Negative_potential { type_ = ty })
-                (Logic.less_equal (Logic.int 0) potential_term))
-            potential)
-  | None -> ());
-  make_outcome start.query
+  let evaluated_constants =
+    match Mir.read_type_clauses lookups.mir path with
+    | Some { form = { invariants; potential }; _ } ->
+        let ty =
+          match Interface.Definition.find_interface lookups.interface path with
+          | Some (Interface.Environment.Type_interface interface) ->
+              Types.Named { path; arguments = Types.list_generic_arguments interface.type_generics }
+          | _ -> Facts.raise_bug "%s is not a type" (Path.show path)
+        in
+        let start = { start with self_type = Some ty } in
+        let evaluated_constants = prove_defaults start path in
+        (match Cycles.list_circular_clauses start ~type_:ty with
+        | _ :: _ as circular -> List.iter (Cycles.reject_circular_proof start) circular
+        | [] ->
+            let value_ = Encoding.arrive start "value" ty in
+            Facts.assume start
+              (Validity.make_validity start ~assuming:true ~includes_invariants:false ty value_);
+            let at_value = { start with self = Some value_; old_self = Some value_ } in
+            List.iter
+              (fun (invariant : Mir.requirement) ->
+                let after, holds = Validity.read_specification at_value invariant.clause in
+                Facts.assume after holds)
+              invariants;
+            Option.iter
+              (fun (written : Mir.formula) ->
+                let _, potential_term = Validity.read_specification at_value written in
+                Obligations.oblige at_value
+                  (Facts.locate at_value written.origin)
+                  (Negative_potential { type_ = ty })
+                  (Logic.less_equal (Logic.int 0) potential_term))
+              potential);
+        evaluated_constants
+    | None -> []
+  in
+  { (make_outcome start.query) with evaluated_constants }
 
 let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
   let start = start_proof lookups source ~current:path in
   match Mir.read_initializer lookups.mir path with
   | Some { form = code; _ } ->
       let frame = start in
-      Cycles.reject_constant_cycle frame code;
+      Cycles.reject_constant_cycle frame ~is_constant:true code;
       ignore
         (Lambdas.run_code frame code
            ~type_:(Interface.Definition.read_constant_type start.environment.lookups.interface path));
       {
         (make_outcome start.query) with
-        evaluation =
-          (if Cycles.is_evaluated_constant start.environment path code then
-             Some (Constant_value path)
-           else None);
+        evaluated_constants =
+          (if Cycles.is_evaluated_constant start.environment path code then [ path ] else []);
       }
   | None -> Facts.raise_bug "the constant `%s` has no MIR" (Path.show path)

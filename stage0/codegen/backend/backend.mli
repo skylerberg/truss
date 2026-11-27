@@ -1,5 +1,6 @@
 type profile = Profile.t = Development | Release
 type t
+type lowered_lookups = Lowering.lowered_lookups
 
 type 'value ran = 'value Lowering.ran =
   | Ran of 'value
@@ -10,7 +11,7 @@ val create :
   ?show_file:(Path.file -> string) ->
   ?evaluation_cpu_time_limit_ms:int ->
   ?programs:string ->
-  Lowering.lowered_lookups ->
+  lowered_lookups ->
   C_compiler.t ->
   profile ->
   t
@@ -59,9 +60,9 @@ val run_tests :
 type location = { file : Path.file; line : int; column : int }
 type unshippable = { failure : [ `Todo | `Echo ]; location : location; way : Path.t list }
 
-val list_unshippable : Lowering.lowered_lookups -> main:Path.t -> unshippable list
-val list_reached_definitions : Lowering.lowered_lookups -> Path.t -> Path.t list
-val list_reached_todo_types : Lowering.lowered_lookups -> Path.t -> Path.t list
+val list_unshippable : lowered_lookups -> main:Path.t -> unshippable list
+val list_reached_definitions : lowered_lookups -> Path.t -> Path.t list
+val list_reached_todo_types : lowered_lookups -> Path.t -> Path.t list
 val make_program_path : t -> string
 
 val build_program :

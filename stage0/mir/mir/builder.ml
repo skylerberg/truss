@@ -121,9 +121,7 @@ and list_extended_by (value : Core.expression) =
   match value.kind with
   | Use base -> list_extended_by_base base
   | Construct { fields; _ } ->
-      List.concat_map
-        (fun (_, field) -> Option.fold ~none:[] ~some:list_extended_temporaries field)
-        fields
+      List.concat_map (fun (_, field) -> list_extended_temporaries field) fields
   | Record_update { updates; _ } ->
       List.concat_map (fun (_, update) -> list_extended_by update) updates
   | Collection_literal { elements; construction = Array } ->
@@ -162,7 +160,13 @@ let lower_pattern_constant (pattern : Core.pattern) (value : Core.pattern_consta
   | Integer_constant value -> Immediate { value = Integer value; type_ }
   | String_constant text -> read_literal (Text text) type_ pattern.origin
   | Named_constant path ->
-      Use { place = { root = Constant path; projections = [] }; type_; origin = pattern.origin }
+      Use
+        {
+          place =
+            { root = Constant { path; substitution = Types.no_substitution }; projections = [] };
+          type_;
+          origin = pattern.origin;
+        }
 
 let lower_range_bound (pattern : Core.pattern) (bound : Core.range_bound) : Tree.operand =
   lower_pattern_constant pattern
@@ -215,8 +219,6 @@ let rec lower_expression ?final_return builder (node : Core.expression) : Tree.o
     | Function_value _ | Lambda _ ->
         Option.map fst (lower_function_expression builder node ~is_argument:false)
     | Value_parameter parameter -> hold (Value_parameter parameter)
-    | Parameter_default { definition; position; substitution } ->
-        hold (Parameter_default { definition; position; substitution })
     | Construct { variant; fields } ->
         let* fields = construct_fields builder fields in
         hold (Construct { variant; fields; type_ = node.type_ })
@@ -466,28 +468,25 @@ and construct_fields builder fields =
   In_order.run builder
     (In_order.all
        (List.map
-          (fun (name, field) ->
-            match field with
-            | None -> In_order.pure (name, None)
-            | Some (field : Core.operand) ->
-                In_order.map
-                  (fun value -> (name, Some value))
-                  (In_order.evaluate_operand builder
-                     (fun () ->
-                       match field with
-                       | Place _ ->
-                           raise_bug
-                             "a constructor field that is a place, in a construct that no lending \
-                              method lends"
-                       | Value value -> lower_expression builder value)
-                     (compute_core_operand_type field) (compute_operand_origin field)))
+          (fun (name, (field : Core.operand)) ->
+            In_order.map
+              (fun value -> (name, value))
+              (In_order.evaluate_operand builder
+                 (fun () ->
+                   match field with
+                   | Place _ ->
+                       raise_bug
+                         "a constructor field that is a place, in a construct that no lending \
+                          method lends"
+                   | Value value -> lower_expression builder value)
+                 (compute_core_operand_type field) (compute_operand_origin field)))
           fields))
 
 and lower_yielded builder (mode : Language.Mode.t) (part : Core.operand) : Tree.yielded option =
   let rec lends : Core.operand -> bool = function
     | Place _ -> true
     | Value { kind = Construct { fields; _ }; _ } ->
-        List.exists (fun (_, field) -> Option.fold ~none:false ~some:lends field) fields
+        List.exists (fun (_, field) -> lends field) fields
     | Value _ -> false
   in
   match part with
@@ -500,10 +499,7 @@ and lower_yielded builder (mode : Language.Mode.t) (part : Core.operand) : Tree.
               (In_order.all
                  (List.map
                     (fun (name, field) ->
-                      match field with
-                      | None -> In_order.pure (name, None)
-                      | Some field ->
-                          In_order.map (fun built -> (name, Some built)) (plan_part field))
+                      In_order.map (fun built -> (name, built)) (plan_part field))
                     fields))
         | _ -> In_order.map (fun value -> Tree.Part value) (plan_operand builder mode field)
       in
@@ -538,7 +534,8 @@ and lower_place builder (written : Core.place) : Tree.place option =
         Some (Emitter.make_local_place entry)
     | Local { local; type_; origin } ->
         Some (Emitter.make_local_place (Emitter.obtain_free_source builder local ~type_ ~origin))
-    | Constant { path; _ } -> Some { root = Constant path; projections = [] }
+    | Constant { path; substitution; _ } ->
+        Some { root = Constant { path; substitution }; projections = [] }
     | Field { base; field; _ } ->
         let* base = lower_place builder base in
         Some (project base (Field field))
@@ -1646,10 +1643,6 @@ and build_expression_body (written : Core.expression) ~return =
 and of_expression (written : Core.expression) =
   build_expression_body written ~return:(fun builder value ->
       Emitter.return_ builder (Some value) written.origin)
-
-and of_default (written : Core.expression) =
-  build_expression_body written ~return:(fun builder value ->
-      Emitter.jump builder (Return (Some value)) written.origin)
 
 let compute_parameter_origin ~(enclosing : Core.origin) (parameter : Core.parameter) : Core.origin =
   match parameter.local with

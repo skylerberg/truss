@@ -19,8 +19,7 @@ type restriction =
   | Specification
   | Law
   | Quantifier_body
-  | Evaluated_assertion
-  | Constant_value
+  | Constant_expression
 
 type declaring_clause =
   | Own_uses

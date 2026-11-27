@@ -161,7 +161,7 @@ let rec lower_place state (written : Mir.place) : Lowered.place =
   let root =
     match written.root with
     | Local local -> lookup_local_place state local
-    | Constant path -> Targets.lower_static_constant state path
+    | Constant { path; substitution } -> Targets.lower_static_constant state path substitution
     | Literal { value; type_ } ->
         Targets.lower_literal_place state (Lowering.ground state type_) value
   in
@@ -284,7 +284,6 @@ let make_body_frame (state : Lowering.state) ?owner ?returns_into ?lending
         (Moves.list_flagged moves);
     move_state = Moves.copy_entry_state moves 0;
     move_state_at_return = None;
-    applied_defaults = Hashtbl.create 1;
     lending;
     called_parts =
       list_statements_where
@@ -396,10 +395,9 @@ let reads (value : Mir.rvalue) local =
   | Convert { value; _ } -> is_in_operand value
   | Operation { operands; _ } | Array operands -> List.exists is_in_operand operands
   | Compare { left; right; _ } -> is_in_operand left || is_in_operand right
-  | Construct { fields; _ } ->
-      List.exists (fun (_, field) -> Option.fold ~none:false ~some:is_in_operand field) fields
+  | Construct { fields; _ } -> List.exists (fun (_, field) -> is_in_operand field) fields
   | Is_variant { place; _ } -> is_in_place place
-  | Function_value _ | Lambda _ | Value_parameter _ | Parameter_default _ | Specification _ -> false
+  | Function_value _ | Lambda _ | Value_parameter _ | Specification _ -> false
 
 let alias state local (source : Lowered.place) ~writable =
   let info = lookup_local_info state local in

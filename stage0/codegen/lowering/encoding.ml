@@ -57,8 +57,9 @@ let encode env ty =
   | Storage element ->
       append_bytes (Storage.project_capacity value) (Memory_layout.compute_integer_size UInt64);
       encode_elements element
-  | Handle -> raise_bug "a handle cannot be computed while compiling"
-  | Shared _ -> raise_bug "a shared value cannot be computed while compiling"
+  | Handle | Shared _ ->
+      Emit_c.Ir_builder.finish builder Unreachable;
+      Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder)
   | Shape (Scalar _) -> append_bytes value (Memory_layout.of_type env ty).size
   | Shape (Record members) -> encode_fields value None members
   | Shape (Array (element, count)) ->

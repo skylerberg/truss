@@ -580,10 +580,10 @@ let () =
       let module_ = Support.parse_module "app.main" in
       let make_top_path name : Path.t = Top { module_; name } in
       let parts = make_mir_parts packages in
-      let read_defaults path =
-        match Mir.read_default_graphs parts path with
+      let read_default owner ?variant name =
+        match Mir.read_initializer_graph parts (Default { owner; variant; name }) with
         | Some { form; _ } -> form
-        | None -> failwith (Path.show path ^ " has no defaults")
+        | None -> Harness.fail "`%s` has no default for `%s`" (Path.show owner) name
       in
       let find_returned (default : Mir.Graph.t) =
         Mir_lint.check "a default" default.body;
@@ -594,75 +594,37 @@ let () =
             | _ -> None)
           (list_terminators default.body)
       in
-      let list_positions = function
-        | Mir.Parameter_defaults defaults ->
-            List.map (fun (position, default) -> (position, find_returned default)) defaults
-        | Field_defaults _ -> failwith "a function with field defaults"
-      in
       let add : Path.t =
         Method { owner = make_top_path "Tally"; name = "add"; receiver = Static }
       in
       if Mir.read_code parts add <> None then Harness.fail "`Tally.add` has a body's MIR";
-      if list_positions (read_defaults add) <> [ (0, Some 5) ] then
-        Harness.fail "`Tally.add` does not have its default at position 0";
+      if find_returned (read_default add "amount") <> Some 5 then
+        Harness.fail "the default of `amount` is not 5";
       let advance : Path.t =
         Method { owner = make_top_path "Counter"; name = "advance"; receiver = Instance Mut }
       in
-      if list_positions (read_defaults advance) <> [ (1, Some 3) ] then
-        Harness.fail "`Counter.advance` does not have its default at position 1";
-      match read_defaults (make_top_path "Counter") with
-      | Field_defaults [ { variant = None; field = "step"; value; _ } ] ->
-          if find_returned value <> Some 2 then Harness.fail "the default of `step` is not 2"
-      | Field_defaults defaults ->
-          Harness.fail "`Counter` has %d field defaults" (List.length defaults)
-      | Parameter_defaults _ -> Harness.fail "a type with parameter defaults");
+      if find_returned (read_default advance "times") <> Some 3 then
+        Harness.fail "the default of `times` is not 3";
+      if find_returned (read_default (make_top_path "Counter") "step") <> Some 2 then
+        Harness.fail "the default of `step` is not 2");
   Harness.test "an omitted argument reads the default of the definition that declares it" (fun () ->
       let packages = Support.setup [ ("app.main", Fixtures.Mir.calls_that_omit_arguments) ] in
       let { Mir.form = code; _ } =
         Option.get (Mir.read_code (make_mir_parts packages) (Support.make_top_path "app.main" "f"))
       in
       let defaults = ref [] in
-      Mir.iter_code
-        (fun (statement : Mir.statement) ->
-          match statement.kind with
-          | Basic (Assign { value = Parameter_default { definition; position; _ }; _ }) ->
-              defaults := (Path.show definition, position) :: !defaults
-          | _ -> ())
+      Mir.iter_places
+        (fun _ (place : Mir.place) ->
+          match place.root with
+          | Constant { path = Default _ as path; _ } -> defaults := Path.show path :: !defaults
+          | Constant _ | Local _ | Literal _ -> ())
         code;
       let expected =
-        [ ("app.main.Scaled.scaled", 1); ("app.main.Tally.add", 0); ("app.main.scale", 1) ]
+        [ "app.main.Scaled.scaled(factor)"; "app.main.Tally.add(amount)"; "app.main.scale(factor)" ]
       in
-      if List.sort compare !defaults <> expected then
+      if List.sort_uniq compare !defaults <> expected then
         Harness.fail "the defaults read are [%s]"
-          (String.concat "; "
-             (List.map
-                (fun (definition, position) -> Printf.sprintf "%s at %d" definition position)
-                (List.sort compare !defaults))));
-  Harness.test
-    "a default's code ends none of its temporaries, which the statement that makes the call ends"
-    (fun () ->
-      let packages = Support.setup [ ("app.main", Fixtures.Mir.calls_that_omit_arguments) ] in
-      match
-        Mir.read_default_graphs (make_mir_parts packages) (Support.make_top_path "app.main" "count")
-      with
-      | Some { form = Parameter_defaults [ (0, default) ]; _ } ->
-          let statements = list_statements default.body in
-          if
-            not
-              (List.exists
-                 (fun (statement : Mir.Graph.statement) ->
-                   match statement.kind with
-                   | Basic (Assign { value = Array _; _ }) -> true
-                   | _ -> false)
-                 statements)
-          then Harness.fail "the default builds no array";
-          if
-            List.exists
-              (fun (statement : Mir.Graph.statement) ->
-                match statement.kind with Basic (Dead _) -> true | _ -> false)
-              statements
-          then Harness.fail "the default's code ends a temporary"
-      | _ -> Harness.fail "`count` does not have one default at position 0");
+          (String.concat "; " (List.sort_uniq compare !defaults)));
   Harness.test "a contract's clauses are formulas that take the function's parameters" (fun () ->
       let packages =
         Support.setup
@@ -1055,7 +1017,7 @@ let () =
       expect_edges "size_window" ~expected:[]);
   Harness.test "a constant has an edge to each function it calls and each constant it reads"
     (fun () -> expect_edges "doubled" ~expected:[ "app.main.limit"; "app.main.pass_limit" ]);
-  Harness.test "a dependency records what reads the constant and through which omitted field"
+  Harness.test "a dependency records what reads the constant and through which field default"
     (fun () ->
       let { Mir.form = code; _ } =
         Option.get
@@ -1066,10 +1028,10 @@ let () =
           (fun (dependency : Mir.Call_edges.dependency) -> dependency.kind = Read)
           (Mir.Call_edges.list_dependencies (Lazy.force lookups) Types.no_substitution code)
       with
-      | [ { path; omitted = Some (Field "size"); _ } ] ->
+      | [ { path; default = Some (Default { name = "size"; _ }); _ } ] ->
           expect_paths ~expected:[ "app.main.limit" ] [ path ]
       | dependencies -> Harness.fail "%d reads" (List.length dependencies));
-  Harness.test "a dependency records what reads the constant and through which omitted argument"
+  Harness.test "a dependency records what reads the constant and through which parameter default"
     (fun () ->
       let { Mir.form = code; _ } =
         Option.get
@@ -1080,7 +1042,7 @@ let () =
           (fun (dependency : Mir.Call_edges.dependency) -> dependency.kind = Read)
           (Mir.Call_edges.list_dependencies (Lazy.force lookups) Types.no_substitution code)
       with
-      | [ { path; omitted = Some (Argument "size"); _ } ] ->
+      | [ { path; default = Some (Default { name = "size"; _ }); _ } ] ->
           expect_paths ~expected:[ "app.main.limit" ] [ path ]
       | dependencies -> Harness.fail "%d reads" (List.length dependencies))
 

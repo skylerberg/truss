@@ -231,7 +231,9 @@ let copy context ty =
   in
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   (match Representation.classify context.env ty with
-  | Handle -> raise_bug "a copy of a handle, which is not Copyable"
+  | Handle ->
+      Emit_c.Ir_builder.finish builder Unreachable;
+      Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder)
   | View _ | Shape (Scalar _) -> raise_bug "a copy of %s, which is trivial" (Ground.to_string ty)
   | Shared _ ->
       Emit_c.Ir_builder.emit builder

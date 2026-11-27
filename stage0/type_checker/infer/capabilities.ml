@@ -42,6 +42,8 @@ let make_parallel_scope ~enclosing restriction =
 let make_no_capabilities_scope restriction =
   make_restricted_scope ~allowed:Types.no_capabilities restriction
 
+let make_constant_expression_scope = make_no_capabilities_scope Constant_expression
+
 let make_quantifier_scope ~enclosing =
   make_restricted_scope ~enclosing
     ~allowed:(Types.make_capability_set [ Built_in Run_forever ])
@@ -347,9 +349,7 @@ and check_statement checking scope (statement : Core.statement) =
       check_block checking scope body
   | Proof body -> check_block checking (make_no_capabilities_scope Proof) body
   | Assert { condition; by = Some Evaluation } ->
-      check_expression checking
-        (make_restricted_scope ~allowed:Types.no_capabilities Evaluated_assertion)
-        condition.value
+      check_expression checking make_constant_expression_scope condition.value
   | Let _ | Evaluate _ | Assign _ | Compound_assign _
   | Assert { by = Some Bit_vector | None; _ }
   | Yield _ ->
@@ -630,10 +630,12 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
          })
   in
   let check_specification = check_expression checking (make_no_capabilities_scope Specification) in
+  let check_default = check_expression checking make_constant_expression_scope in
   (match form.definition with
   | Function { parameters; contract; _ } ->
       List.iter
         (fun (parameter : Core.parameter) ->
+          Option.iter check_default parameter.default;
           Option.iter
             (fun (contract : Core.callback_contract) ->
               List.iter check_specification contract.requires)
@@ -655,7 +657,8 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
           match cost.clause.bound with
           | Order_of value | At_most value | Exactly value -> check_specification value)
         contract.costs
-  | Type { invariants; potential; _ } ->
+  | Type { defaults; invariants; potential } ->
+      List.iter (fun (_, _, default) -> check_default default) defaults;
       List.iter (fun (invariant : Core.condition) -> check_specification invariant.value) invariants;
       Option.iter check_specification potential
   | Trait laws ->
@@ -680,10 +683,7 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
         body
   | Function { body = Some body; _ }, Theorem _, _ | Law_proof { body = Some body; _ }, _, _ ->
       check_block checking (make_no_capabilities_scope Proof) body
-  | Constant (Some value), _, _ ->
-      check_expression checking
-        (make_restricted_scope ~allowed:Types.no_capabilities Constant_value)
-        value
+  | Constant (Some value), _, _ -> check_expression checking make_constant_expression_scope value
   | _ -> ());
   solve state;
   let read_solved variable =

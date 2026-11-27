@@ -4,7 +4,6 @@
  (libraries
   language
   structural_key
-  source
   compiler_bug
   logic
   solver

@@ -237,7 +237,7 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Resolve grants | Dependency | `Interface.Grants.resolve_grant` | The capabilities the manifest grants; name lookups | `grant` |
 | Check imports | File | `Resolve.list_file_diagnostics` | The file's text; the imports that a `references` edge names; whether a `resolved` row of the file holds no value | Diagnostics |
 | Read trait headers | Trait | `Resolve.make_trait_header` | The tree and its resolved names | `trait_header` |
-| Evaluate constants | Constant | `Interface.Constants.evaluate_constant` | The trees and resolved names of the constants it names | `constant_value` |
+| Evaluate constants | Constant | `Interface.Constants.evaluate_constant`, which evaluates a value that calls no function from its tree | The trees and resolved names of the constants it names and of the types it builds, whose field defaults it reads | `constant_value`: the value, or that it calls a function or has no value |
 | Elaborate headers | Trait, impl, or capability | `Interface.Elaborator.elaborate_header` | The tree and resolved names; trait headers, constant values, grants | `header` |
 | Elaborate | Definition | `Interface.Elaborator.elaborate_definition` | The tree and resolved names; headers | `interface` |
 | Derive interfaces | Derived impl | `Interface.Impls.derive_interface` | Interfaces | `derived_interface` |
