@@ -165,12 +165,14 @@ test_key       (item, state, key)
 evaluation     (item, state, value)
 test_run       (item, state, compiler_fingerprint, microseconds)
 unit           (item, profile, state, text_hash)
+unit_text      (item, profile, state, text)
 ```
 
 A build lists its linked items by `lowered.is_evaluated` and `lowered.sites`,
 and reads the `code` of none of them. `unit.text_hash` is the hash of the text
 of the item's translation unit in a build of that profile, and it names the
-unit's object in the user's cache.
+unit's object in the user's cache. `unit_text.text` is that text. A build reads
+it only where the cache holds no object for the unit.
 
 ### Diagnostics
 
@@ -409,7 +411,7 @@ every proof that reads the constant standing.
 | An item whose layout needs a type defined as `todo` is lowered to that type's path, and a test key holds the paths of every such type that its item reaches. | `test`, `build`, and `holes` ask which types defined as `todo` a root reaches. The root's key answers, so no command walks the edges of the units that could not be lowered to find the types again. |
 | A fact names the stage that writes it, and forgetting a unit removes the facts of its stage. | A recipe that lists its stage's facts a second time can forget a unit and leave the unit's row. |
 | The call graphs and the references between items are `edge` rows, and no graph is held in memory between commands. | Opening a database rebuilds nothing, and `graph` reads the same rows as the orchestrator. |
-| An object is named by the hash of its translation unit's text, and the hash is a fact. | A build that renders each unit to learn its object's name does work for every linked item, changed or not. With the hash stored, a build reads one row for each linked item, and asks for a unit's text only where the user's cache holds no object for it. One function renders the text for the stage and for that request, and the C compiler checks the text against the hash. The hash is still a hash of the text, so a read that Render did not record shows as a differing `unit` row when a propagated database is compared with one built from nothing. |
+| An object is named by the hash of its translation unit's text. The hash and the text are facts of the unit, in two tables. | A build that renders each unit to learn its object's name does work for every linked item, changed or not. With the hash stored, a build reads one row for each linked item. It reads a unit's text only where the user's cache holds no object for it. It compiles the stored text, so Render is the only stage that renders a unit. Render hashes the text that it stores, so an object's name is always the hash of the text it was compiled from. The text costs the database as many bytes as the program's C. It has a table of its own, so the `unit` rows that every build reads stay small: in the `WITHOUT ROWID` table, rows of tens of kilobytes made each read of a hash about forty times slower. Only the hash was stored before, so a build from nothing rendered and hashed every unit twice: once in Render and once to compile it. The hash is still a hash of the text, so a read that Render did not record shows as a differing `unit` row when a propagated database is compared with one built from nothing. |
 | A development unit holds no position. It names each site by a symbol, and one unit of the program defines every site with its file, line, and column. | An edit that moves a definition changes that one unit and no other. The sites of a program are the `sites` of its linked items. |
 | A capability's symbol is a weak definition in each unit that names it. | The linker keeps one definition, so the symbol has one address in the program, and no unit lists the capabilities of every linked item. |
 | A test key is a hash of the text of each item that its item reaches, with the names that the text links by. | A fragment is rendered once, and its hash is the hash of that text. Renaming a definition, or an edit that moves a site inside a definition, changes the keys of the tests that reach the definition, and they run once more. A key that survived both needed a second rendering of every fragment, with each name replaced by its position. |
@@ -464,7 +466,7 @@ every proof that reads the constant standing.
 | Claim | Evidence |
 |---|---|
 | A local change costs the same at every project size. | `database_tests` counts the statements and the virtual machine steps of an edit to one body, of adding a function, of adding and removing a use of an unexported function, of a type error and its fix, of adding a test, of lowering the code that the tests reach after an edit, and of proving and deciding one file, in four modules and in forty. `stage0/tools/database_benchmark` times the same edits at each size. |
-| A command with no change computes nothing. | `database_tests`: deciding a file again decides no definition, and a database opened again recomputes no unit. `build_tests`: a development build and a release build of a program that was built before render no unit. |
+| A command with no change computes nothing. | `database_tests`: deciding a file again decides no definition, and a database opened again recomputes no unit. `build_tests`: a development build and a release build of a program that was built before read no unit's text, so they compile no unit. |
 | A command with no change selects its units in the same number of steps at every project size. | `database_tests` counts the steps of lowering the code that the tests reach, and of proving and deciding a package again, in four modules and in forty. |
 | A build renders the units of the items that an edit changes. | `database_tests`: after an edit to one body, listing the linked items of a program renders the development unit of that item alone, with as many statements in forty modules as in four and as many steps more than a listing that renders nothing, and the release units of that item's file and of no other. |
 | A question costs the same at every project size. | `database_tests` counts the statements and the steps of listing a file's diagnostics, a definition's dependents and dependencies, and the definitions that name it, in four modules and in forty. |

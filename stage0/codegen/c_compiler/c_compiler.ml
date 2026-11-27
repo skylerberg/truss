@@ -8,7 +8,6 @@ type t = {
   objects : string;
 }
 
-let raise_bug format = Compiler_bug.raise_bug ~stage:"C compiler" format
 let command_variable = "TRUSS_CC"
 let flags_variable = "TRUSS_CFLAGS"
 let kept_source_variable = "TRUSS_KEEP_C"
@@ -114,10 +113,10 @@ let make_fingerprint compiler profile =
             Cbor.Array (List.map (fun flag -> Cbor.Text flag) (list_compile_flags compiler profile));
           ]))
 
-type source = { name : string; text_hash : string; render : unit -> string }
+type source = { name : string; text_hash : string; read_text : unit -> string }
 
 let hash_text = Blake3.derive_key ~context:"truss 2026-11-22 translation unit text"
-let make_source ~name text = { name; text_hash = hash_text text; render = (fun () -> text) }
+let make_source ~name text = { name; text_hash = hash_text text; read_text = (fun () -> text) }
 let derive_object_key = Blake3.derive_key ~context:"truss 2026-11-22 object key"
 
 let make_object_key ~fingerprint text_hash =
@@ -135,19 +134,13 @@ let compile compiler flags ~text ~output =
 
 type job = { source : source; object_path : string; missing_text : string option }
 
-let render_text source =
-  let text = source.render () in
-  if not (String.equal (hash_text text) source.text_hash) then
-    raise_bug "%s renders to a text that its hash does not name" source.name;
-  text
-
 let make_job compiler ~fingerprint source =
   let key = make_object_key ~fingerprint source.text_hash in
   let object_path = make_object_path compiler key in
   {
     source;
     object_path;
-    missing_text = (if Sys.file_exists object_path then None else Some (render_text source));
+    missing_text = (if Sys.file_exists object_path then None else Some (source.read_text ()));
   }
 
 let compile_job compiler flags ~on_compiled { source; object_path; missing_text } =

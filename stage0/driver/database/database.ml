@@ -798,13 +798,6 @@ let list_linked (database : t) profile roots : Lowering.linked list =
                 (Lowered.Item.to_string item)))
     rows
 
-let render_unit (database : t) profile item =
-  match Recipes.render_unit database Tracker.untracked profile item with
-  | Some text -> text
-  | None ->
-      Compiler_bug.raise_bug ~stage:"Database" "%s is rendered, and has no code"
-        (Lowered.Item.to_string item)
-
 let find_lowered_lookups (database : t) packages : (Lowering.lowered_lookups, string) result =
   match Libc.host with
   | Error message -> Error message
@@ -844,7 +837,7 @@ let find_lowered_lookups (database : t) packages : (Lowering.lowered_lookups, st
                     "%s is read, and no root of lowering reaches it" (Lowered.Item.to_string item));
           read_test_key = read_reached database Facts.test_key;
           list_linked = list_linked database;
-          render_unit = render_unit database;
+          read_unit_text = (fun profile -> read_reached database (Facts.unit_text profile));
         }
 
 type read = {
