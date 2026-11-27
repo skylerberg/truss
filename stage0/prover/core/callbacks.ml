@@ -227,20 +227,12 @@ let find_named (frame : State.frame) path instantiation : State.known_function o
 
 let number terms = List.mapi (fun position term -> (position, term)) terms
 
-let read_holding (environment : State.environment) (query : Query.t) (clauses : State.clauses)
-    ~substitution inside formulas =
-  read_clauses clauses.callee inside
-    (List.filter
-       (fun (clause : Mir.formula) ->
-         Conditions.holds_here environment query ~substitution clause.holds_when)
-       formulas)
-
 let list_requires (frame : State.frame) (known : State.known_function) arguments =
   match known with
   | Named { substitution_of; contract; _ } ->
       let clauses = Contracts.select_precondition_clauses contract in
       let substitution = substitution_of clauses in
-      read_holding frame.environment frame.query clauses ~substitution
+      read_clauses clauses.callee
         (Contracts.make_entry_frame frame clauses ~arguments:(number arguments) ~substitution)
         (Facts.list_clauses clauses.requires)
   | Own { callback; _ } -> read_requires (Some (frame.source, frame, callback)) arguments
@@ -250,7 +242,7 @@ let list_ensures (frame : State.frame) (known : State.known_function) ~entries ~
   | Named { substitution_of; contract; _ } ->
       let clauses = contract.callee_clauses in
       let substitution = substitution_of clauses in
-      read_holding frame.environment frame.query clauses ~substitution
+      read_clauses clauses.callee
         (Contracts.make_exit_frame frame clauses ~entries:(number entries) ~exits:(number exits)
            ~result:(Some result) ~substitution)
         clauses.ensures

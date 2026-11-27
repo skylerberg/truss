@@ -1813,6 +1813,9 @@ let () =
         (Support.apply_edit generic
            ("-> UInt64 ensures result == items.length()))", "-> UInt64 ensures result == 0))"))
         "prover.ensures");
+  Harness.test "a function named as a value has no clause whose condition its type does not meet"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.conditional_clause_of_a_function_value "prover.ensures");
   Harness.test "a function named as a value in its own ensures is read once" (fun () ->
       expect_codes Fixtures.Prover.function_named_as_a_value_in_its_own_ensures
         [ "prover.circular_proof" ]);

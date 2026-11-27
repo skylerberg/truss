@@ -129,18 +129,6 @@ let call_contract (frame : State.frame) (site : Invocation.site) (callee : Calle
   let may_abort = Callee.may_abort frame.environment definition in
   let is_unspecified_application = may_abort && (frame : State.frame).is_ghost in
   let substitution_of = definition.substitution_of in
-  let keep_holding_clauses clauses =
-    Conditions.keep_holding frame.environment frame.query ~substitution:(substitution_of clauses)
-      clauses
-  in
-  let contract =
-    {
-      contract with
-      callee_clauses = keep_holding_clauses contract.callee_clauses;
-      trait_clauses = Option.map keep_holding_clauses contract.trait_clauses;
-      restated_clauses = List.map keep_holding_clauses contract.restated_clauses;
-    }
-  in
   let is_logic_call =
     contract.is_logic_function && Facts.remove_panic callee.uses = Types.no_capabilities
   in
