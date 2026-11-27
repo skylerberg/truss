@@ -1,0 +1,110 @@
+fn greet(name: String)
+  uses Console
+{
+  Console.print_line(name)
+}
+
+fn greet_twice(name: String)
+  uses Console
+{
+  greet(name)
+  greet(name)
+}
+
+fn next(count: UInt8) -> UInt8
+  uses Panic
+{
+  count + 1
+}
+
+fn unwrapped(value: Option[Int64]) -> Int64
+  uses Panic
+{
+  value.expect("a value")
+}
+
+fn incremented(values: List[UInt8]) -> List[UInt8]
+  uses Panic
+{
+  values.map(fn(value) { value + 1 })
+}
+
+fn both_next(left: Int64, right: Int64) -> Int64
+  uses Panic
+{
+  parallel {
+    let first = left + 1
+    let second = right + 1
+  }
+  first.saturating_add(second)
+}
+
+fn apply(visit: (fn() uses generic Granted))
+  uses generic Granted
+{
+  visit()
+}
+
+fn shout()
+  uses Console
+{
+  apply(fn() { Console.print_line("hey") })
+}
+
+fn spin()
+  uses RunForever
+{
+  while true {
+  }
+}
+
+fn visit_all(items: List[Int64])
+  uses Tasks
+{
+  concurrent for item in items {
+    let _ = item
+  }
+}
+
+fn ping(count: UInt64)
+  uses Console, RunForever
+{
+  if count > 0 {
+    pong(count - 1)
+  }
+}
+
+fn pong(count: UInt64)
+  uses Console, RunForever
+{
+  Console.print_line("pong")
+  if count > 0 {
+    ping(count - 1)
+  }
+}
+
+fn later()
+  uses Console
+{
+  todo
+}
+
+trait Greeter {
+  fn greet(self)
+    uses Console
+}
+
+type Quiet(level: UInt8)
+
+impl Greeter for Quiet {
+  fn greet(self)
+    uses Console
+  {
+  }
+}
+
+test "prints"
+  uses Console
+{
+  Console.print_line("hello")
+}

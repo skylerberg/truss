@@ -212,7 +212,7 @@ module Code : sig
     | Unused_variable
     | Unused_function
     | Unused_constant
-    | Unused_run_forever
+    | Unused_capability
     | Unmodified_part
     | Unreachable_code
     | Self_comparison

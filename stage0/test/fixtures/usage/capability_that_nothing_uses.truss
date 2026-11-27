@@ -1,0 +1,5 @@
+fn greeting(name: String) -> String
+  uses Console
+{
+  "Hello, ${name}"
+}

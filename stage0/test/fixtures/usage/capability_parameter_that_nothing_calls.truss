@@ -1,0 +1,5 @@
+fn later(run: (fn() uses generic Granted)) -> (fn() uses generic Granted)
+  uses generic Granted
+{
+  run
+}

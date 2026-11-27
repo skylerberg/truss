@@ -14,7 +14,7 @@ val contract : Core.t Tracker.fact
 val body : Infer.checked Tracker.fact
 val body_form : Core.t Tracker.view
 val body_tables : Infer.tables Tracker.view
-val uses_run_forever : bool Tracker.view
+val capability_uses : Infer.capability_use list Tracker.view
 val ownership_modes : ((Syntax.id * Language.Mode.t) list * Core.mode_keyword list) Tracker.view
 val body_mir : Mir.body_part Tracker.fact
 val contract_mir : Mir.contract_part Tracker.fact

@@ -111,7 +111,7 @@ let list_targets : read -> (Database.Kind.target * int * string) list = function
       | Type_facts _ -> of_facts [ Type_facts ]
       | Signature_check _ -> of_facts [ Checked_interface ]
       | Contract _ -> of_facts [ Contract ]
-      | Checked_body _ -> of_facts [ Body_form; Body_tables; Run_forever; Ownership_modes ]
+      | Checked_body _ -> of_facts [ Body_form; Body_tables; Capability_uses; Ownership_modes ]
       | Body_mir _ -> of_facts [ Body_mir ]
       | Generated_mir _ -> of_facts [ Generated_mir ]
       | Call_edges _ -> of_facts [ Callees ]

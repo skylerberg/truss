@@ -1,0 +1,15 @@
+type LoadedDie(face: UInt64)
+
+impl Random for LoadedDie {
+  fn next(self) -> UInt64 {
+    self.face
+  }
+}
+
+fn roll() -> UInt64
+  uses Random
+{
+  provide LoadedDie(face: 5) {
+    Random.next()
+  }
+}

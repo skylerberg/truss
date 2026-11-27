@@ -1,5 +1,5 @@
 fn spin[Source: Cursor](source: own Source) -> UInt64
-  uses Source.Uses, RunForever unless Source: FiniteCursor
+  uses RunForever unless Source: FiniteCursor
 {
   var cursor = own source
   var count: UInt64 = 0

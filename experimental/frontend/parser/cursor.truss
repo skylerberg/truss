@@ -38,9 +38,7 @@ type TokenCursor(
   diagnostics: List[source.Diagnostic],
 )
 
-fn compute_group_ends(tables: token.Tables) -> List[UInt64]
-  uses Panic
-{
+fn compute_group_ends(tables: token.Tables) -> List[UInt64] {
   var ends: List[UInt64] = List.with_capacity(tables.tokens.length())
   var openers: List[UInt64] = []
   for entry in tables.tokens.enumerate() {
@@ -76,9 +74,7 @@ fn continues_type_arguments(kind: token.Kind) -> Bool {
   }
 }
 
-fn list_angle_closers(tables: token.Tables) -> List[Option[UInt64]]
-  uses Panic
-{
+fn list_angle_closers(tables: token.Tables) -> List[Option[UInt64]] {
   var closers: List[Option[UInt64]] = List.filled(None, count: tables.tokens.length())
   var openers: List[UInt64] = []
   var enclosing: List[List[UInt64]] = []
@@ -120,9 +116,7 @@ fn list_angle_closers(tables: token.Tables) -> List[Option[UInt64]]
   closers
 }
 
-fn TokenCursor.create(tables: own token.Tables, file_stop: UInt64) -> TokenCursor
-  uses Panic
-{
+fn TokenCursor.create(tables: own token.Tables, file_stop: UInt64) -> TokenCursor {
   let group_ends = compute_group_ends(tables)
   let angle_closers = list_angle_closers(tables)
   TokenCursor(
@@ -342,9 +336,7 @@ fn TokenCursor.read_span(self, id: UInt64) -> source.Span
   self.spans.get(id).expect("a node id")
 }
 
-fn set_span(cursor: mut TokenCursor, id: UInt64, span: source.Span)
-  uses Panic
-{
+fn set_span(cursor: mut TokenCursor, id: UInt64, span: source.Span) {
   if id < cursor.spans.length() {
     cursor.spans[id] = span
   }
@@ -694,9 +686,7 @@ fn parse_lines[Item](
   items
 }
 
-fn sort_unique(spans: own List[source.Span]) -> List[source.Span]
-  uses Panic
-{
+fn sort_unique(spans: own List[source.Span]) -> List[source.Span] {
   var sorted = own spans
   mut sorted.sort()
   var unique: List[source.Span] = []

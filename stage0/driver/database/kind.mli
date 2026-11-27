@@ -55,7 +55,7 @@ type fact =
   | Contract
   | Body_form
   | Body_tables
-  | Run_forever
+  | Capability_uses
   | Ownership_modes
   | Body_mir
   | Contract_mir

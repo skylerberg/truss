@@ -1,7 +1,7 @@
 fn limit(n: UInt64) -> UInt64
   uses Panic
 {
-  n
+  n + 1
 }
 
 fn count(n: UInt64) -> UInt64

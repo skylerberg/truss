@@ -212,7 +212,7 @@ module Code = struct
     | Unused_variable
     | Unused_function
     | Unused_constant
-    | Unused_run_forever
+    | Unused_capability
     | Unmodified_part
     | Unreachable_code
     | Self_comparison
@@ -514,7 +514,7 @@ module Code = struct
     | Unused_variable -> "unused_variable"
     | Unused_function -> "unused_function"
     | Unused_constant -> "unused_constant"
-    | Unused_run_forever -> "unused_run_forever"
+    | Unused_capability -> "unused_capability"
     | Unmodified_part -> "unmodified_part"
     | Unreachable_code -> "unreachable_code"
     | Self_comparison -> "self_comparison"

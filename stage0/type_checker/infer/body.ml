@@ -1,10 +1,15 @@
+type capability_use = Capabilities.capability_use = {
+  capabilities : Types.capability_set;
+  callee : Path.t option;
+}
+
 type checked = {
   form : Core.t;
   tables : Tables.published;
   used_packages : Path.package list;
   places_without_keyword : (Syntax.id * Language.Mode.t) list;
   mode_keywords : Core.mode_keyword list;
-  uses_run_forever : bool;
+  capability_uses : capability_use list;
 }
 
 let no_output : State.env =
@@ -469,21 +474,21 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       ~checks_body ~has_syntax_error
   in
   let checked = if is_clean tables then Some (build tables) else None in
-  let uses_run_forever =
+  let capability_uses =
     match checked with
     | Some form ->
         check_bit_vector_names state form;
-        let uses_run_forever = Capabilities.check state elaborated form in
+        let capability_uses = Capabilities.check state elaborated form in
         check_deserialized_invariants state elaborated form;
-        Some uses_run_forever
+        Some capability_uses
     | None ->
         state.capability_solution <- Some (Hashtbl.create 1);
         None
   in
   let has_capability_variables = state.unifier.capability_variable_count > 0 in
   let tables = if has_capability_variables then finalize () else tables in
-  match (checked, uses_run_forever) with
-  | Some form, Some uses_run_forever when is_clean tables ->
+  match (checked, capability_uses) with
+  | Some form, Some capability_uses when is_clean tables ->
       let form = if has_capability_variables then build tables else form in
       Ok
         {
@@ -493,7 +498,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
             list_used_packages resolved ~evidence_packages:state.evidence_packages form;
           places_without_keyword = state.places_without_keyword;
           mode_keywords = state.mode_keywords;
-          uses_run_forever;
+          capability_uses;
         }
   | _ ->
       let reported = Hashtbl.create 16 in

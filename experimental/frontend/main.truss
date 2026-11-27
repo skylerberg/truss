@@ -74,9 +74,7 @@ fn advance_string(
   enclosing: ShownRun,
   strings: mut List[ShownString],
   text: mut String,
-) -> ShownRun
-  uses Panic
-{
+) -> ShownRun {
   if segment >= literal.rest.length() {
     write_suffix(string_token, text: mut text)
     return enclosing
@@ -94,9 +92,7 @@ fn open_string(
   enclosing: ShownRun,
   strings: mut List[ShownString],
   text: mut String,
-) -> ShownRun
-  uses Panic
-{
+) -> ShownRun {
   mut text.push("string ")
   if literal.tag is Some(tag) {
     mut text.push("tag ${tag.name} ${show_span(tag.span)} ")

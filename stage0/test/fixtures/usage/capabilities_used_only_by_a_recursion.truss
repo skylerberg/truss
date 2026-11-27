@@ -1,0 +1,11 @@
+fn is_even(count: UInt64) -> Bool
+  uses Console, RunForever
+{
+  if count == 0 { true } else { is_odd(count - 1) }
+}
+
+fn is_odd(count: UInt64) -> Bool
+  uses Console, RunForever
+{
+  if count == 0 { false } else { is_even(count - 1) }
+}

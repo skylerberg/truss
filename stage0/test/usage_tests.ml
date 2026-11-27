@@ -156,7 +156,7 @@ let () =
       expect_fine Fixtures.Usage.mut_bindings_written_through)
 
 let () =
-  let expect_removed text fixed = expect_one_diagnostic ~fixed text "usage.unused_run_forever" in
+  let expect_removed text fixed = expect_one_diagnostic ~fixed text "usage.unused_capability" in
   Harness.test "a RunForever that nothing uses is reported, and removing it joins the brace"
     (fun () ->
       expect_removed Fixtures.Usage.run_forever_that_nothing_uses
@@ -192,5 +192,54 @@ let () =
   Harness.test "a while loop in a lambda does not use its enclosing function's RunForever"
     (fun () ->
       expect_one_diagnostic Fixtures.Usage.run_forever_beside_a_while_loop_in_a_lambda
-        "usage.unused_run_forever"
+        "usage.unused_capability"
         ~fixed:("fn f(count: UInt32)\n  uses RunForever\n{", "fn f(count: UInt32) {"))
+
+let () =
+  let expect_removed ?says text fixed =
+    expect_one_diagnostic ?says ~fixed text "usage.unused_capability"
+  in
+  Harness.test "a capability used by a call, an operation, a lambda, or a recursion is not reported"
+    (fun () -> expect_fine Fixtures.Usage.capabilities_used_in_each_way);
+  Harness.test "a capability that nothing uses is reported, with a fix that removes it" (fun () ->
+      expect_removed Fixtures.Usage.capability_that_nothing_uses
+        ~says:
+          "Nothing in `app.main.greeting` uses `Console`, so no caller of `app.main.greeting` \
+           needs it. Remove it."
+        ( "fn greeting(name: String) -> String\n  uses Console\n{",
+          "fn greeting(name: String) -> String {" ));
+  Harness.test "a Panic with a condition that nothing uses is removed with its condition" (fun () ->
+      expect_removed Fixtures.Usage.panic_unless_that_nothing_uses
+        ( "fn length(values: List[UInt64]) -> UInt64\n  uses Panic unless values.length() > 0\n{",
+          "fn length(values: List[UInt64]) -> UInt64 {" ));
+  Harness.test "a capability that a provide gives is not a use of the declared one" (fun () ->
+      expect_removed Fixtures.Usage.capability_given_by_a_provide
+        ("fn roll() -> UInt64\n  uses Random\n{", "fn roll() -> UInt64 {"));
+  Harness.test "returning a lambda does not use the capabilities that the lambda uses" (fun () ->
+      expect_removed Fixtures.Usage.capability_of_a_returned_lambda
+        ( "fn greeter() -> (fn(String) uses Console)\n  uses Console\n{",
+          "fn greeter() -> (fn(String) uses Console) {" ));
+  Harness.test "a capability parameter is unused where no function that uses it is called"
+    (fun () ->
+      expect_removed Fixtures.Usage.capability_parameter_that_nothing_calls
+        ( "-> (fn() uses generic Granted)\n  uses generic Granted\n{",
+          "-> (fn() uses generic Granted) {" ));
+  Harness.test "a capability that only calls within a recursion use is reported for each member"
+    (fun () ->
+      Support.expect_codes ~check Fixtures.Usage.capabilities_used_only_by_a_recursion
+        [ "usage.unused_capability"; "usage.unused_capability" ];
+      List.iter
+        (fun (diagnostic : Diagnostic.t) ->
+          if not (String.includes ~affix:"uses `Console`" diagnostic.message) then
+            Harness.fail "%s" diagnostic.message)
+        (list_diagnostics Fixtures.Usage.capabilities_used_only_by_a_recursion));
+  Harness.test "a call in a quantifier does not use its test's Panic" (fun () ->
+      expect_removed Fixtures.Usage.panic_used_only_in_a_quantifier
+        ("present\" uses Panic {", "present\" {"));
+  Harness.test "an operation in a specification does not use Panic" (fun () ->
+      expect_removed Fixtures.Usage.panic_used_only_in_an_ensures
+        ("  uses Panic\n  ensures", "  ensures"));
+  Harness.test "a test's capability that nothing uses is removed with its uses keyword" (fun () ->
+      expect_removed Fixtures.Usage.test_capability_that_nothing_uses
+        ~says:"Nothing in the test \"adds\" uses `Console`. Remove it."
+        ("test \"adds\" uses Console {", "test \"adds\" {"))

@@ -125,14 +125,14 @@ let body : Infer.checked Tracker.fact =
       [
         (Body_form, [ "form" ]);
         (Body_tables, [ "tables" ]);
-        (Run_forever, [ "uses_run_forever" ]);
+        (Capability_uses, [ "capability_uses" ]);
         (Ownership_modes, [ "places_without_keyword"; "mode_keywords" ]);
       ]
     ~encode:(fun (checked : Infer.checked) ->
       [
         Tracker.marshal checked.form;
         Tracker.marshal checked.tables;
-        Integer (Bool.to_int checked.uses_run_forever);
+        Tracker.marshal checked.capability_uses;
         Tracker.marshal checked.places_without_keyword;
         Tracker.marshal checked.mode_keywords;
       ])
@@ -141,7 +141,7 @@ let body : Infer.checked Tracker.fact =
         form = Tracker.unmarshal cells.(0);
         tables = Tracker.unmarshal cells.(1);
         used_packages = [];
-        uses_run_forever = decode_boolean cells.(2);
+        capability_uses = Tracker.unmarshal cells.(2);
         places_without_keyword = Tracker.unmarshal cells.(3);
         mode_keywords = Tracker.unmarshal cells.(4);
       })
@@ -156,8 +156,8 @@ let body_form : Core.t Tracker.view =
 let body_tables : Infer.tables Tracker.view =
   make_body_view Body_tables [ "tables" ] (fun cells -> Tracker.unmarshal cells.(0))
 
-let uses_run_forever : bool Tracker.view =
-  make_body_view Run_forever [ "uses_run_forever" ] (fun cells -> decode_boolean cells.(0))
+let capability_uses : Infer.capability_use list Tracker.view =
+  make_body_view Capability_uses [ "capability_uses" ] (fun cells -> Tracker.unmarshal cells.(0))
 
 let ownership_modes : ((Syntax.id * Language.Mode.t) list * Core.mode_keyword list) Tracker.view =
   make_body_view Ownership_modes [ "places_without_keyword"; "mode_keywords" ] (fun cells ->

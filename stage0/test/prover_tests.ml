@@ -1,9 +1,10 @@
 let check_file database file =
-  match
+  let diagnostics =
     Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database file
-  with
-  | [] -> Support.list_proof_diagnostics database file
-  | errors -> errors
+  in
+  if List.exists (fun (diagnostic : Diagnostic.t) -> diagnostic.severity = Error) diagnostics then
+    diagnostics
+  else diagnostics @ Support.list_proof_diagnostics database file
 
 let check packages = check_file (Support.make_database packages)
 let expect_proven text = Support.expect_no_diagnostics ~check [ ("app.main", text) ]
@@ -145,19 +146,18 @@ let () =
   Harness.test "the `uses Panic` fix joins the function's `uses` clause" (fun () ->
       Support.expect_one_diagnostic ~check Fixtures.Prover.overflow_in_a_function_with_other_clauses
         "prover.overflow" ~at:("value + 1", 1)
-        ~fixed:
-          ( "ensures true\n{\n  value + 1",
-            "ensures true\n  requires value <= UInt8.maximum - 1\n{\n  value + 1" )
-        ~alternatives:[ ("Clock", "Clock, Panic") ]);
+        ~fixed:("ensures true\n{", "ensures true\n  requires value <= UInt8.maximum - 1\n{")
+        ~alternatives:[ ("uses Clock", "uses Clock, Panic") ]);
   Harness.test "a function that declares `uses Panic` lets its integer operations panic" (fun () ->
       expect_codes Fixtures.Prover.failing_operations_of_a_function_that_may_panic
-        [
-          "prover.out_of_bounds";
-          "prover.out_of_bounds";
-          "prover.requires";
-          "prover.requires";
-          "prover.requires";
-        ]);
+        ([
+           "prover.out_of_bounds";
+           "prover.out_of_bounds";
+           "prover.requires";
+           "prover.requires";
+           "prover.requires";
+         ]
+        @ List.init 5 (fun _ -> "usage.unused_capability")));
   Harness.test "a function that uses `Panic unless` a bound proves its operations where it holds"
     (fun () ->
       expect_not_proven Fixtures.Prover.operation_that_panics_unless_a_bound_holds "prover.overflow"
@@ -175,21 +175,27 @@ let () =
   Harness.test "a test that declares `Panic` lets its integer operations panic, as a function does"
     (fun () ->
       expect_codes Fixtures.Prover.test_indexing_by_a_sum_from_a_loop [ "prover.out_of_bounds" ]);
-  Harness.test "a lambda passed as a function type without `Panic` proves its operations" (fun () ->
+  Harness.test
+    "a lambda passed as a function type without `Panic` proves its operations, so its function's \
+     `Panic` is unused" (fun () ->
       match
-        check
-          (Support.setup
-             [ ("app.main", Fixtures.Prover.overflow_in_a_lambda_of_a_function_that_may_panic) ])
-          (Support.parse_file "app.main")
+        List.partition
+          (fun (diagnostic : Diagnostic.t) ->
+            Diagnostic.Code.name diagnostic.code = "usage.unused_capability")
+          (check
+             (Support.setup
+                [ ("app.main", Fixtures.Prover.overflow_in_a_lambda_of_a_function_that_may_panic) ])
+             (Support.parse_file "app.main"))
       with
-      | [ diagnostic ] ->
+      | [ _ ], [ diagnostic ] ->
           if
             (not (String.includes ~affix:"may overflow `UInt8`" diagnostic.message))
             || List.exists
                  (fun (fix : Source.span Diagnostic.fix) -> fix.title = "Add `uses Panic`")
                  diagnostic.fixes
           then Harness.fail "message %S" diagnostic.message
-      | diagnostics -> Harness.fail "%s" (String.concat ", " (Support.list_codes diagnostics)));
+      | unused, others ->
+          Harness.fail "%s" (String.concat ", " (Support.list_codes (unused @ others))));
   Harness.test "a lambda whose capabilities are inferred takes `Panic` for an operation that fails"
     (fun () ->
       expect_proven Fixtures.Prover.overflow_in_a_lambda_passed_where_its_capabilities_are_inferred;
@@ -199,14 +205,11 @@ let () =
       expect_not_proven Fixtures.Prover.overflow_in_a_lambda_of_a_test "prover.overflow");
   Harness.test "an index through a bound is proven in a function that declares `uses Panic`"
     (fun () ->
-      expect_not_proven Fixtures.Prover.index_through_a_bound_of_a_function_that_may_panic
-        "prover.requires"
-        ~fixed:
-          ( "uses Panic\n{\n  inspect(collection[key])",
-            "uses Panic\n  requires collection.contains_key(key)\n{\n  inspect(collection[key])" ));
+      expect_codes Fixtures.Prover.index_through_a_bound_of_a_function_that_may_panic
+        [ "prover.requires"; "usage.unused_capability" ]);
   Harness.test "an unreachable is proven in a function that declares `uses Panic`" (fun () ->
-      expect_not_proven Fixtures.Prover.unreachable_of_a_function_that_may_panic
-        "prover.unreachable")
+      expect_codes Fixtures.Prover.unreachable_of_a_function_that_may_panic
+        [ "prover.unreachable"; "usage.unused_capability" ])
 
 let () =
   Harness.test "a call must meet its callee's requires" (fun () ->
@@ -1398,18 +1401,8 @@ let () =
            }\n")
          "prover.ensures");
    Harness.test "a modifies entry that the body never changes leaves the proof to run" (fun () ->
-       let packages =
-         Support.setup [ ("app.main", Fixtures.Prover.increment_under_an_unchanged_modifies_entry) ]
-       in
-       let file = Support.parse_file "app.main" in
-       (match Support.list_codes (check packages file) with
-       | [ "usage.unmodified_part" ] -> ()
-       | codes -> Harness.fail "checking: %s" (String.concat ", " codes));
-       match
-         Support.list_codes (Support.list_proof_diagnostics (Support.make_database packages) file)
-       with
-       | [ "prover.overflow" ] -> ()
-       | codes -> Harness.fail "proving: %s" (String.concat ", " codes));
+       expect_codes Fixtures.Prover.increment_under_an_unchanged_modifies_entry
+         [ "usage.unmodified_part"; "prover.overflow" ]);
    Harness.test "a loop keeps the parts that its body and its callees do not change" (fun () ->
        let loop ~body =
          scanner

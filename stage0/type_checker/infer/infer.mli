@@ -21,13 +21,18 @@ type tables = Tables.published = {
 
 val statement_diverges : tables -> Syntax.statement -> bool
 
+type capability_use = Body.capability_use = {
+  capabilities : Types.capability_set;
+  callee : Path.t option;
+}
+
 type checked = Body.checked = {
   form : Core.t;
   tables : tables;
   used_packages : Path.package list;
   places_without_keyword : (Syntax.id * Language.Mode.t) list;
   mode_keywords : Core.mode_keyword list;
-  uses_run_forever : bool;
+  capability_uses : capability_use list;
 }
 
 val check_contract : Lookups.t -> Resolve.Names.key -> (checked, Catalog.diagnostic list) result

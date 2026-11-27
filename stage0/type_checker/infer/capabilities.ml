@@ -1,10 +1,18 @@
 let tasks : Types.capability = Capability (Well_known.make_path Tasks)
 
+type capability_use = { capabilities : Types.capability_set; callee : Path.t option }
+
+type recorded_use = {
+  used : Types.capability_set;
+  restrictions : Types.capability_set list;
+  provided : Types.capability_set;
+  callee : Path.t option;
+}
+
 type checking = {
   state : State.state;
   mutable provides : (Types.capability_set * Core.implementation list * Core.block) list;
-  mutable body_requirements : Types.capability_set list;
-  mutable has_implicit_measure_loop : bool;
+  mutable recorded_uses : recorded_use list;
 }
 
 let report checking diagnostic =
@@ -14,7 +22,7 @@ type function_body = { path : Path.t; implementation : Interface.Impls.implement
 
 type scope_kind =
   | Function_body of function_body
-  | Lambda_body of { origin : Core.origin; enclosing_panic : Types.capability option }
+  | Lambda_body of { origin : Core.origin; enclosing : scope }
   | Restricted of { restriction : Catalog.Capabilities.restriction; enclosing : scope option }
 
 and scope = { allowed : Types.capability_set; provided : Types.capability_set; kind : scope_kind }
@@ -107,6 +115,16 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.operand C
       | Impl _ | Derived_for_view _ | Bound -> ())
   | Capability_method _ | Intrinsic _ | Indirect _ -> ()
 
+let rec record_use checking scope ?(restrictions = []) ?callee (used : Types.capability_set) =
+  if used <> Types.no_capabilities then
+    match scope.kind with
+    | Function_body _ ->
+        checking.recorded_uses <-
+          { used; restrictions; provided = scope.provided; callee } :: checking.recorded_uses
+    | Restricted { enclosing = Some enclosing; _ } ->
+        record_use checking enclosing ~restrictions:(scope.allowed :: restrictions) ?callee used
+    | Lambda_body _ | Restricted { enclosing = None; _ } -> ()
+
 let rec require_available checking scope (origin : Core.origin) ~subject ?alternative
     ?(indirect_call = false) ?restriction (required : Types.capability_set) =
   let state = checking.state in
@@ -167,9 +185,6 @@ let rec require_available checking scope (origin : Core.origin) ~subject ?altern
       (Types.list_capabilities missing)
   in
   if required <> Types.no_capabilities then begin
-    (match scope.kind with
-    | Function_body _ -> checking.body_requirements <- required :: checking.body_requirements
-    | Lambda_body _ | Restricted _ -> ());
     state.capability_constraints <-
       { subset = required; restriction; superset; report_missing } :: state.capability_constraints;
     match find_enclosing_restriction scope with
@@ -184,50 +199,47 @@ let rec require_available checking scope (origin : Core.origin) ~subject ?altern
     | None -> ()
   end
 
-let compute_required_uses state scope (callee : Core.callee) =
-  let uses =
-    Types.replace_capabilities
-      (function Types.Capability_unless_values _ -> Some Types.no_capabilities | _ -> None)
-      callee.uses
-  in
+let use_capabilities checking scope (origin : Core.origin) ~subject ?alternative ?indirect_call
+    ?callee (used : Types.capability_set) =
+  record_use checking scope ?callee used;
+  require_available checking scope origin ~subject ?alternative ?indirect_call
+    (Types.replace_capabilities
+       (function Types.Capability_unless_values _ -> Some Types.no_capabilities | _ -> None)
+       used)
+
+let compute_callee_uses state scope (callee : Core.callee) =
   match (callee.target, find_implemented_capability scope) with
   | Intrinsic _, Some _ ->
-      Types.subtract_capabilities ~implies:(implies state) uses
+      Types.subtract_capabilities ~implies:(implies state) callee.uses
         (Types.make_capability_set [ tasks ])
-  | (Function _ | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _), _ -> uses
+  | (Function _ | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _), _ -> callee.uses
 
 let require_callee_uses checking scope (origin : Core.origin) (callee : Core.callee) =
   check_callee_grants checking origin callee.target;
-  require_available checking scope origin ~subject:(Call origin)
+  use_capabilities checking scope origin ~subject:(Call origin)
     ~indirect_call:(match callee.target with Indirect _ -> true | _ -> false)
-    (compute_required_uses checking.state scope callee)
+    ?callee:(match callee.target with Function { path; _ } -> Some path | _ -> None)
+    (compute_callee_uses checking.state scope callee)
 
 let require_run_forever_of_unmeasured_loop checking scope (origin : Core.origin) ~alternative =
-  require_available checking scope origin ~subject:Unmeasured_loop ~alternative
+  use_capabilities checking scope origin ~subject:Unmeasured_loop ~alternative
     (Types.make_capability_set [ Built_in Run_forever ])
 
 let require_run_forever_unless checking scope (origin : Core.origin) condition =
-  require_available checking scope origin ~subject:(Conditionally_measured_loop condition)
+  use_capabilities checking scope origin ~subject:(Conditionally_measured_loop condition)
     (Types.make_capability_set
        (Option.to_list (Types.make_unless (Built_in Run_forever) condition)))
-
-let rec note_implicit_measure checking scope =
-  match scope.kind with
-  | Function_body _ -> checking.has_implicit_measure_loop <- true
-  | Restricted { enclosing = Some enclosing; _ } -> note_implicit_measure checking enclosing
-  | Lambda_body _ | Restricted { enclosing = None; _ } -> ()
 
 let find_available_panic scope =
   List.find_opt
     (fun capability -> Types.find_base capability = Built_in Panic)
     (Types.list_capabilities (compute_available scope))
 
-let find_panic_for_lambda scope =
+let rec find_panic_source scope =
   match (find_available_panic scope, scope.kind) with
-  | Some panic, _ -> Some panic
-  | None, Lambda_body { enclosing_panic; _ } when Types.contains_capability_variable scope.allowed
-    ->
-      enclosing_panic
+  | Some panic, _ -> Some (scope, panic)
+  | None, Lambda_body { enclosing; _ } when Types.contains_capability_variable scope.allowed ->
+      find_panic_source enclosing
   | None, (Function_body _ | Lambda_body _ | Restricted _) -> None
 
 let can_fail (operation : Intrinsic.scalar) ty =
@@ -238,13 +250,21 @@ let can_fail (operation : Intrinsic.scalar) ty =
   | _ -> false
 
 let require_panic_of_failing_operation checking scope (origin : Core.origin) =
-  match scope.kind with
-  | Lambda_body { enclosing_panic = Some panic; _ }
+  (match scope.kind with
+  | Lambda_body { enclosing; _ }
     when Option.is_none (find_available_panic scope)
-         && Types.contains_capability_variable scope.allowed ->
-      require_available checking scope origin ~subject:Failing_operation
-        (Types.make_capability_set [ panic ])
-  | Function_body _ | Lambda_body _ | Restricted _ -> ()
+         && Types.contains_capability_variable scope.allowed -> (
+      match find_panic_source enclosing with
+      | Some (_, panic) ->
+          require_available checking scope origin ~subject:Failing_operation
+            (Types.make_capability_set [ panic ])
+      | None -> ())
+  | Function_body _ | Lambda_body _ | Restricted _ -> ());
+  match find_panic_source scope with
+  | Some (source, _) ->
+      record_use checking source
+        (Types.make_capability_set [ Capability_unless_values (Built_in Panic) ])
+  | None -> ()
 
 let compute_node_origin = function
   | `Expression (inner : Core.expression) -> inner.origin
@@ -258,10 +278,11 @@ let rec check_expression checking scope (node : Core.expression) =
         match node.type_ with Types.Function { uses; _ } -> uses | _ -> Types.no_capabilities
       in
       check_block checking
-        (make_scope ~allowed
-           (Lambda_body { origin = node.origin; enclosing_panic = find_panic_for_lambda scope }))
+        (make_scope ~allowed (Lambda_body { origin = node.origin; enclosing = scope }))
         body
-  | Operator { operation; _ } when can_fail operation node.type_ ->
+  | Operator { operation; _ }
+  | Call { callee = { target = Intrinsic { operation = Scalar operation; _ }; _ }; _ }
+    when can_fail operation node.type_ ->
       require_panic_of_failing_operation checking scope node.origin;
       check_children checking scope (`Expression node)
   | Provide { implementations; body } -> check_provide checking scope implementations body
@@ -299,7 +320,7 @@ and check_statement checking scope (statement : Core.statement) =
         (check_statement checking (make_parallel_scope ~enclosing:scope Parallel_branch))
         branches
   | Concurrent branches ->
-      require_available checking scope statement.origin ~subject:Concurrent_block
+      use_capabilities checking scope statement.origin ~subject:Concurrent_block
         (Types.make_capability_set [ tasks ]);
       List.iter (check_statement checking scope) branches
   | For { mode; pattern; iteration; clauses; body } ->
@@ -331,14 +352,15 @@ and check_statement checking scope (statement : Core.statement) =
         | Parallel -> make_parallel_scope ~enclosing:scope Parallel_for
         | Sequential -> scope
         | Concurrent ->
-            require_available checking scope statement.origin ~subject:Concurrent_for_loop
+            use_capabilities checking scope statement.origin ~subject:Concurrent_for_loop
               (Types.make_capability_set [ tasks ]);
             scope)
         body
   | While { condition; clauses; body; _ } ->
       (match Core_walk.find_measure_condition clauses with
       | Some [] -> ()
-      | _ when Core_walk.has_implicit_measure condition -> note_implicit_measure checking scope
+      | _ when Core_walk.has_implicit_measure condition ->
+          record_use checking scope (Types.make_capability_set [ Built_in Run_forever ])
       | Some measured_when ->
           require_run_forever_unless checking scope statement.origin measured_when
       | None ->
@@ -401,7 +423,7 @@ and check_provide checking scope implementations body =
                { capability = provided.capability; for_type = interface.for_type })
             (Path.locate_package provided.impl)
             interface.impl_uses;
-          require_available checking scope implementation.origin ~subject:Implementation
+          use_capabilities checking scope implementation.origin ~subject:Implementation
             interface.impl_uses)
         impls;
       provided :=
@@ -611,11 +633,43 @@ let check_monitor_callbacks checking implementations =
              ~package:state.package implementation.type_))
     implementations
 
+let list_uses checking =
+  let state = checking.state in
+  let implies = implies state in
+  let is_allowed_by restriction capability =
+    Types.is_capability_subset ~implies (Types.make_capability_set [ capability ]) restriction
+  in
+  let resolve (recorded : recorded_use) =
+    let used =
+      List.filter
+        (fun capability ->
+          List.for_all
+            (fun restriction -> is_allowed_by restriction capability)
+            recorded.restrictions)
+        (Types.list_capabilities (State.finalize_capabilities state recorded.used))
+    in
+    Types.subtract_capabilities ~implies (Types.make_capability_set used) recorded.provided
+  in
+  let merged =
+    List.fold_left
+      (fun merged (recorded : recorded_use) ->
+        let capabilities = resolve recorded and callee = recorded.callee in
+        if capabilities = Types.no_capabilities then merged
+        else
+          match List.assoc_opt callee merged with
+          | Some earlier ->
+              (callee, Types.union_capabilities earlier capabilities)
+              :: List.remove_assoc callee merged
+          | None -> (callee, capabilities) :: merged)
+      [] checking.recorded_uses
+  in
+  List.map
+    (fun (callee, capabilities) -> { capabilities; callee })
+    (List.sort (fun (left, _) (right, _) -> Option.compare Path.compare left right) merged)
+
 let check (state : State.state) (elaborated : Interface.Environment.elaborated_interface)
     (form : Core.t) =
-  let checking =
-    { state; provides = []; body_requirements = []; has_implicit_measure_loop = false }
-  in
+  let checking = { state; provides = []; recorded_uses = [] } in
   let make_function_body_scope allowed =
     let path = state.key.path in
     make_scope ~allowed
@@ -701,14 +755,4 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
           check_monitor_callbacks checking implementations;
           check_monitor_lock checking ~read_solved available implementations)
     (List.rev checking.provides);
-  checking.has_implicit_measure_loop
-  || List.exists
-       (fun required ->
-         List.exists
-           (fun capability -> Types.find_base capability = Built_in Run_forever)
-           (Types.list_capabilities
-              (Types.replace_capabilities
-                 (function
-                   | Types.Capability_variable variable -> Some (read_solved variable) | _ -> None)
-                 (State.finalize_capabilities state required))))
-       checking.body_requirements
+  list_uses checking
