@@ -1,5 +1,6 @@
 fn main(arguments: List[String]) -> ExitCode
   uses Console
 {
+  Console.print_line("started")
   ExitCode(0)
 }

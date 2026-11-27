@@ -1,7 +1,7 @@
 use standard.network
 
 fn main(arguments: List[String]) -> ExitCode
-  uses Console, NetworkServer, NetworkClient, Handles
+  uses Console, NetworkServer, NetworkClient
 {
   let loopback = network.SocketAddress(address: network.IpAddress.loopback, port: 0)
   var unused: UInt16 = 0

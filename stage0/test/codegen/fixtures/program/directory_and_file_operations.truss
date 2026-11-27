@@ -5,7 +5,7 @@ fn say(text: String) uses Console {
 }
 
 fn main(arguments: List[String]) -> ExitCode
-  uses Console, FileRead, FileWrite, Handles, Clock
+  uses Console, FileRead, FileWrite, Clock
 {
   let directory = Path.new("${arguments[1]}/made")
   let file = Path.new("${arguments[1]}/made/first.txt")

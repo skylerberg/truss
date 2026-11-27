@@ -87,7 +87,7 @@ test "retain keeps the elements a function accepts, in order" {
   assert sorted.is_empty()
 }
 
-test "a sorted set is made from elements in any order" uses RunForever {
+test "a sorted set is made from elements in any order" {
   let elements: List[Int64] = [3, 1, 3, 2, 3, 1]
   let sorted: collections.SortedSet[Int64] = collections.SortedSet.from_elements(elements.copy())
   assert listed(sorted) == [1, 2, 3]
