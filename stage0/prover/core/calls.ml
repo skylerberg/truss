@@ -426,17 +426,156 @@ type modelled =
   | Without_contract of (State.frame * Logic.term) option
   | Lent_without_contract of applied
 
-let apply_lend (frame : State.frame) (site : Invocation.site) (callee : Callee.t) ~through
-    (values : State.passed list) =
-  let location = Facts.locate frame site.origin in
-  (match Obligations.find_ruled_out_panic frame with
+let check_panic_is_allowed (frame : State.frame) location (callee : Callee.t) =
+  match Obligations.find_ruled_out_panic frame with
   | Some condition
     when Conditions.may_panic_for_every_value frame.environment.lookups
            ~current:frame.environment.current ~condition:frame.environment.condition callee.uses ->
       Obligations.oblige frame location
         (Panics_where_ruled_out { call = { at = location; callee = None }; condition })
         (Logic.Boolean false)
-  | Some _ | None -> ());
+  | Some _ | None -> ()
+
+let havoc_whole_arguments frame values = havoc_mut frame values ~list_modified:(fun _ -> None)
+
+let call_definition_without_a_contract (frame : State.frame) location (callee : Callee.t)
+    (definition : Callee.definition) (values : State.passed list) ~result_type =
+  let list_modified = Contracts.list_modified_parts frame.environment definition.path in
+  let havoc_and_spend frame =
+    let havoc = havoc_mut frame values ~list_modified in
+    let frame = Amounts.spend_call_without_a_contract havoc.after callee values in
+    havoc.end_writes frame;
+    frame
+  in
+  match callee.lends with
+  | Some Language.Mode.Mut ->
+      let frame = (havoc_mut frame values ~list_modified).after in
+      Lent_without_contract
+        {
+          frame;
+          result = Encoding.arrive frame "result" result_type;
+          end_lend =
+            Some
+              (fun ended final ->
+                Validity.check_valid ended location result_type final ~deep:true
+                  ~moment:When_lend_ends;
+                havoc_and_spend ended);
+        }
+  | Some (Read | Own) | None ->
+      let frame = havoc_and_spend frame in
+      Without_contract (Some (frame, Encoding.arrive frame "result" result_type))
+
+let find_compiler_given_result (frame : State.frame) (callee : Callee.t)
+    ({ trait; self_type; evidence; name; receiver } : Callee.trait_method)
+    (values : State.passed list) ~declared_result_type =
+  let operands = List.map (fun (passed : State.passed) -> passed.term) values in
+  let method_ = Well_known.find_method (Path.Method { owner = trait.trait; name; receiver }) in
+  match (method_, evidence, operands) with
+  | ( Some
+        ( Fixed_width_integer_minimum_value | Fixed_width_integer_maximum_value
+        | Fixed_width_integer_bit_width ),
+      _,
+      [] )
+    when Types.find_integer_bits self_type <> None ->
+      Some
+        (Without_contract
+           (match
+              (method_, Types.find_integer_range self_type, Types.find_integer_bits self_type)
+            with
+           | Some Fixed_width_integer_minimum_value, Some (low, _), _ ->
+               Some (frame, Logic.Integer low)
+           | Some Fixed_width_integer_maximum_value, Some (_, high), _ ->
+               Some (frame, Logic.Integer high)
+           | Some Fixed_width_integer_bit_width, _, Some (bits, _) -> Some (frame, Logic.int bits)
+           | _ -> None))
+  | Some Equal_equal, _, [ left; right ]
+    when Encoding.is_equality_identity frame.environment self_type ->
+      Some (Without_contract (Some (frame, Logic.equal left right)))
+  | ( Some Equal_equal,
+      (Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ }),
+      [ left; right ] ) ->
+      let spent =
+        Amounts.spend_derived_equality frame callee values ~result_type:declared_result_type
+          ~result:(Logic.equal left right)
+      in
+      Some (Without_contract (Some (spent, Operations.make_equality frame self_type left right)))
+  | _ -> None
+
+let call_function_value (frame : State.frame) (site : Invocation.site) ~through
+    (values : State.passed list) ~result_type ~declared_result_type =
+  let function_type, called =
+    match through with
+    | Some (Types.Function function_type, called) -> (function_type, called)
+    | Some _ | None -> Facts.raise_bug "a call through a value that is not a function"
+  in
+  let location = Facts.locate frame site.origin in
+  let entries = List.map (fun (passed : State.passed) -> passed.term) values in
+  let is_defined = Callbacks.oblige_requires frame site called entries in
+  let before = frame in
+  let havoc = havoc_whole_arguments frame values in
+  let frame = havoc.after in
+  let result =
+    if Callbacks.is_in_the_logic function_type then begin
+      let term = Callbacks.apply_function function_type called entries in
+      Facts.assume
+        (Facts.restrict_unless_proven frame is_defined)
+        (Encoding.make_in_range result_type term);
+      term
+    end
+    else Encoding.arrive frame "result" result_type
+  in
+  let is_unspecified_application =
+    frame.is_ghost && not (Types.states_no_allocation function_type.costs)
+  in
+  if not is_unspecified_application then
+    Validity.assume_valid (Facts.restrict_unless_proven frame is_defined) result_type result;
+  let frame =
+    Amounts.spend_indirect_call ~before ~after:frame ~location function_type called values
+      ~changed:(List.rev havoc.written) ~result_type:declared_result_type ~result
+  in
+  if not is_unspecified_application then
+    Callbacks.assume_returned
+      (Facts.restrict_unless_proven frame is_defined)
+      function_type called ~entries
+      ~exits:(List.map (find_written havoc) values)
+      ~result;
+  List.iter
+    (fun (passed : State.passed) ->
+      Option.iter
+        (Validity.assume_valid frame passed.type_)
+        (List.assoc_opt passed.position havoc.written))
+    values;
+  havoc.end_writes frame;
+  (frame, result)
+
+let call_intrinsic (frame : State.frame) ~(site : Invocation.site) (callee : Callee.t) operation
+    type_arguments (values : State.passed list) ~result_type ~declared_result_type =
+  let havoc =
+    match (operation : Intrinsic.operation) with
+    | Lend _ -> { after = frame; written = []; end_writes = ignore }
+    | Scalar _ | Buffer _ | Runtime _ -> havoc_whole_arguments frame values
+  in
+  let frame = havoc.after in
+  let changed = List.map (find_written havoc) values in
+  let types =
+    List.filter_map
+      (function Types.Type ty -> Some (Encoding.substitute_type frame ty) | _ -> None)
+      type_arguments
+  in
+  let result =
+    Intrinsics.translate_intrinsic frame ~site operation types values ~changed result_type
+  in
+  let frame =
+    Amounts.spend_intrinsic frame callee operation values ~changed ~result_type:declared_result_type
+      ~result
+  in
+  havoc.end_writes frame;
+  (frame, result)
+
+let apply_lend (frame : State.frame) (site : Invocation.site) (callee : Callee.t) ~through
+    (values : State.passed list) =
+  let location = Facts.locate frame site.origin in
+  check_panic_is_allowed frame location callee;
   let declared_result_type = Encoding.substitute_declared_type frame site.type_ in
   let result_type = Types.erase_views declared_result_type in
   (match callee.target with
@@ -448,144 +587,30 @@ let apply_lend (frame : State.frame) (site : Invocation.site) (callee : Callee.t
             ~includes_invariants:(not passed.is_step_self)
             ~moment:(When_passed { at = location; callee = None }))
         values);
-  let havoc_whole_arguments frame = havoc_mut frame values ~list_modified:(fun _ -> None) in
   let recursive_callee = Termination.find_recursive_callee frame location callee.group_member in
   let call_definition (definition : Callee.definition) =
     match definition.contract with
     | Some contract ->
         By_contract (call_contract ~recursive_callee frame site callee definition contract values)
-    | None -> (
-        let list_modified = Contracts.list_modified_parts frame.environment definition.path in
-        let havoc_and_spend frame =
-          let havoc = havoc_mut frame values ~list_modified in
-          let frame = Amounts.spend_call_without_a_contract havoc.after callee values in
-          havoc.end_writes frame;
-          frame
-        in
-        match callee.lends with
-        | Some Language.Mode.Mut ->
-            let frame = (havoc_mut frame values ~list_modified).after in
-            Lent_without_contract
-              {
-                frame;
-                result = Encoding.arrive frame "result" result_type;
-                end_lend =
-                  Some
-                    (fun ended final ->
-                      Validity.check_valid ended location result_type final ~deep:true
-                        ~moment:When_lend_ends;
-                      havoc_and_spend ended);
-              }
-        | Some (Read | Own) | None ->
-            let frame = havoc_and_spend frame in
-            Without_contract (Some (frame, Encoding.arrive frame "result" result_type)))
+    | None ->
+        call_definition_without_a_contract frame location callee definition values ~result_type
   in
   let modelled =
     match callee.target with
-    | Definition
-        ({ trait_method = Some { trait; self_type; evidence; name; receiver }; _ } as definition)
-      -> (
-        Laws.assume_laws frame trait self_type;
-        let operands = List.map (fun (passed : State.passed) -> passed.term) values in
-        let method_ =
-          Well_known.find_method (Path.Method { owner = trait.trait; name; receiver })
-        in
-        match (method_, evidence, operands) with
-        | ( Some
-              ( Fixed_width_integer_minimum_value | Fixed_width_integer_maximum_value
-              | Fixed_width_integer_bit_width ),
-            _,
-            [] )
-          when Types.find_integer_bits self_type <> None ->
-            Without_contract
-              (match
-                 (method_, Types.find_integer_range self_type, Types.find_integer_bits self_type)
-               with
-              | Some Fixed_width_integer_minimum_value, Some (low, _), _ ->
-                  Some (frame, Logic.Integer low)
-              | Some Fixed_width_integer_maximum_value, Some (_, high), _ ->
-                  Some (frame, Logic.Integer high)
-              | Some Fixed_width_integer_bit_width, _, Some (bits, _) -> Some (frame, Logic.int bits)
-              | _ -> None)
-        | Some Equal_equal, _, [ left; right ]
-          when Encoding.is_equality_identity frame.environment self_type ->
-            Without_contract (Some (frame, Logic.equal left right))
-        | ( Some Equal_equal,
-            (Impl { impl = Derived _; _ } | Derived_for_view { viewed = Derived _; _ }),
-            [ left; right ] ) ->
-            let spent =
-              Amounts.spend_derived_equality frame callee values ~result_type:declared_result_type
-                ~result:(Logic.equal left right)
-            in
-            Without_contract (Some (spent, Operations.make_equality frame self_type left right))
-        | _ -> call_definition definition)
+    | Definition ({ trait_method = Some trait_method; _ } as definition) -> (
+        Laws.assume_laws frame trait_method.trait trait_method.self_type;
+        match find_compiler_given_result frame callee trait_method values ~declared_result_type with
+        | Some given -> given
+        | None -> call_definition definition)
     | Definition definition -> call_definition definition
     | Function_value ->
-        let function_type, called =
-          match through with
-          | Some (Types.Function function_type, called) -> (function_type, called)
-          | Some _ | None -> Facts.raise_bug "a call through a value that is not a function"
-        in
-        let entries = List.map (fun (passed : State.passed) -> passed.term) values in
-        let is_defined = Callbacks.oblige_requires frame site called entries in
-        let before = frame in
-        let havoc = havoc_whole_arguments frame in
-        let frame = havoc.after in
-        let result =
-          if Callbacks.is_in_the_logic function_type then begin
-            let term = Callbacks.apply_function function_type called entries in
-            Facts.assume
-              (Facts.restrict_unless_proven frame is_defined)
-              (Encoding.make_in_range result_type term);
-            term
-          end
-          else Encoding.arrive frame "result" result_type
-        in
-        let is_unspecified_application =
-          frame.is_ghost && not (Types.states_no_allocation function_type.costs)
-        in
-        if not is_unspecified_application then
-          Validity.assume_valid (Facts.restrict_unless_proven frame is_defined) result_type result;
-        let frame =
-          Amounts.spend_indirect_call ~before ~after:frame ~location function_type called values
-            ~changed:(List.rev havoc.written) ~result_type:declared_result_type ~result
-        in
-        if not is_unspecified_application then
-          Callbacks.assume_returned
-            (Facts.restrict_unless_proven frame is_defined)
-            function_type called ~entries
-            ~exits:(List.map (find_written havoc) values)
-            ~result;
-        List.iter
-          (fun (passed : State.passed) ->
-            Option.iter
-              (Validity.assume_valid frame passed.type_)
-              (List.assoc_opt passed.position havoc.written))
-          values;
-        havoc.end_writes frame;
-        Without_contract (Some (frame, result))
+        Without_contract
+          (Some (call_function_value frame site ~through values ~result_type ~declared_result_type))
     | Intrinsic { operation; type_arguments } ->
-        let havoc =
-          match operation with
-          | Lend _ -> { after = frame; written = []; end_writes = ignore }
-          | Scalar _ | Buffer _ | Runtime _ -> havoc_whole_arguments frame
-        in
-        let frame = havoc.after in
-        let changed = List.map (find_written havoc) values in
-        let types =
-          List.filter_map
-            (function Types.Type ty -> Some (Encoding.substitute_type frame ty) | _ -> None)
-            type_arguments
-        in
-        let result =
-          Intrinsics.translate_intrinsic frame ~site operation types values ~changed result_type
-        in
-        let frame =
-          Amounts.spend_intrinsic frame callee operation values ~changed
-            ~result_type:declared_result_type ~result
-        in
-        havoc.end_writes frame;
-        Without_contract (Some (frame, result))
+        Without_contract
+          (Some
+             (call_intrinsic frame ~site callee operation type_arguments values ~result_type
+                ~declared_result_type))
   in
   match modelled with
   | By_contract applied -> Some applied
