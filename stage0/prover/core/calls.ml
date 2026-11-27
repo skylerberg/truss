@@ -1,12 +1,3 @@
-let lookup_argument_at_index (values : State.passed list) index =
-  match
-    List.find_map
-      (fun (passed : State.passed) -> if passed.position = index then Some passed.term else None)
-      values
-  with
-  | Some term -> term
-  | None -> Logic.Boolean false
-
 let name_term query ty term =
   let rec holds_call = function
     | Logic.Apply ((Logic.Symbol.Function _ | Logic.Symbol.Limited _), _) -> true
@@ -71,14 +62,13 @@ let havoc_mut (frame : State.frame) (values : State.passed list) ~list_modified 
     values
 
 let oblige_preconditions (frame : State.frame) (callee : Callee.t) (contract : State.contract)
-    (values : State.passed list) ~location ~path ~substitution_of ~recursive_callee
+    (values : State.passed list) ~location ~origin ~path ~substitution_of ~recursive_callee
     ~read_entry_frame =
   Option.iter
     (fun recursive ->
-      Termination.check_recursive_call frame location ~path contract.callee_clauses
+      Termination.check_recursive_call frame location ~origin ~path contract.callee_clauses
         ~is_self_call:(Path.equal recursive frame.environment.node)
-        ~callee_entry:(read_entry_frame frame contract.callee_clauses)
-        ~argument_at:(lookup_argument_at_index values))
+        ~callee_entry:(read_entry_frame frame contract.callee_clauses))
     recursive_callee;
   let oblige_each (clauses : State.clauses) (entry : State.frame) requirements ~make_obligation =
     List.map
@@ -345,7 +335,8 @@ let call_contract (frame : State.frame) (site : Invocation.site) (callee : Calle
   in
   let required =
     oblige_preconditions frame callee contract values ~location:(Facts.locate frame site.origin)
-      ~path:definition.path ~substitution_of:definition.substitution_of ~recursive_callee
+      ~origin:site.origin ~path:definition.path ~substitution_of:definition.substitution_of
+      ~recursive_callee
       ~read_entry_frame:(read_entry_frame definition values)
   in
   let declared_result_type = Encoding.substitute_declared_type frame site.type_ in

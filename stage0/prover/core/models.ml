@@ -97,10 +97,7 @@ let is_model_built_from_contents : Path.t -> bool = function
   | Impl { module_; trait; for_type } ->
       module_.package = Path.standard_package
       && Path.equal trait.path (Well_known.make_path Model)
-      && (Well_known.find_builtin_type for_type = Some Array
-         || List.exists
-              (fun name -> Path.equal for_type (Well_known.make_path name))
-              [ List; List_cursor; String; Literal; Set; Sorted_set; Map; Sorted_map ])
+      && Well_known.is_built_from_elements for_type
   | Top _ | Method _ | Member_constant _ | Default _ | Derived _ | Test _ | Law_proof _
   | Unresolved _ ->
       false

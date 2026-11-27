@@ -12,4 +12,5 @@
   resolve
   catalog
   interface
+  well_known
   zarith))

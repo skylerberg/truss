@@ -1,0 +1,18 @@
+type Tree(value: Int64, children: List[Tree])
+
+impl Equal for Tree {
+  fn equal(self, other: Tree) -> Bool {
+    self.value == other.value && self.children == other.children
+  }
+}
+
+impl Ordered for Tree {
+  fn compare(self, other: Tree) -> Ordering {
+    let order = self.value.compare(other.value)
+    if order == Ordering.Equal {
+      self.children.compare(other.children)
+    } else {
+      order
+    }
+  }
+}

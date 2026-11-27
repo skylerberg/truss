@@ -60,6 +60,15 @@ type bounds = Properties.Bounds.t
 
 val list_no_bounds : bounds
 
+type required_bound = {
+  parameter : Types.parameter;
+  argument : Types.ty;
+  bound : Types.trait_reference;
+}
+
+val list_required_bounds_of_parameters :
+  Types.generic list -> Types.substitution -> required_bound list
+
 val list_required_bounds :
   Types.generic list -> Types.substitution -> (Types.ty * Types.trait_reference) list
 

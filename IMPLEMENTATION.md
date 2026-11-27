@@ -319,7 +319,8 @@ develop as well as make it easier to bootstrap the compiler in parts.
   Its domain is a condition under which the definition returns: valid
   arguments, the precondition, the Panic condition, and, for a
   callee in the recursion group of the definition being proven, arguments
-  below the entry measure, which is the induction hypothesis. A call that
+  below the entry in the group's measure or ranking, which is the induction
+  hypothesis. A call that
   returned gives its `ensures` without the Panic condition, since
   `uses Panic unless C` says that `C` rules a panic out, not that a return
   implies `C`.
@@ -353,7 +354,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   A trait's method on a type whose `impl` is known is a callee like any
   other: the method that the `impl` writes, derives or inherits has its own
   fact. So the fact of a definition depends on no code that a caller
-  supplies, and a call is judged by the callee's fact alone.
+  passes, and a call is judged by the callee's fact alone.
 
   A storage of capacity zero allocates nothing, so the call that builds one,
   which an empty list literal makes, is no abort site.
@@ -400,21 +401,50 @@ develop as well as make it easier to bootstrap the compiler in parts.
   value, with every premise its proof had: arguments in range that meet
   their invariants, the `requires`, and, for a callee in the recursion group
   of the definition being proven, arguments below the entry measure.
-- **`Termination` holds the rules that show a body to end.** It compares a
-  recursive call with the entry of the definition being proven: the call
-  obliges the comparison, and the axiom of a callee in the recursion group
-  takes it as a premise, so the two never differ. It also holds the measure
-  of a loop. It has no state: the definition's measures are a field of the
-  environment, and `Termination.enter_definition` gives the start frame the
-  entry of the definition, `definition_entry`, which every later frame
-  carries.
+- **`Termination` holds the rules that show a body to end.** A recursion
+  without `decreases` is checked by size-change termination. `Mir.Size_change`
+  lists, for each call of a definition, the size-change graphs of the call:
+  which arguments are a part of a parameter, or the parameter unchanged,
+  read from the MIR by the projections that take a field or an element out
+  of a place. A call that passes code to a generic function gets the graphs
+  that parametricity gives: one for each way of choosing, for each
+  parameter of the code, an argument of the generic function that holds the
+  type parameter. The List calls stage stores the graphs with the call
+  edges. The Group recursion stage, once for each group, decides the group
+  with `Size_change.decide`: it closes the graphs of the members without
+  `decreases` under composition, lists the calls on a cycle whose
+  idempotent graph has no strict self-arc, builds the ranking below, and
+  writes each member's part as its `termination`; a change to a member's
+  graphs makes the group recompute, as a change to its call edges does.
+  Each member's proof reports those calls where it reads them, under the
+  condition of their path, and at the end of the proof the calls that it
+  did not read. A
+  recursion with `decreases` compares the measure of the call with the
+  entry of the definition being proven. The axiom of a callee in the
+  recursion group takes a comparison as a premise, the induction hypothesis,
+  which must use one well-founded order that every call of the group
+  decreases, since a call assumes its callee's contract as well: the measure
+  where the functions state one, and otherwise the group's ranking. The
+  Group recursion stage builds the ranking from the size-change graphs with
+  `Size_change.decide`: a lexicographic tuple whose components are, for each
+  member, the largest rank of a set of its parameters or a level, the form
+  that Isabelle's size-change method certifies. Each component is chosen
+  so that every remaining call decreases it weakly and some call strictly;
+  the calls it decreases strictly are removed; a level orders the calls left
+  once they form no cycle. A group for which this finds no ranking gets no
+  hypothesis beyond its calls. It also holds the measure of a loop. Its
+  state is the group's verdict, a lazy field of the environment, and the
+  calls that the proof has read, private state of the environment;
+  `Termination.enter_definition` gives the start frame the entry of the
+  definition, `definition_entry`: its measures and the ranks of its
+  parameters, which every later frame carries.
 - **`Cycles` reads the recursion group and the proof group, and rejects a
   proof that assumes a fact whose own proof assumes it back.** Every fact
   that a proof takes from another definition is an edge of the proof graph,
   which `Mir.Call_edges` lists: a callee's contract, a type's invariant, and
   the laws of an `impl`. An `impl` that satisfies a bound brings the impls
   behind every bound that it assumes in turn. One walk lists them for the
-  code that a call supplies and for the laws that a callee assumes,
+  code that a call passes and for the laws that a callee assumes,
   `Call_edges.list_satisfied_bounds`, so a new way for one `impl` to rely
   on another is written once, in `list_bounds_that_evidence_assumes`: the
   bounds of its generics, and the bounds that its trait declares on the
@@ -572,7 +602,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `Joins` | The join of the paths that meet |
   | `Forks` | The branches of a `concurrent` or `parallel` block: each alone, the end of the block, and what an early exit knows of the other branches |
   | `Cycles` | The recursion group and the proof group |
-  | `Termination` | Measures, and the comparison of a recursive call |
+  | `Termination` | Size-change termination of a recursion group, measures, and the comparison of a recursive call with a measure |
   | `Contract_axioms` | The contract of a logic function as an axiom |
   | `Validity` | The invariant of a value, and each check of it |
   | `Callee` | The callee of a call: the definition that it runs, its contract, its substitutions and the key of its logic symbol |

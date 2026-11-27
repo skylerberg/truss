@@ -1,24 +1,48 @@
 type lookups = { interface : Interface.Lookups.t; mir : Parts.lookups }
-type resolution = { target : Path.t option; supplied : Path.t list Lazy.t }
 
+type assumption = {
+  assumer : Path.t;
+  parameter : Types.parameter option;
+  assumed : Types.ty * Types.trait_reference;
+}
+
+type dictionary = {
+  parameter : Types.parameter;
+  argument : Types.ty;
+  methods : Path.t list;
+  assumed_methods : Path.t list;
+  assumptions : assumption list;
+}
+
+type resolution = {
+  target : Path.t option;
+  callee : Path.t option;
+  dictionaries : dictionary list Lazy.t;
+}
+
+val list_dictionary_methods : dictionary -> Path.t list
 val resolve_callee : Interface.Lookups.t -> Types.substitution -> 'operand Core.target -> resolution
+val find_instance : lookups -> Path.t -> Types.substitution
+val find_code : lookups -> Path.t -> Tree.t option
 
-type supplier = Call | Named_function of Path.t | Provide
-type edge = Calls of Path.t | Supplies of { supplier : supplier; code : Path.t list }
+type higher_order_argument = Dictionary | Function_value of Path.t | Handler
+type edge = Calls of Path.t | Passes of { argument : higher_order_argument; code : Path.t list }
 
 val list_statement_edges : Interface.Lookups.t -> Types.substitution -> Tree.statement -> edge list
 
-val list_code_supplied_to_self :
+val list_code_passed_to_self :
   Interface.Lookups.t -> trait:Path.t -> Types.substitution -> Path.t list
 
-val list_code_supplied_to_generics :
+val list_code_passed_to_generics :
   Interface.Lookups.t ->
   ?instance:Types.substitution ->
   Types.generic list ->
   Types.substitution ->
   Path.t list
 
-type dependency_kind = Read | Direct_call | Supplied of supplier
+type dependency_kind = Read | Direct_call | Passed of higher_order_argument
+
+val locate_call : Tree.statement -> Core.origin
 
 type dependency = {
   path : Path.t;

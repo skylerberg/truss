@@ -193,11 +193,24 @@ let generated_mir : (Mir.body_part * Mir.contract_part) Tracker.fact =
     ~encode:(fun (body, contract) -> [ Tracker.marshal body; Tracker.marshal contract ])
     ~decode:(fun cells -> (Tracker.unmarshal cells.(0), Tracker.unmarshal cells.(1)))
 
-let call_node : Path.t list Tracker.fact =
+type call_node = { callees : Path.t list; size_changes : Mir.Size_change.summary }
+
+let call_node : call_node Tracker.fact =
   Tracker.make_fact ~stage:List_calls ~table:"call_node" ~id_column:"path" ~fixed:[]
-    ~groups:[ (Callees, [ "callees" ]) ]
-    ~encode:(fun callees -> [ Tracker.marshal callees ])
-    ~decode:(fun cells -> Tracker.unmarshal cells.(0))
+    ~groups:[ (Callees, [ "callees" ]); (Size_changes, [ "size_changes" ]) ]
+    ~encode:(fun { callees; size_changes } ->
+      [ Tracker.marshal callees; Tracker.marshal size_changes ])
+    ~decode:(fun cells ->
+      { callees = Tracker.unmarshal cells.(0); size_changes = Tracker.unmarshal cells.(1) })
+
+let make_call_node_view target column =
+  Tracker.make_view ~stage:List_calls ~table:"call_node" ~id_column:"path" ~fixed:[] ~target
+    ~columns:[ column ] ~decode:(fun cells -> Tracker.unmarshal cells.(0))
+
+let callees : Path.t list Tracker.view = make_call_node_view Callees "callees"
+
+let size_changes : Mir.Size_change.summary Tracker.view =
+  make_call_node_view Size_changes "size_changes"
 
 let make_group ~table target : Path.t list Tracker.fact =
   Tracker.make_fact ~stage:Group_recursion ~table ~id_column:"path" ~fixed:[]
@@ -211,6 +224,9 @@ let make_group ~table target : Path.t list Tracker.fact =
 
 let recursion_group = make_group ~table:"recursion_group" Recursion_group
 let proof_group = make_group ~table:"proof_group" Proof_group
+
+let termination : Mir.Size_change.verdict Tracker.fact =
+  make_marshaled ~stage:Group_recursion ~table:"termination" ~id_column:"path" Termination
 
 let make_abort_fact ~table target : bool Tracker.fact =
   Tracker.make_fact ~stage:Find_aborts ~table ~id_column:"path" ~fixed:[]

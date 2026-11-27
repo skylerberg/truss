@@ -14,6 +14,7 @@ let make_environment ?node ?(condition = []) ?(keeps_termination = true) ?(keeps
     ranking = terminates && measures = [] && lookups.list_recursion_group node <> [];
     terminates;
     measures;
+    termination = lazy (lookups.find_termination node);
     blocked_holders = Option.value blocked_holders ~default:[];
     proven_laws;
     policy = Obligations.make_policy ~keeps_termination ~keeps_failures ~panic_condition;
@@ -369,7 +370,7 @@ let bind_entry (run : run) (query : Query.t) (source : State.source) ~path ~subs
              (List.nth_opt parameters position))
          contract.callbacks)
   in
-  let start = Termination.enter_definition start in
+  let start = Termination.enter_definition start ~parameters in
   let trait_declaration =
     match (Interface.Impls.find_implemented_method lookups.interface path, path) with
     | Some { declaration; _ }, _ -> Some declaration
@@ -584,6 +585,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
       ~path query
   in
   let exits = Reader.read_body entered.start ~lambdas:entered.code.lambdas entered.code.body in
+  Termination.reject_unreached_calls_without_decrease entered.start;
   List.iter (check_lent_part entered) (List.rev exits.lends);
   List.iter
     (fun returned ->

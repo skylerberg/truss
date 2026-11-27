@@ -1,0 +1,16 @@
+type Forest =
+  | Empty
+  | indirect Grove(first: Tree, rest: Forest)
+
+type Tree(value: Int64, children: Forest)
+
+fn tree_has(tree: Tree, value: Int64) -> Bool {
+  tree.value == value || forest_has(tree.children, value: value)
+}
+
+fn forest_has(forest: Forest, value: Int64) -> Bool {
+  match forest {
+    Empty => false
+    Grove(first, rest) => tree_has(first, value: value) || forest_has(rest, value: value)
+  }
+}

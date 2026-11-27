@@ -19,9 +19,15 @@ val ownership_modes : ((Syntax.id * Language.Mode.t) list * Core.mode_keyword li
 val body_mir : Mir.body_part Tracker.fact
 val contract_mir : Mir.contract_part Tracker.fact
 val generated_mir : (Mir.body_part * Mir.contract_part) Tracker.fact
-val call_node : Path.t list Tracker.fact
+
+type call_node = { callees : Path.t list; size_changes : Mir.Size_change.summary }
+
+val call_node : call_node Tracker.fact
+val callees : Path.t list Tracker.view
+val size_changes : Mir.Size_change.summary Tracker.view
 val recursion_group : Path.t list Tracker.fact
 val proof_group : Path.t list Tracker.fact
+val termination : Mir.Size_change.verdict Tracker.fact
 val aborts_outside_group : bool Tracker.fact
 val may_abort : bool Tracker.fact
 val usage_check : unit Tracker.fact

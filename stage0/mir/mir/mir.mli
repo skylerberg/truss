@@ -4,6 +4,7 @@ end
 
 module Graph = Graph
 module Call_edges = Call_edges
+module Size_change = Size_change
 
 include module type of struct
   include Walk

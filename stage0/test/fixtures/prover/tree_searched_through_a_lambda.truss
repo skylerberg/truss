@@ -1,0 +1,19 @@
+type Tree(value: Int64, children: List[Tree])
+
+fn any_of[Item](items: List[Item], predicate: fn(Item) -> Bool) -> Bool {
+  var index: UInt64 = 0
+  while index < items.length()
+    invariant index <= items.length()
+    decreases items.length() - index
+  {
+    if predicate(items[index]) {
+      return true
+    }
+    index += 1
+  }
+  false
+}
+
+fn has_value(tree: Tree, value: Int64) -> Bool {
+  tree.value == value || any_of(tree.children, predicate: fn(child) { has_value(child, value: value) })
+}

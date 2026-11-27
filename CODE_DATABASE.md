@@ -57,7 +57,7 @@ and the next command computes the unit again.
 | Decision | Reason |
 |---|---|
 | An id is the first 63 bits of the BLAKE2 digest of the key's canonical encoding, stored as the table's integer primary key. | The id is the same in a project's database, in a dependency's file, and after a rebuild, so a row of one database refers to a row of another with no table between them, and two databases compare row for row. A sequence number would need a mapping wherever one database names another's definition. The costs are eight bytes for an id where a sequence number takes three, and rows that land on pages in digest order. A collision within one database fails the insert as a compiler bug. |
-| A definition the compiler supplies has a row: a method an impl inherits from its trait's default, and a method or impl that `derives` generates. Its `origin` says which, and `supplied_from` names the definition it comes from. | Call edges, generated MIR, and recursion groups belong to these definitions. Without rows they would need a table of bare paths, which is glue. The methods an impl inherits are then a query. |
+| A definition the compiler synthesizes has a row: a method an impl inherits from its trait's default, and a method or impl that `derives` generates. Its `origin` says which, and `synthesized_from` names the definition it comes from. | Call edges, generated MIR, and recursion groups belong to these definitions. Without rows they would need a table of bare paths, which is glue. The methods an impl inherits are then a query. |
 | A module's top-level names are `entry` rows, written from the syntax alone, apart from `definition` rows. | Declaring a module's definitions resolves the owner of a method and the trait of an impl, which reads the top-level names of other modules. Those names must exist before any module is declared. |
 
 ## Tables
@@ -71,7 +71,7 @@ module     (id, package, name)
 file       (id, package, module, name, text)
 entry      (module, name, position, kind, visibility, is_generic)
 definition (id, package, module, path, ordinal, name, owner, kind, visibility,
-            is_generic, origin, supplied_from, container, file, position,
+            is_generic, origin, synthesized_from, container, file, position,
             base, stop, text_hash)
 syntax     (definition, tree, spans, syntax_errors)
 import     (file, name, module)
@@ -101,8 +101,8 @@ Each table's key is the definition's id. `state` is `value`, `failed`, or
 `blocked`. A fact that a pass reads by a path alone, with no module and
 ordinal, is keyed by the id of the path, which `definition.path` holds:
 `type_facts`, `constant_value`, `derived_interface`, `generated_mir`,
-`call_node`, `recursion_group`, `proof_group`, `aborts_outside_group`, and
-`may_abort`. Such a fact is in the
+`call_node`, `recursion_group`, `proof_group`, `termination`,
+`aborts_outside_group`, and `may_abort`. Such a fact is in the
 database of the package that declares the definition. A method written on a
 type of another package is an error, and its path names the other package,
 so a read by path that finds no row there reads the project's database.
@@ -122,9 +122,10 @@ body            (definition, state, form, tables, uses_run_forever,
 body_mir        (definition, state, graph)
 contract_mir    (definition, state, graph)
 generated_mir   (definition, state, body, contract)
-call_node       (definition, state, kind, callees)
+call_node       (definition, state, kind, callees, size_changes)
 recursion_group (definition, state, representative, members)
 proof_group     (definition, state, representative, members)
+termination     (definition, state, value)
 aborts_outside_group (definition, state, value)
 may_abort            (definition, state, value)
 usage_check     (definition, state)
@@ -231,7 +232,7 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 |---|---|---|---|---|
 | Parse | File | `Parser.parse_source` | The file's text | `entry`, parse diagnostics |
 | Declare | Module | The declaring half of `Resolve.Namespace` | The parsed files of the module; lookups of entries, modules, and dependencies | `definition`, `syntax`, `import`, `impl`, with a row for each derived impl; `roots` edges to the items that run its tests and its package's `main` |
-| Supply | Impl | The trait's methods that the impl does not write | Name lookups | A `definition` row for each method the impl inherits or derives |
+| Synthesize | Impl | The trait's methods that the impl does not write | Name lookups | A `definition` row for each method the impl inherits or derives |
 | Resolve | Definition | `Resolve.resolve`, which walks the definition once | The definition's tree; name lookups | A `resolved` row for each section, `references` edges |
 | Resolve grants | Dependency | `Interface.Grants.resolve_grant` | The capabilities the manifest grants; name lookups | `grant` |
 | Check imports | File | `Resolve.list_file_diagnostics` | The file's text; the imports that a `references` edge names; whether a `resolved` row of the file holds no value | Diagnostics |
@@ -245,8 +246,8 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Infer | Definition | `Infer.check_contract`, `Infer.check_body` | The tree, resolved names, and interface; lookups of interfaces and contracts | `contract`, `body`, `body_fact`, `references` edges |
 | Build MIR | Definition | `Mir.make_body_part`, `Mir.make_contract_part` | The body's and contract's forms | `body_mir`, `contract_mir` |
 | Generate MIR | Derived method | `Infer.derive_form` | Interfaces and contracts | `generated_mir` |
-| List calls | Definition, with the supplied methods and derived impls | `Mir.Call_edges.list_path_edges`, `Mir.Call_edges.list_assumed_paths` | MIR and interfaces | `call_node`, `calls` and `assumes` edges |
-| Group recursion | The definitions whose `calls` or `assumes` edges changed, and their groups | Strongly connected components, once over the `calls` edges and once over both | The definitions that both reach and are reached by a changed one, and the edges among them | `recursion_group`, `proof_group` |
+| List calls | Definition, with the synthesized methods and derived impls | `Mir.Call_edges.list_path_edges`, `Mir.Call_edges.list_assumed_paths`, `Mir.Size_change.summarize` | MIR and interfaces | `call_node` (callees and size-change graphs), `calls` and `assumes` edges |
+| Group recursion | The definitions whose `calls` or `assumes` edges or size-change graphs changed, and their groups | Strongly connected components, once over the `calls` edges and once over both; for each recursion group, `Mir.Size_change.decide` over its members' graphs | The definitions that both reach and are reached by a changed one, the edges among them, and the size-change graphs of the members of each recursion group | `recursion_group`, `proof_group`, `termination` |
 | Find aborts | Path, a definition's callees before it | Whether the code of the definition that runs holds a call of `intrinsic.crash` or of an intrinsic that allocates, or calls a definition outside its recursion group that may abort, and the trait methods that it or such a callee calls through a bound. A storage of capacity zero is no allocation. A specification-only definition does neither. Once the members of a group are computed, whether any of them does, written for each member. | The definition's MIR and signature, its `recursion_group`, and its callees' `may_abort` | `aborts_outside_group`, `may_abort` |
 | Check bodies | Definition | `Usage.check`, `Ownership.check` | The body's tables and `uses_run_forever`, the definition's `recursion_group`, its MIR, and its ownership modes | `usage_check`, `ownership` |
 | Check an impl, a type | Definition | `Package_checks.run` with `Sealed`, `Impl`, or `Type` | Interfaces | Diagnostics |
@@ -254,7 +255,7 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Check a test | Test | `Package_checks.run` with `Test` | The tests of its package that have its name | Diagnostics |
 | Check unexported | Function, method, constant, or member constant, with the other stale units of the drain | `Package_checks.classify_uses`, then `Package_checks.run` with `Unexported` | The `references` edges into the definition, one user at a time, and the declaration of each user | Diagnostics |
 | Check a dependency | Dependency | `Package_checks.run` with `Dependency` | Whether a body of the package references the dependency | `dependency_use` |
-| Prove | Definition | `Prover.prove` | MIR, contracts, `ownership`, `recursion_group`, `proof_group`, the `may_abort` of its callees and of the `impl` methods and functions supplied to them | `proof`, `hole`, `roots` edges to the items of its evaluations |
+| Prove | Definition | `Prover.prove` | MIR, contracts, `ownership`, `recursion_group`, `proof_group`, `termination`, the `may_abort` of its callees and of the `impl` methods and functions passed to them | `proof`, `hole`, `roots` edges to the items of its evaluations |
 | Decide | Definition | `Prover.pose`, the solver, `Prover.list_states` | The proof, the results of running its evaluations, and the outputs of the unit's own runs of Z3 | `verdict`, `solver_run` |
 | Lower | Item | `Lowering.lower`, `Lowering.check_calls` | MIR and interfaces; the callees of the item's definition and of each callee | `lowered`, `references` edges to the items its code names |
 | Key tests | Item, with the items of its reference cycle | `Lowering.derive_test_keys` | `lowered`, and the test keys of the items it references | `test_key` |

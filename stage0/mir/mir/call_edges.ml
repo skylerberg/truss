@@ -8,8 +8,6 @@ type lookups = { interface : Interface.Lookups.t; mir : Parts.lookups }
 
 let find_head (ty : Types.ty) = match ty with Named { path; _ } -> Some path | _ -> None
 
-type resolution = { target : Path.t option; supplied : Path.t list Lazy.t }
-
 let normalize interface ty =
   Interface.Impls.normalize interface ~list_bounds:Interface.Impls.list_no_bounds ty
 
@@ -89,21 +87,32 @@ type satisfied_bound = {
   is_assumed_by_an_impl : bool;
 }
 
-let list_bounds_that_evidence_assumes interface :
-    Types.evidence -> (Types.ty * Types.trait_reference) list = function
+type assumption = {
+  assumer : Path.t;
+  parameter : Types.parameter option;
+  assumed : Types.ty * Types.trait_reference;
+}
+
+let list_bounds_that_evidence_assumes interface : Types.evidence -> assumption list = function
   | Bound -> []
   | Impl { impl; substitution } | Derived_for_view { viewed = impl; substitution } ->
       let impl_interface = Interface.Definition.read_impl_interface interface impl in
-      Interface.Impls.list_required_bounds impl_interface.impl_generics substitution
-      @ Interface.Impls.list_associated_type_bounds interface impl_interface substitution
+      List.map
+        (fun ({ parameter; argument; bound } : Interface.Impls.required_bound) ->
+          { assumer = impl; parameter = Some parameter; assumed = (argument, bound) })
+        (Interface.Impls.list_required_bounds_of_parameters impl_interface.impl_generics
+           substitution)
+      @ List.map
+          (fun assumed -> { assumer = impl; parameter = None; assumed })
+          (Interface.Impls.list_associated_type_bounds interface impl_interface substitution)
 
 module Visited_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Path.t * Types.ty * bool
 end))
 
-let list_satisfied_bounds interface roots =
+let collect_satisfied_bounds interface roots =
   let visited = Visited_table.create 16 in
-  let satisfied_bounds = ref [] in
+  let satisfied_bounds = ref [] and assumptions = ref [] in
   let rec visit ~is_assumed_by_an_impl ((of_type : Types.ty), (bound : Types.trait_reference)) =
     List.iter
       (fun (satisfied : Types.trait_reference) ->
@@ -117,25 +126,65 @@ let list_satisfied_bounds interface roots =
           satisfied_bounds :=
             { satisfied; of_type; evidence; is_assumed_by_an_impl } :: !satisfied_bounds;
           List.iter
-            (visit ~is_assumed_by_an_impl:true)
+            (fun (assumption : assumption) ->
+              assumptions := assumption :: !assumptions;
+              visit ~is_assumed_by_an_impl:true assumption.assumed)
             (list_bounds_that_evidence_assumes interface evidence)))
       (Interface.Properties.list_bound_closure interface ~self:of_type bound)
   in
   List.iter (visit ~is_assumed_by_an_impl:false) roots;
-  List.rev !satisfied_bounds
+  (List.rev !satisfied_bounds, List.rev !assumptions)
+
+let list_satisfied_bounds interface roots = fst (collect_satisfied_bounds interface roots)
+
+let list_methods_of_satisfied_bound interface { satisfied; of_type; evidence; _ } =
+  match evidence with
+  | Bound ->
+      if is_self_of_enclosing_trait of_type then list_trait_methods interface satisfied.trait
+      else []
+  | Impl _ | Derived_for_view _ ->
+      list_methods_of_evidence interface ~trait:satisfied.trait evidence
 
 let list_code_of_impl_for interface bound =
   List.concat_map
-    (fun { satisfied; of_type; evidence; _ } ->
-      match evidence with
-      | Bound ->
-          if is_self_of_enclosing_trait of_type then list_trait_methods interface satisfied.trait
-          else []
-      | Impl _ | Derived_for_view _ ->
-          list_methods_of_evidence interface ~trait:satisfied.trait evidence)
+    (list_methods_of_satisfied_bound interface)
     (list_satisfied_bounds interface [ bound ])
 
-let list_code_supplied_to_self (interface : Interface.Lookups.t) ~trait substitution =
+type dictionary = {
+  parameter : Types.parameter;
+  argument : Types.ty;
+  methods : Path.t list;
+  assumed_methods : Path.t list;
+  assumptions : assumption list;
+}
+
+let make_dictionary interface instance
+    ({ parameter; argument; bound } : Interface.Impls.required_bound) =
+  let argument = substitute_type interface instance argument in
+  let satisfied, assumptions =
+    collect_satisfied_bounds interface [ (argument, substitute_trait interface instance bound) ]
+  in
+  let own, assumed =
+    List.partition (fun (bound : satisfied_bound) -> not bound.is_assumed_by_an_impl) satisfied
+  in
+  {
+    parameter;
+    argument;
+    methods = List.concat_map (list_methods_of_satisfied_bound interface) own;
+    assumed_methods = List.concat_map (list_methods_of_satisfied_bound interface) assumed;
+    assumptions;
+  }
+
+let list_dictionary_methods dictionary = dictionary.methods @ dictionary.assumed_methods
+
+let list_dictionaries interface ?(instance = Types.no_substitution) generics substitution =
+  List.filter
+    (fun dictionary -> list_dictionary_methods dictionary <> [])
+    (List.map
+       (make_dictionary interface instance)
+       (Interface.Impls.list_required_bounds_of_parameters generics substitution))
+
+let list_code_passed_to_self (interface : Interface.Lookups.t) ~trait substitution =
   match Types.find_argument (Types.make_self_parameter trait) substitution with
   | Some (Type self) ->
       list_code_of_impl_for interface
@@ -150,15 +199,9 @@ let list_code_supplied_to_self (interface : Interface.Lookups.t) ~trait substitu
           } )
   | Some (Value _) | None -> []
 
-let list_code_supplied_to_bound interface instance (type_, bound) =
-  list_code_of_impl_for interface
-    (substitute_type interface instance type_, substitute_trait interface instance bound)
-
-let list_code_supplied_to_generics interface ?(instance = Types.no_substitution) generics
-    substitution =
-  List.concat_map
-    (list_code_supplied_to_bound interface instance)
-    (Interface.Impls.list_required_bounds generics substitution)
+let list_code_passed_to_generics interface ?instance generics substitution =
+  List.concat_map list_dictionary_methods
+    (list_dictionaries interface ?instance generics substitution)
 
 let rec bind_generics substitution (generics : Types.generic list) arguments =
   match (generics, arguments) with
@@ -166,10 +209,10 @@ let rec bind_generics substitution (generics : Types.generic list) arguments =
       bind_generics (Types.bind_argument generic.generic argument substitution) generics arguments
   | _ -> substitution
 
-let list_code_supplied_to_callee interface instance path ~bound_by_owner type_arguments =
+let list_dictionaries_of_callee interface instance path ~bound_by_owner type_arguments =
   match Interface.Impls.read_signature interface path with
   | Some (signature : Types.signature) ->
-      list_code_supplied_to_generics interface ~instance signature.generics
+      list_dictionaries interface ~instance signature.generics
         (bind_generics bound_by_owner
            (List.filter
               (fun (generic : Types.generic) ->
@@ -178,19 +221,30 @@ let list_code_supplied_to_callee interface instance path ~bound_by_owner type_ar
            type_arguments)
   | None -> []
 
-let list_code_supplied_by_function_value interface instance path
+let list_code_passed_with_function_value interface instance path
     (instantiation : Types.instantiation) =
-  list_code_supplied_to_callee interface instance path ~bound_by_owner:Types.no_substitution
-    instantiation.type_arguments
+  List.concat_map list_dictionary_methods
+    (list_dictionaries_of_callee interface instance path ~bound_by_owner:Types.no_substitution
+       instantiation.type_arguments)
+
+type resolution = {
+  target : Path.t option;
+  callee : Path.t option;
+  dictionaries : dictionary list Lazy.t;
+}
 
 let resolve_callee (interface : Interface.Lookups.t) instance (callee : _ Core.target) =
   match callee with
   | Function { path; instantiation } ->
       {
         target = Some path;
-        supplied = lazy (list_code_supplied_by_function_value interface instance path instantiation);
+        callee = Some path;
+        dictionaries =
+          lazy
+            (list_dictionaries_of_callee interface instance path
+               ~bound_by_owner:Types.no_substitution instantiation.type_arguments);
       }
-  | Trait_method { trait; name; receiver; self_type; evidence; instantiation } ->
+  | Trait_method { trait; name; receiver; self_type; evidence; instantiation } -> (
       let evidence =
         Interface.Impls.resolve_evidence interface instance ~self_type ~trait evidence
       in
@@ -200,32 +254,40 @@ let resolve_callee (interface : Interface.Lookups.t) instance (callee : _ Core.t
       let type_arguments =
         List.map (substitute_argument interface instance) instantiation.type_arguments
       in
-      let list_code_supplied_to path ~bound_by_owner =
-        list_code_supplied_to_callee interface Types.no_substitution path ~bound_by_owner
-          type_arguments
+      let list_dictionaries_of path ~bound_by_owner =
+        lazy
+          (list_dictionaries_of_callee interface Types.no_substitution path
+             ~bound_by_owner:(bound_by_owner ()) type_arguments)
       in
-      let list_code_supplied_to_declaration () =
-        list_code_supplied_to declaration
-          ~bound_by_owner:
-            (Types.make_trait_substitution
-               (Interface.Definition.read_trait_interface interface trait.trait).trait_generics
-               ~self:self_type trait)
+      let declared target =
+        {
+          target;
+          callee = Some declaration;
+          dictionaries =
+            list_dictionaries_of declaration ~bound_by_owner:(fun () ->
+                Types.make_trait_substitution
+                  (Interface.Definition.read_trait_interface interface trait.trait).trait_generics
+                  ~self:self_type trait);
+        }
       in
-      let target, supplied =
-        match Interface.Impls.locate_method interface evidence ~name ~receiver with
-        | Some Declaration_for_view ->
-            (Some declaration, lazy (list_code_supplied_to_declaration ()))
-        | Some (Method_of_impl { impl; substitution }) ->
-            let method_ = Path.Method { owner = impl; name; receiver } in
-            (Some method_, lazy (list_code_supplied_to method_ ~bound_by_owner:substitution))
-        | None ->
-            ( (if is_self_of_enclosing_trait self_type then Some declaration else None),
-              lazy (list_code_supplied_to_declaration ()) )
-      in
-      { target; supplied }
+      match Interface.Impls.locate_method interface evidence ~name ~receiver with
+      | Some Declaration_for_view -> declared (Some declaration)
+      | Some (Method_of_impl { impl; substitution }) ->
+          let method_ = Path.Method { owner = impl; name; receiver } in
+          {
+            target = Some method_;
+            callee = Some method_;
+            dictionaries = list_dictionaries_of method_ ~bound_by_owner:(fun () -> substitution);
+          }
+      | None -> declared (if is_self_of_enclosing_trait self_type then Some declaration else None))
   | Intrinsic { operation; _ } when Intrinsic.has_contract operation ->
-      { target = Some (Intrinsic.make_contract_path operation); supplied = lazy [] }
-  | Capability_method _ | Intrinsic _ | Indirect _ -> { target = None; supplied = lazy [] }
+      {
+        target = Some (Intrinsic.make_contract_path operation);
+        callee = None;
+        dictionaries = lazy [];
+      }
+  | Capability_method _ | Intrinsic _ | Indirect _ ->
+      { target = None; callee = None; dictionaries = lazy [] }
 
 let resolve_node (lookups : lookups) (declaration : Path.t) instance =
   let find_inheriting_method owner name receiver =
@@ -263,24 +325,25 @@ let resolve_node (lookups : lookups) (declaration : Path.t) instance =
       Option.value (find_inheriting_method owner name receiver) ~default:declaration
   | _ -> declaration
 
-type supplier = Call | Named_function of Path.t | Provide
-type edge = Calls of Path.t | Supplies of { supplier : supplier; code : Path.t list }
+type higher_order_argument = Dictionary | Function_value of Path.t | Handler
+type edge = Calls of Path.t | Passes of { argument : higher_order_argument; code : Path.t list }
 
 let list_statement_edges interface instance (statement : Tree.statement) =
-  let supply supplier code = if code = [] then [] else [ Supplies { supplier; code } ] in
+  let pass argument code = if code = [] then [] else [ Passes { argument; code } ] in
   (match Walk.find_callee statement with
     | Some callee ->
         let resolution = resolve_callee interface instance callee.target in
         List.map (fun target -> Calls target) (Option.to_list resolution.target)
-        @ supply Call (Lazy.force resolution.supplied)
+        @ pass Dictionary
+            (List.concat_map list_dictionary_methods (Lazy.force resolution.dictionaries))
     | None -> [])
   @
   match statement.kind with
   | Basic (Assign { value = Function_value { path; instantiation; _ }; _ }) ->
-      supply (Named_function path)
-        (path :: list_code_supplied_by_function_value interface instance path instantiation)
+      pass (Function_value path)
+        (path :: list_code_passed_with_function_value interface instance path instantiation)
   | Provide { provided; _ } ->
-      supply Provide
+      pass Handler
         (List.concat_map
            (fun (implementation : Tree.provided) ->
              List.concat_map
@@ -304,7 +367,12 @@ let list_statement_edges interface instance (statement : Tree.statement) =
   | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Resume _ | Yield _ ->
       []
 
-type dependency_kind = Read | Direct_call | Supplied of supplier
+type dependency_kind = Read | Direct_call | Passed of higher_order_argument
+
+let locate_call (statement : Tree.statement) =
+  match statement.kind with
+  | For { iteration = Pull { next_origin; _ }; _ } -> next_origin
+  | _ -> statement.origin
 
 type dependency = {
   path : Path.t;
@@ -430,11 +498,11 @@ let collect (lookups : lookups) instance visit_roots =
     Walk.iter_formula_places (add_constant ~through ~instance) formula;
     Walk.iter_formula (visit_statement ~through ~instance) formula
   and visit_statement ~through ~instance (statement : Tree.statement) =
+    let origin = locate_call statement in
     List.iter
       (function
-        | Calls target -> add ~through statement.origin Direct_call target
-        | Supplies { supplier; code } ->
-            List.iter (add ~through statement.origin (Supplied supplier)) code)
+        | Calls target -> add ~through origin Direct_call target
+        | Passes { argument; code } -> List.iter (add ~through origin (Passed argument)) code)
       (list_statement_edges lookups.interface instance statement);
     List.iter
       (fun (assumed : assumed_laws) ->
@@ -555,8 +623,7 @@ let rec body_may_abort (lookups : lookups) instance ~lambdas (body : Tree.body) 
         is_abort_site lookups instance statement
         || List.exists
              (function
-               | Calls callee -> may_abort callee
-               | Supplies { code; _ } -> List.exists may_abort code)
+               | Calls callee -> may_abort callee | Passes { code; _ } -> List.exists may_abort code)
              (list_statement_edges lookups.interface instance statement)
         ||
         match statement.kind with
@@ -590,7 +657,7 @@ let list_callees_that_run (lookups : lookups) path =
          | Some { target = Intrinsic _; _ } -> []
          | Some _ | None ->
              List.concat_map
-               (function Calls callee -> [ callee ] | Supplies { code; _ } -> code)
+               (function Calls callee -> [ callee ] | Passes { code; _ } -> code)
                (list_statement_edges lookups.interface instance statement))
        (list_run_statements lookups path))
 
@@ -735,7 +802,7 @@ let list_instance_dependencies (lookups : lookups) (instance : Types.ty) =
         | Some { type_generics; _ } ->
             let substitution = bind_generics Types.no_substitution type_generics arguments in
             if List.exists (Path.equal path) enclosing then
-              list_code_supplied_to_generics lookups.interface type_generics substitution
+              list_code_passed_to_generics lookups.interface type_generics substitution
             else
               list_paths
                 (List.concat_map

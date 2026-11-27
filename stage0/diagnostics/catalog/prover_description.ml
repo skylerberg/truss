@@ -248,15 +248,47 @@ let describe_obligation = function
       tick clause @ [ Text " may not hold for every value of the variables it names." ]
   | Desugared_assertion_may_fail { call } ->
       capitalize (describe_call call) @ [ Text " may not give `true`." ]
-  | Recursion_not_on_part { call; compared } ->
-      describe_recursive_call call
-      @ [
-          Text
-            (Printf.sprintf " may not be on a part of %s: give the function a `decreases` clause."
-               (match List.map (Printf.sprintf "`%s`") compared with
-               | [ name ] -> name
-               | names -> "the first of " ^ String.concat " and " names ^ " that it changes"));
-        ]
+  | Recursion_without_smaller_part { call; passage; is_self_call } -> (
+      let without_smaller_part =
+        "on some cycle of calls through it, no parameter is passed a part of itself each time \
+         around, so the recursion may not end: "
+        ^
+        if is_self_call then "give the function a `decreases` clause."
+        else "give the functions on the cycle `decreases` clauses."
+      in
+      match passage with
+      | Direct_call ->
+          describe_recursive_call call @ [ Text (" may not end: " ^ without_smaller_part) ]
+      | Dictionary { owner; incomparable } ->
+          capitalize (describe_call call)
+          @ [
+              Text
+                (Printf.sprintf
+                   " uses `%s` where a bound needs it, and its methods reach back here%s. "
+                   (Path.show owner)
+                   (match incomparable with
+                   | None -> ""
+                   | Some (Makes_values { parameter; maker }) ->
+                       Printf.sprintf
+                         " with values that are not parts of the arguments: `%s` makes new values \
+                          of `%s`"
+                         (Path.show maker) parameter
+                   | Some (Holds_out_of_reach { parameter; type_ }) ->
+                       Printf.sprintf
+                         " with values that may not be parts of the arguments: `%s` holds `%s` \
+                          outside its value"
+                         (Types.show type_) parameter
+                   | Some (Assumed_by_impl impl) ->
+                       Printf.sprintf
+                         " through `%s`, whose methods may pass values that are not parts of their \
+                          arguments"
+                         (Path.show impl)));
+              Text (String.capitalize_ascii without_smaller_part);
+            ]
+      | Function_value path ->
+          say
+            (Printf.sprintf "Naming `%s` as a value reaches back here, and %s" (Path.show path)
+               without_smaller_part))
   | Recursion_may_not_end { call; is_self_call = true } ->
       describe_recursive_call call
       @ [
@@ -292,31 +324,32 @@ let describe_obligation = function
                 that code, so the recursion cannot be shown to end."
                (match impl with Derives -> "derives" | Inherits -> "inherits from its trait"));
         ]
-  | Recursion_through_supply (Named_function path) ->
+  | Recursion_through_argument (Function_value path) ->
       say
         (Printf.sprintf
-           "Naming `%s` as a value reaches back here, and such a use passes no arguments the \
-            prover can compare, so the recursion cannot be shown to end: write it as a direct call \
-            on a part."
+           "Naming `%s` as a value reaches back here, and no `decreases` clause is compared \
+            through a function value, so the recursion cannot be shown to end: write it as a \
+            direct call, or leave out the `decreases` clauses for the prover to compare parts."
            (Path.show path))
-  | Recursion_through_supply (Bound_through_call { call; owner }) ->
+  | Recursion_through_argument (Dictionary_through_call { call; owner }) ->
       capitalize (describe_call call)
       @ [
           Text
             (Printf.sprintf
-               " uses `%s` where a bound needs it, and its methods reach back here. Such a use \
-                passes no arguments the prover can compare, so the recursion cannot be shown to \
-                end: write it as a direct call on a part."
+               " uses `%s` where a bound needs it, and its methods reach back here. No `decreases` \
+                clause is compared through such a use, so the recursion cannot be shown to end: \
+                write it as a direct call, or leave out the `decreases` clauses for the prover to \
+                compare parts."
                (Path.show owner));
         ]
-  | Recursion_through_supply (Bound_through_name { path; owner }) ->
+  | Recursion_through_argument (Dictionary_through_name { path; owner }) ->
       say
         (Printf.sprintf
            "Naming `%s` as a value uses `%s` where a bound needs it, and its methods reach back \
-            here. Such a use passes no arguments the prover can compare, so the recursion cannot \
-            be shown to end."
+            here. No `decreases` clause is compared through such a use, so the recursion cannot be \
+            shown to end."
            (Path.show path) (Path.show owner))
-  | Recursion_through_supply (Provided owner) ->
+  | Recursion_through_argument (Handler owner) ->
       say
         (Printf.sprintf
            "This `provide` gives `%s`, whose methods call back here, so the prover cannot show \
@@ -555,8 +588,8 @@ let describe_obligation = function
 let find_code : Prover.obligation -> Diagnostic.Code.prover = function
   | Assertion_may_fail _ | Bit_vector_assertion_may_fail _ | Desugared_assertion_may_fail _ ->
       Assertion
-  | Recursion_not_on_part _ | Recursion_may_not_end _ | Uncompared_recursion _
-  | Measure_may_not_decrease _ | Recursion_through_impl _ | Recursion_through_supply _
+  | Recursion_without_smaller_part _ | Recursion_may_not_end _ | Uncompared_recursion _
+  | Measure_may_not_decrease _ | Recursion_through_impl _ | Recursion_through_argument _
   | Loop_measure_may_not_decrease ->
       Termination
   | Constant_cycle _ -> Constant_cycle

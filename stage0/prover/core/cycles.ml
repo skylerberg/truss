@@ -51,7 +51,7 @@ let is_evaluated_constant (environment : State.environment) path code =
 let make_catalog_dependency (environment : State.environment)
     (dependency : Mir.Call_edges.dependency) : Catalog.Prover.dependency =
   {
-    kind = (match dependency.kind with Read -> Reads | Direct_call -> Calls | Supplied _ -> Uses);
+    kind = (match dependency.kind with Read -> Reads | Direct_call -> Calls | Passed _ -> Uses);
     path = dependency.path;
     omitted =
       Option.map

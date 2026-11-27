@@ -1,0 +1,7 @@
+type Tree(value: Int64, children: List[Tree])
+
+impl Equal for Tree {
+  fn equal(self, other: Tree) -> Bool {
+    self.value == other.value && other.children == self.children
+  }
+}

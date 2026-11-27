@@ -73,6 +73,10 @@ let proof_graph : Store.proof_graph =
 
 let package_kind = Kind.rank_target (Entity Package)
 
+let mark_group_stale tracker id =
+  mark_stale tracker Group_recursion id;
+  Store.mark_groups_stale tracker.store ~stage:(Kind.rank_stage Group_recursion) ~path:id
+
 let follow_edge_changes tracker (stage : Kind.stage) id changes =
   let differs (change : Store.edge_change) marker =
     Kind.has_marker change.before marker <> Kind.has_marker change.after marker
@@ -116,10 +120,7 @@ let follow_edge_changes tracker (stage : Kind.stage) id changes =
         (fun (change : Store.edge_change) ->
           change.changed.kind = definition_kind && (differs change Calls || differs change Assumes))
         changes
-    then begin
-      mark_stale tracker Group_recursion id;
-      Store.mark_groups_stale tracker.store ~stage:(Kind.rank_stage Group_recursion) ~path:id
-    end
+    then mark_group_stale tracker id
     end
 
 let replace_edges tracker stage id edges =
@@ -380,6 +381,7 @@ let write_observed tracker fact ~id outcome =
   List.iter
     (fun target -> mark_readers tracker (Fact target) id "")
     (List.concat_map Kind.list_read_targets changed);
+  if List.mem Kind.Size_changes changed then mark_group_stale tracker id;
   !observer
     (if changed = [] then Unchanged { stage = fact.whole.stage; id }
      else Written { stage = fact.whole.stage; id; is_removal = Option.is_none outcome });

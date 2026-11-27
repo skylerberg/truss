@@ -1,0 +1,9 @@
+type Tree(value: Int64, children: List[Tree])
+
+fn check_made[Item](make: fn() -> Item, predicate: fn(Item) -> Bool) -> Bool {
+  predicate(make())
+}
+
+fn has_negative(tree: Tree) -> Bool {
+  tree.value < 0 || check_made(fn() { tree.copy() }, predicate: has_negative)
+}
