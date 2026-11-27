@@ -4,7 +4,10 @@ type 'value outcome = Value of 'value | Failed | Blocked
 exception Unusable of string
 
 val create : ?on_bug:(Compiler_bug.t -> unit) -> ?loaded:string list -> Project.package list -> t
-val build_package : loaded:string list -> Project.package -> into:string -> unit
+
+val build_package :
+  loaded:string list -> ?check:(t -> unit) -> Project.package -> into:string -> unit
+
 val update : ?on_bug:(Compiler_bug.t -> unit) -> t -> (Path.file * string option) list -> unit
 
 val relayout :
@@ -23,7 +26,6 @@ val close : t -> unit
 val close_uncommitted : t -> unit
 val copy : t -> t
 val merge_packages : string list -> into:string -> unit
-val list_package_diagnostics : string -> Path.package -> (Source.t * Diagnostic.t list) list
 
 type checker =
   | Parse

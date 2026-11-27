@@ -91,7 +91,7 @@ let combine_package_databases (loaded : loaded list) =
                (List.map (fun (loaded : loaded) -> loaded.package_database) several));
       ]
 
-let load_package_database (package : Project.package) ~hash ~visible =
+let load_package_database ?check (package : Project.package) ~hash ~visible =
   let key = make_package_database_key ~hash ~visible in
   match Hashtbl.find_opt loaded_package_databases key with
   | Some loaded -> loaded
@@ -103,7 +103,8 @@ let load_package_database (package : Project.package) ~hash ~visible =
           key;
           package_database =
             obtain_package_database key
-              ~build:(Database.build_package ~loaded:(combine_package_databases visible) package);
+              ~build:
+                (Database.build_package ~loaded:(combine_package_databases visible) ?check package);
         }
       in
       Hashtbl.replace loaded_package_databases key loaded;
@@ -119,25 +120,20 @@ let standard_hash =
           (fun (file, text) -> (Project.make_file_path ~directory:"" file, text))
           Standard_library.files))
 
-let checked_standard_keys : (string, unit) Hashtbl.t = Hashtbl.create 1
+let reject_standard_diagnostics database =
+  match Database.list_dependency_diagnostics database Path.standard_package with
+  | [] -> ()
+  | failed ->
+      Compiler_bug.raise_bug ~stage:"Workspace" "the standard library has diagnostics:\n%s"
+        (String.concat ""
+           (List.concat_map
+              (fun (source, diagnostics) ->
+                List.map (Diagnostic.render ~is_colored:false source) diagnostics)
+              failed))
 
 let load_standard_package () =
-  let standard =
-    load_package_database standard_package ~visible:[] ~hash:(Lazy.force standard_hash)
-  in
-  if not (Hashtbl.mem checked_standard_keys standard.key) then begin
-    (match Database.list_package_diagnostics standard.package_database Path.standard_package with
-    | [] -> ()
-    | failed ->
-        Compiler_bug.raise_bug ~stage:"Workspace" "the standard library has diagnostics:\n%s"
-          (String.concat ""
-             (List.concat_map
-                (fun (source, diagnostics) ->
-                  List.map (Diagnostic.render ~is_colored:false source) diagnostics)
-                failed)));
-    Hashtbl.replace checked_standard_keys standard.key ()
-  end;
-  standard
+  load_package_database standard_package ~check:reject_standard_diagnostics ~visible:[]
+    ~hash:(Lazy.force standard_hash)
 
 let list_package_databases () =
   List.sort compare
