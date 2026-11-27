@@ -155,9 +155,6 @@ let select_precondition_clauses (contract : State.contract) =
 let list_clause_sets (contract : State.contract) =
   (contract.callee_clauses :: Option.to_list contract.trait_clauses) @ contract.restated_clauses
 
-let find_declared_clauses lookups path =
-  Option.bind (find_source lookups path) (fun (callee, _, _) -> find_clauses lookups path callee)
-
 let find_inherited_clauses (environment : State.environment) (path : Path.t) =
   Option.bind (Interface.Impls.find_implemented_method environment.lookups.interface path)
     (fun (implemented : Interface.Impls.implemented_method) ->

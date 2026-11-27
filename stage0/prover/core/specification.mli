@@ -7,8 +7,6 @@ type t = {
   has_ensures : bool;
 }
 
-val assume_requires : State.frame -> t -> Logic.term list -> State.frame
-
 val oblige_requires :
   State.frame ->
   Obligation.location ->
