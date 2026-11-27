@@ -15,8 +15,7 @@ val drain_decide :
 val drain_stage :
   Tracker.t -> ?on_bug:(Compiler_bug.t -> unit) -> Kind.stage -> scope:Store.scope -> bool
 
-val drain_claimed_items :
-  Tracker.t -> ?on_bug:(Compiler_bug.t -> unit) -> string list option -> unit
+val drain_live_items : Tracker.t -> ?on_bug:(Compiler_bug.t -> unit) -> string list option -> unit
 
 val drain_evaluated_items :
   Tracker.t -> ?on_bug:(Compiler_bug.t -> unit) -> string list option -> unit
