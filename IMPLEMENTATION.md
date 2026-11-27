@@ -240,15 +240,22 @@ develop as well as make it easier to bootstrap the compiler in parts.
   its contract once, and every use relies on that proof alone, so a use may
   assume a clause only under the premises that the proof assumed.
   `Contracts.list_promises` is the one statement of those premises: it lists
-  each clause set's `ensures` with the clause set whose `requires` they were
-  proven under. The clauses that a trait adds to a restated method are
-  proven under the precondition of the method's contract, which is all that
-  the proof of the `impl` assumes, so a call and the axiom of a logic
-  function assume them under that precondition and for no other argument.
-  A `cost` clause has the premise of its clause set, as an `ensures` has. A
-  call that takes its amount from a clause set proven under other
-  `requires` than the ones it met spends that amount where those `requires`
-  hold of its arguments, and an unknown amount elsewhere.
+  each clause set with the clause set whose `requires` its clauses were
+  proven under. A contract is a list of specification cases in this sense,
+  as in JML's specification inheritance, and the precondition of the
+  contract is the `requires` that a call must meet: the definition's own,
+  or its trait's where it writes none.
+
+  | Clause set | Proven under | Its `ensures` at a call | Its `cost` at a call | In the axiom of a logic function |
+  |---|---|---|---|---|
+  | The definition's own | The precondition | Assumed, since the call met the precondition | Spent | Under the precondition |
+  | Its trait's, where the definition writes `requires` of its own | The trait's `requires` | Assumed under the trait's `requires` | Spent where the trait's `requires` hold of the arguments, and an unknown amount elsewhere | Under the trait's `requires` |
+  | A restating trait's | The precondition, which is all that the proof of the `impl` assumes | Assumed | Spent | Under the precondition |
+
+  A reader that takes a clause from the list and drops its premise states
+  the clause of arguments that no proof covers. A change that adds an
+  assumption to one of the proofs changes the premise in `list_promises`
+  with it, since that is where every use reads the premise.
 
   | Reader | Proves | Assumes |
   |---|---|---|
