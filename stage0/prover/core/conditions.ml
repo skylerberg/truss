@@ -5,16 +5,20 @@ let implies (lookups : Lookups.t) ~current premise conclusion =
     ~list_bounds:(Encoding.list_definition_bounds lookups ~current ~condition:[])
     premise conclusion
 
-let may_panic_for_every_value lookups ~current ~condition (uses : Types.capability_set) =
-  Types.has_capability (Built_in Panic) uses
+let may_use_for_every_value lookups ~current ~condition capability (uses : Types.capability_set) =
+  Types.has_capability capability uses
   ||
-  match Types.find_unless (Built_in Panic) uses with
+  match Types.find_unless capability uses with
   | Some unless -> not (implies lookups ~current condition unless)
   | None -> false
 
-let may_panic lookups ~current ~condition (uses : Types.capability_set) =
-  may_panic_for_every_value lookups ~current ~condition uses
-  || Types.has_capability (Capability_unless_values (Built_in Panic)) uses
+let decide_available lookups ~current ~condition (uses : Types.capability_set) =
+  Types.make_capability_set
+    (List.filter
+       (function
+         | Types.Capability_unless { unless; _ } -> not (implies lookups ~current condition unless)
+         | _ -> true)
+       (Types.list_capabilities uses))
 
 type state = { mutable undecided : Types.condition list }
 

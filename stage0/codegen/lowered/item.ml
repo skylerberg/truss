@@ -1,5 +1,5 @@
 type t =
-  | Code of { path : Path.t; instantiation : Ground.instantiation; assumes_condition : bool }
+  | Code of { path : Path.t; instantiation : Ground.instantiation; assumed : Path.t list }
   | Constant of { path : Path.t; arguments : (Types.parameter * Ground.argument) list }
   | Drop of Ground.ty
   | Copy of Ground.ty
@@ -34,7 +34,7 @@ and impl_method = {
 }
 
 let make_method_path { impl; name; receiver; _ } = Path.Method { owner = impl; name; receiver }
-let make_code path instantiation = Code { path; instantiation; assumes_condition = false }
+let make_code path instantiation = Code { path; instantiation; assumed = [] }
 let make_constant path = Constant { path; arguments = [] }
 
 let make_method_code (impl_method : impl_method) =
@@ -50,11 +50,14 @@ let equal = Key.equal
 let hash = Key.hash
 
 let rec to_string = function
-  | Code { path; instantiation; assumes_condition } ->
+  | Code { path; instantiation; assumed } ->
       Path.show path
       ^ show_arguments instantiation.type_arguments
       ^ show_capability_arguments instantiation.capability_arguments
-      ^ if assumes_condition then " assuming its condition on values" else ""
+      ^ String.concat ""
+          (List.map
+             (fun capability -> " assuming the condition of " ^ Path.show capability)
+             assumed)
   | Constant { path; arguments } ->
       Path.show path ^ show_arguments (List.map (fun (_, argument) -> argument) arguments)
   | Drop ty -> "drop " ^ Ground.to_string ty

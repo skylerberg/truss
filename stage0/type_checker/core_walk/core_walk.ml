@@ -212,7 +212,9 @@ let walk_parameter visit (parameter : Core.parameter) =
 let walk_definition_children visit : Core.definition -> unit = function
   | Core.Function { parameters; contract; body } ->
       List.iter (walk_parameter visit) parameters;
-      List.iter visit.expression contract.panics_unless;
+      List.iter
+        (fun (conditional : Core.conditional_use) -> List.iter visit.expression conditional.unless)
+        contract.conditional_uses;
       List.iter
         (fun (requirement : Core.condition Core.conditional) ->
           visit.expression requirement.clause.value)

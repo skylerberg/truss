@@ -263,14 +263,10 @@ let describe : Typing.t -> Nodes.description = function
            (match condition with
            | In_capability_method ->
                "A capability's method takes no condition on its arguments: an implementation uses \
-                the capabilities of the code that provides it, so it could panic where the \
+                the capabilities of the code that provides it, so it could use them where the \
                 condition holds."
            | Joined_with_bound ->
-               "A condition on the arguments cannot be joined with a bound with `&&`."
-           | Not_panic capabilities ->
-               Printf.sprintf
-                 "A condition on the arguments applies only to `Panic`, and `%s` is not `Panic`."
-                 (String.concat ", " (List.map Types.show_capability capabilities))))
+               "A condition on the arguments cannot be joined with a bound with `&&`."))
   | Wrong_value_parameter_type { at = origin; parameter; type_ } ->
       make Wrong_value_parameter_type (Build.at origin)
         ~fixes:
@@ -413,14 +409,15 @@ let describe : Typing.t -> Nodes.description = function
         (say
            (Printf.sprintf "`%s` can use only the capabilities `%s` declares for it." name
               (Path.show_name trait)))
-  | Panic_beyond_condition { at = origin; name; trait } ->
+  | Use_beyond_condition { at = origin; name; trait; capability } ->
+      let shown = Types.show_capability capability in
       make Impl_uses (Build.at origin)
         (say
            (Printf.sprintf
-              "`%s` declares `%s` with `uses Panic unless` a condition, and this `%s` uses `Panic` \
-               without one, so it could panic where that condition holds. Declare `uses Panic \
+              "`%s` declares `%s` with `uses %s unless` a condition, and this `%s` uses `%s` \
+               without one, so it could use `%s` where that condition holds. Declare `uses %s \
                unless` a condition that `%s`'s implies."
-              (Path.show_name trait) name name (Path.show_name trait)))
+              (Path.show_name trait) name shown name shown shown shown (Path.show_name trait)))
   | Bound_unmet { at = origin; definition; arguments; argument; bound } ->
       make Unsatisfied_bound (Build.at origin)
         (say

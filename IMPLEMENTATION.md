@@ -618,7 +618,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | Field of `State.frame` | Holds while |
   |---|---|
   | `is_ghost` | A specification, a proof block or an evaluated assertion is read |
-  | `panics`, `can_declare_panic` | The code being read may panic, and may be given `uses Panic` as a fix |
+  | `available`, `declared_uses` | The capabilities the code being read may use, and the function's own `uses`, to which a fix may add one |
   | `terminates` | The code being read must terminate: the definition's own flag, or a lambda's inside its body |
   | `obligation_condition` | A clause that holds under a condition is read, so that an obligation made while reading it is one of that condition |
   | `requires_being_read` | One `requires` clause of the definition is read, so that a fix is placed before it |

@@ -149,13 +149,6 @@ let exists_capability predicate (set : capability_set) =
 let list_capabilities (set : capability_set) : capability list = set
 let terminates set = not (may_use (Built_in Run_forever) set)
 
-let terminates_when ~implies (premise : condition) (set : capability_set) =
-  (not (has_capability (Built_in Run_forever) set))
-  &&
-  match find_unless (Built_in Run_forever) set with
-  | Some unless -> implies premise unless
-  | None -> true
-
 let contains_capability_error (capabilities : capability_set) =
   List.exists
     (fun capability -> match find_base capability with Capability_error _ -> true | _ -> false)
@@ -207,6 +200,13 @@ let replace_capabilities find_replacement (set : capability_set) =
              List.filter_map
                (fun replacement -> make_unless replacement unless)
                (Option.value ~default:[ base ] (find_replacement base))
+         | Capability_unless_values base -> (
+             match find_replacement capability with
+             | Some replacement -> replacement
+             | None ->
+                 List.map
+                   (fun replacement -> Capability_unless_values (find_base replacement))
+                   (Option.value ~default:[ base ] (find_replacement base)))
          | _ -> Option.value ~default:[ capability ] (find_replacement capability))
        set)
 

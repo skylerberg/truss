@@ -40,7 +40,7 @@ type code = {
   result : Types.result;
   substitution : Types.substitution;
   uses : Types.capability_set;
-  assumes_condition : bool;
+  assumed : Path.t list;
 }
 
 let make_unwritten_code ~definition ~substitution ~result =
@@ -51,7 +51,7 @@ let make_unwritten_code ~definition ~substitution ~result =
     result;
     substitution;
     uses = Types.no_capabilities;
-    assumes_condition = false;
+    assumed = [];
   }
 
 let read_written context key =
@@ -79,7 +79,7 @@ let make_function_code context ~enclosing_impl (key : Resolve.Names.key)
     result = interface.output;
     substitution;
     uses = interface.uses;
-    assumes_condition = false;
+    assumed = [];
   }
 
 let make_declared_code context ~impl ~(declaration : Resolve.Names.key) ~trait_substitution
@@ -143,13 +143,24 @@ let make_code context (path : Path.t) (instantiation : Ground.instantiation) : c
 let panic_path = Well_known.make_builtin_capability_path Panic
 let list_evidence context = Monomorphic.list_capabilities context.monomorphic
 
-let has_panic_condition (uses : Types.capability_set) =
-  Types.has_capability (Capability_unless_values (Built_in Panic)) uses
+let list_conditional_evidence context substitution (uses : Types.capability_set) =
+  list_evidence context substitution
+    (Types.make_capability_set
+       (List.filter
+          (function Types.Capability_unless_values _ -> true | _ -> false)
+          (Types.list_capabilities uses)))
 
-let remove_panic_condition (uses : Types.capability_set) =
-  Types.replace_capabilities
-    (function Types.Capability_unless_values _ -> Some Types.no_capabilities | _ -> None)
-    uses
+let remove_assumed context substitution ~assumed (uses : Types.capability_set) =
+  Types.make_capability_set
+    (List.filter
+       (function
+         | Types.Capability_unless_values _ as capability ->
+             not
+               (List.exists
+                  (fun path -> List.exists (Path.equal path) assumed)
+                  (list_evidence context substitution (Types.make_capability_set [ capability ])))
+         | _ -> true)
+       (Types.list_capabilities uses))
 
 let classify_result context substitution (result : Types.result) =
   match result with

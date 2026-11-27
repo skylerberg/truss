@@ -1,6 +1,6 @@
-let make_environment ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_failures = true)
-    ?panic_condition ?blocked_holders ?proven_laws (lookups : Lookups.t) ~home ~current ~terminates
-    ~measures ~inherits_precondition =
+let make_environment ?node ?(condition = []) ?(keeps = State.Every_capability) ?ruled_out
+    ?blocked_holders ?proven_laws (lookups : Lookups.t) ~home ~current ~terminates ~measures
+    ~inherits_precondition =
   let node = Option.value node ~default:current in
   {
     State.lookups;
@@ -17,7 +17,7 @@ let make_environment ?node ?(condition = []) ?(keeps_termination = true) ?(keeps
     termination = lazy (lookups.find_termination node);
     blocked_holders = Option.value blocked_holders ~default:[];
     proven_laws;
-    policy = Obligations.make_policy ~keeps_termination ~keeps_failures ~panic_condition;
+    policy = { keeps; ruled_out };
     memos = Private_state.create ();
     read_formula = Reader.read_formula;
     run_body = Reader.read_body;
@@ -71,8 +71,8 @@ let make_empty_frame (environment : State.environment) (query : Query.t) source 
     requires_being_read = None;
     callees_whose_requires_are_read = [];
     provided = [];
-    panics = false;
-    can_declare_panic = false;
+    available = Types.no_capabilities;
+    declared_uses = None;
     instantiating = [];
     obligation_condition = [];
     is_reading_callback = false;
@@ -206,30 +206,51 @@ let assume_precondition (start : State.frame) (source : State.source) ~(own : St
       assumed
   | (Some _ | None), _ -> assume_own ()
 
-let check_panic_condition_against_the_trait (start : State.frame) (source : State.source)
+let list_conditions ?(substitution = Types.no_substitution) capability
+    (conditional_uses : Mir.conditional_use list) =
+  List.concat_map
+    (fun (conditional : Mir.conditional_use) ->
+      if
+        Types.may_use capability
+          (Types.substitute_capabilities substitution
+             (Types.make_capability_set [ conditional.capability ]))
+      then conditional.unless
+      else [])
+    conditional_uses
+
+let check_capability_conditions_against_the_trait (start : State.frame) (source : State.source)
     ~(own : State.clauses) ~(inherited : (State.clauses * State.frame) option) ~trait_requires =
-  if own.panics_unless <> [] then
-    match inherited with
-    | Some (clauses, inside) when clauses.panics_unless <> [] ->
-        let trait_condition =
-          Logic.conjunction
-            (List.map
-               (fun (requirement : Mir.requirement) ->
-                 snd (Validity.read_specification inside requirement.clause))
-               clauses.panics_unless)
-        in
-        ignore
-          (List.fold_left
-             (fun frame (requirement : Mir.requirement) ->
-               let frame, term = Validity.read_specification frame requirement.clause in
-               Obligations.oblige frame
-                 (Facts.locate frame requirement.clause.origin)
-                 (Impl_panic_condition { clause = Facts.quote source requirement.clause.origin })
-                 term;
-               frame)
-             (Facts.restrict (Facts.restrict start trait_requires) trait_condition)
-             own.panics_unless)
-    | Some _ | None -> ()
+  match inherited with
+  | Some (clauses, inside) ->
+      List.iter
+        (fun (conditional : Mir.conditional_use) ->
+          match list_conditions conditional.capability clauses.conditional_uses with
+          | [] -> ()
+          | trait_conditions ->
+              let trait_condition =
+                Logic.conjunction
+                  (List.map
+                     (fun (requirement : Mir.requirement) ->
+                       snd (Validity.read_specification inside requirement.clause))
+                     trait_conditions)
+              in
+              ignore
+                (List.fold_left
+                   (fun frame (requirement : Mir.requirement) ->
+                     let frame, term = Validity.read_specification frame requirement.clause in
+                     Obligations.oblige frame
+                       (Facts.locate frame requirement.clause.origin)
+                       (Impl_capability_condition
+                          {
+                            capability = conditional.capability;
+                            clause = Facts.quote source requirement.clause.origin;
+                          })
+                       term;
+                     frame)
+                   (Facts.restrict (Facts.restrict start trait_requires) trait_condition)
+                   conditional.unless))
+        own.conditional_uses
+  | None -> ()
 
 type case = {
   clauses : State.clauses;
@@ -251,12 +272,12 @@ type run = {
   signature : Types.signature option;
   is_update_step : bool;
   is_specification_only : bool;
-  panics : bool;
-  can_declare_panic : bool;
+  available : Types.capability_set;
+  declared_uses : Types.capability_set;
 }
 
-let make_run ~substitution ~condition ~assumes_panic_condition ?blocked_holders
-    (lookups : Lookups.t) (source : State.source) ~path (contract : Mir.contract) =
+let make_run ~substitution ~condition ?ruled_out ?blocked_holders (lookups : Lookups.t)
+    (source : State.source) ~path (contract : Mir.contract) =
   let signature =
     Option.map
       (Types.map_signature (Types.substitute_erased substitution))
@@ -273,26 +294,39 @@ let make_run ~substitution ~condition ~assumes_panic_condition ?blocked_holders
     | None -> Types.make_capability_set [ Built_in Run_forever ]
   in
   let implies = Conditions.implies lookups ~current:path in
-  let terminates = is_specification_only || Types.terminates_when ~implies condition uses in
-  let keeps_termination =
-    condition = [] || Types.find_unless (Built_in Run_forever) uses = Some condition
+  let available =
+    Types.make_capability_set
+      (List.filter
+         (fun capability -> Some (Types.find_base capability) <> ruled_out)
+         (Types.list_capabilities
+            (Conditions.decide_available lookups ~current:path ~condition uses)))
   in
-  let keeps_failures =
-    assumes_panic_condition || condition = []
-    || Types.find_unless (Built_in Panic) uses = Some condition
+  let terminates = is_specification_only || not (Types.may_use (Built_in Run_forever) available) in
+  let keeps : State.kept =
+    match (ruled_out, condition) with
+    | Some capability, _ -> Capabilities [ capability ]
+    | None, [] -> Every_capability
+    | None, _ ->
+        Capabilities
+          (List.filter_map
+             (function
+               | Types.Capability_unless { capability; unless } when unless = condition ->
+                   Some capability
+               | _ -> None)
+             (Types.list_capabilities uses))
   in
-  let panics =
-    (not assumes_panic_condition) && Conditions.may_panic lookups ~current:path ~condition uses
+  let ruled_out =
+    Option.map
+      (fun capability : State.ruled_out ->
+        {
+          capability;
+          condition =
+            List.map
+              (fun (requirement : Mir.requirement) -> Facts.quote source requirement.clause.origin)
+              (list_conditions ~substitution capability contract.conditional_uses);
+        })
+      ruled_out
   in
-  let panic_condition =
-    if assumes_panic_condition then
-      Some
-        (List.map
-           (fun (requirement : Mir.requirement) -> Facts.quote source requirement.clause.origin)
-           contract.panics_unless)
-    else None
-  in
-  let can_declare_panic = not (Types.may_use (Built_in Panic) uses) in
   let home = source.key in
   let measures =
     List.filter
@@ -300,8 +334,7 @@ let make_run ~substitution ~condition ~assumes_panic_condition ?blocked_holders
       contract.decreases
   in
   let environment =
-    make_environment lookups ~condition ~keeps_termination ~keeps_failures ?panic_condition
-      ?blocked_holders ~home ~current:path
+    make_environment lookups ~condition ~keeps ?ruled_out ?blocked_holders ~home ~current:path
       ~node:
         (Mir.Call_edges.resolve_node
            { interface = lookups.interface; mir = lookups.mir }
@@ -310,7 +343,7 @@ let make_run ~substitution ~condition ~assumes_panic_condition ?blocked_holders
       ~inherits_precondition:
         (Option.is_some (Interface.Impls.find_implemented_method lookups.interface path))
   in
-  { environment; signature; is_update_step; is_specification_only; panics; can_declare_panic }
+  { environment; signature; is_update_step; is_specification_only; available; declared_uses = uses }
 
 let resolve_clause_sets (environment : State.environment) (query : Query.t) (source : State.source)
     ~path (contract : Mir.contract) =
@@ -344,7 +377,7 @@ let resolve_clause_sets (environment : State.environment) (query : Query.t) (sou
 
 let bind_entry (run : run) (query : Query.t) (source : State.source) ~path ~substitution ~condition
     (contract : Mir.contract) =
-  let { environment; signature; is_update_step; is_specification_only; panics; can_declare_panic } =
+  let { environment; signature; is_update_step; is_specification_only; available; declared_uses } =
     run
   in
   let lookups = environment.lookups and parameters = contract.parameters in
@@ -355,8 +388,8 @@ let bind_entry (run : run) (query : Query.t) (source : State.source) ~path ~subs
         (make_empty_frame environment query source) with
         substitution;
         is_ghost = is_specification_only;
-        panics;
-        can_declare_panic;
+        available;
+        declared_uses = Some declared_uses;
       }
       parameters ~is_update_step
   in
@@ -397,8 +430,8 @@ let bind_entry (run : run) (query : Query.t) (source : State.source) ~path ~subs
   in
   (start, output)
 
-let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_holders
-    (lookups : Lookups.t) (source : State.source) ~path (query : Query.t) =
+let enter_function ~substitution ~condition ?ruled_out ?blocked_holders (lookups : Lookups.t)
+    (source : State.source) ~path (query : Query.t) =
   let contract =
     match Mir.read_contract lookups.mir path with
     | Some { form; _ } -> form
@@ -406,8 +439,7 @@ let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_ho
   in
   let parameters = contract.parameters in
   let run =
-    make_run ~substitution ~condition ~assumes_panic_condition ?blocked_holders lookups source ~path
-      contract
+    make_run ~substitution ~condition ?ruled_out ?blocked_holders lookups source ~path contract
   in
   let environment = run.environment in
   let own, inherited, added, clause_sets =
@@ -474,17 +506,19 @@ let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_ho
   in
   let promised = List.concat_map (fun case -> case.costs) cases in
   let start = Cost_promises.enter_definition start promised ~body:(Some mir.body) in
-  check_panic_condition_against_the_trait start source ~own ~inherited ~trait_requires;
+  check_capability_conditions_against_the_trait start source ~own ~inherited ~trait_requires;
   let start = assume_precondition start source ~own ~inherited ~trait_requires in
   let start =
-    if assumes_panic_condition then
-      List.fold_left
-        (fun frame (requirement : Mir.requirement) ->
-          let frame, term = Validity.read_specification frame requirement.clause in
-          Facts.assume frame term;
-          frame)
-        start own.panics_unless
-    else start
+    match ruled_out with
+    | Some capability ->
+        List.fold_left
+          (fun frame (requirement : Mir.requirement) ->
+            let frame, term = Validity.read_specification frame requirement.clause in
+            Facts.assume frame term;
+            frame)
+          start
+          (list_conditions ~substitution capability own.conditional_uses)
+    | None -> start
   in
   Cost_promises.check_promise_amounts start promised ~output;
   List.iter
@@ -576,13 +610,12 @@ let check_return entered ({ frame; returned; return_origin } : State.function_ex
         case.costs)
     entered.cases
 
-let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : Lookups.t)
-    (source : State.source) ~path =
+let translate_run ~substitution ~condition ?ruled_out (lookups : Lookups.t) (source : State.source)
+    ~path =
   run_blocking @@ fun ?blocked_holders () ->
   let query = Query.create () in
   let entered =
-    enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_holders lookups source
-      ~path query
+    enter_function ~substitution ~condition ?ruled_out ?blocked_holders lookups source ~path query
   in
   let exits = Reader.read_body entered.start ~lambdas:entered.code.lambdas entered.code.body in
   Termination.reject_unreached_calls_without_decrease entered.start;
@@ -605,25 +638,23 @@ let find_circular_proof (lookups : Lookups.t) (source : State.source) ~path =
 
 let translate_function ?(substitution = Types.no_substitution) (lookups : Lookups.t)
     (source : State.source) ~path =
-  let run ?(assumes_panic_condition = false) condition =
-    translate_run ~substitution ~condition ~assumes_panic_condition lookups source ~path
+  let run ?ruled_out condition =
+    translate_run ~substitution ~condition ?ruled_out lookups source ~path
   in
   let base, skipped = run [] in
-  let has_panic_condition =
+  let uses =
     match Interface.Impls.read_signature lookups.interface path with
     | Some signature ->
-        Types.has_capability (Capability_unless_values (Built_in Panic)) signature.uses
-    | None -> false
-  in
-  let find_capability_condition capability =
-    match Interface.Impls.read_signature lookups.interface path with
-    | Some signature when not (Types.has_capability capability signature.uses) ->
-        Option.to_list
-          (Types.find_unless capability (Types.substitute_capabilities substitution signature.uses))
-    | Some _ | None -> []
+        Types.list_capabilities (Types.substitute_capabilities substitution signature.uses)
+    | None -> []
   in
   let outcomes =
-    (base :: (if has_panic_condition then [ fst (run ~assumes_panic_condition:true []) ] else []))
+    base
+    :: List.filter_map
+         (function
+           | Types.Capability_unless_values capability -> Some (fst (run ~ruled_out:capability []))
+           | _ -> None)
+         uses
     @ List.map
         (fun condition ->
           let outcome = fst (run condition) in
@@ -636,8 +667,9 @@ let translate_function ?(substitution = Types.no_substitution) (lookups : Lookup
                 outcome.obligations;
           })
         (List.sort_uniq compare
-           (find_capability_condition (Built_in Run_forever)
-           @ find_capability_condition (Built_in Panic)
+           (List.filter_map
+              (function Types.Capability_unless { unless; _ } -> Some unless | _ -> None)
+              uses
            @ skipped))
   in
   merge_outcomes outcomes

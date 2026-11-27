@@ -273,14 +273,16 @@ let lower_nested_function (state : Lowering.state) ~(function_type : Ground.func
           (List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ [ capabilities ])
         ())
 
-let is_unreachable_panic (state : Lowering.state) capabilities =
-  state.frame.code.assumes_condition
-  && Option.is_none (Lowering.find_panic_trace state)
-  && List.exists (Path.equal Definitions.panic_path) capabilities
+let lacks_assumed_evidence (state : Lowering.state) capability =
+  List.exists (Path.equal capability) state.frame.code.assumed
+  && not (List.exists (fun (path, _) -> Path.equal path capability) state.evidence)
+
+let is_unreachable_call (state : Lowering.state) capabilities =
+  List.exists (lacks_assumed_evidence state) capabilities
 
 let lower_indirect_call state ~(function_type : Ground.function_type) ~(value : Lowered.place) ~site
     (places : Lowered.place list) destination =
-  if is_unreachable_panic state function_type.uses then Lowering.emit_unreachable_block state
+  if is_unreachable_call state function_type.uses then Lowering.emit_unreachable_block state
   else
     let passed =
       List.concat
@@ -375,19 +377,26 @@ let lower_item_call (state : Lowering.state) item ~(signature : Types.signature)
     ~site () =
   let item : Lowered.Item.t =
     match item with
-    | Lowered.Item.Code { path; instantiation; assumes_condition = false }
-      when Definitions.has_panic_condition signature.uses
-           && Option.is_none (Lowering.find_panic_trace state) ->
-        Lowered.Item.Code { path; instantiation; assumes_condition = true }
+    | Lowered.Item.Code { path; instantiation; assumed = [] } ->
+        Lowered.Item.Code
+          {
+            path;
+            instantiation;
+            assumed =
+              List.filter
+                (fun capability ->
+                  not (List.exists (fun (path, _) -> Path.equal path capability) state.evidence))
+                (Definitions.list_conditional_evidence state.context substitution signature.uses);
+          }
     | item -> item
   in
   let uses =
     match item with
-    | Lowered.Item.Code { assumes_condition = true; _ } ->
-        Definitions.remove_panic_condition signature.uses
+    | Lowered.Item.Code { assumed; _ } ->
+        Definitions.remove_assumed state.context substitution ~assumed signature.uses
     | _ -> signature.uses
   in
-  if is_unreachable_panic state (Definitions.list_evidence state.context substitution uses) then
+  if is_unreachable_call state (Definitions.list_evidence state.context substitution uses) then
     Lowering.emit_unreachable_block state
   else
     let c_signature, result =

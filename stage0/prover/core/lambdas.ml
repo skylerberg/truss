@@ -148,7 +148,9 @@ let run_lambda_body ?(enter = Fun.id) (frame : State.frame) ~(lambdas : Mir.body
     (body : Mir.body) ~type_ =
   let inside =
     enter
-      (Obligations.set_panics { frame with locals = remove_temporaries frame.locals } ~panics:false)
+      (Obligations.set_available
+         { frame with locals = remove_temporaries frame.locals }
+         Types.no_capabilities)
   in
   let exits =
     Facts.run_in_source frame (fun () -> frame.environment.run_body inside ~lambdas body)
@@ -377,15 +379,14 @@ let read_lambda ?(capture_free = false) (frame : State.frame) ~(site : Invocatio
   let inferred_bounds =
     begin
       let inside =
-        Obligations.set_panics
+        Obligations.set_available
           {
             inside with
             locals = remove_temporaries inside.locals;
             terminates = Types.terminates function_type.uses;
           }
-          ~panics:
-            (Conditions.may_panic frame.environment.lookups ~current:frame.environment.current
-               ~condition:frame.environment.condition function_type.uses)
+          (Conditions.decide_available frame.environment.lookups ~current:frame.environment.current
+             ~condition:frame.environment.condition function_type.uses)
       in
       let inside =
         List.fold_left2

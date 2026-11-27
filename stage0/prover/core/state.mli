@@ -3,7 +3,7 @@ type source = { key : Resolve.Names.key; definition : Path.t }
 type clauses = {
   callee : source;
   parameters : Mir.parameter list;
-  panics_unless : Mir.requirement list;
+  conditional_uses : Mir.conditional_use list;
   requires : Mir.requirement list;
   ensures : Mir.formula list;
   decreases : Mir.formula list;
@@ -32,11 +32,9 @@ type known_function =
     }
   | Own of { name : string; callback : Mir.callback }
 
-type obligation_policy = {
-  panic_condition : Catalog.Prover.quoted list option;
-  keeps_termination : bool;
-  keeps_failures : bool;
-}
+type ruled_out = { capability : Types.capability; condition : Catalog.Prover.quoted list }
+type kept = Every_capability | Capabilities of Types.capability list
+type obligation_policy = { keeps : kept; ruled_out : ruled_out option }
 
 type environment = {
   lookups : Lookups.t;
@@ -87,8 +85,8 @@ and frame = {
   requires_being_read : Core.origin option;
   callees_whose_requires_are_read : Path.t list;
   provided : Mir.provided list list;
-  panics : bool;
-  can_declare_panic : bool;
+  available : Types.capability_set;
+  declared_uses : Types.capability_set option;
   instantiating : (Path.t * int) list;
   obligation_condition : Types.condition;
   is_reading_callback : bool;

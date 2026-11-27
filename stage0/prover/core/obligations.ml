@@ -1,10 +1,11 @@
-let make_policy ~keeps_termination ~keeps_failures ~panic_condition : State.obligation_policy =
-  { panic_condition; keeps_termination; keeps_failures }
+let is_available (frame : State.frame) capability = Types.may_use capability frame.available
 
-let find_ruled_out_panic (frame : State.frame) =
-  if frame.panics then None else frame.environment.policy.panic_condition
+let find_ruled_out (frame : State.frame) =
+  match frame.environment.policy.ruled_out with
+  | Some ruled_out when not (is_available frame ruled_out.capability) -> Some ruled_out
+  | Some _ | None -> None
 
-let set_panics (frame : State.frame) ~panics = { frame with panics; can_declare_panic = false }
+let set_available (frame : State.frame) available = { frame with available; declared_uses = None }
 
 let make_obligation (frame : State.frame) location obligation goal =
   Query.make_obligation frame.query ~find_signature:Signatures.find_signature
@@ -29,21 +30,36 @@ let make_closed_obligation (frame : State.frame) location obligation goal =
           (make_obligation { frame with condition = Logic.Boolean true } location obligation closed)
     | None -> None
 
-let is_panic_obligation : Diagnostic.Code.prover -> bool = function
-  | Overflow | Division | Shift | Panic -> true
+let is_failing_operation : Diagnostic.Code.prover -> bool = function
+  | Overflow | Division | Shift -> true
   | _ -> false
+
+let find_guarded_capability (obligation : Catalog.Prover.obligation) code =
+  match (obligation, code) with
+  | (Precondition_may_use { capability; _ } | Uses_where_ruled_out { capability; _ }), _ ->
+      Some capability
+  | _, (Diagnostic.Code.Overflow | Division | Shift) -> Some (Types.Built_in Panic)
+  | _, Termination -> Some (Types.Built_in Run_forever)
+  | _ -> None
 
 let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?(is_proven_by_evaluation = false)
     ?holds_when (frame : State.frame) location obligation goal =
   let code = Catalog.Prover_description.find_code obligation in
   let holds_when = Option.value holds_when ~default:frame.obligation_condition in
+  let guarded = find_guarded_capability obligation code in
+  let policy = frame.environment.policy in
+  let is_kept =
+    match (policy.keeps, guarded) with
+    | Every_capability, Some _ -> true
+    | Capabilities kept, Some capability -> List.mem capability kept
+    | _, None -> false
+  in
   if
-    (is_panic_obligation code && frame.panics)
-    || (Option.is_some frame.environment.policy.panic_condition && not (is_panic_obligation code))
-    || not
-         (holds_when = frame.environment.condition
-         || (code = Diagnostic.Code.Termination && frame.environment.policy.keeps_termination)
-         || (is_panic_obligation code && frame.environment.policy.keeps_failures))
+    (is_failing_operation code && is_available frame (Built_in Panic))
+    || (match policy.ruled_out with
+      | Some ruled_out -> guarded <> Some ruled_out.capability
+      | None -> false)
+    || not (holds_when = frame.environment.condition || is_kept)
   then Facts.assume frame goal
   else
     let is_held =
@@ -74,9 +90,13 @@ let oblige ?cited ?(fixes = []) ?(can_be_required = true) ?(is_proven_by_evaluat
             | fixes -> fixes
           in
           let fixes =
-            if is_panic_obligation code && frame.can_declare_panic && is_home_body then
-              fixes @ Fixes.make_panic_fix frame.environment
-            else fixes
+            match (guarded, frame.declared_uses) with
+            | Some capability, Some declared
+              when (is_failing_operation code || code = Capability_condition)
+                   && is_home_body
+                   && not (Types.may_use capability declared) ->
+                fixes @ Fixes.make_uses_fix frame.environment capability
+            | _ -> fixes
           in
           Query.add_obligation frame.query { obligation with cited; fixes };
           Facts.assume frame goal

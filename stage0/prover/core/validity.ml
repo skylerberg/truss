@@ -91,14 +91,14 @@ let note_place (frame : State.frame) ~node ~origin value =
 
 let run_as_specification (frame : State.frame) read =
   let (after : State.frame), value =
-    read (Counters.stop_counting (Obligations.set_panics frame ~panics:false))
+    read (Counters.stop_counting (Obligations.set_available frame Types.no_capabilities))
   in
   ( {
       after with
       spent = frame.spent;
       conditional_counters = frame.conditional_counters;
-      panics = frame.panics;
-      can_declare_panic = frame.can_declare_panic;
+      available = frame.available;
+      declared_uses = frame.declared_uses;
     },
     value )
 

@@ -113,11 +113,12 @@ let mangle_capability_arguments arguments =
        arguments)
 
 let rec mangle : Lowered.Item.t -> string = function
-  | Code { path; instantiation; assumes_condition } ->
+  | Code { path; instantiation; assumed } ->
       mangle_path path
       ^ mangle_arguments instantiation.type_arguments
       ^ mangle_capability_arguments instantiation.capability_arguments
-      ^ if assumes_condition then render_marker "Assuming" else ""
+      ^ String.concat ""
+          (List.map (fun capability -> render_marker "Assuming" ^ mangle_path capability) assumed)
   | Constant { path; arguments } ->
       render_marker "Constant" ^ mangle_path path
       ^ mangle_arguments (List.map (fun (_, argument) -> argument) arguments)

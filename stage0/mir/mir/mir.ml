@@ -76,15 +76,22 @@ let find_contract (definition : Core.definition) =
       Some
         {
           parameters = List.map make_parameter parameters;
-          panics_unless =
+          conditional_uses =
             List.map
-              (fun value ->
+              (fun ({ capability; unless } : Core.conditional_use) ->
                 {
-                  clause = Builder.of_clause ~parameters value;
-                  is_executable = false;
-                  names = Builder.list_names value;
+                  capability;
+                  unless =
+                    List.map
+                      (fun value ->
+                        {
+                          clause = Builder.of_clause ~parameters value;
+                          is_executable = false;
+                          names = Builder.list_names value;
+                        })
+                      unless;
                 })
-              contract.panics_unless;
+              contract.conditional_uses;
           requires =
             List.map
               (fun ({ holds_when; clause = written } : Core.condition Core.conditional) ->
@@ -140,7 +147,7 @@ let find_contract (definition : Core.definition) =
       Some
         {
           parameters = [];
-          panics_unless = [];
+          conditional_uses = [];
           requires = [];
           ensures = [];
           decreases = [];

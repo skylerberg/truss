@@ -1,0 +1,20 @@
+fn report(count: Int64, quiet: Bool)
+  uses Console unless quiet
+{
+  if !quiet {
+    Console.print_line("count ${count}")
+  }
+}
+
+fn tally(count: Int64) -> Int64 {
+  report(count, quiet: true)
+  count
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  report(1, quiet: false)
+  report(tally(2), quiet: false)
+  ExitCode(0)
+}

@@ -7,12 +7,7 @@ type recursion =
 type count_error = Not_uint64 | Computed_by_call | Computed_from_itself
 type associated = Types.associated_kind = Associated_type | Associated_capability_set
 type kind_mismatch = Value_for_type | Type_for_value
-
-type value_condition =
-  | In_capability_method
-  | Joined_with_bound
-  | Not_panic of Types.capability list
-
+type value_condition = In_capability_method | Joined_with_bound
 type recipient = Main | Test
 
 type member_kind =
@@ -165,7 +160,12 @@ type t =
     }
   | Uses_beyond_impl of { at : Core.origin; name : string }
   | Uses_beyond_trait of { at : Core.origin; name : string; trait : Path.t }
-  | Panic_beyond_condition of { at : Core.origin; name : string; trait : Path.t }
+  | Use_beyond_condition of {
+      at : Core.origin;
+      name : string;
+      trait : Path.t;
+      capability : Types.capability;
+    }
   | Bound_unmet of {
       at : Core.origin;
       definition : Path.t;

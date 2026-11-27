@@ -1,0 +1,11 @@
+fn report(count: UInt64, quiet: Bool)
+  uses Console unless quiet
+{
+  if !quiet {
+    Console.print_line("${count}")
+  }
+}
+
+fn count_aloud(count: UInt64) {
+  report(count, quiet: false)
+}

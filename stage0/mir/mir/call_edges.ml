@@ -671,7 +671,9 @@ let list_contract_formulas (contract : Tree.contract) =
   let list_clauses requirements =
     List.map (fun (requirement : Tree.requirement) -> requirement.clause) requirements
   in
-  list_clauses contract.panics_unless
+  List.concat_map
+    (fun (conditional : Tree.conditional_use) -> list_clauses conditional.unless)
+    contract.conditional_uses
   @ list_clauses contract.requires @ contract.ensures @ contract.decreases
   @ List.map
       (fun (cost : Tree.cost) ->

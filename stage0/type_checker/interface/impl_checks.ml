@@ -49,14 +49,18 @@ type conformance = {
   missing_associated : string list;
 }
 
-let panics_beyond_value_condition ~(allowed : Types.capability_set) (written : Types.capability_set)
-    =
-  Types.has_capability (Capability_unless_values (Built_in Panic)) allowed
-  && List.exists
-       (fun capability ->
-         Types.find_base capability = Built_in Panic
-         && capability <> Types.Capability_unless_values (Built_in Panic))
-       (Types.list_capabilities written)
+let find_use_beyond_value_condition ~(allowed : Types.capability_set)
+    (written : Types.capability_set) =
+  List.find_map
+    (function
+      | Types.Capability_unless_values capability ->
+          List.find_opt
+            (fun used ->
+              Types.find_base used = capability && used <> Types.Capability_unless_values capability)
+            (Types.list_capabilities written)
+          |> Option.map (fun _ -> capability)
+      | _ -> None)
+    (Types.list_capabilities allowed)
 
 let compiler_implements (impl : Types.impl_interface) =
   Well_known.is Copyable impl.implements.trait
@@ -387,25 +391,33 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                    else
                      Uses_beyond_trait
                        { at = Written name.id; name = name.text; trait = impl.implements.trait })
-              else if
-                (not trait.is_capability)
-                && panics_beyond_value_condition ~allowed (normalize_capabilities written.uses)
-              then
-                Checking.report state
-                  (Panic_beyond_condition
-                     { at = Written name.id; name = name.text; trait = impl.implements.trait })
               else
-                match find_unallowed_part ~expected ~written with
-                | Some part ->
+                match
+                  if trait.is_capability then None
+                  else
+                    find_use_beyond_value_condition ~allowed (normalize_capabilities written.uses)
+                with
+                | Some capability ->
                     Checking.report state
-                      (Impl_modifies
+                      (Use_beyond_condition
                          {
                            at = Written name.id;
                            name = name.text;
-                           parameter = (Types.read_parameter_at written part.position).name;
-                           part;
                            trait = impl.implements.trait;
+                           capability;
                          })
-                | None ->
-                    check_callback_contracts state name ~trait:impl.implements.trait
-                      implemented.declaration))
+                | None -> (
+                    match find_unallowed_part ~expected ~written with
+                    | Some part ->
+                        Checking.report state
+                          (Impl_modifies
+                             {
+                               at = Written name.id;
+                               name = name.text;
+                               parameter = (Types.read_parameter_at written part.position).name;
+                               part;
+                               trait = impl.implements.trait;
+                             })
+                    | None ->
+                        check_callback_contracts state name ~trait:impl.implements.trait
+                          implemented.declaration)))

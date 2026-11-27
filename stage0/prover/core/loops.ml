@@ -355,7 +355,7 @@ let prove_cursor_loop ~(for_loop : for_loop) (frame : State.frame)
   in
   let pulling : Invocation.site = { origin = next_origin; type_ = option_type } in
   let measures = Termination.find_written_measures clauses in
-  Termination.require_measure frame ~loop:"a loop over a cursor"
+  Termination.require_measure frame location ~loop:"a loop over a cursor"
     ~is_measured:(Option.is_some measures);
   let find_measured (at : State.frame) = Option.map (Termination.read_measures at) measures in
   let entry_measure = match find_measured frame with Some [ entry ] -> Some entry | _ -> None in
@@ -579,7 +579,8 @@ let run_while_loop (frame : State.frame) (loop : while_loop) =
       ?implicit:(Termination.make_comparison_measure head loop.measure_operands)
       clauses ~head
   in
-  Termination.require_measure head ~loop:"a `while` loop" ~is_measured:(Option.is_some measure);
+  Termination.require_measure head (Facts.locate head loop.while_at) ~loop:"a `while` loop"
+    ~is_measured:(Option.is_some measure);
   let iteration_bounds =
     match
       ( Option.map

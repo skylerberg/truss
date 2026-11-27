@@ -26,7 +26,7 @@ let find_clauses (lookups : Lookups.t) path callee =
       {
         State.callee;
         parameters = contract.parameters;
-        panics_unless = contract.panics_unless;
+        conditional_uses = contract.conditional_uses;
         requires = contract.requires;
         ensures = contract.ensures;
         decreases = contract.decreases;

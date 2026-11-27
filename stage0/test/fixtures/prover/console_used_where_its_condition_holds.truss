@@ -1,0 +1,5 @@
+fn report(count: UInt64, quiet: Bool)
+  uses Console unless quiet
+{
+  Console.print_line("${count}")
+}

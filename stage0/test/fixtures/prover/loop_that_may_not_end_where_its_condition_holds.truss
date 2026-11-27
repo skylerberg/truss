@@ -1,0 +1,6 @@
+fn wait(bounded: Bool)
+  uses RunForever unless bounded
+{
+  while true {
+  }
+}

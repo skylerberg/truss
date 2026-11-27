@@ -195,7 +195,10 @@ let state_with_trigger (outer : State.frame) (application : application) (contra
                   in
                   let required =
                     read_required precondition precondition.requires
-                    @ read_required callee_clauses callee_clauses.panics_unless
+                    @ read_required callee_clauses
+                        (List.concat_map
+                           (fun (conditional : Mir.conditional_use) -> conditional.unless)
+                           callee_clauses.conditional_uses)
                   in
                   if List.mem None required then None
                   else

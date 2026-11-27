@@ -95,3 +95,5 @@ val pull_loop :
   call_next:(Lowered.place -> unit) ->
   body:(Lowered.place -> unit) ->
   unit
+
+val lacks_assumed_evidence : Lowering.state -> Path.t -> bool

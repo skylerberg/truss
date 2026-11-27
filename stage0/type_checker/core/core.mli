@@ -214,8 +214,10 @@ and callback_contract = {
   ensures : expression list;
 }
 
+type conditional_use = { capability : Types.capability; unless : expression list }
+
 type contract = {
-  panics_unless : expression list;
+  conditional_uses : conditional_use list;
   requires : condition conditional list;
   ensures : expression conditional list;
   decreases : expression conditional list;
