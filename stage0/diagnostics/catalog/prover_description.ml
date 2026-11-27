@@ -470,6 +470,14 @@ let describe_obligation = function
             " may not follow from the trait's precondition, which callers through the trait show, \
              and an `impl`'s precondition must.";
         ]
+  | Trait_precondition { clause } ->
+      [
+        Description.Text "The trait's precondition `";
+        quote_in clause;
+        Text
+          "` may not follow from the method's own. An `impl` restates its trait's precondition in \
+           its own terms and does not widen it.";
+      ]
   | Impl_panic_condition { clause } ->
       tick clause
       @ [
@@ -558,7 +566,8 @@ let find_code : Prover.obligation -> Diagnostic.Code.prover = function
   | Constant_cycle _ -> Constant_cycle
   | Circular_proof _ -> Circular_proof
   | Precondition_may_fail _ | Intrinsic_requirement _ | Callback_precondition _ | Float_conversion _
-  | Not_a_scalar_value _ | Impl_precondition _ | Impl_panic_condition _ | Function_requirement _ ->
+  | Not_a_scalar_value _ | Impl_precondition _ | Trait_precondition _ | Impl_panic_condition _
+  | Function_requirement _ ->
       Requires
   | Precondition_may_panic _ | Panics_where_ruled_out _ -> Panic
   | Upper_bound_in_exact_cost _ | Lambda_cost _ | Lambda_call_above_bound _ | Loop_cost_clause _

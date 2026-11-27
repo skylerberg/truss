@@ -161,17 +161,6 @@ let call_contract (frame : State.frame) (site : Invocation.site) (callee : Calle
     oblige_preconditions frame callee contract values ~location ~path ~substitution_of
       ~recursive_callee ~read_entry_frame
   in
-  let read_requires (base : State.frame) (clauses : State.clauses) =
-    Logic.conjunction
-      (List.map
-         (fun requirement ->
-           snd (Validity.read_specification (read_entry_frame base clauses) requirement))
-         (Facts.list_clauses clauses.requires))
-  in
-  let read_premise (base : State.frame) : Contracts.premise -> Logic.term = function
-    | The_precondition -> required
-    | Requires_of clauses -> read_requires base clauses
-  in
   let callee_bindings = list_bindings callee_clauses in
   let callee_arguments = List.filter_map snd callee_bindings in
   let is_on_bound_values = List.exists (Logic.mentions frame.bound) callee_arguments in
@@ -293,7 +282,7 @@ let call_contract (frame : State.frame) (site : Invocation.site) (callee : Calle
       | None -> false
     in
     List.iter
-      (fun ({ made_by = clauses; proven_under } : Contracts.promise) ->
+      (fun (clauses : State.clauses) ->
         let exits =
           List.map
             (fun (position, entry) ->
@@ -322,10 +311,10 @@ let call_contract (frame : State.frame) (site : Invocation.site) (callee : Calle
                   | Some application, None ->
                       defining_term := Contract_axioms.find_definition application term
                   | _ -> ());
-                  Facts.assume after (Logic.( ==> ) (read_premise base proven_under) term)
+                  Facts.assume after (Logic.( ==> ) required term)
               | exception Facts.Unsupported _ -> ())
           clauses.ensures)
-      (Contracts.list_promises contract)
+      (Contracts.list_clause_sets contract)
   in
   let assume_hypotheses (after : State.frame) applied =
     Option.iter
@@ -336,10 +325,8 @@ let call_contract (frame : State.frame) (site : Invocation.site) (callee : Calle
   let spend ~(before : State.frame) ~(after : State.frame) ~changed ~result ~final =
     Amounts.spend_contract_call ~before ~after site callee definition contract values ~changed
       ~result ~result_type:declared_result_type ~final
-      ~is_recursive:(Option.is_some recursive_callee)
-      ~bind_frame:(fun clauses ->
+      ~is_recursive:(Option.is_some recursive_callee) ~bind_frame:(fun clauses ->
         { (read_entry_frame before clauses) with result = Some result; condition = after.condition })
-      ~read_requires:(read_requires before)
   in
   let havoc = havoc_mut frame values ~list_modified in
   let after = havoc.after and changed = List.rev havoc.written in

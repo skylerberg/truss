@@ -361,8 +361,8 @@ let prove_cursor_loop ~(for_loop : for_loop) (frame : State.frame)
   let entry_measure = match find_measured frame with Some [ entry ] -> Some entry | _ -> None in
   let next_costs =
     List.concat_map
-      (fun (next : Contracts.promise) -> next.made_by.costs)
-      (Contracts.list_promises contract)
+      (fun (clauses : State.clauses) -> clauses.costs)
+      (Contracts.list_clause_sets contract)
   in
   let states_only_amortized_cost =
     List.exists

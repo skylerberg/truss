@@ -144,7 +144,8 @@ let find_smaller_than_entry (frame : State.frame) (callee_clauses : State.clause
 let state_with_trigger (outer : State.frame) (application : application) (contract : State.contract)
     ~substitution_of ~result_type ~group_member ~is_triggered =
   let symbol = application.symbol and sorts = application.sorts in
-  let callee_clauses = contract.callee_clauses in
+  let callee_clauses = contract.callee_clauses
+  and precondition = Contracts.select_precondition_clauses contract in
   Query.run_once outer.query (Contract_of symbol) (fun () ->
       let parameters = make_fresh_parameters outer.query "ensured" sorts in
       let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
@@ -183,7 +184,7 @@ let state_with_trigger (outer : State.frame) (application : application) (contra
             in
             let readable_clauses =
               List.filter_map
-                (fun ({ made_by = clauses; proven_under } : Contracts.promise) ->
+                (fun (clauses : State.clauses) ->
                   let inside =
                     { (bind clauses) with result = Some applied; makes_obligations = false }
                   in
@@ -193,13 +194,8 @@ let state_with_trigger (outer : State.frame) (application : application) (contra
                         find_readable_clause outer.query mark requirement (bind stated_by))
                       (Facts.list_clauses requirements)
                   in
-                  let premise =
-                    match proven_under with
-                    | The_precondition -> Contracts.select_precondition_clauses contract
-                    | Requires_of clauses -> clauses
-                  in
                   let required =
-                    read_required premise premise.requires
+                    read_required precondition precondition.requires
                     @ read_required callee_clauses callee_clauses.panics_unless
                   in
                   if List.mem None required then None
@@ -214,7 +210,7 @@ let state_with_trigger (outer : State.frame) (application : application) (contra
                     with
                     | [] -> None
                     | ensures -> Some (clauses, List.filter_map Fun.id required, ensures))
-                (Contracts.list_promises contract)
+                (Contracts.list_clause_sets contract)
             in
             match smaller with
             | Some smaller ->

@@ -35,7 +35,6 @@ val spend_contract_call :
   final:Logic.term option ->
   is_recursive:bool ->
   bind_frame:(State.clauses -> State.frame) ->
-  read_requires:(State.clauses -> Logic.term) ->
   State.frame
 
 val spend_call_without_a_contract : State.frame -> Callee.t -> State.passed list -> State.frame
