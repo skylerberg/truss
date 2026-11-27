@@ -458,7 +458,7 @@ let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_ho
     measures;
   { start; cases; code = mir; parameters; output; is_update_step }
 
-let check_ensures (lookups : Lookups.t) entered (frame : State.frame) location ~is_checked ~moment =
+let check_ensures entered (frame : State.frame) location ~is_checked ~moment =
   List.iter
     (fun case ->
       let inside = case.bind_values frame in
@@ -476,7 +476,7 @@ let check_ensures (lookups : Lookups.t) entered (frame : State.frame) location ~
                    clause = Facts.quote case.clauses.callee ensured.origin;
                    promiser =
                      (if case.clauses.inherited then
-                        Some (Contracts.find_promiser lookups case.clauses.callee)
+                        Some (Contracts.find_promiser case.clauses.callee)
                       else None);
                    moment;
                  })
@@ -484,8 +484,8 @@ let check_ensures (lookups : Lookups.t) entered (frame : State.frame) location ~
         case.clauses.ensures)
     entered.cases
 
-let check_lent_part lookups entered ({ lent_frame; lent_origin } : State.lent_part) =
-  check_ensures lookups entered lent_frame
+let check_lent_part entered ({ lent_frame; lent_origin } : State.lent_part) =
+  check_ensures entered lent_frame
     (Facts.locate lent_frame lent_origin)
     ~is_checked:Lending.holds_where_lent ~moment:Where_lent
 
@@ -522,10 +522,10 @@ let check_returned_values entered ({ frame; returned; return_origin } : State.fu
         ~includes_invariants:(not entered.is_update_step) ~moment:Self_at_return
   | _ -> ()
 
-let check_return lookups entered ({ frame; returned; return_origin } : State.function_exit) =
+let check_return entered ({ frame; returned; return_origin } : State.function_exit) =
   let lends = Option.is_some entered.start.lent_part_type in
   let exit_location = Facts.locate frame return_origin in
-  check_ensures lookups entered frame exit_location
+  check_ensures entered frame exit_location
     ~is_checked:(fun clause -> not (lends && Lending.holds_where_lent clause))
     ~moment:(if lends then At_lend_end else At_return);
   List.iter
@@ -550,12 +550,12 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
       ~path query
   in
   let exits = Reader.read_body entered.start ~lambdas:entered.code.lambdas entered.code.body in
-  List.iter (check_lent_part lookups entered) (List.rev exits.lends);
+  List.iter (check_lent_part entered) (List.rev exits.lends);
   List.iter
     (fun returned ->
       let returned = bind_returned entered returned in
       check_returned_values entered returned;
-      check_return lookups entered returned)
+      check_return entered returned)
     (List.rev exits.returns);
   (make_outcome query, Conditions.list_undecided query)
 
@@ -589,7 +589,16 @@ let translate_function ?(substitution = Types.no_substitution) (lookups : Lookup
   let outcomes =
     (base :: (if has_panic_condition then [ fst (run ~assumes_panic_condition:true []) ] else []))
     @ List.map
-        (fun condition -> fst (run condition))
+        (fun condition ->
+          let outcome = fst (run condition) in
+          {
+            outcome with
+            obligations =
+              List.map
+                (fun (obligation : Obligation.t) ->
+                  { obligation with instance = { obligation.instance with condition } })
+                outcome.obligations;
+          })
         (List.sort_uniq compare
            (find_capability_condition (Built_in Run_forever)
            @ find_capability_condition (Built_in Panic)

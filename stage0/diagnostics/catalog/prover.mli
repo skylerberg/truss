@@ -64,12 +64,11 @@ type unbounded =
     }
   | Unbounded_iteration
 
-type promiser = Trait_promiser | Capability_promiser
 type postcondition_moment = At_return | Where_lent | At_lend_end
 
 type promise =
   | Own_promise of { counting : counting; clause : quoted }
-  | Inherited_promise of { counting : counting; promiser : promiser; clause : quoted }
+  | Inherited_promise of { counting : counting; promiser : Path.t; clause : quoted }
 
 type function_value = Named_function of Path.t | Callback_parameter of string
 type function_use = Passed_for_parameter | Used_as_value of Types.ty
@@ -124,7 +123,7 @@ type obligation =
   | Impl_precondition of { clause : quoted }
   | Trait_precondition of { clause : quoted }
   | Impl_panic_condition of { clause : quoted }
-  | Postcondition of { clause : quoted; promiser : promiser option; moment : postcondition_moment }
+  | Postcondition of { clause : quoted; promiser : Path.t option; moment : postcondition_moment }
   | Law_may_fail of { trait : Types.trait_reference; law : string; for_type : Types.ty }
   | Negative_potential of { type_ : Types.ty }
   | May_alias of { first : quoted; second : quoted }
@@ -191,7 +190,7 @@ type fix =
   | Add_panic_to_uses of Core.origin
 
 type citation = Cited_here | Cited_at of { path : string; line : int }
-type instance = (string * Language.Builtin_type.t) list
+type instance = { builtins : (string * Language.Builtin_type.t) list; condition : Types.condition }
 
 type t =
   | Proves of { location : location; instance : instance; obligation : obligation }

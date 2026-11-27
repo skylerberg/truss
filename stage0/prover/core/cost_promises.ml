@@ -100,11 +100,7 @@ let check_promise ?cited (frame : State.frame) promise ~(at : State.frame) ~loca
          promise =
            (if promise.inherited then
               Inherited_promise
-                {
-                  counting;
-                  promiser = Contracts.find_promiser frame.environment.lookups promise.written_in;
-                  clause;
-                }
+                { counting; promiser = Contracts.find_promiser promise.written_in; clause }
             else Own_promise { counting; clause });
        })
     goal

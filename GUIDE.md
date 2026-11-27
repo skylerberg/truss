@@ -4879,9 +4879,10 @@ test "a cursor's provided methods" {
 - **A loop over a cursor terminates when the cursor measures itself.** Its
   type implements the prelude trait `FiniteCursor`, whose `remaining()`
   counts down: `FiniteCursor` promises that each `next` that returns `Some`
-  makes `remaining()` smaller. `impl FiniteCursor for Countdown` proves that
-  promise from the `ensures` of `next` and of `remaining`, so the loop in the
-  first test needs nothing more. Without the `impl`:
+  makes `remaining()` smaller. With `impl FiniteCursor for Countdown`, that
+  promise is a clause of `Countdown`'s `next`, and the body of `next` is
+  proven to keep it, so the loop in the first test needs nothing more.
+  Without the `impl`:
 
   ```text
   main.truss:19:3: error[capabilities.not_available]: This loop has no measure, so it uses `RunForever`, which is not available here. Declare it with `uses RunForever`, or give the loop a `decreases` clause, or implement `FiniteCursor` for `Countdown`.

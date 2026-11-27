@@ -308,12 +308,10 @@ let mentions_visited (clause : Mir.formula) =
 let mentions_final_result (clause : Mir.formula) =
   mentions_specification clause (function Final_result -> true | _ -> false)
 
-let find_promiser (lookups : Lookups.t) (source : State.source) : Catalog.Prover.promiser =
-  match source.key with
-  | { path = Method { owner; _ }; _ }
-    when Resolve.Names.find_kind lookups.interface.names owner = Some Resolve.Names.Capability ->
-      Capability_promiser
-  | _ -> Trait_promiser
+let find_promiser (source : State.source) =
+  match source.key.path with
+  | Method { owner; _ } -> owner
+  | path -> Facts.raise_bug "`%s` promises a clause to an `impl` and is no method" (Path.show path)
 
 let make_entry_frame frame (clauses : State.clauses) ~arguments ~substitution =
   let locals, types, self =
