@@ -732,7 +732,14 @@ let prove_restated_method (start : State.frame) ~at ~impl_interface ~trait ~for_
           in
           let parameters = clauses.parameters in
           let entry =
-            bind_parameters start parameters
+            bind_parameters
+              {
+                start with
+                panics =
+                  Conditions.may_panic lookups ~current:start.environment.current
+                    ~condition:start.environment.condition callee.uses;
+              }
+              parameters
               ~substitute:(Types.substitute_erased subtrait_substitution)
               ~is_update_step:false
           in

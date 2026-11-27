@@ -266,7 +266,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
 
   The second row is a refinement written as an implementation: the
   contract of the `impl`'s method refines the restated contract where a
-  body that only executes the first implements the second. Each proof runs
+  body that only executes the first implements the second. A restated
+  method has the signature of the method that it restates, so its proof
+  may panic where that signature says so, and proves the added clauses of
+  each call that returns. Each proof runs
   once for every condition that a clause of its cases leaves undecided, so
   a clause with a `when` condition is proven where the condition holds. A
   proof that reads no body, of a law, a type or a constant, starts from

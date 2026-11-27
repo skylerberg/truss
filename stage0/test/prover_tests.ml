@@ -650,6 +650,9 @@ let () =
   Harness.test "a restated clause is not assumed of arguments outside the method's precondition"
     (fun () ->
       expect_not_proven Fixtures.Prover.restated_clause_outside_the_precondition "prover.ensures");
+  Harness.test "a restated method may panic where the method that it restates may" (fun () ->
+      expect_not_proven Fixtures.Prover.restated_method_with_a_panic_condition "prover.ensures"
+        ~says:"The contract of `Crawler`'s `step` may not imply `result >= by`");
   Harness.test "a restated clause with a condition is proven where the impl's type meets it"
     (fun () ->
       expect_codes Fixtures.Prover.restated_clauses_with_a_condition
