@@ -11,7 +11,7 @@ val find :
 
 val make_fingerprint : t -> Profile.t -> string
 
-type source = { name : string; text_hash : string; render : unit -> string }
+type source = { name : string; text_hash : string; read_text : unit -> string }
 
 val hash_text : string -> string
 val make_source : name:string -> string -> source

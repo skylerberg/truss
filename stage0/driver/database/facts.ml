@@ -290,3 +290,19 @@ let unit =
   in
   let development = make Development and release = make Release in
   function Profile.Development -> development | Release -> release
+
+let decode_bytes : Store.cell -> string = function
+  | Blob bytes -> bytes
+  | Text _ | Integer _ | Null ->
+      Compiler_bug.raise_bug ~stage:"Database" "a column that holds bytes holds none"
+
+let unit_text =
+  let make profile : string Tracker.fact =
+    Tracker.make_fact ~stage:(Render profile) ~table:"unit_text" ~id_column:"item"
+      ~fixed:[ ("profile", Integer (rank_profile profile)) ]
+      ~groups:[ (Unit profile, [ "text" ]) ]
+      ~encode:(fun text -> [ Blob text ])
+      ~decode:(fun cells -> decode_bytes cells.(0))
+  in
+  let development = make Development and release = make Release in
+  function Profile.Development -> development | Release -> release

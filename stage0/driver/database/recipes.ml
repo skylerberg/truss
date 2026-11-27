@@ -1053,13 +1053,21 @@ let record_test_run (database : Tracker.t) item (pass : Lowering.test_pass optio
 
 let run_render profile (database : Tracker.t) id =
   let item = read_item database id in
-  let outcome =
+  let text =
     Tracker.record database (Render profile) id (fun recorder ->
         match render_unit database recorder profile item with
-        | text -> Option.map (fun text -> Tracker.Value (C_compiler.hash_text text)) text
+        | text -> Option.map (fun text -> Tracker.Value text) text
         | exception Tracker.Reads_failed_fact -> Some Blocked)
   in
-  ignore (Tracker.write database (Facts.unit profile) ~id outcome)
+  let text_hash =
+    Option.map
+      (function
+        | Tracker.Value text -> Tracker.Value (C_compiler.hash_text text)
+        | (Failed | Blocked) as outcome -> outcome)
+      text
+  in
+  ignore (Tracker.write database (Facts.unit profile) ~id text_hash);
+  ignore (Tracker.write database (Facts.unit_text profile) ~id text)
 
 let list_linked (database : Tracker.t) profile ~roots =
   Store.list_linked database.store item_graph ~profile:(Facts.rank_profile profile)

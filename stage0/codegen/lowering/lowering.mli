@@ -36,7 +36,7 @@ type lowered_lookups = {
   record_test_run : Lowered.Item.t -> test_pass option -> unit;
   read_test_key : Lowered.Item.t -> (string, unbuildable) result;
   list_linked : Profile.t -> Lowered.Item.t list -> linked list;
-  render_unit : Profile.t -> Lowered.Item.t -> string;
+  read_unit_text : Profile.t -> Lowered.Item.t -> string;
 }
 
 exception Infinite_size of Ground.ty

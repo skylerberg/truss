@@ -170,16 +170,16 @@ let make_run (record : Test_report.record) =
   | Timed_out -> Stopped (end_with Timed_out)
   | Crashed -> Stopped (end_with Crashed)
 
-let units_rendered = Atomic.make 0
+let unit_texts_read = Atomic.make 0
 
 let make_stored_source backend item ~text_hash : C_compiler.source =
   {
     name = Lowered.Item.to_string item;
     text_hash;
-    render =
+    read_text =
       (fun () ->
-        Atomic.incr units_rendered;
-        backend.lookups.render_unit backend.profile item);
+        Atomic.incr unit_texts_read;
+        backend.lookups.read_unit_text backend.profile item);
   }
 
 let rec build ?report_progress ?(tests = false) ?dsym_bundle backend ~roots ~startup ~output =
@@ -602,5 +602,5 @@ module For_testing = struct
       [ (compile_fragment backend item, External) ]
 
   let count_built_programs () = Atomic.get programs_built
-  let count_rendered_units () = Atomic.get units_rendered
+  let count_unit_texts_read () = Atomic.get unit_texts_read
 end

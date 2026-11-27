@@ -5,7 +5,6 @@ val write_file : Tracker.t -> package:string -> Path.file -> string -> unit
 val remove_file : Tracker.t -> Path.file -> unit
 val forget_dependency : Tracker.t -> int -> unit
 val list_linked : Tracker.t -> Profile.t -> roots:Lowered.Item.t list -> Store.linked list
-val render_unit : Tracker.t -> Tracker.recorder -> Profile.t -> Lowered.Item.t -> string option
 val list_definition_facts : unit -> Tracker.description list
 val list_stale_units : Tracker.t -> Kind.stage -> scope:Store.scope -> int list
 

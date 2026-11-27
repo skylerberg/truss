@@ -40,3 +40,4 @@ val evaluation : Lowering.evaluation Tracker.fact
 val test_run : Lowering.test_pass Tracker.fact
 val rank_profile : Profile.t -> int
 val unit : Profile.t -> string Tracker.fact
+val unit_text : Profile.t -> string Tracker.fact

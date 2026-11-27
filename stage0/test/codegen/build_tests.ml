@@ -281,7 +281,7 @@ let () =
   List.iter
     (fun (name, profile) ->
       Codegen_support.test
-        (Printf.sprintf "a %s build of a program that was built before renders no unit" name)
+        (Printf.sprintf "a %s build of a program that was built before reads no unit's text" name)
         (fun () ->
           let _, backend =
             Codegen_support.load ~profile
@@ -300,10 +300,10 @@ let () =
             | Error message -> Codegen_support.fail "%s" message
           in
           build ();
-          let rendered = Backend.For_testing.count_rendered_units () in
+          let texts_read = Backend.For_testing.count_unit_texts_read () in
           build ();
-          Codegen_support.expect_int ~expected:rendered
-            (Backend.For_testing.count_rendered_units ())))
+          Codegen_support.expect_int ~expected:texts_read
+            (Backend.For_testing.count_unit_texts_read ())))
     [ ("development", Backend.Development); ("release", Release) ]
 
 let () =

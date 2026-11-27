@@ -9,6 +9,9 @@ let keyed_by_id name columns indexes =
 let keyed_by_columns name columns indexes =
   { name; columns; without_rowid = true; indexes = List.map index_every_row indexes }
 
+let keyed_by_columns_with_large_rows name columns indexes =
+  { (keyed_by_columns name columns indexes) with without_rowid = false }
+
 let fact_of_definition ?(has_index_without_value = false) name columns =
   {
     (keyed_by_id name ("definition INTEGER PRIMARY KEY, " ^ columns) []) with
@@ -150,6 +153,10 @@ let tables =
     keyed_by_columns "unit"
       ("item INTEGER NOT NULL, profile INTEGER NOT NULL, " ^ state
      ^ ", text_hash BLOB, PRIMARY KEY (item, profile)")
+      [];
+    keyed_by_columns_with_large_rows "unit_text"
+      ("item INTEGER NOT NULL, profile INTEGER NOT NULL, " ^ state
+     ^ ", text BLOB, PRIMARY KEY (item, profile)")
       [];
     keyed_by_columns "diagnostic"
       "stage INTEGER NOT NULL, unit INTEGER NOT NULL, position INTEGER NOT NULL, package TEXT NOT \

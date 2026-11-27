@@ -84,5 +84,5 @@ module For_testing : sig
   val compile_fragment : t -> Lowered.Item.t -> Emit_c.fragment
   val render_unit : t -> Lowered.Item.t -> string
   val count_built_programs : unit -> int
-  val count_rendered_units : unit -> int
+  val count_unit_texts_read : unit -> int
 end
