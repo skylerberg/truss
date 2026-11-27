@@ -1,4 +1,5 @@
 type profile = Profile.t = Development | Release
+type lowered_lookups = Lowering.lowered_lookups
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Backend" format
 
@@ -10,7 +11,7 @@ type 'value ran = 'value Lowering.ran =
   | Stopped of Catalog.Codegen.stop
 
 type t = {
-  lookups : Lowering.lowered_lookups;
+  lookups : lowered_lookups;
   positions : Lowering.Positions.t;
   c_compiler : C_compiler.t;
   profile : profile;
@@ -21,7 +22,7 @@ type t = {
   attempted : unit Item_table.t;
 }
 
-let make_positions (lookups : Lowering.lowered_lookups) =
+let make_positions (lookups : lowered_lookups) =
   Lowering.Positions.create lookups.interface.names ~source:lookups.source
     ~read_source:lookups.read_source
 
@@ -41,7 +42,7 @@ let stop_evaluation evaluated stop =
 
 type location = Lowering.Positions.location = { file : Path.file; line : int; column : int }
 
-let locate_todo_type (lookups : Lowering.lowered_lookups) positions (path : Path.t) =
+let locate_todo_type (lookups : lowered_lookups) positions (path : Path.t) =
   let names = lookups.interface.names in
   match
     Option.map
@@ -78,7 +79,7 @@ let raise_unbuildable backend : Lowering.unbuildable -> 'never = function
   | Unsupported unsupported -> raise_unsupported backend unsupported
   | Todo_types todo_types -> raise_cannot_build (Todo_types (locate_todo_types backend todo_types))
 
-let list_todo_types (lookups : Lowering.lowered_lookups) root =
+let list_todo_types (lookups : lowered_lookups) root =
   match lookups.read_test_key root with
   | Error (Todo_types todo_types) -> todo_types
   | Ok _ | Error (Unsupported _) -> []
@@ -346,7 +347,7 @@ let make_incomplete_record backend failure =
     cached = false;
   }
 
-let rec read_executed_fragment (lookups : Lowering.lowered_lookups) item =
+let rec read_executed_fragment (lookups : lowered_lookups) item =
   match lookups.find_lowered item with
   | Some (Ok (Compiled fragment | Folded (_, fragment))) -> Some fragment
   | Some (Ok (Evaluate (evaluator, _))) -> read_executed_fragment lookups evaluator
@@ -469,7 +470,7 @@ let list_reached_definitions lookups root =
          | _ -> None)
        (trace_root lookups root))
 
-let list_unshippable (lookups : Lowering.lowered_lookups) ~main =
+let list_unshippable (lookups : lowered_lookups) ~main =
   let reached = trace_root lookups main in
   let positions = make_positions lookups in
   begin

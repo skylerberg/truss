@@ -4,9 +4,6 @@
   compiler_bug
   path
   interface
-  source
-  memory_layout
-  libc
   lowered
   lowering
   emit_c
@@ -15,6 +12,4 @@
   process
   startup
   unix
-  zarith
-  types
   catalog))
