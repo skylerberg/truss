@@ -83,7 +83,6 @@ let reject_constant_cycle (frame : State.frame) ~is_constant (code : Mir.t) =
         | true, false, None | false, _, _ -> ())
       (Mir.Call_edges.list_dependencies
          { interface = environment.lookups.interface; mir = environment.lookups.mir }
-         ~home:(Path.locate_package environment.node)
          Types.no_substitution code)
 
 type circular_proof = { location : Obligation.location; proof : Catalog.Prover.circular_proof }

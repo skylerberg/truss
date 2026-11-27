@@ -81,13 +81,7 @@ let assume_laws (frame : State.frame) (trait : Types.trait_reference) (ty : Type
         | Some impl -> Cycles.is_in_proof_cycle frame.environment impl
         | None -> false
       in
-      let is_assumed =
-        match frame.environment.proven_impl with
-        | Some (Proves_restated_clauses _) -> false
-        | Some (Proves_laws (proven, for_type)) -> (proven, for_type) <> (required, ty)
-        | None -> true
-      in
-      if is_assumed && not is_proven_with_this_proof then
+      if not (is_proven_with_this_proof || frame.environment.proven_laws = Some (required, ty)) then
         Query.run_once frame.query (Laws_of (required, ty)) @@ fun () ->
         let substitution =
           Contracts.make_trait_substitution frame.environment.lookups required ty

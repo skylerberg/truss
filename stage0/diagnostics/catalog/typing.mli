@@ -147,6 +147,13 @@ type t =
       name : string;
       for_type : Types.ty;
     }
+  | Restated_apart_from_method of {
+      at : Core.origin;
+      trait : Path.t;
+      declared : Types.trait_reference;
+      name : string;
+      for_type : Types.ty;
+    }
   | Undeclared_method of { at : Core.origin; trait : Path.t; name : string }
   | Capability_method_receiver of { at : Core.origin }
   | Overridden_default of { at : Core.origin; trait : Path.t; name : string }

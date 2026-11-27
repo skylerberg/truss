@@ -1162,6 +1162,15 @@ let () =
       expect_one_diagnostic Fixtures.Interface.complete_impl_without_the_conditions_of_partial
         "types.missing_required_impl"
         ~says:"`Complete` requires `Partial`, which `Wrapper[Item]` does not implement.");
+  Harness.test "a trait that restates a method is implemented where the method's impl is written"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Interface.impl_of_a_restating_trait_for_a_derived_method
+        "types.missing_required_impl"
+        ~says:
+          "so `Strict` is implemented for `Point` in the package that writes the `impl` of `Equal` \
+           for it. This package writes none.";
+      expect_one_diagnostic Fixtures.Interface.impl_of_a_restating_trait_for_another_packages_method
+        "types.missing_required_impl" ~says:"`Drained` adds clauses to `standard.core.Cursor.next`");
   Harness.test "a definition may name a type whose bound needs the definition" (fun () ->
       List.iter
         (fun text -> expect_no_diagnostics [ ("app.main", text) ])

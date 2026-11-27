@@ -70,14 +70,6 @@ type postcondition_moment = At_return | Where_lent | At_lend_end
 type promise =
   | Own_promise of { counting : counting; clause : quoted }
   | Inherited_promise of { counting : counting; promiser : promiser; clause : quoted }
-  | Restated_promise of {
-      counting : counting;
-      for_type : Types.ty;
-      name : string;
-      clause : quoted;
-      trait : Types.trait_reference;
-      declared : Types.trait_reference;
-    }
 
 type function_value = Named_function of Path.t | Callback_parameter of string
 type function_use = Passed_for_parameter | Used_as_value of Types.ty
@@ -133,13 +125,6 @@ type obligation =
   | Impl_panic_condition of { clause : quoted }
   | Postcondition of { clause : quoted; promiser : promiser option; moment : postcondition_moment }
   | Law_may_fail of { trait : Types.trait_reference; law : string; for_type : Types.ty }
-  | Restated_contract of {
-      for_type : Types.ty;
-      name : string;
-      clause : quoted;
-      trait : Types.trait_reference;
-      declared : Types.trait_reference;
-    }
   | Negative_potential of { type_ : Types.ty }
   | May_alias of { first : quoted; second : quoted }
   | Function_requirement of { function_ : function_value; use : function_use; clause : quoted }
@@ -168,7 +153,6 @@ type construct =
   | Lent_part_outside_lending_method
   | Hidden_variant_of of Types.ty
   | Nonreturning_specification_call
-  | Compiler_restated_method of { trait : Types.trait_reference; declared_by : Path.t }
   | Literal_of of Types.ty
   | Unreadable_function_value
   | String_pattern_on of Types.ty

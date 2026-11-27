@@ -153,6 +153,94 @@ and match_arguments ~variables substitution patterns arguments =
             | _ -> None))
       (Some substitution) patterns arguments
 
+let find_trait_restated_by lookups ~self (restating : Types.trait_reference)
+    (restated : Types.restated_method) =
+  List.find_opt
+    (fun (required : Types.trait_reference) -> Path.equal required.trait restated.declared_by)
+    (Properties.list_bound_closure lookups ~self restating)
+
+let is_same_trait (left : Types.trait_reference) (right : Types.trait_reference) =
+  Path.equal left.trait right.trait
+  && List.equal
+       (fun (left : Types.argument) (right : Types.argument) ->
+         match (left, right) with
+         | Type left, Type right -> Types.equal left right
+         | left, right -> left = right)
+       left.trait_arguments right.trait_arguments
+
+type added_clauses = {
+  restating_method : Path.t;
+  substitution : Types.substitution;
+  holds_when : Types.condition;
+}
+
+let list_added_clauses lookups (path : Path.t) =
+  match path with
+  | Method { owner = Impl { module_; for_type = head; _ } as owner; name; receiver } -> (
+      match Definition.find_impl_interface lookups owner with
+      | None -> []
+      | Some implementing ->
+          let adds_to_this_method (trait : Types.trait_interface) reference =
+            List.exists
+              (fun (restated : Types.restated_method) ->
+                restated.restated_name = name
+                && restated.restated_receiver = receiver
+                &&
+                match
+                  find_trait_restated_by lookups ~self:implementing.for_type reference restated
+                with
+                | Some declared -> is_same_trait declared implementing.implements
+                | None -> false)
+              trait.restated
+          in
+          List.filter_map
+            (fun (restating_trait, restating_impl) ->
+              match
+                ( Definition.find_trait_interface lookups restating_trait,
+                  Definition.find_impl_interface lookups restating_impl )
+              with
+              | Some ({ restated = _ :: _; _ } as trait), Some restating ->
+                  Option.bind
+                    (match_type
+                       ~variables:
+                         (List.map
+                            (fun (generic : Types.generic) -> generic.generic)
+                            restating.impl_generics)
+                       Types.no_substitution restating.for_type implementing.for_type)
+                    (fun arguments ->
+                      let reference =
+                        Types.substitute_trait_erased arguments restating.implements
+                      in
+                      if adds_to_this_method trait reference then
+                        Some
+                          {
+                            restating_method = Method { owner = restating_trait; name; receiver };
+                            substitution =
+                              Types.make_trait_substitution trait.trait_generics
+                                ~self:implementing.for_type reference;
+                            holds_when =
+                              List.concat_map
+                                (fun (generic : Types.generic) ->
+                                  match generic.kind with
+                                  | Type_generic bounds ->
+                                      List.map
+                                        (fun bound ->
+                                          {
+                                            Types.subject =
+                                              Types.substitute arguments (Parameter generic.generic);
+                                            bound = Types.substitute_trait arguments bound;
+                                          })
+                                        bounds
+                                  | Value_generic -> [])
+                                restating.impl_generics;
+                          }
+                      else None)
+              | _ -> None)
+            (list_impls_for_type lookups head module_.package))
+  | Top _ | Method _ | Member_constant _ | Default _ | Impl _ | Derived _ | Test _ | Law_proof _
+  | Unresolved _ ->
+      []
+
 type solution = Evidence of Types.evidence | Built_in | Accepted of Types.ty
 type bounds = Properties.Bounds.t
 

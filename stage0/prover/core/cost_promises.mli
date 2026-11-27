@@ -22,7 +22,6 @@ val enter_definition : State.frame -> promise list -> body:Mir.body option -> St
 val check_promise_amounts : State.frame -> promise list -> output:Types.ty option -> unit
 
 val check_promise :
-  ?restated:Types.ty * string * Types.trait_reference * Types.trait_reference ->
   ?cited:Resolve.Names.key * Core.origin ->
   State.frame ->
   promise ->
