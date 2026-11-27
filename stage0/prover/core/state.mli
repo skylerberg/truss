@@ -50,6 +50,7 @@ type environment = {
   ranking : bool;
   terminates : bool;
   measures : Mir.formula list;
+  calls_without_decrease : Mir.Size_change.call list Lazy.t;
   blocked_holders : string list;
   proven_laws : (Types.trait_reference * Types.ty) option;
   policy : obligation_policy;

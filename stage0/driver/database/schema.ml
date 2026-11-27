@@ -50,8 +50,8 @@ let tables =
       "id INTEGER PRIMARY KEY, key BLOB NOT NULL, package TEXT NOT NULL, module INTEGER NOT NULL, \
        path INTEGER NOT NULL, ordinal INTEGER NOT NULL, name TEXT NOT NULL, owner INTEGER, member \
        TEXT, kind INTEGER NOT NULL, visibility INTEGER NOT NULL, is_generic INTEGER NOT NULL, \
-       origin INTEGER NOT NULL, supplied_from INTEGER, container INTEGER, file INTEGER, position \
-       INTEGER, base INTEGER, stop INTEGER, text_hash INTEGER"
+       origin INTEGER NOT NULL, synthesized_from INTEGER, container INTEGER, file INTEGER, \
+       position INTEGER, base INTEGER, stop INTEGER, text_hash INTEGER"
       [
         ("definition_module", "module");
         ("definition_file", "file, position");
@@ -102,13 +102,16 @@ let tables =
     keyed_by_id "generated_mir"
       ("path INTEGER PRIMARY KEY, " ^ state ^ ", body BLOB, contract BLOB")
       [];
-    keyed_by_id "call_node" ("path INTEGER PRIMARY KEY, " ^ state ^ ", callees BLOB") [];
+    keyed_by_id "call_node"
+      ("path INTEGER PRIMARY KEY, " ^ state ^ ", callees BLOB, size_changes BLOB")
+      [];
     keyed_by_id "recursion_group"
       ("path INTEGER PRIMARY KEY, " ^ state ^ ", representative INTEGER, members BLOB")
       [ ("recursion_group_representative", "representative") ];
     keyed_by_id "proof_group"
       ("path INTEGER PRIMARY KEY, " ^ state ^ ", representative INTEGER, members BLOB")
       [ ("proof_group_representative", "representative") ];
+    keyed_by_id "calls_without_decrease" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value BLOB") [];
     keyed_by_id "aborts_outside_group" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value INTEGER") [];
     keyed_by_id "may_abort" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value INTEGER") [];
     fact_of_definition "usage_check" state;

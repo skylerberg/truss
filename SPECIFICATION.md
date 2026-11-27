@@ -1203,9 +1203,12 @@ fn serve(listener: mut Listener)
   no `unless` condition of it holds, or names an associated capability set
   that an `impl` puts `RunForever` in
   (see [Associated capability sets](#associated-capability-sets)).
-- A recursive call on a part of a parameter needs nothing written. A part is
-  a field taken out by a pattern, or an element of a collection that is
-  itself a part:
+- A recursion among functions that state no `decreases` needs nothing
+  written when every cycle of calls passes some parameter a part of itself
+  each time around. A part is a field or an element taken out of a
+  parameter, or out of another part, by a pattern, a field access, an
+  index, or a `for` loop. A parameter passed on unchanged keeps its size,
+  and so does a range of it:
 
   ```truss
   fn depth(tree: Tree) -> UInt64
@@ -1218,12 +1221,10 @@ fn serve(listener: mut Listener)
   }
   ```
 
-- The parameters whose types are declared with `type` are compared in the
-  order they are declared, as a list of measures is. The first of them that
-  a recursive call does not pass unchanged must be passed a part of itself,
-  and the parameters after it may be any value. The recursive call below
-  needs nothing written because `chain` is declared before `reversed`. Declared in the
-  other order, the function would have to state `decreases`:
+- Each cycle may shrink a different parameter, and on that cycle the other
+  parameters may take any value. This is size-change termination (Lee,
+  Jones, and Ben-Amram), as Agda and Isabelle check it. Below, `chain`
+  shrinks on every call while `reversed` grows:
 
   ```truss
   fn reverse_onto(chain: Chain, reversed: own Chain) -> Chain {
@@ -1251,40 +1252,62 @@ fn serve(listener: mut Listener)
   |---|---|
   | A function, or a method of a type | That function or method |
   | A trait's method, on a type whose `impl` is known | That `impl`'s method: the method written in the `impl`, the method that the `impl` derives, or the provided method that the `impl` inherits |
-  | A trait's method, through a bound on a type parameter | Code that a caller of the enclosing function supplies, as the next rule says |
-  | A function value | Code that a caller of the enclosing function supplies, as the next rule says |
+  | A trait's method, through a bound on a type parameter | Code that a caller of the enclosing function passes, as the next rule says |
+  | A function value | Code that a caller of the enclosing function passes, as the next rule says |
 
   A provided method that an `impl` inherits runs the trait's body for that
   `impl`, so a call on `Self` in the body runs the same `impl`'s method. The
   body is also checked once, for every `impl`. In that check a call on `Self`
   is followed to the trait's method, so provided methods that call each
   other are a recursion.
-- **Code that supplies other code to a callee is followed to all of the
-  supplied code:**
+- **A call that passes code to a callee is followed to all of the code
+  passed:**
 
-  | The supplier | The supplied code |
+  | The higher-order argument | The code passed |
   |---|---|
-  | A call that gives a type argument to a type parameter with a bound. The parameter is one of a generic function, of a generic `impl`, of a generic type with a derived `impl`, or of a trait's generic method | Every method of the type argument's `impl` of the bound |
-  | A function named as a value | The function, and the code that its type arguments supply |
+  | A type argument given to a type parameter with a bound. The parameter is one of a generic function, of a generic `impl`, of a generic type with a derived `impl`, or of a trait's generic method | Every method of the type argument's `impl` of the bound, and of the `impl`s that it assumes |
+  | A function named as a value | The function, and the code that its type arguments pass |
   | A `provide` | Every method of the provided `impl` |
+
+- **A generic function calls the code that it is passed on parts of its
+  arguments.** It has no value of a type parameter but those that its
+  arguments hold, so the code passed for a type parameter is called on an
+  argument whose type is the type parameter, or on a part of an argument
+  that holds the type parameter in a field or as an element. A recursion
+  through the code is compared as if each of its parameters of the type
+  parameter's type were passed one of those values. This holds of a type
+  parameter unless the generic function can make a value of it that is not
+  one of its arguments:
+  - A method of its bound returns a value of the type parameter, or changes
+    a `mut` one, and states no `ensures` that the result is identical to
+    one of its arguments, as `Ordered.max` states.
+  - A parameter's type holds the type parameter where it is not part of
+    the value: in a function type's result, in an associated type, or in a
+    type that is opaque and is not a collection of the standard library.
+  - A bound of another type parameter names it.
+
+  The rule rests on a generic function having no other way to make a
+  value of its type parameter: Truss has no specialization, no downcasting,
+  and no test of a value's type.
 
 - **A recursion that leads back to a function without `RunForever` is proven
   to terminate, or is rejected.** The way back decides:
 
   | The way back to the function | The requirement |
   |---|---|
-  | A call of a function, of a method written in an `impl`, or of a trait's method on `Self` | The call is on a part of a parameter, or each function in the cycle states `decreases` |
+  | A call of a function, of a method written in an `impl`, or of a trait's method on `Self` | Every cycle of calls passes some parameter a part of itself, or each function in the cycle states `decreases` |
+  | Code passed to a generic function for a type parameter or as a function | Every cycle of calls passes some parameter a part of itself. A `decreases` is not compared through such code |
   | A call of a method that its `impl` derives or inherits | Rejected |
-  | Supplied code | Rejected |
+  | A `provide` | Rejected |
 
   A function that uses `RunForever` is not rejected for any of these. Its
   recursive call is compared only where it and its callee both state
   `decreases`.
 
   With `type Tree(children: List[Tree])`, an `equal` of `Tree` written as
-  `self.children == other.children` supplies the `impl` of `Equal` for `Tree`
-  to the list's `equal`, which calls it back, and is rejected. A loop over
-  the children that calls `equal` on each child recurses on a part.
+  `self.children == other.children` passes the `impl` of `Equal` for `Tree`
+  to the list's `equal`, which calls it on elements of the two lists, so the
+  recursion ends.
 
 ### Cost clauses
 
@@ -3290,10 +3313,10 @@ way.
 
   | The definition has | Its proof depends on |
   |---|---|
-  | A call or a read of a constant, in its body or in its contract | The callee or the constant, and the code that the call supplies |
+  | A call or a read of a constant, in its body or in its contract | The callee or the constant, and the code that the call passes |
   | A contract that its trait declares, for a method of an `impl` | Each function that the trait's contract calls, as the `impl` resolves the call |
   | A value of a type of its own package: a parameter, a result, a local, or, for a type, a field | The type |
-  | A value of a generic type | Each function that the invariant or the `potential` of the type calls at those type arguments, and the same for the types of its fields. Where a field's type is a generic type that holds the field, with other type arguments, every method of the `impl`s that those type arguments supply to its bounds |
+  | A value of a generic type | Each function that the invariant or the `potential` of the type calls at those type arguments, and the same for the types of its fields. Where a field's type is a generic type that holds the field, with other type arguments, every method of the `impl`s that those type arguments pass to its bounds |
   | An invariant or a `potential`, for a type | Each function that the clause calls and each constant it reads |
   | A call of a trait's method that an `impl` resolves, in its body, in its contract, or in the laws that it proves | The `impl`, and the `impl` of each trait that the trait requires, for the laws that they prove |
   | Laws to prove, for an `impl` | Its law proofs |

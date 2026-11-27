@@ -77,6 +77,7 @@ public trait Ordered: Equal {
 
   fn clamp(own self, low: own Self, high: own Self) -> Self
     uses Panic unless low <= high
+    ensures identical(result, self) || identical(result, low) || identical(result, high)
     ensures low <= result && result <= high
     ensures low <= self && self <= high ==> identical(result, self)
     ensures self < low ==> identical(result, low)

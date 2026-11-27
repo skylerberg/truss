@@ -391,7 +391,7 @@ let encode_definition ~text (declared : Resolve.Namespace.declared_definition) :
       visibility = rank visibilities declared.declaration.visibility;
       is_generic = declared.declaration.generic;
       origin = written_origin;
-      supplied_from = None;
+      synthesized_from = None;
       container = Option.map Ids.of_key declared.container;
       file = Some (Ids.of_file declared.file);
       position = Some declared.position;
@@ -405,8 +405,8 @@ let encode_definition ~text (declared : Resolve.Namespace.declared_definition) :
       syntax_errors = marshal item.positions.syntax_errors;
     } )
 
-let encode_supplied ~origin ~(kind : Resolve.Names.kind) (key : Resolve.Names.key) ~supplied_from
-    ~container : Store.definition =
+let encode_synthesized ~origin ~(kind : Resolve.Names.kind) (key : Resolve.Names.key)
+    ~synthesized_from ~container : Store.definition =
   let owner, member =
     match key.path with
     | Method { owner; name; _ } | Member_constant { owner; name } ->
@@ -427,7 +427,7 @@ let encode_supplied ~origin ~(kind : Resolve.Names.kind) (key : Resolve.Names.ke
     visibility = rank visibilities Private;
     is_generic = false;
     origin;
-    supplied_from = Some supplied_from;
+    synthesized_from = Some synthesized_from;
     container;
     file = None;
     position = None;
@@ -644,20 +644,20 @@ let write_module store (module_ : Path.module_) ~(files : (Path.file * string) l
     (fun ((lookup : Kind.lookup), scope, name, read) before ->
       if compare before (read ()) <> 0 then add lookup scope name)
     candidates results_before;
-  let supplied =
+  let synthesized =
     List.filter_map
       (fun ((_, type_), impl) ->
         match impl with
         | Path.Derived _ ->
             Some
-              (encode_supplied ~origin:derived_impl_origin ~kind:Impl
+              (encode_synthesized ~origin:derived_impl_origin ~kind:Impl
                  { module_; path = impl; ordinal = 0 }
-                 ~supplied_from:(Ids.of_key { module_; path = type_; ordinal = 0 })
+                 ~synthesized_from:(Ids.of_key { module_; path = type_; ordinal = 0 })
                  ~container:None)
         | _ -> None)
       declarations.impls
   in
-  let supplied_before =
+  let synthesized_before =
     List.filter
       (fun (row : Store.definition) -> row.origin = derived_impl_origin)
       (Store.list_definitions store Main (Of_module module_id))
@@ -667,12 +667,12 @@ let write_module store (module_ : Path.module_) ~(files : (Path.file * string) l
   in
   List.iter
     (fun (row : Store.definition) ->
-      if not (has_row supplied row) then Store.remove_definition store ~id:row.id)
-    supplied_before;
+      if not (has_row synthesized row) then Store.remove_definition store ~id:row.id)
+    synthesized_before;
   List.iter
     (fun (row : Store.definition) ->
-      if not (List.mem row supplied_before) then Store.replace_definition store row)
-    supplied;
+      if not (List.mem row synthesized_before) then Store.replace_definition store row)
+    synthesized;
   let is_same_kind (before : Store.definition option) (row : Store.definition) =
     match before with Some before -> before.kind = row.kind | None -> false
   in
@@ -683,11 +683,11 @@ let write_module store (module_ : Path.module_) ~(files : (Path.file * string) l
         (fun ((row : Store.definition), _) ->
           if is_same_kind (find_before row.id) row then None else Some row)
         rows
-      @ List.filter (fun row -> not (has_row supplied_before row)) supplied;
+      @ List.filter (fun row -> not (has_row synthesized_before row)) synthesized;
     removed =
       List.filter
         (fun (row : Store.definition) ->
           not (is_same_kind (Option.map fst (find_after row.id)) row))
         rows_before
-      @ List.filter (fun row -> not (has_row supplied row)) supplied_before;
+      @ List.filter (fun row -> not (has_row synthesized row)) synthesized_before;
   }

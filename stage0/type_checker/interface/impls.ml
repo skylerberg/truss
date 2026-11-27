@@ -246,16 +246,33 @@ type bounds = Properties.Bounds.t
 
 let list_no_bounds = Properties.Bounds.none
 
-let list_required_bounds (generics : Types.generic list) (substitution : Types.substitution) =
+type required_bound = {
+  parameter : Types.parameter;
+  argument : Types.ty;
+  bound : Types.trait_reference;
+}
+
+let list_required_bounds_of_parameters (generics : Types.generic list)
+    (substitution : Types.substitution) =
   List.concat_map
     (fun (generic : Types.generic) ->
       match (generic.kind, Types.find_argument generic.generic substitution) with
       | Type_generic generic_bounds, Some (Types.Type argument) ->
           List.map
-            (fun bound -> (argument, Types.substitute_trait substitution bound))
+            (fun bound ->
+              {
+                parameter = generic.generic;
+                argument;
+                bound = Types.substitute_trait substitution bound;
+              })
             generic_bounds
       | _ -> [])
     generics
+
+let list_required_bounds generics substitution =
+  List.map
+    (fun { argument; bound; _ } -> (argument, bound))
+    (list_required_bounds_of_parameters generics substitution)
 
 let list_associated_type_bounds lookups (impl : Types.impl_interface)
     (substitution : Types.substitution) =

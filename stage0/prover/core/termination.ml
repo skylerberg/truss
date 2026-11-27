@@ -38,11 +38,59 @@ let list_structural_parameters (entry : State.frame) (clauses : State.clauses) =
              | _ -> []))
        clauses.parameters)
 
-type decrease =
-  | Smaller_measures of Logic.term
-  | Smaller_part of { compared : string list; smaller : Logic.term }
-  | Unmeasured
-  | Uncompared
+let reached_calls : (Core.origin * Path.t) list ref Private_state.key =
+  Private_state.make_key (fun () -> ref [])
+
+let makes_size_change_obligations (frame : State.frame) =
+  frame.terminates && frame.makes_obligations && frame.environment.measures = []
+
+let oblige_call_without_decrease (frame : State.frame) location (call : Mir.Size_change.call) =
+  Obligations.oblige frame location
+    (Recursion_without_smaller_part
+       {
+         call =
+           {
+             at = location;
+             callee =
+               (match call.passage with
+               | Direct_call | Function_value _ -> Some call.callee
+               | Dictionary _ -> None);
+           };
+         passage = call.passage;
+         is_self_call = Path.equal call.callee frame.environment.node;
+       })
+    (Logic.Boolean false)
+
+let check_size_change (frame : State.frame) location ~origin ~callee =
+  if makes_size_change_obligations frame then
+    match
+      List.find_opt
+        (fun (call : Mir.Size_change.call) -> call.origin = origin && Path.equal call.callee callee)
+        (Lazy.force frame.environment.calls_without_decrease)
+    with
+    | Some call ->
+        let reached = Private_state.read frame.environment.memos reached_calls in
+        reached := (origin, callee) :: !reached;
+        oblige_call_without_decrease frame location call
+    | None -> ()
+
+let is_rejected_at_its_call (environment : State.environment) (call : Mir.Size_change.call) =
+  match environment.lookups.mir.find_form_origin call.callee with
+  | Some ((Derived _ | Inherited _), _) -> true
+  | Some (Written _, _) | None -> false
+
+let reject_unreached_calls_without_decrease (frame : State.frame) =
+  let environment = frame.environment in
+  if makes_size_change_obligations frame then begin
+    let reached = !(Private_state.read environment.memos reached_calls) in
+    List.iter
+      (fun (call : Mir.Size_change.call) ->
+        if
+          (not (List.mem (call.origin, call.callee) reached))
+          && not (is_rejected_at_its_call environment call)
+        then oblige_call_without_decrease frame (Facts.locate frame call.origin) call)
+      (Lazy.force environment.calls_without_decrease)
+  end
 
 let rec pair_measures before after =
   match (before, after) with
@@ -51,59 +99,18 @@ let rec pair_measures before after =
       (entry :: rest_before, called :: rest_after)
   | _ -> ([], [])
 
-let compare_with_entry (frame : State.frame) (clauses : State.clauses) ~is_self_call
-    ~(callee_entry : State.frame) ~argument_at =
-  match (frame.environment.measures, clauses.decreases) with
-  | [], [] when callee_entry.terminates && is_self_call -> (
-      let entry = (read_entry frame).entry_frame in
-      let is_passed_at_its_type ((parameter : Mir.parameter), ty, _, _) =
-        Types.equal
-          (Encoding.substitute_type entry ty)
-          (Encoding.substitute_type callee_entry parameter.type_)
-      in
-      match List.filter is_passed_at_its_type (list_structural_parameters entry clauses) with
-      | [] -> Unmeasured
-      | parts ->
-          let before =
-            List.map
-              (fun (_, ty, value, _) -> Models.rank frame.environment frame.query ty value)
-              parts
-          in
-          let after =
-            List.map
-              (fun (_, ty, _, index) ->
-                Models.rank frame.environment frame.query ty (argument_at index))
-              parts
-          in
-          Smaller_part
-            {
-              compared =
-                List.map (fun (parameter, _, _, _) -> Facts.read_parameter_name parameter) parts;
-              smaller = Logic.decreases_lexicographically before after;
-            })
-  | ([], _ | _, []) when callee_entry.terminates -> Unmeasured
-  | _ :: _, (_ :: _ as callee_measures) ->
-      let after =
-        List.map
-          (fun measure -> snd (Validity.read_specification callee_entry measure))
-          callee_measures
-      in
-      let before, after = pair_measures (read_entry frame).entry_measures after in
-      Smaller_measures (Logic.decreases_lexicographically before after)
-  | [], _ | _, [] -> Uncompared
+let compare_measures (frame : State.frame) ~(callee_entry : State.frame) callee_measures =
+  let after =
+    List.map (fun measure -> snd (Validity.read_specification callee_entry measure)) callee_measures
+  in
+  let before, after = pair_measures (read_entry frame).entry_measures after in
+  Logic.decreases_lexicographically before after
 
-let check_recursive_call (frame : State.frame) location ~path (clauses : State.clauses)
-    ~is_self_call ~callee_entry ~argument_at =
-  match compare_with_entry frame clauses ~is_self_call ~callee_entry ~argument_at with
-  | Smaller_part { compared; smaller } ->
-      Obligations.oblige frame location
-        (Recursion_not_on_part { call = { at = location; callee = Some path }; compared })
-        smaller
-  | Unmeasured ->
-      Obligations.oblige frame location
-        (Recursion_may_not_end { call = { at = location; callee = Some path }; is_self_call })
-        (Logic.Boolean false)
-  | Smaller_measures smaller ->
+let check_recursive_call (frame : State.frame) location ~origin ~path (clauses : State.clauses)
+    ~is_self_call ~(callee_entry : State.frame) =
+  match (frame.environment.measures, clauses.decreases) with
+  | [], [] -> check_size_change frame location ~origin ~callee:path
+  | _ :: _, (_ :: _ as callee_measures) ->
       Obligations.oblige frame location
         (Measure_may_not_decrease
            {
@@ -113,14 +120,56 @@ let check_recursive_call (frame : State.frame) location ~path (clauses : State.c
                  (fun (measure : Mir.formula) -> Facts.quote frame.source measure.origin)
                  frame.environment.measures;
            })
-        smaller
-  | Uncompared -> ()
+        (compare_measures frame ~callee_entry callee_measures)
+  | ([], _ :: _ | _ :: _, []) when callee_entry.terminates ->
+      Obligations.oblige frame location
+        (Recursion_may_not_end { call = { at = location; callee = Some path }; is_self_call })
+        (Logic.Boolean false)
+  | [], _ :: _ | _ :: _, [] -> ()
+
+let decreases_lexicographically_at_every_call (environment : State.environment) ~positions =
+  match environment.lookups.list_recursion_group environment.node with
+  | [ member ] when Path.equal member environment.node ->
+      List.for_all
+        (fun (site : Mir.Size_change.site) ->
+          (not (Path.equal site.target environment.node))
+          || List.for_all (Mir.Size_change.decreases_lexicographically ~positions) site.graphs)
+        (environment.lookups.list_size_changes environment.node)
+  | _ -> false
+
+let find_structural_premise (frame : State.frame) (clauses : State.clauses)
+    ~(callee_entry : State.frame) ~argument_at =
+  let entry = (read_entry frame).entry_frame in
+  let is_passed_at_its_type ((parameter : Mir.parameter), ty, _, _) =
+    Types.equal
+      (Encoding.substitute_type entry ty)
+      (Encoding.substitute_type callee_entry parameter.type_)
+  in
+  match List.filter is_passed_at_its_type (list_structural_parameters entry clauses) with
+  | [] -> None
+  | parts
+    when decreases_lexicographically_at_every_call frame.environment
+           ~positions:(List.map (fun (_, _, _, index) -> index) parts) ->
+      let before =
+        List.map (fun (_, ty, value, _) -> Models.rank frame.environment frame.query ty value) parts
+      in
+      let after =
+        List.map
+          (fun (_, ty, _, index) ->
+            Models.rank frame.environment frame.query ty (argument_at index))
+          parts
+      in
+      Some (Logic.decreases_lexicographically before after)
+  | _ -> None
 
 let find_induction_premise (frame : State.frame) (clauses : State.clauses) ~is_self_call
-    ~callee_entry ~argument_at =
-  match compare_with_entry frame clauses ~is_self_call ~callee_entry ~argument_at with
-  | Smaller_measures smaller | Smaller_part { smaller; _ } -> Some smaller
-  | Unmeasured | Uncompared -> None
+    ~(callee_entry : State.frame) ~argument_at =
+  match (frame.environment.measures, clauses.decreases) with
+  | [], [] when callee_entry.terminates && is_self_call ->
+      find_structural_premise frame clauses ~callee_entry ~argument_at
+  | _ :: _, (_ :: _ as callee_measures) ->
+      Some (compare_measures frame ~callee_entry callee_measures)
+  | [], _ | _, [] -> None
 
 let find_recursive_callee (frame : State.frame) location group_member =
   let reject target impl =
@@ -146,24 +195,41 @@ let reject_uncompared_recursion (frame : State.frame) location recursive_callee 
           (Logic.Boolean false))
       recursive_callee
 
-let reject_recursion_through_supplied_code (frame : State.frame) location
+let reject_recursion_through_higher_order_argument (frame : State.frame) location
     (statement : Mir.statement) =
-  let reject supplied =
-    Obligations.oblige frame location (Recursion_through_supply supplied) (Logic.Boolean false)
+  let environment = frame.environment in
+  let reject recursion =
+    Obligations.oblige frame location (Recursion_through_argument recursion) (Logic.Boolean false)
   in
-  let reject_supply (supplier : Mir.Call_edges.supplier) code =
-    let recursive = List.filter (Cycles.is_in_recursion_group frame.environment) code in
-    (match supplier with
-    | Named_function path when List.exists (Path.equal path) recursive ->
-        reject (Named_function path)
-    | Named_function _ | Call | Provide -> ());
+  let reject_passing (argument : Mir.Call_edges.higher_order_argument) code =
+    let recursive =
+      List.filter
+        (fun target ->
+          Cycles.is_in_recursion_group environment target
+          &&
+          match argument with
+          | Handler -> true
+          | Dictionary | Function_value _ -> environment.measures <> [])
+        code
+    in
+    (match argument with
+    | Dictionary | Function_value _ ->
+        List.iter
+          (fun callee ->
+            check_size_change frame location ~origin:(Mir.Call_edges.locate_call statement) ~callee)
+          code
+    | Handler -> ());
+    (match argument with
+    | Function_value path when List.exists (Path.equal path) recursive ->
+        reject (Function_value path)
+    | Function_value _ | Dictionary | Handler -> ());
     List.iter
       (fun owner ->
         reject
-          (match supplier with
-          | Call -> Bound_through_call { call = { at = location; callee = None }; owner }
-          | Named_function path -> Bound_through_name { path; owner }
-          | Provide -> Provided owner))
+          (match argument with
+          | Dictionary -> Dictionary_through_call { call = { at = location; callee = None }; owner }
+          | Function_value path -> Dictionary_through_name { path; owner }
+          | Handler -> Handler owner))
       (List.sort_uniq Path.compare
          (List.filter_map
             (fun (node : Path.t) -> match node with Method { owner; _ } -> Some owner | _ -> None)
@@ -172,8 +238,8 @@ let reject_recursion_through_supplied_code (frame : State.frame) location
   if frame.terminates && frame.makes_obligations then
     List.iter
       (fun (edge : Mir.Call_edges.edge) ->
-        match edge with Calls _ -> () | Supplies { supplier; code } -> reject_supply supplier code)
-      (Mir.Call_edges.list_statement_edges frame.environment.lookups.interface frame.substitution
+        match edge with Calls _ -> () | Passes { argument; code } -> reject_passing argument code)
+      (Mir.Call_edges.list_statement_edges environment.lookups.interface frame.substitution
          statement)
 
 type loop_measure = { read : State.frame -> Logic.term list; at_head : Logic.term list }

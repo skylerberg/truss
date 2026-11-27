@@ -36,11 +36,11 @@ val derived_impl_origin : int
 val inherited_method_origin : int
 val derived_method_origin : int
 
-val encode_supplied :
+val encode_synthesized :
   origin:int ->
   kind:Resolve.Names.kind ->
   Resolve.Names.key ->
-  supplied_from:int ->
+  synthesized_from:int ->
   container:int option ->
   Store.definition
 

@@ -232,7 +232,7 @@ type definition = {
   visibility : int;
   is_generic : bool;
   origin : int;
-  supplied_from : int option;
+  synthesized_from : int option;
   container : int option;
   file : int option;
   position : int option;

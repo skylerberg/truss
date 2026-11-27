@@ -190,7 +190,7 @@ let names_private_definition (environment : State.environment) ~current (clause 
     (fun statement ->
       List.iter
         (fun (edge : Mir.Call_edges.edge) ->
-          let paths = match edge with Calls path -> [ path ] | Supplies { code; _ } -> code in
+          let paths = match edge with Calls path -> [ path ] | Passes { code; _ } -> code in
           if List.exists (is_private_to_another_module environment ~current) paths then
             is_hidden := true)
         (Mir.Call_edges.list_statement_edges environment.lookups.interface Types.no_substitution

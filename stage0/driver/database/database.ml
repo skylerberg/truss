@@ -307,7 +307,7 @@ let find_checker (stage : Kind.stage) : checker option =
   | Check_ownership -> Some Ownership
   | Check_sealed | Check_impl | Check_type | Check_instantiation | Check_test -> Some Package_checks
   | Check_unexported -> Some Unexported
-  | Declare | Supply | Claim_roots | Resolve_grant | Read_trait_header | Evaluate_constant
+  | Declare | Synthesize | Claim_roots | Resolve_grant | Read_trait_header | Evaluate_constant
   | Derive_interface | Compute_type_facts | Build_body_mir | Build_contract_mir | Generate_mir
   | List_calls | Group_recursion | Find_aborts | Check_dependency | Prove | Lower | Key_tests
   | Evaluate | Run_test | Render _ | Decide ->

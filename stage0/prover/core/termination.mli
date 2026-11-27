@@ -1,13 +1,14 @@
 val enter_definition : State.frame -> State.frame
+val reject_unreached_calls_without_decrease : State.frame -> unit
 
 val check_recursive_call :
   State.frame ->
   Obligation.location ->
+  origin:Core.origin ->
   path:Path.t ->
   State.clauses ->
   is_self_call:bool ->
   callee_entry:State.frame ->
-  argument_at:(int -> Logic.term) ->
   unit
 
 val find_induction_premise :
@@ -21,7 +22,7 @@ val find_induction_premise :
 val find_recursive_callee : State.frame -> Obligation.location -> Path.t option -> Path.t option
 val reject_uncompared_recursion : State.frame -> Obligation.location -> Path.t option -> unit
 
-val reject_recursion_through_supplied_code :
+val reject_recursion_through_higher_order_argument :
   State.frame -> Obligation.location -> Mir.statement -> unit
 
 type loop_measure = { read : State.frame -> Logic.term list; at_head : Logic.term list }

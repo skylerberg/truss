@@ -1,7 +1,7 @@
 type stage =
   | Parse
   | Declare
-  | Supply
+  | Synthesize
   | Claim_roots
   | Resolve
   | Resolve_grant
@@ -62,8 +62,10 @@ type fact =
   | Contract_mir
   | Generated_mir
   | Callees
+  | Size_changes
   | Recursion_group
   | Proof_group
+  | Calls_without_decrease
   | Aborts_outside_group
   | May_abort
   | Usage_check

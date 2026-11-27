@@ -1133,7 +1133,7 @@ type definition = {
   visibility : int;
   is_generic : bool;
   origin : int;
-  supplied_from : int option;
+  synthesized_from : int option;
   container : int option;
   file : int option;
   position : int option;
@@ -1164,7 +1164,7 @@ let definition_column_names =
     "visibility";
     "is_generic";
     "origin";
-    "supplied_from";
+    "synthesized_from";
     "container";
     "file";
     "position";
@@ -1195,7 +1195,7 @@ let read_definition row =
     visibility = Sql.read_integer row 10;
     is_generic = Sql.read_integer row 11 <> 0;
     origin = Sql.read_integer row 12;
-    supplied_from = read_optional_integer row 13;
+    synthesized_from = read_optional_integer row 13;
     container = read_optional_integer row 14;
     file = read_optional_integer row 15;
     position = read_optional_integer row 16;
@@ -1283,7 +1283,7 @@ let replace_definition store (definition : definition) =
       Integer definition.visibility;
       Integer (Bool.to_int definition.is_generic);
       Integer definition.origin;
-      bind_optional_integer definition.supplied_from;
+      bind_optional_integer definition.synthesized_from;
       bind_optional_integer definition.container;
       bind_optional_integer definition.file;
       bind_optional_integer definition.position;

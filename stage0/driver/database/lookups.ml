@@ -192,6 +192,16 @@ let make_proof (database : Tracker.t) (recorder : Tracker.recorder) : Prover.Loo
     mir = make_mir database recorder;
     list_must_be_disjoint = read_of_key database recorder Facts.ownership.whole;
     list_recursion_group = list_recursion_group database recorder;
+    list_size_changes =
+      (fun path ->
+        Option.value ~default:[]
+          (Tracker.find_value database recorder Facts.size_changes (Path.locate_package path)
+             ~id:(Ids.of_path path)));
+    list_calls_without_decrease =
+      (fun path ->
+        Option.value ~default:[]
+          (Tracker.find_value database recorder Facts.calls_without_decrease.whole
+             (Path.locate_package path) ~id:(Ids.of_path path)));
     list_proof_group = list_group database recorder Facts.proof_group;
     may_abort = may_abort database recorder;
   }

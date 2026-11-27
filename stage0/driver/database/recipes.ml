@@ -411,7 +411,7 @@ let run_list_calls database (row : Store.definition) =
       let note marker target = recorder.note marker (Entity Definition) (Ids.of_path target) "" in
       List.iter (note Calls) callees;
       List.iter (note Assumes) (Mir.Call_edges.list_assumed_paths lookups path);
-      (Value callees, []))
+      (Value { Facts.callees; size_changes = Mir.Size_change.list_sites lookups path }, []))
 
 module Integer_node = struct
   type t = int
@@ -478,11 +478,49 @@ let group_recursion (database : Tracker.t) ~is_node (rows : Store.definition lis
                       (List.sort Path.compare (List.filter_map (Hashtbl.find_opt paths) members)))
                   (Hashtbl.find_opt groups node)))
         in
+        let calls_without_decrease = Hashtbl.create 16 in
+        let list_calls_without_decrease members =
+          match Hashtbl.find_opt calls_without_decrease members with
+          | Some calls -> calls
+          | None ->
+              let calls =
+                Mir.Size_change.list_calls_without_decrease
+                  (List.filter_map
+                     (fun member ->
+                       Option.map
+                         (fun path ->
+                           ( path,
+                             match
+                               Tracker.find database Tracker.untracked Facts.size_changes
+                                 (Path.locate_package path) ~id:member
+                             with
+                             | Some (Value sites) -> sites
+                             | Some (Failed | Blocked) | None -> [] ))
+                         (Hashtbl.find_opt paths member))
+                     members)
+              in
+              Hashtbl.replace calls_without_decrease members calls;
+              calls
+        in
+        let write_calls_without_decrease node =
+          ignore
+            (Tracker.write database Facts.calls_without_decrease ~id:node
+               (Option.map
+                  (fun members : Mir.Size_change.call list Tracker.outcome ->
+                    let caller = Hashtbl.find_opt paths node in
+                    Value
+                      (List.filter
+                         (fun (call : Mir.Size_change.call) ->
+                           Option.fold ~none:false ~some:(Path.equal call.caller) caller)
+                         (list_calls_without_decrease members)))
+                  (Hashtbl.find_opt recursion_groups node)))
+        in
         List.iter
           (fun node ->
             ignore (Store.unmark_stale database.store ~stage:rank ~id:node);
             write Facts.recursion_group recursion_groups node;
-            write Facts.proof_group proof_groups node)
+            write Facts.proof_group proof_groups node;
+            write_calls_without_decrease node)
           targets
       end)
     (Store.list_project database.store)
@@ -872,9 +910,7 @@ let read_item (database : Tracker.t) id : Lowered.Item.t =
 
 let find_call_edges (database : Tracker.t) (recorder : Tracker.recorder) path =
   let node = Ids.of_path path in
-  match
-    Tracker.find database recorder Facts.call_node.whole (Path.locate_package path) ~id:node
-  with
+  match Tracker.find database recorder Facts.callees (Path.locate_package path) ~id:node with
   | Some (Value callees) -> Some callees
   | Some (Failed | Blocked) -> Some []
   | None -> None
@@ -884,8 +920,7 @@ let run_find_aborts database (row : Store.definition) =
   run_fact database Find_aborts Facts.aborts_outside_group row ~id:row.path (fun recorder ->
       let lookups = Lookups.make_call_edges database recorder in
       ignore
-        (Tracker.find_value database recorder Facts.call_node.whole (Path.locate_package path)
-           ~id:row.path);
+        (Tracker.find_value database recorder Facts.callees (Path.locate_package path) ~id:row.path);
       let has_aborting_callee () =
         let members =
           Option.value ~default:[]
@@ -1207,12 +1242,13 @@ let is_impl (row : Store.definition) =
   (is_written row && is_first row && decode_kind row = Impl)
   || row.origin = Declarations.derived_impl_origin
 
-let is_supplied_method (row : Store.definition) =
+let is_synthesized_method (row : Store.definition) =
   row.origin = Declarations.inherited_method_origin
   || row.origin = Declarations.derived_method_origin
 
-let list_supplied_methods (database : Tracker.t) (impl : Store.definition) =
-  List.filter is_supplied_method (Store.list_definitions database.store Main (Of_container impl.id))
+let list_synthesized_methods (database : Tracker.t) (impl : Store.definition) =
+  List.filter is_synthesized_method
+    (Store.list_definitions database.store Main (Of_container impl.id))
 
 let rec forget_definition (database : Tracker.t) (row : Store.definition) =
   let claimed =
@@ -1231,11 +1267,11 @@ let rec forget_definition (database : Tracker.t) (row : Store.definition) =
   collect_items database claimed;
   if is_impl row then begin
     List.iter
-      (fun (supplied : Store.definition) ->
-        Store.remove_definition database.store ~id:supplied.id;
-        forget_definition database supplied)
-      (list_supplied_methods database row);
-    Tracker.forget database Supply row.id
+      (fun (synthesized : Store.definition) ->
+        Store.remove_definition database.store ~id:synthesized.id;
+        forget_definition database synthesized)
+      (list_synthesized_methods database row);
+    Tracker.forget database Synthesize row.id
   end
 
 let create_units database (row : Store.definition) =
@@ -1244,9 +1280,9 @@ let create_units database (row : Store.definition) =
       if recipe.applies row then Tracker.mark_stale database recipe.stage (identify_unit recipe row))
     definition_stages;
   if is_proven_definition row then Tracker.mark_stale database Decide row.id;
-  if is_impl row then Tracker.mark_stale database Supply row.id
+  if is_impl row then Tracker.mark_stale database Synthesize row.id
 
-let run_supply (database : Tracker.t) (impl : Store.definition) =
+let run_synthesize (database : Tracker.t) (impl : Store.definition) =
   let key = Declarations.decode_key impl.key in
   let trait =
     match key.path with
@@ -1254,8 +1290,8 @@ let run_supply (database : Tracker.t) (impl : Store.definition) =
     | Derived { trait; _ } -> Some trait
     | Top _ | Method _ | Member_constant _ | Default _ | Test _ | Law_proof _ | Unresolved _ -> None
   in
-  let supplied =
-    Tracker.record database Supply impl.id (fun recorder ->
+  let synthesized =
+    Tracker.record database Synthesize impl.id (fun recorder ->
         let names = Lookups.make_names database recorder in
         match Option.bind trait names.find_key with
         | Some trait_key when (names.read_declaration trait_key).kind = Trait ->
@@ -1267,34 +1303,34 @@ let run_supply (database : Tracker.t) (impl : Store.definition) =
                     if Option.is_some (names.find_key method_) then None
                     else
                       Some
-                        (Declarations.encode_supplied
+                        (Declarations.encode_synthesized
                            ~origin:
                              (if Infer.is_derived_method method_ then
                                 Declarations.derived_method_origin
                               else Declarations.inherited_method_origin)
                            ~kind:Method
                            { module_ = key.module_; path = method_; ordinal = 0 }
-                           ~supplied_from:(Ids.of_key member) ~container:(Some impl.id))
+                           ~synthesized_from:(Ids.of_key member) ~container:(Some impl.id))
                 | _ -> None)
               (names.list_contained trait_key)
         | Some _ | None -> [])
   in
-  let supplied_before = list_supplied_methods database impl in
+  let synthesized_before = list_synthesized_methods database impl in
   let has_row rows (row : Store.definition) =
     List.exists (fun (candidate : Store.definition) -> candidate.id = row.id) rows
   in
   List.iter
     (fun (row : Store.definition) ->
-      if not (has_row supplied row) then begin
+      if not (has_row synthesized row) then begin
         Store.remove_definition database.store ~id:row.id;
         forget_definition database row
       end)
-    supplied_before;
+    synthesized_before;
   List.iter
     (fun (row : Store.definition) ->
-      if not (List.mem row supplied_before) then Store.replace_definition database.store row;
-      if not (has_row supplied_before row) then create_units database row)
-    supplied
+      if not (List.mem row synthesized_before) then Store.replace_definition database.store row;
+      if not (has_row synthesized_before row) then create_units database row)
+    synthesized
 
 let run_declare (database : Tracker.t) id =
   let module_ : Path.module_ =
@@ -1458,7 +1494,7 @@ let locate_entity (stage : Kind.stage) : Store.unit_entity =
   | Parse | Check_imports -> File_unit
   | Declare -> Module_unit
   | Resolve_grant | Check_dependency -> Dependency_unit
-  | Supply | Decide -> Definition_unit
+  | Synthesize | Decide -> Definition_unit
   | Claim_roots | Resolve | Read_trait_header | Evaluate_constant | Elaborate_header | Elaborate
   | Derive_interface | Compute_type_facts | Check_signature | Check_contract | Check_body
   | Build_body_mir | Build_contract_mir | Generate_mir | List_calls | Group_recursion | Find_aborts
@@ -1566,10 +1602,10 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
               ~is_node:(fun ~package id ->
                 match find_node id with Some row -> row.package = package | None -> false)
               rows)
-  | Supply ->
+  | Synthesize ->
       run_each (fun database id ->
           match Store.find_definition database.store Main ~id with
-          | Some impl -> run_supply database impl
+          | Some impl -> run_synthesize database impl
           | None -> Compiler_bug.raise_bug ~stage:"Database" "a stale impl has no row")
   | Check_dependency -> run_each run_check_dependency
   | Check_instantiation | Check_unexported ->
@@ -1613,9 +1649,9 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
   | Find_aborts ->
       let recipe = find_recipe stage in
       let visiting = Hashtbl.create 64 in
-      let read_untracked (fact : Path.t list Tracker.fact) path =
+      let read_untracked (view : Path.t list Tracker.view) path =
         match
-          Tracker.find database Tracker.untracked fact.whole (Path.locate_package path)
+          Tracker.find database Tracker.untracked view (Path.locate_package path)
             ~id:(Ids.of_path path)
         with
         | Some (Value paths) -> paths
@@ -1627,7 +1663,7 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
             (Declarations.decode_key (read_first_definition database recipe id).key).path
           in
           let members =
-            match read_untracked Facts.recursion_group path with
+            match read_untracked Facts.recursion_group.whole path with
             | [] -> [ path ]
             | members -> members
           in
@@ -1637,7 +1673,7 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
             (fun member ->
               List.iter
                 (fun callee -> run_after_callees (Ids.of_path callee))
-                (read_untracked Facts.call_node member))
+                (read_untracked Facts.callees member))
             members;
           List.iter (Hashtbl.remove visiting) member_ids;
           run_units database ?on_bug stage member_ids (fun database id ->

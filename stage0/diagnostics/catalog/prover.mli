@@ -30,11 +30,21 @@ type requirement =
 
 type recursion_impl = Derives | Inherits
 
-type supplied_recursion =
-  | Named_function of Path.t
-  | Bound_through_call of { call : call; owner : Path.t }
-  | Bound_through_name of { path : Path.t; owner : Path.t }
-  | Provided of Path.t
+type incomparable =
+  | Makes_values of { parameter : string; maker : Path.t }
+  | Holds_out_of_reach of { parameter : string; type_ : Types.ty }
+  | Assumed_by_impl of Path.t
+
+type passage =
+  | Direct_call
+  | Dictionary of { owner : Path.t; incomparable : incomparable option }
+  | Function_value of Path.t
+
+type higher_order_recursion =
+  | Function_value of Path.t
+  | Dictionary_through_call of { call : call; owner : Path.t }
+  | Dictionary_through_name of { path : Path.t; owner : Path.t }
+  | Handler of Path.t
 
 type dependency_kind = Reads | Calls | Uses
 type omitted = Omitted_field of string | Omitted_argument of string
@@ -82,12 +92,12 @@ type obligation =
   | Assertion_may_fail of { clause : quoted }
   | Bit_vector_assertion_may_fail of { clause : quoted }
   | Desugared_assertion_may_fail of { call : call }
-  | Recursion_not_on_part of { call : call; compared : string list }
+  | Recursion_without_smaller_part of { call : call; passage : passage; is_self_call : bool }
   | Recursion_may_not_end of { call : call; is_self_call : bool }
   | Uncompared_recursion of { call : call }
   | Measure_may_not_decrease of { call : call; measures : quoted list }
   | Recursion_through_impl of { call : call; impl : recursion_impl }
-  | Recursion_through_supply of supplied_recursion
+  | Recursion_through_argument of higher_order_recursion
   | Constant_cycle of { cyclic : Path.t; dependency : dependency }
   | Circular_proof of circular_proof
   | Precondition_may_fail of { clause : quoted; call : call }

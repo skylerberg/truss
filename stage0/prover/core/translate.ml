@@ -14,6 +14,9 @@ let make_environment ?node ?(condition = []) ?(keeps_termination = true) ?(keeps
     ranking = terminates && measures = [] && lookups.list_recursion_group node <> [];
     terminates;
     measures;
+    calls_without_decrease =
+      (if terminates && measures = [] then lazy (lookups.list_calls_without_decrease node)
+       else lazy []);
     blocked_holders = Option.value blocked_holders ~default:[];
     proven_laws;
     policy = Obligations.make_policy ~keeps_termination ~keeps_failures ~panic_condition;
@@ -584,6 +587,7 @@ let translate_run ~substitution ~condition ~assumes_panic_condition (lookups : L
       ~path query
   in
   let exits = Reader.read_body entered.start ~lambdas:entered.code.lambdas entered.code.body in
+  Termination.reject_unreached_calls_without_decrease entered.start;
   List.iter (check_lent_part entered) (List.rev exits.lends);
   List.iter
     (fun returned ->

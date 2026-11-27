@@ -1440,6 +1440,22 @@ let () =
         Harness.fail "collected %d items" (List.length observed.collected);
       expect_untouched observed.recomputed ~is_excluded:(fun part ->
           List.mem part (List.map locate [ make_lowered "shared"; make_lowered "kept" ])));
+  Harness.test
+    "a recursive call that stops passing a part recomputes the calls of its group without a \
+     decrease" (fun () ->
+      let make_program argument =
+        [
+          ( "app.main",
+            "type Chain =\n\
+            \  | End\n\
+            \  | indirect Link(value: Int64, rest: Chain)\n\n\
+             fn ends(chain: Chain) -> Bool {\n\
+            \  match chain {\n\
+            \    End => true\n\
+            \    Link(rest, ..) => ends(" ^ argument ^ ")\n  }\n}\n" );
+        ]
+      in
+      ignore (list_propagated ~before:(make_program "rest") ~after:(make_program "chain")));
   Harness.test "removing a type collects the items at that type without computing them" (fun () ->
       let make_program shape =
         [

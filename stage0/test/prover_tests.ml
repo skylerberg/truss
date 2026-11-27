@@ -23,6 +23,8 @@ let list_termination_messages text =
       else None)
     (check packages (Support.parse_file "app.main"))
 
+let laws_of_equal = [ "prover.law"; "prover.law"; "prover.law" ]
+
 let expect_one_termination_failure ~says text =
   match list_termination_messages text with
   | [ message ] ->
@@ -1086,13 +1088,8 @@ let () =
       expect_proven Fixtures.Prover.chain_searched_beside_an_unchanged_chain);
   Harness.test "recursion on a part of a parameter ends while an earlier one is unchanged"
     (fun () -> expect_proven Fixtures.Prover.chain_searched_after_an_unchanged_chain);
-  Harness.test "recursion on a part of a parameter does not end while an earlier one grows"
-    (fun () ->
-      expect_not_proven
-        ~says:
-          "This recursive call may not be on a part of the first of `grown` and `chain` that it \
-           changes: give the function a `decreases` clause."
-        Fixtures.Prover.chain_counted_while_the_first_chain_grows "prover.termination");
+  Harness.test "recursion on a part of a parameter ends while an earlier one grows" (fun () ->
+      expect_proven Fixtures.Prover.chain_counted_while_the_first_chain_grows);
   Harness.test "a user's model is not known to be smaller than its value" (fun () ->
       expect_not_proven Fixtures.Prover.spin_on_a_knot_whose_model_holds_it "prover.termination");
   Harness.test "a match with guards ends in an unreachable that is proven" (fun () ->
@@ -2723,15 +2720,16 @@ let () =
       expect_codes Fixtures.Prover.ping_and_pong_provided_methods
         [ "prover.termination"; "prover.termination" ]);
   Harness.test "an implementation that calls the function providing it is recursion" (fun () ->
-      expect_codes Fixtures.Prover.looper_provided_by_its_own_caller
-        [ "prover.termination"; "prover.termination" ])
+      Support.expect_one_diagnostic ~check
+        ~says:"This `provide` gives `app.main.impl app.main.Ping for app.main.Looper`"
+        Fixtures.Prover.looper_provided_by_its_own_caller "prover.termination")
 
 let () =
   Harness.test "an impl's method that calls itself through its type is recursion" (fun () ->
       Support.expect_one_diagnostic ~check
         ~says:
-          "This recursive call may not end: give the function a `decreases` clause for the prover \
-           to show that the recursion ends."
+          "This recursive call may not end: on some cycle of calls through it, no parameter is \
+           passed a part of itself each time around"
         Fixtures.Prover.from_calling_itself_through_its_type "prover.termination");
   Harness.test "an operator that calls its own method is recursion named by the operator" (fun () ->
       Support.expect_one_diagnostic ~check
@@ -2845,14 +2843,33 @@ let () =
   Harness.test "an equal that compares its receiver in a derived wrapper is recursion" (fun () ->
       expect_one_termination_failure ~says:"through code that its `impl` derives"
         Fixtures.Prover.equal_comparing_its_receiver_through_a_derived_wrapper);
-  Harness.test "an equal that compares lists of its own type gives its impl to the list's equal"
+  Harness.test "an equal that compares lists of its own type passes its impl to the list's equal"
     (fun () ->
+      expect_codes Fixtures.Prover.tree_equal_comparing_its_lists_of_children laws_of_equal);
+  Harness.test "functions that recurse on parts of each other's types end" (fun () ->
+      expect_proven Fixtures.Prover.trees_and_forests_searched_on_their_parts);
+  Harness.test "a function that passes its parameter back on a cycle of two functions may not end"
+    (fun () ->
+      expect_one_termination_failure ~says:"This recursive call may not end"
+        Fixtures.Prover.trees_and_forests_passing_their_parameters_back);
+  Harness.test "an equal that compares swapped lists of its own type ends" (fun () ->
+      expect_codes Fixtures.Prover.tree_equal_comparing_swapped_lists_of_children laws_of_equal);
+  Harness.test "a generic function whose bound makes values is not compared by parts" (fun () ->
       expect_one_termination_failure
-        ~says:
-          "The call that `self.children == other.children` makes uses `app.main.impl \
-           standard.core.Equal for app.main.Tree` where a bound needs it, and its methods reach \
-           back here."
-        Fixtures.Prover.tree_equal_comparing_its_lists_of_children);
+        ~says:"`standard.core.Default.default` makes new values of `Item`"
+        Fixtures.Prover.tree_equal_through_a_generic_function_that_makes_values);
+  Harness.test "a function passed to a generic function is called on parts" (fun () ->
+      expect_proven Fixtures.Prover.tree_searched_through_a_function_value);
+  Harness.test "a lambda passed to a generic function is called on parts" (fun () ->
+      expect_proven Fixtures.Prover.tree_searched_through_a_lambda);
+  Harness.test "a function passed beside a function that makes its argument may not end" (fun () ->
+      expect_one_termination_failure
+        ~says:"Naming `app.main.has_negative` as a value reaches back here"
+        Fixtures.Prover.tree_searched_through_a_function_that_makes_its_argument);
+  Harness.test "a compare that compares lists of its own type ends through `max` and `min`"
+    (fun () ->
+      expect_codes Fixtures.Prover.tree_compare_comparing_its_lists_of_children
+        (laws_of_equal @ laws_of_equal));
   Harness.test "an equal that compares each child in a loop recurses on parts" (fun () ->
       match list_termination_messages Fixtures.Prover.tree_equal_comparing_each_child with
       | [] -> ()

@@ -1,0 +1,17 @@
+type Tree(value: Int64, children: List[Tree])
+
+fn starts_with_default[Item: Equal + Default](items: List[Item]) -> Bool {
+  items.length() > 0 && items[0] == Item.default()
+}
+
+impl Default for Tree {
+  fn default() -> Tree {
+    Tree(value: 0, children: [])
+  }
+}
+
+impl Equal for Tree {
+  fn equal(self, other: Tree) -> Bool {
+    self.value == other.value && starts_with_default(self.children)
+  }
+}

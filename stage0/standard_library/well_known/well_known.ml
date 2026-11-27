@@ -427,6 +427,12 @@ let builtin_types_by_path =
 
 let find_builtin_type path = Path.Map.find_opt path builtin_types_by_path
 
+let is_built_from_elements path =
+  find_builtin_type path = Some Array
+  || List.exists
+       (fun name -> Path.equal path (make_path name))
+       [ List; List_cursor; String; Literal; Set; Sorted_set; Map; Sorted_map ]
+
 let make_builtin_capability_path builtin_capability =
   Path.make_standard_path [ "capabilities" ] (Language.Builtin_capability.show builtin_capability)
 
