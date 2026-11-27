@@ -2735,14 +2735,37 @@ let () =
           steps_as_package steps_as_project);
   Harness.test "a package database records the diagnostics of its package, and none when it checks"
     (fun () ->
-      let clean = load_package [ ("lib.tools", "public fn first() -> Int64 { 1 }\n") ] in
-      let broken = load_package [ ("lib.tools", "public fn first() -> Int64 { \"one\" }\n") ] in
       let lib : Path.package = { owner = None; name = "lib" } in
-      if Database.list_package_diagnostics clean lib <> [] then
-        Harness.fail "the package that checks records diagnostics";
-      match Database.list_package_diagnostics broken lib with
+      let list_recorded_diagnostics files =
+        Database.list_dependency_diagnostics (Database.create ~loaded:[ load_package files ] []) lib
+      in
+      if list_recorded_diagnostics [ ("lib.tools", "public fn first() -> Int64 { 1 }\n") ] <> []
+      then Harness.fail "the package that checks records diagnostics";
+      match
+        list_recorded_diagnostics [ ("lib.tools", "public fn first() -> Int64 { \"one\" }\n") ]
+      with
       | [ (_, _ :: _) ] -> ()
-      | failed -> Harness.fail "the broken package records %d files" (List.length failed))
+      | failed -> Harness.fail "the broken package records %d files" (List.length failed));
+  Harness.test
+    "a package build runs its check on the package's diagnostics before it saves the file"
+    (fun () ->
+      let lib : Path.package = { owner = None; name = "lib" } in
+      let path = Filename.concat (Harness.make_scratch_directory "package") "package.sqlite" in
+      let reject database =
+        match Database.list_dependency_diagnostics database lib with
+        | [ (_, _ :: _) ] -> raise Exit
+        | failed -> Harness.fail "the check reads %d files with diagnostics" (List.length failed)
+      in
+      match
+        Database.build_package
+          ~loaded:[ Lazy.force standard ]
+          ~check:reject
+          (List.hd (Support.setup [ ("lib.tools", "public fn first() -> Int64 { \"one\" }\n") ]))
+          ~into:path
+      with
+      | () -> Harness.fail "the build did not run its check"
+      | exception Exit ->
+          if Sys.file_exists path then Harness.fail "the build saved the file before its check")
 
 let shapes_and_tools =
   [

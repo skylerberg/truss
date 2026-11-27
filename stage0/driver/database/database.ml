@@ -1046,19 +1046,14 @@ let list_changes (database : t) (other : t) =
                    (Recipes.list_definition_facts ())))
        replaced)
 
-let build_package ~loaded (package : Project.package) ~into =
+let build_package ~loaded ?(check = ignore) (package : Project.package) ~into =
   let database = create_in_memory ~loaded ~records_reads:false [ package ] in
   Fun.protect
     ~finally:(fun () -> Store.close database.store)
     (fun () ->
+      check database;
       Store.keep_for_dependents database.store ~markers:(Kind.encode_markers [ Calls ]);
       Store.save database.store ~into)
-
-let list_package_diagnostics path package =
-  let database = create ~loaded:[ path ] [] in
-  Fun.protect
-    ~finally:(fun () -> close database)
-    (fun () -> list_dependency_diagnostics database package)
 
 let list_differences (database : t) (other : t) =
   let path = Filename.temp_file "truss-database" ".sqlite" in
