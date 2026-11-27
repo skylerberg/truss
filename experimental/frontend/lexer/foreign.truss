@@ -391,6 +391,7 @@ fn decode_character_escape(content: String) -> String {
 
 fn lex_character_literal(scanner: mut Scanner, tag: String, literal_start: UInt64, stop: UInt64) -> token.Kind
   modifies scanner.diagnostics, scanner.position, scanner.tables
+  requires literal_start <= scanner.position
   requires scanner.is_at(scanner.position, byte: 39) && scanner.position + 3 <= stop && scanner.is_at(stop - 1, byte: 39)
   ensures scanner.position == stop
 {
@@ -621,16 +622,13 @@ fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token.Kind]
   }
   let text_start = scanner.position + hashes + 1
   let line_end = scanner.compute_end_of_line(text_start)
-  var close: Option[UInt64] = None
-  var position = text_start
-  while position < line_end {
-    if scanner.is_at(position, byte: 34) && scanner.run_length(position + 1, byte: 35) >= hashes {
-      close = Some(position)
-      break
-    }
-    position += 1
+  var text_stop = text_start
+  while text_stop < line_end && !(scanner.is_at(text_stop, byte: 34) && scanner.run_length(text_stop + 1, byte: 35) >= hashes)
+    invariant text_start <= text_stop
+  {
+    text_stop += 1
   }
-  let Some(text_stop) = close else {
+  if text_stop >= line_end {
     return None
   }
   let written = scanner.text(text_start, stop: text_stop)
@@ -768,12 +766,10 @@ fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing
   let start = scanner.position
   let text_start = start + opening_length
   let line_end = scanner.compute_end_of_line(text_start)
-  let rest_of_line = scanner.text(text_start, stop: line_end)
-  let Some(value_length) = rest_of_line.find(closing) else {
+  let Some(text_stop) = scanner.find_text(closing, start: text_start, stop: line_end) else {
     return None
   }
-  let value = rest_of_line.substring(0, to: value_length).copy()
-  let text_stop = text_start + value_length
+  let value = scanner.text(text_start, stop: text_stop).copy()
   let stop = text_stop + closing.length()
   let reads_differently = value.contains("\\") || value.contains("$") || value.contains("\"") || quote_joins_before(scanner, index: start)
   let fixes = if reads_differently {

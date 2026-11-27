@@ -246,7 +246,8 @@ fn Scanner.run_length(self, index: UInt64, byte: UInt8) -> UInt64
   requires is_ascii(byte)
   ensures self.is_at(index, byte) ==> 1 <= result
   ensures !self.is_at(index, byte) ==> result == 0
-  ensures 0 < result ==> index + result <= self.length && self.is_boundary(index + result)
+  ensures 0 < result ==> index + result <= self.length
+  ensures forall offset in index + 1..index + result + 1 => self.source.text.is_boundary(offset)
 {
   if !self.is_at(index, byte) {
     return 0
@@ -254,7 +255,7 @@ fn Scanner.run_length(self, index: UInt64, byte: UInt8) -> UInt64
   var position = index + 1
   while self.is_at(position, byte)
     invariant index < position && position <= self.length
-    invariant self.is_at(position - 1, byte)
+    invariant forall offset in index + 1..position + 1 => self.source.text.is_boundary(offset)
     decreases self.count_remaining(position)
   {
     position += 1
@@ -288,6 +289,26 @@ fn Scanner.compute_end_of_line(self, index: UInt64) -> UInt64
     position += 1
   }
   position
+}
+
+fn Scanner.find_text(self, pattern: String, start: UInt64, stop: UInt64) -> Option[UInt64]
+  ensures !(result is Some(position)
+    && !(start <= position && position + pattern.length() <= stop
+      && self.is_boundary(position) && self.is_boundary(position + pattern.length())))
+{
+  var position = start
+  while position < stop
+    invariant start <= position
+  {
+    if pattern.length() <= stop - position
+      && self.source.text.get_substring(position, to: position + pattern.length()) is Some(part)
+      && part == pattern
+    {
+      return Some(position)
+    }
+    position += 1
+  }
+  None
 }
 
 fn Scanner.measure_line_break(self, index: UInt64) -> UInt64

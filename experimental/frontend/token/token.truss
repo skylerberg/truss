@@ -546,7 +546,9 @@ fn escape_spelling(text: String) -> String
       mut buffer.push("\\u{${format_lowercase_hexadecimal(byte)}}")
     } else {
       var stop = index + 1
-      while stop < length && !text.is_boundary(stop) {
+      while stop < length && !text.is_boundary(stop)
+        invariant index < stop && stop <= length
+      {
         stop += 1
       }
       mut buffer.push(text.substring(index, to: stop))
