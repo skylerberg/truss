@@ -27,7 +27,8 @@ val list_law_holes :
 
 val select_precondition_clauses : State.contract -> State.clauses
 
-type promise = { made_by : State.clauses; proven_under : State.clauses }
+type premise = The_precondition | Requires_of of State.clauses
+type promise = { made_by : State.clauses; proven_under : premise }
 
 val list_promises : State.contract -> promise list
 

@@ -193,8 +193,13 @@ let state_with_trigger (outer : State.frame) (application : application) (contra
                         find_readable_clause outer.query mark requirement (bind stated_by))
                       (Facts.list_clauses requirements)
                   in
+                  let premise =
+                    match proven_under with
+                    | The_precondition -> Contracts.select_precondition_clauses contract
+                    | Requires_of clauses -> clauses
+                  in
                   let required =
-                    read_required proven_under proven_under.requires
+                    read_required premise premise.requires
                     @ read_required callee_clauses callee_clauses.panics_unless
                   in
                   if List.mem None required then None
