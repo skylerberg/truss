@@ -122,13 +122,215 @@ let oblige_preconditions (frame : State.frame) (callee : Callee.t) (contract : S
              term));
   required
 
+type call = {
+  at_call : State.frame;
+  site : Invocation.site;
+  callee : Callee.t;
+  definition : Callee.definition;
+  contract : State.contract;
+  values : State.passed list;
+  required : Logic.term;
+  declared_result_type : Types.ty;
+  result_type : Types.ty;
+  may_abort : bool;
+  is_recursive : bool;
+}
+
+type logic_application = {
+  application : Contract_axioms.application;
+  arguments : Logic.term list;
+  is_on_bound_values : bool;
+}
+
+let list_arguments (values : State.passed list) =
+  List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values
+
+let read_entry_frame (definition : Callee.definition) (values : State.passed list)
+    (base : State.frame) (clauses : State.clauses) =
+  Contracts.make_entry_frame base clauses ~arguments:(list_arguments values)
+    ~substitution:(definition.substitution_of clauses)
+
+let apply_logic_function (after : State.frame) (call : call) =
+  let ({ path; type_arguments; substitution_of; _ } : Callee.definition) = call.definition in
+  let parameters = call.contract.callee_clauses.parameters in
+  let passed =
+    List.filter_map
+      (fun index ->
+        List.find_opt (fun (passed : State.passed) -> passed.position = index) call.values)
+      (List.init (List.length parameters) Fun.id)
+  in
+  if List.length passed <> List.length parameters then None
+  else begin
+    let sorts = List.map (fun (passed : State.passed) -> Encoding.sort_of passed.type_) passed
+    and arguments = List.map (fun (passed : State.passed) -> passed.term) passed in
+    let function_symbol =
+      Contract_axioms.declare_function after.query ~path ~type_arguments ~sorts
+        ~result_type:call.result_type
+    in
+    (match (path, parameters) with
+    | Method { owner = Impl { trait; _ } as impl; name; receiver }, [ self ]
+      when self.local = Self
+           && Well_known.is_method Model_model (Method { owner = trait.path; name; receiver }) ->
+        Models.rank_model after.environment after.query
+          (Types.erase_views
+             ((Interface.Impls.normalize after.environment.lookups.interface
+                 ~list_bounds:after.environment.bounds)
+                (Types.substitute (substitution_of call.contract.callee_clauses) self.type_)))
+          ~model:call.result_type ~impl function_symbol
+    | _ -> ());
+    let is_on_bound_values = List.exists (Logic.mentions call.at_call.bound) arguments in
+    Some
+      {
+        application =
+          Contract_axioms.apply after ~path ~type_arguments ~sorts ~result_type:call.result_type
+            ~arguments ~is_on_bound_values;
+        arguments;
+        is_on_bound_values;
+      }
+  end
+
+let assume_changed_validity (after : State.frame) (values : State.passed list) ~changed ~left_valid
+    =
+  List.iter
+    (fun (passed : State.passed) ->
+      if passed.mode = Language.Mode.Mut then
+        match List.assoc_opt passed.position changed with
+        | Some term ->
+            let valid =
+              Validity.make_validity after ~assuming:true
+                ~includes_invariants:(not passed.is_step_self) passed.type_ term
+            in
+            Facts.assume after
+              (match left_valid with Some left -> Logic.( ==> ) left valid | None -> valid)
+        | None -> ())
+    values
+
+let enter_instantiation (frame : State.frame) (definition : Callee.definition) =
+  let size = ref 0 in
+  List.iter
+    (function
+      | Types.Type argument ->
+          ignore
+            (Types.exists
+               (fun _ ->
+                 incr size;
+                 false)
+               argument)
+      | Types.Value _ -> ())
+    definition.type_arguments;
+  let size = !size in
+  if
+    List.for_all
+      (fun (outer, outer_size) -> (not (Path.equal definition.path outer)) || size < outer_size)
+      frame.instantiating
+  then
+    Some
+      (fun (entered : State.frame) ->
+        { entered with instantiating = (definition.path, size) :: frame.instantiating })
+  else None
+
+let state_axiom (after : State.frame) (call : call) applied =
+  let environment = call.at_call.environment in
+  if
+    (not call.may_abort)
+    && not
+         (Conditions.may_panic_for_every_value environment.lookups ~current:environment.current
+            ~condition:environment.condition call.callee.uses)
+  then
+    Option.iter
+      (fun { application; is_on_bound_values; _ } ->
+        Contract_axioms.state after application call.contract
+          ~substitution_of:call.definition.substitution_of ~result_type:call.result_type
+          ~group_member:call.callee.group_member ~is_on_bound_values)
+      applied
+
+let assume_ensures (call : call) ~(base : State.frame) ~(after : State.frame) ~changed ~applied
+    ~result ~final is_kept =
+  let arguments = list_arguments call.values in
+  let proves_the_axiom_domain =
+    call.contract.callee_clauses.panics_unless = [] || not call.at_call.panics
+  in
+  let is_in_axiom (clauses : State.clauses) (clause : Mir.formula) =
+    match applied with
+    | Some { application; _ } ->
+        application.is_limited
+        || proves_the_axiom_domain
+           && Contract_axioms.states call.at_call.query application clauses clause
+    | None -> false
+  in
+  let exits =
+    List.map
+      (fun (position, entry) ->
+        (position, Option.value (List.assoc_opt position changed) ~default:entry))
+      arguments
+  in
+  List.fold_left
+    (fun defining_term (clauses : State.clauses) ->
+      let ensures_frame =
+        {
+          (Contracts.make_exit_frame base clauses ~entries:arguments ~exits ~result:(Some result)
+             ~substitution:(call.definition.substitution_of clauses))
+          with
+          condition = after.condition;
+        }
+      in
+      let ensures_frame =
+        match final with
+        | Some final -> Lending.bind_final ensures_frame final
+        | None -> ensures_frame
+      in
+      List.fold_left
+        (fun defining_term (clause : Mir.formula) ->
+          if is_kept clause && not (is_in_axiom clauses clause) then
+            match Validity.read_specification ensures_frame clause with
+            | _, term -> (
+                Facts.assume after (Logic.( ==> ) call.required term);
+                match (applied, defining_term) with
+                | Some { application; _ }, None -> Contract_axioms.find_definition application term
+                | (Some _ | None), _ -> defining_term)
+            | exception Facts.Unsupported _ -> defining_term
+          else defining_term)
+        defining_term clauses.ensures)
+    None
+    (Contracts.list_clause_sets call.contract)
+
+let spend (call : call) ~(before : State.frame) ~(after : State.frame) ~changed ~result ~final =
+  Amounts.spend_contract_call ~before ~after call.site call.callee call.definition call.contract
+    call.values ~changed ~result ~result_type:call.declared_result_type ~final
+    ~is_recursive:call.is_recursive ~bind_frame:(fun clauses ->
+      {
+        (read_entry_frame call.definition call.values before clauses) with
+        result = Some result;
+        condition = after.condition;
+      })
+
+let end_lend (call : call) ~applied ~result ~where_lent (ended : State.frame) final =
+  let havoc =
+    havoc_mut ended
+      (List.filter (fun (passed : State.passed) -> passed.position = 0) call.values)
+      ~list_modified:(Contracts.list_modified_parts ended.environment call.definition.path)
+  in
+  let after = havoc.after and written = List.rev havoc.written in
+  let changed = written @ where_lent in
+  assume_changed_validity after call.values ~changed:written
+    ~left_valid:
+      (Some (Validity.make_validity after ~assuming:false ~deep:true call.result_type final));
+  Validity.check_valid after
+    (Facts.locate call.at_call call.site.origin)
+    call.result_type final ~deep:true ~moment:When_lend_ends;
+  Option.iter
+    (fun enter ->
+      ignore
+        (assume_ensures call ~base:(enter ended) ~after:(enter after) ~changed ~applied ~result
+           ~final:(Some final) (fun clause -> not (Lending.holds_where_lent clause))))
+    (enter_instantiation call.at_call call.definition);
+  let after = spend call ~before:ended ~after ~changed ~result ~final:(Some final) in
+  havoc.end_writes after;
+  after
+
 let call_contract (frame : State.frame) (site : Invocation.site) (callee : Callee.t)
     (definition : Callee.definition) (contract : State.contract) (values : State.passed list)
     ~recursive_callee =
-  let path = definition.path and type_arguments = definition.type_arguments in
-  let may_abort = Callee.may_abort frame.environment definition in
-  let is_unspecified_application = may_abort && (frame : State.frame).is_ghost in
-  let substitution_of = definition.substitution_of in
   let is_logic_call =
     contract.is_logic_function && Facts.remove_panic callee.uses = Types.no_capabilities
   in
@@ -141,248 +343,83 @@ let call_contract (frame : State.frame) (site : Invocation.site) (callee : Calle
         values
     else values
   in
-  let location = Facts.locate frame site.origin in
-  let find_argument_at index =
-    List.find_map
-      (fun (passed : State.passed) -> if passed.position = index then Some passed.term else None)
-      values
-  in
-  let list_bindings (clauses : State.clauses) =
-    List.mapi
-      (fun index (parameter : Mir.parameter) -> (parameter, find_argument_at index))
-      clauses.parameters
-  in
-  let arguments = List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values in
-  let read_entry_frame (base : State.frame) (clauses : State.clauses) =
-    Contracts.make_entry_frame base clauses ~arguments ~substitution:(substitution_of clauses)
-  in
-  let callee_clauses = contract.callee_clauses in
   let required =
-    oblige_preconditions frame callee contract values ~location ~path ~substitution_of
-      ~recursive_callee ~read_entry_frame
+    oblige_preconditions frame callee contract values ~location:(Facts.locate frame site.origin)
+      ~path:definition.path ~substitution_of:definition.substitution_of ~recursive_callee
+      ~read_entry_frame:(read_entry_frame definition values)
   in
-  let callee_bindings = list_bindings callee_clauses in
-  let callee_arguments = List.filter_map snd callee_bindings in
-  let is_on_bound_values = List.exists (Logic.mentions frame.bound) callee_arguments in
   let declared_result_type = Encoding.substitute_declared_type frame site.type_ in
-  let result_type = Types.erase_views declared_result_type in
-  let defining_term = ref None in
-  let list_modified = Contracts.list_modified_parts frame.environment path in
-  let make_result (after : State.frame) =
-    let applied =
-      if is_logic_call && List.length callee_arguments = List.length callee_bindings then begin
-        let sorts =
-          List.mapi
-            (fun index ((parameter : Mir.parameter), _) ->
-              match
-                List.find_opt (fun (passed : State.passed) -> passed.position = index) values
-              with
-              | Some passed -> Encoding.sort_of passed.type_
-              | None ->
-                  Encoding.sort_of
-                    (Types.erase_views
-                       ((Interface.Impls.normalize frame.environment.lookups.interface
-                           ~list_bounds:frame.environment.bounds)
-                          (Types.substitute (substitution_of callee_clauses) parameter.type_))))
-            callee_bindings
-        in
-        let function_symbol =
-          Contract_axioms.declare_function frame.query ~path ~type_arguments ~sorts ~result_type
-        in
-        (match (path, callee_bindings) with
-        | Method { owner = Impl { trait; _ } as impl; name; receiver }, [ (self, _) ]
-          when self.local = Self
-               && Well_known.is_method Model_model (Method { owner = trait.path; name; receiver })
-          ->
-            Models.rank_model frame.environment frame.query
-              (Types.erase_views
-                 ((Interface.Impls.normalize frame.environment.lookups.interface
-                     ~list_bounds:frame.environment.bounds)
-                    (Types.substitute (substitution_of callee_clauses) self.type_)))
-              ~model:result_type ~impl function_symbol
-        | _ -> ());
-        Some
-          (Contract_axioms.apply after ~path ~type_arguments ~sorts ~result_type
-             ~arguments:callee_arguments ~is_on_bound_values)
-      end
-      else None
-    in
-    let result =
-      match applied with
-      | Some application -> application.term
-      | None -> Encoding.arrive after "result" result_type
-    in
-    if not is_unspecified_application then
-      Validity.assume_valid (Facts.restrict_unless_proven after required) result_type result;
-    (applied, result)
+  let call =
+    {
+      at_call = frame;
+      site;
+      callee;
+      definition;
+      contract;
+      values;
+      required;
+      declared_result_type;
+      result_type = Types.erase_views declared_result_type;
+      may_abort = Callee.may_abort frame.environment definition;
+      is_recursive = Option.is_some recursive_callee;
+    }
   in
-  let assume_changed_validity (after : State.frame) ~changed ~left_valid =
-    List.iter
-      (fun (passed : State.passed) ->
-        if passed.mode = Language.Mode.Mut then
-          match List.assoc_opt passed.position changed with
-          | Some term ->
-              let valid =
-                Validity.make_validity after ~assuming:true
-                  ~includes_invariants:(not passed.is_step_self) passed.type_ term
-              in
-              Facts.assume after
-                (match left_valid with Some left -> Logic.( ==> ) left valid | None -> valid)
-          | None -> ())
-      values
+  let is_unspecified_application = call.may_abort && frame.is_ghost in
+  let havoc =
+    havoc_mut frame values
+      ~list_modified:(Contracts.list_modified_parts frame.environment definition.path)
   in
-  let instantiation_size =
-    let size = ref 0 in
-    List.iter
-      (function
-        | Types.Type argument ->
-            ignore
-              (Types.exists
-                 (fun _ ->
-                   incr size;
-                   false)
-                 argument)
-        | Types.Value _ -> ())
-      type_arguments;
-    !size
-  in
-  let run_instantiating run =
-    if
-      List.for_all
-        (fun (outer, outer_size) ->
-          (not (Path.equal path outer)) || instantiation_size < outer_size)
-        frame.instantiating
-    then
-      run (fun (entered : State.frame) ->
-          { entered with instantiating = (path, instantiation_size) :: frame.instantiating })
-  in
-  let returns_where_its_condition_holds =
-    (not may_abort)
-    && not
-         (Conditions.may_panic_for_every_value frame.environment.lookups
-            ~current:frame.environment.current ~condition:frame.environment.condition callee.uses)
-  in
-  let state_axiom (after : State.frame) applied =
-    if returns_where_its_condition_holds then
-      Option.iter
-        (fun application ->
-          Contract_axioms.state after application contract ~substitution_of ~result_type
-            ~group_member:callee.group_member ~is_on_bound_values)
-        applied
-  in
-  let assume_ensures (base : State.frame) (after : State.frame) ~changed ~applied ~result ~final
-      is_kept =
-    let proves_the_axiom_domain = callee_clauses.panics_unless = [] || not frame.panics in
-    let is_in_axiom (clauses : State.clauses) (clause : Mir.formula) =
-      match applied with
-      | Some (application : Contract_axioms.application) ->
-          application.is_limited
-          || proves_the_axiom_domain
-             && Contract_axioms.states frame.query application clauses clause
-      | None -> false
-    in
-    List.iter
-      (fun (clauses : State.clauses) ->
-        let exits =
-          List.map
-            (fun (position, entry) ->
-              (position, Option.value (List.assoc_opt position changed) ~default:entry))
-            arguments
-        in
-        let ensures_frame =
-          {
-            (Contracts.make_exit_frame base clauses ~entries:arguments ~exits ~result:(Some result)
-               ~substitution:(substitution_of clauses))
-            with
-            condition = after.condition;
-          }
-        in
-        let ensures_frame =
-          match final with
-          | Some final -> Lending.bind_final ensures_frame final
-          | None -> ensures_frame
-        in
-        List.iter
-          (fun (clause : Mir.formula) ->
-            if is_kept clause && not (is_in_axiom clauses clause) then
-              match Validity.read_specification ensures_frame clause with
-              | _, term ->
-                  (match (applied, !defining_term) with
-                  | Some application, None ->
-                      defining_term := Contract_axioms.find_definition application term
-                  | _ -> ());
-                  Facts.assume after (Logic.( ==> ) required term)
-              | exception Facts.Unsupported _ -> ())
-          clauses.ensures)
-      (Contracts.list_clause_sets contract)
-  in
-  let assume_hypotheses (after : State.frame) applied =
-    Option.iter
-      (fun application ->
-        Contract_axioms.assume_hypotheses after application ~arguments:callee_arguments)
-      applied
-  in
-  let spend ~(before : State.frame) ~(after : State.frame) ~changed ~result ~final =
-    Amounts.spend_contract_call ~before ~after site callee definition contract values ~changed
-      ~result ~result_type:declared_result_type ~final
-      ~is_recursive:(Option.is_some recursive_callee) ~bind_frame:(fun clauses ->
-        { (read_entry_frame before clauses) with result = Some result; condition = after.condition })
-  in
-  let havoc = havoc_mut frame values ~list_modified in
   let after = havoc.after and changed = List.rev havoc.written in
-  let applied, result = make_result after in
-  (match result with
-  | Logic.Apply (symbol, _) when is_unspecified_application ->
-      Query.note_withheld frame.query symbol path
-  | _ -> ());
-  assume_changed_validity after ~changed ~left_valid:None;
-  run_instantiating (fun enter ->
-      state_axiom (enter after) applied;
-      if not is_unspecified_application then
-        match contract.result_kind with
-        | `Lends ->
-            let assume =
-              assume_ensures (enter frame) (enter after) ~changed ~applied ~result
-                ~final:(Some result)
-            in
-            assume Lending.holds_where_lent;
-            assume (fun clause -> not (Lending.holds_where_lent clause))
-        | `Returns ->
-            assume_ensures (enter frame) (enter after) ~changed ~applied ~result ~final:None
-              (fun _ -> true));
-  if not is_unspecified_application then assume_hypotheses after applied;
+  let applied = if is_logic_call then apply_logic_function after call else None in
+  let result =
+    match applied with
+    | Some { application; _ } -> application.term
+    | None -> Encoding.arrive after "result" call.result_type
+  in
+  if is_unspecified_application then
+    match result with
+    | Logic.Apply (symbol, _) -> Query.note_withheld frame.query symbol definition.path
+    | _ -> ()
+  else Validity.assume_valid (Facts.restrict_unless_proven after required) call.result_type result;
+  assume_changed_validity after values ~changed ~left_valid:None;
+  let defining_term =
+    Option.bind (enter_instantiation frame definition) (fun enter ->
+        state_axiom (enter after) call applied;
+        if is_unspecified_application then None
+        else
+          let assume =
+            assume_ensures call ~base:(enter frame) ~after:(enter after) ~changed ~applied ~result
+          in
+          match contract.result_kind with
+          | `Lends -> (
+              let where_lent = assume ~final:(Some result) Lending.holds_where_lent in
+              let at_lend_end =
+                assume ~final:(Some result) (fun clause -> not (Lending.holds_where_lent clause))
+              in
+              match where_lent with Some _ -> where_lent | None -> at_lend_end)
+          | `Returns -> assume ~final:None (fun _ -> true))
+  in
+  if not is_unspecified_application then
+    Option.iter
+      (fun { application; arguments; _ } ->
+        Contract_axioms.assume_hypotheses after application ~arguments)
+      applied;
+  let returned = Option.value defining_term ~default:result in
   match (contract.result_kind, callee.lends) with
   | `Lends, Some Language.Mode.Mut ->
       havoc.end_writes after;
-      let is_lender (position, _) = position = 0 in
-      let where_lent = List.filter (fun changed -> not (is_lender changed)) changed in
-      let end_lend (ended : State.frame) final =
-        let havoc =
-          havoc_mut ended
-            (List.filter (fun (passed : State.passed) -> passed.position = 0) values)
-            ~list_modified
-        in
-        let after = havoc.after and changed = List.rev havoc.written @ where_lent in
-        assume_changed_validity after ~changed:(List.rev havoc.written)
-          ~left_valid:
-            (Some (Validity.make_validity after ~assuming:false ~deep:true result_type final));
-        Validity.check_valid after location result_type final ~deep:true ~moment:When_lend_ends;
-        run_instantiating (fun enter ->
-            assume_ensures (enter ended) (enter after) ~changed ~applied ~result ~final:(Some final)
-              (fun clause -> not (Lending.holds_where_lent clause)));
-        let after = spend ~before:ended ~after ~changed ~result ~final:(Some final) in
-        havoc.end_writes after;
-        after
-      in
       {
         frame = after;
-        result = Option.value !defining_term ~default:result;
-        end_lend = Some end_lend;
+        result = returned;
+        end_lend =
+          Some
+            (end_lend call ~applied ~result
+               ~where_lent:(List.filter (fun (position, _) -> position <> 0) changed));
       }
   | (`Lends | `Returns), _ ->
-      let after = spend ~before:frame ~after ~changed ~result ~final:None in
+      let after = spend call ~before:frame ~after ~changed ~result ~final:None in
       havoc.end_writes after;
-      { frame = after; result = Option.value !defining_term ~default:result; end_lend = None }
+      { frame = after; result = returned; end_lend = None }
 
 type modelled =
   | By_contract of applied

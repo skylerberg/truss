@@ -227,16 +227,34 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | A call executes a contract | `assert pre; havoc w; assume post` |
   | Contract 1 refines contract 2: the statement of 1 implements 2 | `assume pre2; assert pre1; havoc w; assume post1; assert post2` |
 
-  `Specification.t` is a contract read at given entry and exit values. It
-  has the readings that the relations are made of, `assume_requires`,
-  `oblige_requires` and `assume_ensures`, and `refine`, which is the third
-  row. `oblige_requires` returns the conjunction that it obliged, which is
-  the condition under which the call is defined, so its caller states the
-  facts of the call in `Facts.restrict_unless_proven` of that condition and
-  reads the `requires` once. `Callbacks` reads a function value's contract
-  through it: a value passed for a parameter refines the parameter's
-  contract, a call of a value obliges its `requires`, and a call that
-  returned assumes its `ensures`.
+  Each relation has one reader for each kind of contract. Every reader
+  evaluates a clause at given values the same way, in a frame from
+  `Contracts.make_entry_frame` or `make_exit_frame`.
+
+  | Contract of | Implemented by | Executed by | Refined by |
+  |---|---|---|---|
+  | A definition | The proof of the function: the cases of `Translate.enter_function` | `Calls.call_contract` | An `impl`'s method against its trait's: `Translate.assume_precondition`, and the trait's clauses as cases |
+  | A function value: a function parameter's stated contract, or a named function used as a value | A lambda's body, in `Lambdas.read_lambda` | `Specification.oblige_requires` and `assume_ensures`, from `Callbacks` | `Specification.refine`, where a value is passed for a parameter |
+
+  `Specification.t` is the contract of a function value read at given
+  entry and exit values: its `requires` and its `ensures`, and no more. A
+  definition's contract has parts that a function value's has not, which
+  is why `Calls.call_contract` is the reader for a definition: the two
+  moments of a lend, the axiom of a logic function, the cost clauses, the
+  Panic condition and the measure of a recursion.
+  `Specification.oblige_requires` returns the conjunction that it obliged,
+  which is the condition under which the call is defined, so its caller
+  states the facts of the call in `Facts.restrict_unless_proven` of that
+  condition and reads the `requires` once.
+
+  `Calls.call_contract` is the second row of the first table, one step to
+  a function: `oblige_preconditions`; `havoc_mut` for the `mut` arguments;
+  the result, which is `apply_logic_function`'s term for a logic function
+  and a new value otherwise; `state_axiom`; `assume_ensures`, under the
+  precondition that was obliged; and `spend`. `end_lend` is the same
+  steps again for the moment a `mut` lend ends. The steps share the
+  record `Calls.call`, which holds what the call fixed before any of
+  them ran.
 - **A contract is resolved once, and its three readers differ only in what
   they prove and what they assume.** The rules are those of modular
   verification with pre- and postconditions. A definition is proven against
