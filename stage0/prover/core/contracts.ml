@@ -157,10 +157,14 @@ let select_precondition_clauses (contract : State.contract) =
 type promise = { made_by : State.clauses; proven_under : State.clauses }
 
 let list_promises (contract : State.contract) =
-  { made_by = contract.callee_clauses; proven_under = select_precondition_clauses contract }
+  let precondition = select_precondition_clauses contract in
+  { made_by = contract.callee_clauses; proven_under = precondition }
   :: List.map
        (fun clauses -> { made_by = clauses; proven_under = clauses })
-       (Option.to_list contract.trait_clauses @ contract.restated_clauses)
+       (Option.to_list contract.trait_clauses)
+  @ List.map
+      (fun clauses -> { made_by = clauses; proven_under = precondition })
+      contract.restated_clauses
 
 let find_declared_clauses lookups path =
   Option.bind (find_source lookups path) (fun (callee, _, _) -> find_clauses lookups path callee)
