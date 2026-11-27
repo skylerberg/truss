@@ -15,20 +15,10 @@ val oblige_requires :
   t ->
   Logic.term list ->
   describe:(Catalog.Prover.quoted -> Catalog.Prover.obligation) ->
-  unit
+  Logic.term
 
 val assume_ensures :
   State.frame -> t -> entries:Logic.term list -> exits:Logic.term list -> result:Logic.term -> unit
-
-val oblige_ensures :
-  State.frame ->
-  Obligation.location ->
-  t ->
-  entries:Logic.term list ->
-  exits:Logic.term list ->
-  result:Logic.term ->
-  describe:(Catalog.Prover.quoted -> Catalog.Prover.obligation) ->
-  unit
 
 val refine :
   State.frame ->

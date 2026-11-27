@@ -282,16 +282,18 @@ let describe_requirement location (known : State.known_function) ~use clause :
   | Not_called use, Own { name; _ } ->
       Function_requirement { function_ = Callback_parameter name; use; clause }
 
-let check_requires (frame : State.frame) location (known : State.known_function) ~use arguments =
+let oblige_known_requires (frame : State.frame) location (known : State.known_function) ~use
+    arguments =
   Specification.oblige_requires frame location (specify_known known frame) arguments
     ~describe:(describe_requirement location known ~use)
 
 let check_escaping (frame : State.frame) location known (function_type : Types.function_type) =
   if has_requires known then
     let _, supposed = Facts.suppose frame "called" in
-    check_requires supposed location known
-      ~use:(Not_called (Used_as_value (Types.Function function_type)))
-      (declare_arguments supposed function_type.inputs)
+    ignore
+      (oblige_known_requires supposed location known
+         ~use:(Not_called (Used_as_value (Types.Function function_type)))
+         (declare_arguments supposed function_type.inputs))
 
 let check_read (frame : State.frame) term =
   if frame.makes_obligations && not frame.is_reading_callback then
@@ -332,15 +334,11 @@ let check_passed (frame : State.frame) ~at (callee : Callee.t) (passed : State.p
       Option.iter (fun known -> check_escaping frame location known passed_type) known
   | _, _ -> ()
 
-let check_called (frame : State.frame) (site : Invocation.site) called arguments =
-  Option.iter
-    (fun known -> check_requires frame (Facts.locate frame site.origin) known ~use:Called arguments)
-    (find_known frame called)
-
-let list_called_requires (frame : State.frame) called arguments =
+let oblige_requires (frame : State.frame) (site : Invocation.site) called arguments =
   match find_known frame called with
-  | Some known -> List.map snd (list_requires frame known arguments)
-  | None -> []
+  | Some known ->
+      oblige_known_requires frame (Facts.locate frame site.origin) known ~use:Called arguments
+  | None -> Logic.Boolean true
 
 let assume_returned (frame : State.frame) (function_type : Types.function_type) called ~entries
     ~exits ~result =
