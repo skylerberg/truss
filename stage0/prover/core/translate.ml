@@ -245,14 +245,17 @@ type entered_function = {
   is_update_step : bool;
 }
 
-let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_holders
-    (lookups : Lookups.t) (source : State.source) ~path (query : Query.t) =
-  let contract =
-    match Mir.read_contract lookups.mir path with
-    | Some { form; _ } -> form
-    | None -> Facts.raise_bug "`%s` has no MIR of its contract" (Resolve.Names.show_key source.key)
-  in
-  let parameters = contract.parameters in
+type run = {
+  environment : State.environment;
+  signature : Types.signature option;
+  is_update_step : bool;
+  is_specification_only : bool;
+  panics : bool;
+  can_declare_panic : bool;
+}
+
+let make_run ~substitution ~condition ~assumes_panic_condition ?blocked_holders
+    (lookups : Lookups.t) (source : State.source) ~path (contract : Mir.contract) =
   let signature =
     Option.map
       (Types.map_signature (Types.substitute_erased substitution))
@@ -306,6 +309,10 @@ let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_ho
       ~inherits_precondition:
         (Option.is_some (Interface.Impls.find_implemented_method lookups.interface path))
   in
+  { environment; signature; is_update_step; is_specification_only; panics; can_declare_panic }
+
+let resolve_clause_sets (environment : State.environment) (query : Query.t) (source : State.source)
+    ~path (contract : Mir.contract) =
   List.iter
     (fun (measure : Mir.formula) ->
       ignore
@@ -332,16 +339,14 @@ let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_ho
             } )
     | None -> Facts.raise_bug "`%s` has no contract" (Resolve.Names.show_key source.key)
   in
-  let pair_up (clauses : State.clauses) terms =
-    match (parameters, terms) with
-    | { local = Self; _ } :: _, _ :: rest
-      when not
-             (List.exists
-                (fun (parameter : Mir.parameter) -> parameter.local = Self)
-                clauses.parameters) ->
-        rest
-    | _ -> terms
+  (own, inherited, added, clause_sets)
+
+let bind_entry (run : run) (query : Query.t) (source : State.source) ~path ~substitution ~condition
+    (contract : Mir.contract) =
+  let { environment; signature; is_update_step; is_specification_only; panics; can_declare_panic } =
+    run
   in
+  let lookups = environment.lookups and parameters = contract.parameters in
   let output = match signature with Some { output = Returns ty; _ } -> Some ty | _ -> None in
   let start =
     bind_parameters
@@ -389,6 +394,35 @@ let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_ho
         { start with lent_part_type = Some (Encoding.substitute_type start part) }
     | Some { output = Returns _; _ } | None -> start
   in
+  (start, output)
+
+let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_holders
+    (lookups : Lookups.t) (source : State.source) ~path (query : Query.t) =
+  let contract =
+    match Mir.read_contract lookups.mir path with
+    | Some { form; _ } -> form
+    | None -> Facts.raise_bug "`%s` has no MIR of its contract" (Resolve.Names.show_key source.key)
+  in
+  let parameters = contract.parameters in
+  let run =
+    make_run ~substitution ~condition ~assumes_panic_condition ?blocked_holders lookups source ~path
+      contract
+  in
+  let environment = run.environment in
+  let own, inherited, added, clause_sets =
+    resolve_clause_sets environment query source ~path contract
+  in
+  let pair_up (clauses : State.clauses) terms =
+    match (parameters, terms) with
+    | { local = Self; _ } :: _, _ :: rest
+      when not
+             (List.exists
+                (fun (parameter : Mir.parameter) -> parameter.local = Self)
+                clauses.parameters) ->
+        rest
+    | _ -> terms
+  in
+  let start, output = bind_entry run query source ~path ~substitution ~condition contract in
   let entry = start in
   let substitutions =
     List.map
@@ -455,8 +489,8 @@ let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_ho
   List.iter
     (fun (measure : Mir.formula) ->
       Validity.check_defined start ~holds_when:measure.holds_when measure)
-    measures;
-  { start; cases; code = mir; parameters; output; is_update_step }
+    environment.measures;
+  { start; cases; code = mir; parameters; output; is_update_step = run.is_update_step }
 
 let check_ensures entered (frame : State.frame) location ~is_checked ~moment =
   List.iter
