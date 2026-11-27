@@ -1025,7 +1025,7 @@ let () =
         "fn one() -> Int64 {\n\
         \  1\n\
          }\n\n\
-         fn take(n: Int64 = one()) -> Int64 {\n\
+         fn take(n: Int64 = if true { one() } else { 1 }) -> Int64 {\n\
         \  n\n\
          }\n\n\
          fn first() -> Int64 {\n\
