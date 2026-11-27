@@ -647,6 +647,10 @@ let () =
     (fun () ->
       expect_not_proven Fixtures.Prover.restated_method_whose_declaration_requires "prover.ensures"
         ~says:"The contract of `Crawler`'s `step` may not imply `result >= by`");
+  Harness.test "a restated clause with a condition is proven where the impl's type meets it"
+    (fun () ->
+      expect_codes Fixtures.Prover.restated_clauses_with_a_condition
+        [ "prover.cost"; "prover.ensures" ]);
   Harness.test "a restated clause is proven of the receiver that the method changes" (fun () ->
       expect_not_proven Fixtures.Prover.restated_clause_that_the_changed_receiver_breaks
         "prover.ensures");

@@ -249,10 +249,25 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | A call, `Calls` | The `requires`, and the Panic condition where the caller may not panic, in `oblige_preconditions` | Each `ensures` under its premise, in the frame of the call, in `call_contract` |
   | The axiom of a logic function, `Contract_axioms` | Nothing | Each `ensures`, for every argument in the function's domain |
 
-  `Translate.translate_run` is the proof of a function in four steps: it
-  enters the definition, reads the body, and checks each lent part and
-  each return. A proof that reads no body, of a law, a type, a constant or
-  a restated method, starts from `Translate.start_proof`.
+  `Translate.implementation` is a contract that a body implements: the
+  frame at entry, where the parameters are bound and the precondition is
+  assumed, and the contract's cases. A case is a clause set with the
+  premise that its `ensures` and its costs are proven under.
+  `check_lent_part` and `check_return` oblige every case at an exit. Two
+  proofs build an implementation, and they differ in the body.
+
+  | Proof | Cases | Body |
+  |---|---|---|
+  | A function, `translate_run` | Its own clauses and its trait's | Its code, which `Reader.read_body` reads |
+  | A restated method of an `impl`, `prove_restated_method` | The clauses that the trait adds | A call of the declared method, `Calls.call_contract` |
+
+  The second row is a refinement written as an implementation: the
+  contract of the `impl`'s method refines the restated contract where a
+  body that only executes the first implements the second. Each proof runs
+  once for every condition that a clause of its cases leaves undecided, so
+  a clause with a `when` condition is proven where the condition holds. A
+  proof that reads no body, of a law, a type or a constant, starts from
+  `Translate.start_proof`.
 
   A logic function is total in the logic and unspecified outside its domain.
   Its domain is a condition under which the definition returns: valid
