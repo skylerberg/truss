@@ -605,7 +605,9 @@ let translate_function ?(substitution = Types.no_substitution) (lookups : Lookup
 
 let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~proofs ~at
     =
-  let start = start_proof lookups source ~current:impl ~proven_impl:(trait, for_type) in
+  let start =
+    start_proof lookups source ~current:impl ~proven_impl:(Proves_laws (trait, for_type))
+  in
   let substitution = Contracts.make_trait_substitution lookups trait for_type in
   List.iter
     (fun (law_source, (law : Mir.law)) ->
@@ -850,7 +852,7 @@ let translate_restated_clauses (lookups : Lookups.t) (source : State.source) ~im
     run_blocking @@ fun ?blocked_holders () ->
     let start =
       start_proof lookups source ~current:impl ~condition ?blocked_holders
-        ~proven_impl:(trait, for_type)
+        ~proven_impl:(Proves_restated_clauses (trait, for_type))
     in
     List.iter
       (fun (restated : Types.restated_method) ->

@@ -85,3 +85,41 @@ impl Paces for Pacer {
 
 impl LinkedPaces for Pacer {
 }
+
+trait Strides {
+  fn stride(self) -> Int64
+}
+
+trait LinkedStrides: Strides {
+  fn stride(self) -> Int64
+    ensures result == 7
+}
+
+trait Totals: LinkedStrides {
+  fn total(self) -> Int64
+
+  law seven(value: Self) {
+    value.stride() == 7
+  }
+}
+
+type Strider(x: Int64)
+
+impl Strides for Strider {
+  fn stride(self) -> Int64
+    ensures result == 1 && self.total() == 2
+  {
+    1
+  }
+}
+
+impl LinkedStrides for Strider {
+}
+
+impl Totals for Strider {
+  fn total(self) -> Int64
+    ensures result == 2
+  {
+    2
+  }
+}

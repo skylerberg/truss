@@ -301,7 +301,11 @@ develop as well as make it easier to bootstrap the compiler in parts.
   trait requires that trait, and never the proven trait's own
   (`Contracts.list_restated_clauses`). A proof that assumed its own clauses
   proved two clauses from each other, and a law's proof proved the law from
-  a clause whose proof could assume the law.
+  a clause whose proof could assume the law. The proof of restated clauses
+  assumes no law (`Laws.assume_laws`): the proof of a law may assume the
+  clauses of the traits that its trait requires, and through the proof of
+  another law the clauses of any trait, so a law can rest on the clause
+  that it would help to prove.
 
   A use has only the clauses whose condition holds for its type arguments.
   `Callee.resolve` decides each clause's condition once, with

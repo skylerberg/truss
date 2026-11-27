@@ -253,7 +253,7 @@ let list_restated_clauses (environment : State.environment) ~packages ~self_type
   let is_proven_before_this_proof (subtrait : Types.trait_reference) =
     match environment.proven_impl with
     | None -> true
-    | Some (proven, for_type) ->
+    | Some (Proves_laws (proven, for_type) | Proves_restated_clauses (proven, for_type)) ->
         (not (Path.equal subtrait.trait proven.trait))
         && List.exists
              (fun (required : Types.trait_reference) -> Path.equal required.trait subtrait.trait)

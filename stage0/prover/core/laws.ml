@@ -75,14 +75,19 @@ let make_law_fact (frame : State.frame) source ~substitution (law : Mir.law) =
 let assume_laws (frame : State.frame) (trait : Types.trait_reference) (ty : Types.ty) =
   List.iter
     (fun (required : Types.trait_reference) ->
-      let key = (required, ty) in
       let impl = Option.map fst (Encoding.find_impl frame.environment required ty) in
       let is_proven_with_this_proof =
         match impl with
         | Some impl -> Cycles.is_in_proof_cycle frame.environment impl
         | None -> false
       in
-      if not (is_proven_with_this_proof || frame.environment.proven_impl = Some key) then
+      let is_assumed =
+        match frame.environment.proven_impl with
+        | Some (Proves_restated_clauses _) -> false
+        | Some (Proves_laws (proven, for_type)) -> (proven, for_type) <> (required, ty)
+        | None -> true
+      in
+      if is_assumed && not is_proven_with_this_proof then
         Query.run_once frame.query (Laws_of (required, ty)) @@ fun () ->
         let substitution =
           Contracts.make_trait_substitution frame.environment.lookups required ty
