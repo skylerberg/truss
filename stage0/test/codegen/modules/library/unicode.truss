@@ -94,7 +94,7 @@ test "normalize decomposes and composes Hangul syllables by arithmetic" {
   assert unicode.normalize("\u{1100}\u{1161}\u{11A8}") == "\u{AC01}"
 }
 
-test "normalize replaces compatibility characters only in the compatibility forms" uses RunForever {
+test "normalize replaces compatibility characters only in the compatibility forms" {
   assert unicode.normalize("\u{FB01}") == "\u{FB01}"
   assert unicode.normalize("\u{FB01}", form: unicode.Form.Decomposed) == "\u{FB01}"
   assert unicode.normalize("\u{FB01}", form: unicode.Form.CompatibilityComposed) == "fi"

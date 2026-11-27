@@ -161,7 +161,7 @@ test "a byte queue gives its bytes back in the order they arrived" {
   assert queue.is_empty()
 }
 
-test "a byte queue reads from a reader after the bytes it still holds" uses RunForever {
+test "a byte queue reads from a reader after the bytes it still holds" {
   provide streams.NoHandles() {
     var source = drip("0123456789", step: 4)
     var queue: streams.ByteQueue = []

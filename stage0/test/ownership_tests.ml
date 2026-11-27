@@ -38,7 +38,6 @@ let () =
       expect_fine
         (scanner
        ^ "public fn step(scanner: mut Scanner)\n\
-         \  uses Panic\n\
          \  modifies scanner.position, scanner.region.stop, scanner.items\n\
           {\n\
          \  advance(mut scanner)\n\

@@ -126,7 +126,7 @@ test "maps are equal when they hold equal values under equal keys, in any order"
   assert first != second
 }
 
-test "a map is made from a cursor of entries, the last of a key winning" uses RunForever {
+test "a map is made from a cursor of entries, the last of a key winning" {
   let entries: List[map.Entry[String, Int64]] = [
     map.Entry(key: "a", value: 1),
     map.Entry(key: "b", value: 2),

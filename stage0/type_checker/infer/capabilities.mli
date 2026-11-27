@@ -1,1 +1,2 @@
-val check : State.state -> Interface.Environment.elaborated_interface -> Core.t -> bool
+val check :
+  State.state -> Interface.Environment.elaborated_interface -> Core.t -> Types.capability_set

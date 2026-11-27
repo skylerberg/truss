@@ -42,7 +42,7 @@ test "characters decodes each UTF-8 sequence" {
   assert "".character_count() == 0
 }
 
-test "characters_with_offsets gives the byte offset of each character" uses RunForever {
+test "characters_with_offsets gives the byte offset of each character" {
   assert "a\u{e9}\u{20ac}z".characters_with_offsets().to_list() == [
     core.Indexed(index: 0, element: Character"a"),
     core.Indexed(index: 1, element: Character"\u{e9}"),

@@ -668,9 +668,7 @@ public fn FileWriter.write_bytes(mut self, bytes: List[UInt8]) -> Result[Unit, S
   mut self.file.write_all(bytes)
 }
 
-public fn FileWriter.flush(mut self) -> Result[Unit, SystemError]
-  uses Handles
-{
+public fn FileWriter.flush(mut self) -> Result[Unit, SystemError] {
   Ok(Unit)
 }
 
@@ -757,7 +755,7 @@ public fn write_with[Output](
   write: (fn(mut FileWriter) -> Result[Output, SystemError] uses generic Granted),
   mode: WriteMode = WriteMode.Replace,
 ) -> Result[Output, SystemError]
-  uses FileWrite, Handles, generic Granted
+  uses FileWrite, generic Granted
 {
   let opened = FileWrite.open(file, mode: mode)?
   var writer = FileWriter(file: own opened)

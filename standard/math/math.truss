@@ -894,6 +894,9 @@ fn BigInteger.division(self, divisor: BigInteger) -> Division[BigInteger]
 public fn BigInteger.quotient_and_remainder(self, divisor: BigInteger) -> Division[BigInteger]
   uses Panic unless !divisor.is_zero()
 {
+  if divisor.is_zero() {
+    Panic.crash("division by zero")
+  }
   self.division(divisor)
 }
 

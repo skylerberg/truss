@@ -105,7 +105,7 @@ type fact =
   | Contract
   | Body_form
   | Body_tables
-  | Run_forever
+  | Capability_uses
   | Ownership_modes
   | Body_mir
   | Contract_mir
@@ -145,7 +145,7 @@ let facts =
     Contract;
     Body_form;
     Body_tables;
-    Run_forever;
+    Capability_uses;
     Ownership_modes;
     Body_mir;
     Contract_mir;
@@ -301,7 +301,7 @@ let show_fact = function
   | Type_facts -> "type facts"
   | Signature_check -> "signature check"
   | Contract -> "contract"
-  | Body_form | Body_tables | Run_forever | Ownership_modes -> "checked body"
+  | Body_form | Body_tables | Capability_uses | Ownership_modes -> "checked body"
   | Body_mir -> "MIR of the body"
   | Contract_mir -> "MIR of the contract"
   | Generated_mir -> "generated MIR"
@@ -349,7 +349,7 @@ let is_signature = function
   | Header | Trait_header | Constant_value | Interface | Elaboration | Derived_interface
   | Type_facts | Signature_check | Checked_interface | Contract | Contract_mir ->
       true
-  | Resolved _ | Grant | Body_form | Body_tables | Run_forever | Ownership_modes | Body_mir
+  | Resolved _ | Grant | Body_form | Body_tables | Capability_uses | Ownership_modes | Body_mir
   | Generated_mir | Callees | Size_changes | Recursion_group | Proof_group | Termination
   | Aborts_outside_group | May_abort | Usage_check | Ownership | Dependency_use | Proof | Lowered
   | Test_key | Evaluation | Test_run | Unit _ ->
@@ -359,7 +359,7 @@ let list_read_targets = function
   | Interface -> [ Interface; Checked_interface ]
   | Signature_check -> [ Checked_interface ]
   | ( Resolved _ | Grant | Trait_header | Constant_value | Header | Elaboration | Derived_interface
-    | Type_facts | Checked_interface | Contract | Body_form | Body_tables | Run_forever
+    | Type_facts | Checked_interface | Contract | Body_form | Body_tables | Capability_uses
     | Ownership_modes | Body_mir | Contract_mir | Generated_mir | Callees | Size_changes
     | Recursion_group | Proof_group | Termination | Aborts_outside_group | May_abort | Usage_check
     | Ownership | Dependency_use | Proof | Lowered | Test_key | Evaluation | Test_run | Unit _ ) as

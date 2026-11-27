@@ -11,6 +11,7 @@ module Elaborator : sig
   val list_applications : t -> (Syntax.id * Types.application) list
   val split_part : Syntax.expression -> (string * Syntax.name list * bool) option
   val elaborate_type : t -> Syntax.type_expression -> Types.ty
+  val elaborate_capability : t -> Syntax.capability_reference -> Types.capability list
   val elaborate_mode : Syntax.mode option -> Language.Mode.t
   val elaborate_condition : t -> Syntax.condition -> Types.condition
   val add_condition : t -> Types.condition -> t

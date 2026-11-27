@@ -137,8 +137,7 @@ let make_usage database recorder : Usage.Lookups.t =
              (fun section -> read_of_key database recorder (Facts.resolved section).whole key)
              Resolve.sections));
     read_tables = read_of_key database recorder Facts.body_tables;
-    uses_run_forever = read_of_key database recorder Facts.uses_run_forever;
-    is_recursive = (fun path -> list_recursion_group database recorder path <> []);
+    read_capability_uses = read_of_key database recorder Facts.capability_uses;
   }
 
 let make_ownership database recorder : Ownership.Lookups.t =

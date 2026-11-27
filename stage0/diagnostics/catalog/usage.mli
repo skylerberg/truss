@@ -20,8 +20,8 @@ type t =
       operator : Language.Comparison.t;
       is_float : bool;
     }
-  | Unused_run_forever of {
-      function_ : Path.t;
+  | Unused_capability of {
+      definition : Path.t;
       entry : Core.origin Description.range;
       siblings : Core.origin Description.siblings;
     }

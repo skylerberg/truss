@@ -1189,11 +1189,11 @@ fn serve(listener: mut Listener)
 - A function that uses `RunForever` has no `time` clause. One that uses
   `RunForever unless C` states its `time` clause `when` a condition that
   implies `C`.
-- A `RunForever` that a function declares and does not use is a warning. The
-  function uses it where a call or a loop in it uses `RunForever`, where one
-  of its `while` loops takes its measure from its condition, or where a
-  recursion reaches the function. A method written in a trait or an `impl`
-  is not checked.
+- A function uses `RunForever` where a call or a loop in it uses
+  `RunForever`, where one of its `while` loops takes its measure from its
+  condition, or where a recursion reaches the function. A `RunForever` that
+  it declares and does not use is a warning (see
+  [Unused capabilities](#unused-capabilities)).
 - A call of a capability's method terminates unless the method's `uses`
   names `RunForever`. A method that waits for the world, such as
   `Console.read_line`, returns once the world answers, so waiting is not
@@ -1549,8 +1549,9 @@ A capability parameter passes on the capabilities a callback uses,
   and so does the call. Where it is a lambda that takes `Panic` (see
   [Failure](#failure)), `Granted` holds `Panic`.
 - A function declares `uses generic Granted` only where it calls a function
-  that uses it. One that returns or stores such a function does not, and its
-  caller needs the capabilities only where it calls the result:
+  that uses it (see [Unused capabilities](#unused-capabilities)). One that
+  returns or stores such a function does not, and its caller needs the
+  capabilities only where it calls the result:
 
   ```truss
   fn later(run: (fn() uses generic Granted)) -> (fn() uses generic Granted) {
@@ -2687,6 +2688,30 @@ let rolled = provide LoadedDie(face: 5) {
   type is `Never`, as for `Panic.crash`.
 - A capability's method keeps no view it is given, and returns no view of its
   implementation's state.
+
+### Unused capabilities
+
+- **A capability that a function or a test declares and does not use is a
+  warning,** since every caller of the function must then have it, and the
+  runtime gives a test each capability that the test declares.
+- Code uses a capability where it calls a function whose `uses` names the
+  capability, with or without a condition. It also uses one where an
+  operation needs it: a `concurrent` block uses `Tasks`, an integer
+  operation that can fail uses `Panic` (see [Failure](#failure)), a loop
+  uses `RunForever` as [Termination](#termination) states, and providing an
+  `impl` uses the capabilities its `uses` names.
+- Inside a `provide`, a use of a capability that the `provide` gives does
+  not use the function's own.
+- A lambda's body uses the capabilities of its own type, and the function
+  uses them where it calls the lambda or passes it to a call. A lambda whose
+  capabilities are inferred takes the function's `Panic` for an integer
+  operation, which uses that `Panic`.
+- A specification uses no capability, and a quantifier uses only
+  `RunForever`.
+- A `todo` uses every capability where it is written, since the code it
+  stands for may.
+- A method written in a trait or an `impl` is not checked, since its `uses`
+  bounds what every implementation may use.
 
 ### Standard capabilities
 

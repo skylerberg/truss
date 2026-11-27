@@ -1,0 +1,5 @@
+fn greeter() -> (fn(String) uses Console)
+  uses Console
+{
+  fn(name) { Console.print_line(name) }
+}

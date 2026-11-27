@@ -131,21 +131,24 @@ let describe : Usage.t -> Nodes.description = function
                 " `==` treats every NaN as equal to itself, so a test for NaN calls `" :: test
             @ [ Text "`." ])
       | _ -> make Self_comparison (Build.at comparison) outcome)
-  | Unused_run_forever { function_; entry; siblings } ->
-      make Unused_run_forever (Build.over entry) ~severity:Warning
+  | Unused_capability { definition; entry; siblings } ->
+      let capability = [ Description.Text "`"; Build.quote_over entry; Text "`" ] in
+      make Unused_capability (Build.over entry) ~severity:Warning
         ~fixes:
           [
             {
-              title = [ Text "Remove `RunForever`" ];
+              title = Description.Text "Remove " :: capability;
               edits = [ Build.remove_entry entry siblings ];
             };
           ]
-        [
-          Text
-            (Printf.sprintf
-               "Nothing in `%s` may run forever, so its `RunForever` is unused. Remove it."
-               (Path.show function_));
-        ]
+        (match definition with
+        | Test { name; _ } ->
+            (Description.Text (Printf.sprintf "Nothing in the test %S uses " name) :: capability)
+            @ [ Text ". Remove it." ]
+        | _ ->
+            let shown = Path.show definition in
+            (Description.Text (Printf.sprintf "Nothing in `%s` uses " shown) :: capability)
+            @ [ Text (Printf.sprintf ", so no caller of `%s` needs it. Remove it." shown) ])
   | Unmodified_part { entry; function_; parameter; part; change } ->
       let shown = Types.show_modified_part ~root:parameter part in
       let function_name = Build.show_callee function_ in

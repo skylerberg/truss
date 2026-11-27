@@ -117,7 +117,7 @@ signature_check (definition, state)
 type_facts      (definition, state, generics, copyable, plain, view, holds_function, contains)
 constant_value  (definition, state, value)
 contract        (definition, state, form)
-body            (definition, state, form, tables, uses_run_forever,
+body            (definition, state, form, tables, capability_uses,
                  places_without_keyword, mode_keywords)
 body_mir        (definition, state, graph)
 contract_mir    (definition, state, graph)
@@ -147,7 +147,7 @@ of the groups whose columns changed.
 | The checked interface: `interface.value` with the state of `signature_check` | Every stage after Check signatures, which takes an interface only once its signature has checked |
 | `body.form` | Build MIR |
 | `body.tables` | The usage check, `explain` |
-| `body.uses_run_forever` | The usage check |
+| `body.capability_uses` | The usage check |
 | `body.places_without_keyword`, `mode_keywords` | The ownership check |
 | `syntax.syntax_errors` | Every stage that asks whether a part of a definition is broken |
 | `hole` | `holes`, which reads no proof |
@@ -249,7 +249,7 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | List calls | Definition, with the synthesized methods and derived impls | `Mir.Call_edges.list_path_edges`, `Mir.Call_edges.list_assumed_paths`, `Mir.Size_change.summarize` | MIR and interfaces | `call_node` (callees and size-change graphs), `calls` and `assumes` edges |
 | Group recursion | The definitions whose `calls` or `assumes` edges or size-change graphs changed, and their groups | Strongly connected components, once over the `calls` edges and once over both; for each recursion group, `Mir.Size_change.decide` over its members' graphs | The definitions that both reach and are reached by a changed one, the edges among them, and the size-change graphs of the members of each recursion group | `recursion_group`, `proof_group`, `termination` |
 | Find aborts | Path, a definition's callees before it | Whether the code of the definition that runs holds a call of `intrinsic.crash` or of an intrinsic that allocates, or calls a definition outside its recursion group that may abort, and the trait methods that it or such a callee calls through a bound. A storage of capacity zero is no allocation. A specification-only definition does neither. Once the members of a group are computed, whether any of them does, written for each member. | The definition's MIR and signature, its `recursion_group`, and its callees' `may_abort` | `aborts_outside_group`, `may_abort` |
-| Check bodies | Definition | `Usage.check`, `Ownership.check` | The body's tables and `uses_run_forever`, the definition's `recursion_group`, its MIR, and its ownership modes | `usage_check`, `ownership` |
+| Check bodies | Definition | `Usage.check`, `Ownership.check` | The body's tables and `capability_uses`, its MIR, and its ownership modes | `usage_check`, `ownership` |
 | Check an impl, a type | Definition | `Package_checks.run` with `Sealed`, `Impl`, or `Type` | Interfaces | Diagnostics |
 | Check an instantiation | Generic function or method, with the other stale units of the drain | `Package_checks.find_growing_cycles`, then `Package_checks.run` with `Instantiation` | The `instantiates` edges of its body and of each body that those edges reach, each read once for the drain | Diagnostics |
 | Check a test | Test | `Package_checks.run` with `Test` | The tests of its package that have its name | Diagnostics |

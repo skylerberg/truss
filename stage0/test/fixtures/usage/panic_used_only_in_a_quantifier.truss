@@ -1,0 +1,4 @@
+test "every value is present" uses Panic {
+  let values = [Some(1), Some(2)]
+  assert forall i in 0..values.length() => values[i].expect("a value") > 0
+}

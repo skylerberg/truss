@@ -3,6 +3,7 @@ type Holder(items: List[Int64], count: UInt64)
 fn wait(count: UInt64) -> Result[UInt64, UInt64]
   uses Clock
 {
+  let _ = Clock.monotonic()
   Ok(count)
 }
 

@@ -4,7 +4,7 @@ type checked = {
   used_packages : Path.package list;
   places_without_keyword : (Syntax.id * Language.Mode.t) list;
   mode_keywords : Core.mode_keyword list;
-  uses_run_forever : bool;
+  capability_uses : Types.capability_set;
 }
 
 val check :

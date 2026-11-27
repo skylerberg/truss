@@ -1,0 +1,6 @@
+fn same(count: UInt8) -> UInt8
+  uses Panic
+  ensures result + 0 == count
+{
+  count
+}
