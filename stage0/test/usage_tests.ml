@@ -177,7 +177,7 @@ let () =
     (fun () ->
       expect_removed Fixtures.Usage.run_forever_before_an_ensures
         ("uses RunForever\n  ensures result == values.length()", "ensures result == values.length()"));
-  Harness.test "a RunForever is used by a recursion, which it leaves unchecked" (fun () ->
+  Harness.test "a RunForever is used by a recursion" (fun () ->
       expect_fine Fixtures.Usage.run_forever_of_a_recursion);
   Harness.test "a RunForever is used by a lambda passed to a generic callee that may run forever"
     (fun () -> expect_fine Fixtures.Usage.run_forever_of_a_lambda_passed_to_a_generic_callee);
@@ -224,15 +224,6 @@ let () =
       expect_removed Fixtures.Usage.capability_parameter_that_nothing_calls
         ( "-> (fn() uses generic Granted)\n  uses generic Granted\n{",
           "-> (fn() uses generic Granted) {" ));
-  Harness.test "a capability that only calls within a recursion use is reported for each member"
-    (fun () ->
-      Support.expect_codes ~check Fixtures.Usage.capabilities_used_only_by_a_recursion
-        [ "usage.unused_capability"; "usage.unused_capability" ];
-      List.iter
-        (fun (diagnostic : Diagnostic.t) ->
-          if not (String.includes ~affix:"uses `Console`" diagnostic.message) then
-            Harness.fail "%s" diagnostic.message)
-        (list_diagnostics Fixtures.Usage.capabilities_used_only_by_a_recursion));
   Harness.test "a call in a quantifier does not use its test's Panic" (fun () ->
       expect_removed Fixtures.Usage.panic_used_only_in_a_quantifier
         ("present\" uses Panic {", "present\" {"));

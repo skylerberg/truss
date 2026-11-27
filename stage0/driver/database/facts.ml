@@ -156,7 +156,7 @@ let body_form : Core.t Tracker.view =
 let body_tables : Infer.tables Tracker.view =
   make_body_view Body_tables [ "tables" ] (fun cells -> Tracker.unmarshal cells.(0))
 
-let capability_uses : Infer.capability_use list Tracker.view =
+let capability_uses : Types.capability_set Tracker.view =
   make_body_view Capability_uses [ "capability_uses" ] (fun cells -> Tracker.unmarshal cells.(0))
 
 let ownership_modes : ((Syntax.id * Language.Mode.t) list * Core.mode_keyword list) Tracker.view =

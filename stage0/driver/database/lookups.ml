@@ -137,15 +137,7 @@ let make_usage database recorder : Usage.Lookups.t =
              (fun section -> read_of_key database recorder (Facts.resolved section).whole key)
              Resolve.sections));
     read_tables = read_of_key database recorder Facts.body_tables;
-    find_capability_uses =
-      (fun key ->
-        match
-          Tracker.find database recorder Facts.capability_uses key.module_.package
-            ~id:(Ids.of_key key)
-        with
-        | Some (Value uses) -> Some uses
-        | Some (Failed | Blocked) | None -> None);
-    list_recursion_group = list_recursion_group database recorder;
+    read_capability_uses = read_of_key database recorder Facts.capability_uses;
   }
 
 let make_ownership database recorder : Ownership.Lookups.t =

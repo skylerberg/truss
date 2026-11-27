@@ -1,12 +1,9 @@
 let tasks : Types.capability = Capability (Well_known.make_path Tasks)
 
-type capability_use = { capabilities : Types.capability_set; callee : Path.t option }
-
 type recorded_use = {
   used : Types.capability_set;
   restrictions : Types.capability_set list;
   provided : Types.capability_set;
-  callee : Path.t option;
 }
 
 type checking = {
@@ -115,14 +112,14 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.operand C
       | Impl _ | Derived_for_view _ | Bound -> ())
   | Capability_method _ | Intrinsic _ | Indirect _ -> ()
 
-let rec record_use checking scope ?(restrictions = []) ?callee (used : Types.capability_set) =
+let rec record_use checking scope ?(restrictions = []) (used : Types.capability_set) =
   if used <> Types.no_capabilities then
     match scope.kind with
     | Function_body _ ->
         checking.recorded_uses <-
-          { used; restrictions; provided = scope.provided; callee } :: checking.recorded_uses
+          { used; restrictions; provided = scope.provided } :: checking.recorded_uses
     | Restricted { enclosing = Some enclosing; _ } ->
-        record_use checking enclosing ~restrictions:(scope.allowed :: restrictions) ?callee used
+        record_use checking enclosing ~restrictions:(scope.allowed :: restrictions) used
     | Lambda_body _ | Restricted { enclosing = None; _ } -> ()
 
 let rec require_available checking scope (origin : Core.origin) ~subject ?alternative
@@ -200,8 +197,8 @@ let rec require_available checking scope (origin : Core.origin) ~subject ?altern
   end
 
 let use_capabilities checking scope (origin : Core.origin) ~subject ?alternative ?indirect_call
-    ?callee (used : Types.capability_set) =
-  record_use checking scope ?callee used;
+    (used : Types.capability_set) =
+  record_use checking scope used;
   require_available checking scope origin ~subject ?alternative ?indirect_call
     (Types.replace_capabilities
        (function Types.Capability_unless_values _ -> Some Types.no_capabilities | _ -> None)
@@ -218,7 +215,6 @@ let require_callee_uses checking scope (origin : Core.origin) (callee : Core.cal
   check_callee_grants checking origin callee.target;
   use_capabilities checking scope origin ~subject:(Call origin)
     ~indirect_call:(match callee.target with Indirect _ -> true | _ -> false)
-    ?callee:(match callee.target with Function { path; _ } -> Some path | _ -> None)
     (compute_callee_uses checking.state scope callee)
 
 let require_run_forever_of_unmeasured_loop checking scope (origin : Core.origin) ~alternative =
@@ -266,6 +262,13 @@ let require_panic_of_failing_operation checking scope (origin : Core.origin) =
         (Types.make_capability_set [ Capability_unless_values (Built_in Panic) ])
   | None -> ()
 
+let rec record_todo_uses checking scope =
+  record_use checking scope scope.allowed;
+  match scope.kind with
+  | Lambda_body { enclosing; _ } when Types.contains_capability_variable scope.allowed ->
+      record_todo_uses checking enclosing
+  | Function_body _ | Lambda_body _ | Restricted _ -> ()
+
 let compute_node_origin = function
   | `Expression (inner : Core.expression) -> inner.origin
   | `Statement (inner : Core.statement) -> inner.origin
@@ -286,6 +289,7 @@ let rec check_expression checking scope (node : Core.expression) =
       require_panic_of_failing_operation checking scope node.origin;
       check_children checking scope (`Expression node)
   | Provide { implementations; body } -> check_provide checking scope implementations body
+  | Todo -> record_todo_uses checking scope
   | Quantified _ ->
       check_children checking (make_quantifier_scope ~enclosing:scope) (`Expression node)
   | Function_value { path; _ } ->
@@ -639,33 +643,19 @@ let list_uses checking =
   let is_allowed_by restriction capability =
     Types.is_capability_subset ~implies (Types.make_capability_set [ capability ]) restriction
   in
-  let resolve (recorded : recorded_use) =
-    let used =
-      List.filter
-        (fun capability ->
-          List.for_all
-            (fun restriction -> is_allowed_by restriction capability)
-            recorded.restrictions)
-        (Types.list_capabilities (State.finalize_capabilities state recorded.used))
-    in
-    Types.subtract_capabilities ~implies (Types.make_capability_set used) recorded.provided
-  in
-  let merged =
-    List.fold_left
-      (fun merged (recorded : recorded_use) ->
-        let capabilities = resolve recorded and callee = recorded.callee in
-        if capabilities = Types.no_capabilities then merged
-        else
-          match List.assoc_opt callee merged with
-          | Some earlier ->
-              (callee, Types.union_capabilities earlier capabilities)
-              :: List.remove_assoc callee merged
-          | None -> (callee, capabilities) :: merged)
-      [] checking.recorded_uses
-  in
-  List.map
-    (fun (callee, capabilities) -> { capabilities; callee })
-    (List.sort (fun (left, _) (right, _) -> Option.compare Path.compare left right) merged)
+  List.fold_left
+    (fun uses (recorded : recorded_use) ->
+      let used =
+        List.filter
+          (fun capability ->
+            List.for_all
+              (fun restriction -> is_allowed_by restriction capability)
+              recorded.restrictions)
+          (Types.list_capabilities (State.finalize_capabilities state recorded.used))
+      in
+      Types.union_capabilities uses
+        (Types.subtract_capabilities ~implies (Types.make_capability_set used) recorded.provided))
+    Types.no_capabilities checking.recorded_uses
 
 let check (state : State.state) (elaborated : Interface.Environment.elaborated_interface)
     (form : Core.t) =

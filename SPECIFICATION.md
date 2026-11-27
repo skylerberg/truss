@@ -2708,12 +2708,10 @@ let rolled = provide LoadedDie(face: 5) {
   operation, which uses that `Panic`.
 - A specification uses no capability, and a quantifier uses only
   `RunForever`.
-- **In a recursion, a call of another member uses only what that member
-  needs.** So capabilities that the members declare only for each other are
-  reported together.
+- A `todo` uses every capability where it is written, since the code it
+  stands for may.
 - A method written in a trait or an `impl` is not checked, since its `uses`
-  bounds what every implementation may use, and neither is a body with a
-  `todo`.
+  bounds what every implementation may use.
 
 ### Standard capabilities
 

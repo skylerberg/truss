@@ -17,18 +17,13 @@ type tables = Tables.published = {
   callees : Path.t option array;
 }
 
-type capability_use = Body.capability_use = {
-  capabilities : Types.capability_set;
-  callee : Path.t option;
-}
-
 type checked = Body.checked = {
   form : Core.t;
   tables : tables;
   used_packages : Path.package list;
   places_without_keyword : (Syntax.id * Language.Mode.t) list;
   mode_keywords : Core.mode_keyword list;
-  capability_uses : capability_use list;
+  capability_uses : Types.capability_set;
 }
 
 let check lookups (key : Resolve.Names.key) ~checks_body =
