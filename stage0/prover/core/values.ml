@@ -303,16 +303,22 @@ let project_field (frame : State.frame) ty variant field field_type term =
   end;
   part
 
-let evaluate_constant (frame : State.frame) path =
+let find_constant_owner (path : Path.t) =
+  match path with Default { owner; _ } -> owner | _ -> path
+
+let evaluate_constant (frame : State.frame) path substitution =
   match
-    ( Contracts.find_source frame.environment.lookups path,
+    ( Contracts.find_source frame.environment.lookups (find_constant_owner path),
       Mir.read_initializer frame.environment.lookups.mir path )
   with
   | Some (constant_source, _, _), Some { form = code; _ } ->
+      let substitution = Types.substitute_substitution frame.substitution substitution in
       let symbol : Logic.symbol =
-        if Cycles.is_evaluated_constant frame.environment path code then
-          Evaluated (Constant_value path)
-        else Constant path
+        if
+          Types.is_empty_substitution substitution
+          && Cycles.is_evaluated_constant frame.environment path code
+        then Evaluated (Constant_value path)
+        else Constant { path; type_arguments = List.map snd (Types.list_arguments substitution) }
       in
       let empty =
         {
@@ -325,11 +331,13 @@ let evaluate_constant (frame : State.frame) path =
           condition = Logic.Boolean true;
           bound = [];
           binders = [];
+          substitution;
         }
       in
       Query.run_once frame.query (Value_of symbol) (fun () ->
           let ty =
-            Interface.Definition.read_constant_type frame.environment.lookups.interface path
+            Encoding.substitute_type empty
+              (Interface.Definition.read_constant_type frame.environment.lookups.interface path)
           in
           Query.declare frame.query (Logic.Constant (symbol, Encoding.sort_of ty));
           let _, defined_value = Lambdas.run_code (Counters.stop_counting empty) code ~type_:ty in
@@ -337,47 +345,14 @@ let evaluate_constant (frame : State.frame) path =
       Logic.Symbol symbol
   | _ -> Facts.raise_bug "the constant %s has no initializer" (Path.show path)
 
-let evaluate_field_default (frame : State.frame) ty variant field =
-  match (ty, Validity.find_type_source frame.environment ty) with
-  | Types.Named { path; _ }, Some source -> (
-      match Mir.read_defaults frame.environment.lookups.mir path with
-      | Some { form = Field_defaults defaults; _ } -> (
-          match
-            List.find_opt
-              (fun (default : Mir.t Mir.field_default) ->
-                default.variant = variant && default.field = field)
-              defaults
-          with
-          | Some default ->
-              let inside = Validity.make_type_frame frame source ty ~self:None in
-              let evaluated, value =
-                Lambdas.run_code inside default.value
-                  ~type_:(Encoding.substitute_type inside default.type_)
-              in
-              ({ frame with spent = evaluated.spent }, value)
-          | None -> Facts.raise_bug "the field %s of %s has no default" field (Types.show ty))
-      | Some { form = Parameter_defaults _; _ } | None ->
-          Facts.raise_bug "a type with no MIR of its defaults")
-  | _ -> Facts.raise_bug "a default of %s, which has no source" (Types.show ty)
-
 let check_built (frame : State.frame) (site : Invocation.site) ty term =
   Validity.check_valid frame (Facts.locate frame site.origin) ty term ~deep:false ~moment:Built_here
 
 let apply_construct (frame : State.frame) (site : Invocation.site) variant
-    (fields : (string * Logic.term option) list) =
+    (field_terms : (string * Logic.term) list) =
   let ty = Encoding.substitute_type frame site.type_ in
   if Types.equal ty Types.unit then (frame, Logic.Apply (Logic.Symbol.Unit, []))
   else
-    let frame, field_terms =
-      List.fold_left
-        (fun (frame, field_terms) (field, written) ->
-          match written with
-          | Some term -> (frame, field_terms @ [ (field, term) ])
-          | None ->
-              let frame, value = evaluate_field_default frame ty variant field in
-              (frame, field_terms @ [ (field, value) ]))
-        (frame, []) fields
-    in
     let frame =
       Counters.spend frame (Amounts.compute_construction_amount frame.environment ty variant)
     in

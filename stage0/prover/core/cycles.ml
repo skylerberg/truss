@@ -48,30 +48,41 @@ let is_evaluated_constant (environment : State.environment) path code =
        (Types.find_specification_only_type
           (Interface.Definition.read_constant_type environment.lookups.interface path))
 
-let make_catalog_dependency (dependency : Mir.Call_edges.dependency) : Catalog.Prover.dependency =
+let make_catalog_dependency (environment : State.environment)
+    (dependency : Mir.Call_edges.dependency) : Catalog.Prover.dependency =
   {
     kind = (match dependency.kind with Read -> Reads | Direct_call -> Calls | Supplied _ -> Uses);
     path = dependency.path;
     omitted =
       Option.map
-        (fun (omitted : Mir.Call_edges.omitted) : Catalog.Prover.omitted ->
-          match omitted with
-          | Field field -> Omitted_field field
-          | Argument parameter -> Omitted_argument parameter)
-        dependency.omitted;
+        (fun (default : Path.t) : Catalog.Prover.omitted ->
+          match default with
+          | Default { owner; variant = None; name }
+            when Option.is_none
+                   (Interface.Definition.find_type_interface environment.lookups.interface owner) ->
+              Omitted_argument name
+          | _ -> Omitted_field (Path.show_name default))
+        dependency.default;
   }
 
-let reject_constant_cycle (frame : State.frame) (code : Mir.t) =
-  if frame.environment.lookups.list_recursion_group frame.environment.node <> [] then
+let reject_constant_cycle (frame : State.frame) ~is_constant (code : Mir.t) =
+  let environment = frame.environment in
+  if environment.lookups.list_recursion_group environment.node <> [] then
     List.iter
       (fun (dependency : Mir.Call_edges.dependency) ->
-        if is_in_recursion_group frame.environment dependency.path then
+        let reject cyclic =
           Obligations.oblige frame (Node dependency.origin)
-            (Constant_cycle
-               { cyclic = frame.environment.node; dependency = make_catalog_dependency dependency })
-            (Logic.Boolean false))
+            (Constant_cycle { cyclic; dependency = make_catalog_dependency environment dependency })
+            (Logic.Boolean false)
+        in
+        match
+          (is_in_recursion_group environment dependency.path, is_constant, dependency.default)
+        with
+        | true, true, _ -> reject environment.node
+        | true, false, Some default -> reject default
+        | true, false, None | false, _, _ -> ())
       (Mir.Call_edges.list_dependencies
-         { interface = frame.environment.lookups.interface; mir = frame.environment.lookups.mir }
+         { interface = environment.lookups.interface; mir = environment.lookups.mir }
          Types.no_substitution code)
 
 type circular_proof = { location : Obligation.location; proof : Catalog.Prover.circular_proof }
@@ -92,7 +103,7 @@ let list_circular_dependencies (environment : State.environment) ~make_proof dep
         Some
           {
             location = Obligation.Node dependency.origin;
-            proof = make_proof (make_catalog_dependency dependency);
+            proof = make_proof (make_catalog_dependency environment dependency);
           }
       else None)
     dependencies

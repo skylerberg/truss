@@ -22,3 +22,4 @@ type t =
 
 val all : t list
 val show : t -> string
+val find_scalar_literal : t -> string -> int option

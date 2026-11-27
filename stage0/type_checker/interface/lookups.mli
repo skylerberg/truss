@@ -2,7 +2,7 @@ type t = {
   names : Resolve.Names.lookups;
   read_resolved : Resolve.section -> Resolve.Names.key -> Resolve.resolved;
   find_trait_header : Path.t -> Resolve.trait_header option;
-  find_constant_value : Path.t -> Z.t option;
+  find_constant_value : Path.t -> Constant_value.outcome;
   find_header : Resolve.Names.key -> Environment.header option;
   read_interface : Resolve.Names.key -> Environment.interface;
   find_interface : Path.t -> Environment.interface option;

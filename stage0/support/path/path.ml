@@ -52,6 +52,7 @@ type t =
   | Top of { module_ : module_; name : string }
   | Method of { owner : t; name : string; receiver : receiver }
   | Member_constant of { owner : t; name : string }
+  | Default of { owner : t; variant : string option; name : string }
   | Impl of { module_ : module_; trait : reference; for_type : t }
   | Derived of { type_ : t; trait : t }
   | Test of { module_ : module_; name : string }
@@ -73,13 +74,14 @@ let is_entry_point = function
 let rec locate_package = function
   | Top { module_; _ } | Impl { module_; _ } | Test { module_; _ } | Law_proof { module_; _ } ->
       module_.package
-  | Method { owner; _ } | Member_constant { owner; _ } -> locate_package owner
+  | Method { owner; _ } | Member_constant { owner; _ } | Default { owner; _ } ->
+      locate_package owner
   | Derived { type_; _ } -> locate_package type_
   | Unresolved { file; _ } -> file.module_.package
 
 let rec is_resolved = function
   | Top _ | Test _ -> true
-  | Method { owner; _ } | Member_constant { owner; _ } -> is_resolved owner
+  | Method { owner; _ } | Member_constant { owner; _ } | Default { owner; _ } -> is_resolved owner
   | Impl { trait; for_type; _ } | Law_proof { trait; for_type; _ } ->
       is_resolved_reference trait && is_resolved for_type
   | Derived { type_; trait } -> is_resolved type_ && is_resolved trait
@@ -105,7 +107,7 @@ let rec show_name = function
   | Law_proof { trait; law; for_type; _ } ->
       show_name trait.path ^ "." ^ law ^ " for " ^ show_name for_type
   | Unresolved { names; _ } -> String.concat "." names
-  | Method { name; _ } | Member_constant { name; _ } -> name
+  | Method { name; _ } | Member_constant { name; _ } | Default { name; _ } -> name
   | Derived { trait; _ } -> show_name trait
 
 let rec show = function
@@ -116,6 +118,9 @@ let rec show = function
       | Static | Instance Read -> base
       | Instance mode -> base ^ "(" ^ Language.Mode.show_prefix mode ^ "self)")
   | Member_constant { owner; name } -> show owner ^ "." ^ name
+  | Default { owner; variant = None; name } -> Printf.sprintf "%s(%s)" (show owner) name
+  | Default { owner; variant = Some variant; name } ->
+      Printf.sprintf "%s.%s(%s)" (show owner) variant name
   | Impl { module_; trait; for_type } ->
       Printf.sprintf "%s.impl %s for %s" (show_module module_) (show_reference trait)
         (show for_type)

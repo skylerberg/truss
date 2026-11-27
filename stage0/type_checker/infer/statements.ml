@@ -194,7 +194,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
           output = None;
         }
         value Types.bool;
-      Constant.check state Evaluated_condition value
+      Constant.check_condition state value
   | Assert { value; by = Some Bit_vector | None } -> Hooks.check state env value Types.bool
   | Statement_error -> ()
 

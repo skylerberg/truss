@@ -232,44 +232,11 @@ and assign state (target : Mir.place) (value : Mir.rvalue) ~origin =
       if List.mem target frame.taken then
         frame.taken <- List.filter (fun taken -> taken <> target) frame.taken
       else Mir_drops.drop_overwritten state target destination ty;
-      match (evaluated, value, target) with
-      | Some fresh, _, _ ->
+      match evaluated with
+      | Some fresh ->
           Emit_c.Ir_builder.emit state.builder
             (Assign (destination, Use (Lowering.make_owned_operand state fresh ty)))
-      | ( None,
-          Parameter_default { definition; position; substitution },
-          { root = Local local; projections = [] } ) ->
-          let default =
-            Mir.read_parameter_default_graph state.context.lookups.mir ~definition ~position
-          in
-          let caller = state.frame in
-          state.frame <-
-            {
-              caller with
-              code =
-                Definitions.make_default_code state.context caller.code ~source:default.source
-                  ~substitution;
-              self_place = None;
-            };
-          let default_frame = inline_mir state default.form destination in
-          state.frame <- caller;
-          Option.iter
-            (fun (inlined : Lowering.mir_frame) ->
-              Option.iter
-                (fun at_return -> inlined.move_state <- at_return)
-                inlined.move_state_at_return;
-              if Mir_drops.list_default_temporaries inlined <> [] then begin
-                let is_applied =
-                  Lowered.make_local_place
-                    (Emit_c.Ir_builder.allocate_local state.builder ~is_zeroed:true (Raw Bool))
-                in
-                Emit_c.Ir_builder.emit state.builder
-                  (Assign (is_applied, Use (Constant (Bool true))));
-                Hashtbl.replace (Mir_places.require_mir_frame state).applied_defaults local
-                  { default_frame; is_applied }
-              end)
-            default_frame.mir
-      | None, _, _ -> lower_rvalue_into ?types_ty state value destination ty ~origin)
+      | None -> lower_rvalue_into ?types_ty state value destination ty ~origin)
 
 and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~origin
     =
@@ -302,16 +269,7 @@ and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lower
   | Construct { variant; fields; type_ } ->
       let built = Lowering.ground state type_ in
       let fields =
-        List.map
-          (fun (name, (field : Mir.operand option)) ->
-            match field with
-            | Some field -> (name, Mir_places.lower_operand state field)
-            | None ->
-                let default, default_ty =
-                  lower_field_default_place state built ~variant ~field:name
-                in
-                (name, Lowering.make_owned_operand state default default_ty))
-          fields
+        List.map (fun (name, field) -> (name, Mir_places.lower_operand state field)) fields
       in
       assign (Build { ty = built; variant; fields })
   | Array elements ->
@@ -361,8 +319,6 @@ and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lower
       match Mir_places.ground_argument state (Value (Value_parameter parameter)) with
       | Value number -> assign (Use (Targets.lower_literal state ty (Integer_value number)))
       | _ -> Definitions.raise_bug "the value parameter %s is not a number" parameter.name)
-  | Parameter_default _ ->
-      Definitions.raise_bug "a default assigned to a place that is no temporary of its own"
   | Lambda { body = index; captures; _ } ->
       let function_type =
         match ty with
@@ -401,16 +357,8 @@ and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lower
         destination
   | Specification _ -> Definitions.raise_bug "a specification's expression in code that runs"
 
-and lower_field_default_place state ty ~variant ~field =
-  let { Mir.source; form = default } = Mir_calls.read_field_default state ty ~variant ~field in
-  Targets.run_in_type_definition state ~source ty (fun () ->
-      let default_ty = Lowering.ground state default.type_ in
-      let place = Lowering.allocate_temporary state default_ty in
-      lower_mir_into state default.value place;
-      (place, default_ty))
-
-and inline_mir ?(arguments = []) state (expression_mir : Mir.Graph.t) (destination : Lowered.place)
-    : Lowering.frame =
+and lower_mir_into ?(arguments = []) (state : Lowering.state) (expression_mir : Mir.Graph.t)
+    (destination : Lowered.place) =
   let expression_mir = Loop_parts.end_parts expression_mir in
   let caller = state.frame in
   let exit = Emit_c.Ir_builder.allocate_block state.builder in
@@ -424,11 +372,7 @@ and inline_mir ?(arguments = []) state (expression_mir : Mir.Graph.t) (destinati
   lower_body state frame;
   Emit_c.Ir_builder.finish state.builder Unreachable;
   Emit_c.Ir_builder.start state.builder exit;
-  state.frame <- caller;
-  inlined
-
-and lower_mir_into ?arguments state expression_mir destination =
-  ignore (inline_mir ?arguments state expression_mir destination)
+  state.frame <- caller
 
 and lower_call_into state (call : Mir.call) destination ~origin =
   match call.callee.target with
@@ -691,20 +635,10 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
         let field_types = List.assoc variant (Mir_places.list_variants state ty) in
         let built =
           List.map
-            (fun (name, (field : Mir.yielded option)) ->
+            (fun (name, field) ->
               let field_ty = List.assoc name field_types in
               let value = Lowering.allocate_local state (Value field_ty) in
-              let deferred =
-                match field with
-                | Some field -> write field value
-                | None ->
-                    let default, default_ty =
-                      lower_field_default_place state ty ~variant ~field:name
-                    in
-                    Lowering.take state default default_ty ~destination:value;
-                    if Lowering.is_trivial state default_ty then []
-                    else [ ([], Deferred_drop default_ty) ]
-              in
+              let deferred = write field value in
               ( (name, if Lowering.is_trivial state field_ty then Lowered.Copy value else Move value),
                 List.map
                   (fun (inside, deferred) ->

@@ -166,15 +166,16 @@ module Code = struct
     | Not_a_capability
     | Arity
     | Argument_kind
+    | Count_calls_function
+    | Cyclic_count
     | Wrong_value_parameter_type
     | Unsatisfied_bound
     | Private_in_public
     | Method_outside_package
-    | Default_not_constant
     | Not_constant
     | Constant_overflow
     | Constant_not_data
-    | Condition_not_constant
+    | Condition_names_parameter
     | Main_signature
     | No_real_implementation
     | Duplicate_member
@@ -461,15 +462,16 @@ module Code = struct
     | Not_a_capability -> "not_a_capability"
     | Arity -> "arity"
     | Argument_kind -> "argument_kind"
+    | Count_calls_function -> "count_calls_function"
+    | Cyclic_count -> "cyclic_count"
     | Wrong_value_parameter_type -> "wrong_value_parameter_type"
     | Unsatisfied_bound -> "unsatisfied_bound"
     | Private_in_public -> "private_in_public"
     | Method_outside_package -> "method_outside_package"
-    | Default_not_constant -> "default_not_constant"
     | Not_constant -> "not_constant"
     | Constant_overflow -> "constant_overflow"
     | Constant_not_data -> "constant_not_data"
-    | Condition_not_constant -> "condition_not_constant"
+    | Condition_names_parameter -> "condition_names_parameter"
     | Main_signature -> "main_signature"
     | No_real_implementation -> "no_real_implementation"
     | Duplicate_member -> "duplicate_member"

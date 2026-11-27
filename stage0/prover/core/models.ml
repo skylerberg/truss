@@ -101,7 +101,9 @@ let is_model_built_from_contents : Path.t -> bool = function
          || List.exists
               (fun name -> Path.equal for_type (Well_known.make_path name))
               [ List; List_cursor; String; Literal; Set; Sorted_set; Map; Sorted_map ])
-  | Top _ | Method _ | Member_constant _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> false
+  | Top _ | Method _ | Member_constant _ | Default _ | Derived _ | Test _ | Law_proof _
+  | Unresolved _ ->
+      false
 
 let rank_model (environment : State.environment) query (ty : Types.ty) ~(model : Types.ty) ~impl
     symbol =

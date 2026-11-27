@@ -134,7 +134,7 @@ let make_unit profile name = Unit (profile, make_code_item name)
 let rec locate_module : Path.t -> Path.module_ = function
   | Top { module_; _ } | Impl { module_; _ } | Test { module_; _ } | Law_proof { module_; _ } ->
       module_
-  | Method { owner; _ } | Member_constant { owner; _ } -> locate_module owner
+  | Method { owner; _ } | Member_constant { owner; _ } | Default { owner; _ } -> locate_module owner
   | Derived { type_; _ } -> locate_module type_
   | Unresolved { file; _ } -> file.module_
 
@@ -369,7 +369,7 @@ let run_of_step : Path.t =
 
 let make_configured_source construction =
   Printf.sprintf
-    "type Config(size: Int64 = start())\n\
+    "type Config(size: Int64 = if true { start() } else { 1 })\n\
      fn start() -> Int64\n\
      { make().size }\n\
      fn make() -> Config\n\
@@ -1025,7 +1025,7 @@ let () =
         "fn one() -> Int64 {\n\
         \  1\n\
          }\n\n\
-         fn take(n: Int64 = one()) -> Int64 {\n\
+         fn take(n: Int64 = if true { one() } else { 1 }) -> Int64 {\n\
         \  n\n\
          }\n\n\
          fn first() -> Int64 {\n\
@@ -1607,9 +1607,11 @@ let () =
         list_propagated_with_roots ~roots:[ "read" ] ~before:(make_constants "1")
           ~after:(make_constants "2")
       in
-      expect_included recomputed ~parts:[ Lowered (Constant (make_main_path "second")) ];
+      expect_included recomputed
+        ~parts:[ Lowered (Lowered.Item.make_constant (make_main_path "second")) ];
       expect_untouched recomputed
-        ~is_excluded:(( = ) (locate (Lowered (Constant (make_main_path "first"))))));
+        ~is_excluded:
+          (( = ) (locate (Lowered (Lowered.Item.make_constant (make_main_path "first"))))));
   Harness.test "adding a dependency to a manifest fixes the dependent's use of it" (fun () ->
       expect_included
         (lay_out_again ~before:(Support.setup tool_user)

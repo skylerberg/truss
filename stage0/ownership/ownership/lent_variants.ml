@@ -7,7 +7,7 @@ let check context (mir : Mir.Graph.t) =
     | Part _, _ -> ()
     | Built { variant = built; fields; _ }, _ ->
         let variant = if Option.is_some built then built else variant in
-        List.iter (fun (_, field) -> Option.iter (check_part ~variant) field) fields
+        List.iter (fun (_, field) -> check_part ~variant field) fields
   in
   let check_body (body : Mir.Graph.body) =
     Array.iter

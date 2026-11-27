@@ -72,7 +72,8 @@ let expect_fold name ~folded ~run source =
         Codegen_support.load
           ~roots:
             (List.map
-               (fun name -> Lowered.Item.Constant (Top { module_ = Codegen_support.example; name }))
+               (fun name ->
+                 Lowered.Item.make_constant (Top { module_ = Codegen_support.example; name }))
                (folded @ run))
           source
       in

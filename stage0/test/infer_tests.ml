@@ -1058,13 +1058,18 @@ let () =
                 {
                   mode = Read;
                   value =
-                    Value
-                      {
-                        kind =
-                          Parameter_default
-                            { definition = Top { name = "connect"; _ }; position = 1; _ };
-                        _;
-                      };
+                    Place
+                      (Constant
+                         {
+                           path =
+                             Default
+                               {
+                                 owner = Top { name = "connect"; _ };
+                                 variant = None;
+                                 name = "port";
+                               };
+                           _;
+                         });
                 };
               ];
             _;
@@ -2165,11 +2170,13 @@ let () =
   Harness.test "a constant of type UInt64 is a type argument in an expression" (fun () ->
       expect_fine Fixtures.Infer.width_given_a_uint64_constant);
   Harness.test "a constant of another type is not a type argument in an expression" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.width_given_an_int64_constant "types.arity"
+      expect_one_diagnostic Fixtures.Infer.width_given_an_int64_constant "types.mismatch"
         ~says:"`size` in a type argument must be a constant of type `UInt64`.");
-  Harness.test "a constant whose value is not computed is one error as a type argument" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.width_given_an_unevaluated_constant "types.arity"
-        ~says:"The value of `size` cannot be computed");
+  Harness.test "a constant whose value calls a function is one error as a type argument" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.width_given_an_unevaluated_constant
+        "types.count_calls_function" ~says:"The value of `size` calls a function.");
+  Harness.test "a constant of shifts and bitwise operators is a type argument" (fun () ->
+      expect_fine Fixtures.Infer.width_given_a_shifted_constant);
   Harness.test "explicit type arguments give exactly the function's own" (fun () ->
       expect_one_diagnostic Fixtures.Infer.pick_with_one_type_argument "types.arity");
   Harness.test
@@ -2662,8 +2669,8 @@ let () =
       expect_one_diagnostic Fixtures.Infer.constant_calling_a_function_value "types.not_constant"
         ~at:("fn(value) { value }", 1));
   Harness.test
-    "a constant's type cannot be or hold a function type, a handle, or state that tasks share"
-    (fun () ->
+    "a value that a constant stores is built from literals, constructors, and constants, or has a \
+     type that holds no function, handle, or shared state" (fun () ->
       let reported =
         List.map
           (fun (diagnostic : Diagnostic.t) ->
@@ -2676,9 +2683,15 @@ let () =
         List.map
           (fun part ->
             ( "types.constant_not_data",
-              "A constant is stored in the compiled program as data, so its type cannot be or hold "
-              ^ part ^ "." ))
-          [ "a function type"; "a function type"; "a handle"; "state that tasks share" ]
+              "A constant is stored in the compiled program as data, so this value cannot " ^ part
+              ^ "." ))
+          [
+            "be or hold a function";
+            "be or hold a function";
+            "be or hold a handle";
+            "be or hold state that tasks share: every use of the constant would share one mutable \
+             value";
+          ]
       in
       if reported <> expected then
         Harness.fail "reported [%s]" (String.concat "; " (List.map snd reported)));
@@ -2694,18 +2707,24 @@ let () =
       expect_one_diagnostic "let flipped: Int8 = -(-128)\n" "types.constant_overflow");
   Harness.test "a constant cannot divide by zero" (fun () ->
       expect_one_diagnostic "let nothing: Int64 = 5 / 0\n" "types.constant_overflow");
-  Harness.test "a default must be a constant expression" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.default_calling_a_function "types.default_not_constant");
+  Harness.test "a default can call a function" (fun () ->
+      expect_fine Fixtures.Infer.default_calling_a_function);
   Harness.test "a default cannot name a parameter" (fun () ->
-      expect_one_diagnostic "fn f(count: Int64, twice: Int64 = count * 2) {}\n"
-        "types.default_not_constant");
-  Harness.test "a method's default must be a constant expression" (fun () ->
-      expect_one_diagnostic
-        (point ^ Fixtures.Infer.method_default_calling_a_function)
-        "types.default_not_constant");
-  Harness.test "a field's default must be a constant expression" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.field_default_calling_a_function
-        "types.default_not_constant");
+      expect_one_diagnostic "fn f(count: Int64, twice: Int64 = count * 2) {}\n" "types.not_constant");
+  Harness.test "a method's default can call a function" (fun () ->
+      expect_fine (point ^ Fixtures.Infer.method_default_calling_a_function));
+  Harness.test "a field's default can call a function" (fun () ->
+      expect_fine Fixtures.Infer.field_default_calling_a_function);
+  Harness.test "a default that calls no function can have a type that could hold shared state"
+    (fun () -> expect_fine Fixtures.Infer.defaults_that_can_hold_shared_state);
+  Harness.test "a default cannot call a function that builds shared state" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.default_building_shared_state "types.constant_not_data"
+        ~says:"every use of the constant would share one mutable value");
+  Harness.test "a default cannot store a value that a type parameter's bound builds" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.default_calling_through_a_bound "types.constant_not_data"
+        ~says:"names a type parameter");
+  Harness.test "a generic function's default can be a collection literal or a variant" (fun () ->
+      expect_fine Fixtures.Infer.generic_defaults_of_literals);
   Harness.test "a field's default's arithmetic must stay within its type" (fun () ->
       expect_one_diagnostic "type Settings(retries: UInt8 = 250 + 10)\n" "types.constant_overflow")
 
@@ -2810,16 +2829,16 @@ let () =
 
 let () =
   let expect_not_constant ?says text ~at =
-    expect_one_diagnostic text "types.condition_not_constant" ?says ~at
+    expect_one_diagnostic text "types.not_constant" ?says ~at
   in
   Harness.test "an assertion by evaluation takes calls, constants, quantifiers, and literals"
     (fun () -> expect_fine Fixtures.Infer.assertions_by_evaluation);
   Harness.test "an assertion by evaluation cannot name a local variable" (fun () ->
       expect_not_constant Fixtures.Infer.assertion_by_evaluation_naming_a_local
-        ~says:"before any variable has a value" ~at:("chosen", 2));
+        ~says:"before any variable or parameter has a value" ~at:("chosen", 2));
   Harness.test "an assertion by evaluation cannot mention a type parameter" (fun () ->
-      expect_not_constant Fixtures.Infer.assertion_by_evaluation_naming_a_type_parameter
-        ~says:"cannot mention a type parameter" ~at:("[]", 1));
+      expect_one_diagnostic Fixtures.Infer.assertion_by_evaluation_naming_a_type_parameter
+        "types.condition_names_parameter" ~says:"cannot mention a type parameter" ~at:("[]", 1));
   Harness.test "an assertion by evaluation cannot branch" (fun () ->
       expect_not_constant Fixtures.Infer.assertion_by_evaluation_that_branches
         ~says:"Move this into a function"

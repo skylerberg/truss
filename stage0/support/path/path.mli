@@ -26,6 +26,7 @@ type t =
   | Top of { module_ : module_; name : string }
   | Method of { owner : t; name : string; receiver : receiver }
   | Member_constant of { owner : t; name : string }
+  | Default of { owner : t; variant : string option; name : string }
   | Impl of { module_ : module_; trait : reference; for_type : t }
   | Derived of { type_ : t; trait : t }
   | Test of { module_ : module_; name : string }

@@ -18,7 +18,7 @@ type place = { root : root; projections : projection list }
 
 and root =
   | Local of local
-  | Constant of Path.t
+  | Constant of { path : Path.t; substitution : Types.substitution }
   | Literal of { value : Language.Literal.t; type_ : Types.ty }
 
 and projection =
@@ -51,7 +51,7 @@ type capture = { local : Core.local; type_ : Types.ty; place : place }
 
 type yielded =
   | Part of operand
-  | Built of { variant : string option; fields : (string * yielded option) list; type_ : Types.ty }
+  | Built of { variant : string option; fields : (string * yielded) list; type_ : Types.ty }
 
 type provided = {
   mode : Language.Mode.t;
@@ -83,11 +83,7 @@ type rvalue =
     }
   | Compare of { comparison : Language.Comparison.t; left : operand; right : operand }
   | Not of operand
-  | Construct of {
-      variant : string option;
-      fields : (string * operand option) list;
-      type_ : Types.ty;
-    }
+  | Construct of { variant : string option; fields : (string * operand) list; type_ : Types.ty }
   | Array of operand list
   | Is_variant of { place : place; variant : string }
   | Convert of {
@@ -99,7 +95,6 @@ type rvalue =
   | Function_value of { path : Path.t; instantiation : Types.instantiation; is_argument : bool }
   | Lambda of { body : int; captures : capture list; is_argument : bool }
   | Value_parameter of Types.parameter
-  | Parameter_default of { definition : Path.t; position : int; substitution : Types.substitution }
   | Specification of specification
 
 and choice =
@@ -247,16 +242,7 @@ and body = {
 
 and t = { body : body; lambdas : body array }
 
-type 'code field_default = {
-  variant : string option;
-  field : string;
-  type_ : Types.ty;
-  value : 'code;
-}
-
-type 'code defaults =
-  | Parameter_defaults of (int * 'code) list
-  | Field_defaults of 'code field_default list
+type 'code default = { variant : string option; name : string; value : 'code }
 
 type requirement = {
   clause : formula;

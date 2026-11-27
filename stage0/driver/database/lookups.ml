@@ -59,7 +59,7 @@ let make_interface (database : Tracker.t) (recorder : Tracker.recorder) ~is_chec
         if module_ = Well_known.intrinsic_module then None
         else of_key interface { module_; path; ordinal = 0 } Tracker.find_value
     | Method _ | Member_constant _ -> Option.map read_interface (names.find_key path)
-    | Derived _ | Unresolved _ -> None
+    | Default _ | Derived _ | Unresolved _ -> None
   in
   {
     names;
@@ -70,7 +70,10 @@ let make_interface (database : Tracker.t) (recorder : Tracker.recorder) ~is_chec
         Option.bind (names.find_key path) (fun key ->
             of_key Facts.trait_header.whole key Tracker.find_value));
     find_constant_value =
-      (fun path -> Option.join (of_path Facts.constant_value.whole path Tracker.find_value));
+      (fun path ->
+        Option.value
+          (of_path Facts.constant_value.whole path Tracker.find_value)
+          ~default:Interface.Constants.Unevaluated);
     find_header = (fun key -> of_key Facts.header.whole key Tracker.find_value);
     read_interface;
     find_interface;

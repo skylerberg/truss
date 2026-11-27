@@ -1,4 +1,2 @@
-type site = Value | Default | Evaluated_condition
-
-val check : State.state -> site -> Syntax.expression -> unit
-val check_type : State.state -> Syntax.type_expression -> Types.ty -> unit
+val check_value : State.state -> Syntax.expression -> unit
+val check_condition : State.state -> Syntax.expression -> unit

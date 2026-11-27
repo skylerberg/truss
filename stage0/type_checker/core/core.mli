@@ -54,7 +54,12 @@ and operand = Place of place | Value of expression
 
 and place =
   | Local of { local : local; type_ : Types.ty; origin : origin }
-  | Constant of { path : Path.t; type_ : Types.ty; origin : origin }
+  | Constant of {
+      path : Path.t;
+      substitution : Types.substitution;
+      type_ : Types.ty;
+      origin : origin;
+    }
   | Field of { base : place; field : string; type_ : Types.ty; origin : origin }
   | Element of { id : id; base : place; index : expression; type_ : Types.ty; origin : origin }
   | Range of {
@@ -79,14 +84,13 @@ and kind =
   | Copy of operand
   | Function_value of { path : Path.t; instantiation : Types.instantiation }
   | Value_parameter of Types.parameter
-  | Parameter_default of { definition : Path.t; position : int; substitution : Types.substitution }
   | Lambda of {
       parameters : pattern list;
       captures : capture list;
       body : block;
       result : Types.ty;
     }
-  | Construct of { variant : string option; fields : (string * operand option) list }
+  | Construct of { variant : string option; fields : (string * operand) list }
   | Collection_literal of { elements : expression list; construction : construction }
   | Map_literal of { entries : (expression * expression) list }
   | Record_update of { base : expression; updates : (string list * expression) list }

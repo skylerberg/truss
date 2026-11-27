@@ -90,7 +90,7 @@ let tables =
       ("path INTEGER PRIMARY KEY, " ^ state
      ^ ", generics BLOB, copyable BLOB, plain BLOB, view BLOB, holds_function BLOB, contains BLOB")
       [];
-    keyed_by_id "constant_value" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value TEXT") [];
+    keyed_by_id "constant_value" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value BLOB") [];
     keyed_by_id "derived_interface" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value BLOB") [];
     fact_of_definition "contract" (state ^ ", form BLOB");
     fact_of_definition ~has_index_without_value:true "body"

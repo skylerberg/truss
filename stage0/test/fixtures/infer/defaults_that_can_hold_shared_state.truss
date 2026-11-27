@@ -1,0 +1,5 @@
+use standard.tasks
+
+type Inbox(messages: Option[tasks.Channel[Int64]] = None, seen: List[Int64] = [])
+
+fn open(inbox: Option[tasks.Channel[Int64]] = None, empty: Inbox = Inbox()) {}

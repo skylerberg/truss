@@ -1,0 +1,3 @@
+fn pick[Value: Default](value: Value = Value.default()) -> Value {
+  value
+}

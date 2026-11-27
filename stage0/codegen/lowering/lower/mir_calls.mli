@@ -33,10 +33,3 @@ val lower_intrinsic :
   destination:Lowered.place option ->
   site:Lowered.site ->
   Lowered.place option
-
-val read_field_default :
-  Lowering.state ->
-  Ground.ty ->
-  variant:string option ->
-  field:string ->
-  Mir.Graph.t Mir.field_default Mir.sourced

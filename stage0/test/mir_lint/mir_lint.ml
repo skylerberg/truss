@@ -28,14 +28,11 @@ let rec list_rvalue_locals : Mir.rvalue -> Mir.local list = function
   | Operand value | Not value | Convert { value; _ } | Copy value -> list_operand_locals value
   | Operation { operands; _ } | Array operands -> List.concat_map list_operand_locals operands
   | Compare { left; right; _ } -> list_operand_locals left @ list_operand_locals right
-  | Construct { fields; _ } ->
-      List.concat_map
-        (fun (_, field) -> Option.fold ~none:[] ~some:list_operand_locals field)
-        fields
+  | Construct { fields; _ } -> List.concat_map (fun (_, field) -> list_operand_locals field) fields
   | Is_variant { place; _ } -> list_place_locals place
   | Lambda { captures; _ } ->
       List.concat_map (fun (capture : Mir.capture) -> list_place_locals capture.place) captures
-  | Function_value _ | Value_parameter _ | Parameter_default _ -> []
+  | Function_value _ | Value_parameter _ -> []
   | Specification (Result | Visited | Final_result) -> []
   | Specification (Entry local) -> [ local ]
   | Specification (Identical (first, second)) ->
@@ -118,10 +115,7 @@ let collect_graph_effects :
 
 let rec list_yielded_locals : Mir.yielded -> Mir.local list = function
   | Part value -> list_operand_locals value
-  | Built { fields; _ } ->
-      List.concat_map
-        (fun (_, field) -> Option.fold ~none:[] ~some:list_yielded_locals field)
-        fields
+  | Built { fields; _ } -> List.concat_map (fun (_, field) -> list_yielded_locals field) fields
 
 let list_terminator_reads : Mir.Graph.terminator -> Mir.local list = function
   | Branch { condition; _ } -> list_operand_locals condition
@@ -178,7 +172,6 @@ let check definition (body : Mir.Graph.body) =
                     | Function_value _ -> "function"
                     | Lambda _ -> "lambda"
                     | Value_parameter _ -> "value_parameter"
-                    | Parameter_default _ -> "parameter_default"
                     | Specification _ -> "specification")
               | ( None,
                   Basic (Call { destination = Some { root = Local assigned; projections = [] }; _ })

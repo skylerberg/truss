@@ -57,15 +57,6 @@ let make_unwritten_code ~definition ~substitution ~result =
 let read_written context key =
   { spans = context.lookups.source.read_spans key; text = context.lookups.source.read_text key }
 
-let make_default_code context (code : code) ~(source : Resolve.Names.key) ~substitution =
-  {
-    code with
-    definition = source.path;
-    written = Some (read_written context source);
-    enclosing_impl = None;
-    substitution = Types.substitute_substitution code.substitution substitution;
-  }
-
 let bind = Monomorphic.make_substitution
 
 let read_impl_interface context impl =
@@ -146,7 +137,7 @@ let make_code context (path : Path.t) (instantiation : Ground.instantiation) : c
       | Some (Inherited _, _), _ ->
           raise_bug "%s inherits a method outside an impl" (Path.show path)
       | None, _ -> raise_bug "%s is not a function" (Path.show path))
-  | Member_constant _ | Impl _ | Derived _ | Law_proof _ | Unresolved _ ->
+  | Member_constant _ | Default _ | Impl _ | Derived _ | Law_proof _ | Unresolved _ ->
       raise_bug "%s is not code" (Path.show path)
 
 let panic_path = Well_known.make_builtin_capability_path Panic

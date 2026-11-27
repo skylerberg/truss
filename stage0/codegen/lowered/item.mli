@@ -1,6 +1,6 @@
 type t =
   | Code of { path : Path.t; instantiation : Ground.instantiation; assumes_condition : bool }
-  | Constant of Path.t
+  | Constant of { path : Path.t; arguments : (Types.parameter * Ground.argument) list }
   | Drop of Ground.ty
   | Copy of Ground.ty
   | Debug of Ground.ty
@@ -36,6 +36,7 @@ and impl_method = {
 val make_method_path : impl_method -> Path.t
 val find_definition : t -> Path.t option
 val make_code : Path.t -> Ground.instantiation -> t
+val make_constant : Path.t -> t
 val make_method_code : impl_method -> t
 val compare : t -> t -> int
 val equal : t -> t -> bool

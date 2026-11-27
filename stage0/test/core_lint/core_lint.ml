@@ -240,31 +240,19 @@ let construct_fields context (node : Core.expression) variant fields =
           then
             context.report "a construct of `%s` lists the fields %s" type_name
               (String.concat ", " names);
-          let rec is_given_then_omitted = function
-            | (_, None) :: (_, Some _) :: _ -> false
-            | _ :: rest -> is_given_then_omitted rest
-            | [] -> true
-          in
-          if not (is_given_then_omitted fields) then
-            context.report "a construct of `%s` lists an omitted field before a given one" type_name;
           List.iter
-            (fun (name, (operand : Core.operand option)) ->
+            (fun (name, (operand : Core.operand)) ->
               match
-                ( List.find_opt (fun (field : Types.field) -> field.field_name = name) declared,
-                  operand )
+                List.find_opt (fun (field : Types.field) -> field.field_name = name) declared
               with
-              | Some field, Some operand ->
+              | Some field ->
                   let found = read_operand_type operand in
                   if not (fits context ~expected:field.field_type ~found) then
                     context.report
                       "the field `%s` of a construct of `%s` has the type `%s`, and is declared \
                        `%s`"
                       name type_name (Types.show found) (Types.show field.field_type)
-              | Some field, None ->
-                  if not field.field_has_default then
-                    context.report "a construct of `%s` omits `%s`, which has no default" type_name
-                      name
-              | None, _ -> ())
+              | None -> ())
             fields)
   | _ ->
       context.report "a construct has the type `%s`, which is not a named type"
@@ -484,7 +472,7 @@ let check_form (interface : Interface.Lookups.t) (source_lookups : Resolve.Names
         | Impl { substitution; _ } | Derived_for_view { substitution; _ } ->
             List.iter
               (fun (_, inner) -> check_argument "an `impl`'s type argument" inner)
-              (Types.For_testing.list_arguments substitution)
+              (Types.list_arguments substitution)
         | Bound -> ())
     | Intrinsic { type_arguments; _ } ->
         List.iter (check_argument "an intrinsic's type argument") type_arguments
@@ -532,6 +520,11 @@ let check_form (interface : Interface.Lookups.t) (source_lookups : Resolve.Names
         report "a call of `%s` has %d arguments for %d parameters" callee
           (List.length call.arguments) (List.length parameters)
     | Some parameters ->
+        let is_default : Core.place -> bool = function
+          | Constant { path = Default _; _ } -> true
+          | Temporary { kind = Copy (Place (Constant { path = Default _; _ })); _ } -> true
+          | _ -> false
+        in
         List.iteri
           (fun position ((mode, has_default), (argument : Core.argument)) ->
             match argument with
@@ -540,7 +533,8 @@ let check_form (interface : Interface.Lookups.t) (source_lookups : Resolve.Names
                   position callee
                   (Language.Mode.show_prefix passed)
                   (Language.Mode.show_prefix mode)
-            | { value = Value { kind = Parameter_default _; _ }; _ } when not has_default ->
+            | { value = Place default | Value { kind = Copy (Place default); _ }; _ }
+              when is_default default && not has_default ->
                 report "a call of `%s` omits argument %d, whose parameter has no default" callee
                   position
             | _ -> ())
@@ -616,7 +610,7 @@ let check_form (interface : Interface.Lookups.t) (source_lookups : Resolve.Names
         else check_place core_place
     | Value ({ kind = Construct { fields; _ }; _ } as node) ->
         Hashtbl.replace yielded node.id ();
-        List.iter (fun (_, field) -> Option.iter (check_yielded_operand mode) field) fields
+        List.iter (fun (_, field) -> check_yielded_operand mode field) fields
     | Value _ -> ()
   in
   Core_walk.walk_definition
@@ -657,9 +651,9 @@ let check_form (interface : Interface.Lookups.t) (source_lookups : Resolve.Names
              | Use core_place -> check_place core_place
              | Construct { fields; _ } ->
                  List.iter
-                   (fun (_, (field : Core.operand option)) ->
+                   (fun (_, (field : Core.operand)) ->
                      match field with
-                     | Some (Place _) when not (Hashtbl.mem yielded node.id) ->
+                     | Place _ when not (Hashtbl.mem yielded node.id) ->
                          report "a construct that no `Yield` lends has a field that is a place"
                      | _ -> ())
                    fields

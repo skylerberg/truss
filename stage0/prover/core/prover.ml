@@ -19,7 +19,7 @@ let translate_impl (lookups : Lookups.t) (key : Resolve.Names.key) source =
   match Contracts.list_impl_holes lookups key with
   | _ :: _ as holes ->
       if Contracts.has_impl_obligations lookups interface.implements.trait then
-        [ { Obligation.obligations = []; holes; evaluation = None } ]
+        [ { Obligation.obligations = []; holes; evaluated_constants = [] } ]
       else []
   | [] ->
       [
@@ -102,8 +102,11 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
     match
       (declaration.kind, lazy (Translate.find_circular_proof lookups source ~path:key.path))
     with
-    | (Function | Method | Test), _ when Mir.find_code (lookups.mir.read_body_part key) = None ->
-        Not_proven_here
+    | (Function | Method | Test), _ when Mir.find_code (lookups.mir.read_body_part key) = None -> (
+        match Mir.read_defaults lookups.mir key.path with
+        | Some { form = _ :: _; _ } ->
+            Obligations (Translate.translate_defaults lookups source ~path:key.path)
+        | Some { form = []; _ } | None -> Not_proven_here)
     | (Trait | Capability), _ -> Not_proven_here
     | _, (lazy (Some circular)) -> Obligations circular
     | Theorem, _ -> Obligations (Translate.translate_function lookups source ~path:key.path)
@@ -111,8 +114,10 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
         let prove_with substitution =
           Translate.translate_function ~substitution lookups source ~path:key.path
         in
+        let defaults = Translate.translate_defaults lookups source ~path:key.path in
         match list_integer_instances lookups key.path with
-        | [] -> Obligations (prove_with Types.no_substitution)
+        | [] ->
+            Obligations (Translate.merge_outcomes [ prove_with Types.no_substitution; defaults ])
         | instances ->
             let outcomes =
               List.map
@@ -127,7 +132,7 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                   })
                 instances
             in
-            Obligations (Translate.merge_outcomes outcomes))
+            Obligations (Translate.merge_outcomes (outcomes @ [ defaults ])))
     | (Constant | Member_constant), _ ->
         Obligations (Translate.translate_constant lookups source ~path:key.path)
     | Impl, _ ->
@@ -137,8 +142,8 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
     | Type, _ -> (
         let has_defaults () =
           match Mir.read_defaults lookups.mir key.path with
-          | Some { form = Field_defaults (_ :: _); _ } -> true
-          | Some { form = Field_defaults [] | Parameter_defaults _; _ } | None -> false
+          | Some { form = _ :: _; _ } -> true
+          | Some { form = []; _ } | None -> false
         in
         match Mir.read_type_clauses lookups.mir key.path with
         | Some { form = { invariants = _ :: _; _ }; _ } ->
@@ -168,7 +173,7 @@ let find_declared_evaluation : Logic.declaration -> Obligation.evaluation option
 let list_evaluations = function
   | Obligations outcome ->
       List.sort_uniq compare
-        (Option.to_list outcome.evaluation
+        (List.map (fun path -> Obligation.Constant_value path) outcome.evaluated_constants
         @ List.concat_map
             (fun (obligation : Obligation.t) ->
               List.filter_map find_declared_evaluation obligation.query.declarations)
@@ -261,12 +266,12 @@ let make_request ({ query; _ } : posed_obligation) = Solver.make_request query
 
 type posed =
   | Unreadable of Catalog.Prover.t
-  | Posed of { obligations : posed_obligation list; failed_evaluation : Catalog.Prover.t option }
+  | Posed of { obligations : posed_obligation list; failed_evaluations : Catalog.Prover.t list }
 
 let pose ~runs proof =
   let runs = Evaluation_table.of_seq (List.to_seq runs) in
   match proof with
-  | Not_proven_here -> Posed { obligations = []; failed_evaluation = None }
+  | Not_proven_here -> Posed { obligations = []; failed_evaluations = [] }
   | Unsupported { location; construct; foreign } ->
       Unreadable (Unreadable { location; construct; foreign })
   | Obligations outcome ->
@@ -284,15 +289,13 @@ let pose ~runs proof =
                      })
                   obligation)
               outcome.obligations;
-          failed_evaluation =
-            Option.bind outcome.evaluation (fun (evaluation : Obligation.evaluation) ->
-                match (evaluation, Evaluation_table.find_opt runs evaluation) with
-                | Constant_value path, Some (Failed stop) ->
-                    Some (Catalog.Prover.Unevaluated { path; stop })
-                | Constant_value _, (Some (Evaluated _ | Unfinished _) | None) -> None
-                | Assertion _, _ ->
-                    Compiler_bug.raise_bug ~stage:"Prover"
-                      "a definition's own evaluation is not of a constant");
+          failed_evaluations =
+            List.filter_map
+              (fun path ->
+                match Evaluation_table.find_opt runs (Constant_value path) with
+                | Some (Failed stop) -> Some (Catalog.Prover.Unevaluated { path; stop })
+                | Some (Evaluated _ | Unfinished _) | None -> None)
+              outcome.evaluated_constants;
         }
 
 let list_posed = function Unreadable _ -> [] | Posed { obligations; _ } -> obligations
@@ -333,7 +336,7 @@ let fail_site failure =
 let list_states posed ~answers ~refutations =
   match posed with
   | Unreadable failure -> [ fail_site failure ]
-  | Posed { obligations; failed_evaluation } ->
+  | Posed { obligations; failed_evaluations } ->
       let refutations = Queue.of_seq (List.to_seq refutations) in
       List.map2
         (fun (posed : posed_obligation) answer ->
@@ -366,7 +369,7 @@ let list_states posed ~answers ~refutations =
                 explained;
           })
         obligations answers
-      @ List.map fail_site (Option.to_list failed_evaluation)
+      @ List.map fail_site failed_evaluations
 
 module For_testing = struct
   let list_queries posed =

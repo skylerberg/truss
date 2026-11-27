@@ -519,27 +519,15 @@ let describe : Inference.t -> Nodes.description = function
               (Z.to_string constant) (Types.show type_) (Z.to_string low) (Z.to_string high)))
   | Division_by_zero { at = origin } ->
       make Constant_overflow (Build.at origin) (say "This divides by zero.")
-  | Default_not_constant { at = origin } ->
-      make Default_not_constant (Build.at origin)
-        (say
-           "A default must be a constant expression: literals, arithmetic, constants, and records, \
-            variants, and collections built from them. It cannot call a function or name a \
-            parameter.")
   | Not_constant { at = origin } ->
       make Not_constant (Build.at origin)
         (say
-           "The value of a constant is made of literals, other constants, operators, calls, \
-            quantifiers over ranges and collections, and the records, variants, collections, and \
-            strings built from them. Move this into a function, and call the function here.")
-  | Condition_not_constant { at = origin } ->
-      make Condition_not_constant (Build.at origin)
-        (say
-           "An assertion `by evaluation` is evaluated when the code is checked, before any \
-            variable has a value. Its condition is made of literals, constants, operators, calls, \
+           "A constant expression is evaluated once, when the code is checked, before any variable \
+            or parameter has a value. It is made of literals, constants, operators, calls, \
             quantifiers over ranges and collections, and the records, variants, collections, and \
             strings built from them. Move this into a function, and call the function here.")
   | Condition_names_parameter { at = origin } ->
-      make Condition_not_constant (Build.at origin)
+      make Condition_names_parameter (Build.at origin)
         (say
            "An assertion `by evaluation` is evaluated once, when the code is checked, so its \
             condition cannot mention a type parameter or a value parameter of the code around it.")
@@ -547,12 +535,16 @@ let describe : Inference.t -> Nodes.description = function
       make Constant_not_data (Build.at origin)
         (say
            (Printf.sprintf
-              "A constant is stored in the compiled program as data, so its type cannot be or hold \
-               %s."
+              "A constant is stored in the compiled program as data, so this value cannot %s."
               (match part with
-              | Function_type -> "a function type"
-              | Handle -> "a handle"
-              | Shared_state -> "state that tasks share")))
+              | Function_type -> "be or hold a function"
+              | Handle -> "be or hold a handle"
+              | Shared_state ->
+                  "be or hold state that tasks share: every use of the constant would share one \
+                   mutable value"
+              | Type_parameter ->
+                  "have a type that names a type parameter, which an instantiation could make a \
+                   function, a handle, or state that tasks share")))
   | Hidden_in_public_clause { at = origin; name; hidden } ->
       let hidden = Path.show hidden in
       make Private_in_public (Build.at origin)

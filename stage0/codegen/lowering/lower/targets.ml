@@ -465,9 +465,25 @@ let lower_borrowed_sequence (state : Lowering.state) (sequence : Ground.ty) ~buf
          Build { ty = sequence; variant = None; fields = [ (field, Copy borrowed_storage) ] } ));
   borrowed
 
-let lower_static_constant (state : Lowering.state) path : Lowered.place =
-  let ty = Interface.Definition.read_constant_type state.context.lookups.interface path in
-  { root = Static { item = Constant path; ty = Lowering.ground state ty }; projections = [] }
+let make_constant_item (state : Lowering.state) path substitution =
+  let substitution = Types.substitute_substitution state.frame.code.substitution substitution in
+  let monomorphic = state.context.monomorphic in
+  let arguments =
+    List.map
+      (fun (parameter, argument) ->
+        (parameter, Monomorphic.ground_argument monomorphic Types.no_substitution argument))
+      (Types.list_arguments substitution)
+  in
+  Lowered.Item.Constant { path; arguments }
+
+let lower_static_constant (state : Lowering.state) path substitution : Lowered.place =
+  let item = make_constant_item state path substitution in
+  let ty =
+    Monomorphic.ground state.context.monomorphic
+      (Types.substitute_substitution state.frame.code.substitution substitution)
+      (Interface.Definition.read_constant_type state.context.lookups.interface path)
+  in
+  { root = Static { item; ty }; projections = [] }
 
 let pull_loop state ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
     ~(body : Lowered.place -> unit) =

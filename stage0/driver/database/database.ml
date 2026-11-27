@@ -1081,7 +1081,7 @@ let list_definitions_naming (database : t) (path : Path.t) =
           :: List.map
                (fun (key : Resolve.Names.key) -> key.path)
                ((make_name_lookups database).list_members owner name))
-    | Top _ | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> [ path ]
+    | Top _ | Default _ | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> [ path ]
   in
   List.sort_uniq compare
     (List.concat_map

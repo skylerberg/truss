@@ -160,12 +160,13 @@ and check_type_argument state (value : Syntax.expression) : Types.argument =
   | _, Some { target = Value_parameter parameter; _ } -> Types.Value (Value_parameter parameter)
   | _, Some { target = Definition (Constant, path); _ } -> (
       match Interface.Constants.evaluate_count state.lookups.interface path with
-      | Ok value -> Types.Value (Known value)
-      | Error error ->
+      | Count value -> Types.Value (Known value)
+      | Invalid_count error ->
           Types.Value
             (Value_error
                (State.record_diagnostic state
-                  (Catalog.Typing (Count_error { at = Written value.id; error })))))
+                  (Catalog.Typing (Count_error { at = Written value.id; error }))))
+      | Unevaluated_count -> Types.Value (Value_error Catalog.reported_elsewhere))
   | _ -> (
       let report_not_a_type () =
         Types.Type (make_error_type_at state value (Not_a_type_argument { at = Written value.id }))
