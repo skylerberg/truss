@@ -307,9 +307,14 @@ let read_loop_measure ?implicit (clauses : Mir.loop_clause list) ~(head : State.
   in
   Option.map (fun read -> { read; at_head = read head }) read
 
-let require_measure (frame : State.frame) ~loop ~is_measured =
+let require_measure (frame : State.frame) location ~loop ~is_measured =
   if frame.terminates && not is_measured then
-    Facts.raise_bug "%s has no measure in a body that terminates" loop
+    match Obligations.find_ruled_out frame with
+    | Some { capability = Built_in Run_forever; condition } ->
+        Obligations.oblige frame location
+          (Unmeasured_loop_where_ruled_out { condition })
+          (Logic.Boolean false)
+    | Some _ | None -> Facts.raise_bug "%s has no measure in a body that terminates" loop
 
 let check_loop_measure (frame : State.frame) location measure =
   Option.iter

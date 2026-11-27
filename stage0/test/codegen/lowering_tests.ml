@@ -24,7 +24,7 @@ let () =
           {
             path = Top { module_ = probe_module; name = "read_first_book" };
             instantiation = Ground.no_instantiation;
-            assumes_condition = false;
+            assumed = [];
           }
       in
       let _, backend =
@@ -138,7 +138,7 @@ let () =
           {
             path = Top { module_ = Codegen_support.example; name = "read" };
             instantiation = Ground.no_instantiation;
-            assumes_condition = false;
+            assumed = [];
           }
       in
       let _, backend =

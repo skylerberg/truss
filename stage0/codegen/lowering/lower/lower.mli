@@ -13,7 +13,7 @@ val lower_source_code :
   context ->
   path:Path.t ->
   instantiation:Ground.instantiation ->
-  assumes_condition:bool ->
+  assumed:Path.t list ->
   Emit_c.fragment
 
 val lower_generated : context -> Lowered.Item.generated -> Emit_c.fragment

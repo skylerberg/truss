@@ -44,7 +44,7 @@ let () =
                        trait = Well_known.make_path Equal;
                      });
             instantiation = Ground.no_instantiation;
-            assumes_condition = false;
+            assumed = [];
           }
       in
       let _, backend =
@@ -82,7 +82,7 @@ let () =
           {
             path = Top { module_ = Codegen_support.example; name };
             instantiation = Ground.no_instantiation;
-            assumes_condition = false;
+            assumed = [];
           }
       in
       let _, backend =
@@ -140,7 +140,7 @@ let () =
           {
             path = Top { module_ = Codegen_support.example; name = "sum" };
             instantiation = Ground.no_instantiation;
-            assumes_condition = false;
+            assumed = [];
           }
       in
       let _, backend =
@@ -172,7 +172,7 @@ let make_example_item name : Lowered.Item.t =
     {
       path = Top { module_ = Codegen_support.example; name };
       instantiation = Ground.no_instantiation;
-      assumes_condition = false;
+      assumed = [];
     }
 
 type presumed_line = { text : string; file : string; line : int }
@@ -288,12 +288,12 @@ let () =
   Codegen_support.test
     "a caller without `Panic` calls a copy of a callee with a condition on values that panics \
      nowhere" (fun () ->
-      let make_item ?(assumes_condition = false) name : Lowered.Item.t =
+      let make_item ?(assumed = []) name : Lowered.Item.t =
         Code
           {
             path = Top { module_ = Codegen_support.example; name };
             instantiation = Ground.no_instantiation;
-            assumes_condition;
+            assumed;
           }
       in
       let proven = make_item "five_thousand" and panicking = make_item "scaled_or_panic" in
@@ -305,7 +305,8 @@ let () =
       let render item =
         Emit_c.For_testing.render_c (Backend.For_testing.compile_fragment backend item)
       in
-      let assuming = make_item ~assumes_condition:true "scaled" and checking = make_item "scaled" in
+      let assuming = make_item ~assumed:[ Well_known.make_builtin_capability_path Panic ] "scaled"
+      and checking = make_item "scaled" in
       if not (List.mem assuming (called proven)) then
         Codegen_support.fail "five_thousand calls no copy of scaled that assumes its condition";
       if not (List.mem checking (called panicking)) then
@@ -337,8 +338,8 @@ let () =
       let list_scaled_copies item =
         List.filter_map
           (function
-            | Lowered.Item.Code { path = Method { name = "scaled"; _ }; assumes_condition; _ } ->
-                Some assumes_condition
+            | Lowered.Item.Code { path = Method { name = "scaled"; _ }; assumed; _ } ->
+                Some (assumed <> [])
             | _ -> None)
           (called item)
       in
@@ -359,7 +360,7 @@ let () =
           {
             path = Top { module_ = Codegen_support.example; name = "measured" };
             instantiation = Ground.no_instantiation;
-            assumes_condition = true;
+            assumed = [ Well_known.make_builtin_capability_path Panic ];
           }
       in
       let _, backend =

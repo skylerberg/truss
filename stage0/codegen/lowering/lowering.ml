@@ -48,8 +48,8 @@ let make (context : Lower.context) (item : Lowered.Item.t) : lowered =
   let env = Lower.env context in
   let drop_and_copy = Lower.drop_and_copy context in
   match item with
-  | Code { path; instantiation; assumes_condition } ->
-      Compiled (Lower.lower_source_code context ~path ~instantiation ~assumes_condition)
+  | Code { path; instantiation; assumed } ->
+      Compiled (Lower.lower_source_code context ~path ~instantiation ~assumed)
   | Generated generated -> Compiled (Lower.lower_generated context generated)
   | Table table -> Compiled (Emit_c.make_table_fragment env (Lower.lower_table context table))
   | (Constant _ | Assertion _) as evaluated -> (

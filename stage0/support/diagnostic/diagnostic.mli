@@ -259,7 +259,7 @@ module Code : sig
     | Constant_cycle
     | Circular_proof
     | Evaluation
-    | Panic
+    | Capability_condition
     | Assertion
     | Law
     | Cost

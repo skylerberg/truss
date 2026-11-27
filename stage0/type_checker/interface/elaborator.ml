@@ -514,7 +514,10 @@ and elaborate_function_type context (written : Syntax.function_type) :
   | Error report -> Error report
 
 and report_time_of_run_forever context ~uses (clauses : Syntax.clause list) =
-  if Types.has_capability (Built_in Run_forever) uses then
+  if
+    Types.has_capability (Built_in Run_forever) uses
+    || Types.has_capability (Capability_unless_values (Built_in Run_forever)) uses
+  then
     List.iter
       (fun (clause : Syntax.clause) ->
         match clause.kind with
@@ -550,8 +553,7 @@ and elaborate_capability_uses context uses =
           in
           if context.is_in_capability then report In_capability_method
           else if Option.is_some unless then report Joined_with_bound
-          else if capabilities <> [ Built_in Panic ] then report (Not_panic capabilities)
-          else [ Types.Capability_unless_values (Built_in Panic) ])
+          else List.map (fun capability -> Types.Capability_unless_values capability) capabilities)
     uses
 
 and elaborate_costs context clauses : (Types.cost list, Catalog.reported) Stdlib.result =

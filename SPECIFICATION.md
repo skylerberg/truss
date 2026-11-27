@@ -1075,29 +1075,41 @@ public fn Option[Value].expect(own self, message: String) -> Value
   ensures self is Some(held) && identical(result, held)
 ```
 
-- **`Panic` can be `unless` a condition on the arguments.** The condition
-  is a `&&` of `Bool` expressions over the parameters, read at entry, as a
-  `requires` is. No other capability takes one, and it is not joined with a
-  bound.
-- **A caller without `Panic` proves the condition, as it proves a
-  `requires`.** A caller that has `Panic` proves nothing. A caller that uses
-  `Panic unless C` proves the condition where `C` holds.
-- **The body is proven twice.** It is proven once with `Panic`. It is
-  proven again assuming the condition, without `Panic`: every operation that
-  could fail is proven not to, and every call that uses `Panic` is proven
-  unreachable.
-- **A specification that calls such a function proves its condition,** as
-  it proves a callee's `requires`, since a specification never panics. A
-  function whose only capability is `Panic unless P` can be called in a
-  specification: `forall i in 0..text.length() => text.byte(i) < 128`.
+```truss
+fn report(count: UInt64, quiet: Bool)
+  uses Console unless quiet
+{
+  if !quiet {
+    Console.print_line("${count}")
+  }
+}
+```
+
+- **Any capability can be `unless` a condition on the arguments.** The
+  condition is a `&&` of `Bool` expressions over the parameters, read at
+  entry, as a `requires` is. It is not joined with a bound.
+- **A caller without the capability proves the condition, as it proves a
+  `requires`.** A caller that has the capability proves nothing. A caller
+  that uses `X unless C` proves the condition where `C` holds.
+- **The body is proven with every capability it declares, and once more for
+  each capability with a condition on values:** assuming the condition,
+  without that capability. That run proves every call that uses the
+  capability unreachable. Without `Panic`, every operation that could fail is
+  proven not to; without `RunForever`, every loop and recursion is proven to
+  end.
+- **A specification that calls such a function proves its conditions,** as
+  it proves a callee's `requires`, since a specification uses no capability.
+  A function whose only capabilities have conditions on values can be called
+  in a specification: `forall i in 0..text.length() => text.byte(i) < 128`.
 - **A trait's method can take one.** An `impl`'s method of it states its
-  own `uses Panic unless` a condition, which the trait's must imply, or uses
-  no `Panic`. A call known to reach an `impl` proves that `impl`'s
-  condition, and a call through a bound proves the trait's.
-- A function named as a value uses `Panic`, since the code that a call of
-  the value reaches is chosen when the program runs. A capability's method,
-  a written function type, and a `when` condition take no condition on
-  values.
+  own `uses X unless` a condition, which the trait's must imply, or uses no
+  `X`. A call known to reach an `impl` proves that `impl`'s condition, and a
+  call through a bound proves the trait's.
+- A function named as a value uses each such capability with no condition,
+  since the code that a call of the value reaches is chosen when the program
+  runs. A capability's method, a written function type, and a `when`
+  condition take no condition on values, and a function whose `RunForever`
+  has one states no `time` clause.
 
 ### Changed parts
 
@@ -2999,8 +3011,8 @@ trait Ordered: Equal {
   within the trait's, and the contract clauses that the next two rules allow.
 - **An `impl`'s method may promise more than its trait.** Its contract is
   the trait method's, with the method's own `ensures` and `cost` clauses
-  added. The condition after the trait's `Panic unless` must imply the
-  method's. A call known to reach that `impl` is proven against the
+  added. The condition after each `unless` of the trait's must imply the
+  method's for the same capability. A call known to reach that `impl` is proven against the
   `impl`'s contract, and a call through a bound against the trait's.
 - **An `impl`'s method has its trait's precondition.** It can restate the
   trait's `requires` in its own terms, as `List`'s `at` writes
@@ -3436,7 +3448,7 @@ an invariant, a law, or a proof.
   a function that calls `self.find(separator)`, or states the result
   through a model.
 - Every specification is well defined: each call meets its callee's
-  `requires` and the condition of a callee's `Panic unless`, and each index
+  `requires` and the conditions of a callee's `uses`, and each index
   is in bounds. `&&`, `||`, `==>`, and `if` read
   left to right, so the right side can rely on the left.
 - `==` is the type's `Equal`, and `identical(a, b)` is identity, for any type.

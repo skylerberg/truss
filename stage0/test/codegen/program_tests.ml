@@ -792,3 +792,11 @@ let () =
           "  called at example/main.truss:4:3";
           "  called at example/main.truss:10:16";
         ])
+
+let () =
+  Codegen_support.test
+    "a caller without `Console` calls a copy of a callee whose `Console` has a condition on values"
+    (fun () ->
+      let status, output, _ = Codegen_support.run_main Fixtures.Program.report_unless_quiet in
+      Codegen_support.expect_int ~expected:0 status;
+      Codegen_support.expect_string ~expected:"count 1\ncount 2\n" output)

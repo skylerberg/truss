@@ -101,8 +101,9 @@ type obligation =
   | Constant_cycle of { cyclic : Path.t; dependency : dependency }
   | Circular_proof of circular_proof
   | Precondition_may_fail of { clause : quoted; call : call }
-  | Precondition_may_panic of { clause : quoted; call : call }
-  | Panics_where_ruled_out of { call : call; condition : quoted list }
+  | Precondition_may_use of { capability : Types.capability; clause : quoted; call : call }
+  | Unmeasured_loop_where_ruled_out of { condition : quoted list }
+  | Uses_where_ruled_out of { capability : Types.capability; call : call; condition : quoted list }
   | Upper_bound_in_exact_cost of { metric : Language.Metric.t; call : call }
   | Out_of_bounds of { at : quoted }
   | Intrinsic_requirement of { at : quoted; requirement : requirement }
@@ -132,7 +133,7 @@ type obligation =
   | Cost_promise of { promise : promise; unstated : (Path.t * Types.ty) list }
   | Impl_precondition of { clause : quoted }
   | Trait_precondition of { clause : quoted }
-  | Impl_panic_condition of { clause : quoted }
+  | Impl_capability_condition of { capability : Types.capability; clause : quoted }
   | Postcondition of { clause : quoted; promiser : Path.t option; moment : postcondition_moment }
   | Law_may_fail of { trait : Types.trait_reference; law : string; for_type : Types.ty }
   | Negative_potential of { type_ : Types.ty }
@@ -196,8 +197,8 @@ type fix =
       premise : Code.t option;
       condition : Types.condition;
     }
-  | Add_panic of clause_place
-  | Add_panic_to_uses of Core.origin
+  | Add_uses of { capability : Types.capability; place : clause_place }
+  | Add_to_uses of { capability : Types.capability; uses : Core.origin }
 
 type citation = Cited_here | Cited_at of { path : string; line : int }
 type instance = { builtins : (string * Language.Builtin_type.t) list; condition : Types.condition }

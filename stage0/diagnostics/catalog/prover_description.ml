@@ -359,15 +359,20 @@ let describe_obligation = function
   | Circular_proof circular -> say (describe_circular_proof circular)
   | Precondition_may_fail { clause; call } ->
       tick clause @ (Description.Text " may not hold for " :: describe_call call) @ [ Text "." ]
-  | Precondition_may_panic { clause; call } ->
+  | Precondition_may_use { capability; clause; call } ->
       tick clause
       @ (Description.Text " may not hold for " :: describe_call call)
-      @ [ Text ", so the call may panic." ]
-  | Panics_where_ruled_out { call; condition } ->
+      @ [ Text (Printf.sprintf ", so the call may use `%s`." (Types.show_capability capability)) ]
+  | Unmeasured_loop_where_ruled_out { condition } ->
+      Description.Text "This loop has no measure, so it may run forever where `"
+      :: join " && " (List.map (fun part -> [ quote_in part ]) condition)
+      @ [ Text "` holds, which the function's `uses RunForever unless` rules out." ]
+  | Uses_where_ruled_out { capability; call; condition } ->
+      let shown = Types.show_capability capability in
       capitalize (describe_call call)
-      @ Description.Text " may panic where `"
+      @ Description.Text (Printf.sprintf " may use `%s` where `" shown)
         :: join " && " (List.map (fun part -> [ quote_in part ]) condition)
-      @ [ Text "` holds, which the function's `uses Panic unless` rules out." ]
+      @ [ Text (Printf.sprintf "` holds, which the function's `uses %s unless` rules out." shown) ]
   | Upper_bound_in_exact_cost { metric; call } ->
       Description.Text
         (Printf.sprintf "Only an upper bound is known for the `%s` of "
@@ -507,13 +512,16 @@ let describe_obligation = function
           "` may not follow from the method's own. An `impl` restates its trait's precondition in \
            its own terms and does not widen it.";
       ]
-  | Impl_panic_condition { clause } ->
+  | Impl_capability_condition { capability; clause } ->
+      let shown = Types.show_capability capability in
       tick clause
       @ [
           Text
-            " may not follow from the trait's condition after `Panic unless`. A caller without \
-             `Panic` proves only the trait's condition, so this `impl` could panic in code that \
-             has no `Panic`.";
+            (Printf.sprintf
+               " may not follow from the trait's condition after `%s unless`. A caller without \
+                `%s` proves only the trait's condition, so this `impl` could use `%s` in code that \
+                has no `%s`."
+               shown shown shown shown);
         ]
   | Postcondition { clause; promiser; moment } -> (
       let failure =
@@ -590,15 +598,15 @@ let find_code : Prover.obligation -> Diagnostic.Code.prover = function
       Assertion
   | Recursion_without_smaller_part _ | Recursion_may_not_end _ | Uncompared_recursion _
   | Measure_may_not_decrease _ | Recursion_through_impl _ | Recursion_through_argument _
-  | Loop_measure_may_not_decrease ->
+  | Loop_measure_may_not_decrease | Unmeasured_loop_where_ruled_out _ ->
       Termination
   | Constant_cycle _ -> Constant_cycle
   | Circular_proof _ -> Circular_proof
   | Precondition_may_fail _ | Intrinsic_requirement _ | Callback_precondition _ | Float_conversion _
-  | Not_a_scalar_value _ | Impl_precondition _ | Trait_precondition _ | Impl_panic_condition _
+  | Not_a_scalar_value _ | Impl_precondition _ | Trait_precondition _ | Impl_capability_condition _
   | Function_requirement _ ->
       Requires
-  | Precondition_may_panic _ | Panics_where_ruled_out _ -> Panic
+  | Precondition_may_use _ | Uses_where_ruled_out _ -> Capability_condition
   | Upper_bound_in_exact_cost _ | Lambda_cost _ | Lambda_call_above_bound _ | Loop_cost_clause _
   | May_not_return_under_no_allocation _ | Iteration_above_inferred_bound
   | Unbounded_iteration_cost _ | Cost_promise _ | Negative_potential _ ->
@@ -797,10 +805,18 @@ let describe_fix = function
         Description.title = (Description.Text "Add `requires " :: required) @ [ Text "`" ];
         edits = [ add_clause place (Text "requires " :: required) ];
       }
-  | Add_panic place ->
-      { title = say "Add `uses Panic`"; edits = [ add_clause place [ Text "uses Panic" ] ] }
-  | Add_panic_to_uses uses ->
-      { title = say "Add `uses Panic`"; edits = [ Build.insert_after uses [ Text ", Panic" ] ] }
+  | Add_uses { capability; place } ->
+      let shown = Types.show_capability capability in
+      {
+        title = say (Printf.sprintf "Add `uses %s`" shown);
+        edits = [ add_clause place [ Text ("uses " ^ shown) ] ];
+      }
+  | Add_to_uses { capability; uses } ->
+      let shown = Types.show_capability capability in
+      {
+        title = say (Printf.sprintf "Add `uses %s`" shown);
+        edits = [ Build.insert_after uses [ Text (", " ^ shown) ] ];
+      }
 
 let show_construct = function
   | Prover.Potential_of_elements -> "the potential of a collection's elements"

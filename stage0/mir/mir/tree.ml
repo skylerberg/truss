@@ -250,12 +250,13 @@ type requirement = {
   names : (Core.local * Core.origin) list;
 }
 
+type conditional_use = { capability : Types.capability; unless : requirement list }
 type callback = { inputs : Core.local list; requires : formula list; ensures : formula list }
 type parameter = { local : Core.local; mode : Language.Mode.t; type_ : Types.ty }
 
 type contract = {
   parameters : parameter list;
-  panics_unless : requirement list;
+  conditional_uses : conditional_use list;
   requires : requirement list;
   ensures : formula list;
   decreases : formula list;

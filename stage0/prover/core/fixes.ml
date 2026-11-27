@@ -3,7 +3,7 @@ let find_signature (environment : State.environment) =
   | { kind = Function { signature; body; _ }; _ } -> Some (signature, body)
   | _ -> None
 
-let make_panic_fix (environment : State.environment) : Catalog.Prover.fix list =
+let make_uses_fix (environment : State.environment) capability : Catalog.Prover.fix list =
   match find_signature environment with
   | Some (signature, body) when not environment.inherits_precondition ->
       [
@@ -14,9 +14,9 @@ let make_panic_fix (environment : State.environment) : Catalog.Prover.fix list =
                signature.clauses,
              signature.clauses )
          with
-        | Some uses, _ -> Add_panic_to_uses (Written uses.id)
-        | None, first :: _ -> Add_panic (Before_clause (Written first.id))
-        | None, [] -> Add_panic (Before_body (Written body.id)));
+        | Some uses, _ -> Add_to_uses { capability; uses = Written uses.id }
+        | None, first :: _ -> Add_uses { capability; place = Before_clause (Written first.id) }
+        | None, [] -> Add_uses { capability; place = Before_body (Written body.id) });
       ]
   | Some _ | None -> []
 

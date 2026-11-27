@@ -259,7 +259,7 @@ module Code = struct
     | Constant_cycle
     | Circular_proof
     | Evaluation
-    | Panic
+    | Capability_condition
     | Assertion
     | Law
     | Cost
@@ -576,7 +576,7 @@ module Code = struct
     | Constant_cycle -> "constant_cycle"
     | Circular_proof -> "circular_proof"
     | Evaluation -> "evaluation"
-    | Panic -> "panic"
+    | Capability_condition -> "capability_condition"
     | Assertion -> "assertion"
     | Law -> "law"
     | Cost -> "cost"

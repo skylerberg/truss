@@ -1,6 +1,6 @@
 val add_requires : State.frame -> Catalog.Prover.required list -> Catalog.Prover.fix list
 val find_goal_code : State.frame -> Logic.term -> Catalog.Code.t option
-val make_panic_fix : State.environment -> Catalog.Prover.fix list
+val make_uses_fix : State.environment -> Types.capability -> Catalog.Prover.fix list
 val find_parameter_code : State.frame -> Logic.term -> Catalog.Code.t option
 val make_comparison : Catalog.Code.t -> Language.Comparison.t -> Catalog.Code.t -> Catalog.Code.t
 val make_range_fix : State.frame -> Types.ty -> Logic.term -> Catalog.Prover.fix list

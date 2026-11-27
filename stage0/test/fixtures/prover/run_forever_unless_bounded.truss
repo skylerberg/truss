@@ -1,0 +1,12 @@
+fn wait(bounded: Bool)
+  uses RunForever unless bounded
+{
+  if !bounded {
+    while true {
+    }
+  }
+}
+
+fn wait_briefly() {
+  wait(bounded: true)
+}

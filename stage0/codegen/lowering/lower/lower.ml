@@ -36,13 +36,15 @@ let begin_body (state : Lowering.state) ~(body : Mir.Graph.body) =
   Emit_c.Ir_builder.start state.builder (Emit_c.Ir_builder.allocate_block state.builder);
   (List.filter_map fst bound @ evidence, List.map snd bound)
 
-let lower_source_code context ~path ~instantiation ~assumes_condition : Emit_c.fragment =
-  let item = Lowered.Item.Code { path; instantiation; assumes_condition } in
+let lower_source_code context ~path ~instantiation ~assumed : Emit_c.fragment =
+  let item = Lowered.Item.Code { path; instantiation; assumed } in
   let code = Definitions.make_code context path instantiation in
   let code =
-    if assumes_condition then
-      { code with uses = Definitions.remove_panic_condition code.uses; assumes_condition }
-    else code
+    {
+      code with
+      uses = Definitions.remove_assumed context code.substitution ~assumed code.uses;
+      assumed;
+    }
   in
   let body = (Mir_places.read_mir_graph context path).body in
   let state = Lowering.enter_item context ~item code in

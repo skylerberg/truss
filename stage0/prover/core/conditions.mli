@@ -2,11 +2,20 @@ type decision = Always | In_run of Types.condition | Elsewhere
 
 val implies : Lookups.t -> current:Path.t -> Types.condition -> Types.condition -> bool
 
-val may_panic :
-  Lookups.t -> current:Path.t -> condition:Types.condition -> Types.capability_set -> bool
+val may_use_for_every_value :
+  Lookups.t ->
+  current:Path.t ->
+  condition:Types.condition ->
+  Types.capability ->
+  Types.capability_set ->
+  bool
 
-val may_panic_for_every_value :
-  Lookups.t -> current:Path.t -> condition:Types.condition -> Types.capability_set -> bool
+val decide_available :
+  Lookups.t ->
+  current:Path.t ->
+  condition:Types.condition ->
+  Types.capability_set ->
+  Types.capability_set
 
 val list_undecided : Query.t -> Types.condition list
 

@@ -769,13 +769,14 @@ let () =
   Harness.test "a caller without `Panic` proves a callee's condition on values" (fun () ->
       expect_proven Fixtures.Prover.scaled_under_a_condition_on_its_argument;
       Support.expect_one_diagnostic ~check Fixtures.Prover.scaled_without_a_proof_of_its_condition
-        "prover.panic" ~at:("scaled(value)", 1)
+        "prover.capability_condition" ~at:("scaled(value)", 1)
         ~fixed:
           ( "requires value >= 0\n{\n  scaled(value)",
             "requires value >= 0\n  requires value * 1000 <= Int64.maximum\n{\n  scaled(value)" )
         ~alternatives:[ ("requires value >= 0", "uses Panic\n  requires value >= 0") ]);
   Harness.test "a function rules out every panic where its condition on values holds" (fun () ->
-      expect_not_proven Fixtures.Prover.crash_where_the_condition_holds "prover.panic";
+      expect_not_proven Fixtures.Prover.crash_where_the_condition_holds
+        "prover.capability_condition";
       expect_proven Fixtures.Prover.crash_where_the_condition_fails;
       expect_not_proven Fixtures.Prover.operation_that_fails_where_the_condition_holds
         "prover.overflow"
@@ -788,13 +789,13 @@ let () =
   Harness.test "a caller that panics unless a condition proves its callee's where it holds"
     (fun () ->
       match list_codes Fixtures.Prover.condition_passed_on_to_a_callee with
-      | [ "prover.panic" ] -> ()
+      | [ "prover.capability_condition" ] -> ()
       | codes -> Harness.fail "%s" (String.concat ", " codes));
   Harness.test "a specification proves the condition of a function it calls" (fun () ->
       expect_proven Fixtures.Prover.function_with_a_condition_on_values_in_a_specification;
       expect_not_proven
         Fixtures.Prover.function_with_a_condition_on_values_in_a_specification_outside_it
-        "prover.panic"
+        "prover.capability_condition"
         ~fixed:
           ( "ensures text.byte(0) == 48 ==> result\n{\n  text.byte(0) == 48",
             "ensures text.byte(0) == 48 ==> result\n\
@@ -803,7 +804,8 @@ let () =
             \  text.byte(0) == 48" ));
   Harness.test "expect needs no `Panic` where its value is proven present" (fun () ->
       expect_proven Fixtures.Prover.expect_of_a_value_proven_present;
-      expect_not_proven Fixtures.Prover.expect_of_a_value_that_may_be_absent "prover.panic"
+      expect_not_proven Fixtures.Prover.expect_of_a_value_that_may_be_absent
+        "prover.capability_condition"
         ~fixed:
           ( "fn first(values: List[Int64]) -> Int64 {",
             "fn first(values: List[Int64]) -> Int64\n  uses Panic\n{" ));
@@ -814,11 +816,12 @@ let () =
   Harness.test "a call through a bound without `Panic` proves the trait's condition on values"
     (fun () ->
       Support.expect_one_diagnostic ~check
-        Fixtures.Prover.call_through_a_bound_beyond_the_trait_condition "prover.panic"
+        Fixtures.Prover.call_through_a_bound_beyond_the_trait_condition
+        "prover.capability_condition"
         ~fixed:
           ( "fn large[Shape: Sized](shape: Shape) -> Int64 {",
             "fn large[Shape: Sized](shape: Shape) -> Int64\n  uses Panic\n{" )
-        ~says:"may not hold for this call to `Sized.size`, so the call may panic");
+        ~says:"may not hold for this call to `Sized.size`, so the call may use `Panic`");
   Harness.test "a loop that counts up to its bound ends" (fun () ->
       expect_proven Fixtures.Prover.while_loop_counting_up);
   Harness.test "a for loop over a range knows its index is in range" (fun () ->
@@ -2895,7 +2898,7 @@ let () =
 
 let () =
   Harness.test "generic negation without `Panic` proves the trait method's condition" (fun () ->
-      expect_not_proven Fixtures.Prover.generic_negation "prover.panic"
+      expect_not_proven Fixtures.Prover.generic_negation "prover.capability_condition"
         ~fixed:
           ( "fn negate[Number: Negate](value: Number) -> Number.Output {",
             "fn negate[Number: Negate](value: Number) -> Number.Output\n\
@@ -3554,7 +3557,8 @@ let () =
         ]);
   Harness.test "a panic condition of an operator's call names the operator" (fun () ->
       expect_message_saying Fixtures.Prover.sum_of_capped_money
-        "may not hold for the call to `Money.add` that `left + right` makes, so the call may panic.")
+        "may not hold for the call to `Money.add` that `left + right` makes, so the call may use \
+         `Panic`.")
 
 let () =
   Harness.test "a pure call's result is in its type's range for every bound value" (fun () ->
@@ -4719,3 +4723,20 @@ let () =
           (fun (obligation : Prover.Obligation.t) -> obligation.has_untriggered_written_fact)
           obligations
       then Harness.fail "an obligation names a fact the program does not write")
+
+let () =
+  Harness.test "a caller without `Console` proves the condition of a callee's `Console unless`"
+    (fun () ->
+      expect_proven Fixtures.Prover.console_unless_quiet;
+      expect_not_proven Fixtures.Prover.console_unless_quiet_called_aloud
+        "prover.capability_condition" ~says:"so the call may use `Console`"
+        ~fixed:
+          ("fn count_aloud(count: UInt64) {", "fn count_aloud(count: UInt64)\n  uses Console\n{"));
+  Harness.test "a body does not use a capability where the capability's condition holds" (fun () ->
+      expect_not_proven Fixtures.Prover.console_used_where_its_condition_holds
+        "prover.capability_condition" ~says:"may use `Console` where `quiet` holds");
+  Harness.test "a function whose `RunForever` has a condition on values ends where it holds"
+    (fun () ->
+      expect_proven Fixtures.Prover.run_forever_unless_bounded;
+      expect_codes Fixtures.Prover.loop_that_may_not_end_where_its_condition_holds
+        [ "prover.termination" ])

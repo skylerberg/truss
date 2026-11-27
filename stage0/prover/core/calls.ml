@@ -61,6 +61,16 @@ let havoc_mut (frame : State.frame) (values : State.passed list) ~list_modified 
     { after = frame; written = []; end_writes = ignore }
     values
 
+let find_lacked_capability (frame : State.frame) (callee : Callee.t) substitution
+    (conditional : Mir.conditional_use) =
+  List.find_opt
+    (fun capability ->
+      not (Obligations.is_available frame capability || Types.has_capability capability callee.uses))
+    (List.map Types.find_base
+       (Types.list_capabilities
+          (Types.substitute_capabilities substitution
+             (Types.make_capability_set [ conditional.capability ]))))
+
 let oblige_preconditions (frame : State.frame) (callee : Callee.t) (contract : State.contract)
     (values : State.passed list) ~location ~origin ~path ~substitution_of ~recursive_callee
     ~read_entry_frame =
@@ -103,13 +113,20 @@ let oblige_preconditions (frame : State.frame) (callee : Callee.t) (contract : S
                (Precondition_may_fail { clause = quoted; call })
                term))
   in
-  if not (frame.panics || Types.has_capability (Built_in Panic) callee.uses) then
-    ignore
-      (oblige_each contract.callee_clauses (read_entry_frame frame contract.callee_clauses)
-         contract.callee_clauses.panics_unless ~make_obligation:(fun _ ~fixes ~cited ~quoted term ->
-           Obligations.oblige ~cited ~fixes frame location
-             (Precondition_may_panic { clause = quoted; call })
-             term));
+  List.iter
+    (fun conditional ->
+      match
+        find_lacked_capability frame callee (substitution_of contract.callee_clauses) conditional
+      with
+      | Some capability ->
+          ignore
+            (oblige_each contract.callee_clauses (read_entry_frame frame contract.callee_clauses)
+               conditional.unless ~make_obligation:(fun _ ~fixes ~cited ~quoted term ->
+                 Obligations.oblige ~cited ~fixes frame location
+                   (Precondition_may_use { capability; clause = quoted; call })
+                   term))
+      | None -> ())
+    contract.callee_clauses.conditional_uses;
   required
 
 type call = {
@@ -224,8 +241,8 @@ let state_axiom (after : State.frame) (call : call) applied =
   if
     (not call.may_abort)
     && not
-         (Conditions.may_panic_for_every_value environment.lookups ~current:environment.current
-            ~condition:environment.condition call.callee.uses)
+         (Conditions.may_use_for_every_value environment.lookups ~current:environment.current
+            ~condition:environment.condition (Built_in Panic) call.callee.uses)
   then
     Option.iter
       (fun { application; is_on_bound_values; _ } ->
@@ -238,7 +255,13 @@ let assume_ensures (call : call) ~(base : State.frame) ~(after : State.frame) ~c
     ~result ~final is_kept =
   let arguments = list_arguments call.values in
   let proves_the_axiom_domain =
-    call.contract.callee_clauses.panics_unless = [] || not call.at_call.panics
+    List.for_all
+      (fun conditional ->
+        Option.is_some
+          (find_lacked_capability call.at_call call.callee
+             (call.definition.substitution_of call.contract.callee_clauses)
+             conditional))
+      call.contract.callee_clauses.conditional_uses
   in
   let is_in_axiom (clauses : State.clauses) (clause : Mir.formula) =
     match applied with
@@ -417,13 +440,15 @@ type modelled =
   | Without_contract of (State.frame * Logic.term) option
   | Lent_without_contract of applied
 
-let check_panic_is_allowed (frame : State.frame) location (callee : Callee.t) =
-  match Obligations.find_ruled_out_panic frame with
-  | Some condition
-    when Conditions.may_panic_for_every_value frame.environment.lookups
-           ~current:frame.environment.current ~condition:frame.environment.condition callee.uses ->
+let check_ruled_out_use (frame : State.frame) location (callee : Callee.t) =
+  match Obligations.find_ruled_out frame with
+  | Some { capability; condition = ruled_out_condition }
+    when Conditions.may_use_for_every_value frame.environment.lookups
+           ~current:frame.environment.current ~condition:frame.environment.condition capability
+           callee.uses ->
       Obligations.oblige frame location
-        (Panics_where_ruled_out { call = { at = location; callee = None }; condition })
+        (Uses_where_ruled_out
+           { capability; call = { at = location; callee = None }; condition = ruled_out_condition })
         (Logic.Boolean false)
   | Some _ | None -> ()
 
@@ -566,7 +591,7 @@ let call_intrinsic (frame : State.frame) ~(site : Invocation.site) (callee : Cal
 let apply_lend (frame : State.frame) (site : Invocation.site) (callee : Callee.t) ~through
     (values : State.passed list) =
   let location = Facts.locate frame site.origin in
-  check_panic_is_allowed frame location callee;
+  check_ruled_out_use frame location callee;
   let declared_result_type = Encoding.substitute_declared_type frame site.type_ in
   let result_type = Types.erase_views declared_result_type in
   (match callee.target with

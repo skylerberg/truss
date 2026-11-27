@@ -685,7 +685,10 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
               List.iter check_specification contract.requires)
             parameter.callback_contract)
         parameters;
-      List.iter check_specification contract.panics_unless;
+      List.iter
+        (fun (conditional : Core.conditional_use) ->
+          List.iter check_specification conditional.unless)
+        contract.conditional_uses;
       List.iter
         (fun (requirement : Core.condition Core.conditional) ->
           check_specification requirement.clause.value)

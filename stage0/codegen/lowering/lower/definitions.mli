@@ -21,7 +21,7 @@ type code = {
   result : Types.result;
   substitution : Types.substitution;
   uses : Types.capability_set;
-  assumes_condition : bool;
+  assumed : Path.t list;
 }
 
 val make_unwritten_code :
@@ -35,8 +35,15 @@ val read_signature : context -> Path.t -> Types.signature
 val make_code : context -> Path.t -> Ground.instantiation -> code
 val panic_path : Path.t
 val list_evidence : context -> Types.substitution -> Types.capability_set -> Path.t list
-val has_panic_condition : Types.capability_set -> bool
-val remove_panic_condition : Types.capability_set -> Types.capability_set
+val list_conditional_evidence : context -> Types.substitution -> Types.capability_set -> Path.t list
+
+val remove_assumed :
+  context ->
+  Types.substitution ->
+  assumed:Path.t list ->
+  Types.capability_set ->
+  Types.capability_set
+
 val classify_result : context -> Types.substitution -> Types.result -> Convention.result * bool
 val list_lending_parameters : context -> Types.substitution -> Types.result -> Lowered.ty list
 

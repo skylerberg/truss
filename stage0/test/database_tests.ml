@@ -18,12 +18,7 @@ let make_impl_method ?(module_ = "app.main") ~trait ~for_type name receiver =
     name receiver
 
 let make_code_item_of path : Lowered.Item.t =
-  Code
-    {
-      path;
-      instantiation = { type_arguments = []; capability_arguments = [] };
-      assumes_condition = false;
-    }
+  Code { path; instantiation = { type_arguments = []; capability_arguments = [] }; assumed = [] }
 
 let make_code_item name = make_code_item_of (make_main_path name)
 

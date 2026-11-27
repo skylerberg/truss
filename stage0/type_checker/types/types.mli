@@ -111,10 +111,6 @@ val find_base : capability -> capability
 val has_capability : capability -> capability_set -> bool
 val may_use : capability -> capability_set -> bool
 val find_unless : capability -> capability_set -> condition option
-
-val terminates_when :
-  implies:(condition -> condition -> bool) -> condition -> capability_set -> bool
-
 val exists_capability : (capability -> bool) -> capability_set -> bool
 val list_capabilities : capability_set -> capability list
 val terminates : capability_set -> bool

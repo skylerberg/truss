@@ -1893,19 +1893,30 @@ let build_contract form env (clauses : Syntax.clause list) : Core.contract =
         | Cost cost -> Some (fun form -> [ build_cost form env ~origin:(Written clause.id) cost ])
         | _ -> None)
   in
-  let panics_unless =
+  let conditional_uses =
     List.concat_map
       (fun (clause : Syntax.clause) ->
         match clause.kind with
         | Uses uses ->
             List.concat_map
               (fun (use : Syntax.capability_use) ->
-                List.map (build_expression form env) use.unless_values)
+                match use.unless_values with
+                | [] -> []
+                | written ->
+                    let unless = List.map (build_expression form env) written in
+                    List.map
+                      (fun capability : Core.conditional_use -> { capability; unless })
+                      (Types.list_capabilities
+                         (Interface.Impls.normalize_capabilities form.lookups.interface
+                            ~list_bounds:(list_bounds form)
+                            (Types.make_capability_set
+                               (Interface.Elaborator.elaborate_capability form.context
+                                  use.capability)))))
               uses
         | Requires _ | Ensures _ | Decreases _ | Modifies _ | Cost _ | Clause_error -> [])
       clauses
   in
-  { panics_unless; requires; ensures; decreases; costs }
+  { conditional_uses; requires; ensures; decreases; costs }
 
 let build_parameters form env (written : Syntax.parameter list) (signature : Types.signature) :
     Core.parameter list =

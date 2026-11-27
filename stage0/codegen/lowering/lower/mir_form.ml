@@ -407,7 +407,8 @@ and lower_call_into state (call : Mir.call) destination ~origin =
           { signature with receiver = None }
           Types.no_substitution call.arguments
       in
-      if Path.equal capability Definitions.panic_path then
+      if Targets.lacks_assumed_evidence state capability then Lowering.emit_unreachable_block state
+      else if Path.equal capability Definitions.panic_path then
         match (arguments, Lowering.find_panic_trace state) with
         | [ (_, _, message) ], Some trace ->
             ignore
@@ -415,8 +416,6 @@ and lower_call_into state (call : Mir.call) destination ~origin =
                  ~type_arguments:[] [ Intrinsics.Place message ] ~destination:None
                  ~site:(Mir_places.locate_site state origin)
                  ~trace:(Some trace))
-        | [ _ ], None when state.frame.code.assumes_condition ->
-            Lowering.emit_unreachable_block state
         | [ _ ], None -> Definitions.raise_bug "Panic.crash where Panic has no evidence"
         | _ -> Definitions.raise_bug "Panic.crash takes one message"
       else begin

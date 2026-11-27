@@ -1,5 +1,5 @@
 type t =
-  | Code of { path : Path.t; instantiation : Ground.instantiation; assumes_condition : bool }
+  | Code of { path : Path.t; instantiation : Ground.instantiation; assumed : Path.t list }
   | Constant of { path : Path.t; arguments : (Types.parameter * Ground.argument) list }
   | Drop of Ground.ty
   | Copy of Ground.ty

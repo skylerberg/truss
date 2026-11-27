@@ -1,11 +1,6 @@
-val make_policy :
-  keeps_termination:bool ->
-  keeps_failures:bool ->
-  panic_condition:Catalog.Prover.quoted list option ->
-  State.obligation_policy
-
-val find_ruled_out_panic : State.frame -> Catalog.Prover.quoted list option
-val set_panics : State.frame -> panics:bool -> State.frame
+val is_available : State.frame -> Types.capability -> bool
+val find_ruled_out : State.frame -> State.ruled_out option
+val set_available : State.frame -> Types.capability_set -> State.frame
 
 val oblige :
   ?cited:Resolve.Names.key * Core.origin ->
