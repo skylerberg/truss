@@ -28,9 +28,7 @@ type dependency = {
   omitted : omitted option;
 }
 
-val list_dependencies :
-  lookups -> home:Path.package -> Types.substitution -> Tree.t -> dependency list
-
+val list_dependencies : lookups -> Types.substitution -> Tree.t -> dependency list
 val list_contract_dependencies : lookups -> Path.t -> dependency list
 val list_inherited_contract_dependencies : lookups -> Path.t -> dependency list
 val list_invariant_dependencies : lookups -> Path.t -> dependency list

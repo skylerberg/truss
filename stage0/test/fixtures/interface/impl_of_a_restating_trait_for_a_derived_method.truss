@@ -1,0 +1,10 @@
+trait Strict: Equal {
+  fn equal(self, other: Self) -> Bool
+    ensures result == identical(self, other)
+}
+
+type Point(x: Int64)
+  derives Equal
+
+impl Strict for Point {
+}

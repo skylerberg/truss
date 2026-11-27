@@ -1,8 +1,7 @@
 type entered =
   [ `Field_default of Path.t * string option * string
   | `Parameter_default of Path.t * int
-  | `Invariant of Path.t * Z.t
-  | `Restated_clauses of Path.t * Types.ty ]
+  | `Invariant of Path.t * Z.t ]
 
 module Entered_table = Hashtbl.Make (Structural_key.Make (struct
   type t = entered
@@ -390,66 +389,7 @@ let list_laws_assumed_at (interface : Interface.Lookups.t) instance (statement :
       list_laws_of_generics interface instance path instantiation
   | _ -> []
 
-let list_contract_formulas (contract : Tree.contract) =
-  let list_clauses requirements =
-    List.map (fun (requirement : Tree.requirement) -> requirement.clause) requirements
-  in
-  list_clauses contract.panics_unless
-  @ list_clauses contract.requires @ contract.ensures @ contract.decreases
-  @ List.map
-      (fun (cost : Tree.cost) ->
-        match cost.bound with Order_of amount | At_most amount | Exactly amount -> amount)
-      contract.costs
-  @ List.concat_map
-      (fun (_, (callback : Tree.callback)) -> callback.requires @ callback.ensures)
-      contract.callbacks
-
-let find_contract (lookups : lookups) path =
-  Option.map (fun (read : _ Parts.sourced) -> read.form) (Parts.read_contract lookups.mir path)
-
-let list_restated_clauses_assumed_at (lookups : lookups) ~home instance (statement : Tree.statement)
-    =
-  match Walk.find_callee statement with
-  | Some { target = Trait_method { trait; self_type; name; receiver; _ }; _ } -> (
-      let self_type = substitute_type lookups.interface instance self_type in
-      match find_head self_type with
-      | Some head ->
-          let restates (restated : Types.restated_method) =
-            restated.restated_name = name
-            && restated.restated_receiver = receiver
-            && Path.equal restated.declared_by trait.trait
-          in
-          List.concat_map
-            (fun package ->
-              List.filter_map
-                (fun (restating, impl) ->
-                  let trait_interface =
-                    Interface.Definition.read_trait_interface lookups.interface restating
-                  in
-                  if List.exists restates trait_interface.restated then
-                    let impl_interface =
-                      Interface.Definition.read_impl_interface lookups.interface impl
-                    in
-                    Option.map
-                      (fun arguments ->
-                        ( Path.Method { owner = restating; name; receiver },
-                          self_type,
-                          Types.make_trait_substitution trait_interface.trait_generics
-                            ~self:self_type
-                            (Types.substitute_trait_erased arguments impl_interface.implements) ))
-                      (Interface.Impls.match_type
-                         ~variables:
-                           (List.map
-                              (fun (generic : Types.generic) -> generic.generic)
-                              impl_interface.impl_generics)
-                         Types.no_substitution impl_interface.for_type self_type)
-                  else None)
-                (Interface.Impls.list_impls_for_type lookups.interface head package))
-            (List.sort_uniq compare [ Path.locate_package head; home; Path.standard_package ])
-      | None -> [])
-  | Some { target = Function _ | Capability_method _ | Intrinsic _ | Indirect _; _ } | None -> []
-
-let collect (lookups : lookups) ~home instance visit_roots =
+let collect (lookups : lookups) instance visit_roots =
   let dependencies = ref [] in
   let laws = ref [] in
   let entered = Entered_table.create 4 in
@@ -488,14 +428,6 @@ let collect (lookups : lookups) ~home instance visit_roots =
         let origin = match through with Some (origin, _) -> origin | None -> statement.origin in
         laws := { assumed with origin = Some origin } :: !laws)
       (list_laws_assumed_at lookups.interface instance statement);
-    List.iter
-      (fun (restating_method, self_type, substitution) ->
-        if enters (`Restated_clauses (restating_method, self_type)) then
-          List.iter
-            (visit_formula ~through ~instance:substitution)
-            (Option.fold ~none:[] ~some:list_contract_formulas
-               (find_contract lookups restating_method)))
-      (list_restated_clauses_assumed_at lookups ~home instance statement);
     match statement.kind with
     | Basic (Call { call; _ } | Lend { call; _ }) -> add_invariant_check ~through ~instance call
     | Basic (Assign { value = Parameter_default { definition; position; substitution }; _ }) ->
@@ -575,14 +507,13 @@ let collect (lookups : lookups) ~home instance visit_roots =
     ~formula:(visit_formula ~through:None ~instance);
   (List.rev !dependencies, List.rev !laws)
 
-let collect_dependencies lookups ~home instance visit_roots =
-  fst (collect lookups ~home instance visit_roots)
+let collect_dependencies lookups instance visit_roots = fst (collect lookups instance visit_roots)
 
-let list_dependencies lookups ~home instance (code : Tree.t) =
-  collect_dependencies lookups ~home instance (fun ~code:visit ~formula:_ -> visit code)
+let list_dependencies lookups instance (code : Tree.t) =
+  collect_dependencies lookups instance (fun ~code:visit ~formula:_ -> visit code)
 
-let list_formula_dependencies lookups ~home instance (formula : Tree.formula) =
-  collect_dependencies lookups ~home instance (fun ~code:_ ~formula:visit -> visit formula)
+let list_formula_dependencies lookups instance (formula : Tree.formula) =
+  collect_dependencies lookups instance (fun ~code:_ ~formula:visit -> visit formula)
 
 let list_paths dependencies =
   List.map (fun (dependency : dependency) -> dependency.path) dependencies
@@ -703,26 +634,49 @@ let list_callees_that_run (lookups : lookups) path =
 let list_path_edges (lookups : lookups) path =
   List.sort_uniq Path.compare
     (List.concat_map
-       (fun code ->
-         list_paths
-           (list_dependencies lookups ~home:(Path.locate_package path) (find_instance lookups path)
-              code))
+       (fun code -> list_paths (list_dependencies lookups (find_instance lookups path) code))
        (Option.to_list (find_code lookups path)))
+
+let list_contract_formulas (contract : Tree.contract) =
+  let list_clauses requirements =
+    List.map (fun (requirement : Tree.requirement) -> requirement.clause) requirements
+  in
+  list_clauses contract.panics_unless
+  @ list_clauses contract.requires @ contract.ensures @ contract.decreases
+  @ List.map
+      (fun (cost : Tree.cost) ->
+        match cost.bound with Order_of amount | At_most amount | Exactly amount -> amount)
+      contract.costs
+  @ List.concat_map
+      (fun (_, (callback : Tree.callback)) -> callback.requires @ callback.ensures)
+      contract.callbacks
+
+let find_contract (lookups : lookups) path =
+  Option.map (fun (read : _ Parts.sourced) -> read.form) (Parts.read_contract lookups.mir path)
 
 let list_contract_dependencies (lookups : lookups) path =
   List.concat_map
-    (list_formula_dependencies lookups ~home:(Path.locate_package path) (find_instance lookups path))
+    (list_formula_dependencies lookups (find_instance lookups path))
     (Option.fold ~none:[] ~some:list_contract_formulas (find_contract lookups path))
 
+let list_inherited_contract_formulas (lookups : lookups) path =
+  List.map
+    (fun (declaration, substitution) ->
+      ( substitution,
+        Option.fold ~none:[] ~some:list_contract_formulas (find_contract lookups declaration) ))
+    ((match Interface.Impls.find_implemented_method lookups.interface path with
+       | Some implemented -> [ (implemented.declaration, implemented.implementation.substitution) ]
+       | None -> [])
+    @ List.map
+        (fun (added : Interface.Impls.added_clauses) ->
+          (added.restating_method, added.substitution))
+        (Interface.Impls.list_added_clauses lookups.interface path))
+
 let list_inherited_contract_dependencies (lookups : lookups) path =
-  match Interface.Impls.find_implemented_method lookups.interface path with
-  | Some implemented ->
-      List.concat_map
-        (list_formula_dependencies lookups ~home:(Path.locate_package path)
-           implemented.implementation.substitution)
-        (Option.fold ~none:[] ~some:list_contract_formulas
-           (find_contract lookups implemented.declaration))
-  | None -> []
+  List.concat_map
+    (fun (substitution, formulas) ->
+      List.concat_map (list_formula_dependencies lookups substitution) formulas)
+    (list_inherited_contract_formulas lookups path)
 
 let list_potential_clauses (lookups : lookups) type_ =
   match Parts.read_type_clauses lookups.mir type_ with
@@ -731,12 +685,12 @@ let list_potential_clauses (lookups : lookups) type_ =
 
 let list_invariant_dependencies lookups type_ =
   List.concat_map
-    (list_formula_dependencies lookups ~home:(Path.locate_package type_) Types.no_substitution)
+    (list_formula_dependencies lookups Types.no_substitution)
     (list_invariant_clauses lookups type_)
 
 let list_potential_dependencies lookups type_ =
   List.concat_map
-    (list_formula_dependencies lookups ~home:(Path.locate_package type_) Types.no_substitution)
+    (list_formula_dependencies lookups Types.no_substitution)
     (list_potential_clauses lookups type_)
 
 let list_field_types (interface : Interface.Lookups.t) path =
@@ -822,7 +776,7 @@ let list_instance_dependencies (lookups : lookups) (instance : Types.ty) =
             else
               list_paths
                 (List.concat_map
-                   (list_formula_dependencies lookups ~home:(Path.locate_package path) substitution)
+                   (list_formula_dependencies lookups substitution)
                    (list_invariant_clauses lookups path @ list_potential_clauses lookups path))
               @ List.concat_map
                   (fun field_type ->
@@ -913,9 +867,7 @@ let list_trait_laws (lookups : lookups) trait =
 let list_assumed_laws (lookups : lookups) path =
   let instance = find_instance lookups path in
   let list_laws substitution formulas =
-    snd
-      (collect lookups ~home:(Path.locate_package path) substitution (fun ~code:_ ~formula ->
-           List.iter formula formulas))
+    snd (collect lookups substitution (fun ~code:_ ~formula -> List.iter formula formulas))
   in
   let list_laws_of_another_source substitution formulas =
     List.map
@@ -924,20 +876,16 @@ let list_assumed_laws (lookups : lookups) path =
   in
   let of_code =
     snd
-      (collect lookups ~home:(Path.locate_package path) instance (fun ~code ~formula:_ ->
-           Option.iter code (find_code lookups path)))
+      (collect lookups instance (fun ~code ~formula:_ -> Option.iter code (find_code lookups path)))
   in
   let of_contract =
     list_laws instance
       (Option.fold ~none:[] ~some:list_contract_formulas (find_contract lookups path))
   in
   let of_inherited_contract =
-    match Interface.Impls.find_implemented_method lookups.interface path with
-    | Some implemented ->
-        list_laws_of_another_source implemented.implementation.substitution
-          (Option.fold ~none:[] ~some:list_contract_formulas
-             (find_contract lookups implemented.declaration))
-    | None -> []
+    List.concat_map
+      (fun (substitution, formulas) -> list_laws_of_another_source substitution formulas)
+      (list_inherited_contract_formulas lookups path)
   in
   let of_type_clauses =
     list_laws Types.no_substitution

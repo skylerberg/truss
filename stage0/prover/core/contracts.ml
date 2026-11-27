@@ -67,8 +67,6 @@ let list_impl_holes (lookups : Lookups.t) (key : Resolve.Names.key) =
     (lookups.interface.names.list_contained key)
 
 let has_impl_obligations (lookups : Lookups.t) trait =
-  (Interface.Definition.read_trait_interface lookups.interface trait).restated <> []
-  ||
   match lookups.interface.find_trait_header trait with
   | Some header -> header.laws <> []
   | None -> false
@@ -185,28 +183,39 @@ let find_function_contract (environment : State.environment) (path : Path.t) =
        environment path)
     (find_callee_clauses environment path)
 
-let find_restated_trait (lookups : Lookups.t) ~self_type (subtrait : Types.trait_reference)
-    (restated : Types.restated_method) =
-  List.find_opt
-    (fun (bound : Types.trait_reference) -> Path.equal bound.trait restated.declared_by)
-    (Interface.Properties.list_bound_closure lookups.interface ~self:self_type subtrait)
+let list_added_clauses (environment : State.environment) (path : Path.t) =
+  List.filter_map
+    (fun ({ restating_method; substitution; holds_when } : Interface.Impls.added_clauses) ->
+      Option.map
+        (fun (clauses : State.clauses) ->
+          ( {
+              clauses with
+              inherited = true;
+              ensures =
+                List.map
+                  (fun (clause : Mir.formula) ->
+                    { clause with holds_when = clause.holds_when @ holds_when })
+                  clauses.ensures;
+              costs =
+                List.map
+                  (fun (cost : Mir.cost) -> { cost with holds_when = cost.holds_when @ holds_when })
+                  clauses.costs;
+            },
+            substitution ))
+        (find_callee_clauses environment restating_method))
+    (Interface.Impls.list_added_clauses environment.lookups.interface path)
 
 let restates (lookups : Lookups.t) ~self_type (subtrait : Types.trait_reference)
     (trait : Types.trait_reference) ~name ~receiver =
-  let is_argument_equal (left : Types.argument) (right : Types.argument) =
-    match (left, right) with
-    | Type left, Type right -> Types.equal left right
-    | left, right -> left = right
-  in
   List.exists
     (fun (restated : Types.restated_method) ->
       restated.restated_name = name
       && restated.restated_receiver = receiver
       &&
-      match find_restated_trait lookups ~self_type subtrait restated with
-      | Some declared ->
-          Path.equal declared.trait trait.trait
-          && List.equal is_argument_equal declared.trait_arguments trait.trait_arguments
+      match
+        Interface.Impls.find_trait_restated_by lookups.interface ~self:self_type subtrait restated
+      with
+      | Some declared -> Interface.Impls.is_same_trait declared trait
       | None -> false)
     (Interface.Definition.read_trait_interface lookups.interface subtrait.trait).restated
 
@@ -250,22 +259,9 @@ let list_restated_clauses (environment : State.environment) ~packages ~self_type
     | Some interface -> interface.restated <> []
     | None -> false
   in
-  let is_proven_before_this_proof (subtrait : Types.trait_reference) =
-    match environment.proven_impl with
-    | None -> true
-    | Some (Proves_laws (proven, for_type) | Proves_restated_clauses (proven, for_type)) ->
-        (not (Path.equal subtrait.trait proven.trait))
-        && List.exists
-             (fun (required : Types.trait_reference) -> Path.equal required.trait subtrait.trait)
-             (Interface.Properties.list_bound_closure environment.lookups.interface ~self:for_type
-                proven)
-  in
   List.filter_map
     (fun (subtrait : Types.trait_reference) ->
-      if
-        is_proven_before_this_proof subtrait
-        && restates environment.lookups ~self_type subtrait trait ~name ~receiver
-      then
+      if restates environment.lookups ~self_type subtrait trait ~name ~receiver then
         Option.map
           (fun clauses -> (subtrait, clauses))
           (find_callee_clauses environment (Path.Method { owner = subtrait.trait; name; receiver }))

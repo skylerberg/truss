@@ -22,20 +22,14 @@ let translate_impl (lookups : Lookups.t) (key : Resolve.Names.key) source =
         [ { Obligation.obligations = []; holes; evaluation = None } ]
       else []
   | [] ->
-      Translate.translate_laws lookups source ~impl:key.path ~trait:interface.implements
-        ~for_type:interface.for_type
-        ~proofs:
-          (Contracts.list_law_proofs lookups (Path.locate_package key.path) interface.implements
-             interface.for_type)
-        ~at:Whole_definition
-      ::
-      (match lookups.interface.names.read_definition key with
-      | { kind = Impl { trait_; _ }; _ } ->
-          [
-            Translate.translate_restated_clauses lookups source ~impl:key.path
-              ~trait:interface.implements ~for_type:interface.for_type ~at:(Written trait_.id);
-          ]
-      | _ -> [])
+      [
+        Translate.translate_laws lookups source ~impl:key.path ~trait:interface.implements
+          ~for_type:interface.for_type
+          ~proofs:
+            (Contracts.list_law_proofs lookups (Path.locate_package key.path) interface.implements
+               interface.for_type)
+          ~at:Whole_definition;
+      ]
 
 let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
   let generics =

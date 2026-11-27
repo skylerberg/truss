@@ -245,17 +245,6 @@ let describe_promise = function
         quote_in clause;
         Text (Printf.sprintf "` %s before it returns here." verb);
       ]
-  | Restated_promise { counting; for_type; name; clause; trait; declared } ->
-      let difference, verb = describe_difference counting in
-      [
-        Text
-          (Printf.sprintf "The contract of `%s`'s `%s` may spend %s `" (Types.show for_type) name
-             difference);
-        quote_in clause;
-        Text
-          (Printf.sprintf "`, which `%s` adds to `%s.%s`, %s." (Types.show_trait trait)
-             (Types.show_trait declared) name verb);
-      ]
 
 let describe_obligation = function
   | Prover.Assertion_may_fail { clause } -> tick clause @ [ Text " may not hold." ]
@@ -509,15 +498,6 @@ let describe_obligation = function
       say
         (Printf.sprintf "The law `%s.%s` may not hold for `%s`." (Types.show_trait trait) law
            (Types.show for_type))
-  | Restated_contract { for_type; name; clause; trait; declared } ->
-      [
-        Text
-          (Printf.sprintf "The contract of `%s`'s `%s` may not imply `" (Types.show for_type) name);
-        quote_in clause;
-        Text
-          (Printf.sprintf "`, which `%s` adds to `%s.%s`." (Types.show_trait trait)
-             (Types.show_trait declared) name);
-      ]
   | Negative_potential { type_ } ->
       say
         (Printf.sprintf
@@ -589,7 +569,7 @@ let find_code : Prover.obligation -> Diagnostic.Code.prover = function
   | Invariant_may_fail _ | Preserved_invariant _ | Derived_default_invariant | Loop_invariant _
   | Visited_out_of_order | Element_count_changes ->
       Invariant
-  | Lambda_promise _ | Postcondition _ | Restated_contract _ | Callback_promise _ -> Ensures
+  | Lambda_promise _ | Postcondition _ | Callback_promise _ -> Ensures
   | Out_of_range _ -> Out_of_range
   | Divisor_may_be_zero _ -> Division
   | Division_overflow _ | Overflow _ -> Overflow
@@ -814,9 +794,6 @@ let show_construct = function
   | Hidden_variant_of type_ ->
       Printf.sprintf "a variant of `%s`, which the prover does not see" (Types.show type_)
   | Nonreturning_specification_call -> "a call in a specification that never returns"
-  | Compiler_restated_method { trait; declared_by } ->
-      Printf.sprintf "a method that `%s` restates from `%s`, which the compiler implements"
-        (Types.show_trait trait) (Path.show declared_by)
   | Literal_of type_ -> Printf.sprintf "a literal of `%s`" (Types.show type_)
   | Unreadable_function_value -> "a function the prover cannot read, used as a value"
   | String_pattern_on type_ -> Printf.sprintf "a string pattern on `%s`" (Types.show type_)

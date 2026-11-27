@@ -1,0 +1,10 @@
+use standard.list
+
+trait Drained: Cursor {
+  fn next(mut self) -> Option[Self.Element]
+    uses Self.Uses
+    ensures result is None
+}
+
+impl Drained for list.ListCursor[Element] {
+}

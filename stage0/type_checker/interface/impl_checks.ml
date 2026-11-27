@@ -182,6 +182,32 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
                   | Some evidence -> check_evidence_grants evidence))
             (Impls.list_obligations lookups ~list_bounds:(Checking.list_bounds state) trait impl
                ~self:impl.for_type);
+          List.iter
+            (fun (restated : Types.restated_method) ->
+              match
+                Option.bind
+                  (Impls.find_trait_restated_by lookups ~self:impl.for_type impl.implements restated)
+                  (fun declared ->
+                    Option.map
+                      (fun solution -> (declared, solution))
+                      (Impls.find_evidence lookups ~list_bounds:list_impl_bounds impl.for_type
+                         declared))
+              with
+              | Some (_, Evidence (Types.Impl { impl = Path.Impl { module_; _ }; _ }))
+                when module_.package = state.key.module_.package ->
+                  ()
+              | Some (declared, (Evidence _ | Built_in | Accepted _)) ->
+                  Checking.report state
+                    (Restated_apart_from_method
+                       {
+                         at;
+                         trait = impl.implements.trait;
+                         declared;
+                         name = restated.restated_name;
+                         for_type = impl.for_type;
+                       })
+              | None -> ())
+            trait.restated;
           let check_definition defined (name : Syntax.name) associated ~is_declared =
             if not is_declared then
               Checking.report state
