@@ -241,7 +241,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
   assume a clause only under the premises that the proof assumed.
   `Contracts.list_promises` is the one statement of those premises: it lists
   each clause set's `ensures` with the clause set whose `requires` they were
-  proven under.
+  proven under. The clauses that a trait adds to a restated method are
+  proven under the precondition of the method's contract, which is all that
+  the proof of the `impl` assumes, so a call and the axiom of a logic
+  function assume them under that precondition and for no other argument.
 
   | Reader | Proves | Assumes |
   |---|---|---|
