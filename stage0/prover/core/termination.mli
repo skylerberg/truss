@@ -1,4 +1,4 @@
-val enter_definition : State.frame -> State.frame
+val enter_definition : State.frame -> parameters:Mir.parameter list -> State.frame
 val reject_unreached_calls_without_decrease : State.frame -> unit
 
 val check_recursive_call :
@@ -14,7 +14,7 @@ val check_recursive_call :
 val find_induction_premise :
   State.frame ->
   State.clauses ->
-  is_self_call:bool ->
+  callee:Path.t ->
   callee_entry:State.frame ->
   argument_at:(int -> Logic.term) ->
   Logic.term option

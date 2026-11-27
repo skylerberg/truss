@@ -111,7 +111,7 @@ let tables =
     keyed_by_id "proof_group"
       ("path INTEGER PRIMARY KEY, " ^ state ^ ", representative INTEGER, members BLOB")
       [ ("proof_group_representative", "representative") ];
-    keyed_by_id "calls_without_decrease" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value BLOB") [];
+    keyed_by_id "termination" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value BLOB") [];
     keyed_by_id "aborts_outside_group" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value INTEGER") [];
     keyed_by_id "may_abort" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value INTEGER") [];
     fact_of_definition "usage_check" state;

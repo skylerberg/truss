@@ -1,0 +1,26 @@
+type Forest(trees: List[Tree])
+
+type Tree(value: Int64, children: Forest)
+
+fn tree_is_nonnegative(tree: Tree) -> Bool
+  ensures result ==> tree.value >= 0
+{
+  tree.value >= 0 && forest_is_nonnegative(tree.children)
+}
+
+fn forest_is_nonnegative(forest: Forest) -> Bool
+  ensures result ==> forall i in 0..forest.trees.length() => forest.trees.model()[i].value >= 0
+{
+  var index: UInt64 = 0
+  while index < forest.trees.length()
+    invariant index <= forest.trees.length()
+    invariant forall i in 0..index => tree_is_nonnegative(forest.trees.model()[i])
+    decreases forest.trees.length() - index
+  {
+    if !tree_is_nonnegative(forest.trees[index]) {
+      return false
+    }
+    index += 1
+  }
+  true
+}

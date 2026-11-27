@@ -800,66 +800,61 @@ let states_decreases (lookups : Call_edges.lookups) path =
   | Some { form; _ } -> form.decreases <> []
   | None -> false
 
-let list_sites (lookups : Call_edges.lookups) path =
-  match Call_edges.find_code lookups path with
-  | Some _ when states_decreases lookups path -> []
-  | None -> []
-  | Some code ->
-      let walk =
-        {
-          lookups;
-          instance = Call_edges.find_instance lookups path;
-          recorded = Site_table.create 16;
-          lambda_alternatives = Lambda_table.create 4;
-          code_number = 0;
-          lambdas = code.lambdas;
-          scope = code.body.locals;
-          count_codes = ref 1;
-        }
+let list_sites (lookups : Call_edges.lookups) ~instance (code : Tree.t) =
+  let walk =
+    {
+      lookups;
+      instance;
+      recorded = Site_table.create 16;
+      lambda_alternatives = Lambda_table.create 4;
+      code_number = 0;
+      lambdas = code.lambdas;
+      scope = code.body.locals;
+      count_codes = ref 1;
+    }
+  in
+  let start =
+    List.fold_left
+      (fun start (position, local) ->
+        assign start local [ { limit = Parameter position; is_strict = false } ])
+      Locals.empty
+      (List.mapi (fun position local -> (position, local)) code.body.parameters)
+  in
+  ignore (walk_block walk start code.body.code);
+  iter_called_statements
+    (fun statement ->
+      let origin = Call_edges.locate_call statement in
+      let record_unrelated target passage =
+        if not (Site_table.mem walk.recorded (origin, target)) then
+          record walk ~origin ~target ~passage [ [] ]
       in
-      let start =
-        List.fold_left
-          (fun start (position, local) ->
-            assign start local [ { limit = Parameter position; is_strict = false } ])
-          Locals.empty
-          (List.mapi (fun position local -> (position, local)) code.body.parameters)
-      in
-      ignore (walk_block walk start code.body.code);
-      iter_called_statements
-        (fun statement ->
-          let origin = Call_edges.locate_call statement in
-          let record_unrelated target passage =
-            if not (Site_table.mem walk.recorded (origin, target)) then
-              record walk ~origin ~target ~passage [ [] ]
-          in
-          List.iter
-            (fun (edge : Call_edges.edge) ->
-              match edge with
-              | Calls target -> record_unrelated target Direct_call
-              | Passes { argument = Dictionary; code } ->
-                  List.iter
-                    (fun target ->
-                      record_unrelated target
-                        (Dictionary { owner = find_owner target; incomparable = None }))
-                    code
-              | Passes { argument = Function_value path; code } ->
-                  List.iter (fun target -> record_unrelated target (Function_value path)) code
-              | Passes { argument = Handler; _ } -> ())
-            (Call_edges.list_statement_edges lookups.interface walk.instance statement))
-        code;
-      Site_table.fold
-        (fun (origin, target) (recorded : recorded) sites ->
-          {
-            origin;
-            target;
-            graphs =
-              List.sort_uniq compare
-                (List.concat_map (expand_graph walk ~depth:0) recorded.raw_graphs);
-            passage = recorded.passage;
-          }
-          :: sites)
-        walk.recorded []
-      |> List.sort compare
+      List.iter
+        (fun (edge : Call_edges.edge) ->
+          match edge with
+          | Calls target -> record_unrelated target Direct_call
+          | Passes { argument = Dictionary; code } ->
+              List.iter
+                (fun target ->
+                  record_unrelated target
+                    (Dictionary { owner = find_owner target; incomparable = None }))
+                code
+          | Passes { argument = Function_value path; code } ->
+              List.iter (fun target -> record_unrelated target (Function_value path)) code
+          | Passes { argument = Handler; _ } -> ())
+        (Call_edges.list_statement_edges lookups.interface walk.instance statement))
+    code;
+  Site_table.fold
+    (fun (origin, target) (recorded : recorded) sites ->
+      {
+        origin;
+        target;
+        graphs =
+          List.sort_uniq compare (List.concat_map (expand_graph walk ~depth:0) recorded.raw_graphs);
+        passage = recorded.passage;
+      }
+      :: sites)
+    walk.recorded []
+  |> List.sort compare
 
 let compose (first : graph) (second : graph) =
   normalize
@@ -941,16 +936,177 @@ let list_calls_without_decrease (nodes : (Path.t * site list) list) =
     closure []
   |> List.sort_uniq compare
 
-let decreases_lexicographically ~positions (graph : graph) =
-  let has_arc ~is_strict position =
-    List.exists
-      (fun arc ->
-        arc.source = position && arc.target = position && (arc.is_strict || not is_strict))
-      graph
+type summary = { sites : site list; ranked_parameters : int list }
+
+let is_ranked (ty : Types.ty) =
+  match Types.strip_view ty with
+  | Named _ as ty -> Option.is_none (Types.find_builtin ty)
+  | _ -> false
+
+let summarize (lookups : Call_edges.lookups) path =
+  match Call_edges.find_code lookups path with
+  | Some code when not (states_decreases lookups path) ->
+      let instance = Call_edges.find_instance lookups path in
+      {
+        sites = list_sites lookups ~instance code;
+        ranked_parameters =
+          List.concat
+            (List.mapi
+               (fun position local ->
+                 if is_ranked (Types.substitute instance code.body.locals.(local).type_) then
+                   [ position ]
+                 else [])
+               code.body.parameters);
+      }
+  | Some _ | None -> { sites = []; ranked_parameters = [] }
+
+type component = Level of int | Largest_rank of int list
+
+type verdict = {
+  calls_without_decrease : call list;
+  ranking : (Path.t * component list) list option;
+}
+
+type constraint_ = { caller : Path.t; callee : Path.t; graph : graph }
+
+let find_entry entries path =
+  Option.map snd (List.find_opt (fun (key, _) -> Path.equal key path) entries)
+
+let find_positions sets path = Option.value (find_entry sets path) ~default:[]
+
+let has_arc ~is_strict (graph : graph) source target =
+  List.exists
+    (fun (arc : arc) ->
+      arc.source = source && arc.target = target && (arc.is_strict || not is_strict))
+    graph
+
+let is_reached ~is_strict sets (decrease : constraint_) target =
+  List.exists
+    (fun source -> has_arc ~is_strict decrease.graph source target)
+    (find_positions sets decrease.caller)
+
+let rec keep_weakly_decreasing constraints sets =
+  let kept =
+    List.map
+      (fun (path, positions) ->
+        ( path,
+          List.filter
+            (fun target ->
+              List.for_all
+                (fun (decrease : constraint_) ->
+                  (not (Path.equal decrease.callee path))
+                  || is_reached ~is_strict:false sets decrease target)
+                constraints)
+            positions ))
+      sets
   in
-  let rec check = function
-    | [] -> false
-    | position :: rest ->
-        has_arc ~is_strict:true position || (has_arc ~is_strict:false position && check rest)
+  if kept = sets then sets else keep_weakly_decreasing constraints kept
+
+let decreases_strictly sets (decrease : constraint_) =
+  match find_positions sets decrease.callee with
+  | [] -> find_positions sets decrease.caller <> []
+  | targets -> List.for_all (is_reached ~is_strict:true sets decrease) targets
+
+let find_largest_ranks constraints ranked =
+  let weak = keep_weakly_decreasing constraints ranked in
+  let is_progress sets = List.exists (decreases_strictly sets) constraints in
+  if is_progress weak then Some weak
+  else
+    List.find_map
+      (fun (decrease : constraint_) ->
+        let blocking =
+          List.filter
+            (fun target -> not (is_reached ~is_strict:true weak decrease target))
+            (find_positions weak decrease.callee)
+        in
+        let sets =
+          keep_weakly_decreasing constraints
+            (List.map
+               (fun (path, positions) ->
+                 ( path,
+                   if Path.equal path decrease.callee then
+                     List.filter (fun position -> not (List.mem position blocking)) positions
+                   else positions ))
+               weak)
+        in
+        if is_progress sets then Some sets else None)
+      constraints
+
+let find_levels functions constraints =
+  let levels = Path_table.create 16 in
+  let rec find_level visiting path =
+    match Path_table.find_opt levels path with
+    | Some level -> Some level
+    | None when List.exists (Path.equal path) visiting -> None
+    | None ->
+        let level =
+          List.fold_left
+            (fun level (decrease : constraint_) ->
+              if Path.equal decrease.caller path then
+                Option.bind level (fun level ->
+                    Option.map
+                      (fun below -> max level (below + 1))
+                      (find_level (path :: visiting) decrease.callee))
+              else level)
+            (Some 0) constraints
+        in
+        Option.iter (Path_table.replace levels path) level;
+        level
   in
-  check positions
+  List.fold_right
+    (fun path found ->
+      Option.bind found (fun found ->
+          Option.map (fun level -> (path, level) :: found) (find_level [] path)))
+    functions (Some [])
+
+let find_ranking (summaries : (Path.t * summary) list) =
+  let functions = List.map fst summaries in
+  let ranked = List.map (fun (path, summary) -> (path, summary.ranked_parameters)) summaries in
+  let rec build constraints components =
+    match find_levels functions constraints with
+    | Some levels -> Some (List.rev (`Levels levels :: components))
+    | None -> (
+        match find_largest_ranks constraints ranked with
+        | Some sets ->
+            build
+              (List.filter (fun decrease -> not (decreases_strictly sets decrease)) constraints)
+              (`Largest sets :: components)
+        | None -> None)
+  in
+  Option.map
+    (fun components ->
+      List.map
+        (fun path ->
+          ( path,
+            List.map
+              (function
+                | `Levels levels -> Level (Option.value (find_entry levels path) ~default:0)
+                | `Largest sets -> Largest_rank (find_positions sets path))
+              components ))
+        functions)
+    (build
+       (List.concat_map
+          (fun (caller, summary) ->
+            List.concat_map
+              (fun (site : site) ->
+                if List.exists (Path.equal site.target) functions then
+                  List.map (fun graph -> { caller; callee = site.target; graph }) site.graphs
+                else [])
+              summary.sites)
+          summaries)
+       [])
+
+let decide (summaries : (Path.t * summary) list) =
+  let calls =
+    list_calls_without_decrease (List.map (fun (path, summary) -> (path, summary.sites)) summaries)
+  in
+  let ranking = if calls = [] then find_ranking summaries else None in
+  List.map
+    (fun (path, _) ->
+      ( path,
+        {
+          calls_without_decrease =
+            List.filter (fun (call : call) -> Path.equal call.caller path) calls;
+          ranking;
+        } ))
+    summaries

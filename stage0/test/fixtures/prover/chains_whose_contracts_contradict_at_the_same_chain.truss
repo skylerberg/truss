@@ -1,0 +1,21 @@
+type Chain =
+  | End
+  | indirect Link(value: Int64, rest: Chain)
+
+fn first(chain: Chain) -> Bool
+  ensures result == !second(chain)
+{
+  match chain {
+    End => true
+    Link(rest, ..) => second(rest)
+  }
+}
+
+fn second(chain: Chain) -> Bool
+  ensures result == first(chain)
+{
+  match chain {
+    End => true
+    Link(rest, ..) => first(rest)
+  }
+}

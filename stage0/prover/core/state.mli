@@ -50,7 +50,7 @@ type environment = {
   ranking : bool;
   terminates : bool;
   measures : Mir.formula list;
-  calls_without_decrease : Mir.Size_change.call list Lazy.t;
+  termination : Mir.Size_change.verdict Lazy.t;
   blocked_holders : string list;
   proven_laws : (Types.trait_reference * Types.ty) option;
   policy : obligation_policy;
@@ -98,7 +98,8 @@ and frame = {
   definition_entry : definition_entry option;
 }
 
-and definition_entry = { entry_frame : frame; entry_measures : Logic.term list }
+and definition_entry = { entry_measures : Logic.term list; entry_ranks : ranked_value list }
+and ranked_value = { position : int; type_ : Types.ty; value : Logic.term }
 and function_exit = { frame : frame; returned : Logic.term option; return_origin : Core.origin }
 and lent_part = { lent_frame : frame; lent_origin : Core.origin }
 and body_exits = { returns : function_exit list; lends : lent_part list }

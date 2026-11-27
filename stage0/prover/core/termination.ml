@@ -1,17 +1,42 @@
-let is_datatype ty = match ty with Types.Named _ -> Types.find_builtin ty = None | _ -> false
+let is_datatype ty =
+  match Types.strip_view ty with Named _ as ty -> Types.find_builtin ty = None | _ -> false
 
-let enter_definition (start : State.frame) =
+let list_entry_ranks (entry : State.frame) (parameters : Mir.parameter list) :
+    State.ranked_value list =
+  List.concat
+    (List.mapi
+       (fun position (parameter : Mir.parameter) ->
+         let found =
+           match parameter.local with
+           | Self -> (
+               match (entry.old_self, entry.self_type) with
+               | Some value, Some type_ -> Some (value, type_)
+               | _ -> None)
+           | local -> (
+               match
+                 ( Locals.find_opt (Core_local local) entry.old_locals,
+                   Encoding.find_local_type entry (Core_local local) )
+               with
+               | Some value, Some type_ -> Some (value, type_)
+               | _ -> None)
+         in
+         match found with
+         | Some (value, type_) when is_datatype type_ -> [ { State.position; type_; value } ]
+         | Some _ | None -> [])
+       parameters)
+
+let enter_definition (start : State.frame) ~parameters =
   let at_entry = { start with makes_obligations = false } in
   {
     start with
     definition_entry =
       Some
         {
-          entry_frame = start;
           entry_measures =
             List.map
               (fun measure -> snd (Validity.read_specification at_entry measure))
               start.environment.measures;
+          entry_ranks = list_entry_ranks start parameters;
         };
   }
 
@@ -19,24 +44,6 @@ let read_entry (frame : State.frame) =
   match frame.definition_entry with
   | Some entry -> entry
   | None -> Facts.raise_bug "a recursive call is compared before the definition is entered"
-
-let list_structural_parameters (entry : State.frame) (clauses : State.clauses) =
-  List.concat
-    (List.mapi
-       (fun index (parameter : Mir.parameter) ->
-         match parameter.local with
-         | Self -> (
-             match (entry.old_self, entry.self_type) with
-             | Some value, Some ty when is_datatype ty -> [ (parameter, ty, value, index) ]
-             | _ -> [])
-         | local -> (
-             match
-               ( Locals.find_opt (Core_local local) entry.old_locals,
-                 Encoding.find_local_type entry (Core_local local) )
-             with
-             | Some value, Some ty when is_datatype ty -> [ (parameter, ty, value, index) ]
-             | _ -> []))
-       clauses.parameters)
 
 let reached_calls : (Core.origin * Path.t) list ref Private_state.key =
   Private_state.make_key (fun () -> ref [])
@@ -66,7 +73,7 @@ let check_size_change (frame : State.frame) location ~origin ~callee =
     match
       List.find_opt
         (fun (call : Mir.Size_change.call) -> call.origin = origin && Path.equal call.callee callee)
-        (Lazy.force frame.environment.calls_without_decrease)
+        (Lazy.force frame.environment.termination).calls_without_decrease
     with
     | Some call ->
         let reached = Private_state.read frame.environment.memos reached_calls in
@@ -89,7 +96,7 @@ let reject_unreached_calls_without_decrease (frame : State.frame) =
           (not (List.mem (call.origin, call.callee) reached))
           && not (is_rejected_at_its_call environment call)
         then oblige_call_without_decrease frame (Facts.locate frame call.origin) call)
-      (Lazy.force environment.calls_without_decrease)
+      (Lazy.force environment.termination).calls_without_decrease
   end
 
 let rec pair_measures before after =
@@ -127,46 +134,68 @@ let check_recursive_call (frame : State.frame) location ~origin ~path (clauses :
         (Logic.Boolean false)
   | [], _ :: _ | _ :: _, [] -> ()
 
-let decreases_lexicographically_at_every_call (environment : State.environment) ~positions =
-  match environment.lookups.list_recursion_group environment.node with
-  | [ member ] when Path.equal member environment.node ->
-      List.for_all
-        (fun (site : Mir.Size_change.site) ->
-          (not (Path.equal site.target environment.node))
-          || List.for_all (Mir.Size_change.decreases_lexicographically ~positions) site.graphs)
-        (environment.lookups.list_size_changes environment.node)
-  | _ -> false
-
-let find_structural_premise (frame : State.frame) (clauses : State.clauses)
-    ~(callee_entry : State.frame) ~argument_at =
-  let entry = (read_entry frame).entry_frame in
-  let is_passed_at_its_type ((parameter : Mir.parameter), ty, _, _) =
-    Types.equal
-      (Encoding.substitute_type entry ty)
-      (Encoding.substitute_type callee_entry parameter.type_)
-  in
-  match List.filter is_passed_at_its_type (list_structural_parameters entry clauses) with
-  | [] -> None
-  | parts
-    when decreases_lexicographically_at_every_call frame.environment
-           ~positions:(List.map (fun (_, _, _, index) -> index) parts) ->
-      let before =
-        List.map (fun (_, ty, value, _) -> Models.rank frame.environment frame.query ty value) parts
-      in
-      let after =
+let compute_rank (frame : State.frame) (ranks : State.ranked_value list)
+    (component : Mir.Size_change.component) =
+  match component with
+  | Level level -> Some (Logic.int level)
+  | Largest_rank positions -> (
+      let found =
         List.map
-          (fun (_, ty, _, index) ->
-            Models.rank frame.environment frame.query ty (argument_at index))
-          parts
+          (fun position ->
+            List.find_opt (fun (rank : State.ranked_value) -> rank.position = position) ranks)
+          positions
       in
-      Some (Logic.decreases_lexicographically before after)
-  | _ -> None
+      if List.exists Option.is_none found then None
+      else
+        match
+          List.map
+            (fun (rank : State.ranked_value) ->
+              Models.rank frame.environment frame.query (Types.erase_views rank.type_) rank.value)
+            (List.filter_map Fun.id found)
+        with
+        | [] -> Some (Logic.int 0)
+        | first :: rest -> Some (Logic.add (Logic.int 1) (List.fold_left Logic.larger first rest)))
 
-let find_induction_premise (frame : State.frame) (clauses : State.clauses) ~is_self_call
+let rec compare_ranks before after =
+  match (before, after) with
+  | Logic.Integer earlier :: before, Logic.Integer later :: after ->
+      if Z.lt later earlier then Some (Logic.Boolean true)
+      else if Z.gt later earlier then None
+      else compare_ranks before after
+  | [], [] -> None
+  | before, after -> Some (Logic.decreases_lexicographically before after)
+
+let find_ranked_premise (frame : State.frame) (clauses : State.clauses) ~callee
+    ~(callee_entry : State.frame) ~argument_at =
+  let compute path ranks ranking =
+    Option.bind
+      (Option.map snd (List.find_opt (fun (member, _) -> Path.equal member path) ranking))
+      (fun components ->
+        let computed = List.map (compute_rank frame ranks) components in
+        if List.exists Option.is_none computed then None else Some (List.filter_map Fun.id computed))
+  in
+  let callee_ranks =
+    List.concat
+      (List.mapi
+         (fun position (parameter : Mir.parameter) ->
+           let type_ = Encoding.substitute_type callee_entry parameter.type_ in
+           if is_datatype type_ then [ { State.position; type_; value = argument_at position } ]
+           else [])
+         clauses.parameters)
+  in
+  Option.bind (Lazy.force frame.environment.termination).ranking (fun ranking ->
+      match
+        ( compute frame.environment.node (read_entry frame).entry_ranks ranking,
+          compute callee callee_ranks ranking )
+      with
+      | Some before, Some after -> compare_ranks before after
+      | _ -> None)
+
+let find_induction_premise (frame : State.frame) (clauses : State.clauses) ~callee
     ~(callee_entry : State.frame) ~argument_at =
   match (frame.environment.measures, clauses.decreases) with
-  | [], [] when callee_entry.terminates && is_self_call ->
-      find_structural_premise frame clauses ~callee_entry ~argument_at
+  | [], [] when callee_entry.terminates ->
+      find_ranked_premise frame clauses ~callee ~callee_entry ~argument_at
   | _ :: _, (_ :: _ as callee_measures) ->
       Some (compare_measures frame ~callee_entry callee_measures)
   | [], _ | _, [] -> None

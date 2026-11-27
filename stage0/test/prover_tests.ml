@@ -399,6 +399,12 @@ let () =
         "prover.termination";
       expect_codes Fixtures.Prover.mutually_recursive_functions_whose_ensures_contradict_each_other
         [ "prover.termination"; "prover.termination" ]);
+  Harness.test "functions that recurse on parts of each other assume each other's contracts below"
+    (fun () -> expect_proven Fixtures.Prover.trees_and_forests_using_each_others_contracts_on_parts);
+  Harness.test "functions that recurse on parts do not assume each other's contracts at their entry"
+    (fun () ->
+      expect_codes Fixtures.Prover.chains_whose_contracts_contradict_at_the_same_chain
+        [ "prover.ensures"; "prover.ensures" ]);
   Harness.test "a recursive call in a requires is compared with the entry measure" (fun () ->
       expect_not_proven Fixtures.Prover.recursive_function_whose_requires_calls_itself
         "prover.termination");

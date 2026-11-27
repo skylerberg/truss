@@ -116,7 +116,7 @@ type fact =
   | Size_changes
   | Recursion_group
   | Proof_group
-  | Calls_without_decrease
+  | Termination
   | Aborts_outside_group
   | May_abort
   | Usage_check
@@ -156,7 +156,7 @@ let facts =
     Size_changes;
     Recursion_group;
     Proof_group;
-    Calls_without_decrease;
+    Termination;
     Aborts_outside_group;
     May_abort;
     Usage_check;
@@ -312,7 +312,7 @@ let show_fact = function
   | Size_changes -> "size-change graphs"
   | Recursion_group -> "recursion group"
   | Proof_group -> "proof group"
-  | Calls_without_decrease -> "calls without a decrease"
+  | Termination -> "termination of the recursion group"
   | Aborts_outside_group | May_abort -> "abort sites"
   | Usage_check -> "usage check"
   | Ownership -> "ownership check"
@@ -353,7 +353,7 @@ let is_signature = function
   | Type_facts | Signature_check | Checked_interface | Contract | Contract_mir ->
       true
   | Resolved _ | Grant | Body_form | Body_tables | Run_forever | Ownership_modes | Body_mir
-  | Generated_mir | Callees | Size_changes | Recursion_group | Proof_group | Calls_without_decrease
+  | Generated_mir | Callees | Size_changes | Recursion_group | Proof_group | Termination
   | Aborts_outside_group | May_abort | Usage_check | Ownership | Dependency_use | Proof | Lowered
   | Test_key | Evaluation | Test_run | Unit _ ->
       false
@@ -364,9 +364,9 @@ let list_read_targets = function
   | ( Resolved _ | Grant | Trait_header | Constant_value | Header | Elaboration | Derived_interface
     | Type_facts | Checked_interface | Contract | Body_form | Body_tables | Run_forever
     | Ownership_modes | Body_mir | Contract_mir | Generated_mir | Callees | Size_changes
-    | Recursion_group | Proof_group | Calls_without_decrease | Aborts_outside_group | May_abort
-    | Usage_check | Ownership | Dependency_use | Proof | Lowered | Test_key | Evaluation | Test_run
-    | Unit _ ) as fact ->
+    | Recursion_group | Proof_group | Termination | Aborts_outside_group | May_abort | Usage_check
+    | Ownership | Dependency_use | Proof | Lowered | Test_key | Evaluation | Test_run | Unit _ ) as
+    fact ->
       [ fact ]
 
 let lookups_of_definition = [ Imports; Declaration; Tree; Text; Place; Container; Contained ]

@@ -8,7 +8,9 @@ type site = {
   passage : Catalog.Prover.passage;
 }
 
-val list_sites : Call_edges.lookups -> Path.t -> site list
+type summary = { sites : site list; ranked_parameters : int list }
+
+val summarize : Call_edges.lookups -> Path.t -> summary
 
 type call = {
   caller : Path.t;
@@ -17,5 +19,11 @@ type call = {
   passage : Catalog.Prover.passage;
 }
 
-val list_calls_without_decrease : (Path.t * site list) list -> call list
-val decreases_lexicographically : positions:int list -> graph -> bool
+type component = Level of int | Largest_rank of int list
+
+type verdict = {
+  calls_without_decrease : call list;
+  ranking : (Path.t * component list) list option;
+}
+
+val decide : (Path.t * summary) list -> (Path.t * verdict) list

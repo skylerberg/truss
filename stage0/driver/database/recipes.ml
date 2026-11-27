@@ -411,7 +411,7 @@ let run_list_calls database (row : Store.definition) =
       let note marker target = recorder.note marker (Entity Definition) (Ids.of_path target) "" in
       List.iter (note Calls) callees;
       List.iter (note Assumes) (Mir.Call_edges.list_assumed_paths lookups path);
-      (Value { Facts.callees; size_changes = Mir.Size_change.list_sites lookups path }, []))
+      (Value { Facts.callees; size_changes = Mir.Size_change.summarize lookups path }, []))
 
 module Integer_node = struct
   type t = int
@@ -478,13 +478,13 @@ let group_recursion (database : Tracker.t) ~is_node (rows : Store.definition lis
                       (List.sort Path.compare (List.filter_map (Hashtbl.find_opt paths) members)))
                   (Hashtbl.find_opt groups node)))
         in
-        let calls_without_decrease = Hashtbl.create 16 in
-        let list_calls_without_decrease members =
-          match Hashtbl.find_opt calls_without_decrease members with
-          | Some calls -> calls
+        let verdicts = Hashtbl.create 16 in
+        let decide members =
+          match Hashtbl.find_opt verdicts members with
+          | Some decided -> decided
           | None ->
-              let calls =
-                Mir.Size_change.list_calls_without_decrease
+              let decided =
+                Mir.Size_change.decide
                   (List.filter_map
                      (fun member ->
                        Option.map
@@ -494,33 +494,33 @@ let group_recursion (database : Tracker.t) ~is_node (rows : Store.definition lis
                                Tracker.find database Tracker.untracked Facts.size_changes
                                  (Path.locate_package path) ~id:member
                              with
-                             | Some (Value sites) -> sites
-                             | Some (Failed | Blocked) | None -> [] ))
+                             | Some (Value summary) -> summary
+                             | Some (Failed | Blocked) | None ->
+                                 { Mir.Size_change.sites = []; ranked_parameters = [] } ))
                          (Hashtbl.find_opt paths member))
                      members)
               in
-              Hashtbl.replace calls_without_decrease members calls;
-              calls
+              Hashtbl.replace verdicts members decided;
+              decided
         in
-        let write_calls_without_decrease node =
+        let write_termination node =
           ignore
-            (Tracker.write database Facts.calls_without_decrease ~id:node
-               (Option.map
-                  (fun members : Mir.Size_change.call list Tracker.outcome ->
-                    let caller = Hashtbl.find_opt paths node in
-                    Value
-                      (List.filter
-                         (fun (call : Mir.Size_change.call) ->
-                           Option.fold ~none:false ~some:(Path.equal call.caller) caller)
-                         (list_calls_without_decrease members)))
-                  (Hashtbl.find_opt recursion_groups node)))
+            (Tracker.write database Facts.termination ~id:node
+               (Option.bind (Hashtbl.find_opt recursion_groups node) (fun members ->
+                    Option.bind (Hashtbl.find_opt paths node) (fun path ->
+                        Option.map
+                          (fun verdict : Mir.Size_change.verdict Tracker.outcome -> Value verdict)
+                          (Option.map snd
+                             (List.find_opt
+                                (fun (member, _) -> Path.equal member path)
+                                (decide members)))))))
         in
         List.iter
           (fun node ->
             ignore (Store.unmark_stale database.store ~stage:rank ~id:node);
             write Facts.recursion_group recursion_groups node;
             write Facts.proof_group proof_groups node;
-            write_calls_without_decrease node)
+            write_termination node)
           targets
       end)
     (Store.list_project database.store)

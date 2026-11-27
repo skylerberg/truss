@@ -193,7 +193,7 @@ let generated_mir : (Mir.body_part * Mir.contract_part) Tracker.fact =
     ~encode:(fun (body, contract) -> [ Tracker.marshal body; Tracker.marshal contract ])
     ~decode:(fun cells -> (Tracker.unmarshal cells.(0), Tracker.unmarshal cells.(1)))
 
-type call_node = { callees : Path.t list; size_changes : Mir.Size_change.site list }
+type call_node = { callees : Path.t list; size_changes : Mir.Size_change.summary }
 
 let call_node : call_node Tracker.fact =
   Tracker.make_fact ~stage:List_calls ~table:"call_node" ~id_column:"path" ~fixed:[]
@@ -209,7 +209,7 @@ let make_call_node_view target column =
 
 let callees : Path.t list Tracker.view = make_call_node_view Callees "callees"
 
-let size_changes : Mir.Size_change.site list Tracker.view =
+let size_changes : Mir.Size_change.summary Tracker.view =
   make_call_node_view Size_changes "size_changes"
 
 let make_group ~table target : Path.t list Tracker.fact =
@@ -225,9 +225,8 @@ let make_group ~table target : Path.t list Tracker.fact =
 let recursion_group = make_group ~table:"recursion_group" Recursion_group
 let proof_group = make_group ~table:"proof_group" Proof_group
 
-let calls_without_decrease : Mir.Size_change.call list Tracker.fact =
-  make_marshaled ~stage:Group_recursion ~table:"calls_without_decrease" ~id_column:"path"
-    Calls_without_decrease
+let termination : Mir.Size_change.verdict Tracker.fact =
+  make_marshaled ~stage:Group_recursion ~table:"termination" ~id_column:"path" Termination
 
 let make_abort_fact ~table target : bool Tracker.fact =
   Tracker.make_fact ~stage:Find_aborts ~table ~id_column:"path" ~fixed:[]

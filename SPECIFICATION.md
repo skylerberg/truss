@@ -1308,6 +1308,15 @@ fn serve(listener: mut Listener)
   `self.children == other.children` passes the `impl` of `Equal` for `Tree`
   to the list's `equal`, which calls it on elements of the two lists, so the
   recursion ends.
+- **A recursion that ends without `decreases` is an induction over a
+  ranking.** The ranking is built from the cycles of calls: a list of
+  components compared in order, each the largest size among some
+  parameters of each function, or a fixed level of each function, such that
+  every call of the cycles makes the list smaller. The proof of a function
+  in the cycles assumes the contract of a function that it reaches for
+  arguments whose ranking is below its own, as with a written `decreases`.
+  Where no such ranking is found, the proof assumes a contract only at its
+  calls.
 
 ### Cost clauses
 

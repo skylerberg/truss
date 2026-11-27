@@ -137,9 +137,8 @@ let find_smaller_than_entry (frame : State.frame) (callee_clauses : State.clause
   match group_member with
   | None -> Some (Logic.Boolean true)
   | Some member ->
-      Termination.find_induction_premise frame callee_clauses
-        ~is_self_call:(Path.equal member frame.environment.node)
-        ~callee_entry ~argument_at:(List.nth inputs)
+      Termination.find_induction_premise frame callee_clauses ~callee:member ~callee_entry
+        ~argument_at:(List.nth inputs)
 
 let state_with_trigger (outer : State.frame) (application : application) (contract : State.contract)
     ~substitution_of ~result_type ~group_member ~is_triggered =

@@ -101,7 +101,7 @@ Each table's key is the definition's id. `state` is `value`, `failed`, or
 `blocked`. A fact that a pass reads by a path alone, with no module and
 ordinal, is keyed by the id of the path, which `definition.path` holds:
 `type_facts`, `constant_value`, `derived_interface`, `generated_mir`,
-`call_node`, `recursion_group`, `proof_group`, `calls_without_decrease`,
+`call_node`, `recursion_group`, `proof_group`, `termination`,
 `aborts_outside_group`, and `may_abort`. Such a fact is in the
 database of the package that declares the definition. A method written on a
 type of another package is an error, and its path names the other package,
@@ -125,7 +125,7 @@ generated_mir   (definition, state, body, contract)
 call_node       (definition, state, kind, callees, size_changes)
 recursion_group (definition, state, representative, members)
 proof_group     (definition, state, representative, members)
-calls_without_decrease (definition, state, value)
+termination     (definition, state, value)
 aborts_outside_group (definition, state, value)
 may_abort            (definition, state, value)
 usage_check     (definition, state)
@@ -248,7 +248,7 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Build MIR | Definition | `Mir.make_body_part`, `Mir.make_contract_part` | The body's and contract's forms | `body_mir`, `contract_mir` |
 | Generate MIR | Derived method | `Infer.derive_form` | Interfaces and contracts | `generated_mir` |
 | List calls | Definition, with the synthesized methods and derived impls | `Mir.Call_edges.list_path_edges`, `Mir.Call_edges.list_assumed_paths`, `Mir.Size_change.list_sites` | MIR and interfaces | `call_node` (callees and size-change graphs), `calls` and `assumes` edges |
-| Group recursion | The definitions whose `calls` or `assumes` edges or size-change graphs changed, and their groups | Strongly connected components, once over the `calls` edges and once over both; for each recursion group, `Mir.Size_change.list_calls_without_decrease` over its members' graphs | The definitions that both reach and are reached by a changed one, the edges among them, and the size-change graphs of the members of each recursion group | `recursion_group`, `proof_group`, `calls_without_decrease` |
+| Group recursion | The definitions whose `calls` or `assumes` edges or size-change graphs changed, and their groups | Strongly connected components, once over the `calls` edges and once over both; for each recursion group, `Mir.Size_change.decide` over its members' graphs | The definitions that both reach and are reached by a changed one, the edges among them, and the size-change graphs of the members of each recursion group | `recursion_group`, `proof_group`, `termination` |
 | Find aborts | Path, a definition's callees before it | Whether the code of the definition that runs holds a call of `intrinsic.crash` or of an intrinsic that allocates, or calls a definition outside its recursion group that may abort, and the trait methods that it or such a callee calls through a bound. A storage of capacity zero is no allocation. A specification-only definition does neither. Once the members of a group are computed, whether any of them does, written for each member. | The definition's MIR and signature, its `recursion_group`, and its callees' `may_abort` | `aborts_outside_group`, `may_abort` |
 | Check bodies | Definition | `Usage.check`, `Ownership.check` | The body's tables and `uses_run_forever`, the definition's `recursion_group`, its MIR, and its ownership modes | `usage_check`, `ownership` |
 | Check an impl, a type | Definition | `Package_checks.run` with `Sealed`, `Impl`, or `Type` | Interfaces | Diagnostics |
@@ -256,7 +256,7 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Check a test | Test | `Package_checks.run` with `Test` | The tests of its package that have its name | Diagnostics |
 | Check unexported | Function, method, constant, or member constant, with the other stale units of the drain | `Package_checks.classify_uses`, then `Package_checks.run` with `Unexported` | The `references` edges into the definition, one user at a time, and the declaration of each user | Diagnostics |
 | Check a dependency | Dependency | `Package_checks.run` with `Dependency` | Whether a body of the package references the dependency | `dependency_use` |
-| Prove | Definition | `Prover.prove` | MIR, contracts, `ownership`, `recursion_group`, `proof_group`, `calls_without_decrease`, its own size-change graphs, the `may_abort` of its callees and of the `impl` methods and functions passed to them | `proof`, `hole`, `claims` edges to the items of its evaluations |
+| Prove | Definition | `Prover.prove` | MIR, contracts, `ownership`, `recursion_group`, `proof_group`, `termination`, the `may_abort` of its callees and of the `impl` methods and functions passed to them | `proof`, `hole`, `claims` edges to the items of its evaluations |
 | Decide | Definition | `Prover.pose`, the solver, `Prover.list_states` | The proof, the results of running its evaluations, and the outputs of the unit's own runs of Z3 | `verdict`, `solver_run` |
 | Lower | Item | `Lowering.lower`, `Lowering.check_calls` | MIR and interfaces; the callees of the item's definition and of each callee | `lowered`, `references` edges to the items its code names |
 | Key tests | Item, with the items of its reference cycle | `Lowering.derive_test_keys` | `lowered`, and the test keys of the items it references | `test_key` |

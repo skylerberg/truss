@@ -65,7 +65,7 @@ type fact =
   | Size_changes
   | Recursion_group
   | Proof_group
-  | Calls_without_decrease
+  | Termination
   | Aborts_outside_group
   | May_abort
   | Usage_check

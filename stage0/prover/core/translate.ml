@@ -14,9 +14,7 @@ let make_environment ?node ?(condition = []) ?(keeps_termination = true) ?(keeps
     ranking = terminates && measures = [] && lookups.list_recursion_group node <> [];
     terminates;
     measures;
-    calls_without_decrease =
-      (if terminates && measures = [] then lazy (lookups.list_calls_without_decrease node)
-       else lazy []);
+    termination = lazy (lookups.find_termination node);
     blocked_holders = Option.value blocked_holders ~default:[];
     proven_laws;
     policy = Obligations.make_policy ~keeps_termination ~keeps_failures ~panic_condition;
@@ -372,7 +370,7 @@ let bind_entry (run : run) (query : Query.t) (source : State.source) ~path ~subs
              (List.nth_opt parameters position))
          contract.callbacks)
   in
-  let start = Termination.enter_definition start in
+  let start = Termination.enter_definition start ~parameters in
   let trait_declaration =
     match (Interface.Impls.find_implemented_method lookups.interface path, path) with
     | Some { declaration; _ }, _ -> Some declaration

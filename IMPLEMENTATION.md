@@ -319,7 +319,8 @@ develop as well as make it easier to bootstrap the compiler in parts.
   Its domain is a condition under which the definition returns: valid
   arguments, the precondition, the Panic condition, and, for a
   callee in the recursion group of the definition being proven, arguments
-  below the entry measure, which is the induction hypothesis. A call that
+  below the entry in the group's measure or ranking, which is the induction
+  hypothesis. A call that
   returned gives its `ensures` without the Panic condition, since
   `uses Panic unless C` says that `C` rules a panic out, not that a return
   implies `C`.
@@ -409,27 +410,34 @@ develop as well as make it easier to bootstrap the compiler in parts.
   that parametricity gives: one for each way of choosing, for each
   parameter of the code, an argument of the generic function that holds the
   type parameter. The List calls stage stores the graphs with the call
-  edges. The Group recursion stage, once for each group, closes the graphs
-  of the group's members without `decreases` under composition with
-  `Size_change.list_calls_without_decrease`, which lists the calls on a
-  cycle whose idempotent graph has no strict self-arc, and writes each
-  member's calls as its `calls_without_decrease`; a change to a member's
+  edges. The Group recursion stage, once for each group, decides the group
+  with `Size_change.decide`: it closes the graphs of the members without
+  `decreases` under composition, lists the calls on a cycle whose
+  idempotent graph has no strict self-arc, builds the ranking below, and
+  writes each member's part as its `termination`; a change to a member's
   graphs makes the group recompute, as a change to its call edges does.
   Each member's proof reports those calls where it reads them, under the
   condition of their path, and at the end of the proof the calls that it
   did not read. A
   recursion with `decreases` compares the measure of the call with the
   entry of the definition being proven. The axiom of a callee in the
-  recursion group takes a comparison as a premise: the measure where the
-  functions state one, and the order of the definition's structural
-  parameters only where the definition is alone in its group and every one
-  of its calls decreases in that order, since an induction hypothesis needs
-  one well-founded order that contains every call. It also holds the
-  measure of a loop. Its state is the calls without a decrease of the
-  definition, a lazy field of the environment, and the calls that the proof
-  has read, private state of the environment; `Termination.enter_definition` gives
-  the start frame the entry of the definition, `definition_entry`, which
-  every later frame carries.
+  recursion group takes a comparison as a premise, the induction hypothesis,
+  which must use one well-founded order that every call of the group
+  decreases, since a call assumes its callee's contract as well: the measure
+  where the functions state one, and otherwise the group's ranking. The
+  Group recursion stage builds the ranking from the size-change graphs with
+  `Size_change.decide`: a lexicographic tuple whose components are, for each
+  member, the largest rank of a set of its parameters or a level, the form
+  that Isabelle's size-change method certifies. Each component is chosen
+  so that every remaining call decreases it weakly and some call strictly;
+  the calls it decreases strictly are removed; a level orders the calls left
+  once they form no cycle. A group for which this finds no ranking gets no
+  hypothesis beyond its calls. It also holds the measure of a loop. Its
+  state is the group's verdict, a lazy field of the environment, and the
+  calls that the proof has read, private state of the environment;
+  `Termination.enter_definition` gives the start frame the entry of the
+  definition, `definition_entry`: its measures and the ranks of its
+  parameters, which every later frame carries.
 - **`Cycles` reads the recursion group and the proof group, and rejects a
   proof that assumes a fact whose own proof assumes it back.** Every fact
   that a proof takes from another definition is an edge of the proof graph,
