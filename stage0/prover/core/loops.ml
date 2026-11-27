@@ -92,16 +92,13 @@ let list_validity_obligations (entry : State.frame) (changed : State.changed_par
   List.filter_map
     (fun (root, root_description) ->
       match Encoding.find_root entry root with
-      | Some (ty, before) -> (
-          match Validity.make_validity entry ~assuming:false ~deep:true ty before with
-          | Logic.Boolean true -> None
-          | valid ->
-              Some
-                ( root_description,
-                  ty,
-                  valid,
-                  fun (at : State.frame) -> Option.map snd (Encoding.find_root at root) ))
-      | None -> None)
+      | Some (ty, before) when Validity.has_invariants entry.environment ty ->
+          Some
+            ( root_description,
+              ty,
+              Validity.make_validity entry ~assuming:true ty before,
+              fun (at : State.frame) -> Option.map snd (Encoding.find_root at root) )
+      | Some _ | None -> None)
     (List.sort_uniq compare
        (List.map (fun (part : State.changed_part) -> (part.root, part.root_description)) changed))
 

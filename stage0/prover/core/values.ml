@@ -269,12 +269,12 @@ let rec find_abstracted_selection query term =
         (Query.find_argument_sorts query callee)
   | _ -> None
 
-let assume_field_range_of_every_result (environment : State.environment) query ty variant field
+let state_field_range_of_every_result (environment : State.environment) query ty variant field
     field_type term =
   match find_abstracted_selection query term with
-  | Some (parameters, abstracted) -> (
+  | Some (parameters, abstracted) ->
       let selection = Encoding.select_field environment ty variant field abstracted in
-      match Encoding.make_in_range field_type selection with
+      (match Encoding.make_in_range field_type selection with
       | Logic.Boolean true -> ()
       | range ->
           Query.run_once query (Field_in_range selection) (fun () ->
@@ -286,15 +286,20 @@ let assume_field_range_of_every_result (environment : State.environment) query t
                 | None -> range
               in
               Query.add_theorem query ~because:Lemma
-                (Logic.forall ~trigger:[ selection ] (parameters, range))))
-  | None -> ()
+                (Logic.forall ~trigger:[ selection ] (parameters, range))));
+      true
+  | None -> false
 
 let project_field (frame : State.frame) ty variant field field_type term =
   let part = Encoding.select_field frame.environment ty variant field term in
-  Contract_axioms.assume_typed frame (Encoding.make_in_range field_type part);
+  let range = Encoding.make_in_range field_type part in
+  let is_stated_of_every_result () =
+    state_field_range_of_every_result frame.environment frame.query ty variant field field_type term
+  in
   if Logic.mentions (List.map (fun (name, _, _) -> name) frame.binders) term then
-    assume_field_range_of_every_result frame.environment frame.query ty variant field field_type
-      term;
+    ignore (is_stated_of_every_result ());
+  if not (Contract_axioms.is_typing_fact frame range && is_stated_of_every_result ()) then
+    Contract_axioms.assume_typed frame range;
   if frame.environment.ranking then begin
     Facts.assume frame
       (Logic.less

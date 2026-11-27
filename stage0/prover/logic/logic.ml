@@ -6,6 +6,7 @@ module Symbol = struct
     | Variable of { label : string; numbers : int list }
     | Function of { callee : Path.t; type_arguments : Types.argument list }
     | Limited of { callee : Path.t; type_arguments : Types.argument list }
+    | Can_call of { callee : Path.t; type_arguments : Types.argument list }
     | Function_value of { callee : Path.t; type_arguments : Types.argument list }
     | Constant of { path : Path.t; type_arguments : Types.argument list }
     | Evaluated of evaluation
@@ -22,6 +23,7 @@ module Symbol = struct
     | Callback_ensures of sort list
     | Equal of Types.ty
     | Valid of Types.ty
+    | Hidden_invariants of Types.ty
     | Rank of Types.ty
     | Capacity of Types.ty
     | Range_of of Types.ty
@@ -236,6 +238,8 @@ let rec show_symbol : symbol -> string = function
       "function." ^ Path.show callee ^ show_type_arguments type_arguments
   | Limited { callee; type_arguments } ->
       "limited." ^ Path.show callee ^ show_type_arguments type_arguments
+  | Can_call { callee; type_arguments } ->
+      "can_call." ^ Path.show callee ^ show_type_arguments type_arguments
   | Function_value { callee; type_arguments } ->
       "named." ^ Path.show callee ^ show_type_arguments type_arguments
   | Constant { path; type_arguments } ->
@@ -262,6 +266,7 @@ let rec show_symbol : symbol -> string = function
   | Callback_ensures sorts -> String.concat "." ("ensures" :: List.map show_sort sorts)
   | Equal ty -> "equal." ^ Types.show ty
   | Valid ty -> "valid." ^ Types.show ty
+  | Hidden_invariants ty -> "hidden_invariants." ^ Types.show ty
   | Rank ty -> "rank." ^ Types.show ty
   | Capacity ty -> "capacity." ^ Types.show ty
   | Range_of sequence -> "range_of." ^ Types.show sequence
@@ -395,6 +400,48 @@ let greater left right = Operation (Greater, [ left; right ])
 let greater_equal left right = Operation (Greater_equal, [ left; right ])
 let conjunction terms = List.fold_left ( &&& ) (Boolean true) terms
 let disjunction terms = List.fold_left ( ||| ) (Boolean false) terms
+
+let rec list_condition_conjuncts = function
+  | Boolean true -> []
+  | Operation (And, [ outer; inner ]) -> list_condition_conjuncts outer @ [ inner ]
+  | condition -> [ condition ]
+
+let nest_under_conditions facts =
+  let split = function
+    | Operation (Implies, [ condition; fact ]) -> (list_condition_conjuncts condition, fact)
+    | fact -> ([], fact)
+  in
+  let rec nest stated entries =
+    let unconditional =
+      List.rev
+        (List.fold_left
+           (fun retained -> function
+             | [], fact when not (List.mem fact stated || List.mem fact retained) ->
+                 fact :: retained
+             | _ -> retained)
+           [] entries)
+    in
+    let stated = unconditional @ stated in
+    let groups =
+      List.fold_left
+        (fun groups entry ->
+          match entry with
+          | [], _ -> groups
+          | first :: rest, fact -> (
+              match List.find_opt (fun (key, _) -> key == first || key = first) groups with
+              | Some (_, members) ->
+                  members := (rest, fact) :: !members;
+                  groups
+              | None -> (first, ref [ (rest, fact) ]) :: groups))
+        [] entries
+    in
+    conjunction
+      (unconditional
+      @ List.rev_map
+          (fun (first, members) -> first ==> nest (first :: stated) (List.rev !members))
+          groups)
+  in
+  nest [] (List.map split facts)
 
 let truncated_divide left right =
   let is_nonnegative value = greater_equal value (Integer Z.zero) in
@@ -630,6 +677,7 @@ let list_triggers ~is_triggering variables body =
         (not (mentions names term)) && is_matchable term
   in
   let is_candidate = function
+    | Apply ((Symbol.Can_call _ | Symbol.Valid _), _) -> false
     | Apply (name, _ :: _) as term ->
         is_triggering name && mentions names term && is_trigger_term term
     | _ -> false

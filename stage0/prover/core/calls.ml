@@ -393,7 +393,7 @@ let call_contract (frame : State.frame) (site : Invocation.site) (callee : Calle
   if not is_unspecified_application then
     Option.iter
       (fun { application; arguments; _ } ->
-        Contract_axioms.assume_hypotheses after application ~arguments)
+        Contract_axioms.assume_can_call after application ~arguments)
       applied;
   let returned = Option.value defining_term ~default:result in
   match (contract.result_kind, callee.lends) with

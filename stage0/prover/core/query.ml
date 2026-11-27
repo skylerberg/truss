@@ -60,7 +60,7 @@ let declare query (declaration : Logic.declaration) =
   | Datatype _ -> invalid_arg "Query.declare: a datatype is derived from its sort"
 
 let find_argument_sorts query symbol = Tables.Symbol_table.find_opt query.declared symbol
-let list_defined_symbols query = List.of_seq (Tables.Symbol_table.to_seq_keys query.definitions)
+let is_defined query symbol = Tables.Symbol_table.mem query.definitions symbol
 let add_fact query fact = query.facts <- Fact_list.add fact query.facts
 let assume query ~under fact = add_fact query (Logic.( ==> ) under fact)
 

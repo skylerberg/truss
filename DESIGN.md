@@ -1417,6 +1417,8 @@ the start.
 | Universal introduction is a theorem call in a quantifier's body, not a statement of its own. | The prover already reads a call in a quantifier's body for each value of the binder. The quantifier states the conclusion where a reader sees it, and a statement form would be a second spelling of the same proof. |
 | A proof is a result of its own. | An edit to a proof re-checks proofs, with no rebuild of the program and no rerun of tests. A reviewer trusts a checked proof without reading it, and reads only signatures. |
 | There is no `assume`. | A missing proof that an addition cannot overflow would allow a failure that the signature does not show. A claim that is not ready is left out of the signature. |
+| A logic function's axiom holds where its can-call atom holds or its arguments are typed, and a call adds only the atom, as in Dafny's `f#canCall`. | The facts that reading a contract needs, such as the range of a field it reads, hold of every argument the function accepts, so the axiom states them once. When each call restated them, every query held a copy of the facts of every callee that its callees reached. |
+| The validity of a type is a predicate with axioms, not its invariants written out at each value. | The solver unfolds the predicate where a proof uses it. Written out, an invariant that calls a function was copied into each value of the type, and into each axiom with a parameter of the type. |
 
 ### Bodies and contracts in proofs
 

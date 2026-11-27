@@ -1,0 +1,11 @@
+fn rises(first: Ascending, second: Ascending, third: Ascending, fourth: Ascending) -> Bool
+  requires first.items.length() > 1 && second.items.length() > 1
+  requires third.items.length() > 1 && fourth.items.length() > 1
+  ensures result
+{
+  first.items[0] < first.items[1] && second.items[0] < second.items[1]
+    && third.items[0] < third.items[1] && fourth.items[0] < fourth.items[1]
+}
+
+type Ascending(items: List[Int64])
+  invariant forall i in 0..items.length() => forall j in 0..items.length() => i < j ==> items[i] < items[j]
