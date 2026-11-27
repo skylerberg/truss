@@ -712,7 +712,7 @@ let spend_wait_for_tasks (frame : State.frame) =
 let spend_contract_call ~(before : State.frame) ~(after : State.frame) (site : Invocation.site)
     (callee : Callee.t) (definition : Callee.definition) (contract : State.contract)
     (values : State.passed list) ~changed ~result ~result_type ~final ~is_recursive ~bind_frame
-    ~read_premise =
+    ~read_requires =
   let compute_potential_change () =
     Logic.add
       (Potentials.compute_arguments_potential_change ~before ~after values ~changed)
@@ -726,13 +726,13 @@ let spend_contract_call ~(before : State.frame) ~(after : State.frame) (site : I
           | None -> Costs.zero)
       | `Returns -> Potentials.compute_potential after result_type result)
   in
-  let precondition = Contracts.select_precondition_clauses contract in
   let promised =
     List.map
       (fun ({ made_by; proven_under } : Contracts.promise) ->
         ( made_by,
-          if proven_under == precondition then Lazy.from_val (Logic.Boolean true)
-          else lazy (read_premise proven_under) ))
+          match proven_under with
+          | The_precondition -> Lazy.from_val (Logic.Boolean true)
+          | Requires_of clauses -> lazy (read_requires clauses) ))
       (Contracts.list_promises contract)
   in
   let declared_clauses = List.map fst promised in

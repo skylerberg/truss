@@ -154,17 +154,18 @@ let select_precondition_clauses (contract : State.contract) =
   | Some trait_clauses when contract.callee_clauses.requires = [] -> trait_clauses
   | Some _ | None -> contract.callee_clauses
 
-type promise = { made_by : State.clauses; proven_under : State.clauses }
+type premise = The_precondition | Requires_of of State.clauses
+type promise = { made_by : State.clauses; proven_under : premise }
 
 let list_promises (contract : State.contract) =
-  let precondition = select_precondition_clauses contract in
-  { made_by = contract.callee_clauses; proven_under = precondition }
+  let under_the_precondition made_by = { made_by; proven_under = The_precondition } in
+  under_the_precondition contract.callee_clauses
   :: List.map
-       (fun clauses -> { made_by = clauses; proven_under = clauses })
+       (fun trait_clauses ->
+         if contract.callee_clauses.requires = [] then under_the_precondition trait_clauses
+         else { made_by = trait_clauses; proven_under = Requires_of trait_clauses })
        (Option.to_list contract.trait_clauses)
-  @ List.map
-      (fun clauses -> { made_by = clauses; proven_under = precondition })
-      contract.restated_clauses
+  @ List.map under_the_precondition contract.restated_clauses
 
 let find_declared_clauses lookups path =
   Option.bind (find_source lookups path) (fun (callee, _, _) -> find_clauses lookups path callee)

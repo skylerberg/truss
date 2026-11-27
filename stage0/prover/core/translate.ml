@@ -407,7 +407,10 @@ let enter_function ~substitution ~condition ~assumes_panic_condition ?blocked_ho
       (fun ({ made_by; proven_under } : Contracts.promise) ->
         {
           clauses = made_by;
-          premise = (if proven_under.inherited then trait_requires else Logic.Boolean true);
+          premise =
+            (match proven_under with
+            | The_precondition -> Logic.Boolean true
+            | Requires_of _ -> trait_requires);
           costs =
             Cost_promises.list_promises environment query made_by.callee
               (bind_values made_by entry).locals made_by.costs ~inherited:made_by.inherited

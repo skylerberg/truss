@@ -240,8 +240,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
   its contract once, and every use relies on that proof alone, so a use may
   assume a clause only under the premises that the proof assumed.
   `Contracts.list_promises` is the one statement of those premises: it lists
-  each clause set with the clause set whose `requires` its clauses were
-  proven under. A contract is a list of specification cases in this sense,
+  each clause set with its `Contracts.premise`, which is `The_precondition`
+  or the `Requires_of` another clause set. A reader matches on the premise
+  to reach a clause, so it cannot take a clause set that needs a premise as
+  one that needs none. A contract is a list of specification cases in this sense,
   as in JML's specification inheritance, and the precondition of the
   contract is the `requires` that a call must meet: the definition's own,
   or its trait's where it writes none.
@@ -252,7 +254,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | Its trait's, where the definition writes `requires` of its own | The trait's `requires` | Assumed under the trait's `requires` | Spent where the trait's `requires` hold of the arguments, and an unknown amount elsewhere | Under the trait's `requires` |
   | A restating trait's | The precondition, which is all that the proof of the `impl` assumes | Assumed | Spent | Under the precondition |
 
-  A reader that takes a clause from the list and drops its premise states
+  A reader that takes a clause from the list and ignores its premise states
   the clause of arguments that no proof covers. A change that adds an
   assumption to one of the proofs changes the premise in `list_promises`
   with it, since that is where every use reads the premise.
