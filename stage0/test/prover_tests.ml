@@ -647,6 +647,9 @@ let () =
     (fun () ->
       expect_not_proven Fixtures.Prover.restated_method_whose_declaration_requires "prover.ensures"
         ~says:"The contract of `Crawler`'s `step` may not imply `result >= by`");
+  Harness.test "a proof depends on the methods that a restated clause it assumes names" (fun () ->
+      expect_not_proven Fixtures.Prover.lemma_reaching_a_method_through_a_restated_clause
+        "prover.termination" ~says:"This call to `lemma` may not end");
   Harness.test "the proof of an impl assumes no clause or law whose proof could assume its own"
     (fun () ->
       expect_codes Fixtures.Prover.restated_clauses_that_assume_each_other
