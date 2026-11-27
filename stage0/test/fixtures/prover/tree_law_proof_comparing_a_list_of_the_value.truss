@@ -1,0 +1,13 @@
+type Tree(value: Int64, children: List[Tree])
+
+impl Equal for Tree {
+  fn equal(self, other: Tree) -> Bool
+    ensures result == (self.value < other.value)
+  {
+    self.value < other.value
+  }
+}
+
+proof Equal.reflexive for Tree {
+  assert [value] == [value]
+}

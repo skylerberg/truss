@@ -2,6 +2,7 @@ let make_environment ?node ?(condition = []) ?(keeps_termination = true) ?(keeps
     ?panic_condition ?blocked_holders ?proven_laws (lookups : Lookups.t) ~home ~current ~terminates
     ~measures ~inherits_precondition =
   let node = Option.value node ~default:current in
+  let inductive_heads = Cycles.list_inductive_heads lookups node in
   {
     State.lookups;
     current;
@@ -11,12 +12,15 @@ let make_environment ?node ?(condition = []) ?(keeps_termination = true) ?(keeps
     bounds = Encoding.list_definition_bounds lookups ~current ~condition;
     disjoint = lookups.list_must_be_disjoint home;
     inherits_precondition;
-    ranking = terminates && measures = [] && lookups.list_recursion_group node <> [];
+    ranking =
+      (terminates && measures = [] && lookups.list_recursion_group node <> [])
+      || inductive_heads <> [];
     terminates;
     measures;
     termination = lazy (lookups.find_termination node);
     blocked_holders = Option.value blocked_holders ~default:[];
     proven_laws;
+    inductive_heads;
     policy = Obligations.make_policy ~keeps_termination ~keeps_failures ~panic_condition;
     memos = Private_state.create ();
     read_formula = Reader.read_formula;
@@ -642,77 +646,107 @@ let translate_function ?(substitution = Types.no_substitution) (lookups : Lookup
   in
   merge_outcomes outcomes
 
+let prove_law (start : State.frame) ~substitution ~trait ~for_type ~proofs ~at
+    ((law_source : State.source), (law : Mir.law)) =
+  let lookups = start.environment.lookups in
+  let types = Laws.list_law_parameter_types ~substitution law in
+  if not (List.exists (fun ty -> Types.is_error ty) types) then begin
+    let terms =
+      List.map
+        (fun ty ->
+          let term = Encoding.arrive start "law" ty in
+          Validity.assume_valid start ty term;
+          term)
+        types
+    in
+    let start =
+      if start.environment.inductive_heads = [] then start
+      else
+        {
+          start with
+          definition_entry =
+            Some
+              {
+                entry_measures = [];
+                entry_ranks = [];
+                induction_bound =
+                  Termination.find_induction_bound start
+                    (List.mapi
+                       (fun position (type_, value) -> { State.position; type_; value })
+                       (List.combine types terms));
+              };
+        }
+    in
+    let inside = Laws.bind_law_parameters start law_source ~substitution law terms in
+    List.iter
+      (fun clause -> Facts.assume start (snd (Validity.read_specification inside clause)))
+      law.requires;
+    let start =
+      List.fold_left
+        (fun (start : State.frame) ((proof_source : State.source), renaming) ->
+          let proof =
+            match Mir.find_code (lookups.mir.read_body_part proof_source.key) with
+            | Some proof -> proof
+            | None ->
+                Facts.raise_bug "the proof `%s` has no MIR"
+                  (Resolve.Names.show_key proof_source.key)
+          in
+          let parameters =
+            List.map
+              (fun parameter ->
+                match proof.body.locals.(parameter) with
+                | { kind = Source { local; _ }; type_; _ } -> (local, type_)
+                | { kind = Temporary | Lent _; _ } ->
+                    Facts.raise_bug "a parameter of the proof `%s` is a temporary"
+                      (Resolve.Names.show_key proof_source.key))
+              proof.body.parameters
+          in
+          let locals, types =
+            List.fold_left2
+              (fun (locals, types) (local, type_) term ->
+                ( Locals.add (Core_local local) term locals,
+                  Locals.add (Core_local local) (Types.substitute_erased renaming type_) types ))
+              (start.locals, start.types) parameters
+              (List.take (List.length parameters) terms)
+          in
+          Facts.restrict start
+            (Logic.not_
+               (Values.run_ghost_code
+                  {
+                    start with
+                    source = proof_source;
+                    makes_obligations = false;
+                    locals;
+                    types;
+                    substitution = renaming;
+                  }
+                  proof)))
+        start
+        (List.filter_map (fun (name, proof) -> if name = law.name then Some proof else None) proofs)
+    in
+    let _, holds = Validity.read_specification inside law.states in
+    Obligations.oblige start at (Law_may_fail { trait; law = law.name; for_type }) holds
+  end
+
 let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~proofs ~at
     =
-  let start = start_proof lookups source ~current:impl ~proven_laws:(trait, for_type) in
+  let start_laws () = start_proof lookups source ~current:impl ~proven_laws:(trait, for_type) in
+  let start = start_laws () in
   let substitution = Contracts.make_trait_substitution lookups trait for_type in
-  List.iter
-    (fun (law_source, (law : Mir.law)) ->
-      let types = Laws.list_law_parameter_types ~substitution law in
-      if not (List.exists (fun ty -> Types.is_error ty) types) then begin
-        let terms =
-          List.map
-            (fun ty ->
-              let term = Encoding.arrive start "law" ty in
-              Validity.assume_valid start ty term;
-              term)
-            types
-        in
-        let inside = Laws.bind_law_parameters start law_source ~substitution law terms in
-        List.iter
-          (fun clause -> Facts.assume start (snd (Validity.read_specification inside clause)))
-          law.requires;
-        let start =
-          List.fold_left
-            (fun (start : State.frame) ((proof_source : State.source), renaming) ->
-              let proof =
-                match Mir.find_code (lookups.mir.read_body_part proof_source.key) with
-                | Some proof -> proof
-                | None ->
-                    Facts.raise_bug "the proof `%s` has no MIR"
-                      (Resolve.Names.show_key proof_source.key)
-              in
-              let parameters =
-                List.map
-                  (fun parameter ->
-                    match proof.body.locals.(parameter) with
-                    | { kind = Source { local; _ }; type_; _ } -> (local, type_)
-                    | { kind = Temporary | Lent _; _ } ->
-                        Facts.raise_bug "a parameter of the proof `%s` is a temporary"
-                          (Resolve.Names.show_key proof_source.key))
-                  proof.body.parameters
-              in
-              let locals, types =
-                List.fold_left2
-                  (fun (locals, types) (local, type_) term ->
-                    ( Locals.add (Core_local local) term locals,
-                      Locals.add (Core_local local) (Types.substitute_erased renaming type_) types
-                    ))
-                  (start.locals, start.types) parameters
-                  (List.take (List.length parameters) terms)
-              in
-              Facts.restrict start
-                (Logic.not_
-                   (Values.run_ghost_code
-                      {
-                        start with
-                        source = proof_source;
-                        makes_obligations = false;
-                        locals;
-                        types;
-                        substitution = renaming;
-                      }
-                      proof)))
-            start
-            (List.filter_map
-               (fun (name, proof) -> if name = law.name then Some proof else None)
-               proofs)
-        in
-        let _, holds = Validity.read_specification inside law.states in
-        Obligations.oblige start at (Law_may_fail { trait; law = law.name; for_type }) holds
-      end)
-    (Laws.list_laws start.environment trait.trait);
-  make_outcome start.query
+  let laws = Laws.list_laws start.environment trait.trait in
+  let prove start law = prove_law start ~substitution ~trait ~for_type ~proofs ~at law in
+  if start.environment.inductive_heads = [] then begin
+    List.iter (prove start) laws;
+    make_outcome start.query
+  end
+  else
+    merge_outcomes
+      (List.mapi
+         (fun index law ->
+           let start = if index = 0 then start else start_laws () in
+           prove start law;
+           make_outcome start.query)
+         laws)
 
 let is_generic_owner (lookups : Lookups.t) (owner : Path.t) =
   match Interface.Definition.find_interface lookups.interface owner with

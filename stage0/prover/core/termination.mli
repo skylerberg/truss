@@ -1,4 +1,21 @@
+val find_induction_bound : State.frame -> State.ranked_value list -> Logic.term option
 val enter_definition : State.frame -> parameters:Mir.parameter list -> State.frame
+val read_induction_bound : State.frame -> Logic.term option
+
+val makes_inductive_values :
+  State.environment ->
+  generics:Types.generic list ->
+  substitution:Types.substitution ->
+  Mir.Call_edges.assumption list ->
+  bool
+
+val find_law_induction_premise :
+  State.frame ->
+  State.clauses ->
+  substitution:Types.substitution ->
+  inputs:Logic.term list ->
+  Logic.term option
+
 val reject_unreached_calls_without_decrease : State.frame -> unit
 
 val check_recursive_call :

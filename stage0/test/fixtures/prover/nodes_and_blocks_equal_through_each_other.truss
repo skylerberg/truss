@@ -1,0 +1,39 @@
+type Node =
+  | Leaf(value: Int64)
+  | Branch(block: Block)
+
+type Block(label: Int64, nodes: List[Node])
+
+impl Equal for Node {
+  fn equal(self, other: Node) -> Bool
+    ensures result == match self {
+      Leaf(value) => match other {
+        Leaf(value: other_value) => value == other_value
+        _ => false
+      }
+      Branch(block) => match other {
+        Branch(block: other_block) => block == other_block
+        _ => false
+      }
+    }
+  {
+    match self {
+      Leaf(value) => match other {
+        Leaf(value: other_value) => value == other_value
+        _ => false
+      }
+      Branch(block) => match other {
+        Branch(block: other_block) => block == other_block
+        _ => false
+      }
+    }
+  }
+}
+
+impl Equal for Block {
+  fn equal(self, other: Block) -> Bool
+    ensures result == (self.label == other.label && self.nodes == other.nodes)
+  {
+    self.label == other.label && self.nodes == other.nodes
+  }
+}

@@ -231,6 +231,56 @@ let rec classify interface ~parameter ~visiting (ty : Types.ty) =
     | Function { output; _ } -> if mentions parameter output then Out_of_reach ty else Consumed
     | Projection _ | Never | Integer | Variable _ | Hole | Error _ -> Out_of_reach ty
 
+let rec classify_holding interface ~heads ~visiting (ty : Types.ty) =
+  let classify_each ~visiting types =
+    List.fold_left
+      (fun occurrence ty ->
+        combine occurrence (enclose (classify_holding interface ~heads ~visiting ty)))
+      Absent types
+  in
+  match Types.strip_view ty with
+  | Named { path; _ } when List.exists (Path.equal path) heads -> Whole
+  | Named { path; arguments } -> (
+      let elements () =
+        classify_each ~visiting
+          (List.filter_map
+             (function Types.Type element -> Some element | Value _ -> None)
+             arguments)
+      in
+      if Well_known.is_built_from_elements path then elements ()
+      else if List.exists (Path.equal path) visiting then Absent
+      else
+        match Interface.Definition.find_type_interface interface path with
+        | Some type_interface ->
+            classify_each ~visiting:(path :: visiting)
+              (list_instance_fields type_interface arguments)
+        | None -> ( match elements () with Absent -> Absent | _ -> Out_of_reach ty))
+  | Function { inputs; output; _ } -> (
+      match classify_holding interface ~heads ~visiting output with
+      | Absent ->
+          if
+            List.exists
+              (fun (_, input) -> classify_holding interface ~heads ~visiting input <> Absent)
+              inputs
+          then Consumed
+          else Absent
+      | Whole | Within | Consumed | Out_of_reach _ -> Out_of_reach ty)
+  | Projection _ -> Out_of_reach ty
+  | Parameter _ | Never | Integer | Variable _ | Hole | Error _ -> Absent
+
+let classify_holding interface ~heads ty = classify_holding interface ~heads ~visiting:[] ty
+
+let holds_itself interface (ty : Types.ty) =
+  match Types.strip_view ty with
+  | Named { path; arguments } -> (
+      match Interface.Definition.find_type_interface interface path with
+      | Some type_interface ->
+          List.exists
+            (fun field -> classify_holding interface ~heads:[ path ] field <> Absent)
+            (list_instance_fields type_interface arguments)
+      | None -> false)
+  | _ -> false
+
 let list_declared_types (signature : Types.signature) =
   (match signature.receiver with Some (_, ty) -> [ ty ] | None -> [])
   @ List.map (fun (parameter : Types.parameter_info) -> parameter.type_) signature.parameters

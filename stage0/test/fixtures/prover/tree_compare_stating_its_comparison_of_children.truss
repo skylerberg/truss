@@ -1,0 +1,25 @@
+type Tree(value: Int64, children: List[Tree])
+
+impl Equal for Tree {
+  fn equal(self, other: Tree) -> Bool
+    ensures result == (self.value == other.value && self.children == other.children)
+  {
+    self.value == other.value && self.children == other.children
+  }
+}
+
+impl Ordered for Tree {
+  fn compare(self, other: Tree) -> Ordering
+    ensures result == if self.value == other.value {
+      self.children.compare(other.children)
+    } else {
+      self.value.compare(other.value)
+    }
+  {
+    if self.value == other.value {
+      self.children.compare(other.children)
+    } else {
+      self.value.compare(other.value)
+    }
+  }
+}

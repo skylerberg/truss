@@ -333,6 +333,25 @@ let () =
       expect_circular Fixtures.Prover.law_proof_calling_a_method_of_a_trait_that_requires_its_own
         "prover.circular_proof" ~says:"This assumes the laws of `Ordered` for `Level`"
         ~at:("value.compare(value)", 1));
+  Harness.test "the laws of an impl for a type that holds itself are proven by induction" (fun () ->
+      expect_proven Fixtures.Prover.tree_equal_stating_its_comparison_of_children;
+      expect_proven Fixtures.Prover.expression_equal_stating_its_comparison_of_operands;
+      expect_proven Fixtures.Prover.value_equal_through_its_lists_and_maps);
+  Harness.test "the laws of impls for types that hold each other are proven by induction" (fun () ->
+      expect_proven Fixtures.Prover.nodes_and_blocks_equal_through_each_other);
+  Harness.test "the laws of `Ordered` and `Hash` for a type that holds itself are proven" (fun () ->
+      expect_proven Fixtures.Prover.tree_compare_stating_its_comparison_of_children;
+      expect_proven Fixtures.Prover.tree_hash_stating_its_hash_of_children);
+  Harness.test "an induction on size proves no law that fails for the smallest values" (fun () ->
+      expect_codes Fixtures.Prover.tree_equal_stating_an_order_of_values
+        [ "prover.law"; "prover.law" ]);
+  Harness.test "a law proof learns nothing of laws assumed for a value no smaller than its own"
+    (fun () ->
+      expect_codes Fixtures.Prover.tree_law_proof_comparing_a_list_of_the_value
+        [ "prover.law"; "prover.law" ]);
+  Harness.test "the laws of an impl depend on the methods that its laws call" (fun () ->
+      expect_codes Fixtures.Prover.equal_stated_through_a_compare_that_breaks_its_laws
+        [ "prover.law"; "prover.law" ]);
   Harness.test "a theorem that a law proof calls is proven without the laws of that impl" (fun () ->
       expect_not_proven Fixtures.Prover.law_proven_by_a_theorem_that_needs_the_law "prover.ensures");
   Harness.test "a law is not proven through a generic function named as a value" (fun () ->
@@ -344,7 +363,7 @@ let () =
   Harness.test "a law is not proven through a derived impl that assumes its argument's laws"
     (fun () ->
       expect_codes Fixtures.Prover.law_proven_through_a_derived_impl_that_assumes_it
-        [ "prover.circular_proof" ]);
+        [ "prover.law"; "prover.circular_proof" ]);
   Harness.test "a law is not proven through a helper that compares a type deriving from its field"
     (fun () ->
       expect_codes Fixtures.Prover.law_proven_through_a_helper_comparing_a_type_that_derives_from_it
@@ -356,7 +375,7 @@ let () =
         [ "prover.circular_proof"; "prover.termination" ]);
   Harness.test "a law is not proven through a generic impl that assumes its bound's laws" (fun () ->
       expect_codes Fixtures.Prover.law_proven_through_a_generic_impl_that_assumes_it
-        [ "prover.circular_proof" ]);
+        [ "prover.law"; "prover.circular_proof" ]);
   Harness.test "a law is not proven through a generic function that assumes its bound's laws"
     (fun () ->
       expect_codes Fixtures.Prover.law_proven_through_a_generic_function_that_assumes_it
@@ -2846,9 +2865,10 @@ let () =
   Harness.test "an equal that compares its receiver with the operator is recursion" (fun () ->
       expect_one_termination_failure ~says:"give the function a `decreases` clause"
         Fixtures.Prover.equal_comparing_its_receiver_with_the_operator);
-  Harness.test "an equal that compares its receiver in a derived wrapper is recursion" (fun () ->
-      expect_one_termination_failure ~says:"through code that its `impl` derives"
-        Fixtures.Prover.equal_comparing_its_receiver_through_a_derived_wrapper);
+  Harness.test "an equal that compares its receiver in a derived wrapper assumes its own laws"
+    (fun () ->
+      expect_codes Fixtures.Prover.equal_comparing_its_receiver_through_a_derived_wrapper
+        (laws_of_equal @ [ "prover.circular_proof" ]));
   Harness.test "an equal that compares lists of its own type passes its impl to the list's equal"
     (fun () ->
       expect_codes Fixtures.Prover.tree_equal_comparing_its_lists_of_children laws_of_equal);

@@ -16,6 +16,8 @@ val declare_function :
   result_type:Types.ty ->
   Logic.symbol
 
+val run_limiting : Query.t -> Logic.symbol list -> (unit -> 'a) -> 'a
+
 val apply :
   State.frame ->
   path:Path.t ->

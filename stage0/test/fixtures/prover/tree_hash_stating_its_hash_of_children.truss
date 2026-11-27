@@ -1,0 +1,17 @@
+type Tree(value: Int64, children: List[Tree])
+
+impl Equal for Tree {
+  fn equal(self, other: Tree) -> Bool
+    ensures result == (self.value == other.value && self.children == other.children)
+  {
+    self.value == other.value && self.children == other.children
+  }
+}
+
+impl Hash for Tree {
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, self.children.hash(self.value.hash(hasher)))
+  {
+    self.children.hash(self.value.hash(hasher))
+  }
+}

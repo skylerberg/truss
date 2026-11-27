@@ -3328,7 +3328,7 @@ way.
   | A value of a generic type | Each function that the invariant or the `potential` of the type calls at those type arguments, and the same for the types of its fields. Where a field's type is a generic type that holds the field, with other type arguments, every method of the `impl`s that those type arguments pass to its bounds |
   | An invariant or a `potential`, for a type | Each function that the clause calls and each constant it reads |
   | A call of a trait's method that an `impl` resolves, in its body, in its contract, or in the laws that it proves | The `impl`, and the `impl` of each trait that the trait requires, for the laws that they prove |
-  | Laws to prove, for an `impl` | Its law proofs |
+  | Laws to prove, for an `impl` | Its law proofs, and each function that its laws call at its type, as `Equal`'s laws call the `impl`'s `equal` |
 
 - A proof assumes the laws of an `impl` only where the proof of those laws
   does not depend on it. A theorem that a law proof calls is therefore
@@ -3342,6 +3342,33 @@ way.
 - The proof of an `impl`'s laws, and each of its law proofs, assumes the
   laws of the traits that its trait requires, and never the laws that the
   `impl` proves.
+- **The laws of an `impl` for a type that holds itself are proven by
+  induction on size.** A type holds itself when a field of it holds a value
+  of the type, directly, as an element of a collection, or through other
+  types. Where the proof of such an `impl`'s laws depends on itself, as with
+  `type Tree(value: Int64, children: List[Tree])` whose `equal` ensures
+  `result == (self.value == other.value && self.children == other.children)`,
+  every proof on the cycle is an induction over the sizes of the values
+  that hold the cycle's types. A part is smaller than the value that holds
+  it, and an element is smaller than its collection:
+
+  | A proof on the cycle | Assumes |
+  |---|---|
+  | A law of the `impl` | The laws of the `impl`s on the cycle, and of the `impl`s that assume theirs, such as `Equal` for `List[Tree]`, for values smaller than the largest of the law's values |
+  | Any proof on the cycle | The contract of a definition on the cycle where the values that it passes are no larger than the largest of its own |
+  | Any proof on the cycle | The contract of generic code that assumes the laws of an `impl` on the cycle where each value of the `impl`'s type that it passes is smaller than the largest of its own, and each value that holds one is no larger |
+
+  A proof assumes nothing of generic code whose bound can make values of a
+  type on the cycle, or whose parameter holds the type where it is not part
+  of the value (see [Termination](#termination)): the generic code could
+  then assume the laws for values of any size. Where no type on the cycle
+  holds itself, no value is smaller, so a proof on the cycle assumes none
+  of its laws, as above.
+
+  With these assumptions, `Tree`'s laws are proven from the laws of `List`,
+  which hold for the children because each child is smaller than the tree.
+  A law proof that calls `[value] == [value]` learns nothing of `value`,
+  since the list is larger than `value`.
 
 - A cycle of these dependencies is an error unless calls alone form it. A
   cycle of calls is a recursion, which a measure shows to end (see

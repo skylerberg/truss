@@ -67,6 +67,12 @@ let declare_function query ~path ~type_arguments ~sorts ~result_type =
           (Path.show path));
   symbol
 
+let run_limiting (query : Query.t) symbols run =
+  let state = read_state query in
+  let axiomatizing = state.axiomatizing in
+  state.axiomatizing <- symbols @ axiomatizing;
+  Fun.protect ~finally:(fun () -> state.axiomatizing <- axiomatizing) run
+
 let make_numbered_parameters label sorts =
   List.mapi (fun index sort -> (Logic.Symbol.Variable { label; numbers = [ index ] }, sort)) sorts
 
@@ -133,12 +139,20 @@ let axiomatize (query : Query.t) symbol parameters make =
       (stated, Logic.conjunction (drop_fresh_terms newest_facts), axiom))
 
 let find_smaller_than_entry (frame : State.frame) (callee_clauses : State.clauses) ~group_member
-    ~callee_entry ~inputs =
-  match group_member with
-  | None -> Some (Logic.Boolean true)
-  | Some member ->
-      Termination.find_induction_premise frame callee_clauses ~callee:member ~callee_entry
-        ~argument_at:(List.nth inputs)
+    ~callee_entry ~inputs ~substitution =
+  let through_recursion =
+    match group_member with
+    | None -> Some (Logic.Boolean true)
+    | Some member ->
+        Termination.find_induction_premise frame callee_clauses ~callee:member ~callee_entry
+          ~argument_at:(List.nth inputs)
+  in
+  match
+    ( through_recursion,
+      Termination.find_law_induction_premise frame callee_clauses ~substitution ~inputs )
+  with
+  | Some through_recursion, Some through_laws -> Some (Logic.( &&& ) through_recursion through_laws)
+  | None, _ | _, None -> None
 
 let state_with_trigger (outer : State.frame) (application : application) (contract : State.contract)
     ~substitution_of ~result_type ~group_member ~is_triggered =
@@ -180,6 +194,7 @@ let state_with_trigger (outer : State.frame) (application : application) (contra
             let smaller =
               find_smaller_than_entry outside callee_clauses ~group_member
                 ~callee_entry:(bind callee_clauses) ~inputs
+                ~substitution:(substitution_of callee_clauses)
             in
             let readable_clauses =
               List.filter_map

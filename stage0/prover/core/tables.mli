@@ -10,6 +10,7 @@ type stated =
   | Range_elements of Types.ty
   | Method_cost_bound of Logic.symbol
   | Laws_of of Types.trait_reference * Types.ty
+  | Laws_of_smaller_values of Types.trait_reference * Types.ty
   | Derived_equality of Logic.term
   | Potential_of of Logic.term
 

@@ -1,0 +1,29 @@
+type Expression =
+  | Number(value: Int64)
+  | indirect Sum(left: Expression, right: Expression)
+
+impl Equal for Expression {
+  fn equal(self, other: Expression) -> Bool
+    ensures result == match self {
+      Number(value) => match other {
+        Number(value: other_value) => value == other_value
+        _ => false
+      }
+      Sum(left, right) => match other {
+        Sum(left: other_left, right: other_right) => left == other_left && right == other_right
+        _ => false
+      }
+    }
+  {
+    match self {
+      Number(value) => match other {
+        Number(value: other_value) => value == other_value
+        _ => false
+      }
+      Sum(left, right) => match other {
+        Sum(left: other_left, right: other_right) => left == other_left && right == other_right
+        _ => false
+      }
+    }
+  }
+}

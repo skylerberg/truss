@@ -137,6 +137,16 @@ let collect_satisfied_bounds interface roots =
 
 let list_satisfied_bounds interface roots = fst (collect_satisfied_bounds interface roots)
 
+let list_impls_of_bounds interface roots =
+  let satisfied, assumptions = collect_satisfied_bounds interface roots in
+  ( List.filter_map
+      (fun (bound : satisfied_bound) ->
+        match bound.evidence with
+        | Impl { impl; _ } | Derived_for_view { viewed = impl; _ } -> Some impl
+        | Bound -> None)
+      satisfied,
+    assumptions )
+
 let list_methods_of_satisfied_bound interface { satisfied; of_type; evidence; _ } =
   match evidence with
   | Bound ->
@@ -894,6 +904,24 @@ let list_trait_laws (lookups : lookups) trait =
   | Some key -> (lookups.mir.read_contract_part key).laws
   | None -> []
 
+let find_proven_law_formulas (lookups : lookups) path =
+  Option.map
+    (fun (impl : Types.impl_interface) ->
+      ( Types.make_trait_substitution
+          (Interface.Definition.read_trait_interface lookups.interface impl.implements.trait)
+            .trait_generics
+          ~self:impl.for_type impl.implements,
+        List.concat_map
+          (fun (law : Tree.law) -> law.requires @ [ law.states ])
+          (list_trait_laws lookups impl.implements.trait) ))
+    (Interface.Definition.find_impl_interface lookups.interface path)
+
+let list_law_dependencies (lookups : lookups) (path : Path.t) =
+  match (path, find_proven_law_formulas lookups path) with
+  | Derived _, _ | _, None -> []
+  | _, Some (substitution, formulas) ->
+      List.concat_map (list_formula_dependencies lookups substitution) formulas
+
 let list_laws_assumed_by_proof (lookups : lookups) path =
   let instance = find_instance lookups path in
   let list_laws substitution formulas =
@@ -922,16 +950,8 @@ let list_laws_assumed_by_proof (lookups : lookups) path =
       (list_invariant_clauses lookups path @ list_potential_clauses lookups path)
   in
   let of_proven_laws =
-    match Interface.Definition.find_impl_interface lookups.interface path with
-    | Some impl ->
-        list_laws_of_another_source
-          (Types.make_trait_substitution
-             (Interface.Definition.read_trait_interface lookups.interface impl.implements.trait)
-               .trait_generics
-             ~self:impl.for_type impl.implements)
-          (List.concat_map
-             (fun (law : Tree.law) -> law.requires @ [ law.states ])
-             (list_trait_laws lookups impl.implements.trait))
+    match find_proven_law_formulas lookups path with
+    | Some (substitution, formulas) -> list_laws_of_another_source substitution formulas
     | None -> []
   in
   let proven = find_proven_impl lookups path in
@@ -965,6 +985,7 @@ let list_assumed_paths (lookups : lookups) path =
   in
   List.sort_uniq Path.compare
     (list_paths (list_contract_dependencies lookups path)
+    @ list_paths (list_law_dependencies lookups path)
     @ list_paths (list_inherited_contract_dependencies lookups path)
     @ list_paths (list_invariant_dependencies lookups path)
     @ list_paths (list_potential_dependencies lookups path)

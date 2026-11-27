@@ -458,9 +458,27 @@ develop as well as make it easier to bootstrap the compiler in parts.
   assumes the laws of a derived `impl` assumes its fields' laws on that
   impl's behalf, so `Cycles` reports a cycle through it at that
   definition. `Laws` assumes no law of an `impl` in the proof
-  group of the definition being proven. A law that a callee's proof assumes
+  group of the definition being proven, nor of an `impl` whose closure of
+  bounds reaches one, except by the induction below. A law that a callee's proof assumes
   cannot be left out that way, so `Cycles.list_circular_proofs` reports it,
   and every definition runs that one check, whatever its kind.
+- **The laws of an `impl` for a type that holds itself are an induction on
+  size.** `Cycles.list_inductive_heads` names the types of the impls in the
+  proof group whose types hold themselves, `Size_change.holds_itself` and
+  `Size_change.classify_holding`, and every proof in the group carries them
+  as `inductive_heads`. Its bound, `induction_bound` of the
+  `definition_entry`, is the largest rank among its parameters, or the
+  law's values, that hold one of those types. In such a proof `Laws` states
+  the laws of an `impl` whose closure of bounds reaches the group for values
+  of rank below the bound, and `Termination.find_law_induction_premise`
+  adds a premise to the axiom of a callee: a member of the group takes
+  values of rank at most the bound, and generic code whose bounds reach the
+  group takes them below it. Each law is then a query of its own, since the
+  bound differs between laws. A self-reference in a contract's axiom is the
+  limited function, so a law is stated for smaller values once more with
+  the group's functions limited, `Contract_axioms.run_limiting`, which the
+  unfolding of a definition matches. A rank is never a trigger: it appears
+  only in premises.
 - **`Callbacks` holds the rules of a function value.** A function value has
   two terms in the logic: its application, where its type uses no capability
   and has no `mut` input, and the relation that holds of the arguments and

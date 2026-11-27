@@ -85,6 +85,26 @@ let reject_constant_cycle (frame : State.frame) ~is_constant (code : Mir.t) =
          { interface = environment.lookups.interface; mir = environment.lookups.mir }
          Types.no_substitution code)
 
+let list_inductive_heads (lookups : Lookups.t) node =
+  List.filter_map
+    (fun (member : Path.t) ->
+      match member with
+      | Impl _ -> (
+          match Interface.Definition.find_impl_interface lookups.interface member with
+          | Some impl when Mir.Size_change.holds_itself lookups.interface impl.for_type -> (
+              match Types.strip_view impl.for_type with Named { path; _ } -> Some path | _ -> None)
+          | Some _ | None -> None)
+      | Top _ | Method _ | Member_constant _ | Default _ | Derived _ | Test _ | Law_proof _
+      | Unresolved _ ->
+          None)
+    (lookups.list_proof_group node)
+
+let is_proven_by_induction (environment : State.environment) impl =
+  match Interface.Definition.find_impl_interface environment.lookups.interface impl with
+  | Some { for_type = Named { path; _ }; _ } ->
+      List.exists (Path.equal path) environment.inductive_heads
+  | Some _ | None -> false
+
 type circular_proof = { location : Obligation.location; proof : Catalog.Prover.circular_proof }
 
 let is_in_proof_cycle (environment : State.environment) path =
@@ -154,6 +174,7 @@ let list_circular_laws (frame : State.frame) =
     (fun (laws : Mir.Call_edges.assumed_laws) ->
       if
         is_in_proof_cycle frame.environment laws.impl
+        && (not (is_proven_by_induction frame.environment laws.impl))
         && (laws.is_assumed_by_the_callee
            || (assumes_its_own && not (List.exists (Path.equal laws.impl) required)))
       then
