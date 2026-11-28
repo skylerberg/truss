@@ -5,7 +5,7 @@ val read_state : t -> 'state Private_state.key -> 'state
 val make_variable : ?numbers:int list -> string -> 'a Logic.Symbol.t
 val declare : t -> Logic.declaration -> unit
 val find_argument_sorts : t -> Logic.symbol -> Logic.sort list option
-val list_defined_symbols : t -> Logic.symbol list
+val is_defined : t -> Logic.symbol -> bool
 val assume : t -> under:Logic.term -> Logic.term -> unit
 
 type reason =

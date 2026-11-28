@@ -598,17 +598,20 @@ fn regrown(
     && places.sum(in_overflow) == overflow.size()
 }
 
-theorem target_keeps_step(hash: Integer, slot: Integer, capacity: Integer, step: Integer, target: Integer)
-  requires 0 <= hash && 16 <= capacity && 0 <= slot && slot < capacity
+theorem target_keeps_step(
+  hash: Integer,
+  slot: Integer,
+  capacity: Integer,
+  doubled: Integer,
+  step: Integer,
+  target: Integer,
+)
+  requires 0 <= hash && 16 <= capacity && 0 <= slot && slot < capacity && doubled == 2 * capacity
   requires step == distance(hash % capacity, slot: slot, capacity: capacity) && step < 16
-  requires target == (if hash % (2 * capacity) + step < 2 * capacity {
-    hash % (2 * capacity) + step
-  } else {
-    hash % (2 * capacity) + step - 2 * capacity
-  })
-  ensures 0 <= target && target < 2 * capacity
+  requires target == (if hash % doubled + step < doubled { hash % doubled + step } else { hash % doubled + step - doubled })
+  ensures 0 <= target && target < doubled
   ensures folded(target, capacity: capacity) == slot
-  ensures distance(hash % (2 * capacity), slot: target, capacity: 2 * capacity) == step
+  ensures distance(hash % doubled, slot: target, capacity: doubled) == step
 {
   homes_split(hash, capacity: capacity)
 }
@@ -678,7 +681,7 @@ theorem fills_moved_target(
   ensures 0 <= target && target < after.length()
   ensures fills_target(slots, grown: after, places: places, moved: moved + 1, target: target)
 {
-  target_keeps_step(slots[moved].hash, slot: moved, capacity: slots.length(), step: step, target: target)
+  target_keeps_step(slots[moved].hash, slot: moved, capacity: slots.length(), doubled: after.length(), step: step, target: target)
 }
 
 theorem fills_kept_target(
@@ -766,7 +769,7 @@ theorem regrown_after_occupied_move(
   requires step + 1 <= before[target_home].reach ==> after[target_home].reach == before[target_home].reach
   ensures regrown(slots, overflow: overflow, grown: after, places: after_places, moved: moved + 1, flagged: flagged)
 {
-  target_keeps_step(slots[moved].hash, slot: moved, capacity: slots.length(), step: step, target: target)
+  target_keeps_step(slots[moved].hash, slot: moved, capacity: slots.length(), doubled: 2 * slots.length(), step: step, target: target)
   assert fills_target(slots, grown: before, places: before_places, moved: moved, target: target)
   assert before[target].occupant == 0
   assert moves_slot(slots, grown: before, places: before_places, moved: moved, slot: moved)
@@ -1029,7 +1032,7 @@ fn HashIndex.move_slot(mut self, grown: mut List[Slot], slot: UInt64)
     return
   }
   let capacity = self.slots.length()
-  let doubled = grown.length()
+  let doubled = 2 * capacity
   let home = moving.hash % capacity
   let step = if home <= slot { slot - home } else { slot + capacity - home }
   let target_home = moving.hash % doubled
@@ -1539,6 +1542,8 @@ theorem indexes_after_relabeling[Key: Hash + Ordered](
   assert forall position: UInt64 => after.overflow.holds(position) ==> position < count - 1 && position != hole
   sorted_transferred(before.overflow, first: keys, second: moved)
   assert identical(before.places.model().update(hole, value: place), after.places.model().append(place))
+  assert before.places.model().update(hole, value: place).sum(in_overflow)
+    == before.places.model().sum(in_overflow) - in_overflow(before.places.model()[hole]) + in_overflow(place)
 }
 
 theorem slot_after_detaching[Key: Hash + Ordered](
@@ -1650,6 +1655,8 @@ theorem indexes_after_detaching[Key: Hash + Ordered](
     position < count - 1 && position != hole && after.places.model()[position] == 0
   sorted_transferred(after.overflow, first: keys, second: moved)
   assert identical(before.places.model().update(hole, value: 0), after.places.model().append(0))
+  assert before.places.model().update(hole, value: 0).sum(in_overflow)
+    == before.places.model().sum(in_overflow) - in_overflow(before.places.model()[hole]) + in_overflow(0)
 }
 
 fn HashIndex.detach_last[Key: Hash + Ordered](

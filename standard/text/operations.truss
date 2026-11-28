@@ -136,6 +136,8 @@ internal fn String.copy_onto(self, output: mut intrinsic.Storage[UInt8])
     intrinsic.storage_push(mut output, value: intrinsic.storage_at(self.storage, index: index))
   }
   proof {
+    assert forall i in old(intrinsic.storage_length(output))..intrinsic.storage_length(output) =>
+      identical(intrinsic.storage_model(output)[i], self.model()[i - old(intrinsic.storage_length(output))])
     assert identical(intrinsic.storage_model(output), old(intrinsic.storage_model(output)).concatenate(self.model()))
     if utf8.is_valid(old(intrinsic.storage_model(output))) {
       utf8.concatenation_is_valid(old(intrinsic.storage_model(output)), second: self.model())

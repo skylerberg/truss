@@ -1,0 +1,9 @@
+fn rises(first: Ascending) -> Bool
+  requires first.items.length() > 1
+  ensures result
+{
+  first.items[0] < first.items[1]
+}
+
+type Ascending(items: List[Int64])
+  invariant forall i in 0..items.length() => forall j in 0..items.length() => i < j ==> items[i] < items[j]

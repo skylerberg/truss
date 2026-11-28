@@ -1,0 +1,15 @@
+fn agrees(slots: Sequence[Slot], slot: Integer) -> Bool
+  requires 0 <= slot && slot < slots.length()
+  ensures result == (slots[slot].occupant != 0)
+{
+  occupied(slots, slot: slot)
+}
+
+type Slot(occupant: UInt64, hash: UInt64)
+
+fn occupied(slots: Sequence[Slot], slot: Integer) -> Bool
+  requires 0 <= slot && slot < slots.length()
+  ensures result == (slots[slot].occupant != 0)
+{
+  slots[slot].occupant != 0
+}

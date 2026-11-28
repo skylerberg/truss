@@ -6,6 +6,7 @@ module Symbol : sig
     | Variable of { label : string; numbers : int list }
     | Function of { callee : Path.t; type_arguments : Types.argument list }
     | Limited of { callee : Path.t; type_arguments : Types.argument list }
+    | Can_call of { callee : Path.t; type_arguments : Types.argument list }
     | Function_value of { callee : Path.t; type_arguments : Types.argument list }
     | Constant of { path : Path.t; type_arguments : Types.argument list }
     | Evaluated of evaluation
@@ -22,6 +23,7 @@ module Symbol : sig
     | Callback_ensures of sort list
     | Equal of Types.ty
     | Valid of Types.ty
+    | Hidden_invariants of Types.ty
     | Rank of Types.ty
     | Capacity of Types.ty
     | Range_of of Types.ty
@@ -147,6 +149,8 @@ val less_equal : term -> term -> term
 val greater : term -> term -> term
 val greater_equal : term -> term -> term
 val conjunction : term list -> term
+val nest_under_conditions : term list -> term
+val is_matchable : term -> bool
 val disjunction : term list -> term
 val truncated_divide : term -> term -> term
 val truncated_remainder : term -> term -> term

@@ -316,14 +316,69 @@ develop as well as make it easier to bootstrap the compiler in parts.
   function read the same clauses.
 
   A logic function is total in the logic and unspecified outside its domain.
-  Its domain is a condition under which the definition returns: valid
-  arguments, the precondition, the Panic condition, and, for a
-  callee in the recursion group of the definition being proven, arguments
-  below the entry in the group's measure or ranking, which is the induction
-  hypothesis. A call that
+  Its domain is a condition under which the definition returns: arguments
+  that meet its entry assumptions, the precondition, the Panic condition,
+  and, for a callee in the recursion group of the definition being proven,
+  arguments below the entry in the group's measure or ranking, which is the
+  induction hypothesis. A call that
   returned gives its `ensures` without the Panic condition, since
   `uses Panic unless C` says that `C` rules a panic out, not that a return
   implies `C`.
+
+  The arguments meet the entry assumptions where the function's *can-call
+  atom* holds, `Logic.Symbol.Can_call` applied to them, and the axiom's
+  premise is that atom. A call checks its arguments valid and then assumes
+  the atom at them, in `Contract_axioms.assume_can_call`; a call under a
+  quantifier's binders assumes it for every bound value that meets the
+  binders' premises, triggered by the application, and assumes it in the
+  quantifier's scope as well, where a goal under the binders holds it as a
+  premise. Typed arguments imply the atom, by a second axiom triggered by
+  it: each argument valid with the ranges of its parts, which
+  `Validity.make_validity` states with `~includes_ranges:true`, and the
+  range of each field that the contract reads. That covers an application
+  that the solver reaches through a lambda, a function value or a
+  quantified fact, where no call assumed the atom. A function whose
+  arguments are typed whatever they are, as integers and sequences are,
+  has no premise, and a call of it assumes no atom. The range of a field
+  of a function's result is no typing fact: `Values.project_field` states
+  it of every result of the function as a lemma, so `holds_slot` of
+  `standard/map`, which reads only fields of a sequence's elements, has no
+  premise either. Typing must imply the range of every scalar part of the
+  arguments: the solver's model-based instantiation builds any value that
+  a premise admits, and a value that meets an invariant but holds an
+  out-of-range field would make the conclusion false and the query
+  inconsistent. The premise is never a disjunction of the atom and typing:
+  the solver case splits on such a premise at every instance.
+
+  The facts that reading the contract assumes of the parameters hold of
+  every argument in the domain, so each is stated once, and a call adds
+  only its can-call atom. The can-call atom of each call that the contract
+  makes is a conclusion of the axiom, never a premise, so a function's
+  premise names its own fields only, not its callees'. The range of each
+  field that the contract reads is a conclusion of a third axiom,
+  triggered by the can-call atom. `Logic.nest_under_conditions` writes a
+  conclusion as nested implications, so a condition that several facts
+  share, such as the left operands of a chain of `&&`, is written once,
+  and a fact that an enclosing condition or an outer conjunct states is
+  dropped.
+  Reading a contract for its axiom checks no argument valid:
+  `Validity.check_valid` reads nothing where no obligation can be made, so
+  no invariant's facts enter an axiom by way of a check. This is Dafny's
+  encoding of functions: `f#canCall(args) ==> postcondition`, with the
+  atom derived from typing.
+
+  A function whose one `ensures` defines its result by a formula that
+  holds a quantifier is a definition instead, `Logic.Definition`, which
+  the solver inlines at each application, guarded by the same premise. A
+  function whose result is only an application of another definition stays
+  an axiom: inlining it would inline the other's quantifier at each use, and
+  the axiom unfolds only where a proof instantiates it.
+
+  A clause whose reading needs a ground value is read again at each call,
+  as a clause that the axiom does not state: `Contract_axioms.states`
+  leaves it out. A bit count of a parameter is such a clause, since its
+  facts compare powers of two, and `Operations.make_power` states the
+  lemmas of a power only for an exponent that names no bound value.
 
   A definition that may abort returns for no argument that the prover
   knows of, so it has no axiom, and a call of it in a specification or a
@@ -604,7 +659,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   | `Cycles` | The recursion group and the proof group |
   | `Termination` | Size-change termination of a recursion group, measures, and the comparison of a recursive call with a measure |
   | `Contract_axioms` | The contract of a logic function as an axiom |
-  | `Validity` | The invariant of a value, and each check of it |
+  | `Validity` | The validity predicate of a type, and each check of an invariant |
   | `Callee` | The callee of a call: the definition that it runs, its contract, its substitutions and the key of its logic symbol |
   | `Callbacks` | A function value: its terms, its contract, and each use of it |
   | `Lending` | The contract of a lending method: where each clause holds, and the part as the caller left it |
@@ -665,6 +720,28 @@ develop as well as make it easier to bootstrap the compiler in parts.
   through a passed place returns the end of the write, and the call ends it
   after its postconditions: an element is checked there, and a step's
   `self` is a value not known to be valid until then.
+- **The validity of a type is a predicate.** `Validity` states
+  `Logic.Symbol.Valid` of a type once in a query, with three kinds of
+  axiom: the type's invariants and the facts that reading them assumes,
+  triggered by the predicate; the predicate of each field whose type has
+  one, triggered by the predicate and the field's selector; and, for each
+  constructor, the predicate of a value built with it as its invariants,
+  the ranges of its scalar fields and the predicate of its other fields.
+  Assuming a value valid states the predicate. Checking a value obliges its
+  invariants and the predicate of each part whose type has invariants. Both
+  unfold a value built in place, a constructor application or an `ite` of
+  such values, into its invariants and the validity of its parts, so the
+  solver needs no constructor axiom for a value that the proof itself
+  built. A loop preserves the validity of each value it changes whose type
+  has invariants; it decides that from the type, since the validity of a
+  value built in place may unfold to `true`. A type whose validity is only
+  the ranges of its fields has no predicate: its validity is those ranges,
+  written where a premise asks for them, and nothing where a value is
+  assumed valid. A type that holds itself, as a tree does, has the
+  predicate even without invariants, since its constructor axioms state the
+  ranges of every part. A field whose type reaches the type again has no
+  selector axiom, which would be a matching loop: the predicate of a part
+  would instantiate the axiom for the part's own parts without end.
 - **A call's callee is resolved once.** `Callee.resolve` turns the target
   that the MIR writes into the definition that runs, its contract, the
   substitution of each of its clauses, and the type arguments that key its
@@ -704,6 +781,16 @@ develop as well as make it easier to bootstrap the compiler in parts.
   process, so a query solved beside another takes a different number of
   steps, and the step limit then decides differently from one run to the
   next.
+- **A query that Z3 does not decide is asked again.** If its facts are
+  quantified, `Solver.solve` asks it with its ground facts alone, and, if
+  Z3 ran out of steps, with E-matching alone, as Dafny runs Z3. If Z3 ran
+  out of steps, it then asks one goal conjunct at a time. Model-based
+  instantiation checks each quantified fact against a candidate model, and
+  a fact with a product of two unknowns, such as the axiom of a remainder,
+  sends that check into nonlinear arithmetic, which can spend every step
+  on a goal that E-matching proves. The E-matching run turns `auto_config`
+  and `smt.mbqi` off and back on, since a Z3 process keeps its options
+  across `(reset)`.
 
 ### Documents
 

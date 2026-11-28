@@ -171,6 +171,11 @@ let make_request query = { query; text = Logic.show_query query; is_refutation =
 let make_refutation_request query = { query; text = Logic.show_query query; is_refutation = true }
 let count_steps request = if request.is_refutation then refutation_steps else steps
 let make_input ~steps text = make_header ~steps ^ text ^ info_request
+
+let make_e_matching_input ~steps text =
+  "(set-option :auto_config false)\n(set-option :smt.mbqi false)\n" ^ make_input ~steps text
+  ^ "(set-option :auto_config true)\n(set-option :smt.mbqi true)\n"
+
 let show_input request = make_input ~steps:(count_steps request) request.text
 
 let read_unknown ~steps answers =
@@ -202,8 +207,7 @@ type solved = { answer : answer; runs : run list }
 
 let solve solver ~find_output request =
   let runs = ref [] and steps = count_steps request in
-  let check text =
-    let input = make_input ~steps text in
+  let check input =
     let output =
       match find_output input with
       | Some output -> output
@@ -214,20 +218,24 @@ let solve solver ~find_output request =
     runs := { input; output } :: !runs;
     read_answer ~steps output
   in
+  let check_query query = check (make_input ~steps (Logic.show_query query)) in
+  let has_quantified_facts = List.exists Logic.has_quantifier request.query.facts in
   let is_proven_from_ground_facts () =
-    List.exists Logic.has_quantifier request.query.facts
-    && check (Logic.show_query (Logic.remove_quantified_facts request.query)) = Proven
+    has_quantified_facts && check_query (Logic.remove_quantified_facts request.query) = Proven
+  in
+  let is_proven_by_e_matching () =
+    has_quantified_facts && check (make_e_matching_input ~steps request.text) = Proven
   in
   let is_proven_one_conjunct_at_a_time () =
     match Logic.list_conjunct_queries request.query with
     | [] -> false
-    | conjuncts ->
-        List.for_all (fun conjunct -> check (Logic.show_query conjunct) = Proven) conjuncts
+    | conjuncts -> List.for_all (fun conjunct -> check_query conjunct = Proven) conjuncts
   in
   let answer =
-    match check request.text with
+    match check (make_input ~steps request.text) with
     | Unknown _ as undecided when request.is_refutation -> undecided
     | Unknown _ when is_proven_from_ground_facts () -> Proven
+    | Unknown Out_of_steps when is_proven_by_e_matching () -> Proven
     | Unknown Out_of_steps when is_proven_one_conjunct_at_a_time () -> Proven
     | answer -> answer
   in

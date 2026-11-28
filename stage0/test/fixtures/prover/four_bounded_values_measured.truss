@@ -1,0 +1,22 @@
+fn limited(first: Bounded, second: Bounded, third: Bounded, fourth: Bounded) -> Bool
+  ensures result
+{
+  first.limit_of() > 0 && second.limit_of() > 0 && third.limit_of() > 0 && fourth.limit_of() > 0
+}
+
+type Limit(value: UInt64)
+
+fn all_below(items: Sequence[UInt64], limit: Limit) -> Bool
+  ensures result == ((forall i in 0..items.length() => items[i] < 100) && limit.value > 0)
+{
+  (forall i in 0..items.length() => items[i] < 100) && limit.value > 0
+}
+
+type Bounded(items: List[UInt64], limit: Limit)
+  invariant all_below(items.model(), limit: limit)
+
+fn Bounded.limit_of(self) -> UInt64
+  ensures result == self.limit.value
+{
+  self.limit.value
+}

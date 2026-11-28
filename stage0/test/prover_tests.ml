@@ -3984,9 +3984,18 @@ let () =
       in
       if answers <> [ Solver.Proven; Solver.Proven ] then
         Harness.fail "a constant of another sort under the same name was not proven");
-  let find_obligation_query text code =
+  let find_obligation_query ?name text code =
     let packages = Support.setup [ ("app.main", text) ] in
-    let key = List.hd (Support.list_declarations packages (Support.parse_module "app.main")) in
+    let declarations = Support.list_declarations packages (Support.parse_module "app.main") in
+    let key =
+      match name with
+      | None -> List.hd declarations
+      | Some name ->
+          List.find
+            (fun (declaration : Resolve.Names.declaration) ->
+              Path.equal declaration.key.path (Support.make_top_path "app.main" name))
+            declarations
+    in
     match
       Support.read_proofs (Support.make_database packages) (Support.parse_file "app.main") key.key
     with
@@ -4061,6 +4070,35 @@ let () =
                  diagnostic.message)
           then Harness.fail "message %S" diagnostic.message
       | diagnostics -> Harness.fail "%d diagnostics" (List.length diagnostics));
+  test
+    "a query whose quantified facts exhaust the steps is proven by E-matching, and the next query \
+     has model-based instantiation again" (fun () ->
+      let solver =
+        Solver.For_testing.make ~run_z3:(fun input ->
+            if
+              String.includes ~affix:"(set-option :smt.mbqi false)" input
+              && String.ends_with ~suffix:"(set-option :smt.mbqi true)\n" input
+            then "unsat\n"
+            else "unknown\n(:reason-unknown \"canceled\")\n(:rlimit 1000001)\n")
+      in
+      let positive = Logic.Symbol.Variable { label = "positive"; numbers = [] }
+      and bound = Logic.Symbol.Variable { label = "bound"; numbers = [] } in
+      let apply argument = Logic.Apply (positive, [ argument ]) in
+      let query =
+        {
+          Logic.declarations = [ Logic.Function (positive, [ Logic.Int ], Logic.Int) ];
+          facts =
+            [
+              Logic.forall
+                ~trigger:[ apply (Logic.Symbol bound) ]
+                ([ (bound, Logic.Int) ], Logic.less (Logic.int 0) (apply (Logic.Symbol bound)));
+            ];
+          goal = Logic.less (Logic.int 0) (apply (Logic.int 7));
+        }
+      in
+      match (solve_one solver (Solver.make_request query)).answer with
+      | Proven -> ()
+      | _ -> Harness.fail "expected the query proven by E-matching");
   test "deciding an edited body runs Z3 only for the queries that changed" (fun () ->
       let file = Support.parse_file "app.main" in
       let database =
@@ -4108,7 +4146,48 @@ let () =
       in
       let first = key_of Fixtures.Prover.addition_that_can_overflow in
       let second = key_of Fixtures.Prover.addition_of_a_total_that_can_overflow in
-      if first <> second || first = "none" then Harness.fail "%s and %s" first second)
+      if first <> second || first = "none" then Harness.fail "%s and %s" first second);
+  let count_quantifiers_of_ensures ~name fixture =
+    match find_obligation_query ~name fixture Ensures with
+    | None -> Harness.fail "no obligation of the `ensures`"
+    | Some query ->
+        let text = Logic.show_query query and quantifier = "(forall " in
+        let rec count_from position total =
+          if position + String.length quantifier > String.length text then total
+          else if String.sub text position (String.length quantifier) = quantifier then
+            count_from (position + 1) (total + 1)
+          else count_from (position + 1) total
+        in
+        count_from 0 0
+  in
+  let expect_same_quantifiers ~name ~one ~four =
+    let for_one = count_quantifiers_of_ensures ~name one
+    and for_four = count_quantifiers_of_ensures ~name four in
+    if for_one <> for_four then
+      Harness.fail "%d quantifiers with one value and %d with four" for_one for_four
+  in
+  test "a type's invariant is stated once in a query, however many values of the type it holds"
+    (fun () ->
+      expect_same_quantifiers ~name:"rises" ~one:Fixtures.Prover.one_ascending_list_compared
+        ~four:Fixtures.Prover.four_ascending_lists_compared);
+  test
+    "the facts that a callee's contract needs are stated once, however many values it is called on"
+    (fun () ->
+      expect_same_quantifiers ~name:"limited" ~one:Fixtures.Prover.one_bounded_value_measured
+        ~four:Fixtures.Prover.four_bounded_values_measured);
+  test "a callee that reads only fields of a sequence's elements has no can-call atom" (fun () ->
+      match
+        find_obligation_query ~name:"agrees" Fixtures.Prover.element_field_read_by_callee Ensures
+      with
+      | None -> Harness.fail "no obligation of the `ensures`"
+      | Some query ->
+          if
+            List.exists
+              (function
+                | Logic.Function (Logic.Symbol.Can_call _, _, _) -> true
+                | Logic.Function _ | Constant _ | Definition _ | Datatype _ -> false)
+              query.declarations
+          then Harness.fail "the query declares a can-call atom: %s" (Logic.show_query query))
 
 let () =
   Harness.test "a range of a whole array is within it" (fun () ->

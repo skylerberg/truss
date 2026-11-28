@@ -5,7 +5,7 @@ let find_signature : Logic.symbol -> (Logic.sort list * Logic.sort) option = fun
   | Equal ty ->
       let sort = Encoding.sort_of ty in
       Some ([ sort; sort ], Bool)
-  | Valid ty -> Some ([ Encoding.sort_of ty ], Bool)
+  | Valid ty | Hidden_invariants ty -> Some ([ Encoding.sort_of ty ], Bool)
   | Rank ty | Capacity ty | Slack ty | Potential ty -> Some ([ Encoding.sort_of ty ], Int)
   | Model (Named { arguments = [ Type element ]; _ } as ty) ->
       Some ([ Encoding.sort_of ty ], Encoding.sort_of (Encoding.make_sequence_type element))
@@ -29,9 +29,9 @@ let find_signature : Logic.symbol -> (Logic.sort list * Logic.sort) option = fun
   | Literal { type_; _ } -> Some ([], Encoding.sort_of type_)
   | Block_bytes _ | Method_cost _ | Libc_number _ | Generic_value _ -> Some ([], Int)
   | System _ -> Some ([], Bool)
-  | Model _ | Variable _ | Function _ | Limited _ | Function_value _ | Constant _ | Evaluated _
-  | Named_term _ | Lambda _ | Lifted _ | Unspecified _ | Constructor _ | Field _ | Unit | Range_of _
-  | Opaque_operation _ | Cost_most ->
+  | Model _ | Variable _ | Function _ | Limited _ | Can_call _ | Function_value _ | Constant _
+  | Evaluated _ | Named_term _ | Lambda _ | Lifted _ | Unspecified _ | Constructor _ | Field _
+  | Unit | Range_of _ | Opaque_operation _ | Cost_most ->
       None
 
 let list_axioms : Logic.symbol -> Logic.term list = function

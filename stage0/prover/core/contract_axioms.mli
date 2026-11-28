@@ -1,5 +1,6 @@
+val is_typing_fact : State.frame -> Logic.term -> bool
 val assume_typed : State.frame -> Logic.term -> unit
-val map_each_value : State.frame -> Logic.term -> (State.frame -> Logic.term -> unit) -> unit
+val assume_ground_facts : State.frame -> Logic.term -> (unit -> Logic.term list) -> unit
 
 type application = {
   symbol : Logic.symbol;
@@ -37,5 +38,5 @@ val state :
   unit
 
 val states : Query.t -> application -> State.clauses -> Mir.formula -> bool
-val assume_hypotheses : State.frame -> application -> arguments:Logic.term list -> unit
+val assume_can_call : State.frame -> application -> arguments:Logic.term list -> unit
 val find_definition : application -> Logic.term -> Logic.term option

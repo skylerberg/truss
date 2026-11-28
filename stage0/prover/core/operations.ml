@@ -364,7 +364,7 @@ let translate_bit_count (frame : State.frame) (operation : Intrinsic.scalar) ty 
       let term = count operation value in
       Facts.assume frame Logic.(less_equal (int 0) term &&& less_equal term (int bits));
       (if Z.equal low Z.zero then
-         Contract_axioms.map_each_value frame value @@ fun frame value ->
+         Contract_axioms.assume_ground_facts frame value @@ fun () ->
          let leading = count Leading_zeros value
          and trailing = count Trailing_zeros value
          and ones = count Count_ones value in
@@ -372,26 +372,25 @@ let translate_bit_count (frame : State.frame) (operation : Intrinsic.scalar) ty 
          let width = Logic.int bits in
          let nonzero = Logic.not_ (Logic.equal value (Logic.int 0)) in
          let below_highest = Logic.subtract width leading in
-         List.iter (Facts.assume frame)
-           Logic.
-             [
-               less_equal (int 0) leading
-               &&& less_equal leading width
-               &&& less_equal (int 0) trailing
-               &&& less_equal trailing width
-               &&& less_equal (int 0) ones
-               &&& less_equal ones width;
-               nonzero
-               ==> (less_equal (power (subtract (int (bits - 1)) leading)) value
-                   &&& less value (power below_highest));
-               equal (equal ones (int 0)) (equal value (int 0));
-               nonzero ==> less_equal ones below_highest;
-               nonzero
-               &&& equal (add value (int 1)) (power below_highest)
-               ==> equal ones below_highest;
-               nonzero ==> less_equal (add trailing leading) (int (bits - 1));
-               equal value (int 0) ==> (equal trailing width &&& equal leading width);
-             ]);
+         Logic.
+           [
+             less_equal (int 0) leading
+             &&& less_equal leading width
+             &&& less_equal (int 0) trailing
+             &&& less_equal trailing width
+             &&& less_equal (int 0) ones
+             &&& less_equal ones width;
+             nonzero
+             ==> (less_equal (power (subtract (int (bits - 1)) leading)) value
+                 &&& less value (power below_highest));
+             equal (equal ones (int 0)) (equal value (int 0));
+             nonzero ==> less_equal ones below_highest;
+             nonzero
+             &&& equal (add value (int 1)) (power below_highest)
+             ==> equal ones below_highest;
+             nonzero ==> less_equal (add trailing leading) (int (bits - 1));
+             equal value (int 0) ==> (equal trailing width &&& equal leading width);
+           ]);
       term
   | None -> fallback ()
 
